@@ -29,18 +29,23 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
       int K,
       int N,
       const int8_t* Bint8,
-      int32_t B_zero_point,
-      int32_t* col_offsets) {
+      int32_t* B_zero_point,
+      int32_t* col_offsets,
+      c10::QScheme qtype) {
     for (size_t i = 0; i < N; ++i) {
       int32_t sum = 0;
       for (size_t j = 0; j < K; ++j) {
         sum += Bint8[i * K + j];
       }
-      col_offsets[i] = sum - B_zero_point * K;
+      if (qtype == kPerTensorAffine) {
+        col_offsets[i] = sum - B_zero_point[0] * K;
+      } else {
+        col_offsets[i] = sum - B_zero_point[i] * K;
+      }
     }
   }
 
-  at::Tensor operator()(at::Tensor weight) {
+  at::Tensor operator()(at::Tensor weight, c10::optional<Tensor> bias) {
     TORCH_CHECK(
         weight.dim() == 2,
         "The weight tensor for quantized::fbgemm_linear_prepack should be 2-dimensional.");
@@ -48,22 +53,50 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     auto N = weight.size(0);
     auto K = weight.size(1);
 
-    int32_t weight_zero_point_int32 = weight.q_zero_point();
-
     // TODO: contiguous is called for further JIT optimizations.
     auto weight_contig = weight.contiguous();
+    const auto qtype = weight.qscheme();
+    std::vector<int32_t> weight_zero_points_int32(1, 0);
+    if (qtype == kPerTensorAffine) {
+      weight_zero_points_int32[0] = weight.q_zero_point();
+    } else if (qtype == kPerChannelAffine) {
+      weight_zero_points_int32.resize(N, 0);
+      for (int i = 0; i < N; ++i) {
+        weight_zero_points_int32[i] =
+            weight.q_per_channel_zero_points()[i].item<int32_t>();
+      }
+    }
+    std::vector<float> weight_scales_float(1, 0.0);
+    if (qtype == kPerTensorAffine) {
+      weight_scales_float[0] = weight.q_scale();
+    } else if (qtype == kPerChannelAffine) {
+      weight_scales_float.resize(N, 0.0);
+      for (int i = 0; i < N; ++i) {
+        weight_scales_float[i] = weight.q_per_channel_scales()[i].item<float>();
+      }
+    }
 
     int8_t* weight_ptr_int8 =
-        reinterpret_cast<int8_t*>(weight_contig.data<c10::qint8>());
+        reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
 
     std::vector<int32_t> col_offsets(N);
     calc_col_offsets_transpose(
         /*K=*/K,
         /*N=*/N,
         /*Bint8=*/weight_ptr_int8,
-        /*B_zero_point=*/weight_zero_point_int32,
-        /*col_offsets=*/col_offsets.data());
+        /*B_zero_point=*/weight_zero_points_int32.data(),
+        /*col_offsets=*/col_offsets.data(),
+        /*qtype=*/qtype);
 
+    c10::optional<at::Tensor> bias_contig;
+    if (bias.has_value()) {
+      Tensor bias_vec = bias.value();
+      TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
+      TORCH_CHECK(
+          bias_vec.size(0) == N,
+          "bias should have N elements: " + std::to_string(N));
+      bias_contig = bias->contiguous();
+    }
     auto ret_ptr = guts::make_unique<PackedLinearWeight>(PackedLinearWeight{
         guts::make_unique<fbgemm::PackBMatrix<int8_t>>(
             /*trans=*/fbgemm::matrix_op_t::Transpose,
@@ -73,16 +106,20 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
             /*ld=*/K,
             /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
             /*groups=*/1),
+        bias_contig,
         col_offsets,
-        weight.q_scale(),
-        weight_zero_point_int32});
+        weight_scales_float,
+        weight_zero_points_int32,
+        qtype});
 
     // TODO: we will need to replace this with torchscript classes at a later
     // point.
     return cpp_custom_type_hack::create(std::move(ret_ptr), weight.options());
   }
 #else // USE_FBGEMM
-  at::Tensor operator()(at::Tensor /* weight */
+  at::Tensor operator()(
+      at::Tensor /* weight */,
+      c10::optional<Tensor> /* bias */
   ) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
@@ -94,9 +131,9 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    "quantized::fbgemm_linear_prepack(Tensor W) -> Tensor W_prepack",
-    c10::RegisterOperators::options()
-      .kernel<QLinearPackWeightInt8>(QuantizedCPUTensorId()));
+    "quantized::linear_prepack(Tensor W, Tensor? B=None) -> Tensor W_prepack",
+    c10::RegisterOperators::options().kernel<QLinearPackWeightInt8>(
+        TensorTypeId::QuantizedCPUTensorId));
 } // namespace
 } // namespace native
 } // namespace at

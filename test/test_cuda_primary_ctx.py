@@ -66,7 +66,19 @@ class TestCudaPrimaryCtx(TestCase):
         self.assertFalse(torch._C._cuda_hasPrimaryContext(0))
         self.assertTrue(torch._C._cuda_hasPrimaryContext(1))
 
+        self.assertFalse(x.is_pinned())
+
+        # We should still have only created context on 'cuda:1'
+        self.assertFalse(torch._C._cuda_hasPrimaryContext(0))
+        self.assertTrue(torch._C._cuda_hasPrimaryContext(1))
+
         x = torch.randn(3, device='cpu').pin_memory()
+
+        # We should still have only created context on 'cuda:1'
+        self.assertFalse(torch._C._cuda_hasPrimaryContext(0))
+        self.assertTrue(torch._C._cuda_hasPrimaryContext(1))
+
+        self.assertTrue(x.is_pinned())
 
         # We should still have only created context on 'cuda:1'
         self.assertFalse(torch._C._cuda_hasPrimaryContext(0))

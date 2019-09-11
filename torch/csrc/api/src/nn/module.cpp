@@ -279,7 +279,7 @@ void Module::save(serialize::OutputArchive& archive) const {
   }
   for (const auto& child : children_) {
     if (child.value()->is_serializable()) {
-      serialize::OutputArchive child_archive;
+      serialize::OutputArchive child_archive(archive.compilation_unit());
       child.value()->save(child_archive);
       archive.write(child.key(), child_archive);
     }

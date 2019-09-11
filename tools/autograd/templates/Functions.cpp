@@ -65,7 +65,7 @@ Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
   bool is_one = false;
   if (s.isFloatingPoint()) {
     is_one = s.toDouble() == 1;
-  } else if(s.isIntegral()) {
+  } else if(s.isIntegral(true)) {
     is_one = s.toLong() == 1;
   }
 
@@ -1196,7 +1196,7 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //
 //           stride[k] > \sum_{ i > k } (size[i] - 1) * stride[i]
 //
-//      That is equivalent to, after reording the dimensions so strides are
+//      That is equivalent to, after reordering the dimensions so strides are
 //      in decreasing order, checking that stride of each dimension is larger
 //      than the maximum memory offset in a slice at that dimension.
 //
@@ -1700,37 +1700,39 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
-    TORCH_CHECK(eigenvectors,
-             "symeig_backward: Setting eigenvectors to false in torch.symeig doesn't compute eigenvectors ",
-             "and hence we cannot compute backward. Please use torch.symeig(eigenvectors=True)");
+  // This gradient is symmetric, and not triangular.
+  // symeig operates only on symmetric inputs, which is a subspace of
+  // R^{n x n}, and hence the derivative is not well-defined for off-diagonal
+  // elements. We resolve this by taking the gradient of the functionally independent
+  // elements of the matrix (i.e., the lower triangular portion of the input) and then
+  // reflect it on the upper triangular portion, thereby symmetrizing the gradient of
+  // the symeig operation. The motivation behind this choice is that symmetric gradient
+  // leads to stable gradient updates, and retains symmetry of the updated matrix if it
+  // were updated by a gradient based algorithm.
+  TORCH_CHECK(eigenvectors,
+           "symeig_backward: Setting eigenvectors to false in torch.symeig doesn't compute eigenvectors ",
+           "and hence we cannot compute backward. Please use torch.symeig(eigenvectors=True)");
 
-    auto glambda = grads[0];
-    auto gv = grads[1];
+  auto glambda = grads[0];
+  auto gv = grads[1];
 
-    auto vt = v.transpose(-2, -1);
+  auto vt = v.transpose(-2, -1);
 
-    Tensor result;
-    if (gv.defined()) {
-        Tensor F = lambda.unsqueeze(-2).expand_as(self).clone();
-        F.sub_(at::unsqueeze(lambda, -1));
-        F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
-        F.pow_(-1);
+  Tensor result;
+  if (gv.defined()) {
+      Tensor F = lambda.unsqueeze(-2) - lambda.unsqueeze(-1);
+      F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
+      F.pow_(-1);
+      F.mul_(at::matmul(vt, gv));
+      result = at::matmul(v, at::matmul(F, vt));
+  } else {
+      result = at::zeros_like(self);
+  }
 
-        F.mul_(at::matmul(vt, gv));
-        result = at::matmul(v, at::matmul(F, vt));
-    } else {
-        result = at::zeros_like(self);
-    }
-
-    if (glambda.defined()) {
-        result.add_(at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt));
-    }
-    if (upper) {
-        result = at::triu(result) + at::triu(result.transpose(-2, -1), 1);
-    } else {
-        result = at::tril(result) + at::tril(result.transpose(-2, -1), -1);
-    }
-    return result;
+  if (glambda.defined()) {
+      result.add_(at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt));
+  }
+  return result.add(result.transpose(-2, -1)).mul_(0.5);
 }
 
 // We refer Walter, S.F and Lehmann, L., Algorithmic Differentiation of Linear
@@ -1800,44 +1802,151 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
 // Invertible case is derived from Jacobi's formula, and also can be found at:
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
-  auto det_val = det.item<double>();
-  if (det_val != 0 /* invertible */) {
-    return grad * det * self.inverse().t();
-  } else /* otherwise det = \prod(sigma) = 0, use svd */ {
+  auto singular_case_backward = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
     Tensor u, sigma, v;
     std::tie(u, sigma, v) = self.svd();
-    auto gsigma = prod_backward(grad, sigma, det);
+    auto gsigma = prod_backward(grad.unsqueeze(-1), sigma, det.unsqueeze(-1));
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
+  };
+
+  auto nonsingular_case_backward = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
+    return unsqueeze_multiple(grad * det, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1);
+  };
+
+  if (self.dim() == 2) {
+    if (det.item<double>() == 0) {
+      return singular_case_backward(grad, self, det);
+    } else {
+      return nonsingular_case_backward(grad, self, det);
+    }
+  } else {
+    auto nonzero_det_indices = at::where(det);
+
+    if (nonzero_det_indices[0].size(0) == det.numel()) {  // all determinants are nonzero (non-singular)
+      return nonsingular_case_backward(grad, self, det);
+    }
+
+    auto zero_det_indices = at::where(det == 0);
+
+    if (zero_det_indices[0].size(0) == det.numel()) {  // all determinants are zero (singular)
+      return singular_case_backward(grad, self, det);
+    }
+
+    Tensor grad_det = at::empty_like(self);
+
+    // invertible case
+    grad_det.index_put_(/*indices=*/nonzero_det_indices,
+                        /*value=*/nonsingular_case_backward(grad.index(nonzero_det_indices),
+                                                            self.index(nonzero_det_indices),
+                                                            det.index(nonzero_det_indices)));
+
+    // non-invertible case, uses SVD
+    grad_det.index_put_(/*indices=*/zero_det_indices,
+                        /*value=*/singular_case_backward(grad.index(zero_det_indices),
+                                                         self.index(zero_det_indices),
+                                                         det.index(zero_det_indices)));
+
+    return grad_det;
   }
 }
 
 Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& logdet) {
-  auto logdet_val = logdet.item<double>();
-  if (logdet_val != -INFINITY /* det != 0, invertible */) {
-    return grad * self.inverse().t();
-  } else /* otherwise det = \prod(sigma) = 0, use svd */ {
+  auto singular_case_backward = [&](const Tensor& grad, const Tensor& self) -> Tensor {
     Tensor u, sigma, v;
     std::tie(u, sigma, v) = self.svd();
-    // backward det = \sum log(sigma)
-    auto gsigma = grad.div(sigma);
+    // logdet = \sum log(sigma)
+    auto gsigma = grad.unsqueeze(-1).div(sigma);
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
+  };
+
+  auto nonsingular_case_backward = [&](const Tensor& grad, const Tensor& self) -> Tensor {
+    return unsqueeze_multiple(grad, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1);
+  };
+
+  if (self.dim() == 2) {
+    if (logdet.item<double>() != -INFINITY) {
+      return nonsingular_case_backward(grad, self);
+    } else {
+      return singular_case_backward(grad, self);
+    }
+  } else {
+    auto finite_logdet_indices = at::where(logdet != -INFINITY);
+
+    if (finite_logdet_indices[0].size(0) == logdet.numel()) {  // all log determinants are finite (non-singular)
+      return nonsingular_case_backward(grad, self);
+    }
+
+    auto neginf_logdet_indices = at::where(logdet == -INFINITY);
+
+    if (neginf_logdet_indices[0].size(0) == logdet.numel()) {  // all log determinants are -inf (singular)
+      return singular_case_backward(grad, self);
+    }
+
+    Tensor grad_logdet = at::empty_like(self);
+
+    // invertible case
+    grad_logdet.index_put_(/*indices=*/finite_logdet_indices,
+                           /*value=*/nonsingular_case_backward(grad.index(finite_logdet_indices),
+                                                               self.index(finite_logdet_indices)));
+
+    // non-invertible case, uses SVD
+    grad_logdet.index_put_(/*indices=*/neginf_logdet_indices,
+                           /*value=*/singular_case_backward(grad.index(neginf_logdet_indices),
+                                                            self.index(neginf_logdet_indices)));
+
+    return grad_logdet;
   }
 }
 
 Tensor slogdet_backward(const Tensor& grad_logabsdet,
                         const Tensor& self,
                         const Tensor& signdet, const Tensor& logabsdet) {
-  auto signdet_val = signdet.item<double>();
-  if (signdet_val != 0 /* det != 0, invertible */) {
-    return grad_logabsdet * self.inverse().t();
-  } else /* otherwise det = \prod(sigma) = 0, use svd */ {
+  auto singular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {
     Tensor u, sigma, v;
     std::tie(u, sigma, v) = self.svd();
     // sigma has all non-negative entries (also with at least one zero entry)
     // so logabsdet = \sum log(abs(sigma))
     // but det = 0, so backward logabsdet = \sum log(sigma)
-    auto gsigma = grad_logabsdet.div(sigma);
+    auto gsigma = grad_logabsdet.unsqueeze(-1).div(sigma);
     return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
+  };
+
+  auto nonsingular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {
+    return unsqueeze_multiple(grad_logabsdet, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1);
+  };
+
+  if (self.dim() == 2) {
+    if (signdet.item<double>() == 0) {
+      return singular_case_backward(grad_logabsdet, self);
+    } else {
+      return nonsingular_case_backward(grad_logabsdet, self);
+    }
+  } else {
+    auto nonzero_signdet_indices = at::where(signdet);
+
+    if (nonzero_signdet_indices[0].size(0) == logabsdet.numel()) {  // all log determinants are finite (non-singular)
+      return nonsingular_case_backward(grad_logabsdet, self);
+    }
+
+    auto zero_signdet_indices = at::where(signdet == 0);
+
+    if (zero_signdet_indices[0].size(0) == logabsdet.numel()) {  // all log determinants are -inf (singular)
+      return singular_case_backward(grad_logabsdet, self);
+    }
+
+    Tensor grad_slogdet = at::empty_like(self);
+
+    // invertible case
+    grad_slogdet.index_put_(/*indices=*/nonzero_signdet_indices,
+                            /*value=*/nonsingular_case_backward(grad_logabsdet.index(nonzero_signdet_indices),
+                                                                self.index(nonzero_signdet_indices)));
+
+    // non-invertible case, uses SVD
+    grad_slogdet.index_put_(/*indices=*/zero_signdet_indices,
+                            /*value=*/singular_case_backward(grad_logabsdet.index(zero_signdet_indices),
+                                                             self.index(zero_signdet_indices)));
+
+    return grad_slogdet;
   }
 }
 
@@ -2194,9 +2303,8 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
   return gg_weight.view(size);
 }
 
-Tensor index_backward(const Tensor & self, TensorList indices, const Tensor& grad) {
-   auto zeros = at::zeros_like(self);
-   return at::_index_put_impl_(zeros, indices, grad, true, true);
+Tensor index_backward(Tensor zeros_like_self, TensorList indices, const Tensor& grad) {
+   return at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
 }
 
 

@@ -3,7 +3,7 @@ import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_opset9 as sym_opset9
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _black_list_in_opset, _try_get_scalar_type
-from torch.onnx.symbolic_opset9 import wrap_logical_op_with_cast_to, _cast_Float
+from torch.onnx.symbolic_opset9 import _cast_Float
 
 import warnings
 
@@ -39,7 +39,7 @@ import warnings
 
 black_listed_operators = [
     "nonzero", "where", "scatter", "scatter_add", "erf", "sign", "isnan", "gather",
-    "masked_fill"
+    "arange", "masked_fill"
 ]
 
 for black_listed_op in black_listed_operators:
@@ -70,8 +70,9 @@ def _try_cast_integer_to_float(g, *args):
     old_type = None
     # Cast the input tensor to Float if its scalarType is known and is not floating number.
     # If casting is performed, return the old scalarType, otherwise return None.
-    if args[0].type().kind() == "DimensionedTensorType" or args[0].type().kind() == "CompleteTensorType":
-        old_type = args[0].type().scalarType()
+    arg0_type = args[0].type().scalarType()
+    if arg0_type is not None:
+        old_type = arg0_type
         if old_type not in floating_scalar_types:
             args = tuple(_cast_Float(g, arg, False) for arg in args)
         else:
@@ -98,12 +99,10 @@ def _comparison_operator(g, input, other, op_name):
 
 # NOTE: For symbolics {gt, lt, bmm, matmul, prelu, mm, addmm, view, flatten},
 #       integer input type not supported in opset8. Cast to float if possible.
-@wrap_logical_op_with_cast_to('Byte')
 def gt(g, input, other):
     return _comparison_operator(g, input, other, "Greater")
 
 
-@wrap_logical_op_with_cast_to('Byte')
 def lt(g, input, other):
     return _comparison_operator(g, input, other, "Less")
 
@@ -201,6 +200,14 @@ def _constant_fill(g, sizes, dtype, const_value):
     else:
         return g.op("ConstantFill", sizes, dtype_i=sym_help.scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=const_value)
 
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
+    return zeros(g, sizes, dtype, layout, device, pin_memory)
+
+
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
+    return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):

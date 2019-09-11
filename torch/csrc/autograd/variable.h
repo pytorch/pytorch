@@ -5,6 +5,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function_hook.h>
+#include <torch/csrc/autograd/cpp_hook.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -18,14 +19,14 @@
 
 namespace torch { namespace autograd {
 
-struct Function;
+struct Node;
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ///                                Variable
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 /// A `Variable` augments a `Tensor` with the ability to interact in our
 /// autograd machinery. Conceptually, `Variable`s travel along `Edge`s between
-/// `Function`s in the autograd graph. A `Variable` can either be a leaf, like a
+/// `Node`s in the autograd graph. A `Variable` can either be a leaf, like a
 /// weight in a neural network, or an interior variable, when it is the result
 /// of an operation between variables. Every `Variable` also stores another
 /// `Variable` called its `grad` (gradient). If the variable is a leaf, its
@@ -164,7 +165,7 @@ struct TORCH_API Variable : public at::Tensor {
   /// and expecting the original variable `var` to also be updated.
   at::Tensor variable_data() const noexcept;
 
-  // Gradient Function and Edges
+  // Gradient Node and Edges
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   /// Gets the gradient function of the `Variable`. If this is a leaf variable,
@@ -174,28 +175,28 @@ struct TORCH_API Variable : public at::Tensor {
   /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
   /// re-create the grad_fn to express the up-to-date view relationship between
   /// this and the base Variable.
-  const std::shared_ptr<Function>& grad_fn() const;
+  const std::shared_ptr<Node>& grad_fn() const;
 
   /// Gets the raw gradient function pointer, whatever it currently is.
-  Function* grad_fn_unsafe() const;
+  Node* grad_fn_unsafe() const;
 
   /// Set the gradient accumulator of the `Variable`. This is only applicable to
   /// leaf variables. Interior variables should call `set_gradient_edge()`.
-  void set_grad_accumulator(std::weak_ptr<Function> grad_accumulator);
+  void set_grad_accumulator(std::weak_ptr<Node> grad_accumulator);
 
   /// Attempts to get a pointer to the gradient accumulator of the `Variable`,
   /// if it still exists. If the gradient accumulator function has been
   /// destroyed, returns a `nullptr`.
-  std::shared_ptr<Function> try_get_grad_accumulator() const;
+  std::shared_ptr<Node> try_get_grad_accumulator() const;
 
   /// Gets the gradient accumulator of the `Variable` if it has one, or else
   /// create one on the fly and return it.
-  std::shared_ptr<Function> grad_accumulator() const;
+  std::shared_ptr<Node> grad_accumulator() const;
 
   /// Returns the "canonical" gradient edge of this `Variable`, i.e. either the
   /// gradient function if this is an interior `Variable`, or the gradient
   /// accumulator otherwise. If the `Variable` is interior, the returned `Edge`
-  /// will store the input index of the `Function` to which this variable is
+  /// will store the input index of the `Node` to which this variable is
   /// connected in its `input_nr` field. For leaves, the `input_nr` is always
   /// zero. Note that `set_gradient_edge` and `gradient_edge` are not
   /// symmetric. You must use `set_gradient_edge` to set the `grad_fn` and
@@ -251,9 +252,9 @@ struct TORCH_API Variable : public at::Tensor {
   /// `Variable`.
   void set_gradient_edge(Edge edge) noexcept;
 
-  /// Returns the input index of the gradient `Function` to which this
-  /// `Variable` is connected.  Note: input indexes of the gradient `Function`
-  /// correspond to output indexes of the corresponding forward `Function`.
+  /// Returns the input index of the gradient `Node` to which this
+  /// `Variable` is connected.  Note: input indexes of the gradient `Node`
+  /// correspond to output indexes of the corresponding forward `Node`.
   uint32_t output_nr() const noexcept;
 
   /// True if this `Variable` is a leaf and thus does not have a `grad_fn`.
@@ -291,6 +292,21 @@ struct TORCH_API Variable : public at::Tensor {
   const std::vector<std::shared_ptr<FunctionPreHook>>& hooks() const noexcept;
   void clear_hooks();
 
+  template <typename T>
+  using hook_return_void_t = c10::guts::enable_if_t<std::is_void<typename std::result_of<T&(Variable)>::type>::value, unsigned>;
+  template <typename T>
+  using hook_return_var_t = c10::guts::enable_if_t<std::is_same<typename std::result_of<T&(Variable)>::type, Variable>::value, unsigned>;
+  // Remove hook at given position
+  void remove_hook(unsigned pos);
+
+  // Returns the index of the hook in the list which can be used to remove hook
+  // Register a hook with no return value
+  template <typename T>
+  hook_return_void_t<T> register_hook(T&& hook);
+  // Register a hook with variable return value
+  template <typename T>
+  hook_return_var_t<T> register_hook(T&& hook);
+
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -321,6 +337,7 @@ struct TORCH_API Variable : public at::Tensor {
 
   Variable(c10::intrusive_ptr<at::TensorImpl> self);
   at::TensorImpl* get() const;
+  void create_cpp_hook();
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -334,10 +351,11 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   std::string name;
 
   Variable grad_;
-  std::shared_ptr<Function> grad_fn_;
-  std::weak_ptr<Function> grad_accumulator_;
+  std::shared_ptr<Node> grad_fn_;
+  std::weak_ptr<Node> grad_accumulator_;
 
   std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
+  std::shared_ptr<hooks_list> cpp_hooks_list;
 
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_;
@@ -597,19 +615,19 @@ inline at::Tensor Variable::variable_data() const noexcept {
   return at::Tensor(self_impl_copy);
 }
 
-// Gradient Function and Edges
+// Gradient Node and Edges
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-inline Function* Variable::grad_fn_unsafe() const {
+inline Node* Variable::grad_fn_unsafe() const {
   return get_autograd_meta()->grad_fn_.get();
 }
 
 inline void Variable::set_grad_accumulator(
-    std::weak_ptr<Function> grad_accumulator) {
+    std::weak_ptr<Node> grad_accumulator) {
   get_autograd_meta()->grad_accumulator_ = std::move(grad_accumulator);
 }
 
-inline std::shared_ptr<Function> Variable::try_get_grad_accumulator() const {
+inline std::shared_ptr<Node> Variable::try_get_grad_accumulator() const {
   return get_autograd_meta()->grad_accumulator_.lock();
 }
 
@@ -665,6 +683,37 @@ inline const std::vector<std::shared_ptr<FunctionPreHook>>& Variable::hooks()
 
 inline void Variable::clear_hooks() {
   get_autograd_meta()->hooks_.clear();
+}
+
+template <typename T>
+auto Variable::register_hook(T&& hook) -> Variable::hook_return_void_t<T> {
+  TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
+                           "doesn't require gradient");
+  auto &list = get_autograd_meta()->cpp_hooks_list;
+  if(!list) {
+    create_cpp_hook();
+  }
+  unsigned idx = list->size();
+  // Return the grad argument in case of a hook with void return type to have an
+  // std::function with Variable return type
+  std::function<void(Variable)> fn(hook);
+  list->emplace_back([fn](Variable grad){
+   fn(grad);
+    return Variable();});
+  return idx;
+}
+
+template <typename T>
+auto Variable::register_hook(T&& hook) -> Variable::hook_return_var_t<T> {
+  TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
+                           "doesn't require gradient");
+  auto &list = get_autograd_meta()->cpp_hooks_list;
+  if(!list) {
+    create_cpp_hook();
+  }
+  unsigned idx = list->size();
+  list->push_back(hook);
+  return idx;
 }
 
 // View Variables

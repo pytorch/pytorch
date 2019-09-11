@@ -71,7 +71,7 @@ std::string get_parallel_info() {
   ss << "\tMKL_NUM_THREADS : "
      << get_env_var("MKL_NUM_THREADS", "[not set]") << std::endl;
 
-  ss << "Parallel backend: ";
+  ss << "ATen parallel backend: ";
   #if AT_PARALLEL_OPENMP
   ss << "OpenMP";
   #elif AT_PARALLEL_NATIVE

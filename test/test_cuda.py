@@ -6,6 +6,7 @@ from itertools import repeat
 import os
 from contextlib import contextmanager
 import threading
+import math
 if sys.version_info[0] == 3:
     import queue
 else:
@@ -42,10 +43,12 @@ if not TEST_CUDA:
 
 TEST_MAGMA = TEST_CUDA
 TEST_LARGE_TENSOR = TEST_CUDA
+TEST_MEDIUM_TENSOR = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
     TEST_MAGMA = torch.cuda.has_magma
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
+    TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
 
 floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
                 torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor}
@@ -531,7 +534,6 @@ custom_half_precision = {
     'dot': 1e-2,
     'erf': 1e-3,
     'erfc': 1e-3,
-    'erfinv': 1e-3,
     'exp': 1e-2,
     'expm1': 1e-2,
     'fill': 1e-3,
@@ -588,7 +590,6 @@ simple_pointwise_float = [
     'cosh',
     'erf',
     'erfc',
-    'erfinv',
     'exp',
     'expm1',
     'reciprocal',
@@ -1069,7 +1070,8 @@ class TestCuda(TestCase):
 
             self.assertEqual(x * y, 4.5)
             self.assertEqual(y * x, 4.5)
-            with self.assertRaisesRegex(RuntimeError, "doesn't match the desired"):
+
+            with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
                 y *= x
             x *= y
             self.assertEqual(x, 4.5)
@@ -1085,20 +1087,27 @@ class TestCuda(TestCase):
         self.assertEqual(x.type(torch.int).get_device(), 1)
         self.assertEqual(x.to(torch.int).get_device(), 1)
 
+    def test_abs_zero(self):
+        # Both abs(0.0) and abs(-0.0) should result in 0.0
+        for dtype in (torch.float, torch.double):
+            abs_zeros = torch.tensor([0.0, -0.0], device='cuda', dtype=dtype).abs().tolist()
+            for num in abs_zeros:
+                self.assertGreater(math.copysign(1.0, num), 0.0)
+
     def test_neg(self):
         _TestTorchMixin._test_neg(self, lambda t: t.cuda())
 
     def test_bitwise_not(self):
         _TestTorchMixin._test_bitwise_not(self, 'cuda')
 
+    def test_logical_not(self):
+        _TestTorchMixin._test_logical_not(self, 'cuda')
+
+    def test_logical_xor(self):
+        _TestTorchMixin._test_logical_xor(self, 'cuda')
+
     def test_isinf(self):
         _TestTorchMixin._test_isinf(self, lambda t: t.cuda())
-
-    def test_inplace_unary_mem_overlap(self):
-        _TestTorchMixin._test_inplace_unary_mem_overlap(self, device='cuda')
-
-    def test_inplace_binary_mem_overlap(self):
-        _TestTorchMixin._test_inplace_binary_mem_overlap(self, device='cuda')
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_arithmetic_large_tensor(self):
@@ -1344,7 +1353,7 @@ class TestCuda(TestCase):
 
         # Bool test case
         t = torch.tensor([[False, True], [True, True]], device='cuda')
-        self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]], device='cuda')), 
+        self.assertEqual(torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]], device='cuda')),
                          torch.tensor([[False, False], [True, True]], device='cuda'))
 
     def test_gather(self):
@@ -1431,6 +1440,9 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float64, 'cuda')
         _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float16, 'cuda')
         _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float64, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
+        # test that it works with bool tensors
+        _TestTorchMixin._test_bernoulli(self, torch.bool, torch.float16, 'cuda')
         _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
 
     def test_cat_bad_input_sizes(self):
@@ -1721,6 +1733,8 @@ class TestCuda(TestCase):
     def test_streams_multi_gpu_query(self):
         d0 = torch.device('cuda:0')
         d1 = torch.device('cuda:1')
+        torch.cuda.synchronize(d0)
+        torch.cuda.synchronize(d1)
 
         with torch.cuda.device(d0):
             s0 = torch.cuda.current_stream()
@@ -1928,6 +1942,8 @@ class TestCuda(TestCase):
     def test_events_wait(self):
         d0 = torch.device('cuda:0')
         d1 = torch.device('cuda:1')
+        torch.cuda.synchronize(d0)
+        torch.cuda.synchronize(d1)
 
         with torch.cuda.device(d0):
             s0 = torch.cuda.current_stream()
@@ -2139,12 +2155,12 @@ class TestCuda(TestCase):
         x = torch.randn(20, dtype=torch.float32, device='cuda:0')
         y = torch.randn(1, dtype=torch.float32)
         with self.assertRaisesRegex(RuntimeError,
-                                    'expected device cpu and dtype Float but got device cuda:0 and dtype Float'):
+                                    'expected device cpu but got device cuda:0'):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
         # makeing sure half to float promotion is also properly working.
         x = x.half()
         with self.assertRaisesRegex(RuntimeError,
-                                    'expected device cpu and dtype Float but got device cuda:0 and dtype Half'):
+                                    'expected dtype Float but got dtype Half'):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
 
     @skipIfRocm
@@ -2219,6 +2235,10 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_det_logdet_slogdet(self, 'cuda')
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_det_logdet_slogdet_batched(self):
+        _TestTorchMixin._test_det_logdet_slogdet_batched(self, 'cuda')
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_solve(self):
         _TestTorchMixin._test_solve(self, lambda t: t.cuda())
 
@@ -2263,6 +2283,11 @@ class TestCuda(TestCase):
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky_batched(self):
         _TestTorchMixin._test_cholesky_batched(self, lambda t: t.cuda())
+
+    @slowTest
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_cholesky_batched_many_batches(self):
+        _TestTorchMixin._test_cholesky_batched_many_batches(self, lambda t: t.cuda())
 
     def test_view(self):
         _TestTorchMixin._test_view(self, lambda t: t.cuda())
@@ -2347,6 +2372,8 @@ class TestCuda(TestCase):
                             self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
                         self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
+    # passes on ROCm w/ python 2.7, fails w/ python 3.6
+    @skipIfRocm
     def test_stft(self):
         _TestTorchMixin._test_stft(self, device=torch.device('cuda'))
 
@@ -2418,6 +2445,7 @@ class TestCuda(TestCase):
     @unittest.skipIf(not PY3,
                      "spawn start method is not supported in Python 2, \
                      but we need it for creating another process with CUDA")
+    @skipIfRocm
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
         self._spawn_method(test_method, torch.Tensor([1, -1, 1]))
@@ -2519,6 +2547,26 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_lu_solve(self, lambda t: t.cuda(), pivot=True)
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_lu_solve_batched(self):
+        _TestTorchMixin._test_lu_solve_batched(self, lambda t: t.cuda(), pivot=False)
+        _TestTorchMixin._test_lu_solve_batched(self, lambda t: t.cuda(), pivot=True)
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_lu_solve_batched_non_contiguous(self):
+        _TestTorchMixin._test_lu_solve_batched_non_contiguous(self, lambda t: t.cuda())
+
+    @slowTest
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_lu_solve_batched_many_batches(self):
+        _TestTorchMixin._test_lu_solve_batched_many_batches(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_lu_solve_batched_broadcasting(self):
+        _TestTorchMixin._test_lu_solve_batched_broadcasting(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lu_unpack(self):
         _TestTorchMixin._test_lu_unpack(self, lambda t: t.cuda(), pivot=False)
         _TestTorchMixin._test_lu_unpack(self, lambda t: t.cuda(), pivot=True)
@@ -2559,9 +2607,6 @@ class TestCuda(TestCase):
 
     def test_rpow(self):
         _TestTorchMixin._test_rpow(self, lambda x: x.cuda())
-
-    def test_int_pow(self):
-        _TestTorchMixin._test_int_pow(self, lambda x: x.cuda())
 
     def test_remainder_overflow(self):
         _TestTorchMixin._test_remainder_overflow(self, dtype=torch.int64, device='cuda')
@@ -2615,7 +2660,6 @@ class TestCuda(TestCase):
         tensor = tensor.unsqueeze(1)
         self.assertEqual(tensor.var(0), 0.03125)
 
-    @skipIfRocm
     def test_digamma(self):
         def test(use_double=False):
             cpu_tensor = torch.randn(10, 10, 10)
@@ -2644,7 +2688,6 @@ class TestCuda(TestCase):
         norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
         self.assertEqual(norm_errors, expected_errors)
 
-    @skipIfRocm
     def test_polygamma(self):
         def test(use_double=False):
             cpu_tensor = torch.randn(10, 10, 10)
@@ -2750,6 +2793,10 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_triangular_solve_batched_dims(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_lstsq(self):
+        _TestTorchMixin._test_lstsq(self, 'cuda')
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_qr(self):
         _TestTorchMixin._test_qr(self, lambda t: t.cuda())
 
@@ -2772,40 +2819,7 @@ class TestCuda(TestCase):
         torch.cuda.nvtx.range_pop()
 
     def test_randperm_cuda(self):
-        cuda = torch.device('cuda:0')
-
-        # Test core functionality. For small n, randperm is offloaded to CPU instead. For large n, randperm is executed
-        # on GPU.
-        for n in (100, 50000, 100000):
-            # Ensure both integer and floating-point numbers are tested. Half follows an execution path that is
-            # different from others on cuda.
-            for dtype in (torch.long, torch.half, torch.float):
-                if n > 2049 and dtype == torch.half:  # Large n for torch.half will raise an exception, do not test here.
-                    continue
-                with torch.random.fork_rng(devices=[0]):
-                    res1 = torch.randperm(n, dtype=dtype, device=cuda)
-                res2 = torch.empty(0, dtype=dtype, device=cuda)
-                torch.randperm(n, out=res2, dtype=dtype, device=cuda)
-                self.assertEqual(res1, res2, 0)
-
-        # Default type is long
-        for n in (100, 50000):
-            self.assertIsInstance(torch.randperm(n, device=cuda), torch.cuda.LongTensor)
-
-        # randperm of 0 elements is an empty tensor
-        res1 = torch.randperm(0, device=cuda)
-        res2 = torch.cuda.LongTensor(5)
-        torch.randperm(0, out=res2, device=cuda)
-        self.assertEqual(res1.numel(), 0)
-        self.assertEqual(res2.numel(), 0)
-
-        # Test exceptions when n is too large for a floating point type
-        for res, small_n, large_n in ((torch.cuda.HalfTensor(), 2**11 + 1, 2**11 + 2),
-                                      (torch.cuda.FloatTensor(), 2**24 + 1, 2**24 + 2),
-                                      (torch.cuda.DoubleTensor(), 2**25,  # 2**53 + 1 is too large to run
-                                       2**53 + 2)):
-            torch.randperm(small_n, out=res)  # No exception expected
-            self.assertRaises(RuntimeError, lambda: torch.randperm(large_n, out=res))
+        _TestTorchMixin._test_randperm(self, device='cuda')
 
     def test_random_neg_values(self):
         _TestTorchMixin._test_random_neg_values(self, use_cuda=True)
@@ -2830,6 +2844,13 @@ class TestCuda(TestCase):
         t = torch.randint(2000, input_size, dtype=torch.int64, device='cuda')
         self.assertEqual(t.cpu().bincount(), t.bincount())
         self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
+
+        t = torch.zeros([10], dtype=torch.int32, device='cuda')
+        # 35488 * 65536 as int32 would cause overflow to negative value
+        # giving negative bin offset
+        t[0] = 35488
+        counted = t.bincount(minlength=65536)
+        self.assertEqual(torch.sum(counted), 10)
 
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
@@ -2911,6 +2932,89 @@ class TestCuda(TestCase):
             torch.DoubleTensor(a).cuda().round().cpu(),
             torch.DoubleTensor(res).cpu())
 
+    @unittest.skipIf(not TEST_MEDIUM_TENSOR, "not enough memory")
+    def test_cuda_kernel_loop_overflow(self):
+        # Issue #24309: In extreme cases, the loop variable could overflow and continue
+        # the kernel loop with a negative index, causing a RuntimeError (invalid write):
+        x = torch.randn(1, 1, 1, 2**30 + 1, dtype=torch.float16, device="cuda")
+        expected = x[0, 0, 0, 2**30]
+        y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
+        torch.cuda.synchronize()
+        self.assertEqual(y[0, 0, 0, 2**30], expected)
+
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_cuda_kernel_loop_overflow_large(self):
+        # Make sure input.numel() > INT_MAX is handled:
+        x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
+        with self.assertRaisesRegex(RuntimeError, "integer out of range"):
+            y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
+
+        # Issue #24309: In extreme cases, the loop variable could overflow and continue
+        # the kernel loop with a negative index, causing a RuntimeError (invalid write):
+        x = torch.randn(1, 1, 1, 2**31 - 1, dtype=torch.float16, device="cuda")
+        expected = x[0, 0, 0, 2**31 - 2]
+        y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
+        torch.cuda.synchronize()
+        self.assertEqual(y[0, 0, 0, 2**31 - 2], expected)
+
+    def test_streaming_backwards_sync(self):
+        default_stream = torch.cuda.current_stream()
+        stream = torch.cuda.Stream()
+
+        class MultiplyInStream(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                self.assertEqual(torch.cuda.current_stream(), stream)
+                # delays the operation in the the background stream
+                torch.cuda._sleep(1000 * 1000)
+                return grad * 2
+
+        x = torch.randn(5, 5, device='cuda', requires_grad=True)
+        with torch.cuda.stream(stream):
+            stream.wait_stream(default_stream)
+            output = MultiplyInStream.apply(x)
+            output.sum().backward()
+
+        self.assertEqual(x.grad, torch.ones_like(x) * 2)
+        self.assertEqual(torch.cuda.current_stream(), default_stream)
+
+    def test_streaming_backwards_multiple_streams(self):
+
+        class StreamModel(torch.nn.Module):
+            def __init__(self):
+                super(StreamModel, self).__init__()
+                self.event = torch.cuda.Event()
+                self.stream0 = torch.cuda.Stream()
+                self.stream1 = torch.cuda.Stream()
+
+            def forward(self, x):
+                x0 = x.clone()
+                torch._C._cuda_setStream(self.stream0._cdata)
+                y0 = x0 * 2
+                self.event.record(stream=torch.cuda.current_stream())
+
+                torch._C._cuda_setStream(self.stream1._cdata)
+                y1 = x * 3
+                self.stream1.wait_event(self.event)
+                return y0 + y1
+
+        stream = torch.cuda.Stream()
+
+        def accum_hook(grad):
+            self.assertEqual(torch.cuda.current_stream(), stream)
+
+        with torch.cuda.stream(stream):
+            x = torch.randn(5, 5, device='cuda', requires_grad=True)
+            x.register_hook(accum_hook)
+            torch.cuda.current_stream().wait_stream(stream)
+            model = StreamModel().cuda()
+            model(x).sum().backward()
+
+        self.assertEqual(x.grad, torch.ones_like(x) * 5)
 
 def load_ignore_file():
     from os.path import join, dirname

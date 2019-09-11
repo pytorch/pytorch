@@ -31,6 +31,18 @@ class TestUtilityFuns(TestCase):
         except ValueError:
             self.assertFalse(torch.onnx.is_in_onnx_export())
 
+    def test_validate_dynamic_axes_invalid_input_output_name(self):
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            utils._validate_dynamic_axes({'input1': {}, 'output': {},
+                                         'invalid_name1': {}, 'invalid_name2': {}},
+                                         None, ['input1', 'input2'], ['output'])
+            messages = [str(warning.message) for warning in w]
+        assert "Provided key invalid_name1 for dynamic axes is not a valid input/output name" in messages
+        assert "Provided key invalid_name2 for dynamic axes is not a valid input/output name" in messages
+        assert len(messages) == 2
+
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
             def forward(self, x):
@@ -200,10 +212,23 @@ class TestUtilityFuns(TestCase):
         # test strip_doc_string=False
         self.assertFalse(is_model_stripped(io.BytesIO(), False))
 
+    # NB: remove this test once DataParallel can be correctly handled
+    def test_error_on_data_parallel(self):
+        model = torch.nn.DataParallel(torch.nn.ReflectionPad2d((1, 2, 3, 4)))
+        x = torch.randn(1, 2, 3, 4)
+        f = io.BytesIO()
+        with self.assertRaisesRegex(ValueError,
+                                    'torch.nn.DataParallel is not supported by ONNX '
+                                    'exporter, please use \'attribute\' module to '
+                                    'unwrap model from torch.nn.DataParallel. Try '):
+            torch.onnx.export(model, x, f, opset_version=self.opset_version)
+
+
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=10))
+
 
 if __name__ == '__main__':
     run_tests()

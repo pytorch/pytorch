@@ -102,6 +102,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printList(out, v.toTensorList(), "[", "]");
     case IValue::Tag::Blob:
       return out << *v.toBlob();
+    case IValue::Tag::Capsule:
+      return out << "Capsule";
     case IValue::Tag::GenericList:
       return printList(out, v.toGenericList(), "[", "]");
     case IValue::Tag::Future:
@@ -129,7 +131,7 @@ void IValue::dump() const {
 
 
 std::string ivalue::Object::name() const {
-  return this->type_.type_->qualname();
+  return this->type_.type_->name()->qualifiedName();
 }
 
 IValue ivalue::Object::getAttr(const std::string& name) const {
@@ -147,8 +149,8 @@ void ivalue::Object::resizeObject(size_t slot) {
   slots_.resize(type()->numAttributes());
 }
 
-static bool CompareIValue(const std::pair<IValue, IValue>& aWrap,
-                          const std::pair<IValue, IValue>& bWrap) {
+static bool CompareKeys(const std::pair<IValue, IValue>& aWrap,
+                        const std::pair<IValue, IValue>& bWrap) {
   const auto a = aWrap.first;
   const auto b = bWrap.first;
   if (a.isString() && b.isString()) {
@@ -157,6 +159,8 @@ static bool CompareIValue(const std::pair<IValue, IValue>& aWrap,
     return a.toInt() < b.toInt();
   } else if (a.isDouble() && b.isDouble()) {
     return a.toDouble() < b.toDouble();
+  } else if (a.isTensor() && b.isTensor()) {
+    return a.toTensor().unsafeGetTensorImpl() < b.toTensor().unsafeGetTensorImpl();
   }
   AT_ERROR("Illegal dict key");
 }
@@ -166,8 +170,19 @@ std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IV
   for (auto& element : dict) {
     ordered.emplace_back(element.key(), element.value());
   }
-  std::sort(ordered.begin(), ordered.end(), CompareIValue);
+  std::sort(ordered.begin(), ordered.end(), CompareKeys);
   return ordered;
 }
 
+std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap() {
+    static std::unordered_map<std::string, c10::StrongTypePtr> tmap;
+    return tmap;
+}
+
+std::unordered_map<std::string, std::function<PyObject*(void*)>>&
+getClassConverter() {
+  static std::unordered_map<std::string, std::function<PyObject*(void*)>>
+      classConverter;
+  return classConverter;
+}
 } // namespace c10

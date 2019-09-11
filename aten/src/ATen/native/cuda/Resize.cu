@@ -12,4 +12,8 @@ Tensor& resize_cuda_(Tensor& self, IntArrayRef size) {
   return self;
 }
 
+Tensor& resize_as_cuda_(Tensor& self, const Tensor& the_template) {
+  return resize_cuda_(self, the_template.sizes());
+}
+
 }}

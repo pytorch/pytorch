@@ -144,7 +144,11 @@ const auto options = TensorOptions()
         .layout(${layout})
         .device(${device})
         .pinned_memory(${pin_memory});
-auto result_ = torch::${name}(${args_with_tensor_options});
+#ifdef USE_STATIC_DISPATCH
+    auto result_ = at::${name}(${args_with_tensor_options});
+#else
+    auto result_ = torch::${name}(${args_with_tensor_options});
+#endif
 """)
 CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
@@ -168,7 +172,8 @@ CONSTRUCTOR = CodeTemplate("""\
 OPERATOR = CodeTemplate("""\
 Operator(
     "${signature}",
-    ${op}
+    ${op},
+    atenOperatorOptions()
 ),
 """)
 
@@ -178,6 +183,7 @@ blacklisted_types = {
     'DimnameList?',
     'ConstQuantizerPtr',
     'Dimname',
+    'DimnameList',
 }
 
 default_only_types = {'Generator'}
@@ -344,6 +350,7 @@ def gen_jit_dispatch(declarations, out, template_path):
     tensor_impl_methods = [{
         'name': name,
         'api_name': name,
+        'overload_name': '',
         'method_of': ['Tensor'],
         'arguments': [{'name': 'self', 'simple_type': 'Tensor'}],
         'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t', 'simple_type': 'int64_t'}],
@@ -526,7 +533,8 @@ def signature(decl, should_match_schema=True):
             return '{} {}'.format(jit_type_of(r), r['field_name']) if 'field_name' in r else jit_type_of(r)
         ret_list = '({})'.format(', '.join(type_maybe_field(r) for r in decl['returns']))
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
-    constructed_string = 'aten::{}({}) -> {}'.format(name, arg_list, ret_list)
+    overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
+    constructed_string = 'aten::{}{}({}) -> {}'.format(name, overload_name, arg_list, ret_list)
     return match_signature(decl, constructed_string, should_match_schema)
 
 

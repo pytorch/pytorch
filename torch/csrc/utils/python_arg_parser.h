@@ -76,7 +76,7 @@
 namespace torch {
 
 enum class ParameterType {
-  TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
+  TENSOR, SCALAR, INT64, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
   BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STRING,
   DIMNAME, DIMNAME_LIST, QSCHEME
 };
@@ -144,6 +144,7 @@ struct PythonArgs {
   inline c10::optional<at::Device> deviceOptional(int i);
 #ifdef BUILD_NAMEDTENSOR
   inline at::Dimname dimname(int i);
+  inline std::vector<at::Dimname> dimnamelist(int i);
   inline c10::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
 #endif
   inline at::MemoryFormat memoryformat(int i);
@@ -155,6 +156,8 @@ struct PythonArgs {
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
   inline double toDouble(int i);
   inline double toDoubleWithDefault(int i, double default_double);
+  inline std::complex<double> toComplex(int i);
+  inline std::complex<double> toComplexWithDefault(int i, std::complex<double> default_complex);
   inline bool toBool(int i);
   inline bool toBoolWithDefault(int i, bool default_bool);
   inline bool isNone(int i);
@@ -203,6 +206,7 @@ struct FunctionParameter {
     bool default_bool;
     int64_t default_int;
     double default_double;
+    double default_complex[2]; // see Scalar
     at::ScalarType default_scalartype;
     THPLayout* default_layout;
   };
@@ -392,9 +396,7 @@ inline at::Dimname PythonArgs::dimname(int i) {
   return THPDimname_parse(args[i]);
 }
 
-inline c10::optional<std::vector<at::Dimname>> PythonArgs::toDimnameListOptional(int i) {
-  if (!args[i]) return c10::nullopt;
-  PyObject* arg = args[i];
+inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
   auto tuple = PyTuple_Check(arg);
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<at::Dimname> res;
@@ -404,6 +406,22 @@ inline c10::optional<std::vector<at::Dimname>> PythonArgs::toDimnameListOptional
     res.push_back(THPDimname_parse(obj));
   }
   return res;
+}
+
+inline c10::optional<std::vector<at::Dimname>> PythonArgs::toDimnameListOptional(int i) {
+  if (!args[i]) return c10::nullopt;
+  return parseDimnameList(args[i]);
+}
+
+inline std::vector<at::Dimname> PythonArgs::dimnamelist(int i) {
+  TORCH_INTERNAL_ASSERT(args[i]);
+  PyObject* arg = args[i];
+  auto size = signature.params[i].size;
+  TORCH_INTERNAL_ASSERT(size == 0 || size == 1);
+  if (size == 1 && THPUtils_checkDimname(arg)) {
+    return { THPDimname_parse(arg) };
+  }
+  return parseDimnameList(arg);
 }
 #endif
 
@@ -467,6 +485,18 @@ inline double PythonArgs::toDouble(int i) {
 
 inline double PythonArgs::toDoubleWithDefault(int i, double default_double) {
   if (!args[i]) return default_double;
+  return toDouble(i);
+}
+
+inline std::complex<double> PythonArgs::toComplex(int i) {
+  std::complex<double> default_value = *const_cast<std::complex<double> *>(
+    reinterpret_cast<const std::complex<double> *>(signature.params[i].default_complex));
+  if (!args[i]) return default_value;
+  return THPUtils_unpackComplexDouble(args[i]);
+}
+
+inline std::complex<double> PythonArgs::toComplexWithDefault(int i, std::complex<double> default_value) {
+  if (!args[i]) return default_value;
   return toDouble(i);
 }
 

@@ -26,6 +26,7 @@ namespace jit {
 namespace script {
 
 struct Def;
+struct ClassDef;
 struct SugaredValue;
 struct Resolver;
 
@@ -69,11 +70,16 @@ struct TORCH_API CompilationUnit {
   }
 
   void set_optimized(bool o) {
-    optimized_ = o;
+    AT_WARN(
+        "CompilationUnit::set_optimized() is deprecated and has no effect. "
+        "Please use setGraphExecutorOptimize()");
   }
 
-  bool is_optimized() const {
-    return optimized_;
+   bool is_optimized() const {
+    AT_WARN(
+        "CompilationUnit::is_optimized() is deprecated and always returns true. "
+        "Please use getGraphExecutorOptimize()");
+    return true;
   }
 
   // for historic reasons, these are defined in compiler.cpp
@@ -98,15 +104,20 @@ struct TORCH_API CompilationUnit {
       const ResolverPtr& resolver,
       const Self* self);
 
+  void define_interface(
+      const c10::QualifiedName& qualifiedName,
+      const ClassDef& classDef,
+      ResolverPtr rcb);
+
   Function* create_function(
       c10::QualifiedName name,
       std::shared_ptr<Graph> graph,
       bool shouldMangle = false) {
     if (shouldMangle) {
-      name = c10::QualifiedName(name.prefix(), mangle(name.name()));
+      name = mangle(name);
     }
     auto fn = torch::make_unique<Function>(
-        std::move(name), is_optimized(), std::move(graph), nullptr);
+        std::move(name), std::move(graph), nullptr);
     auto ret = fn.get();
     register_function(std::move(fn));
     return ret;
@@ -144,32 +155,30 @@ struct TORCH_API CompilationUnit {
   /**
    * Register a class as being owned by this compilation unit.
    */
-  void register_class(c10::NamedTypePtr namedType) {
-    if (auto classType = namedType->cast<c10::ClassType>()) {
-      // TODO: class types cannot be redefined because we have no way right now
-      // of invalidating their methods. NamedTuples are fine though, since they
-      // don't have methods.
-      TORCH_CHECK(
-          0 == classDict_.count(*classType->qualified_name_obj()),
-          "class '",
-          classType->qualname(),
-          "' already defined.");
-    }
+  void register_type(c10::NamedTypePtr namedType) {
+    // TODO: class types cannot be redefined because we have no way right now
+    // of invalidating their methods. NamedTuples are fine though, since they
+    // don't have methods.
+    TORCH_CHECK(
+        0 == classDict_.count(*namedType->name()),
+        "class '",
+        namedType->name()->qualifiedName(),
+        "' already defined.");
     classes_.push_back(std::move(namedType));
-    classDict_[*classes_.back()->qualified_name_obj()] = classes_.size() - 1;
+    classDict_[*classes_.back()->name()] = classes_.size() - 1;
   };
 
   c10::ClassTypePtr get_class(const c10::QualifiedName& name) const {
-    auto it = classDict_.find(name);
-    if (it == classDict_.end()) {
+    auto type = get_type(name);
+    if (!type) {
       return nullptr;
     }
-    return classes_[it->second]->cast<c10::ClassType>();
+    return type->cast<c10::ClassType>();
   }
 
   c10::TupleTypePtr get_named_tuple(const c10::QualifiedName& name) const {
     for (const auto& cls : classes_) {
-      if (cls->qualname() == name.qualifiedName()) {
+      if (cls->name()->qualifiedName() == name.qualifiedName()) {
         return cls->expect<TupleType>();
       }
     }
@@ -205,6 +214,16 @@ struct TORCH_API CompilationUnit {
     classDict_.clear();
   }
 
+  // [name mangling] All code objects must have a unique qualified name in a
+  // CompilationUnit. In Python, sometimes functions won't have unique qualified
+  // name (for example, nested functions). So we mangle Python functions to
+  // ensure that they are uniquely named.
+  //
+  // We also use mangling to distinguish different Module instances. Since each
+  // Module is a singleton class instance, different instances of the same
+  // Python Module will have different types but the same qualified name.
+  c10::QualifiedName mangle(const c10::QualifiedName& name) const;
+
  private:
   std::unique_ptr<Function> define(
       const c10::optional<c10::QualifiedName>& prefix,
@@ -228,8 +247,6 @@ struct TORCH_API CompilationUnit {
   // for fast lookup
   std::unordered_map<c10::QualifiedName, size_t> dict_;
   std::unordered_map<c10::QualifiedName, size_t> classDict_;
-  bool optimized_ = true;
-
 
   // [class ownership] Right now there aree two relationships between classes
   // and compilation units:
@@ -238,12 +255,7 @@ struct TORCH_API CompilationUnit {
   // module's compilation unit.
   std::vector<c10::NamedTypePtr> classes_;
 
-  // [name mangling] All code objects must have a unique qualified name in a
-  // CompilationUnit. In Python, sometimes functions won't have unique qualified
-  // name (for example, nested functions). So we mangle Python functions to
-  // ensure that they are uniquely named.
   mutable size_t mangleIndex_ = 0;
-  std::string mangle(const std::string& name) const;
 };
 
 } // namespace script

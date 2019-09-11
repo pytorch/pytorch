@@ -7,6 +7,11 @@
 # and then update DOCKER_IMAGE_VERSION at the top of the following files:
 # * cimodel/data/pytorch_build_definitions.py
 # * cimodel/data/caffe2_build_definitions.py
+# And the inline copies of the variable in
+# * verbatim-sources/job-specs-custom.yml
+#   (grep for DOCKER_IMAGE)
+
+version: 2.1
 
 docker_config_defaults: &docker_config_defaults
   user: jenkins
@@ -46,13 +51,47 @@ macos_brew_update: &macos_brew_update
   no_output_timeout: "1h"
   command: |
     set -ex
+
+    # Update repositories manually
+    for path in $(find /usr/local/Homebrew -type d -name .git)
+    do
+      cd $path/..
+      git fetch --depth=1 origin
+      git reset --hard origin/master
+    done
+
+    export HOMEBREW_NO_AUTO_UPDATE=1
+
     # moreutils installs a `parallel` executable by default, which conflicts
     # with the executable from the GNU `parallel`, so we must unlink GNU
     # `parallel` first, and relink it afterwards
-    brew update
     brew unlink parallel
     brew install moreutils
     brew link parallel --overwrite
     brew install expect
     brew install libomp
 
+ios_brew_update: &ios_brew_update
+  name: Brew update and install iOS toolchains
+  no_output_timeout: "1h"
+  command: |
+    set -ex
+
+    # Update repositories manually
+    for path in $(find /usr/local/Homebrew -type d -name .git)
+    do
+      cd $path/..
+      git fetch --depth=1 origin
+      git reset --hard origin/master
+    done
+
+    export HOMEBREW_NO_AUTO_UPDATE=1
+
+    # moreutils installs a `parallel` executable by default, which conflicts
+    # with the executable from the GNU `parallel`, so we must unlink GNU
+    # `parallel` first, and relink it afterwards
+    brew unlink parallel
+    brew install moreutils
+    brew link parallel --overwrite
+    brew install expect
+    brew install libtool

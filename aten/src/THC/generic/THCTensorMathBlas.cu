@@ -3,6 +3,7 @@
 #else
 
 #include "ATen/cuda/CUDAContext.h"
+#include <ATen/NamedTensorUtils.h>
 
 #define ERROR_ONLY_FP_TYPES(func) \
   THError("%s for CUDA tensors only supports floating-point types. Try converting the tensors with .float()", func);
@@ -41,6 +42,9 @@ accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 
   THCTensor_(free)(state, src);
   THCTensor_(free)(state, self);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::check_names_for_dot(self, src);
+#endif
   return result;
 
 #else
@@ -73,6 +77,9 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   if(r_ != t)
   {
+#ifdef BUILD_NAMEDTENSOR
+    at::NoNamesGuard guard;
+#endif
     THCTensor_(resizeAs)(state, r_, t);
     THCTensor_(copy)(state, r_, t);
   }
@@ -153,6 +160,9 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
 #endif
 #else
   ERROR_ONLY_FP_TYPES("addmv");
+#endif
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names_for_addmv(r_, mat, vec, t);
 #endif
 }
 
@@ -255,6 +265,12 @@ void THCTensor_(addr)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor *
 
 void THCTensor_(addmm)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor *t, scalar_t alpha, THCTensor *m1, THCTensor *m2)
 {
+#ifdef BUILD_NAMEDTENSOR
+  // The logic in this function changes around the pointers, so save a copy of the originals.
+  THCTensor* orig_m1 = m1;
+  THCTensor* orig_m2 = m2;
+#endif
+
 #if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
 
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, m1, m2));
@@ -284,6 +300,9 @@ void THCTensor_(addmm)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
   {
     THCTensor_(resizeAs)(state, r_, t);
     if (ScalarConvert<scalar_t, double>::to(beta) != 0.0) {
+#ifdef BUILD_NAMEDTENSOR
+      at::NoNamesGuard guard;
+#endif
       THCTensor_(copy)(state, r_, t);
     }
   }
@@ -414,6 +433,10 @@ void THCTensor_(addmm)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
 #else
   ERROR_ONLY_FP_TYPES("addmm");
 #endif
+
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names_for_addmm(r_, orig_m1, orig_m2, t);
+#endif
 }
 
 void THCTensor_(addbmm)(THCState *state, THCTensor *result, scalar_t beta, THCTensor *t,
@@ -491,6 +514,11 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
              "equal number of batches expected");
   THArgCheck(THCTensor_(size)(state, t, 0) == THCTensor_(size)(state, batch2, 0), 7,
              "equal number of batches expected");
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = at::namedinference::compute_baddbmm_outnames(result, batch1, batch2, t);
+  {
+    at::NoNamesGuard guard;
+#endif
   THArgCheck(THCTensor_(size)(state, t, 1) == THCTensor_(size)(state, batch1, 1), 6,
              "wrong matrix size");
   THArgCheck(THCTensor_(size)(state, t, 2) == THCTensor_(size)(state, batch2, 2), 7,
@@ -744,125 +772,13 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
   if (result_ != result) {
     THCTensor_(freeCopyTo)(state, result_, result);
   }
+#ifdef BUILD_NAMEDTENSOR
+  }
+  at::namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
 
 #else
   ERROR_ONLY_FP_TYPES("baddbmm");
-#endif
-}
-
-void THCTensor_(btrisolve)(THCState *state, THCTensor *rb_, THCTensor *b,
-                           THCTensor *atf, THCudaIntTensor *pivots)
-{
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-  THAssert(THCTensor_(checkGPU)(state, 3, rb_, atf, b));
-  THArgCheck(THCTensor_(nDimensionLegacyAll)(state, atf) == 3, 3, "expected 3D tensor");
-  THArgCheck(THCTensor_(nDimensionLegacyAll)(state, b) == 3 ||
-             THCTensor_(nDimensionLegacyAll)(state, b) == 2, 4, "expected 2D or 3D tensor");
-  THArgCheck(THCTensor_(size)(state, atf, 0) ==
-             THCTensor_(size)(state, b, 0), 3, "number of batches must be equal");
-  THArgCheck(THCTensor_(size)(state, atf, 1) ==
-             THCTensor_(size)(state, atf, 2), 3, "A matrices must be square");
-  THArgCheck(THCTensor_(size)(state, atf, 1) ==
-             THCTensor_(size)(state, b, 1), 3, "dimensions of A and b must be equal");
-
-  if (rb_ != b) {
-    THCTensor_(resizeAs)(state, rb_, b);
-    THCTensor_(copy)(state, rb_, b);
-  }
-
-
-  int n = atf->size(1);
-  int nrhs = THTensor_nDimensionLegacyAll(rb_) > 2 ? rb_->size(2) : 1;
-  THCTensor *atf_;
-  THCTensor *rb__;
-  int lda, ldb;
-
-  // correct ordering of A_tf
-  if (atf->stride(1) == 1) {
-    // column ordered, what BLAS wants
-    lda = atf->stride(2);
-    atf_ = atf;
-  } else {
-    // not column ordered, need to make it such (requires copy)
-    // it would be nice if we could use the op(A) flags to automatically
-    // transpose A if needed, but this leads to unpredictable behavior if the
-    // user clones A_tf later with a different ordering
-    THCTensor *transp_r_ = THCTensor_(newTranspose)(state, atf, 1, 2);
-    atf_ = THCTensor_(newClone)(state, transp_r_);
-    THCTensor_(free)(state, transp_r_);
-    THCTensor_(transpose)(state, atf_, NULL, 1, 2);
-    lda = atf_->stride(2);
-  }
-
-  // correct ordering of B
-  if (rb_->stride(1) == 1) {
-    // column ordered
-    if (THTensor_nDimensionLegacyAll(rb_) == 2 || rb_->size(2) == 1) {
-      ldb = n;
-    } else {
-      ldb = rb_->stride(2);
-    }
-    rb__ = rb_;
-  } else {
-    // make column ordered
-    if (THTensor_nDimensionLegacyAll(rb_) > 2) {
-      THCTensor *transp_r_ = THCTensor_(newTranspose)(state, rb_, 1, 2);
-      rb__ = THCTensor_(newClone)(state, transp_r_);
-      THCTensor_(free)(state, transp_r_);
-      THCTensor_(transpose)(state, rb__, NULL, 1, 2);
-      ldb = rb__->stride(2);
-    } else {
-      rb__ = THCTensor_(newClone)(state, rb_);
-      ldb = n;
-    }
-  }
-
-  int64_t num_batches = rb_->size(0);
-  size_t matrices_size = num_batches * sizeof(scalar_t*);
-
-  // Copy pointers to device.
-  auto d_result = static_cast<scalar_t**>(THCudaMalloc(state, matrices_size));
-  auto d_atf = static_cast<const scalar_t**>(THCudaMalloc(state, matrices_size));
-
-  const int64_t block = 512;
-  const int64_t grid = (num_batches + block - 1) / block;
-  createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-    (const scalar_t**)d_result, THCTensor_(data)(state, rb__),
-    rb__->stride(0), num_batches);
-  createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-    d_atf, THCTensor_(data)(state, atf_),
-    atf_->stride(0), num_batches);
-
-  if (!THCudaIntTensor_isContiguous(state, pivots)) {
-      THError("Error: pivots is not contiguous.");
-  }
-
-  int *pivots_data = THCudaIntTensor_data(state, pivots);
-  int info;
-
-#ifdef THC_REAL_IS_FLOAT
-  THCudaBlas_Sgetrs(state, 'n', n, nrhs, d_atf, lda, pivots_data, d_result, ldb, &info, num_batches);
-#elif defined(THC_REAL_IS_DOUBLE)
-  THCudaBlas_Dgetrs(state, 'n', n, nrhs, d_atf, lda, pivots_data, d_result, ldb, &info, num_batches);
-#endif
-
-  if (info < 0) {
-    THError("Illegal arg %d", -info);
-  }
-
-  THCudaFree(state, d_result);
-  THCudaFree(state, d_atf);
-
-  if (atf_ != atf) {
-    THCTensor_(free)(state, atf_);
-  }
-
-  if (rb__ != rb_) {
-    THCTensor_(freeCopyTo)(state, rb__, rb_);
-  }
-
-#else
-  THError("btrisolve for CUDA tensors is only supported for floats and doubles");
 #endif
 }
 

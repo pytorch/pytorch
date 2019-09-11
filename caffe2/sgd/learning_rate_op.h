@@ -151,7 +151,7 @@ class LearningRateOp final : public Operator<Context> {
           sub_policy_num_iters.size(),
           0,
           "Must specify at least one sub learning rate policy.");
-      for (int i = 0; i < sub_policy_num_iters.size(); ++i) {
+      for (size_t i = 0; i < sub_policy_num_iters.size(); ++i) {
         CAFFE_ENFORCE_GT(
             sub_policy_num_iters[i],
             0,
@@ -171,6 +171,14 @@ class LearningRateOp final : public Operator<Context> {
             createLearningRateFunctor(sub_policy, sub_policy_arg_prefix_str)));
       }
       return new CompositeLearningRate<T>(sub_policies);
+    } else if (policy == "cyclical") {
+      T max_lr =
+          this->template GetSingleArgument<float>(arg_prefix + "max_lr", 0.005);
+      int stepsize =
+          this->template GetSingleArgument<int>(arg_prefix + "stepsize", 0);
+      DCHECK_GT(stepsize, 0);
+      DCHECK_GE(max_lr, base_lr_);
+      return new CyclicalLearningRate<T>(base_lr_, max_lr, stepsize);
     } else {
       CAFFE_THROW("Unknown learning rate policy: ", policy);
       return NULL;

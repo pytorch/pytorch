@@ -53,7 +53,9 @@
 
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
+#include <torch/csrc/distributed/autograd/autograd.h>
 #include <torch/csrc/distributed/c10d/c10d.h>
+#include <torch/csrc/distributed/rpc/rpc.h>
 #endif
 #endif
 
@@ -415,6 +417,20 @@ PyObject *THPModule_userEnabledCuDNN(PyObject *_unused)
   else Py_RETURN_FALSE;
 }
 
+PyObject *THPModule_setUserEnabledMkldnn(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "set_enabled_mkldnn expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setUserEnabledMkldnn(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_userEnabledMkldnn(PyObject *_unused)
+{
+  if (at::globalContext().userEnabledMkldnn()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
+}
+
 PyObject *THPModule_setDeterministicCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_deterministic_cudnn expects a bool, "
@@ -494,6 +510,8 @@ static PyMethodDef TorchMethods[] = {
   {"set_num_interop_threads", (PyCFunction)THPModule_setNumInteropThreads,     METH_O,       nullptr},
   {"_get_cudnn_enabled", (PyCFunction)THPModule_userEnabledCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_enabled", (PyCFunction)THPModule_setUserEnabledCuDNN, METH_O,  nullptr},
+  {"_get_mkldnn_enabled", (PyCFunction)THPModule_userEnabledMkldnn, METH_NOARGS,     nullptr},
+  {"_set_mkldnn_enabled", (PyCFunction)THPModule_setUserEnabledMkldnn, METH_O,  nullptr},
   {"_get_cudnn_benchmark", (PyCFunction)THPModule_benchmarkCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_benchmark", (PyCFunction)THPModule_setBenchmarkCuDNN, METH_O,  nullptr},
   {"_get_cudnn_deterministic", (PyCFunction)THPModule_deterministicCuDNN, METH_NOARGS,     nullptr},
@@ -529,17 +547,9 @@ void initModule(PyObject *module);
 }} // namespace torch::cuda
 #endif
 
-namespace torch { namespace nn {
-
-void init__THNN(PyObject*);
-#ifdef USE_CUDA
-void init__THCUNN(PyObject*);
-#endif
-
-}} // namespace torch::nn
-
 bool THDPDoubleStorage_init(PyObject *module);
 bool THDPFloatStorage_init(PyObject *module);
+// TODO: fix
 //bool THDPHalfStorage_init(PyObject *module);
 bool THDPLongStorage_init(PyObject *module);
 bool THDPIntStorage_init(PyObject *module);
@@ -625,6 +635,9 @@ PyObject* initModule() {
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
+  THPUtils_addPyMethodDefs(methods, torch::distributed::rpc::python_functions());
+  THPUtils_addPyMethodDefs(
+      methods, torch::distributed::autograd::python_functions());
 #endif
 #endif
 
@@ -744,6 +757,12 @@ PyObject* initModule() {
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
 #endif
 
+#ifdef BUILD_NAMEDTENSOR
+  ASSERT_TRUE(set_module_attr("_BUILD_NAMEDTENSOR", Py_True));
+#else
+  ASSERT_TRUE(set_module_attr("_BUILD_NAMEDTENSOR", Py_False));
+#endif
+
   auto defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator = (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);
   // This reference is meant to be given away, so no need to incref here.
@@ -751,11 +770,6 @@ PyObject* initModule() {
 
 #ifdef USE_NUMPY
   if (_import_array() < 0) return nullptr;
-#endif
-
-  torch::nn::init__THNN(module);
-#ifdef USE_CUDA
-  torch::nn::init__THCUNN(module);
 #endif
 
   return module;

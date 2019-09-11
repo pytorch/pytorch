@@ -26,7 +26,7 @@ class CAFFE2_API SparseNormalizeOp final : public Operator<Context> {
  protected:
   bool use_max_norm_;
   float norm_;
-  INPUT_TAGS(PARAM, INDICES, GRAD);
+  INPUT_TAGS(PARAM, INDICES);
   OUTPUT_TAGS(OUTPUT_PARAM);
 };
 

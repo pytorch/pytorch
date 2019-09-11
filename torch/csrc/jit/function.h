@@ -15,12 +15,10 @@ using Kwargs = std::unordered_map<std::string, IValue>;
 struct TORCH_API Function {
   Function(
       c10::QualifiedName name,
-      bool optimize,
       std::shared_ptr<Graph> graph,
       std::function<void(Function&)> function_creator)
       : name_(std::move(name)),
         graph_(std::move(graph)),
-        optimize_(optimize),
         function_creator_(std::move(function_creator)) {}
 
   void run(Stack& stack) {
@@ -63,12 +61,7 @@ struct TORCH_API Function {
     return *this;
   }
 
-  const FunctionSchema& getSchema() const {
-    if (schema_ == nullptr) {
-      schema_ = make_unique<FunctionSchema>(defaultSchemaFor(*this));
-    }
-    return *schema_;
-  }
+  const FunctionSchema& getSchema() const;
 
   std::string pretty_print_schema() const {
     AT_ASSERT(schema_);
@@ -82,7 +75,10 @@ struct TORCH_API Function {
   }
 
   bool is_optimized() const {
-    return optimize_;
+    AT_WARN(
+        "Function::is_optimized() is deprecated and always returns true. "
+        "Please use getGraphExecutorOptimize()");
+    return true;
   }
 
   void check_single_output() {
@@ -95,32 +91,14 @@ struct TORCH_API Function {
     ensure_defined();
     std::call_once(executor_init_, [&] {
       check_single_output();
-      executor_ = GraphExecutor(graph(), optimize_);
+      executor_ = GraphExecutor(graph());
     });
     return executor_;
   }
 
  private:
-  static FunctionSchema defaultSchemaFor(const Function& function) {
-    std::vector<Argument> args;
-    std::vector<Argument> returns;
-    Graph& g = *function.graph();
-    size_t num_inputs = function.num_inputs();
-    for (size_t i = 0; i < num_inputs; ++i) {
-      const Value* v = g.inputs().at(i);
-      std::string name = v->hasDebugName() ? v->debugNameBase()
-                                           : ("argument_" + std::to_string(i));
-      args.emplace_back(std::move(name), unshapedType(g.inputs()[i]->type()));
-    }
-    for (size_t i = 0; i < g.outputs().size(); ++i) {
-      returns.emplace_back("", unshapedType(g.outputs()[i]->type()));
-    }
-    return {function.name(), "", std::move(args), std::move(returns)};
-  }
-
   c10::QualifiedName name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
-  bool optimize_;
 
   GraphExecutor executor_; // for execution
 

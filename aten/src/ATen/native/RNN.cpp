@@ -3,13 +3,15 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 
+#include <ATen/native/c10_utils.h>
+
 namespace at { namespace native {
 
 namespace {
 
 // Check if pytorch is compiled with MIOpen.
 bool use_miopen(const at::Tensor& input, const double dropout_state) {
-    bool is_miopen_acceptable = (input.scalar_type() == at::kFloat) && 
+    bool is_miopen_acceptable = (input.scalar_type() == at::kFloat) &&
                                 (detail::getCUDAHooks().compiledWithMIOpen()) &&
                                 (input.is_cuda()) &&
                                 (dropout_state == 0.0);
@@ -129,12 +131,90 @@ struct QuantizedCellParams {
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
   }
   Tensor linear_ih(Tensor input) const {
-    return at::fbgemm_linear_int8_weight(
+    return at::fbgemm_linear_int8_weight_fp32_activation(
         input, w_ih, packed_ih, col_offsets_ih, scale_ih, zero_point_ih, b_ih);
   }
   Tensor linear_hh(Tensor h) const {
-    return at::fbgemm_linear_int8_weight(
+    return at::fbgemm_linear_int8_weight_fp32_activation(
         h, w_hh, packed_hh, col_offsets_hh, scale_hh, zero_point_hh, b_hh);
+  }
+};
+
+// QuantizedCellParams vs. QuantizedCellParamsDynamic
+//
+// QuantizedCellParams uses the legacy
+// fbgemm_linear_int8_weight_fp32_activation API, which requires the explicit
+// scale and zero point parameters for the weight. QuantizedCellParamsDynamic
+// uses the new fbgemm_linear_dynamic API, which doesn't require the explicit
+// scale and zero point parameters. These quantization parameters are
+// encapsulated in the `PackedLinearWeight` struct in
+// aten/src/ATen/native/quantized/cpu/fbgemm_utils.h.
+struct QuantizedCellParamsDynamic {
+  QuantizedCellParamsDynamic(
+      const Tensor& _w_ih, /* Prepacked Weight Tensor */
+      const Tensor& _w_hh, /* Prepacked Weight Tensor */
+      const Tensor& _b_ih, /* float Bias Tensor */
+      const Tensor& _b_hh /* float Bias Tensor */)
+      : w_ih(_w_ih), w_hh(_w_hh), b_ih(_b_ih), b_hh(_b_hh) {}
+
+  const Tensor& w_ih;
+  const Tensor& w_hh;
+  const Tensor& b_ih;
+  const Tensor& b_hh;
+
+  Tensor matmul_ih(const Tensor& input) const {
+    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
+  }
+  Tensor matmul_hh(const Tensor& h) const {
+    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
+  }
+
+  Tensor linear_ih(const Tensor& input_ih) const {
+    const auto kFuncName = "quantized::linear_dynamic";
+    const auto kOvrldName = "";
+    const std::vector<c10::IValue> output_ih_list =
+        callOp(kFuncName, kOvrldName, input_ih, w_ih);
+    TORCH_INTERNAL_ASSERT(
+        output_ih_list.size() == 1,
+        "The output vector should have exact one element");
+    const Tensor output_ih = output_ih_list[0].toTensor();
+    return output_ih;
+  }
+  Tensor linear_hh(const Tensor& input_hh) const {
+    const auto kFuncName = "quantized::linear_dynamic";
+    const auto kOvrldName = "";
+    const std::vector<c10::IValue> output_hh_list =
+        callOp(kFuncName, kOvrldName, input_hh, w_hh);
+    TORCH_INTERNAL_ASSERT(
+        output_hh_list.size() == 1,
+        "The output vector should have exact one element");
+    const Tensor output_hh = output_hh_list[0].toTensor();
+    return output_hh;
+  }
+};
+
+struct QuantizedCellParamsFP16 {
+  QuantizedCellParamsFP16(const Tensor &_packed_ih, const Tensor &_packed_hh,
+                          const Tensor &_b_ih, const Tensor &_b_hh)
+      : packed_ih(_packed_ih), packed_hh(_packed_hh),
+        b_ih(_b_ih), b_hh(_b_hh) {}
+
+  const Tensor &packed_ih;
+  const Tensor &packed_hh;
+  const Tensor &b_ih;
+  const Tensor &b_hh;
+
+  Tensor matmul_ih(Tensor /* unused */) const {
+    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
+  }
+  Tensor matmul_hh(Tensor /* unused */) const {
+    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
+  }
+  Tensor linear_ih(Tensor input) const {
+    return at::fbgemm_linear_fp16_weight(input, packed_ih, b_ih);
+  }
+  Tensor linear_hh(Tensor h) const {
+    return at::fbgemm_linear_fp16_weight(h, packed_hh, b_hh);
   }
 };
 
@@ -144,7 +224,7 @@ static std::vector<pair_of<T>> pair_vec(const std::vector<T>& vals) {
   TORCH_CHECK(vals.size() % 2 == 0, "Odd number of params or hiddens given to a bidirectional RNN");
   std::vector<pair_of<T>> result;
   result.reserve(vals.size() / 2);
-  for (int64_t i = 0; i < vals.size(); i += 2) {
+  for (size_t i = 0; i < vals.size(); i += 2) {
     result.emplace_back(vals[i], vals[i + 1]);
   }
   return result;
@@ -155,7 +235,7 @@ template<typename T>
 static std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
   std::vector<T> result;
   result.reserve(vals.size() * 2);
-  for (int64_t i = 0; i < vals.size(); i++) {
+  for (size_t i = 0; i < vals.size(); i++) {
     result.push_back(std::move(vals[i].first));
     result.push_back(std::move(vals[i].second));
   }
@@ -193,6 +273,30 @@ static std::vector<QuantizedCellParams> gather_quantized_params(TensorList param
   return result;
 }
 
+static std::vector<QuantizedCellParamsDynamic> gather_quantized_params_dynamic(
+    TensorList params) {
+  static at::Tensor undefined;
+  std::vector<QuantizedCellParamsDynamic> result;
+  TORCH_CHECK(
+      params.size() % 4 == 0,
+      "got an incorrect number of quantized RNN parameters");
+  for (size_t i = 0; i < params.size(); i += 4) {
+    result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3]);
+  }
+  return result;
+}
+
+static std::vector<QuantizedCellParamsFP16> gather_quantized_params_fp16(
+    TensorList params) {
+  static at::Tensor undefined;
+  std::vector<QuantizedCellParamsFP16> result;
+  TORCH_CHECK(params.size() % 4 == 0,
+              "incorrect number of quantized RNN parameters FP16");
+  for (size_t i = 0; i < params.size(); i += 4) {
+    result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3]);
+  }
+  return result;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // HIDDEN STATE FUNCTIONS
@@ -478,7 +582,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     std::vector<hidden_type> hiddens;
     int64_t input_offset = 0;
     int64_t num_steps = input.batch_sizes.size(0);
-    int64_t* batch_sizes = input.batch_sizes.data<int64_t>();
+    int64_t* batch_sizes = input.batch_sizes.data_ptr<int64_t>();
     int64_t last_batch_size = batch_sizes[0];
 
     const Tensor* input_ptr = &input.data;
@@ -537,7 +641,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     std::vector<at::Tensor> step_outputs;
     int64_t input_offset = input.data.size(0);
     int64_t num_steps = input.batch_sizes.size(0);
-    int64_t* batch_sizes = input.batch_sizes.data<int64_t>();
+    int64_t* batch_sizes = input.batch_sizes.data_ptr<int64_t>();
     int64_t last_batch_size = batch_sizes[num_steps - 1];
 
     const Tensor* input_ptr = &input.data;
@@ -625,8 +729,8 @@ LayerOutput<io_type, std::vector<hidden_type>>
 apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const io_type& input,
                   const std::vector<hidden_type>& hiddens, const std::vector<weight_type>& weights,
                   int64_t num_layers, double dropout_p, bool train) {
-  TORCH_CHECK(num_layers == hiddens.size(), "Expected more hidden states in stacked_rnn");
-  TORCH_CHECK(num_layers == weights.size(), "Expected more weights in stacked_rnn");
+  TORCH_CHECK(num_layers == (int64_t)hiddens.size(), "Expected more hidden states in stacked_rnn");
+  TORCH_CHECK(num_layers == (int64_t)weights.size(), "Expected more weights in stacked_rnn");
 
   auto layer_input = input;
   auto hidden_it = hiddens.begin();
@@ -862,7 +966,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(output, hy, cy);
-  } 
+  }
 
   if (use_miopen(_input, dropout_p)) {
     Tensor output, hy, cy;
@@ -891,7 +995,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     lstm_packed_cudnn_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
     return std::make_tuple(output, hy, cy);
-  } 
+  }
 
   if (use_miopen(data, dropout_p)) {
     Tensor output, hy, cy;
@@ -899,7 +1003,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
     return std::make_tuple(output, hy, cy);
   }
-  
+
   PackedSequence input { data, batch_sizes };
   auto params = gather_params(_params, has_biases);
   auto result = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
@@ -936,30 +1040,53 @@ Tensor rnn_relu_cell(
 // Quantized implementations
 //
 // These implementations use FBGEMM to do the i2h and h2h linear layers with
-// an int8 quantized weight. This is advantageous in small-batch-size scenarios
-// where runtime is dominated by memory fetches of the weight matrix.
+// an int8 or float16 quantized weight. This is advantageous in small-batch-size
+// scenarios where runtime is dominated by memory fetches of the weight matrix.
 
 std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
       const Tensor& _input, TensorList hx,
       TensorList _params, bool has_biases,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional,
+      bool batch_first, c10::optional<ScalarType> dtype, bool use_dynamic) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
-            num_layers, dropout_p, train, bidirectional, batch_first);
+                    num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(output, hy, cy);
   }
+  auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
   check_device(_input, _params, hx);
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   TORCH_CHECK(has_biases, "quantized LSTM requires biases");
-  auto params = gather_quantized_params(_params);
-  auto results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
-      input, params, hx[0], hx[1], num_layers, dropout_p, train, bidirectional);
+  TORCH_CHECK(result_dtype == at::kChar || result_dtype == at::kHalf,
+              "dtype is not supported");
+
+  std::tuple<Tensor, Tensor, Tensor> results;
+  if (result_dtype == at::kChar) {
+    if (use_dynamic) {
+      auto params = gather_quantized_params_dynamic(_params);
+      results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
+          input, params, hx[0], hx[1], num_layers,
+          dropout_p, train, bidirectional);
+    } else {
+      auto params = gather_quantized_params(_params);
+      results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
+          input, params, hx[0], hx[1], num_layers,
+          dropout_p, train, bidirectional);
+    }
+  } else {
+    auto params = gather_quantized_params_fp16(_params);
+    results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
+        input, params, hx[0], hx[1], num_layers,
+        dropout_p, train, bidirectional);
+  }
+
   if (batch_first) {
     std::get<0>(results) = std::get<0>(results).transpose(0, 1);
   }
   return results;
+
 }
 
 #define DEFINE_QUANTIZED_RNN_CELL(name, hx_type, cell_type, return_type, prepare_hx_fn) \

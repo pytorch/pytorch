@@ -127,6 +127,19 @@ class ProcessGroupGloo : public ProcessGroup {
     int threads;
   };
 
+  // Helper functions to create a new device object.
+  // They are static functions on this class to keep them logically
+  // separate from the rest of the code base (e.g. torch/csrc/distributed).
+
+  // Create new device instance for specific interface.
+  static std::shared_ptr<::gloo::transport::Device> createDeviceForInterface(
+      const std::string& interface);
+
+  // Create new device instance for hostname or address.
+  // If specified argument is empty, it defaults to this machine's hostname.
+  static std::shared_ptr<::gloo::transport::Device> createDeviceForHostname(
+      const std::string& hostname);
+
   explicit ProcessGroupGloo(
       const std::shared_ptr<Store>& store,
       int rank,
@@ -142,6 +155,11 @@ class ProcessGroupGloo : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> allreduce_coalesced(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceCoalescedOptions& opts =
+          AllreduceCoalescedOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
@@ -186,6 +204,10 @@ class ProcessGroupGloo : public ProcessGroup {
 
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;
+
+  // Every Gloo context represents a set of connections to its peers.
+  // In order to use more than one device (or allow for parallelism on
+  // a single device), you need multiple contexts.
   std::vector<std::shared_ptr<::gloo::Context>> contexts_;
   std::vector<std::thread> threads_;
   bool stop_;
@@ -198,6 +220,11 @@ class ProcessGroupGloo : public ProcessGroup {
 
   // Returns next collective tag to use (uses collectiveCounter_).
   uint32_t nextTag();
+
+  // Returns the context to use for the specified tag.
+  // With `nextTag` returning an increasing number, this should lead
+  // to contexts being used in a round-robin fashion.
+  std::shared_ptr<::gloo::Context> getContext(uint32_t tag);
 
   // Entrypoint for worker threads.
   void runLoop(int workerIndex);

@@ -305,11 +305,20 @@ struct MethodValue : public SugaredValue {
       size_t n_binders) override {
     std::vector<NamedValue> inputsWithSelf = {self_};
     inputsWithSelf.insert(inputsWithSelf.end(), inputs.begin(), inputs.end());
-    auto method = self_->type()->expect<ClassType>()->getMethod(method_name_);
-    TORCH_INTERNAL_ASSERT(method);
-    method->ensure_defined();
-    MatchedSchema match = matchSchema(
-        method->getSchema(), loc, *f.graph(), inputsWithSelf, attributes);
+    const FunctionSchema* schema = nullptr;
+    if (auto class_type = self_->type()->cast<ClassType>()) {
+      auto method = class_type->getMethod(method_name_);
+      TORCH_INTERNAL_ASSERT(method);
+      method->ensure_defined();
+      schema = &method->getSchema();
+    } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
+      schema = interface_type->getMethod(method_name_);
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "method constructed that is not a class or interface");
+    }
+    MatchedSchema match =
+        matchSchema(*schema, loc, *f.graph(), inputsWithSelf, attributes);
     Value* output = f.graph()->insertMethodCall(method_name_, match);
     output->node()->setSourceRange(loc);
     return std::make_shared<SimpleValue>(output);
@@ -362,9 +371,7 @@ using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 // builtins operators and functions that call a method if it exists
 // on a class type, like 'len(x)' and 'x + y'
 struct TORCH_API MagicMethod : public SugaredValue {
-  MagicMethod(
-      std::string desugared_name,
-      SugaredValuePtr base)
+  MagicMethod(std::string desugared_name, SugaredValuePtr base)
       : base_value_(std::move(base)),
         desugared_name_(std::move(desugared_name)) {}
 
@@ -377,23 +384,7 @@ struct TORCH_API MagicMethod : public SugaredValue {
       Function& m,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) override {
-    if (inputs.size() > 0) {
-      Value* self = inputs[0].value(*m.graph());
-
-      if (auto class_ptr = self->type()->cast<ClassType>()) {
-        if (!class_ptr->getMethod(desugared_name_)) {
-          throw ErrorReport(loc)
-              << class_ptr->python_str() << " does not define a "
-              << desugared_name_ << " method";
-        }
-
-        return MethodValue(self, desugared_name_)
-            .call(loc, m, inputs.slice(1), attributes, n_binders);
-      }
-    }
-    return base_value_->call(loc, m, inputs, attributes, n_binders);
-  }
+      size_t n_binders) override;
 
  private:
   SugaredValuePtr base_value_;
@@ -441,9 +432,17 @@ struct TORCH_API IsInstanceValue : SugaredValue {
   }
 };
 
+// matched against for special handling of tuple() call
+struct TORCH_API TupleCallValue : SugaredValue {
+  TupleCallValue() = default;
+  std::string kind() const override {
+    return "tuple";
+  }
+};
+
 // matched against for special handling of range expressions
 struct TORCH_API RangeValue : SugaredValue {
-  RangeValue(const SourceRange& loc, Function&m, std::vector<Value*> inputs);
+  RangeValue(const SourceRange& loc, Function& m, std::vector<Value*> inputs);
   std::string kind() const override {
     return "range";
   }
@@ -463,25 +462,26 @@ struct TORCH_API RangeValue : SugaredValue {
 
 // matched against for special handling of iterables like zip(), enumerate()
 struct TORCH_API IterableValue : SugaredValue {
-  IterableValue(Symbol symbol): symbol_(symbol) {}
+  IterableValue(Symbol symbol) : symbol_(symbol) {}
   std::string kind() const override {
     return "iterable";
   }
   Symbol symbol_;
 };
 
-// Specialized Tree structure to matched against for special handling 
+// Specialized Tree structure to matched against for special handling
 // of builtin functions iterables expressions like zip(), enumerate(), etc.
 // zip and enumerate can be modeled as a tree of SimpleValue/RangeValue:
 //    zip(x, y) ->  (x, y) with tuple assignment to each loop target
 //    enumerate(x) -> (range(0, math.inf, 1), x)
 // So a complicated expression like zip(a, enumerate(b), range(0, 100)) will be:
 // (a, (range(0, math.inf, 1), b), range(0, 100))
-// We use those base iterables to fill in the loop information like max_trip_count
-// and set the value table for loop targets
+// We use those base iterables to fill in the loop information like
+// max_trip_count and set the value table for loop targets
 struct TORCH_API IterableTree : SugaredValue {
   IterableTree() = default;
-  IterableTree(const std::vector<SugaredValuePtr> children): children_(std::move(children)) {}
+  IterableTree(const std::vector<SugaredValuePtr> children)
+      : children_(std::move(children)) {}
   std::string kind() const override {
     return "iterabletree";
   }

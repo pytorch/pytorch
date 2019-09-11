@@ -235,6 +235,8 @@ def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_ch
     return {
         'mode': 'NN',
         'name': name,
+        'cpu_bfloat16': True if backend_types is not None and 'CPU' in backend_types and
+                'BFloat16' in backend_types['CPU'] else False,
         'backend_types': backend_types,
         'arguments': arguments,
         'return': 'argument 0' if inplace else get_return(arguments),
@@ -359,14 +361,14 @@ def backward_declaration(base, thnn_functions, backend_types):
 
     output_args = [arg for arg in arguments if arg.get('output', False)]
     scalar_check_arg = base['scalar_check'] if base['scalar_check'] is not None else dict()
-    scalar_check = {k: v for (k, v) in scalar_check_arg.items() if k in [a['name'] for a in output_args]}
+    scalar_check = {k: v for (k, v) in scalar_check_arg.items() if k in (a['name'] for a in output_args)}
     for arg in output_args:
         # resize automatically sets scalar_check
         if scalar_check.get(arg['name']) is not None or arg.get('resize', False):
             pass
         else:
             base_name = arg['name'][len('grad_'):] if arg['name'] != 'grad_input' else 'self'
-            if base_name in [a['name'] for a in arguments]:
+            if base_name in (a['name'] for a in arguments):
                 scalar_check[arg['name']] = base_name + '_->dim() == 0'
             else:
                 raise ValueError(("Could not infer scalar_check for {} argument of func {} because {} "

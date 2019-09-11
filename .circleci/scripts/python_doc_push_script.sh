@@ -9,9 +9,6 @@ pt_checkout="/var/lib/jenkins/workspace"
 
 echo "python_doc_push_script.sh: Invoked with $*"
 
-git clone https://github.com/pytorch/pytorch.github.io -b site
-pushd pytorch.github.io
-
 set -ex
 
 # Argument 1: Where to copy the built documentation to
@@ -34,13 +31,23 @@ if [ "$version" == "master" ]; then
   is_master_doc=true
 fi
 
-# Argument 3: (optional) If present, we will NOT do any pushing. Used for testing.
+# Argument 3: The branch to push to. Usually is "site"
+branch="$3"
+if [ -z "$branch" ]; then
+echo "error: python_doc_push_script.sh: branch (arg3) not specified"
+  exit 1
+fi
+
+# Argument 4: (optional) If present, we will NOT do any pushing. Used for testing.
 dry_run=false
-if [ "$3" != "" ]; then
+if [ "$4" != "" ]; then
   dry_run=true
 fi
 
 echo "install_path: $install_path  version: $version  dry_run: $dry_run"
+
+git clone https://github.com/pytorch/pytorch.github.io -b $branch
+pushd pytorch.github.io
 
 export LC_ALL=C
 export PATH=/opt/conda/bin:$PATH
@@ -92,10 +99,10 @@ git commit -m "auto-generating sphinx docs" || true
 git status
 
 if [ "$dry_run" = false ]; then
-  echo "Pushing to pytorch.github.io:site"
+  echo "Pushing to pytorch.github.io:$branch"
   set +x
 /usr/bin/expect <<DONE
-  spawn git push origin site
+  spawn git push origin $branch
   expect "Username*"
   send "pytorchbot\n"
   expect "Password*"

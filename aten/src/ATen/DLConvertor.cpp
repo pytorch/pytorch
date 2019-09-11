@@ -7,7 +7,7 @@
 using namespace std;
 namespace at {
 
-static DLDataType getDLDataType(const Tensor& t) {
+DLDataType getDLDataType(const Tensor& t) {
   DLDataType dtype;
   dtype.lanes = 1;
   dtype.bits = t.element_size() * 8;
@@ -65,7 +65,7 @@ static DLDataType getDLDataType(const Tensor& t) {
   return dtype;
 }
 
-static DLContext getDLContext(const Tensor& tensor, const int64_t& device_id) {
+DLContext getDLContext(const Tensor& tensor, const int64_t& device_id) {
   DLContext ctx;
   ctx.device_id = device_id;
   if (tensor.is_cuda()) {

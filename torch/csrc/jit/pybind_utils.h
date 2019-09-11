@@ -6,8 +6,13 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/QScheme.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
@@ -80,7 +85,28 @@ inline c10::optional<TypePtr> unifyOrInitializeType(
   return unifyTypes(accum, unify);
 }
 
-MatchTypeReturn tryToInferContainerType(py::handle input);
+struct InferredType {
+  InferredType(TypePtr type) : type_(std::move(type)) {}
+  InferredType(std::string reason)
+      : type_(nullptr), reason_(std::move(reason)) {}
+  TypePtr type() const {
+    TORCH_INTERNAL_ASSERT(type_);
+    return type_;
+  }
+  bool success() const {
+    return type_ != nullptr;
+  }
+  const std::string& reason() const {
+    TORCH_INTERNAL_ASSERT(!type_);
+    return reason_;
+  }
+
+ private:
+  TypePtr type_;
+  std::string reason_;
+};
+
+InferredType tryToInferContainerType(py::handle input);
 
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
@@ -88,50 +114,41 @@ MatchTypeReturn tryToInferContainerType(py::handle input);
 //   input is an empty container (list, dict)
 //   input is an list with element types that cannot be unified
 //   input is an dict with key or value types that cannot be unified
-inline MatchTypeReturn tryToInferType(py::handle input) {
+inline InferredType tryToInferType(py::handle input) {
   // Try tensor types
   if (THPVariable_Check(input.ptr())) {
     auto tensor = py::cast<at::Tensor>(input);
-    if (tensor.is_sparse()) {
-      return MatchTypeReturn("Sparse tensors not supported");
-    }
-    if (tensor.is_mkldnn()) {
-      // mkldnn tensor as opaque tensor doesn't have strides, so we can
-      // not create a CompleteTensorType
-      return MatchTypeReturn(DimensionedTensorType::create(tensor));
-    }
-
-    // TODO: maybe unshape this type if this is used for script instead of
-    // tracing
-    return MatchTypeReturn(CompleteTensorType::create(tensor));
+    return InferredType(TensorType::create(tensor));
   }
 
   if (input.is(py::none())) {
-    return MatchTypeReturn("Cannot infer type of a None value");
+    return InferredType("Cannot infer type of a None value");
   }
 
   // Try basic types first
   if (py::isinstance<py::bool_>(input)) {
-    return MatchTypeReturn(BoolType::get());
+    return InferredType(BoolType::get());
   } else if (py::isinstance<py::int_>(input)) {
-    return MatchTypeReturn(IntType::get());
+    return InferredType(IntType::get());
   } else if (py::isinstance<py::float_>(input)) {
-    return MatchTypeReturn(FloatType::get());
+    return InferredType(FloatType::get());
   } else if (py::isinstance<py::str>(input)) {
-    return MatchTypeReturn(StringType::get());
+    return InferredType(StringType::get());
   } else if (THPLayout_Check(input.ptr())) {
-    return MatchTypeReturn(IntType::get());
+    return InferredType(IntType::get());
   } else if (THPDevice_Check(input.ptr())) {
-    return MatchTypeReturn(DeviceObjType::get());
+    return InferredType(DeviceObjType::get());
   } else if (THPDtype_Check(input.ptr())) {
-    return MatchTypeReturn(IntType::get());
+    return InferredType(IntType::get());
+  } else if (THPQScheme_Check(input.ptr())) {
+    return InferredType(IntType::get());
   }
 
   // Try container types
   return tryToInferContainerType(input);
 }
 
-inline MatchTypeReturn tryToInferContainerType(py::handle input) {
+inline InferredType tryToInferContainerType(py::handle input) {
   if (six::isTuple(input)) {
     py::tuple tuple = py::cast<py::tuple>(input);
     std::vector<TypePtr> element_types;
@@ -139,20 +156,20 @@ inline MatchTypeReturn tryToInferContainerType(py::handle input) {
 
     for (py::handle elem : tuple) {
       auto type_match = tryToInferType(elem);
-      if (type_match.type) {
-        element_types.push_back(*type_match.type);
+      if (type_match.success()) {
+        element_types.push_back(type_match.type());
       } else {
         // Forward error message along
-        return type_match.errMsg;
+        return type_match.reason();
       }
     }
-    return MatchTypeReturn(TupleType::create(element_types));
+    return InferredType(TupleType::create(element_types));
   } else if (PyDict_Check(input.ptr())) {
     // Check to make sure we can generate useful input/output types
     auto dict = py::cast<py::dict>(input);
     size_t len = py::len(dict);
     if (!len) {
-      return MatchTypeReturn("Dictionary inputs must have entries");
+      return InferredType("Dictionary inputs must have entries");
     }
 
     TypePtr key_type = nullptr;
@@ -161,67 +178,67 @@ inline MatchTypeReturn tryToInferContainerType(py::handle input) {
     for (auto entry : dict) {
       // Try to infer the key type and unify it with the existing one
       auto entry_key_type_match = tryToInferType(entry.first);
-      if (!entry_key_type_match.type) {
-        return entry_key_type_match.errMsg;
+      if (!entry_key_type_match.success()) {
+        return entry_key_type_match.reason();
       }
       auto unified_key =
-          unifyOrInitializeType(key_type, *entry_key_type_match.type);
+          unifyOrInitializeType(key_type, entry_key_type_match.type());
       if (!unified_key) {
-        return MatchTypeReturn(c10::str(
+        return InferredType(c10::str(
             "Dictionary inputs to traced functions must have consistent type. Found ",
             key_type->python_str(),
             " and ",
-            (*entry_key_type_match.type)->python_str()));
+            (entry_key_type_match.type())->python_str()));
       }
 
       // Try to infer the value type and unify it with the existing one
       auto entry_value_type_match = tryToInferType(entry.second);
-      if (!entry_value_type_match.type) {
-        return entry_value_type_match.errMsg;
+      if (!entry_value_type_match.success()) {
+        return entry_value_type_match.reason();
       }
       auto unified_value =
-          unifyOrInitializeType(value_type, *entry_value_type_match.type);
+          unifyOrInitializeType(value_type, entry_value_type_match.type());
       if (!unified_value) {
-        return MatchTypeReturn(c10::str(
+        return InferredType(c10::str(
             "Dictionary inputs to traced functions must have consistent type. Found ",
             value_type->python_str(),
             " and ",
-            (*entry_value_type_match.type)->python_str()));
+            (entry_value_type_match.type())->python_str()));
       }
 
       key_type = *unified_key;
       value_type = *unified_value;
     }
-    return MatchTypeReturn(DictType::create(key_type, value_type));
+    return InferredType(DictType::create(key_type, value_type));
   } else if (PyList_Check(input.ptr())) {
     auto list = py::cast<py::list>(input);
     size_t len = py::len(list);
     if (!len) {
-      return MatchTypeReturn("List trace inputs must have elements");
+      return InferredType("List trace inputs must have elements");
     }
 
     TypePtr element_type = nullptr;
     for (auto elem : list) {
       auto element_type_match = tryToInferType(elem);
-      if (!element_type_match.type) {
-        return MatchTypeReturn(c10::str(
+      if (!element_type_match.success()) {
+        return InferredType(c10::str(
             "Could not infer type of list element: ",
-            element_type_match.errMsg));
+            element_type_match.reason()));
       }
       auto unified_type =
-          unifyOrInitializeType(element_type, *element_type_match.type);
+          unifyOrInitializeType(element_type, element_type_match.type());
       if (!unified_type) {
-        return MatchTypeReturn(c10::str(
+        return InferredType(c10::str(
             "List inputs to traced functions must have consistent element type. Found ",
             element_type->python_str(),
             " and ",
-            (*element_type_match.type)->python_str()));
+            (element_type_match.type())->python_str()));
       }
       element_type = *unified_type;
     }
-    return MatchTypeReturn(ListType::create(element_type));
+    return InferredType(ListType::create(element_type));
   } else {
-    return MatchTypeReturn(c10::str(
+    return InferredType(c10::str(
         "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
         "are supported ",
         "as inputs or outputs of traced functions",
@@ -263,11 +280,11 @@ inline bool isTraceableType(TypePtr type) {
 
 inline TypedIValue toTraceableIValue(py::handle input) {
   auto match = tryToInferType(input);
-  if (!match.type) {
+  if (!match.success()) {
     AT_ERROR(
-        "Tracer cannot infer type of ", py::str(input), "\n:", match.errMsg);
+        "Tracer cannot infer type of ", py::str(input), "\n:", match.reason());
   }
-  auto type = *match.type;
+  auto type = match.type();
 
   if (isTraceableType(type)) {
     return TypedIValue(toIValue(input, type), type);
@@ -295,9 +312,9 @@ inline TypedStack toTypedStack(const py::tuple& inputs) {
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
-  auto elems = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto elems = c10::impl::GenericList(elem_type);
   for (auto elem : obj) {
-    elems.push_back(toIValue(elem, elem_type));
+    elems.push_back(toIValue(std::move(elem), elem_type));
   }
   return IValue(std::move(elems));
 }
@@ -315,25 +332,42 @@ inline IValue createGenericDict(
   return IValue(std::move(elems));
 }
 
+template <class T>
+inline void guardAgainstNamedTensor(const T& var) {
+#ifdef BUILD_NAMEDTENSOR
+  TORCH_CHECK(!var.has_names(),
+      "NYI: Named tensors are currently unsupported in TorchScript.");
+#endif
+}
+
 inline IValue toIValue(
     py::handle obj,
     const TypePtr& type,
     c10::optional<int32_t> N) {
   switch (type->kind()) {
-    case TypeKind::TensorType:
-    case TypeKind::AutogradZeroTensorType:
-    case TypeKind::DimensionedTensorType:
-    case TypeKind::ProfiledTensorType:
-    case TypeKind::CompleteTensorType: {
+    case TypeKind::TensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
-        AT_ERROR("sparse tensors not supported");
+        AT_WARN(
+            "Using sparse tensors in TorchScript is experimental. Many optimization "
+            "pathways have not been thoroughly tested with sparse tensors. Please "
+            "include the fact that the network is running sparse tensors in any bug "
+            "reports submitted.");
       }
+      guardAgainstNamedTensor<autograd::Variable>(var);
       return var;
     }
     case TypeKind::FloatType:
       return py::cast<double>(obj);
     case TypeKind::IntType:
+      if (THPDtype_Check(obj.ptr())) {
+        auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
+        return static_cast<int64_t>(dtype->scalar_type);
+      }
+      if (THPQScheme_Check(obj.ptr())) {
+        auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+        return static_cast<uint8_t>(qscheme->qscheme);
+      }
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
       if (!obj.is_none()) {
@@ -396,7 +430,6 @@ inline IValue toIValue(
             }
             return repeated;
           }
-        case TypeKind::DimensionedTensorType:
         case TypeKind::TensorType:
           return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
         default:
@@ -435,13 +468,30 @@ inline IValue toIValue(
       }
       return userObj;
     }
-    case TypeKind::NumberType:
+    case TypeKind::NumberType: {
+      if (THPDtype_Check(obj.ptr())) {
+        auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
+        return static_cast<int64_t>(dtype->scalar_type);
+      }
+      if (THPQScheme_Check(obj.ptr())) {
+        auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+        return static_cast<uint8_t>(qscheme->qscheme);
+      }
+      if (py::isinstance<py::int_>(obj)) {
+        return py::cast<int64_t>(obj);
+      } else if (py::isinstance<py::float_>(obj)) {
+        return py::cast<double>(obj);
+      }
+    }
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
+    case TypeKind::InterfaceType:
       break;
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
+    case TypeKind::CapsuleType:
+      AT_ERROR("Capsule Values aren't supported");
   }
   AT_ERROR(
       "Missing cases in toIValue for type: ",
@@ -504,14 +554,30 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
   }
 }
 
+inline c10::optional<py::object> tryToConvertToCustomClass(
+    const c10::intrusive_ptr<c10::ivalue::Object>& obj) {
+  if (obj->name().find("__torch__.torch.classes") == 0) {
+    auto objPtr = (void*)obj->getSlot(0).toCapsule().release();
+    auto classConverter = c10::getClassConverter()[obj->name()];
+    py::handle rawPyObj = classConverter(objPtr);
+    auto o = py::reinterpret_steal<py::object>(rawPyObj);
+    return o;
+  }
+  return c10::nullopt;
+}
 inline py::object toPyObject(IValue&& ivalue) {
   if (ivalue.isNone()) {
     return py::none();
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
     if (tensor.is_sparse()) {
-      AT_ERROR("sparse tensors not supported");
+      AT_WARN(
+          "Using sparse tensors in TorchScript is experimental. Many optimization "
+          "pathways have not been thoroughly tested with sparse tensors. Please "
+          "include the fact that the network is running sparse tensors in any bug "
+          "reports submitted.");
     }
+    guardAgainstNamedTensor<at::Tensor>(tensor);
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
@@ -545,10 +611,10 @@ inline py::object toPyObject(IValue&& ivalue) {
     }
     if (tuple->type && tuple->type->schema() &&
         tuple->type->schema()->name() != "") {
-      auto unqualName = tuple->type->basename();
-      auto fieldNames = fmap(tuple->type->schema()->arguments(), [](const Argument& arg) {
-        return arg.name();
-      });
+      auto unqualName = tuple->type->name()->name();
+      auto fieldNames = fmap(
+          tuple->type->schema()->arguments(),
+          [](const Argument& arg) { return arg.name(); });
       return py::module::import("torch.jit")
           .attr("_create_named_tuple")(
               t, unqualName, fieldNames);
@@ -567,6 +633,10 @@ inline py::object toPyObject(IValue&& ivalue) {
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
     auto pyCu = get_python_cu();
+    auto res = tryToConvertToCustomClass(obj);
+    if (res.has_value()) {
+      return res.value();
+    }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =
@@ -713,33 +783,96 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
   return result;
 }
 
-inline py::object invokeScriptFunctionFromPython(
+// Run `callee`, potentially inserting a CallFunction/CallMethod node into the
+// tracing graph.
+inline py::object runAndInsertCall(
     Function& callee,
     tuple_slice args,
     py::kwargs kwargs,
-    c10::optional<IValue> self = c10::nullopt) {
+    c10::optional<IValue> self,
+    // Lambda that tells this function how to insert `callee` into the graph if
+    // we're tracing.
+    std::function<Value*(Graph&, const script::MatchedSchema& match)>
+        callInserter) {
   auto stack = createStackForSchema(
       callee.getSchema(), std::move(args), std::move(kwargs), std::move(self));
-  {
+  auto tracing_state = tracer::getTracingState();
+  if (!tracing_state) {
     AutoNoGIL no_gil_guard;
+    // If we're not tracing, just run the callee as normal.
     callee.run(stack);
+  } else {
+    // If we are tracing, insert the appropriate CallFunction or CallMethod node
+    // and then run the callee with tracing disabled.
+
+    // Get the graph `Value`s that represent the input IValues
+    auto inputs = last(stack, callee.graph()->inputs().size());
+    auto input_values =
+        fmap(inputs, [](const IValue& v) { return tracer::getValueTrace(v); });
+    TORCH_INTERNAL_ASSERT(callee.getSchema().returns().size() == 1)
+    auto return_type = callee.getSchema().returns().at(0).type();
+    auto graph = tracing_state->graph;
+    std::vector<NamedValue> named_values;
+    for (Value* v : input_values) {
+      named_values.emplace_back(v);
+    }
+
+    // Add a call node.
+    script::MatchedSchema match = script::matchSchema(
+        callee.getSchema(),
+        tracer::getPythonInterpreterSourceRange(),
+        *graph,
+        named_values,
+        {});
+    auto output_value = callInserter(*graph, match);
+
+    // Actually run the callee. Pause the tracer so that we don't double-add the
+    // callee nodes.
+    {
+      AutoNoGIL no_gil_guard;
+      ResourceGuard guard(tracer::pauseTracing());
+      callee.run(stack);
+    }
+
+    // Associate the output IValues with the output `Value`s in the graph
+    tracer::setValueTrace(stack.back(), output_value);
   }
+
   TORCH_CHECK(
       stack.size() > 0,
       "Expected values in the stack after execution but found none");
   return toPyObject(std::move(stack.back()));
 }
 
+inline py::object invokeScriptFunctionFromPython(
+    Function& callee,
+    tuple_slice args,
+    py::kwargs kwargs) {
+  return runAndInsertCall(
+      callee,
+      args,
+      kwargs,
+      /*self=*/c10::nullopt,
+      [&](Graph& graph, const script::MatchedSchema& match) {
+        return graph.insertFunctionCall(&callee, match);
+      });
+}
+
 inline py::object invokeScriptMethodFromPython(
     script::Method& callee,
     tuple_slice args,
     py::kwargs kwargs) {
-  return invokeScriptFunctionFromPython(
+  auto self = callee.owner().module_object();
+  return runAndInsertCall(
       callee.function(),
-      std::move(args),
-      std::move(kwargs),
-      callee.owner().module_object());
+      args,
+      kwargs,
+      self,
+      [&](Graph& graph, const script::MatchedSchema& match) {
+        return graph.insertMethodCall(callee.name(), match);
+      });
 }
+
 inline py::object invokeOperatorFromPython(
     const Operator& op,
     py::args args,

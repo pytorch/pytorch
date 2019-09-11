@@ -40,7 +40,7 @@ void PythonEngine::thread_init(int device) {
   Engine::thread_init(device);
 }
 
-void PythonEngine::thread_on_exception(FunctionTask& task, std::exception& e) {
+void PythonEngine::thread_on_exception(NodeTask& task, std::exception& e) {
   auto python_err = dynamic_cast<python_error*>(&e);
   if (python_err) {
     python_err->persist();
@@ -131,7 +131,17 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 
     PyObject *grad = PyTuple_GET_ITEM(grad_tensors, i);
     if (THPVariable_Check(grad)) {
-      grads.push_back(((THPVariable*)grad)->cdata);
+      const Variable& grad_var = ((THPVariable*)grad)->cdata;
+#ifdef BUILD_NAMEDTENSOR
+      if (grad_var.has_names()) {
+        TORCH_WARN(
+            "Autograd was passed a named grad tensor with dims ", grad_var.names(),
+            ". Autograd does not yet support named tensor semantics, so all names ",
+            "will be ignored. In practice all computed gradients will still be correct "
+            "according to regular tensor semantics.");
+      }
+#endif
+      grads.push_back(grad_var);
     } else {
       THPUtils_assert(grad == Py_None,
           "element %d of gradients tuple is not a Tensor or None", i);
