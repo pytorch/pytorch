@@ -24,9 +24,9 @@ if is_available():
         from .rpc import *  # noqa: F401
 
         def init_model_parallel(self_name,
-                                rpc_backend=RpcBackend.PROCESS_GROUP,
+                                backend=RpcBackend.PROCESS_GROUP,
                                 self_rank=-1,
-                                rpc_init_url=None):
+                                init_method=None):
             r"""
             Initializes model parallel primitives such as the local rpc agent
             and distributed autograd.
@@ -38,7 +38,7 @@ if is_available():
             ``init_process_group`` must be invoked prior to this method.
 
             Arguments:
-                rpc_backend (Enum): type of RPC backend implementation.
+                backend (Enum): type of RPC backend implementation.
                             Currently, process group backend is the only
                             available backend implementation. (default:
                             ``RpcBackend.PROCESS_GROUP``).
@@ -48,8 +48,8 @@ if is_available():
                             underscore, and/or dash, and must be shorter than
                             128 characters.
                 self_rank (int): a globally unique id/rank of this node.
-                rpc_init_url(str): backend specific init arguments.
+                init_method(str): backend specific init arguments.
             """
-            _init_rpc(rpc_backend, self_name, self_rank, rpc_init_url)
+            _init_rpc(backend, self_name, self_rank, init_method)
             from .rpc import _agent
             autograd._init(_agent.get_worker_id().id)

@@ -53,10 +53,10 @@ class RpcBackend(Enum):
 
 
 # TODO: add a context manager to wrap _init_rpc and join_rpc
-def _init_rpc(rpc_backend=RpcBackend.PROCESS_GROUP,
+def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
               self_name=None,
               self_rank=-1,
-              rpc_init_url=None):
+              init_method=None):
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
 
@@ -65,7 +65,7 @@ def _init_rpc(rpc_backend=RpcBackend.PROCESS_GROUP,
     if _agent:
         raise RuntimeError("RPC is already initialized")
 
-    if rpc_backend == RpcBackend.PROCESS_GROUP:
+    if backend == RpcBackend.PROCESS_GROUP:
         from .distributed_c10d import _get_default_group
 
         group = _get_default_group()
@@ -79,7 +79,7 @@ def _init_rpc(rpc_backend=RpcBackend.PROCESS_GROUP,
         _agent = registered_init_rpc(rpc_backend,
                                      self_rank=self_rank,
                                      self_name=self_name,
-                                     init_url=rpc_init_url)
+                                     init_url=init_method)
         init_rref_context(_agent)
     else:
         raise RuntimeError("Unrecognized RPC backend ", rpc_backend)

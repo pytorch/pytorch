@@ -7,6 +7,10 @@ import unittest
 import torch
 import torch.distributed as dist
 
+if not dist.is_available():
+    print("c10d not available, skipping tests")
+    sys.exit(0)
+
 from torch.distributed.rpc import RpcBackend
 from common_distributed import MultiProcessTestCase
 from common_utils import load_tests, run_tests
@@ -67,11 +71,6 @@ class my_class:
 load_tests = load_tests
 
 
-if not dist.is_available():
-    print("c10d not available, skipping tests")
-    sys.exit(0)
-
-
 def _wrap_with_rpc(func):
     '''
         We use this decorator for setting up and tearing down state since
@@ -84,9 +83,9 @@ def _wrap_with_rpc(func):
         dist.init_process_group(backend='gloo', rank=self.rank,
                                 world_size=self.world_size, store=store)
         dist.init_model_parallel(self_name='worker%d' % self.rank,
-                                 rpc_backend=BACKEND,
+                                 backend=BACKEND,
                                  self_rank=self.rank,
-                                 rpc_init_url=RPC_INIT_URL)
+                                 init_method=RPC_INIT_URL)
         func(self)
         dist.join_rpc()
 
@@ -136,9 +135,9 @@ class RpcTest(MultiProcessTestCase):
                                 world_size=self.world_size, store=store)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
             dist.init_model_parallel(self_name="duplicate_name",
-                                     rpc_backend=BACKEND,
+                                     backend=BACKEND,
                                      self_rank=self.rank,
-                                     rpc_init_url=RPC_INIT_URL)
+                                     init_method=RPC_INIT_URL)
         dist.join_rpc()
 
     def test_invalid_names(self):
@@ -159,9 +158,9 @@ class RpcTest(MultiProcessTestCase):
         # value of MAX_NAME_LEN in RPC WorkerId has changed.
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
             dist.init_model_parallel(self_name="".join(["a" for _ in range(500)]),
-                                     rpc_backend=BACKEND,
+                                     backend=BACKEND,
                                      self_rank=self.rank,
-                                     rpc_init_url=RPC_INIT_URL)
+                                     init_method=RPC_INIT_URL)
         dist.join_rpc()
 
     @_wrap_with_rpc
