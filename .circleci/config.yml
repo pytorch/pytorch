@@ -843,11 +843,8 @@ workflows:
   binarybuilds:
     triggers:
       - schedule:
-          cron: "5 16 * * *"
-          filters:
-            branches:
-              only:
-                - master
+          cron: "25 16 * * *"
+
     jobs:
       - setup
         # Pytorch iOS builds
