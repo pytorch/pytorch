@@ -17,7 +17,7 @@ namespace cuda {
 enum class CUDAHistogramMemoryType { SHARED, MULTI_BLOCK, GLOBAL };
 namespace {
   template<typename input_t, typename IndexType>
-  __device__ static IndexType getBin(input_t bVal, input_t minvalue, input_t maxvalue, int nbins) {
+  __device__ static IndexType getBin(input_t bVal, input_t minvalue, input_t maxvalue, int64_t nbins) {
     IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
     // (only applicable for histc)
     // while each bin is inclusive at the lower end and exclusive at the higher, i.e. [start, end)
@@ -47,7 +47,7 @@ __global__ void kernelHistogram1D(
     detail::TensorInfo<output_t, IndexType> a, /* output */
     detail::TensorInfo<output_t, IndexType> p, /* partial output */
     detail::TensorInfo<input_t, IndexType> b, /* input */
-    int nbins,
+    int64_t nbins,
     input_t minvalue,
     input_t maxvalue,
     IndexType totalElements,
@@ -275,7 +275,7 @@ Tensor _bincount_cuda_template(
   }
   if (self.dim() != 1 ||
       (!std::is_same<input_t, uint8_t>::value &&
-       *self.min().cpu().data<input_t>() < 0)) {
+       *self.min().cpu().data_ptr<input_t>() < 0)) {
     AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
   }
 
@@ -284,7 +284,7 @@ Tensor _bincount_cuda_template(
     AT_ERROR("input and weights should have the same length");
   }
 
-  const int64_t nbins = std::max(*self.max().cpu().data<input_t>() + (int64_t)1, minlength);
+  const int64_t nbins = std::max(*self.max().cpu().data_ptr<input_t>() + (int64_t)1, minlength);
   const input_t minvalue = 0;
   const input_t maxvalue = nbins;
   // alloc output counter on GPU
@@ -315,8 +315,8 @@ Tensor _histc_cuda_template(
   input_t minvalue = min;
   input_t maxvalue = max;
   if (min == max) {
-    minvalue = *self.min().cpu().data<input_t>();
-    maxvalue = *self.max().cpu().data<input_t>();
+    minvalue = *self.min().cpu().data_ptr<input_t>();
+    maxvalue = *self.max().cpu().data_ptr<input_t>();
   }
   if (minvalue == maxvalue) {
     minvalue = minvalue - 1;
@@ -339,7 +339,7 @@ Tensor _bincount_cuda(
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
       return _bincount_cuda_template<scalar_t, float>(self, weights, minlength);
     return _bincount_cuda_template<scalar_t, double>(
-        self, weights.toType(CUDA(kDouble)), minlength);
+        self, weights.to(kDouble), minlength);
   });
 }
 

@@ -684,6 +684,14 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         input = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
         self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
 
+    def test_rsqrt(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, input):
+                return input.rsqrt()
+
+        input = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
+
     def test_log(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -1709,7 +1717,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 super(MyModel, self).__init__()
 
             def forward(self, class_prob, pred_bbox, batch_splits):
-                a, b, c, d = torch.ops._caffe2.BoxWithNMSLimit(
+                a, b, c, d, e, f = torch.ops._caffe2.BoxWithNMSLimit(
                     class_prob,
                     pred_bbox,
                     batch_splits,
@@ -1726,7 +1734,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                     output_classes_include_bg_cls=True,
                     legacy_plus_one=True,
                 )
-                return a, b, c, d
+                return a, b, c, d, e, f
 
         inputs = (torch.tensor(class_prob), torch.tensor(pred_bbox), torch.tensor(batch_splits))
         self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3, use_gpu=False)

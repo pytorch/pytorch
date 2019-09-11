@@ -16,15 +16,18 @@ import torch._six
 from torch.utils import cpp_extension
 from common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
+PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'autograd',
+    'cpp_api_parity',
     'cpp_extensions',
     'c10d',
     'c10d_spawn',
     'cuda',
     'cuda_primary_ctx',
     'dataloader',
+    'dist_autograd',
     'distributed',
     'distributions',
     'docs_coverage',
@@ -43,7 +46,6 @@ TESTS = [
     'optim',
     'qat',
     'quantization',
-    'quantized_conv',
     'quantized',
     'quantized_tensor',
     'quantized_nn_mods',
@@ -58,7 +60,14 @@ TESTS = [
     'jit_fuser',
     'tensorboard',
     'namedtensor',
+    'type_promotion',
+    'jit_disabled',
+    'function_schema',
 ]
+
+# skip < 3.6 b/c fstrings added in 3.6
+if PY36:
+    TESTS.append('jit_py3')
 
 WINDOWS_BLACKLIST = [
     'distributed',
@@ -66,17 +75,14 @@ WINDOWS_BLACKLIST = [
 
 ROCM_BLACKLIST = [
     'c10d',
+    'cpp_api_parity',
     'cpp_extensions',
     'distributed',
     'multiprocessing',
     'nccl',
 ]
 
-DISTRIBUTED_TESTS_CONFIG = {
-    'gloo': {
-        'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
-    },
-}
+DISTRIBUTED_TESTS_CONFIG = {}
 
 
 if dist.is_available():
@@ -88,7 +94,10 @@ if dist.is_available():
         DISTRIBUTED_TESTS_CONFIG['nccl'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
         }
-
+    if dist.is_gloo_available():
+        DISTRIBUTED_TESTS_CONFIG['gloo'] = {
+            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+        }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
 SIGNALS_TO_NAMES_DICT = {getattr(signal, n): n for n in dir(signal)
@@ -303,7 +312,7 @@ def get_executable_command(options):
     else:
         executable = [sys.executable]
     if options.pytest:
-        executable += ['-m', 'pytest', '--durations=10']
+        executable += ['-m', 'pytest']
     return executable
 
 

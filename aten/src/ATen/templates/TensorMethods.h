@@ -8,8 +8,15 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
-#ifdef BUILD_NAMEDTENSOR
-#include <ATen/NamedTensor.h>
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
+#include <ATen/core/dispatch/Dispatcher.h>
+#endif
+#include <ATen/core/NamedTensor.h>
+#ifdef USE_STATIC_DISPATCH
+#include <ATen/TypeDefault.h>
+#include <ATen/CPUType.h>
+#include <ATen/QuantizedCPUType.h>
+#include <ATen/SparseCPUType.h>
 #endif
 
 namespace at {
@@ -20,33 +27,26 @@ struct Quantizer;
 // to frontend
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
-inline Tensor Tensor::toType(const DeprecatedTypeProperties & t, bool non_blocking) const {
-  if(type() == t)
-    return *this;
-  return to(
-      at::device(t.device_type()).layout(t.layout()).dtype(t.scalarType()),
-      non_blocking,
-      /*copy=*/ true);
-}
-
 inline Tensor Tensor::cpu() const {
-  return toType(type().cpu());
+  return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
 }
 
+// TODO: The Python version also accepts arguments
 inline Tensor Tensor::cuda() const {
-  return toType(type().cuda());
+  return to(options().device(DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
 }
 
 inline Tensor Tensor::hip() const {
-  return toType(type().hip());
+  return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
-  return toType(type().toScalarType(t));
+  return to(options().dtype(t), /*non_blocking*/ false, /*copy*/ false);
 }
 
+// TODO: Deprecate me
 inline Tensor Tensor::toBackend(Backend b) const {
-  return toType(type().toBackend(b));
+  return to(options().device(backendToDeviceType(b)).layout(layout_from_backend(b)), /*non_blocking*/ false, /*copy*/ false);
 }
 
 inline TensorOptions Tensor::options() const {
@@ -58,10 +58,6 @@ inline TensorOptions Tensor::options() const {
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
 ${tensor_method_definitions}
-
-inline bool Tensor::is_variable() const noexcept {
-  return impl_->is_variable();
-}
 
 inline caffe2::TypeMeta Tensor::dtype() const noexcept {
   return impl_->dtype();
@@ -145,14 +141,14 @@ inline bool is_quantized(Tensor self) {
 
 #define DEFINE_CAST(T, name)                     \
   template <>                                    \
-  inline T* Tensor::data() const {               \
+  inline T* Tensor::data_ptr() const {           \
     TORCH_CHECK(                                 \
         scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \
         " but found ",                           \
         c10::toString(scalar_type()));           \
-    return static_cast<T*>(this->data_ptr());    \
+    return static_cast<T*>(this->unsafeGetTensorImpl()->data());    \
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)

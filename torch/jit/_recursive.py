@@ -3,7 +3,7 @@ import torch
 import collections
 
 import torch._jit_internal as _jit_internal
-from torch.nn import Module, ModuleList, Parameter, Sequential
+from torch.nn import Module, ModuleList, Parameter, Sequential, ModuleDict
 from torch._six import get_function_from_type
 
 
@@ -12,15 +12,12 @@ def copy_to_script_module(original, stubs):
     Copies the parameters, buffers, constants, attributes, and submodules
     of an nn.Module into itself.
     """
-    if not hasattr(original, '_parameters'):
-        raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
-                           .format(type(original).__name__))
-
     qualified_name = torch.jit._qualified_name(type(original))
     script_module = torch.jit.ScriptModule(_qualified_name=qualified_name)
 
     constants_set = set(getattr(original, "__constants__", []))
     script_module.__dict__["_constants_set"] = {}
+
 
     # Copy Parameters and Modules
     for name in dir(original):
@@ -108,9 +105,13 @@ def recursive_script(mod, exclude_methods=()):
     if isinstance(mod, torch.jit.ScriptModule):
         return mod
 
-    if isinstance(mod, (torch.nn.ModuleList, torch.nn.Sequential)):
+    if isinstance(mod, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)):
         # Create constant versions for the iterable modules
         return create_constant_iterable_module(mod)
+
+    if not hasattr(mod, '_parameters'):
+        raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
+                           .format(type(mod).__name__))
 
     methods = ()
     if hasattr(mod, 'forward'):
@@ -119,21 +120,51 @@ def recursive_script(mod, exclude_methods=()):
         if not _jit_internal.is_ignored_fn(mod.forward):
             methods = ('forward',)
     exported = []
+    overloads = []
     for name in dir(mod):
         item = getattr(mod, name)
         if callable(item):
             if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
                 exported.append(name)
+
+            # builtin functions like repr() in python 2 do not have __module__ defined
+            if hasattr(item, "__module__") and item.__module__ is not None:
+                method_overloads = _jit_internal._get_overloaded_methods(item, mod.__class__)
+
+                if method_overloads is not None:
+                    overloads.append((item, method_overloads))
+
     methods = methods + tuple(exported)
 
     methods = tuple(name for name in methods if name not in exclude_methods)
+
+    overload_name_mappings = dict(getattr(mod, "__overloads__", {}))
+    overload_stubs = []
+
+    for orig_fn, overload_fns in overloads:
+        orig_ast = torch.jit.get_jit_def(orig_fn, self_name="ScriptModule")
+        names = list(map(lambda i: orig_ast.name().name + "__" + str(i), range(len(overload_fns))))
+        overload_name_mappings[orig_ast.name().name] = names
+        for overload_fn, name in zip(overload_fns, names):
+            torch.jit._check_no_signature(overload_fn)
+            over_ast = torch.jit.get_jit_def(overload_fn, self_name="ScriptModule")
+            new_ast = torch._C._replace_overloaded_method_decl(over_ast.decl(), orig_ast, name)
+            _rcb = _jit_internal.createResolutionCallbackFromClosure(orig_fn)
+            overload_stubs.append(torch.jit.ScriptMethodStub(_rcb, new_ast, overload_fn))
+
+    mod.__overloads__ = overload_name_mappings
+
+    # we shouldn't directly compile overloaded methods, just its overloads
+    def ignore_overloaded(method_name):
+        return method_name not in overload_name_mappings
 
     def make_stub(method):
         func = get_function_from_type(type(mod), method)
         return torch.jit.script_method(func, _jit_internal.createResolutionCallbackFromClosure(func))
 
-    stubs = list(map(make_stub, methods))
-    return copy_to_script_module(mod, stubs)
+    filtered_methods = filter(ignore_overloaded, methods)
+    stubs = list(map(make_stub, filtered_methods))
+    return copy_to_script_module(mod, overload_stubs + stubs)
 
 
 def create_method_from_fn(module, fn):
@@ -189,7 +220,7 @@ def create_constant_iterable_module(module):
     modules = collections.OrderedDict()
 
     for key, submodule in module._modules.items():
-        if isinstance(submodule, (torch.nn.ModuleList, torch.nn.Sequential)):
+        if isinstance(submodule, (ModuleList, Sequential, ModuleDict)):
             # Make each item in the module a constant
             modules[key] = create_constant_iterable_module(submodule)
         else:
@@ -199,6 +230,8 @@ def create_constant_iterable_module(module):
         return torch.jit._ConstSequential(Sequential(modules))
     elif isinstance(module, ModuleList):
         return torch.jit._ConstModuleList(modules)
+    elif isinstance(module, ModuleDict):
+        return torch.jit._ConstModuleDict(modules)
     else:
-        raise RuntimeError("Only nn.ModuleList and nn.Sequential can be made "
+        raise RuntimeError("Only nn.ModuleList, nn.Sequential, and nn.ModuleDict can be made "
                            "into constant modules, found {}".format(module))

@@ -11,6 +11,8 @@
 # * verbatim-sources/job-specs-custom.yml
 #   (grep for DOCKER_IMAGE)
 
+version: 2.1
+
 docker_config_defaults: &docker_config_defaults
   user: jenkins
   aws_auth:
@@ -61,3 +63,14 @@ macos_brew_update: &macos_brew_update
     brew install expect
     brew install libomp
 
+ios_brew_update: &ios_brew_update
+  name: Brew update and install iOS toolchains
+  no_output_timeout: "1h"
+  command: |
+    set -ex
+    brew update
+    brew unlink parallel
+    brew install moreutils
+    brew link parallel --overwrite
+    brew install expect
+    brew install libtool

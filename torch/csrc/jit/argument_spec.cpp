@@ -216,7 +216,7 @@ void ArgumentSpecCreator::specializeTypes(
         auto& arg = spec.tensorAt(tensor_arg_spec_offset++);
         if (!arg.defined()) {
           result_stack.back().emplace_back(
-              ProfiledTensorType::get()->withAutogradZero());
+              TensorType::get()->withAutogradZero());
         } else {
           result_stack.back().emplace_back(arg.toType());
         }
@@ -270,7 +270,7 @@ void ArgumentSpecCreator::specializeTypes(
       // so we disconnect the input here and replace its uses with
       // a constant
       WithInsertPoint guard(*graph.nodes().begin());
-      auto c = graph.insertConstant({}, ot);
+      auto c = graph.insertConstant({});
       inputs[i]->replaceAllUsesWith(c);
     } else {
       inputs[i]->setType(t);

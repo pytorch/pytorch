@@ -19,6 +19,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 #ifdef USE_FBGEMM
   Tensor operator()(
       Tensor weight,
+      c10::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
@@ -59,9 +60,19 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
          static_cast<int>(padding[1])});
 
     auto weight_contig = weight.contiguous();
-    int32_t weight_zero_point_int32 = weight.q_zero_point();
+    const auto qtype = weight.qscheme();
+    std::vector<int32_t> zero_points(1, 0);
+    if (qtype == kPerTensorAffine) {
+      zero_points[0] = weight.q_zero_point();
+    } else if (qtype == kPerChannelAffine) {
+      zero_points.resize(output_channels, 0);
+      for (int i = 0; i < output_channels; ++i) {
+        zero_points[i] = weight.q_per_channel_zero_points()[i].item<int32_t>();
+      }
+    }
+
     const int8_t* weight_ptr_int8 =
-        reinterpret_cast<int8_t*>(weight_contig.data<c10::qint8>());
+        reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
 
     std::vector<int32_t> col_offsets(output_channels);
     // compute column offsets (Similar to
@@ -76,18 +87,42 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         for (int k = 0; k < KDim_per_group; ++k) {
           sum += weight_ptr_int8[(g * NDim + j) * KDim_per_group + k];
         }
-        col_offsets[g * NDim + j] =
-            sum - weight_zero_point_int32 * KDim_per_group;
+        if (qtype == kPerTensorAffine) {
+          col_offsets[g * NDim + j] = sum - zero_points[0] * KDim_per_group;
+        } else {
+          col_offsets[g * NDim + j] =
+              sum - zero_points[g * NDim + j] * KDim_per_group;
+        }
       }
     }
 
+    std::vector<float> scales(1, 0.0);
+    if (qtype == kPerTensorAffine) {
+      scales[0] = weight.q_scale();
+    } else if (qtype == kPerChannelAffine) {
+      scales.resize(output_channels, 0.0);
+      for (int i = 0; i < output_channels; ++i) {
+        scales[i] = weight.q_per_channel_scales()[i].item<float>();
+      }
+    }
+    c10::optional<at::Tensor> bias_contig;
+    if (bias.has_value()) {
+      Tensor bias_vec = bias.value();
+      TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
+      TORCH_CHECK(
+          bias_vec.size(0) == output_channels,
+          "bias should have K elements: " + std::to_string(output_channels));
+      bias_contig = bias->contiguous();
+    }
     auto ret_ptr = guts::make_unique<PackedConvWeight>(
         PackedConvWeight{guts::make_unique<fbgemm::PackWeightsForConv<2>>(
                              conv_p, weight_ptr_int8),
+                         bias_contig,
                          col_offsets,
                          {kernel_h, kernel_w},
-                         weight.q_scale(),
-                         weight_zero_point_int32});
+                         scales,
+                         zero_points,
+                         qtype});
     // TODO: we will need to replace this with torchscript classes at a later
     // point.
     return cpp_custom_type_hack::create(std::move(ret_ptr), weight.options());
@@ -95,6 +130,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 #else // USE_FBGEMM
   Tensor operator()(
       Tensor, /* weight */
+      c10::optional<Tensor>, /* bias */
       torch::List<int64_t>, /* stride */
       torch::List<int64_t>, /* padding */
       torch::List<int64_t>, /* dilation */
@@ -107,9 +143,9 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    "quantized::fbgemm_conv_prepack",
+    "quantized::conv_prepack",
     c10::RegisterOperators::options().kernel<QConvPackWeightInt8>(
-        QuantizedCPUTensorId()));
+        TensorTypeId::QuantizedCPUTensorId));
 
 } // namespace
 } // namespace native

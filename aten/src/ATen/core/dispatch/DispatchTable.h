@@ -5,8 +5,10 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/either.h>
+#include <c10/core/TensorTypeId.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/dispatch/KernelFunction.h>
+#include <ATen/core/ATenDispatch.h>
 
 #include <array>
 #include <atomic>
@@ -113,7 +115,7 @@ class DispatchTable final {
   void setKernel(
       TensorTypeId dispatch_key,
       const DispatchTableEntry& kernel) {
-    TORCH_INTERNAL_ASSERT(dispatch_key != TensorTypeIds::undefined());
+    TORCH_INTERNAL_ASSERT(dispatch_key != TensorTypeId::UndefinedTensorId);
     TORCH_CHECK(dispatch_strategy_.is_valid_, "Tried to register a kernel with dispatch key ", toString(dispatch_key), " for operator ", operator_name_, " that doesn't have tensor arguments.");
     TORCH_CHECK(kernels_.is_left(), "Tried to register a kernel with dispatch key ", toString(dispatch_key)," for operator ", operator_name_, ", which already has a catch-all kernel registered. An operator can only have either a catch-all kernel or kernels with dispatch keys.");
     kernels_.left().set(dispatch_key, kernel, operator_name_);
@@ -208,14 +210,17 @@ private:
         0,
         reverse_index_of_first_tensor_arg_
       );
+      // TODO: This will need to get adjusted for multiple dispatch
       if (C10_UNLIKELY(first_tensor_arg_is_tensor_list_)) {
         auto tensor_list = first_tensor_arg.toTensorListRef();
         if (tensor_list.size() == 0) {
           throw std::runtime_error("Tried to dispatch operator " + operator_name + " based on an empty tensor list. When the first tensor argument of an operator is a tensor list, then it must not be empty.");
         }
-        return tensor_list[0].type_id();
+        // TODO: Don't use legacy extractor; blocked on c10 understanding
+        // variable
+        return c10::legacyExtractTypeId(tensor_list[0].type_set());
       } else {
-        return first_tensor_arg.unsafeToTensorImpl()->type_id();
+        return c10::legacyExtractTypeId(first_tensor_arg.unsafeToTensorImpl()->type_set());
       }
     }
   };

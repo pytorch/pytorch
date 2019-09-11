@@ -157,7 +157,6 @@ struct PythonResolver : public Resolver {
             tt->python_str());
             return type;
       }
-
       get_python_cu()->register_type(tt);
       return tt;
     }
@@ -280,7 +279,7 @@ struct VISIBILITY_HIDDEN ModuleSelf : public Self {
 };
 
 static TypePtr getTensorType(const at::Tensor& t, bool complete) {
-  auto r = ProfiledTensorType::create(t);
+  auto r = TensorType::create(t);
   if (!complete) {
     r = r->dimensionedOnly();
   }
@@ -354,8 +353,8 @@ static std::shared_ptr<Graph> _assign_output_shapes(
   for (size_t i = 0; i < outputs.size(); ++i) {
     auto scalar_type = outputs[i].scalar_type();
     auto sizes = outputs[i].sizes();
-    auto type = torch::jit::ProfiledTensorType::createContiguous(
-        scalar_type, at::kCPU, sizes);
+    auto type =
+        torch::jit::TensorType::createContiguous(scalar_type, at::kCPU, sizes);
     retval->outputs()[i]->setType(type);
   }
   return retval;
@@ -401,6 +400,12 @@ void initJitScriptBindings(PyObject* module) {
           },
           py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
+      .def(
+          "_dump",
+          &Module::dump,
+          py::arg("code") = true,
+          py::arg("attrs") = true,
+          py::arg("params") = true)
       .def(
           "_define",
           [](Module& m,
@@ -737,7 +742,14 @@ void initJitScriptBindings(PyObject* module) {
         auto new_def = implementation_def.withDecl(overload_decl);
         return script_compile_function(name, new_def, defaults, std::move(rcb));
       });
-
+  m.def(
+      "_replace_overloaded_method_decl",
+      [](const Decl& overload_decl,
+         const Def& implementation_def,
+         const std::string& new_name) {
+        checkOverloadDecl(overload_decl, implementation_def.decl());
+        return implementation_def.withDecl(overload_decl).withName(new_name);
+      });
   m.def(
       "_create_function_from_trace",
       [](std::string qualname,
@@ -786,6 +798,14 @@ void initJitScriptBindings(PyObject* module) {
         }
         const auto self = SimpleSelf(classType);
         cu->define(classname, methodDefs, rcbs, &self);
+      });
+  m.def(
+      "_jit_script_interface_compile",
+      [](const std::string& qualifiedName,
+         const ClassDef& classDef,
+         ResolutionCallback rcb) {
+        get_python_cu()->define_interface(
+            c10::QualifiedName(qualifiedName), classDef, pythonResolver(rcb));
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {

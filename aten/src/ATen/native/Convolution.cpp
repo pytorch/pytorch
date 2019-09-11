@@ -337,7 +337,7 @@ static void check_shape_forward(const at::Tensor& input,
                                 const ConvParams& params, bool input_is_mkldnn) {
   int64_t k = input.ndimension();
   int64_t weight_dim = weight.ndimension();
-  std::vector<int64_t> weight_sizes(k);
+  std::vector<int64_t> weight_sizes(weight_dim);
   // mkldnn conv2d weights could have been re-ordered to 5d by
   // mkldnn_reorder_conv2d_weight
   if ((weight_dim == k + 1) && input_is_mkldnn) {
@@ -347,7 +347,7 @@ static void check_shape_forward(const at::Tensor& input,
     weight_dim = k;
   } else {
     std::copy_n(
-        weight.sizes().cbegin(), k, weight_sizes.begin());
+        weight.sizes().cbegin(), weight_dim, weight_sizes.begin());
   }
   int64_t groups = params.groups;
   auto padding = params.padding;
@@ -502,6 +502,13 @@ at::Tensor convolution(
                           ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
 }
 
+at::Tensor convolution_overrideable(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+    bool transposed, IntArrayRef output_padding, int64_t groups) {
+  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use globalATenDispatch().registerOp to override this function ");
+}
+
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
@@ -615,7 +622,8 @@ at::Tensor _convolution(
                                       params.padding, params.stride, params.dilation, params.groups);
     }
 #endif
-  } else {
+  } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
+    // TH/native only covers CPU/CUDA implementation.
     if (params.groups == 1) {
       output = at::_convolution_nogroup(
           input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
@@ -630,6 +638,9 @@ at::Tensor _convolution(
       }
       output = at::cat(outputs, 1);
     }
+  } else {
+    // Only reach here when input is backend with out-of-source implementation.
+    output = at::convolution_overrideable(input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
   }
 
   if (k == 3) {
@@ -705,6 +716,17 @@ at::Tensor _convolution_nogroup(
   }
 
   AT_ERROR("unsupported ConvNd parameters");
+}
+
+std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
+        const Tensor& grad_output, const Tensor& input, const Tensor& weight,
+        IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+        bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
+  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use globalATenDispatch().registerOp to override this function ");
+  return std::tuple<Tensor, Tensor, Tensor>(
+          at::empty_like(input),
+          at::empty_like(weight),
+          at::empty({}));
 }
 
 static Tensor subvariable(const Tensor& var, int dim, int groups, int g) {

@@ -20,8 +20,8 @@ __device__ inline int min(int a, int b) {
 template <typename scalar_t>
 __global__ static void max_pool3d_with_indices_single_out_frame(
   scalar_t* inputData,
-  PackedTensorAccessor<scalar_t, 4> output,
-  PackedTensorAccessor<int64_t, 4> indices,
+  PackedTensorAccessor64<scalar_t, 4> output,
+  PackedTensorAccessor64<int64_t, 4> indices,
   int itime, int iheight, int iwidth,
   int kT, int kH, int kW,
   int dT, int dH, int dW,
@@ -81,8 +81,8 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
 template <int KERNEL_WIDTH, typename scalar_t>
 __global__ static void max_pool3d_with_indices_single_out_frame(
   scalar_t* inputData,
-  PackedTensorAccessor<scalar_t, 4> output,
-  PackedTensorAccessor<int64_t, 4> indices,
+  PackedTensorAccessor64<scalar_t, 4> output,
+  PackedTensorAccessor64<int64_t, 4> indices,
   int itime, int iheight, int iwidth,
   int kT, int kH,
   int dT, int dH, int dW,
@@ -143,8 +143,8 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
   max_pool3d_with_indices_single_out_frame<KW>            \
   <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>( \
     input_data,                                           \
-    output.packed_accessor<scalar_t, 4>(),                \
-    indices.packed_accessor<int64_t, 4>(),                \
+    output.packed_accessor64<scalar_t, 4>(),                \
+    indices.packed_accessor64<int64_t, 4>(),                \
     itime, iheight, iwidth,                               \
     kT, kH,                                               \
     dT, dH, dW,                                           \
@@ -185,8 +185,8 @@ void max_pool3d_with_indices_out_frame(
       max_pool3d_with_indices_single_out_frame
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
            input_data,
-           output.packed_accessor<scalar_t, 4>(),
-           indices.packed_accessor<int64_t, 4>(),
+           output.packed_accessor64<scalar_t, 4>(),
+           indices.packed_accessor64<int64_t, 4>(),
            itime, iheight, iwidth,
            kT, kH, kW,
            dT, dH, dW,
@@ -209,8 +209,8 @@ void max_pool3d_with_indices_out_frame(
 template <typename scalar_t>
 __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   scalar_t *gradInputData,
-  PackedTensorAccessor<scalar_t, 4> gradOutput,
-  PackedTensorAccessor<int64_t, 4> indices,
+  PackedTensorAccessor64<scalar_t, 4> gradOutput,
+  PackedTensorAccessor64<int64_t, 4> indices,
   int itime, int iheight, int iwidth,
   int dT, int dH, int dW,
   int pT, int pH, int pW,
@@ -255,8 +255,8 @@ void max_pool3d_with_indices_backward_out_frame(
     max_pool3d_with_indices_backward_single_out_frame
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
         gradInputData,
-        gradOutput.packed_accessor<scalar_t, 4>(),
-        indices.packed_accessor<int64_t, 4>(),
+        gradOutput.packed_accessor64<scalar_t, 4>(),
+        indices.packed_accessor64<int64_t, 4>(),
         itime, iheight, iwidth,
         dT, dH, dW,
         pT, pH, pW,
@@ -362,7 +362,7 @@ void max_pool3d_with_indices_out_cuda_template(
     input.scalar_type(),
     "max_pool3d_with_indices_out_frame",
     [&]{
-      scalar_t *input_data = work_input.data<scalar_t>();
+      scalar_t *input_data = work_input.data_ptr<scalar_t>();
       int64_t totalZ = otime * nslices * nbatch;
 
       max_pool3d_with_indices_out_frame(
@@ -472,7 +472,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
     "max_pool3d_with_indices_backward_out_frame",
     [&] {
       const int64_t totalZ = otime * nslices * nbatch;
-      scalar_t *grad_input_data = work_grad_input.data<scalar_t>();
+      scalar_t *grad_input_data = work_grad_input.data_ptr<scalar_t>();
 
       max_pool3d_with_indices_backward_out_frame(
         grad_input_data, work_grad_output, work_indices,
