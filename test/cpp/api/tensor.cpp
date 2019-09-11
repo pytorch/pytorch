@@ -313,6 +313,9 @@ TEST(TensorTest, DataPtr) {
 }
 
 TEST(TensorTest, Data) {
-  auto tensor = torch::ones({3, 3}, torch::requires_grad());
-  auto data = tensor.data();
+  const auto tensor = torch::empty({3, 3});
+  ASSERT_TRUE(torch::equal(tensor, tensor.data()));
+
+  const auto tensor2 = at::empty({3, 3});
+  ASSERT_THROW(tensor2.data();, c10::Error);
 }
