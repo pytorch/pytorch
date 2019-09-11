@@ -301,6 +301,14 @@ Args:
         size of the pooling region will be used. Default: None
 """)
 
+layer_norm = _add_docstr(torch.layer_norm, r"""
+layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5) -> Tensor
+
+Applies Layer Normalization for last certain number of dimensions.
+
+See :class:`~torch.nn.LayerNorm` for details.
+""")
+
 
 def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,
                                        output_ratio=None, return_indices=False,
@@ -1684,16 +1692,6 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
         input, weight, bias, running_mean, running_var,
         use_input_stats, momentum, eps, torch.backends.cudnn.enabled
     )
-
-
-def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
-    # type: (Tensor, List[int], Optional[Tensor], Optional[Tensor], float) -> Tensor
-    r"""Applies Layer Normalization for last certain number of dimensions.
-
-    See :class:`~torch.nn.LayerNorm` for details.
-    """
-    return torch.layer_norm(input, normalized_shape, weight, bias, eps,
-                            torch.backends.cudnn.enabled)
 
 
 def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
