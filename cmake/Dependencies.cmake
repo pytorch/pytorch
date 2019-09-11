@@ -186,20 +186,27 @@ set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
 set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
   CACHE PATH "Confu-style dependencies binary directory")
 
-# ---[ PTHREADPOOL
-if (NOT DEFINED PTHREADPOOL_SOURCE_DIR)
-  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-  set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
-endif()
+# ---[ pthreadpool
+# QNNPACK and NNPACK both depend on pthreadpool, but when building with libtorch
+# they should use the pthreadpool implementation under caffe2/utils/threadpool
+# instead of the default implementation. To avoid confusion, add pthreadpool
+# subdirectory explicitly with EXCLUDE_FROM_ALL property prior to QNNPACK/NNPACK
+# does so, which will prevent it from installing the default pthreadpool library.
+if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE AND (USE_QNNPACK OR USE_NNPACK))
+  if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+    set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+  endif()
 
-IF(NOT TARGET pthreadpool)
-  SET(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
-  SET(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
-  ADD_SUBDIRECTORY(
-    "${PTHREADPOOL_SOURCE_DIR}"
-    "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool"
-    EXCLUDE_FROM_ALL)
-ENDIF()
+  IF(NOT TARGET pthreadpool)
+    SET(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
+    SET(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    ADD_SUBDIRECTORY(
+      "${PTHREADPOOL_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool"
+      EXCLUDE_FROM_ALL)
+  ENDIF()
+endif()
 
 # ---[ QNNPACK
 if(USE_QNNPACK)
@@ -253,6 +260,9 @@ if(USE_QNNPACK)
     endif()
     if (NOT DEFINED PSIMD_SOURCE_DIR)
       set(PSIMD_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/psimd" CACHE STRING "PSimd source directory")
+    endif()
+    if (NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+      set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
     endif()
 
     if(NOT TARGET qnnpack)

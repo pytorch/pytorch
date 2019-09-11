@@ -187,6 +187,13 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False):
     from .load_derivatives import load_derivatives
     autograd_functions = load_derivatives(
         os.path.join(autograd_dir, 'derivatives.yaml'), aten_decls)
+    if disable_autograd:
+        op_whitelist = [
+            'AsStridedBackward',
+        ]
+        autograd_functions = [
+            func for func in autograd_functions if func['op'] in op_whitelist
+        ]
 
     template_path = os.path.join(autograd_dir, 'templates')
 
