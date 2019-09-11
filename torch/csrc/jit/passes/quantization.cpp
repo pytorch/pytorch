@@ -63,17 +63,6 @@ graph(%self, %input):
   }
 }
 
-c10::optional<script::Module> findChildModule(
-    Value* module_instance,
-    const script::Module& module) {
-  if (module_instance->node()->kind() == prim::GetAttr) {
-    auto child_module_name = module_instance->node()->s(attr::name);
-    auto child_module = module.find_module(child_module_name);
-    return child_module;
-  }
-  return c10::nullopt;
-}
-
 static bool outputsNeedToBeObserved(Node* n) {
   return n->kind() != prim::Constant;
 }
