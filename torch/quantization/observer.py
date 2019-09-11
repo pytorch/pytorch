@@ -140,11 +140,7 @@ class MinMaxObserver(ObserverBase):
         return 'min_val={}, max_val={}'.format(self.min_val, self.max_val)
 
 
-<<<<<<< HEAD
 class TensorObserver(ObserverBase):
-=======
-class DebugObserver(ObserverBase):
->>>>>>> fec0423942f6311dd7c1abee489292390405b2f5
     r"""
     The module is mainly for debug and records the tensor values during runtime
     """
