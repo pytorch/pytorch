@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/QScheme.h>
+#include <ATen/Tensor.h>
 #ifdef USE_FBGEMM
 #include "fbgemm/Fbgemm.h"
 #include "fbgemm/QuantUtils.h"
@@ -16,6 +17,7 @@
 // Note that in JIT mode we can think of a way to fuse col_offsets with bias.
 struct FBGEMM_API PackedLinearWeight {
   std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
+  c10::optional<at::Tensor> bias;
   std::vector<int32_t> col_offsets;
   std::vector<float> w_scale;
   std::vector<int32_t> w_zp;
@@ -24,6 +26,7 @@ struct FBGEMM_API PackedLinearWeight {
 
 struct FBGEMM_API PackedConvWeight {
   std::unique_ptr<fbgemm::PackWeightsForConv<2>> w;
+  c10::optional<at::Tensor> bias;
   std::vector<int32_t> col_offsets;
   std::vector<int64_t> kernel;
   std::vector<float> w_scale;

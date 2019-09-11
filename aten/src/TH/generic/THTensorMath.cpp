@@ -3,9 +3,7 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 // HEY YOU!
 //
