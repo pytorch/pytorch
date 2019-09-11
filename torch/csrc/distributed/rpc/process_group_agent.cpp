@@ -126,7 +126,8 @@ ProcessGroupAgent::ProcessGroupAgent(
     workerIds_.emplace_back(std::move(tmpWorkerIds[rank]), rank);
   }
 
-  PythonRpcHandler::init();
+  // construct PythonRpcHandler singleton here
+  PythonRpcHandler::getInstance();
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
