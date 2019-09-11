@@ -213,8 +213,60 @@ class ShapePropagator {
         continue;
       }
     }
-
     return tensor_types;
+  }
+
+  c10::ScalarType unionScalarTypes(c10::ScalarType original, c10::ScalarType next) {
+    if (original == c10::ScalarType::Undefined) {
+      return next;
+    } else {
+      return c10::promoteTypes(original, next);
+    }
+  }
+
+  // Promotes result types for arithmetic operations on Tensor operands using
+  // new type promotion logic. See tensor_attributes.rst for details.
+  // This doesn't handle the case of arithmetic ops with Scalar arguments (when
+  // `Tensor.getUnsafeTensorImpl()->is_wrapped_nubmer()` would return true)
+  c10::optional<c10::ScalarType> getPromotedTypeForArithmeticOp(Node *node) {
+    c10::ScalarType dimmed = c10::ScalarType::Undefined;
+    c10::ScalarType zerodim = c10::ScalarType::Undefined;
+    // binary arithmetic ops, more than 2 args is alpha.
+    for (size_t i = 0 ; i < 2 ; i++ ) {
+      auto dtt = node->inputs()[i]->type()->expect<TensorType>();
+      auto inputDtype = dtt->scalarType();
+      if (!dtt || !inputDtype) {
+        return c10::nullopt;
+      }
+      if (dtt->dim() && *dtt->dim() > 0) {
+        dimmed = unionScalarTypes(dimmed, *inputDtype);
+      } else if (!isFloatingType(dimmed)) {
+        // if no dimensions
+        zerodim = unionScalarTypes(zerodim, *inputDtype);
+      }
+    }
+    // if a tensor with dimensions is already of the highest category, don't
+    // need to check zero-dim tensors.
+    if (isFloatingType(dimmed)) {
+      return dimmed;
+    }
+    // int_tensor * zero_dim_floating -> floating_tensor
+    if (isIntegralType(dimmed, false) && isFloatingType(zerodim) ) {
+      return zerodim;
+    }
+    // bool_tensor * non_bool_scalar -> non_bool_tensor
+    if (c10::ScalarType::Bool == dimmed && c10::ScalarType::Undefined != zerodim) {
+      return zerodim;
+    }
+    // types of dimensioned tensors generally take precedence over zero-dim
+    // tensors if not promoting due to category. e.g.:
+    // int_tensor * long -> int_tensor
+    if (c10::ScalarType::Undefined != dimmed) {
+      return dimmed;
+    }
+
+    // no dimmed tensors. e.g. zero_dim_tensor + zero_dim_tensor.
+    return zerodim;
   }
 
   bool mergeTypes(
@@ -682,13 +734,14 @@ class ShapePropagator {
   // primitive/tensor outputs.
 
   bool PropagateTensorShapeOnNode(Node* node, bool insert_expands) {
-    static const auto broadcast = [](std::vector<TensorTypePtr>& tensor_types,
-                                     size_t arg_for_type) -> TensorTypePtr {
+    static const auto broadcast =
+        [](std::vector<TensorTypePtr>& tensor_types,
+           c10::optional<at::ScalarType> t) -> TensorTypePtr {
       if (tensor_types.size() == 1) {
-        return tensor_types[0]->dimensionedOnly();
+        return tensor_types[0]->dimensionedOnly()->withScalarType(t);
       }
       AT_ASSERT(!tensor_types.empty());
-      auto any_type = tensor_types[arg_for_type];
+      auto any_type = tensor_types[0];
       auto max_dims = any_type->dim();
       for (auto& type : tensor_types) {
         if (!max_dims || !type->dim()) {
@@ -698,7 +751,7 @@ class ShapePropagator {
         }
       }
       return TensorType::create(
-          any_type->scalarType(),
+          t,
           any_type->device(),
           max_dims,
           /*requires_grad=*/c10::nullopt);
@@ -820,17 +873,35 @@ class ShapePropagator {
 
     // Requirements:
     //   dims           : broadcast all tensor args
-    //   scalar type    : always matching and preserved
+    //   scalar type    : promoted from input dtypes
     //   device         : always matching and preserved
     //   tensor inputs  : *
     //   tensor outputs : 1
-    static const register_formula_for broadcasting_ops{
+    static const register_formula_for broadcasting_ops_arithmetic{
         {
             // Tensor-Tensor operators
             "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
             "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
             "aten::mul(Tensor self, Tensor other) -> Tensor",
             "aten::div(Tensor self, Tensor other) -> Tensor",
+        },
+        [this](Node* node) -> type_vec_t {
+          if (auto maybe_tensor_types = gatherTensorTypes(node)) {
+            AT_ASSERT(maybe_tensor_types->size() >= 2);
+            auto dtype = getPromotedTypeForArithmeticOp(node);
+            return {broadcast(*maybe_tensor_types, dtype)};
+          }
+          return {};
+        }};
+
+    // Requirements:
+    //   dims           : broadcast all tensor args
+    //   scalar type    : always matching and preserved
+    //   device         : always matching and preserved
+    //   tensor inputs  : *
+    //   tensor outputs : 1
+    static const register_formula_for broadcasting_ops{
+        {
             "aten::pow(Tensor self, Tensor exponent) -> Tensor",
             "aten::fmod(Tensor self, Tensor other) -> Tensor",
             "aten::remainder(Tensor self, Tensor other) -> Tensor",
@@ -865,7 +936,8 @@ class ShapePropagator {
                 first_scalar_type) {
               arg_for_type = 1;
             }
-            return {broadcast(*maybe_tensor_types, arg_for_type)};
+            auto t = (*maybe_tensor_types)[arg_for_type]->scalarType();
+            return {broadcast(*maybe_tensor_types, *t)};
           }
           return {};
         }};
@@ -878,20 +950,50 @@ class ShapePropagator {
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
-            return {broadcast(*maybe_tensor_types, 0)};
+            auto dtype = (*maybe_tensor_types)[0]->scalarType();
+            if (!dtype) {
+              return {};
+            }
+            return {broadcast(*maybe_tensor_types, *dtype)};
           }
           return {};
         }};
 
-    // NB: we always take the scalar type of the Tensor
-    static const register_formula_for broadcasting_tensor_scalar_ops{
+    static const register_formula_for broadcasting_tensor_scalar_ops_arithmetic{
         {
-
             // Tensor-Scalar operators
             "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
             "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
             "aten::mul(Tensor self, Scalar other) -> Tensor",
             "aten::div(Tensor self, Scalar other) -> Tensor",
+          },
+          [this](Node* node) -> type_vec_t {
+            if (auto maybe_tensor_types = gatherTensorTypes(node)) {
+              auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
+              auto second_scalar_type = tryScalarTypeFromJitType(node->inputs()[1]->type());
+              if (!first_scalar_type || !second_scalar_type) {
+                return {};
+              }
+              if (isIntegralType(*first_scalar_type, false) && isFloatingType(*second_scalar_type) )
+              {
+                auto default_dtype = at::typeMetaToScalarType(caffe2::get_default_dtype());
+                return {broadcast(*maybe_tensor_types, default_dtype)};
+              }
+              if (c10::ScalarType::Bool == *first_scalar_type &&
+                  c10::ScalarType::Bool != *second_scalar_type)
+              {
+                  auto result_type = c10::promoteTypes(*first_scalar_type, *second_scalar_type);
+                  return {broadcast(*maybe_tensor_types, result_type)};
+              }
+              return {broadcast(*maybe_tensor_types, first_scalar_type)};
+            }
+            return {};
+          }};
+
+    // NB: we always take the scalar type of the Tensor
+    static const register_formula_for broadcasting_tensor_scalar_ops{
+        {
+
             "aten::pow(Tensor self, Scalar exponent) -> Tensor",
             "aten::fmod(Tensor self, Scalar other) -> Tensor",
             "aten::remainder(Tensor self, Scalar other) -> Tensor",
@@ -909,7 +1011,7 @@ class ShapePropagator {
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
-            return {broadcast(*maybe_tensor_types, 0)};
+            return {broadcast(*maybe_tensor_types, (*maybe_tensor_types)[0]->scalarType())};
           }
           return {};
         }};
@@ -922,7 +1024,7 @@ class ShapePropagator {
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
-            return {broadcast(*maybe_tensor_types, 1)};
+            return {broadcast(*maybe_tensor_types, (*maybe_tensor_types)[1]->scalarType())};
           }
           return {};
         }};
@@ -980,8 +1082,7 @@ class ShapePropagator {
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
-            return {
-                broadcast(*maybe_tensor_types, 0)->withScalarType(at::kBool)};
+            return {broadcast(*maybe_tensor_types, at::kBool)};
           }
           return {};
         }};
@@ -1658,7 +1759,7 @@ class ShapePropagator {
         } else {
           // Batched matrix multiply (possibly with squeeze + unsqueeze if one
           // argument is 1D)
-          auto type = broadcast(tensor_types, 0);
+          auto type = broadcast(tensor_types, tensor_types[0]->scalarType());
           if (dim1 == 1 ||
               dim2 == 1) {
             type = type->withDim(type->dim().value() - 1);
@@ -1729,14 +1830,37 @@ class ShapePropagator {
       // handled by the fallthrough because it's not always safe to run it due
       // to integer divide-by-zero.
       return PropagateShapeOnNodeByRunningIt(node);
+    } else if (node->matches("aten::pow(Tensor self, Scalar exponent) -> Tensor")) {
+      node->output()->setType(tensor_types.at(0));
+      return true;
     } else if (
         node->matches(
             "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
         node->matches(
             "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
-        node->matches("aten::mul(Tensor self, Scalar other) -> Tensor") ||
-        node->matches("aten::pow(Tensor self, Scalar exponent) -> Tensor")) {
-      node->output()->setType(tensor_types.at(0));
+        node->matches("aten::mul(Tensor self, Scalar other) -> Tensor")) {
+      auto first_scalar_type = (tensor_types)[0]->scalarType();
+      auto second_scalar_type = tryScalarTypeFromJitType(node->inputs()[1]->type());
+      if (!first_scalar_type || !second_scalar_type) {
+        return false;
+      }
+      if (isIntegralType(*first_scalar_type, false) && isFloatingType(*second_scalar_type) )
+      {
+        auto default_dtype = at::typeMetaToScalarType(caffe2::get_default_dtype());
+        auto type = tensor_types[0]->withScalarType(default_dtype);
+        node->output()->setType(type);
+        return true;
+      }
+      if (c10::ScalarType::Bool == *first_scalar_type &&
+          c10::ScalarType::Bool != *second_scalar_type)
+      {
+          auto result_type = c10::promoteTypes(*first_scalar_type, *second_scalar_type);
+          auto type = tensor_types[0]->withScalarType(result_type);
+          node->output()->setType(type);
+          return true;
+      }
+      auto type = tensor_types[0]->withScalarType(first_scalar_type);
+      node->output()->setType(type);
       return true;
     } else if (
         insert_expands &&
@@ -1866,7 +1990,9 @@ class ShapePropagator {
       if (inferred) {
         SHAPE_ASSERT(size_product != 0);
         size_t numel = 1;
-        for (int64_t s : tensor_types.at(0)->sizes().concrete_sizes().value())
+        auto concrete_sizes =
+            tensor_types.at(0)->sizes().concrete_sizes().value();
+        for (int64_t s : concrete_sizes)
           numel *= s;
         int64_t inferred_size = numel / size_product;
         sizes[inferred_idx] = inferred_size;

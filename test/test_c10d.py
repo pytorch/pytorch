@@ -11,6 +11,7 @@ import threading
 import time
 import unittest
 from datetime import timedelta
+from sys import platform
 
 from itertools import groupby
 from functools import partial, reduce
@@ -36,6 +37,12 @@ load_tests = load_tests
 if not c10d.is_available():
     print('c10d not available, skipping tests')
     sys.exit(0)
+
+
+if platform == 'darwin':
+    LOOPBACK = 'lo0'
+else:
+    LOOPBACK = 'lo'
 
 
 def gpus_for_rank(world_size):
@@ -511,7 +518,7 @@ class TimeoutTest(TestCase):
 class ProcessGroupGlooTest(MultiProcessTestCase):
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
-        opts.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        opts.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         opts.timeout = 5.0
         opts.threads = threads
         return opts
@@ -521,8 +528,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         opts = c10d.ProcessGroupGloo.Options()
         opts.timeout = 5.0
         opts.devices = [
-            c10d.ProcessGroupGloo.create_tcp_device(interface="lo"),
-            c10d.ProcessGroupGloo.create_tcp_device(interface="lo"),
+            c10d.ProcessGroupGloo.create_device(interface=LOOPBACK),
+            c10d.ProcessGroupGloo.create_device(interface=LOOPBACK),
         ]
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, opts)
 
@@ -645,8 +652,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     (i * self.world_size) + (i % self.world_size)
                 ]),
                 inputs[i],
-                None,
-                "Mismatch in iteration %d" % i,
+                message=("Mismatch in iteration %d" % i),
             )
 
     def test_broadcast_stress(self):
@@ -728,8 +734,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     (self.world_size * (self.world_size - 1) / 2)
                 ]),
                 inputs[i],
-                None,
-                "Mismatch in iteration %d" % i,
+                message=("Mismatch in iteration %d" % i),
             )
 
     def test_allreduce_stress(self):
@@ -981,8 +986,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 torch.Tensor([iter + root]),
                 outputs[iter][root],
-                None,
-                "Mismatch in iteration %d for rank %d" % (iter, root)
+                message=("Mismatch in iteration %d for rank %d" % (iter, root)),
             )
 
     def test_scatter_stress(self):
@@ -1128,8 +1132,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(
                     expected_outputs[iter],
                     outputs[iter],
-                    None,
-                    "Mismatch in iteration %d for root %d" % (iter, root)
+                    message=("Mismatch in iteration %d for root %d" % (iter, root))
                 )
 
     def test_gather_stress(self):
@@ -1229,8 +1232,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 expected_outputs[i],
                 outputs[i],
-                None,
-                "Mismatch in iteration %d" % i
+                message=("Mismatch in iteration %d" % i),
             )
 
     def test_allgather_stress(self):
@@ -1318,8 +1320,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                         (self.world_size * (self.world_size - 1) / 2)
                     ]),
                     outputs[i],
-                    None,
-                    "Mismatch in iteration %d with root rank %d" % (iter, root),
+                    message=("Mismatch in iteration %d with root rank %d" % (iter, root)),
                 )
 
     def test_reduce_stress(self):
@@ -1369,6 +1370,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 continue
             self.assertEqual(torch.Tensor([i]), outputs[i])
 
+    @unittest.skipIf(platform == 'darwin', 'ProcessGroup timeout not yet supported on macOS')
     def test_timeout_kwarg(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(
@@ -1838,7 +1840,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def _test_gloo_backend(self, devices, device_ids, multi_device=False):
         store = c10d.FileStore(self.file.name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         self._test_ddp_with_process_group(process_group, devices, device_ids, multi_device)
 
@@ -1980,7 +1982,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_dist_broadcast_coalesced_gloo(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
 
         device = torch.device('cuda')
@@ -2019,7 +2021,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_sync_params_no_buffers(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
 
         # Use all available devices on every process here (data is small, so should be fine).
@@ -2046,7 +2048,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_sync_params_with_buffers(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
 
         devices = gpus_for_rank(self.world_size)[self.rank]
@@ -2991,7 +2993,11 @@ class CommTest(MultiProcessTestCase):
     def _test_nccl_errors_blocking(self, func):
         os.environ["NCCL_BLOCKING_WAIT"] = "1"
         store = c10d.FileStore(self.file.name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, "", timeout=timedelta(seconds=self.op_timeout_sec))
+        process_group = c10d.ProcessGroupNCCL(
+            store,
+            self.rank,
+            self.world_size,
+            timeout=timedelta(seconds=self.op_timeout_sec))
         process_group.allreduce(torch.rand(10).cuda(self.rank))
         if self.rank == 0:
             work = process_group.allreduce(torch.rand(10).cuda(self.rank))
@@ -3053,7 +3059,7 @@ class CommTest(MultiProcessTestCase):
     def test_broadcast_coalesced_gloo_cuda(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         device = torch.device('cuda:%d' % self.rank)
         self._test_broadcast_coalesced(process_group, device)
@@ -3062,7 +3068,7 @@ class CommTest(MultiProcessTestCase):
     def test_broadcast_coalesced_gloo_cpu(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         device = torch.device('cpu')
         self._test_broadcast_coalesced(process_group, device)

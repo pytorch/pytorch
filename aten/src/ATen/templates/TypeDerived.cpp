@@ -12,9 +12,7 @@ $storage_tensor_headers
 #include <c10/core/Allocator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/NativeFunctions.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/Dispatch.h>
@@ -44,6 +42,8 @@ Tensor * ${Type}::add(Tensor & a, Tensor & b) {
 
 ${type_derived_method_definitions}
 
+#ifndef USE_STATIC_DISPATCH
 static auto& registerer = globalATenDispatch()
   ${function_registrations};
+#endif
 }
