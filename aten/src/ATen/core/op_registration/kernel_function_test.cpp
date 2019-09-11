@@ -652,12 +652,14 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegistered_th
 }
 
 TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegisteredUnboxedOnly_thenCanBeCalledUnboxed) {
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", RegisterOperators::options().impl_unboxedOnlyKernel<decltype(concatKernel), &concatKernel>(TensorTypeId::CPUTensorId));
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str",
+      RegisterOperators::options().impl_unboxedOnlyKernel<decltype(concatKernel), &concatKernel>("_test::my_op(Tensor dummy, str a, str b, int c) -> str", TensorTypeId::CPUTensorId));
   expectCallsConcatUnboxed(TensorTypeId::CPUTensorId);
 }
 
 TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegisteredUnboxedOnly_thenCannotBeCalledBoxed) {
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", RegisterOperators::options().impl_unboxedOnlyKernel<decltype(concatKernel), &concatKernel>(TensorTypeId::CPUTensorId));
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str",
+      RegisterOperators::options().impl_unboxedOnlyKernel<decltype(concatKernel), &concatKernel>("_test::my_op(Tensor dummy, str a, str b, int c) -> str", TensorTypeId::CPUTensorId));
   expectCannotCallConcatBoxed(TensorTypeId::CPUTensorId);
 }
 

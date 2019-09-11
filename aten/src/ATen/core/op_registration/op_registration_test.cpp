@@ -576,7 +576,7 @@ int64_t decrement_kernel(int64_t a) {
 
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutogradKernel) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(int dummy) -> int", c10::RegisterOperators::options()
-    .impl_unboxedAutogradKernel(&increment_kernel));
+    .impl_unboxedAutogradKernel("_test::dummy(int dummy) -> int", &increment_kernel));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
@@ -587,7 +587,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutograd
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_thenCanCallAutogradKernel) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(int dummy) -> int", c10::RegisterOperators::options()
     .catchAllKernel<decltype(decrement_kernel), &decrement_kernel>()
-    .impl_unboxedAutogradKernel(&increment_kernel));
+    .impl_unboxedAutogradKernel("_test::dummy(int dummy) -> int", &increment_kernel));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
