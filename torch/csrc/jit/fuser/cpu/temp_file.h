@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <random>
 #include <WinError.h>
+#include <sys/stat.h>
 #else
 #include <unistd.h>
 #endif

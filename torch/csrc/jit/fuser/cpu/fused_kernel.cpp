@@ -53,6 +53,96 @@ static bool programExists(const std::string& program) {
   return (system(cmd.c_str()) == 0);
 }
 
+#ifdef _MSC_VER
+std::string exec(const std::string& cmd) {
+  std::array<char, 128> buffer;
+  std::string result;
+  std::unique_ptr<FILE, decltype(&_pclose)> pipe(
+      _popen(cmd.c_str(), "r"), _pclose);
+  if (!pipe) {
+    throw std::runtime_error("popen() failed!");
+  }
+  while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) != nullptr) {
+    result += buffer.data();
+  }
+  return result;
+}
+
+inline std::string& rtrim(std::string& s, const char* t = " \t\n\r\f\v") {
+  s.erase(s.find_last_not_of(t) + 1);
+  return s;
+}
+
+void activate() {
+  char* root = nullptr;
+  std::string cmd;
+  std::string path;
+  std::string vcruntime_plat;
+  std::string envvars;
+
+  // Checking whether the environment is already activated
+  if (getenv("VSCMD_ARG_TGT_ARCH")) {
+    return;
+  }
+
+  // Getting `ProgramFiles` through environment variable queries
+  root = getenv("ProgramFiles(x86)");
+  if (!root) {
+    root = getenv("ProgramFiles");
+  }
+  if (!root) {
+    return;
+  }
+
+  // Getting VS 2017 installation path through `vswhere`
+  cmd = "\"" + std::string(root) +
+      "\\Microsoft Visual Studio\\Installer\\vswhere.exe\""
+      " -latest -prerelease -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath";
+  std::cout << cmd << std::endl;
+  try {
+    path = exec(cmd);
+    rtrim(path);
+  } catch (std::runtime_error&) {
+    return;
+  }
+
+  // Checking whether the activation script `vcvarsall.bat` exists
+  path += "\\VC\\Auxiliary\\Build";
+  struct stat st;
+  if (stat(path.c_str(), &st) == -1 || !(st.st_mode & _S_IFDIR)) {
+    return;
+  }
+  path += "\\vcvarsall.bat";
+  if (_access(path.c_str(), 0) == -1) {
+    return;
+  }
+
+  // Determining current platform
+  if (sizeof(void*) == 8) {
+    vcruntime_plat = "x64";
+  } else {
+    vcruntime_plat = "x86";
+  }
+
+  // Getting environment variables after activating VS development shell
+  cmd = "\"" + path + "\" " + vcruntime_plat + ">NUL && set";
+  try {
+    envvars = exec(cmd);
+  } catch (std::runtime_error&) {
+    return;
+  }
+
+  // Setting environment variables to the current environment
+  std::istringstream f(envvars);
+  std::string envvar;
+  while (getline(f, envvar, '\n')) {
+    if (_putenv(envvar.c_str()) == -1) {
+      return;
+    }
+  }
+}
+#endif
+
 // A single compiler config is accessed through getConfig() (below)
 // Controls compilation options and may be updated based on the result
 // of compilation attempts.
@@ -63,23 +153,12 @@ struct CompilerConfig {
       cxx = cxx_env;
     }
 
+#ifdef _MSC_VER
+    activate();
+#endif
+
     if (!programExists(cxx)) {
-      #ifdef _MSC_VER
-        // First check whether vswhere exists.
-        int rc = system("if not exist \"%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\vswhere.exe\" exit /b 1");
-        if (rc == 0) {
-          // Second check whether a valid MSVC installation exists.
-          rc = system("@echo off && for /f \"usebackq tokens=*\" %i in (`\"%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\vswhere.exe\" -version [15^,17^) -products * -latest -prerelease -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call \"%i\\VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 > NUL && where cl > NUL 2> NUL");
-        }
-        if (rc == 0) {
-          // Append enviornment activation scripts to the compiler.
-          cxx = "@echo off && for /f \"usebackq tokens=*\" %i in (`\"%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\vswhere.exe\" -version [15^,17^) -products * -latest -prerelease -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call \"%i\\VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 > NUL && cl";
-        } else {
-          cxx = "";
-        }
-      #else
-        cxx = "";
-      #endif
+      cxx = "";
     }
   }
 
