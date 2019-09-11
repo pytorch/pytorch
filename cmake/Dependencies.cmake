@@ -186,6 +186,21 @@ set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
 set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
   CACHE PATH "Confu-style dependencies binary directory")
 
+# ---[ PTHREADPOOL
+if (NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+  set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+endif()
+
+IF(NOT TARGET pthreadpool)
+  SET(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
+  SET(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
+  ADD_SUBDIRECTORY(
+    "${PTHREADPOOL_SOURCE_DIR}"
+    "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool"
+    EXCLUDE_FROM_ALL)
+ENDIF()
+
 # ---[ QNNPACK
 if(USE_QNNPACK)
   if (IOS)
@@ -238,9 +253,6 @@ if(USE_QNNPACK)
     endif()
     if (NOT DEFINED PSIMD_SOURCE_DIR)
       set(PSIMD_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/psimd" CACHE STRING "PSimd source directory")
-    endif()
-    if (NOT DEFINED PTHREADPOOL_SOURCE_DIR)
-      set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
     endif()
 
     if(NOT TARGET qnnpack)
