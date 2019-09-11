@@ -227,6 +227,7 @@ DEFAULT_QAT_MODULE_MAPPING = {
 
 DEFAULT_DYNAMIC_MODULE_MAPPING = {
     nn.Linear: nnqd.Linear,
+    nn.LSTM: nnqd.LSTM,
 }
 
 def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
@@ -256,6 +257,7 @@ def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
 
 DEFAULT_QCONFIG_DICT = {
     nn.Linear : default_dynamic_qconfig,
+    nn.LSTM : default_dynamic_qconfig,
 }
 
 def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):

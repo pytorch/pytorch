@@ -72,11 +72,9 @@ inline bool Argument::isBackwardCompatibleWith(
     if (!rhs->type()->isSubtypeOfExt(lhs->type(), why_not)) {
       return false;
     }
-    if (!(detail::defaultValueEquals_(
-            lhs->default_value(),
-            rhs->default_value()) ||
-          (lhs->default_value().has_value() &&
-           !rhs->default_value().has_value()))) {
+    if (rhs->default_value().has_value() &&
+        !detail::defaultValueEquals_(lhs->default_value(),
+                                     rhs->default_value())) {
       return false;
     }
     return true;
@@ -110,6 +108,8 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
     std::ostream* why_not) const {
   if (!(name() == old.name()
         && overload_name() == old.overload_name()
+        // we are conservative on is_vararg and is_varret,
+        // since they are only used by internal operators
         && is_vararg() == old.is_vararg()
         && is_varret() == old.is_varret()
         && returns().size() == old.returns().size()

@@ -105,7 +105,7 @@ struct Argument {
   bool isBackwardCompatibleWith(
       const Argument& old,
       bool is_return,
-      std::ostream* why_not) const;
+      std::ostream* why_not=nullptr) const;
 
 private:
   std::string name_;
