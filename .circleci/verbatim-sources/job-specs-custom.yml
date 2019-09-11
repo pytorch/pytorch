@@ -465,11 +465,13 @@
           command: |
             set -e
             IOS_ARCH=${IOS_ARCH}
+            echo "PWD: `pwd`"
+            echo "IOS_ARCH: ${IOS_ARCH}"
             FILENAME=ios_${IOS_ARCH}.h
             touch ${FILENAME}
             echo "hello world" > ${FILENAME}
-            mkdir -p ios
-            mv ${FILENAME} ios/
+            mkdir -p ~/workspace/ios
+            mv ${FILENAME} ~workspace/ios
             
             
       # - run:
