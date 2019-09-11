@@ -57,17 +57,14 @@ class RNNBase(torch.nn.Module):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
 
                 def process_weights(ihhh, layer, suffix, qweight, bias):
-                    weight_name = 'weight_{}_l{}{}'.format(ihhh, layer, suffix)
-                    bias_name = 'bias_{}_l{}{}'.format(ihhh, layer, suffix)
-
                     # for each layer, for each direction we need to quantize and pack
                     # weights and pack parameters in this order:
                     #
                     #   w_ih, w_hh, b_ih, b_hh
                     packed_weight = \
-                        torch.ops.quantized.linear_prepack(qweight)
-                    params = [packed_weight, bias]
-                    pos_names = ['w', 'b']
+                        torch.ops.quantized.linear_prepack(qweight, bias)
+                    params = [packed_weight]
+                    pos_names = ['w']
                     ret_name = ['{}_{}_l{}{}'.format(
                         name, ihhh, layer, suffix) for name in pos_names]
                     return params, ret_name
@@ -155,13 +152,11 @@ class RNNBase(torch.nn.Module):
             self.training,
         )
 
-        dynamic_vals = []
+        dynamic_vals = torch.jit.annotate(List[Tuple[torch.Tensor, Optional[torch.Tensor]]],
+                                          [])
 
-        for i, weight_name in enumerate(self._all_weight_names):
-            if weight_name.find('w_') != -1:
-                dynamic_vals.append(torch.ops.quantized.linear_unpack(self._all_weight_values[i])[0])
-            else:
-                dynamic_vals.append(self._all_weight_values[i])
+        for i in range(len(self._all_weight_names)):
+            dynamic_vals.append(torch.ops.quantized.linear_unpack(self._all_weight_values[i]))
         return vals, dynamic_vals
 
     @torch.jit.export
@@ -180,11 +175,8 @@ class RNNBase(torch.nn.Module):
         self.training = vals[10]
 
         self._all_weight_values = []
-        for i, weight_name in enumerate(self._all_weight_names):
-            if weight_name.find('w_') != -1:
-                self._all_weight_values.append(torch.ops.quantized.linear_prepack(dynamic_vals[i]))
-            else:
-                self._all_weight_values.append(dynamic_vals[i])
+        for i in range(len(self._all_weight_names)):
+            self._all_weight_values.append(torch.ops.quantized.linear_prepack(*dynamic_vals[i]))
 
     @classmethod
     def from_float(cls, mod):
@@ -236,8 +228,8 @@ class RNNBase(torch.nn.Module):
                     packed_weight = \
                         torch.ops.quantized.linear_prepack(qweight, bias)
 
-                    params = [packed_weight, bias]
-                    pos_names = ['w', 'b']
+                    params = [packed_weight]
+                    pos_names = ['w']
                     ret_name = ['{}_{}_l{}{}'.format(
                         name, ihhh, layer, suffix) for name in pos_names]
                     return params, ret_name

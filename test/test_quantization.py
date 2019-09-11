@@ -544,6 +544,8 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         b.seek(0)
         loaded = torch.jit.load(b)
         out_loaded, hid_loaded = loaded(x, hiddens)
+        for loaded_val, ref_val in zip(out_loaded, ref_out):
+            torch.testing.assert_allclose(loaded_val, ref_val)
 
 
 @unittest.skipIf(
