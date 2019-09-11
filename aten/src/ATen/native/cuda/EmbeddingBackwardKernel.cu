@@ -14,6 +14,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
 
+#include <c10/macros/Macros.h>
 
 namespace at {
 namespace native {
@@ -32,12 +33,6 @@ constexpr int MAX_BLOCK_SIZE = 1024;
   make the size of the thread blocks in the final sum in step 2) too small.
 */
 constexpr int NROWS_PER_THREAD = 10;
-
-#ifdef __HIP_PLATFORM_HCC__
-    constexpr int WARP_SIZE = 64;
-#else
-    constexpr int WARP_SIZE = 32;
-#endif
 
 // Fast ceil division (no overflow checking)
 __host__ __device__ __forceinline__
@@ -266,7 +261,7 @@ Tensor embedding_backward_cuda_kernel(
             num_of_segments);
   }
 
-  const int stride_warped = ceil_div(stride, WARP_SIZE)*WARP_SIZE;
+  const int stride_warped = ceil_div(stride, C10_WARP_SIZE)*C10_WARP_SIZE;
   const int block = std::min(stride_warped, MAX_BLOCK_SIZE);
   const int grid = ceil_div(num_of_partial_segments*stride_warped, block);
 
