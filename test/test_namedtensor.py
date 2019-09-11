@@ -155,39 +155,39 @@ class TestNamedTensor(TestCase):
         self.assertTrue(partially_named.has_names())
         self.assertTrue(fully_named.has_names())
 
-    def test_as_named(self):
+    def test_refine_names(self):
         # Unnamed tensor -> Unnamed tensor
-        self._test_name_inference(Tensor.as_named,
+        self._test_name_inference(Tensor.refine_names,
                                   [create('None:1,None:2,None:3'), 'N', 'C', 'H'],
                                   ['N', 'C', 'H'])
 
         # Named tensor -> Named tensor
-        self._test_name_inference(Tensor.as_named,
+        self._test_name_inference(Tensor.refine_names,
                                   [create('N:1,C:2,H:3'), 'N', 'C', 'H'],
                                   ['N', 'C', 'H'])
 
         # Partially named tensor -> named tensor
-        self._test_name_inference(Tensor.as_named,
+        self._test_name_inference(Tensor.refine_names,
                                   [create('None:1,C:2,None:3'), None, 'C', 'H'],
                                   [None, 'C', 'H'])
 
         # Too few names
-        self._test_name_inference(Tensor.as_named,
+        self._test_name_inference(Tensor.refine_names,
                                   [create('None:2,None:3'), 'N', 'C', 'H'],
                                   maybe_raises_regex="different number of dims")
 
         # Cannot change Tensor[D] to Tensor[N]
-        self._test_name_inference(Tensor.as_named,
+        self._test_name_inference(Tensor.refine_names,
                                   [create('D:3'), 'N'],
                                   maybe_raises_regex="is different from")
 
         # Cannot change Tensor[D] to Tensor[None]
-        self._test_name_inference(Tensor.as_named,
+        self._test_name_inference(Tensor.refine_names,
                                   [create('D:3'), None],
                                   maybe_raises_regex="'D' is more specific than None")
 
         # globbing behavior exists
-        self._test_name_inference(Tensor.as_named,
+        self._test_name_inference(Tensor.refine_names,
                                   [create('None:1,None:1,None:2,None:3'), '*', 'C', 'H'],
                                   [None, None, 'C', 'H'])
 
@@ -1069,6 +1069,17 @@ class TestNamedTensor(TestCase):
         output = tensor.align_to('N', 'H', 'W', 'C')
         self.assertEqual(output.names, ['N', 'H', 'W', 'C'])
         self.assertEqual(output.shape, [3, 5, 1, 2])
+
+        # globbing
+        tensor = create('N:7,H:3,W:5,C:2')
+        output = tensor.align_to('*', 'C', 'H', 'W')
+        self.assertEqual(output.names, ['N', 'C', 'H', 'W'])
+        self.assertEqual(output.shape, [7, 2, 3, 5])
+
+        tensor = create('N:7,C:2,H:3,W:5')
+        output = tensor.align_to('*', 'W', 'H')
+        self.assertEqual(output.names, ['N', 'C', 'W', 'H'])
+        self.assertEqual(output.shape, [7, 2, 5, 3])
 
         # All input dimensions must be named
         with self.assertRaisesRegex(RuntimeError, "All input dims must be named"):

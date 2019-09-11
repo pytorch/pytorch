@@ -89,10 +89,10 @@ static std::vector<int64_t> aligned_size(
   return expanded_sizes;
 }
 
-Tensor as_named(const Tensor& self, DimnameList names) {
+Tensor refine_names(const Tensor& self, DimnameList names) {
   const auto self_names = self.names();
   TORCH_CHECK(self_names.size() == names.size(),
-      "as_named: cannot coerce Tensor", self_names, " to Tensor", names,
+      "refine_names: cannot coerce Tensor", self_names, " to Tensor", names,
       " because they have a different number of dims (",
       self_names.size(), " and ", names.size(), " respectively).");
   check_names_valid_for(self, names);
@@ -105,12 +105,12 @@ Tensor as_named(const Tensor& self, DimnameList names) {
     }
     if (out_name.is_wildcard()) {
       TORCH_CHECK(false,
-          "as_named: cannot coerse Tensor", self_names, " to Tensor", names,
+          "refine_names: cannot coerse Tensor", self_names, " to Tensor", names,
           " because ", self_name, " is more specific than ", out_name, " at index ",
           idx);
     }
     TORCH_CHECK(false,
-        "as_named: cannot coerse Tensor", self_names, " to Tensor", names,
+        "refine_names: cannot coerse Tensor", self_names, " to Tensor", names,
         " because ", self_name, " is different from ", out_name, " at index ",
         idx);
     TORCH_INTERNAL_ASSERT(false); // done handling errors

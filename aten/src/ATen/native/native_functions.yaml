@@ -54,7 +54,7 @@
 - func: align_tensors(Tensor[] tensors) -> Tensor[]
   named_guard: False
 
-- func: as_named(Tensor(a) self, DimnameList names) -> Tensor(a)
+- func: refine_names(Tensor(a) self, DimnameList names) -> Tensor(a)
   variants: method
   named_guard: False
 
