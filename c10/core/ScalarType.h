@@ -326,7 +326,7 @@ static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
 
 // see tensor_attributes.rst for detailed explanation and examples
 // of casting rules.
-static inline bool canCast(const ScalarType from, const ScalarType to) {
+static inline bool canCast(ScalarType from, ScalarType to) {
   // We disallow float -> integral, e.g., int_tensor *= float is disallowed.
   if (isFloatingType(from) && isIntegralType(to, false)) {
     return false;
