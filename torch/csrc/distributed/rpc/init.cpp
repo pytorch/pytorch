@@ -112,7 +112,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   });
 
   module.def("set_current_rpc_dst", [](worker_id_t dst) {
-    PyRRef::setCurrentDst(dst);
+    return PyRRef::setCurrentDst(dst);
   });
 
   module.def(

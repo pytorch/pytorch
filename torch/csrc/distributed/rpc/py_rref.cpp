@@ -111,8 +111,10 @@ PyRRef PyRRef::unpickle(const py::tuple& t) {
   }
 }
 
-void PyRRef::setCurrentDst(worker_id_t dst) {
+worker_id_t PyRRef::setCurrentDst(worker_id_t dst) {
+  auto previousDst = currentDst;
   currentDst = dst;
+  return previousDst;
 }
 
 } // namespace rpc

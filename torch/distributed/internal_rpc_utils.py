@@ -10,11 +10,12 @@ from . import set_current_rpc_dst
 
 
 def serialize(obj, to):
-    set_current_rpc_dst(to)
+    previous_dst = set_current_rpc_dst(to)
     f = io.BytesIO()
     p = pickle.Pickler(f)
     p.dispatch_table = copyreg.dispatch_table.copy()
     p.dump(obj)
+    set_current_rpc_dst(previous_dst)
     return f.getvalue()
 
 

@@ -20,7 +20,7 @@ class PyRRef {
   py::object localValue();
   py::tuple pickle() const;
   static PyRRef unpickle(const py::tuple& t);
-  static void setCurrentDst(worker_id_t dst);
+  static worker_id_t setCurrentDst(worker_id_t dst);
 
  private:
   std::shared_ptr<RRef> rref_;
