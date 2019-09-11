@@ -1,7 +1,9 @@
+import sys
+from functools import wraps
 import unittest
 
 import torch
-from common_utils import TestCase
+from common_utils import TestCase, CudaMemoryLeakCheck
 
 # Note: Generic Device-Type Testing
 #
@@ -66,11 +68,12 @@ from common_utils import TestCase
 #   (5) (Optional) Write setUpClass/tearDownClass class methods.
 #   (6) (Optional) Override the _check_if_skip method.
 #
-# Device type tests are created BEFORE setUpClass is called. setUpClass
-# is only called if those tests are being run, and so can initialize
-# devices. The setUpClass method might be used, for example, to inspect
-# the available software and hardware and change the supported_dtypes attribute
-# or dynamically exclude some tests.
+# Device type tests are created and discovered BEFORE setUpClass is called.
+# setUpClass is called before tests are run, however.
+# setupClass is also only called if its tests are being run, and so can
+# it can initialize devices. The setUpClass method might be used, for example,
+# to inspect the available software and hardware and change the
+# supported_dtypes attribute or dynamically exclude some tests.
 #
 # Before each test is run the _check_if_skip method is called. This method
 # can use the information defined in setUpClass to determine if a test should
@@ -120,7 +123,7 @@ class DeviceTypeTestBase(TestCase):
 
     # Creates device-specific tests.
     # Note: called after all non-test members of the generic class have
-    # been ported.
+    # been ported. Called
     @classmethod
     def instantiate_test(cls, test):
         test_name = test.__name__ + "_" + cls.device_type
@@ -157,6 +160,7 @@ class CUDATestBase(DeviceTypeTestBase):
     device_type = "cuda"
     dtypes = {}  # Holds device-specific dtype metadata
     deps = {}  # Holds device-specific dependency metadata
+    _do_cuda_memory_leak_check = True
 
     @classmethod
     def setUpClass(cls):
@@ -223,9 +227,9 @@ def _get_base(device_type):
 # will override previous @dtypes decorations for that device type.
 class dtypes(object):
 
-    def __init__(self, *args, device_type=None):
+    def __init__(self, *args, **kwargs):
         self.args = args
-        self.device_type = device_type
+        self.device_type = kwargs.get('device_type', None)
 
     def __call__(self, fn):
         if self.device_type is None:
