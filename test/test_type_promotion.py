@@ -222,7 +222,6 @@ class TestTypePromotion(TestCase):
         self.assertTrue(torch._can_Cast(torch.int32, torch.int64))
         self.assertTrue(torch._can_Cast(torch.int64, torch.int32))
         self.assertTrue(torch._can_Cast(torch.int64, torch.float64))
-        
         self.assertFalse(torch._can_Cast(torch.float32, torch.int8))
         self.assertFalse(torch._can_Cast(torch.float32, torch.int32))
         self.assertFalse(torch._can_Cast(torch.float32, torch.int64))
@@ -235,7 +234,7 @@ class TestTypePromotion(TestCase):
         self.assertFalse(torch._can_Cast(torch.uint8, torch.bool))
         self.assertFalse(torch._can_Cast(torch.int32, torch.bool))
 
-        
+
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):
     def setUp(self):
