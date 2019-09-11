@@ -658,8 +658,7 @@ jobs:
           source "$script"
     - persist_to_workspace:
         - root: /Users/distiller/workspace/
-        - paths: 
-            - ios
+        - paths: ios
   
   binary_ios_upload: 
     <<: *pytorch_ios_params
@@ -1290,7 +1289,7 @@ workflows:
   binarybuilds:
     triggers:
       - schedule:
-          cron: "40 15 * * *"
+          cron: "45 15 * * *"
           filters:
             branches:
               only:
