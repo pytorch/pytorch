@@ -521,6 +521,8 @@ static void replaceInputWithList(Node* node, size_t i, ArrayRef<Value*> to) {
 }
 
 static void eraseListConstruct(Block* block) {
+  // TODO: Fix this pass/maybe get rid of this part.
+  // Tensor lists might be used for meshgrid and such ops as well.
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* n = *it;
@@ -588,9 +590,8 @@ static void fuseListUnpack(Block* b) {
     for (auto* child_block : it->blocks()) {
       fuseListUnpack(child_block);
     }
-    if (it->kind() == prim::ListUnpack ) {
-      std::string tile ("Tile");
-      if (tile.compare(it->inputs().at(0)->node()->kind().toUnqualString()) == 0) {
+    if (it->kind() == prim::ListUnpack) {
+      if (it->input()->node()->kind() == prim::ListConstruct) {
         Node* prev = it -> prev();
         for (size_t i = 0; i < it->outputs().size(); i++) {
             auto output = it->outputs().at(i);
@@ -598,7 +599,7 @@ static void fuseListUnpack(Block* b) {
         }
       }
 
-      if (it->inputs().at(0)->node()->kind() == onnx::Split) {
+      if (it->input()->node()->kind() == onnx::Split) {
         auto origSplitNode = it->inputs().at(0)->node();
         Node* splitNode =
             b->owningGraph()->create(it->inputs().at(0)->node()->kind(), it->outputs().size());
@@ -663,8 +664,8 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version) {
   eliminateNopTranspose(graph->block());
   fuseTransposeIntoGemm(graph->block());
   speculateOps(graph->block());
-  eraseListConstruct(graph->block());
   fuseListUnpack(graph->block());
+  eraseListConstruct(graph->block());
   removeMaxPoolUnusedOutput(graph->block());
 }
 

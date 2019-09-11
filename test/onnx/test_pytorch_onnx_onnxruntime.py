@@ -798,6 +798,16 @@ class TestONNXRuntime(unittest.TestCase):
         model = CumSum()
         self.run_test(model, x)
 
+    def test_meshgrid(self):
+        class Meshgrid(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.meshgrid(x, y, z)
+
+        x = torch.ones(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.ones(5, requires_grad=True)
+        self.run_test(Meshgrid(), (x, y, z))
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)
