@@ -318,15 +318,19 @@ public:
       // the op name is trivial. Let's just do it by hand.
       std::string schema_str(schema);
       size_t name_end_pos = schema_str.find_first_of(".(");
-      TORCH_CHECK(name_end_pos != std::string::npos, "Operator schema must contain a '(' character to start the argument list");
+      if (name_end_pos == std::string::npos) {
+        name_end_pos = schema_str.size();
+      }
       size_t overload_name_end_pos = name_end_pos + 1;
       if (schema_str[name_end_pos] == '.') {
         overload_name_end_pos = schema_str.find_first_of('(', name_end_pos);
-        TORCH_INTERNAL_ASSERT(schema_str[overload_name_end_pos] == '(');
+        if (overload_name_end_pos == std::string::npos) {
+          overload_name_end_pos = name_end_pos + 1;
+        }
       }
       return c10::OperatorName{
         schema_str.substr(0, name_end_pos),
-        schema_str.substr(name_end_pos + 1, overload_name_end_pos - name_end_pos - 1)
+        (overload_name_end_pos > name_end_pos + 1) ? schema_str.substr(name_end_pos + 1, overload_name_end_pos - name_end_pos - 1) : ""
       };
     }
 
@@ -420,7 +424,9 @@ public:
    * Call this to register an operator. See class doc comment for examples.
    */
   RegisterOperators&& op(const std::string& schemaOrName, Options&& options = RegisterOperators::options()) && {
-    checkSchemaAndRegisterOp_(schemaOrName, std::move(options));
+    if (!Options::op_is_still_on_aten_dispatcher_(schemaOrName.c_str())) {
+      checkSchemaAndRegisterOp_(schemaOrName, std::move(options));
+    }
     return std::move(*this);
   }
 
