@@ -74,8 +74,31 @@ ScriptRRefFetchRet ScriptRRefFetchRet::fromMessage(const Message& message) {
   return ScriptRRefFetchRet(RRefMessageBase::fromMessage(message));
 }
 
+Message ScriptUserDelete::toMessage() {
+  return fromIValues(
+      {
+        IValue(owner_),
+        rrefId_.toIValue(),
+        forkId_.toIValue()
+      },
+      MessageType::RREF_USER_DELETE
+  );
+}
+
 ScriptUserDelete ScriptUserDelete::fromMessage(const Message& message) {
-  return ScriptUserDelete(RRefMessageBase::fromMessage(message));
+  auto values = toIValues(message, MessageType::RREF_USER_DELETE);
+
+  TORCH_INTERNAL_ASSERT(values.size() == 3,
+      "ScriptUserDelete expects 3 IValue from message.");
+
+  ForkId forkId = ForkId::fromIValue(std::move(values.back()));
+  values.pop_back();
+  RRefId rrefId = ForkId::fromIValue(std::move(values.back()));
+  values.pop_back();
+  auto owner = values.back().toInt();
+  TORCH_INTERNAL_ASSERT(owner < std::numeric_limits<worker_id_t>::max(),
+      "owner id out of range ", owner);
+  return ScriptUserDelete(worker_id_t(owner), rrefId, forkId);
 }
 
 Message ScriptUserAccept::toMessage() {
@@ -105,6 +128,32 @@ ScriptUserAccept ScriptUserAccept::fromMessage(const Message& message) {
   return ScriptUserAccept(worker_id_t(owner), rrefId, forkId);
 }
 
+Message RemoteRet::toMessage() {
+  return fromIValues(
+      {
+        IValue(owner_),
+        rrefId_.toIValue(),
+        forkId_.toIValue()
+      },
+      MessageType::REMOTE_RET
+  );
+}
+
+RemoteRet RemoteRet::fromMessage(const Message& message) {
+  auto values = toIValues(message, MessageType::REMOTE_RET);
+
+  TORCH_INTERNAL_ASSERT(values.size() == 3,
+      "RemoteRet expects 3 IValue from message.");
+
+  ForkId forkId = ForkId::fromIValue(std::move(values.back()));
+  values.pop_back();
+  RRefId rrefId = ForkId::fromIValue(std::move(values.back()));
+  values.pop_back();
+  auto owner = values.back().toInt();
+  TORCH_INTERNAL_ASSERT(owner < std::numeric_limits<worker_id_t>::max(),
+      "owner id out of range ", owner);
+  return RemoteRet(worker_id_t(owner), rrefId, forkId);
+}
 
 Message ScriptForkNotify::toMessage() const {
   return fromIValues(

@@ -41,17 +41,15 @@ const std::shared_ptr<RpcAgent>& RRefContext::agent() const {
 }
 
 template <typename T>
-std::shared_ptr<OwnerRRef<T>> RRefContext::createOwnerRRef(
-    worker_id_t ownerId) {
-  TORCH_CHECK(ownerId == getWorkerId(), "Cannot create OwnerRRef on user.");
+std::shared_ptr<OwnerRRef<T>> RRefContext::createOwnerRRef() {
   return getOrCreateOwnerRRef<T>(genRRefId());
 }
 
 template std::shared_ptr<OwnerRRef<IValue>>
-    RRefContext::createOwnerRRef<IValue>(worker_id_t ownerId);
+    RRefContext::createOwnerRRef<IValue>();
 
 template std::shared_ptr<OwnerRRef<py::object>>
-    RRefContext::createOwnerRRef<py::object>(worker_id_t ownerId);
+    RRefContext::createOwnerRRef<py::object>();
 
 template <typename T>
 std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(worker_id_t ownerId) {
@@ -244,36 +242,23 @@ void RRefContext::finishUserRRef(const RRefId& rrefId, const ForkId& forkId) {
   }
 }
 
-void RRefContext::addForkOfOwner(const at::IValue& value) {
-  auto rfd = RRefForkData::fromIValue(value);
-  AT_ASSERT(
-      rfd.ownerId_ == getWorkerId(),
-      "RRef user should never receive fork notification.");
-  addForkOfOwner(rfd.rrefId_, rfd.forkId_);
-}
-
 void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto& rrefForks = forks_[rrefId];
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       rrefForks.find(forkId) == rrefForks.end(),
       "Got fork notification twice on the same RRef ",
       forkId);
   rrefForks.insert(forkId);
 }
 
-void RRefContext::delForkOfOwner(const at::IValue& value) {
-  auto rfd = RRefForkData::fromIValue(value);
-  AT_ASSERT(
-      rfd.ownerId_ == getWorkerId(),
-      "RRef user should never receive delete notification.");
-  delForkOfOwner(rfd.rrefId_, rfd.forkId_);
-}
-
 void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
-  auto& rrefForks = forks_[rrefId];
-  AT_ASSERT(
+  auto iter = forks_.find(rrefId);
+  TORCH_INTERNAL_ASSERT(iter != forks_.end(),
+      "Inconsistent states, deleting a fork before the owner knows it.");
+  auto& rrefForks = iter->second;
+  TORCH_INTERNAL_ASSERT(
       rrefForks.find(forkId) != rrefForks.end(),
       "Attempt to delete a non-exist fork ",
       forkId);

@@ -5,6 +5,7 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_ret.h>
@@ -56,6 +57,17 @@ std::shared_ptr<Operator> matchBuiltinOp(
   // builtin operators.
 }
 
+void finishAcceptUserRRef(const Message& message) {
+  RemoteRet rr = RemoteRet::fromMessage(message);
+  auto& ctx = RRefContext::getInstance();
+  TORCH_INTERNAL_ASSERT(ctx->getWorkerId() == rr.owner_,
+      "Worker ",
+      ctx->getWorkerId(),
+      " received a RREF_USER_ACCEPT message of a different owner ",
+      rr.owner_);
+  ctx->finishUserRRef(rr.rrefId_, rr.forkId_);
+}
+
 } // namespace
 
 py::object toPyObj(const Message& message) {
@@ -101,29 +113,19 @@ PyRRef pyRemoteBuiltin(
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
 
   auto& ctx = RRefContext::getInstance();
-  if (ctx->getWorkerId() == dst.id_) {
-    auto ownerRRef = ctx->createOwnerRRef<IValue>(dst.id_);
-    agent.send(
-        dst,
-        ScriptRemoteCall(
-            op,
-            std::move(stack),
-            ownerRRef->id().toIValue(),
-            ownerRRef->id().toIValue())
-            .toMessage());
-    return PyRRef(ownerRRef);
-  } else {
-    auto userRRef = ctx->createUserRRef<IValue>(dst.id_);
-    agent.send(
-        dst,
-        ScriptRemoteCall(
-            op,
-            std::move(stack),
-            userRRef->id().toIValue(),
-            userRRef->forkId().toIValue())
-            .toMessage());
-    return PyRRef(userRRef);
-  }
+  TORCH_INTERNAL_ASSERT(ctx->getWorkerId() != dst.id_,
+      "Does not support creating RRef on self yet.");
+  auto userRRef = ctx->createUserRRef<IValue>(dst.id_);
+  auto fm = agent.send(
+      dst,
+      ScriptRemoteCall(
+          op,
+          std::move(stack),
+          userRRef->id().toIValue(),
+          userRRef->forkId().toIValue())
+          .toMessage());
+  fm->addCallback(finishAcceptUserRRef);
+  return PyRRef(userRRef);
 }
 
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
@@ -144,27 +146,19 @@ PyRRef pyRemotePythonUdf(
     const WorkerId& dst,
     const std::string& pickledPythonUDF) {
   auto& ctx = RRefContext::getInstance();
-  if (ctx->getWorkerId() == dst.id_) {
-    auto ownerRRef = ctx->createOwnerRRef<py::object>(dst.id_);
-    agent.send(
-        dst,
-        PythonRemoteCall(
-            pickledPythonUDF,
-            ownerRRef->id().toIValue(),
-            ownerRRef->id().toIValue())
-            .toMessage());
-    return PyRRef(ownerRRef);
-  } else {
-    auto userRRef = ctx->createUserRRef<py::object>(dst.id_);
-    agent.send(
-        dst,
-        PythonRemoteCall(
-            pickledPythonUDF,
-            userRRef->id().toIValue(),
-            userRRef->forkId().toIValue())
-            .toMessage());
-    return PyRRef(userRRef);
-  }
+  TORCH_INTERNAL_ASSERT(ctx->getWorkerId() != dst.id_,
+      "Does not support creating RRef on self yet.");
+  auto userRRef = ctx->createUserRRef<py::object>(dst.id_);
+  auto fm = agent.send(
+      dst,
+      PythonRemoteCall(
+          pickledPythonUDF,
+          userRRef->id().toIValue(),
+          userRRef->forkId().toIValue())
+          .toMessage());
+
+  fm->addCallback(finishAcceptUserRRef);
+  return PyRRef(userRRef);
 }
 
 } // namespace rpc

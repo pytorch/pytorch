@@ -17,15 +17,7 @@ def my_function(a, b, c):
 
 
 def my_rref_function(rref_a, rref_b):
-    def get_value(rref):
-        if rref.is_owner():
-            return rref.local_value()
-        else:
-            return rref.to_here()
-
-    a = get_value(rref_a)
-    b = get_value(rref_b)
-    return a + b
+    return rref_a.to_here() + rref_b.to_here()
 
 # it is used to test python user defined function over rpc
 def no_result():

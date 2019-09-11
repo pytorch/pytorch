@@ -29,7 +29,7 @@ class RRefContext {
 
   // create a new RRef
   template <typename T>
-  std::shared_ptr<OwnerRRef<T>> createOwnerRRef(worker_id_t ownerId);
+  std::shared_ptr<OwnerRRef<T>> createOwnerRRef();
 
   template <typename T>
   std::shared_ptr<UserRRef<T>> createUserRRef(worker_id_t ownerId);
@@ -58,9 +58,7 @@ class RRefContext {
   void finishForkRequest(const ForkId& forkId);
   void finishUserRRef(const RRefId& rrefId, const ForkId& forkId);
 
-  void addForkOfOwner(const IValue& value);
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
-  void delForkOfOwner(const IValue& value);
   void delForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
 
  private:

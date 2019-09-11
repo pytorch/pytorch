@@ -60,12 +60,18 @@ class TORCH_API ScriptRRefFetchRet final : public RRefMessageBase {
 
 // UserRRef (regardless it's the creator or not) uses this message to notiify
 // OwnerRRef on delete.
-class TORCH_API ScriptUserDelete final : public RRefMessageBase {
+class TORCH_API ScriptUserDelete final{
  public:
-  ScriptUserDelete(at::IValue value)
-      : RRefMessageBase(std::move(value), MessageType::RREF_USER_DELETE) {}
+  ScriptUserDelete(
+    worker_id_t owner, const RRefId& rrefId, const ForkId& forkId)
+    : owner_(owner), rrefId_(rrefId), forkId_(forkId) {}
 
+  Message toMessage();
   static ScriptUserDelete fromMessage(const Message& message);
+
+  const worker_id_t owner_;
+  const RRefId rrefId_;
+  const ForkId forkId_;
 };
 
 // The OwnerRRef uses this message to accept a UserRRef. A UserRRef cannot be
@@ -78,6 +84,20 @@ class TORCH_API ScriptUserAccept final {
 
   Message toMessage();
   static ScriptUserAccept fromMessage(const Message& message);
+
+  const worker_id_t owner_;
+  const RRefId rrefId_;
+  const ForkId forkId_;
+};
+
+class TORCH_API RemoteRet final {
+ public:
+  RemoteRet(
+      worker_id_t owner, const RRefId& rrefId, const ForkId& forkId)
+      : owner_(owner), rrefId_(rrefId), forkId_(forkId) {}
+
+  Message toMessage();
+  static RemoteRet fromMessage(const Message& message);
 
   const worker_id_t owner_;
   const RRefId rrefId_;
