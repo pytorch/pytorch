@@ -3336,7 +3336,6 @@ class TestNN(NNTestCase):
         self._test_InstanceNorm_general(nn.InstanceNorm3d, input, dtype=torch.float)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_InstanceNorm3d_general_cuda(self):
         b = random.randint(3, 5)
         c = random.randint(2, 5)
@@ -4007,7 +4006,6 @@ class TestNN(NNTestCase):
         self._test_batchnorm_grad()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_batchnorm_grad_cuda(self):
         self._test_batchnorm_grad("cuda")
         if TEST_CUDNN:
