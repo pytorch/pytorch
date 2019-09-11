@@ -7,11 +7,12 @@ import unittest
 import torch
 import torch.distributed as dist
 
+from torch.distributed.rpc import RpcBackend
 from common_distributed import MultiProcessTestCase
 from common_utils import load_tests, run_tests
 from os import getenv
 
-BACKEND = getenv('RPC_BACKEND', dist.RpcBackend.PROCESS_GROUP)
+BACKEND = getenv('RPC_BACKEND', RpcBackend.PROCESS_GROUP)
 RPC_INIT_URL = getenv('RPC_INIT_URL', '')
 
 # it is used to test python user defined function over rpc
