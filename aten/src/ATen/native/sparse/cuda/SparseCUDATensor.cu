@@ -21,6 +21,7 @@
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
 #include <thrust/system/cuda/execution_policy.h>
 #endif
+#include <c10/macros/Macros.h>
 
 namespace at { namespace native {
 
@@ -90,10 +91,11 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
 
   // If there is no values to copy, save running the kernel.
   if (newValues.numel() > 0) {
+    const int SZ = 4;
     values = values.contiguous();
     int64_t stride = at::prod_intlist(values.sizes().slice(1));
-    dim3 grid(THCCeilDiv(newNnz, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
-    dim3 block(32, 4);
+    dim3 grid(THCCeilDiv(newNnz, (int64_t) SZ), THCCeilDiv(stride, (int64_t) C10_WARP_SIZE*SZ));
+    dim3 block(C10_WARP_SIZE, SZ);
     AT_DISPATCH_ALL_TYPES_AND(
       at::ScalarType::Half,values.scalar_type(), "coalesce_sparse_cuda", [&] {
           using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;

@@ -3861,12 +3861,22 @@ def foo(xyz):
         self.checkScript(f_grad, (y,))
 
     def test_tensor_data(self):
-        x = torch.randn(3, 4)
+        x = torch.randn(3, 4, requires_grad=True)
+        y = torch.randn(4, 5)
 
         def f_data(x):
             return x.data
 
-        self.checkScript(f_data, (x,))
+        scripted_f_data = torch.jit.script(f_data)
+
+        scripted_x = scripted_f_data(x)
+        self.assertEqual(scripted_x, f_data(x))
+        self.assertEqual(scripted_x.requires_grad, False)
+
+        scripted_y = scripted_f_data(y)
+        self.assertEqual(scripted_y, f_data(y))
+        self.assertEqual(scripted_x.requires_grad, False)
+
 
     def test_tensor_dtype(self):
         x_byte = torch.empty(34, 56, 78, dtype=torch.uint8)
@@ -7763,6 +7773,59 @@ a")
             m = M()
             self.assertEqual(m(), 10)
 
+    def test_moduledict(self):
+        from collections import OrderedDict
+
+        class Inner(torch.nn.Module):
+            def forward(self, x):
+                return x + 10
+
+        class Inner2(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        class Inner3(torch.nn.Module):
+            def forward(self, x):
+                return (x - 4) * 3
+
+        class M(torch.nn.Module):
+            __constants__ = ['moduledict']
+
+            def __init__(self):
+                super(M, self).__init__()
+                modules = OrderedDict([
+                    ('one', Inner()),
+                    ('two', Inner2()),
+                    ('three', Inner3()),
+                ])
+                self.moduledict = nn.ModuleDict(modules)
+
+            def forward(self, x, skip_name):
+                # type: (Tensor, str)
+                names = torch.jit.annotate(List[str], [])
+                values = []
+                for name in self.moduledict:
+                    names.append(name)
+
+                for name, mod in self.moduledict.items():
+                    if name != skip_name:
+                        names.append(name)
+                        x = mod(x)
+                        values.append(x)
+
+                for mod in self.moduledict.values():
+                    x = mod(x)
+                    values.append(x)
+
+                for key in self.moduledict.keys():
+                    names.append(key)
+
+                return x, names
+
+        for name in ["", "one", "two", "three"]:
+            inp = torch.tensor(1)
+            self.checkModule(M(), (inp, name))
+
     def test_script_module_for2(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
@@ -8473,6 +8536,15 @@ a")
         inp = torch.randn(3, 3)
 
         self.checkScript(test_if_tracing, (inp,))
+
+    def test_is_scripting(self):
+        def foo():
+            return torch.jit.is_scripting()
+
+        self.assertFalse(foo())
+        scripted = torch.jit.script(foo)
+        FileCheck().check("is_scripting").run(scripted.graph)
+        self.assertTrue(scripted())
 
     def test_script_outputs(self):
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
@@ -14128,36 +14200,70 @@ a")
         out = m(torch.ones(5, 5, 5).cuda())
         self.assertTrue(out[0].is_cuda)
 
-
     def test_ignore_decorator(self):
-        class M(torch.jit.ScriptModule):
-            def __init__(self):
-                super(M, self).__init__()
-                tensor = torch.zeros(1, requires_grad=False)
-                self.register_buffer('some_state', torch.nn.Parameter(tensor))
+        with warnings.catch_warnings(record=True) as warns:
+            class M(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(M, self).__init__()
+                    tensor = torch.zeros(1, requires_grad=False)
+                    self.register_buffer('some_state', torch.nn.Parameter(tensor))
 
-            @torch.jit.script_method
-            def forward(self, x):
-                self.ignored_code(x)
-                return x
+                @torch.jit.script_method
+                def forward(self, x):
+                    self.ignored_code(x)
+                    return x
 
-            @torch.jit.ignore(drop_on_export=True)
-            def ignored_code(self, x):
-                self.some_state = torch.tensor((100,))
+                @torch.jit.ignore(drop_on_export=True)
+                def ignored_code(self, x):
+                    self.some_state = torch.tensor((100,))
+
+        if not PY2:
+            FileCheck().check("TorchScript will now drop the function").run(str(warns[0]))
 
         # Assert ignored code is run
         m = M()
-        self.assertEqual(m.some_state, torch.zeros(1))
-        m(torch.ones(1))
-        self.assertEqual(m.some_state, torch.zeros(1) + 100)
 
         m2 = self.getExportImportCopy(m)
         pp = str(m2.forward.code)
-        self.assertIn('IgnoredPythonOp', pp)
         self.assertNotIn('ignored_code', pp)
 
-        with self.assertRaisesRegex(torch.jit.Error, "This Python function is annotated to be ignored"):
+        with self.assertRaisesRegex(torch.jit.Error, "annotated to be ignored and cannot be run"):
             m2.forward(torch.ones(1))
+
+    def test_ignored_as_value(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            @torch.jit.unused
+            def tuple_ignored(self, x):
+                # type: (Tensor) -> Tuple[Tensor, Tensor]
+                return x, x
+
+            @torch.jit.unused
+            def single_val_ignored(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                return x
+
+            def forward(self, x, use_ignore_path):
+                # type: (Tensor, bool) -> Tuple[Tensor, Tensor]
+                if False:
+                    return self.tuple_ignored(x)
+                if use_ignore_path:
+                    return self.single_val_ignored(x, x), self.single_val_ignored(x, x)
+                return x, x
+
+        original = Model()
+        scripted = torch.jit.script(original)
+        self.assertEqual(scripted(torch.tensor(.5), False), (torch.tensor(.5), torch.tensor(.5)))
+
+        buffer = io.BytesIO()
+        torch.jit.save(scripted, buffer)
+        buffer.seek(0)
+        loaded = torch.jit.load(buffer)
+
+        with self.assertRaisesRegex(torch._C.JITException, "annotated to be ignored and cannot be run"):
+            loaded(torch.tensor(.5), True)
 
     def test_module_error(self):
         class MyModule(torch.nn.Module):
@@ -14744,7 +14850,7 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return torch.ops.quantized.linear_unpack(self._packed_weight)
+                return torch.ops.quantized.linear_unpack(self._packed_weight)[0]
 
             def forward(self):
                 return self._packed_weight
@@ -14756,7 +14862,7 @@ a")
 
             @property
             def weight(self):
-                return torch.ops.quantized.linear_unpack(self._packed_weight)
+                return torch.ops.quantized.linear_unpack(self._packed_weight)[0]
 
             @weight.setter
             def weight(self, w):
@@ -14800,24 +14906,6 @@ a")
 
 
 class TestRecursiveScript(JitTestCase):
-    def checkModule(self, nn_module, args):
-        """
-        Check that a nn.Module's results in Script mode match eager and that it
-        can be exported
-        """
-        sm = torch.jit.script(nn_module)
-
-        with freeze_rng_state():
-            eager_out = nn_module(*args)
-
-        with freeze_rng_state():
-            script_out = sm(*args)
-
-        self.assertEqual(eager_out, script_out)
-        self.assertExportImportModule(sm, args)
-
-        return sm
-
     def test_init_error(self):
         class M(nn.Module):
             def __init__(self):
