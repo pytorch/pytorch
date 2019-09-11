@@ -52,8 +52,4 @@ bool _can_Cast(at::ScalarType from, at::ScalarType to) {
   return at::canCast(from, to);
 }  
 
-bool _can_Cast(at::ScalarType from, at::ScalarType to) {
-  return at::canCast(from, to);
-}
-  
 }} // namespace at::native
