@@ -765,7 +765,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
-
     def test_unfold(self):
         class UnfoldModel(torch.nn.Module):
             def forward(self, x):
