@@ -94,11 +94,6 @@ void Pickler::stop() {
   push<PickleOpCode>(PickleOpCode::STOP);
 }
 
-void Pickler::pushOp(PickleOpCode opcode, const std::string& data) {
-  push<PickleOpCode>(opcode);
-  pushBytes(data.data());
-}
-
 // unmemoized version called by pushIValue
 void Pickler::pushIValueImpl(const IValue& ivalue) {
   if (ivalue.isTensor()) {
@@ -426,7 +421,7 @@ void Pickler::pushLong(const std::string& data) {
     TORCH_INTERNAL_ASSERT(
         data.size() > std::numeric_limits<uint32_t>::max(),
         "Cannot pickle a long with a size larger than 4 bytes")
-    push<PickleOpCode>(PickleOpCode::LONG1);
+    push<PickleOpCode>(PickleOpCode::LONG4);
     push<uint64_t>(size);
   }
   pushBytes(data);

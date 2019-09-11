@@ -138,11 +138,6 @@ class Pickler {
 
   void pushIValue(const IValue& ivalue);
 
-
-  // Internal function to directly push data to the pickle archive of types
-  // that aren't supported by IValue
-  void pushOp(PickleOpCode opcode, const std::string& data);
-
   void startTuple();
   void endTuple();
 

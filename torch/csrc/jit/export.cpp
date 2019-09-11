@@ -551,7 +551,6 @@ class ScriptModuleSerializer {
 
  private:
   void writeArchive(const std::string& archive_name, const IValue& value) {
-    // TODO: use torch::save API
     std::vector<char> data;
     std::vector<at::Tensor> tensors;
     Pickler data_pickle(
