@@ -195,7 +195,6 @@ class TestQuantizedOps(TestCase):
                 torch.qint32 : np.int32
             }
             qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
-            # print('C', qC)
             qC_hat = add(qA, qB, scale=scale, zero_point=zero_point)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
                                     "Quantized addition failed.")
@@ -432,6 +431,63 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(a_ref, a_hat.dequantize(),
                          message="ops.quantized.max_pool2d results are off")
 
+    """Tests max pool operation on NHWC quantized tensors."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           kernel=st.sampled_from((3, 5, 7)),
+           stride=st.sampled_from((None, 1, 2)),
+           dilation=st.integers(1, 2),
+           padding=st.integers(0, 2))
+    def test_max_pool2d_nhwc(self, X, kernel, stride, dilation, padding):
+        X, (scale, zero_point, torch_type) = X
+        # Ensure we hit the vectorized paths
+        # 176 = 128 + 32 + 16
+        # 128 hits the interleaved path
+        # 32 hits the non-interleaved path
+        # 16 hits the scalar path
+        if X.shape[1] < 176:
+            X = np.repeat(X, 176 / X.shape[1], 1)
+        # Check constraints
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+        iH, iW = X.shape[-2:]
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation)
+        assume(oH > 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation)
+        assume(oW > 0)
+
+        X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
+        a = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
+        a_pool = torch.nn.functional.max_pool2d(a, kernel_size=kernel,
+                                                stride=stride,
+                                                padding=padding, dilation=dilation)
+        a_ref = torch.quantize_linear(a_pool, scale=scale,
+                                      zero_point=zero_point, dtype=torch_type)
+        a_ref = a_ref.dequantize()
+        qa = torch.quantize_linear(torch.from_numpy(X_nchw), scale=scale, zero_point=zero_point,
+                                   dtype=torch_type).permute([0, 3, 1, 2])
+        self.assertTrue(qa.stride() != sorted(qa.stride()))
+
+        ops_under_test = {
+            "torch": torch.max_pool2d,
+            "nn.functional": torch.nn.functional.max_pool2d,
+            "nn.quantized.functional": torch.nn.quantized.functional.max_pool2d
+        }
+
+        for name, op in ops_under_test.items():
+            a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
+                       dilation=dilation)
+            self.assertTrue(a_hat.stride() != sorted(a_hat.stride()))
+            self.assertEqual(a_ref, a_hat.dequantize(),
+                             message="{} results are off".format(name))
+        # Test the ops.quantized separately, because None is not treated.
+        a_hat = torch.ops.quantized.max_pool2d(
+            qa, kernel_size=_pair(kernel),
+            stride=_pair(kernel if stride is None else stride),
+            padding=_pair(padding), dilation=_pair(dilation))
+        self.assertEqual(a_ref, a_hat.dequantize(),
+                         message="ops.quantized.max_pool2d results are off")
+
     @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
@@ -621,9 +677,9 @@ class TestDynamicQuantizedLinear(TestCase):
                      use_bias, use_relu, use_multi_dim_input, use_channelwise):
         qlinear_prepack = torch.ops.quantized.linear_prepack
         if use_relu:
-            qlinear_dynamic = torch.ops.quantized.fbgemm_linear_relu_dynamic
+            qlinear_dynamic = torch.ops.quantized.linear_relu_dynamic
         else:
-            qlinear_dynamic = torch.ops.quantized.fbgemm_linear_dynamic
+            qlinear_dynamic = torch.ops.quantized.linear_dynamic
 
         if use_multi_dim_input:
             batch_size *= 3  # Test the multi-dim input tensor
@@ -704,9 +760,9 @@ class TestDynamicQuantizedLinear(TestCase):
         X_q = torch.quantize_linear(X_fp32, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
 
         # Weight prepacking operator for dynamic quantized Linear
-        W_prepack = qlinear_prepack(W_q)
+        W_prepack = qlinear_prepack(W_q, b_fp32)
         # Dynamic quantized Linear operator with prepacked weight
-        Y_fp32 = qlinear_dynamic(X_q.dequantize(), W_prepack, b_fp32)
+        Y_fp32 = qlinear_dynamic(X_q.dequantize(), W_prepack)
         # Y_fp32 = qlinear_dynamic(X_fp32, W_prepack, b_fp32)
 
         Y_fp32_ref = F.linear(X_q.dequantize(), W_q.dequantize(), b_fp32)
@@ -815,13 +871,13 @@ class TestQuantizedLinear(unittest.TestCase):
         Y_zp = 5
 
         # Weight prepacking operator for quantized Linear
-        W_prepack = qlinear_prepack(W_q)
+        W_prepack = qlinear_prepack(W_q, b_q)
 
         if use_multi_dim_input:
             X_q = X_q.view(3, int(batch_size / 3), input_channels)
 
         # Quantized Linear operator with prepacked weight
-        Y_q = qlinear(X_q, W_prepack, b_q, Y_scale, Y_zp)
+        Y_q = qlinear(X_q, W_prepack, Y_scale, Y_zp)
 
         if not use_channelwise:
             # Test the per-tensor quantization only
@@ -879,7 +935,7 @@ class TestQuantizedLinear(unittest.TestCase):
         # Weight prepacking operator for quantized Linear
         W_prepack = qlinear_prepack(W_q)
         # Weight unpack operator for quantized Linear (Used for serialization)
-        W_q_origin = qlinear_unpack(W_prepack)
+        W_q_origin = qlinear_unpack(W_prepack)[0]
 
         # Assert equal
         np.testing.assert_equal(W_q.int_repr(), W_q_origin.int_repr().numpy())
@@ -1054,12 +1110,11 @@ class TestQuantizedConv(unittest.TestCase):
             W_q = torch.quantize_linear(W_KRSC, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
             b_q = torch.quantize_linear(b, scale=X_scale * W_scale[0], zero_point=0, dtype=torch.qint32) if use_bias else None
 
-        W_prepack = qconv_prepack(W_q, stride, pad, dilation, groups)
+        W_prepack = qconv_prepack(W_q, b_q, stride, pad, dilation, groups)
 
         Y_q = qconv(
             X_q,
             W_prepack,
-            b_q,
             stride,
             pad,
             dilation,
@@ -1136,9 +1191,11 @@ class TestQuantizedConv(unittest.TestCase):
         strides = [strideH, strideW]
         paddings = [padH, padW]
         dilations = [1, 1]
-        W_packed = qconv_prepack(W_q, strides, paddings, dilations, groups)
+        bias = torch.from_numpy(bias).to(torch.float)
+        W_packed = qconv_prepack(W_q, bias, strides, paddings, dilations, groups)
         # Unpack weights weight unpacking operator (Used for serialization)
-        W_unpacked = qconv_unpack(W_packed)
+        W_unpacked = qconv_unpack(W_packed)[0]
+        bias = qconv_unpack(W_packed)[1]
 
         # Assert equal
         np.testing.assert_equal(W_q.int_repr().numpy(), W_unpacked.int_repr().numpy())
