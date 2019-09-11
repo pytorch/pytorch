@@ -287,9 +287,16 @@ class TestCppApiParity(common.TestCase):
         example_inputs = self._get_example_inputs(test_params)
         if isinstance(test_params.test_instance, common_nn.CriterionTest):
             example_targets = self._get_example_targets(test_params)
-            return (*example_inputs, *example_targets)
         else:
-            return (*example_inputs, )
+            example_targets = []
+
+        input_args = ()
+        for example_input in example_inputs:
+            input_args += (example_input, )
+        for example_target in example_targets:
+            input_args += (example_target, )
+
+        return input_args
 
     # This tests that Python and C++ torch.nn modules have matching constructor arg names and types.
     def _test_torch_nn_module_ctor_args(self, module_name):
