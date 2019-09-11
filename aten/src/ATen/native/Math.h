@@ -197,7 +197,7 @@ static inline double calc_digamma(double x) {
  * Cephes Math Library Release 2.8:  June, 2000
  * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
  */
-static inline double calc_digamma(float x) {
+static inline float calc_digamma(float x) {
   static float PSI_10 = 2.25175258906672110764f;
   if (x == 0) {
     return INFINITY;
@@ -236,9 +236,9 @@ static inline double calc_digamma(float x) {
   };
 
   float y = 0;
-  if (x < 1.0e17) {
+  if (x < 1.0e17f) {
     float z = 1 / (x * x);
     y = z * polevlf(z, A, 6);
   }
-  return result + logf(x) - (0.5 / x) - y;
+  return result + logf(x) - (0.5f / x) - y;
 }
