@@ -153,42 +153,8 @@
 
       - restore_cache:
           key: homebrew-{{ arch }}
-
       - run:
-          name: Update brew
-          no_output_timeout: "1h"
-          command: |
-            set -e
-
-            date
-
-            # Update repositories manually
-            for path in $(find /usr/local/Homebrew -type d -name .git)
-            do
-              cd $path/..
-              pwd
-              git fetch --depth=1 origin
-              git reset --hard origin/master
-            done
-
-            date
-
-            export HOMEBREW_NO_AUTO_UPDATE=1
-
-            set -x
-
-            brew cleanup
-            brew unlink parallel
-            brew install moreutils
-            brew link parallel --overwrite
-            brew install expect
-            brew install libomp
-
-      - save_cache:
-          key: homebrew-{{ arch }}-{{ epoch }}
-          paths:
-            - "/usr/local/Homebrew"
-
+          <<: *macos_brew_update
 
   pytorch_macos_10_13_py3_build:
     environment:
