@@ -30,7 +30,7 @@ from common_methods_invocations import tri_tests_args, run_additional_tri_tests,
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, torchtest, TEST_WITH_ROCM
+    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, torchtest
 from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -2649,19 +2649,7 @@ class _TestTorchMixin(torchtest):
         floats = [0.0, 1 / 3, 1 / 2, 1.0, 3 / 2, 2.0]
         tensor = torch.tensor(ints, dtype=torch.int64, device=device)
         for pow in floats:
-            if device == 'cuda' and not TEST_WITH_ROCM:
-                # Current pow CUDA implementation casts exponent
-                # to tensor dtype, but numpy does not, that's why:
-                # pow CUDA  4 ^ 0.5 = 1
-                # numpy pow 4 ^ 0.5 = 2
-                # This line must be deleted as soon as
-                # pow CUDA implementation is fixed.
-                self._test_pow(tensor, pow, np_exponent=int(pow))
-            else:
-                # pow CPU implementation is already fixed and
-                # does not cast exponent to tensor dtype,
-                # that why it is compatible with numpy.
-                self._test_pow(tensor, pow)
+            self._test_pow(tensor, pow)
 
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
@@ -8785,6 +8773,28 @@ class _TestTorchMixin(torchtest):
     def test_scatterFill(self):
         self._test_scatter_base(self, lambda t: t, 'scatter_', True)
 
+    def test_scatter_to_large_input(self):
+        for device in torch.testing.get_all_device_types():
+            input = torch.zeros(4, 4, device=device)
+            src = torch.ones(2, 2, device=device)
+            index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
+            input.scatter_(0, index, src)
+            self.assertEqual(input, torch.tensor([[0, 0, 0, 0],
+                                                  [1, 0, 0, 0],
+                                                  [1, 0, 0, 0],
+                                                  [0, 0, 0, 0]], device=device))
+
+    def test_scatter_add_to_large_input(self):
+        for device in torch.testing.get_all_device_types():
+            input = torch.zeros(4, 4, device=device)
+            src = torch.ones(2, 2, device=device)
+            index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
+            input.scatter_add_(0, index, src)
+            self.assertEqual(input, torch.tensor([[0, 0, 0, 0],
+                                                  [1, 0, 0, 0],
+                                                  [1, 0, 0, 0],
+                                                  [0, 0, 0, 0]], device=device))
+
     def test_scatter_bool(self):
         for device in torch.testing.get_all_device_types():
             x = torch.tensor([[True, True, True], [True, True, True]], device=device)
@@ -13267,7 +13277,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             ("div", True, True, 'cpu'),
             ("div", True, True, 'cuda'),
             ("pow", True, True, 'cpu'),
-            ("pow", False, False, 'cuda')
+            ("pow", True, True, 'cuda')
         ]
 
         for (fn, has_input_output_mem_overlap_check,
@@ -13339,14 +13349,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         sz = 3
         doubles = torch.randn(2 * sz, device=device)
         self.check_internal_mem_overlap(
-            lambda t: t.pow_(42), num_inputs=1, device=device,
-            expected_failure=(device == 'cuda'))
+            lambda t: t.pow_(42), num_inputs=1, device=device)
         self.unary_check_input_output_mem_overlap(
-            doubles, sz, lambda input, out: torch.pow(input, 42, out=out),
-            expected_failure=(device == 'cuda'))
+            doubles, sz, lambda input, out: torch.pow(input, 42, out=out))
         self.unary_check_input_output_mem_overlap(
-            doubles, sz, lambda input, out: torch.pow(42, input, out=out),
-            expected_failure=(device == 'cuda'))
+            doubles, sz, lambda input, out: torch.pow(42, input, out=out))
 
 
 # Functions to test negative dimension wrapping
