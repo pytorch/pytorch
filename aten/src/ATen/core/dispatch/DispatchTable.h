@@ -159,14 +159,16 @@ class DispatchTable final {
    * @return Kernel function pointing to the right kernel for the given arguments.
    */
    const DispatchTableEntry& lookup(const Stack* stack) const {
-     return lookup_([=] {
-       TORCH_INTERNAL_ASSERT(dispatch_strategy_.is_valid_, "Operator ", operator_name_, " has an invalid dispatch key but kernels registered.");
+     return lookup_([=] () -> c10::optional<TensorTypeId> {
+       if (!dispatch_strategy_.is_valid_) {
+         return c10::nullopt;
+       }
        return dispatch_strategy_.get_dispatch_key(stack, operator_name_);
      });
    }
 
    const DispatchTableEntry& lookup(TensorTypeId dispatchKey) const {
-     return lookup_([=] {return dispatchKey;});
+     return lookup_([=] () -> c10::optional<TensorTypeId> { return dispatchKey;});
    }
 
    bool isEmpty() const {
@@ -236,20 +238,22 @@ private:
 
   template<class GetDispatchKeyFunc>
   const DispatchTableEntry& lookup_(const GetDispatchKeyFunc& getDispatchKey) const {
+      c10::optional<TensorTypeId> dispatch_key = getDispatchKey();
+      if (dispatch_key.has_value()) {
+        const auto* found = kernels_.lookup(*dispatch_key);
 
-      TensorTypeId dispatch_key = getDispatchKey();
-      auto found = kernels_.lookup(dispatch_key);
-
-      if (nullptr != found) {
-        return *found;
+        if (nullptr != found) {
+          return *found;
+        }
       }
 
       if (catchall_kernel_.has_value()) {
         return *catchall_kernel_;
       }
 
+      const std::string dispatch_key_str = dispatch_key.has_value() ? toString(*dispatch_key) : "None";
       TORCH_CHECK(false, "Didn't find kernel to dispatch to for operator '", operator_name_,
-               "'. Tried to look up kernel for dispatch key '", toString(dispatch_key),
+               "'. Tried to look up kernel for dispatch key '", dispatch_key_str,
                "'. Registered dispatch keys are: ", listAllDispatchKeys());
   }
 

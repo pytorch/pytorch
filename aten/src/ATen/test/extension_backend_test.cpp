@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/core/ATenDispatch.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 using namespace at;
 
