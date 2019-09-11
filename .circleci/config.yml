@@ -1295,7 +1295,7 @@ workflows:
   binarybuilds:
     triggers:
       - schedule:
-          cron: "30 15 * * *"
+          cron: "35 15 * * *"
           filters:
             branches:
               only:
