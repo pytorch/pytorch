@@ -95,6 +95,58 @@ TEST_F(ModulesTest, Conv3d) {
   ASSERT_TRUE(model->weight.grad().numel() == 3 * 2 * 3 * 3 * 3);
 }
 
+TEST_F(ModulesTest, MaxPool1d) {
+  MaxPool1d model(MaxPool1dOptions(3).stride(2));
+  auto x = torch::ones({1, 1, 5}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1 ,2})));
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+}
+
+TEST_F(ModulesTest, MaxPool2dEven) {
+  MaxPool2d model(MaxPool2dOptions(3).stride(2));
+  auto x = torch::ones({2, 5, 5}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2 ,2})));
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
+}
+
+TEST_F(ModulesTest, MaxPool2dUneven) {
+  MaxPool2d model(MaxPool2dOptions({3, 2}).stride({2, 2}));
+  auto x = torch::ones({2, 5, 4}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2})));
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
+}
+
+TEST_F(ModulesTest, MaxPool3d) {
+  MaxPool3d model(MaxPool3dOptions(3).stride(2));
+  auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
+}
+
 TEST_F(ModulesTest, Linear) {
   Linear model(5, 2);
   auto x = torch::randn({10, 5}, torch::requires_grad());
@@ -366,6 +418,24 @@ TEST_F(ModulesTest, PrettyPrintConv) {
   ASSERT_EQ(
       c10::str(Conv2d(options)),
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
+}
+
+TEST_F(ModulesTest, PrettyPrintMaxPool) {
+  ASSERT_EQ(
+      c10::str(MaxPool1d(5)),
+      "torch::nn::MaxPool1d(kernel_size=5, stride=5)");
+  ASSERT_EQ(
+      c10::str(MaxPool2d(5)),
+      "torch::nn::MaxPool2d(kernel_size=[5, 5], stride=[5, 5])");
+  ASSERT_EQ(
+      c10::str(MaxPool2d(MaxPool2dOptions(5).stride(2))),
+      "torch::nn::MaxPool2d(kernel_size=[5, 5], stride=[2, 2])");
+
+  const auto options =
+      MaxPool2dOptions(torch::IntArrayRef{5, 6}).stride({1, 2});
+  ASSERT_EQ(
+      c10::str(MaxPool2d(options)),
+      "torch::nn::MaxPool2d(kernel_size=[5, 6], stride=[1, 2])");
 }
 
 TEST_F(ModulesTest, PrettyPrintDropout) {
