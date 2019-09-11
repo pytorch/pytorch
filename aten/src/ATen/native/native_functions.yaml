@@ -26,7 +26,7 @@
 - func: _cast_Short(Tensor self, bool non_blocking=False) -> Tensor
   variants: function
   
-- func: canCast(ScalarType from, ScalarType to) -> bool
+- func: _can_Cast(ScalarType from, ScalarType to) -> bool
   variants: function
 
 - func: _cast_Half(Tensor self, bool non_blocking=False) -> Tensor
