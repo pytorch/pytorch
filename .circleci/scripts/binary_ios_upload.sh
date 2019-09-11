@@ -9,9 +9,16 @@ mkdir -p ${ZIP_DIR}/src
 # copy header files
 cp -R ${ARTIFACTS_DIR}/arm64/include ${ZIP_DIR}/install/
 # archvie to FAT bianry
-libs=(${ARTIFACTS_DIR}/x86_64/lib/libtorch_x86_64.a ${ARTIFACTS_DIR}/arm64/lib/libtorch_arm64.a ${ARTIFACTS_DIR}/armv7s/lib/libtorch_armv7s.a )
-lipo -create ${libs[@]} -o ${ZIP_DIR}/install/lib/libtorch.a
-lipo -i ${ZIP_DIR}/install/lib/libtorch.a
+cd ${ZIP_DIR}/install/lib
+target_libs=(libc10.a libclog.a libcpuinfo.a libqnnpack.a libtorch.a)
+for lib in ${target_libs[*]}
+do
+    libs=(${ARTIFACTS_DIR}/x86_64/lib/${lib} ${ARTIFACTS_DIR}/arm64/lib/${lib} ${ARTIFACTS_DIR}/armv7s/lib/l${lib} )
+    lipo -create ${libs[@]} -o ${ZIP_DIR}/install/lib/${lib}
+done
+# for nnpack, we only support arm64/armv7s build
+lipo -create ${ARTIFACTS_DIR}/arm64/lib/libnnpack.a ${ARTIFACTS_DIR}/armv7s/lib/libnnpack.a -o ${ZIP_DIR}/install/lib/libnnpack.a
+lipo -i ${ZIP_DIR}/install/lib/*.a
 # copy the umbrella header
 if [ -e ${PROJ_ROOT}/ios/LibTorch.h ]; then
     cp ${PROJ_ROOT}/ios/LibTorch.h ${ZIP_DIR}/src/LibTorch.h

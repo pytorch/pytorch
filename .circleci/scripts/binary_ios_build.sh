@@ -45,16 +45,21 @@ CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import g
 CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
 unbuffer ${PROJ_ROOT}/scripts/build_ios.sh ${CMAKE_ARGS[@]} 2>&1 | ts
 # archive the static libraries
-cd ${PROJ_ROOT}/build_ios/install/lib
-x86_libs=(libc10.a libclog.a libcpuinfo.a libqnnpack.a libtorch.a)
-arm_libs=(libc10.a libclog.a libcpuinfo.a libnnpack.a libqnnpack.a libtorch.a)
-OUTPUT=libtorch_${IOS_ARCH}.a
-cd ${PROJ_ROOT}/build_ios/install/lib
-if [ "${IOS_PLATFORM}" == "SIMULATOR" ]; then
-  libtool -static x86_libs[@] -o ${OUTPUT}
-else
-  libtool -static arm_libs[@] -o ${OUTPUT}
-fi
+# cd ${PROJ_ROOT}/build_ios/install/lib
+# OUTPUT=libtorch_${IOS_ARCH}.a
+# cd ${PROJ_ROOT}/build_ios/install/lib
+# if [ "${IOS_PLATFORM}" == "SIMULATOR" ]; then
+#   static_libs=(libc10.a libclog.a libcpuinfo.a libqnnpack.a libtorch.a)
+# else
+#   static_libs=(libc10.a libclog.a libcpuinfo.a libnnpack.a libqnnpack.a libtorch.a)
+# fi
+# for lib in ${static_libs[*]}
+# do 
+#   ar -x ${lib}
+# done
+# libtool -static -o ${OUTPUT} *.o
+# rm -rf *.o
+
 #store the binary
 cd ${WORKSPACE}
 DEST_DIR=${WORKSPACE}/ios
