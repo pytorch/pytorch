@@ -935,41 +935,50 @@ jobs:
       - run:
           <<: *ios_brew_update
       - run:
-          name: Upload
+          name: Build
           no_output_timeout: "1h"
-          contxt: org-member
           command: |
-            set -e
-            echo ""
-            echo "PWD: `pwd`"
-            WORKSPACE=/Users/distiller/workspace
-            ARTIFACTS_DIR=${WORKSPACE}/ios
-            ls ${ARTIFACTS_DIR}
-            ZIP_DIR=${WORKSPACE}/zip
-            mkdir -p ${ZIP_DIR}/install/lib
-            mkdir -p ${ZIP_DIR}/src
-            # copy header files
-            cp -R ${ARTIFACTS_DIR}/arm64/include ${ZIP_DIR}/install/
-            # archvie to FAT bianry
-            libs=(${ARTIFACTS_DIR}/x86_64/lib/libtorch_x86_64.a ${ARTIFACTS_DIR}/arm64/lib/libtorch_arm64.a ${ARTIFACTS_DIR}/armv7s/lib/libtorch_armv7s.a )
-            lipo -create ${libs[@]} -o ${ZIP_DIR}/install/lib/libtorch.a
-            lipo -i ${ZIP_DIR}/install/lib/libtorch.a
-            # make the zip
-            touch ${ZIP_DIR}/src/LibTorch.h
-            echo "import <torch/script.h>" > ${ZIP_DIR}/src/LibTorch.h
-            # zip the library
-            export ZIPFILE=libtorch_ios_`date +%m%d%Y`_0.0.1.zip
-            cd ${ZIP_DIR}
-            zip -r ${ZIPFILE} install src
-            # upload to aws
-            brew install awscli
-            set +x
-            export AWS_ACCESS_KEY_ID=${AWS_S3_ACCESS_KEY_FOR_PYTORCH_BINARY_UPLOAD}
-            export AWS_SECRET_ACCESS_KEY=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}
-            set +x
-            echo "AWS KEY: ${AWS_ACCESS_KEY_ID}"
-            echo "AWS SECRET: ${AWS_SECRET_ACCESS_KEY}"  
-            aws s3 cp ${ZIPFILE} s3://ossci-ios-build/ --acl public-read
+            set -eux -o pipefail
+            script="/Users/distiller/project/pytorch/.circleci/scripts/binary_ios_upload.sh"
+            cat "$script"
+            source "$script"
+
+      # - run:
+      #     name: Upload
+      #     no_output_timeout: "1h"
+      #     contxt: org-member
+      #     command: |
+      #       set -e
+      #       echo ""
+      #       echo "PWD: `pwd`"
+      #       WORKSPACE=/Users/distiller/workspace
+      #       ARTIFACTS_DIR=${WORKSPACE}/ios
+      #       ls ${ARTIFACTS_DIR}
+      #       ZIP_DIR=${WORKSPACE}/zip
+      #       mkdir -p ${ZIP_DIR}/install/lib
+      #       mkdir -p ${ZIP_DIR}/src
+      #       # copy header files
+      #       cp -R ${ARTIFACTS_DIR}/arm64/include ${ZIP_DIR}/install/
+      #       # archvie to FAT bianry
+      #       libs=(${ARTIFACTS_DIR}/x86_64/lib/libtorch_x86_64.a ${ARTIFACTS_DIR}/arm64/lib/libtorch_arm64.a ${ARTIFACTS_DIR}/armv7s/lib/libtorch_armv7s.a )
+      #       lipo -create ${libs[@]} -o ${ZIP_DIR}/install/lib/libtorch.a
+      #       lipo -i ${ZIP_DIR}/install/lib/libtorch.a
+      #       # make the zip
+      #       touch ${ZIP_DIR}/src/LibTorch.h
+      #       echo "import <torch/script.h>" > ${ZIP_DIR}/src/LibTorch.h
+      #       # zip the library
+      #       export ZIPFILE=libtorch_ios_`date +%m%d%Y`_0.0.1.zip
+      #       cd ${ZIP_DIR}
+      #       zip -r ${ZIPFILE} install src
+      #       # upload to aws
+      #       brew install awscli
+      #       set +x
+      #       export AWS_ACCESS_KEY_ID=${AWS_S3_ACCESS_KEY_FOR_PYTORCH_BINARY_UPLOAD}
+      #       export AWS_SECRET_ACCESS_KEY=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}
+      #       set +x
+      #       echo "AWS KEY: ${AWS_ACCESS_KEY_ID}"
+      #       echo "AWS SECRET: ${AWS_SECRET_ACCESS_KEY}"  
+      #       aws s3 cp ${ZIPFILE} s3://ossci-ios-build/ --acl public-read
             
   pytorch_ios_build:
     <<: *pytorch_ios_params  
@@ -987,107 +996,88 @@ jobs:
       - run:
           name: Build
           no_output_timeout: "1h"
-          contxt: org-member
           command: |
-            set -e
+            set -eux -o pipefail
+            script="/Users/distiller/project/pytorch/.circleci/scripts/binary_ios_build.sh"
+            cat "$script"
+            source "$script"
+      # - run:
+      #     name: Build
+      #     no_output_timeout: "1h"
+      #     contxt: org-member
+      #     command: |
+      #       set -e
             
-            echo ""
-            echo "PWD: ${PWD}"
-            WORKSPACE=/Users/distiller/workspace
-            PROJ_ROOT=/Users/distiller/project
-            export TCLLIBPATH="/usr/local/lib" 
+      #       echo ""
+      #       echo "PWD: ${PWD}"
+      #       WORKSPACE=/Users/distiller/workspace
+      #       PROJ_ROOT=/Users/distiller/project
+      #       export TCLLIBPATH="/usr/local/lib" 
             
-            # Install conda
-            curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
-            chmod +x ~/Downloads/conda.sh
-            /bin/bash ~/Downloads/conda.sh -b -p ~/anaconda
-            export PATH="~/anaconda/bin:${PATH}"
-            source ~/anaconda/bin/activate
-            # Install dependencies
-            conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests
+      #       # Install conda
+      #       curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+      #       chmod +x ~/Downloads/conda.sh
+      #       /bin/bash ~/Downloads/conda.sh -b -p ~/anaconda
+      #       export PATH="~/anaconda/bin:${PATH}"
+      #       source ~/anaconda/bin/activate
+      #       # Install dependencies
+      #       conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests
           
-            # sync submodules
-            cd ${PROJ_ROOT}
-            git submodule sync
-            git submodule update --init --recursive
+      #       # sync submodules
+      #       cd ${PROJ_ROOT}
+      #       git submodule sync
+      #       git submodule update --init --recursive
 
-            # export 
-            export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+      #       # export 
+      #       export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
             
-            # run build script
-            chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
-            echo "########################################################"
-            cat ${PROJ_ROOT}/scripts/build_ios.sh
-            echo "########################################################"
+      #       # run build script
+      #       chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
+      #       echo "########################################################"
+      #       cat ${PROJ_ROOT}/scripts/build_ios.sh
+      #       echo "########################################################"
 
-            echo "IOS_ARCH: ${IOS_ARCH}"
-            echo "IOS_PLATFORM: ${IOS_PLATFORM}"
-            BUILD_PYTORCH_MOBILE=1
-            # unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
+      #       echo "IOS_ARCH: ${IOS_ARCH}"
+      #       echo "IOS_PLATFORM: ${IOS_PLATFORM}"
+      #       BUILD_PYTORCH_MOBILE=1
+      #       # unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
 
-            CMAKE_ARGS=() 
-            if [ -n "${IOS_ARCH:-}" ]; then
-              CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
-              export IOS_ARCH=${IOS_ARCH}
-            fi
-            if [ -n "${IOS_PLATFORM:-}" ]; then
-              CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
-            fi
-            if [ -n "${USE_NNPACK:-}" ]; then 
-              CMAKE_ARGS+=("-DUSE_NNPACK=${USE_NNPACK}")
-            fi 
-            CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
-            CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
-            CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+      #       CMAKE_ARGS=() 
+      #       if [ -n "${IOS_ARCH:-}" ]; then
+      #         CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
+      #         export IOS_ARCH=${IOS_ARCH}
+      #       fi
+      #       if [ -n "${IOS_PLATFORM:-}" ]; then
+      #         CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
+      #       fi
+      #       if [ -n "${USE_NNPACK:-}" ]; then 
+      #         CMAKE_ARGS+=("-DUSE_NNPACK=${USE_NNPACK}")
+      #       fi 
+      #       CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+      #       CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
+      #       CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
 
-            unbuffer ${PROJ_ROOT}/scripts/build_ios.sh ${CMAKE_ARGS[@]} 2>&1 | ts
+      #       unbuffer ${PROJ_ROOT}/scripts/build_ios.sh ${CMAKE_ARGS[@]} 2>&1 | ts
 
-            #archive the static libraries
-            cd ${PROJ_ROOT}/build_ios/install/lib
+      #       #archive the static libraries
+      #       cd ${PROJ_ROOT}/build_ios/install/lib
                         
-            ####### for testing ########
-            rm -rf ${PROJ_ROOT}/build_ios/install/lib/libprotobuf-lite.a
-            rm -rf ${PROJ_ROOT}/build_ios/install/lib/libpthreadpool.a
+      #       ####### for testing ########
+      #       rm -rf ${PROJ_ROOT}/build_ios/install/lib/libprotobuf-lite.a
+      #       rm -rf ${PROJ_ROOT}/build_ios/install/lib/libpthreadpool.a
             
-            #############################
-            OUTPUT=libtorch_${IOS_ARCH}.a
-            cd ${PROJ_ROOT}/build_ios/install/lib
-            libtool -static *.a -o ${OUTPUT}
+      #       #############################
+      #       OUTPUT=libtorch_${IOS_ARCH}.a
+      #       cd ${PROJ_ROOT}/build_ios/install/lib
+      #       libtool -static *.a -o ${OUTPUT}
             
-            #store the binary
-            cd ${WORKSPACE}
-            DEST_DIR=${WORKSPACE}/ios
-            mkdir -p ${DEST_DIR}
+      #       #store the binary
+      #       cd ${WORKSPACE}
+      #       DEST_DIR=${WORKSPACE}/ios
+      #       mkdir -p ${DEST_DIR}
 
-            cp -R ${PROJ_ROOT}/build_ios/install ${DEST_DIR}
-            mv ${DEST_DIR}/install ${DEST_DIR}/${IOS_ARCH}
-            # cp ${PROJ_ROOT}/build_ios/install/lib/${OUTPUT}  ${DEST_DIR}
-
-            #copy files
-            # mkdir -p ${WORKSPACE}/zip/src
-            # touch ${WORKSPACE}/zip/src/LibTorch.h
-            # echo "import <torch/script.h>" > ${WORKSPACE}/zip/src/LibTorch.h
-            # cp ${PROJ_ROOT}/ios/LibTorch.h ${WORKSPACE}/zip/src
-            # cp ${PROJ_ROOT}/ios/framework.module ${WORKSPACE}/zip/src
-
-            # zip the library
-            # cd ${WORKSPACE}/zip/
-            # export FILE_NAME=libtorch_ios_`date +%m%d%Y`_${IOS_ARCH}.zip
-            # zip -r ${FILE_NAME} install src
-            
-            # upload to aws
-            # brew install awscli
-            # set +x
-            # export AWS_ACCESS_KEY_ID=${AWS_S3_ACCESS_KEY_FOR_PYTORCH_BINARY_UPLOAD}
-            # export AWS_SECRET_ACCESS_KEY=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}
-            # set +x
-            # echo "AWS KEY: ${AWS_ACCESS_KEY_ID}"
-            # echo "AWS SECRET: ${AWS_SECRET_ACCESS_KEY}"            
-            # aws s3 cp ${FILE_NAME} s3://ossci-ios-build/ --acl public-read
-
-            # store the artifact
-            # mkdir -p ${WORKSPACE}/artifact/ios
-            # cp ${FILE_NAME} ${WORKSPACE}/artifact/ios
+      #       cp -R ${PROJ_ROOT}/build_ios/install ${DEST_DIR}
+      #       mv ${DEST_DIR}/install ${DEST_DIR}/${IOS_ARCH}
       - persist_to_workspace:
           root: /Users/distiller/workspace/
           paths: 
