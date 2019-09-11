@@ -333,3 +333,26 @@ def swap_module(mod, mapping):
         if type(mod) in mapping:
             new_mod = mapping[type(mod)].from_float(mod)
     return new_mod
+
+def dump_tensor(mod, target_dict, prefix=""):
+    r"""Traverse the modules and save the weight and stored activation to given dict.
+    This is mainly used for quantization accuracy debug
+    Args:
+        mod: the top module we want to save all tensors
+        prefix: the prefix for the current module
+        target_dict: the dictionary used to save the tensors
+    """
+    def get_prefix(prefix):
+        return prefix if prefix == "" else prefix + '.'
+
+    weight_unpack = getattr(mod, "weight", None)
+    if weight_unpack is not None and callable(weight_unpack):
+        target_dict[get_prefix(prefix) + 'weight'] = mod.weight()
+    elif hasattr(mod, 'weight'):
+        target_dict[get_prefix(prefix) + 'weight'] = mod.weight
+
+    if hasattr(mod, 'observer'):
+        target_dict[get_prefix(prefix) + 'activation'] = mod.observer.get_tensor_value()
+    for name, child in mod.named_children():
+        module_prefix = get_prefix(prefix) + name if prefix else name
+        dump_tensor(child, target_dict, module_prefix)
