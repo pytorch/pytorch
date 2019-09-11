@@ -43,5 +43,9 @@ bool _has_compatible_shallow_copy_type(const Tensor& self, const Tensor& from) {
 Tensor type_as(const Tensor& self, const Tensor& other) {
   return self.to(other.options());
 }
+  
+bool _can_Cast(const at::ScalarType from, const at::ScalarType to) {
+  return at::canCast(from, to);
+}
 
 }} // namespace at::native
