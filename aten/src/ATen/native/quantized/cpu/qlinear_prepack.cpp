@@ -45,7 +45,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     }
   }
 
-  at::Tensor operator()(at::Tensor weight) {
+  at::Tensor operator()(at::Tensor weight, c10::optional<Tensor> bias) {
     TORCH_CHECK(
         weight.dim() == 2,
         "The weight tensor for quantized::fbgemm_linear_prepack should be 2-dimensional.");
@@ -88,6 +88,15 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
         /*col_offsets=*/col_offsets.data(),
         /*qtype=*/qtype);
 
+    c10::optional<at::Tensor> bias_contig;
+    if (bias.has_value()) {
+      Tensor bias_vec = bias.value();
+      TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
+      TORCH_CHECK(
+          bias_vec.size(0) == N,
+          "bias should have N elements: " + std::to_string(N));
+      bias_contig = bias->contiguous();
+    }
     auto ret_ptr = guts::make_unique<PackedLinearWeight>(PackedLinearWeight{
         guts::make_unique<fbgemm::PackBMatrix<int8_t>>(
             /*trans=*/fbgemm::matrix_op_t::Transpose,
@@ -97,6 +106,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
             /*ld=*/K,
             /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
             /*groups=*/1),
+        bias_contig,
         col_offsets,
         weight_scales_float,
         weight_zero_points_int32,
@@ -107,7 +117,9 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     return cpp_custom_type_hack::create(std::move(ret_ptr), weight.options());
   }
 #else // USE_FBGEMM
-  at::Tensor operator()(at::Tensor /* weight */
+  at::Tensor operator()(
+      at::Tensor /* weight */,
+      c10::optional<Tensor> /* bias */
   ) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
@@ -119,7 +131,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    "quantized::fbgemm_linear_prepack(Tensor W) -> Tensor W_prepack",
+    "quantized::linear_prepack(Tensor W, Tensor? B=None) -> Tensor W_prepack",
     c10::RegisterOperators::options().kernel<QLinearPackWeightInt8>(
         TensorTypeId::QuantizedCPUTensorId));
 } // namespace

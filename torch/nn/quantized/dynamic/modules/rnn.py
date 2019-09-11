@@ -72,7 +72,7 @@ class RNNBase(torch.nn.Module):
                     #
                     #   w_ih, w_hh, b_ih, b_hh
                     packed_weight = \
-                        torch.ops.quantized.fbgemm_linear_prepack(qweight)
+                        torch.ops.quantized.linear_prepack(qweight)
                     params = [packed_weight, bias]
                     pos_names = ['w', 'b']
                     ret_name = ['{}_{}_l{}{}'.format(
@@ -222,7 +222,7 @@ class RNNBase(torch.nn.Module):
                     qweight = torch.quantize_linear(
                         weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
                     packed_weight = \
-                        torch.ops.quantized.fbgemm_linear_prepack(qweight)
+                        torch.ops.quantized.linear_prepack(qweight, bias)
 
                     params = [packed_weight, bias]
                     pos_names = ['w', 'b']
