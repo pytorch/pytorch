@@ -131,6 +131,7 @@ class RpcTest(MultiProcessTestCase):
             dist.init_model_parallel("duplicated_name")
         dist.join_rpc()
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     def test_invalid_names(self):
         store = dist.FileStore(self.file.name, self.world_size)
         dist.init_process_group(backend="gloo", rank=self.rank,
