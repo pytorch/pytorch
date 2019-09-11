@@ -395,6 +395,7 @@ def run(paths):
                 assert arguments[-1] == ")", "Expecting closing ) for {}".format(func['func'])
                 arguments = arguments[:-1]  # Expect closing )
                 declaration['name'] = func.get('name', fn_name)
+                declaration['operator_name'] = func.get('name', fn_name)
                 declaration['overload_name'] = func.get('overload_name', overload_name)
                 declaration['inplace'] = re.search('(^__i|[^_]_$)', fn_name) is not None
                 return_arguments = parse_return_arguments(return_decl, declaration['inplace'], func)

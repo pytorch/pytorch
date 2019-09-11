@@ -224,7 +224,7 @@ if (${name}.defined()) {
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 
 OPERATOR_NAME = CodeTemplate("""\
-    {"aten::${name}", "${overload_name}"},
+    {"aten::${operator_name}", "${overload_name}"},
 """)
 
 NAMEDTENSOR_CHECK = CodeTemplate("""\
@@ -578,6 +578,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'mode': str,
     'python_module': str,
     'name': str,
+    'operator_name': str,
     'overload_name': str,
     'native_actuals': List[str],
     'native_type_method_dispatch': str,
@@ -605,6 +606,7 @@ FunctionOption = TypedDict('FunctionOption', {
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('name', str),
+    ('operator_name', str),
     ('overload_name', str),
     ('use_c10_dispatcher', bool),
     ('matches_jit_signature', bool),
@@ -1292,6 +1294,7 @@ def create_generic(top_env, declarations):
             return None
         return OutputDeclaration(
             name=option['api_name'],
+            operator_name=option['operator_name'],
             overload_name=option['overload_name'],
             use_c10_dispatcher=option['use_c10_dispatcher'],
             matches_jit_signature=option["matches_jit_signature"],
