@@ -4,37 +4,15 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-py::object to_py_obj(const Message& message) {
-  switch (message.type()) {
-    case MessageType::SCRIPT_RET: {
-      ScriptRet ret = ScriptRet::fromMessage(message);
-      Stack stack;
-      stack.push_back(ret.value());
-      return torch::jit::createPyObjectForStack(std::move(stack));
-    }
-    case MessageType::PYTHON_RET: {
-      return PythonRpcHandler::loadPythonUDFResult(message);
-    }
-    case MessageType::EXCEPTION: {
-      std::string err(message.payload().begin(), message.payload().end());
-      throw std::runtime_error(err);
-    }
-    default: {
-      AT_ERROR("Unrecognized response message type ", message.type());
-    }
-  }
-}
+namespace {
 
-std::shared_ptr<FutureMessage> py_rpc_builtin(
-    RpcAgent& agent,
-    const WorkerId& dst,
+std::shared_ptr<Operator> matchBuiltinOp(
     const std::string& opName,
     const py::args& args,
-    const py::kwargs& kwargs) {
-  // builtin operators.
+    const py::kwargs& kwargs,
+    Stack& stack) {
   Symbol symbol = Symbol::fromQualString(opName);
   if (symbol.is_aten()) {
-    Stack stack;
     for (const auto& op : torch::jit::getAllOperatorsFor(symbol)) {
       try {
         // FIXME: This is temporary solution. We should at least refactor
@@ -49,8 +27,8 @@ std::shared_ptr<FutureMessage> py_rpc_builtin(
         continue;
       }
 
-      // Found the right op! Send it along...
-      return agent.send(dst, ScriptCall(op, std::move(stack)).toMessage());
+      // Found the right op!
+      return op;
     }
   }
 
@@ -63,9 +41,67 @@ std::shared_ptr<FutureMessage> py_rpc_builtin(
       ", kwargs: ",
       kwargs,
       ") to a builtin operator");
+
+  // builtin operators.
 }
 
-std::shared_ptr<FutureMessage> py_rpc_python_udf(
+} // namespace
+
+py::object toPyObj(const Message& message) {
+  switch (message.type()) {
+    case MessageType::SCRIPT_RET: {
+      ScriptRet ret = ScriptRet::fromMessage(message);
+      Stack stack;
+      stack.push_back(ret.value());
+      return torch::jit::createPyObjectForStack(std::move(stack));
+    }
+    case MessageType::PYTHON_RET: {
+      return PythonRpcHandler::getInstance().loadPythonUDFResult(message);
+    }
+    case MessageType::EXCEPTION: {
+      std::string err(message.payload().begin(), message.payload().end());
+      throw std::runtime_error(err);
+    }
+    default: {
+      AT_ERROR("Unrecognized response message type ", message.type());
+    }
+  }
+}
+
+std::shared_ptr<FutureMessage> pyRpcBuiltin(
+    RpcAgent& agent,
+    const WorkerId& dst,
+    const std::string& opName,
+    const py::args& args,
+    const py::kwargs& kwargs) {
+  Stack stack;
+  auto op = matchBuiltinOp(opName, args, kwargs, stack);
+  return agent.send(dst, ScriptCall(op, std::move(stack)).toMessage());
+}
+
+std::shared_ptr<RRef> pyRemoteBuiltin(
+    RpcAgent& agent,
+    const WorkerId& dst,
+    const std::string& opName,
+    const py::args& args,
+    const py::kwargs& kwargs) {
+  Stack stack;
+  auto op = matchBuiltinOp(opName, args, kwargs, stack);
+
+  auto& ctx = RRefContext::getInstance();
+  auto userRRef = ctx->createUserRRef(dst.id_);
+  agent.send(
+      dst,
+      ScriptRemoteCall(
+          op,
+          std::move(stack),
+          userRRef->id().toIValue(),
+          userRRef->forkId().toIValue())
+          .toMessage());
+  return userRRef;
+}
+
+std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& pickledPythonUDF) {
