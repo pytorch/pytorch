@@ -14955,6 +14955,22 @@ class TestRecursiveScript(JitTestCase):
         m = torch.jit.script(MyModule())
         FileCheck().check("ClassType<MyModule>").run(m.graph)
 
+    def test_optional_module(self):
+        class MyModule(torch.nn.Module):
+            __annotations__ = {'sub': Optional[torch.nn.Module]}
+
+            def __init__(self, submodule):
+                super(MyModule, self).__init__()
+                self.sub = submodule
+
+            def forward(self, t):
+                if self.sub is not None:
+                    t += self.sub(t)
+                return t
+
+        self.checkModule(MyModule(torch.nn.ReLU()), (torch.randn(20),))
+        self.checkModule(MyModule(None), (torch.randn(20),))
+
     def test_repeated_error_stack(self):
         def d(x):
             return "a" - 2
