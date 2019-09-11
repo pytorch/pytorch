@@ -58,6 +58,7 @@ std::shared_ptr<Operator> matchBuiltinOp(
 }
 
 void finishAcceptUserRRef(const Message& message) {
+  RRefContext::handleException(message);
   RemoteRet rr = RemoteRet::fromMessage(message);
   auto& ctx = RRefContext::getInstance();
   TORCH_INTERNAL_ASSERT(ctx->getWorkerId() == rr.owner_,

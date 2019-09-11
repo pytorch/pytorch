@@ -46,7 +46,7 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
         return response;
       }
       case MessageType::PYTHON_CALL: {
-        auto payload = PythonRpcHandler::generatePythonUDFResult(request);
+        auto payload = PythonRpcHandler::generatePythonUDFResult(request, from.id_);
         return Message(
             std::move(payload),
             std::vector<torch::Tensor>(),
