@@ -2,10 +2,7 @@
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <cuda.h>
-
-#ifndef __HIP_PLATFORM_HCC__
 #include <nvrtc.h>
-#endif
 
 namespace at { namespace cuda {
 
@@ -64,14 +61,22 @@ namespace at { namespace cuda {
 // list above.
 //
 // HIP doesn't have
-//   nvrtc*
 //   cuOccupancyMaxActiveBlocksPerMultiprocessor
 //   cuGetErrorString  (maps to non-functional hipGetErrorString___)
 
 #define AT_FORALL_NVRTC(_)                       \
+  _(nvrtcVersion)                                \
+  _(nvrtcCreateProgram)                          \
+  _(nvrtcDestroyProgram)                         \
+  _(nvrtcGetPTXSize)                             \
+  _(nvrtcGetPTX)                                 \
   _(cuModuleLoadData)                            \
   _(cuModuleGetFunction)                         \
+  _(nvrtcGetErrorString)                         \
+  _(nvrtcGetProgramLogSize)                      \
+  _(nvrtcGetProgramLog)                          \
   _(cuLaunchKernel)                              \
+  _(nvrtcCompileProgram)                         \
   _(cuCtxGetCurrent)                             \
   _(cuModuleUnload)                              \
   _(cuDevicePrimaryCtxGetState)

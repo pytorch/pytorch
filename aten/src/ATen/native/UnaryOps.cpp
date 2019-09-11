@@ -16,9 +16,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 #include <algorithm>
 #include <cmath>
@@ -44,6 +42,9 @@ static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub
   return result;
 }
 
+// out_impl passed into unary_op_impl and unary_op_impl_  must go through at:: device dispatch
+// otherwise it won't dispatch to out-of-source devices like XLA.
+// For example it must be at::bitwise_not_out instead of bitwise_not_out(which is at::native!).
 template <typename OutImpl>
 static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl) {
   Tensor result = at::empty({0}, self.options());
@@ -56,16 +57,20 @@ static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
 }
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
-Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, bitwise_not_out); }
-Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, bitwise_not_out); }
+Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
+Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, at::bitwise_not_out); }
 
 Tensor& ceil_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, ceil_stub); }
-Tensor ceil(const Tensor& self) { return unary_op_impl(self, ceil_out); }
-Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, ceil_out); }
+Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
+Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 
 Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, erfinv_stub); }
-Tensor erfinv(const Tensor& self) { return unary_op_impl(self, erfinv_out); }
-Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, erfinv_out); }
+Tensor erfinv(const Tensor& self) { return unary_op_impl(self, at::erfinv_out); }
+Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
+
+Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, digamma_stub); }
+Tensor digamma(const Tensor& self) { return unary_op_impl(self, digamma_out); }
+Tensor& digamma_(Tensor& self) { return unary_op_impl_(self, digamma_out); }
 
 Tensor& neg_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
@@ -73,8 +78,8 @@ Tensor& neg_out(Tensor& result, const Tensor& self) {
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
   return unary_op_impl_out(result, self, neg_stub);
 }
-Tensor neg(const Tensor& self) { return unary_op_impl(self, neg_out); }
-Tensor& neg_(Tensor& self) { return unary_op_impl_(self, neg_out); }
+Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
+Tensor& neg_(Tensor& self) { return unary_op_impl_(self, at::neg_out); }
 
 Tensor logical_not(const Tensor& self) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
@@ -115,15 +120,6 @@ Tensor& _clamp__cpu(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   return clamp_out(self, self, min, max);
 }
 
-//used internally and not exposed by API
-Tensor& trigamma_out(Tensor& result, const Tensor& self) {
-  checkBackend("trigamma", result, Backend::CPU);
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_mem_overlap=*/true);
-  trigamma_stub(iter.device_type(), iter);
-  return result;
-}
-
 Tensor polygamma(int64_t n, const Tensor& self) {
   Tensor result = at::empty({0}, self.options());
   at::polygamma_out(result, n, self);
@@ -133,7 +129,6 @@ Tensor& polygamma_(Tensor& self, int64_t n) {
   return at::polygamma_out(self, n, self);
 }
 Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
-  checkBackend("polygamma", result, Backend::CPU);
   auto iter = TensorIterator::unary_op(result, self,
     /*check_mem_overlap=*/true);
   polygamma_stub(iter.device_type(), iter, n);
@@ -265,7 +260,6 @@ IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
 IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
-IMPLEMENT_UNARY_OP_VEC(digamma)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC(exp)
@@ -323,7 +317,6 @@ DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
-DEFINE_DISPATCH(trigamma_stub);
 DEFINE_DISPATCH(trunc_stub);
 }
 } // namespace at

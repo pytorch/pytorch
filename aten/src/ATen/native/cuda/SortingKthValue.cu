@@ -40,7 +40,7 @@ __global__ void gatherKthValue(
     cuda::detail::TensorInfo<int64_t, index_t> indices) {
   // Indices are limited to integer fp precision, so counts can fit in
   // int32, regardless of index_t
-  __shared__ int smem[WARP_SIZE]; // one per each warp, up to warp limit
+  __shared__ int smem[C10_WARP_SIZE]; // one per each warp, up to warp limit
 
   index_t slice = getLinearBlockId<index_t>();
   if (slice >= numInputSlices) {
@@ -117,7 +117,7 @@ struct KthValueLauncher {
     }
 
     dim3 block(
-        std::min(THCRoundUp(slice_size, (int64_t)WARP_SIZE), (int64_t)1024));
+        std::min(THCRoundUp(slice_size, (int64_t)C10_WARP_SIZE), (int64_t)1024));
     auto stream = at::cuda::getCurrentCUDAStream();
     gatherKthValue<scalar_t, index_t, all_dims><<<grid, block, 0, stream>>>(
         self_info,
