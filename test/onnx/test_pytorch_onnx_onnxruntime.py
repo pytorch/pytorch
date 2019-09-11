@@ -765,6 +765,21 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    def test_rsqrt(self):
+        class RsqrtModel(torch.nn.Module):
+            def forward(self, x):
+                return x.rsqrt()
+
+        x = torch.randn(4, 2, 3, requires_grad=True).to(dtype=torch.float64)
+        self.run_test(RsqrtModel(), x)
+
+    def test_rsqrt_zeros(self):
+        class RsqrtModel(torch.nn.Module):
+            def forward(self, x):
+                return x.rsqrt()
+        x = torch.zeros(4, 2, 3, requires_grad=True).to(dtype=torch.float64)
+        self.run_test(RsqrtModel(), x)
+
     # TODO: enable opset 11 test once ORT support for unique is in
     @skipIfUnsupportedOpsetVersion([11])
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -796,6 +811,22 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.cumsum(input, dim=0)
         x = torch.randn(2, 3, 4)
         model = CumSum()
+        self.run_test(model, x)
+
+    def test_log(self):
+        class Log(torch.nn.Module):
+            def forward(self, input):
+                return torch.log(input)
+        x = torch.rand(2, 3, 4)
+        model = Log()
+        self.run_test(model, x)
+
+    def test_log1p(self):
+        class Log1p(torch.nn.Module):
+            def forward(self, input):
+                return torch.log1p(input)
+        x = torch.rand(2, 3, 4)
+        model = Log1p()
         self.run_test(model, x)
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):

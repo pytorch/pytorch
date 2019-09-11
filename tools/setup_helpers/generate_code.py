@@ -23,7 +23,8 @@ def generate_code(ninja_global=None,
                   declarations_path=None,
                   nn_path=None,
                   install_dir=None,
-                  subset=None):
+                  subset=None,
+                  disable_autograd=False):
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
@@ -41,7 +42,12 @@ def generate_code(ninja_global=None,
         gen_autograd_python(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, 'tools/autograd')
 
     if subset == "libtorch" or not subset:
-        gen_autograd(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, 'tools/autograd')
+        gen_autograd(
+            declarations_path or DECLARATIONS_PATH,
+            autograd_gen_dir,
+            'tools/autograd',
+            disable_autograd=disable_autograd,
+        )
         gen_jit_dispatch(declarations_path or DECLARATIONS_PATH, jit_gen_dir, 'tools/jit/templates')
 
 
@@ -55,6 +61,12 @@ def main():
         '--subset',
         help='Subset of source files to generate. Can be "libtorch" or "pybindings". Generates both when omitted.'
     )
+    parser.add_argument(
+        '--disable-autograd',
+        default=False,
+        action='store_true',
+        help='It can skip generating autograd related code when the flag is set',
+    )
     options = parser.parse_args()
     generate_code(
         options.ninja_global,
@@ -62,6 +74,7 @@ def main():
         options.nn_path,
         options.install_dir,
         options.subset,
+        options.disable_autograd,
     )
 
 
