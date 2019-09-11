@@ -7,10 +7,11 @@
 #include <c10/util/order_preserving_flat_hash_map.h>
 #include <gtest/gtest.h>
 #include <ATen/Tensor.h>
+#include <ATen/test/test_assert.h>
 
 namespace {
 
-#define ASSERT_EQUAL(t1, t2) ASSERT_TRUE(t1 == t2);
+#define ASSERT_EQUAL_PRIM(t1, t2) ASSERT_TRUE(t1 == t2);
 
 using dict_int_int = ska_ordered::order_preserving_flat_hash_map<int64_t, int64_t>;
 
@@ -176,12 +177,12 @@ TEST(OrderedPreservingDictTest, test_range_insert) {
 
     TORCH_INTERNAL_ASSERT(map.size(), 987);
 
-    ASSERT_EQUAL(map.at(-1), 0);
+    ASSERT_EQUAL_PRIM(map.at(-1), 0);
 
-    ASSERT_EQUAL(map.at(-2), 0);
+    ASSERT_EQUAL_PRIM(map.at(-2), 0);
 
     for(int i = 10, j = 2; i < nb_values - 5; i++, j++) {
-        ASSERT_EQUAL(map.at(i), i+1);
+        ASSERT_EQUAL_PRIM(map.at(i), i+1);
     }
 }
 
@@ -215,12 +216,12 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
     auto it_last = std::next(map.begin(), 220);
 
     auto it = map.erase(it_first, it_last);
-    ASSERT_EQUAL(std::distance(it, map.end()), 780);
-    ASSERT_EQUAL(map.size(), 790);
-    ASSERT_EQUAL(std::distance(map.begin(), map.end()), 790);
+    ASSERT_EQUAL_PRIM(std::distance(it, map.end()), 780);
+    ASSERT_EQUAL_PRIM(map.size(), 790);
+    ASSERT_EQUAL_PRIM(std::distance(map.begin(), map.end()), 790);
 
     for(auto& val: map) {
-        ASSERT_EQUAL(map.count(val.first), 1);
+        ASSERT_EQUAL_PRIM(map.count(val.first), 1);
     }
 
     // Check order
@@ -233,6 +234,184 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
         TORCH_INTERNAL_ASSERT(*it == exp_it);
         ++it;
     }
+}
+
+TEST(OrderedPreservingDictTest, test_move_constructor_empty) {
+    ska_ordered::order_preserving_flat_hash_map<std::string, int64_t> map(0);
+    ska_ordered::order_preserving_flat_hash_map<std::string, int64_t> map_move(std::move(map));
+
+    TORCH_INTERNAL_ASSERT(map.empty());
+    TORCH_INTERNAL_ASSERT(map_move.empty());
+
+    TORCH_INTERNAL_ASSERT(map.find("") == map.end());
+    TORCH_INTERNAL_ASSERT(map_move.find("") == map_move.end());
+}
+
+TEST(OrderedPreservingDictTest, test_move_operator_empty) {
+    ska_ordered::order_preserving_flat_hash_map<std::string, int64_t> map(0);
+    ska_ordered::order_preserving_flat_hash_map<std::string, int64_t> map_move;
+    map_move = (std::move(map));
+
+    TORCH_INTERNAL_ASSERT(map.empty());
+    TORCH_INTERNAL_ASSERT(map_move.empty());
+
+    TORCH_INTERNAL_ASSERT(map.find("") == map.end());
+    TORCH_INTERNAL_ASSERT(map_move.find("") == map_move.end());
+}
+
+TEST(OrderedPreservingDictTest, test_reassign_moved_object_move_constructor) {
+    using HMap = ska_ordered::order_preserving_flat_hash_map<std::string, std::string>;
+
+    HMap map = {{"Key1", "Value1"}, {"Key2", "Value2"}, {"Key3", "Value3"}};
+    HMap map_move(std::move(map));
+
+    ASSERT_EQUAL_PRIM(map_move.size(), 3);
+    ASSERT_EQUAL_PRIM(map.size(), 0);
+
+    map = {{"Key4", "Value4"}, {"Key5", "Value5"}};
+    TORCH_INTERNAL_ASSERT(map == (HMap({{"Key4", "Value4"}, {"Key5", "Value5"}})));
+}
+
+TEST(OrderedPreservingDictTest, test_reassign_moved_object_move_operator) {
+    using HMap = ska_ordered::order_preserving_flat_hash_map<std::string, std::string>;
+
+    HMap map = {{"Key1", "Value1"}, {"Key2", "Value2"}, {"Key3", "Value3"}};
+    HMap map_move = std::move(map);
+
+    ASSERT_EQUAL_PRIM(map_move.size(), 3);
+    ASSERT_EQUAL_PRIM(map.size(), 0);
+
+    map = {{"Key4", "Value4"}, {"Key5", "Value5"}};
+    TORCH_INTERNAL_ASSERT(map == (HMap({{"Key4", "Value4"}, {"Key5", "Value5"}})));
+}
+
+TEST(OrderedPreservingDictTest, test_copy_constructor_and_operator) {
+    using HMap = ska_ordered::order_preserving_flat_hash_map<std::string, std::string>;
+
+
+    const std::size_t nb_values = 100;
+    HMap map;
+    for (size_t i = 0; i < nb_values; ++i) {
+      map[c10::guts::to_string(i)] = c10::guts::to_string(i);
+    }
+
+
+    HMap map_copy = map;
+    HMap map_copy2(map);
+    HMap map_copy3;
+    map_copy3[c10::guts::to_string(0)] = c10::guts::to_string(0);
+
+    map_copy3 = map;
+
+    TORCH_INTERNAL_ASSERT(map == map_copy);
+    map.clear();
+
+    TORCH_INTERNAL_ASSERT(map_copy == map_copy2);
+    TORCH_INTERNAL_ASSERT(map_copy == map_copy3);
+}
+
+TEST(OrderedPreservingDictTest, test_copy_constructor_empty) {
+    ska_ordered::order_preserving_flat_hash_map<std::string, int> map(0);
+    ska_ordered::order_preserving_flat_hash_map<std::string, int> map_copy(map);
+
+    TORCH_INTERNAL_ASSERT(map.empty());
+    TORCH_INTERNAL_ASSERT(map_copy.empty());
+
+    TORCH_INTERNAL_ASSERT(map.find("") == map.end());
+    TORCH_INTERNAL_ASSERT(map_copy.find("") == map_copy.end());
+}
+
+TEST(OrderedPreservingDictTest, test_copy_operator_empty) {
+    ska_ordered::order_preserving_flat_hash_map<std::string, int> map(0);
+    ska_ordered::order_preserving_flat_hash_map<std::string, int> map_copy(16);
+    map_copy = map;
+
+    TORCH_INTERNAL_ASSERT(map.empty());
+    TORCH_INTERNAL_ASSERT(map_copy.empty());
+
+    TORCH_INTERNAL_ASSERT(map.find("") == map.end());
+    TORCH_INTERNAL_ASSERT(map_copy.find("") == map_copy.end());
+}
+
+
+/**
+ * at
+ */
+TEST(OrderedPreservingDictTest, test_at) {
+    // insert x values, use at for known and unknown values.
+    const ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map = {{0, 10}, {-2, 20}};
+
+    ASSERT_EQUAL_PRIM(map.at(0), 10);
+    ASSERT_EQUAL_PRIM(map.at(-2), 20);
+    ASSERT_THROWS(map.at(1));
+}
+
+
+/**
+ * equal_range
+ */
+TEST(OrderedPreservingDictTest, test_equal_range) {
+    ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map = {{0, 10}, {-2, 20}};
+
+    auto it_pair = map.equal_range(0);
+    ASSERT_EQUAL_PRIM(std::distance(it_pair.first, it_pair.second), 1);
+    ASSERT_EQUAL_PRIM(it_pair.first->second, 10);
+
+    it_pair = map.equal_range(1);
+    TORCH_INTERNAL_ASSERT(it_pair.first == it_pair.second);
+    TORCH_INTERNAL_ASSERT(it_pair.first == map.end());
+}
+
+
+/**
+ * operator[]
+ */
+TEST(OrderedPreservingDictTest, test_access_operator) {
+    // insert x values, use at for known and unknown values.
+    ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map = {{0, 10}, {-2, 20}};
+
+    ASSERT_EQUAL_PRIM(map[0], 10);
+    ASSERT_EQUAL_PRIM(map[-2], 20);
+    ASSERT_EQUAL_PRIM(map[2], std::int64_t());
+
+    ASSERT_EQUAL_PRIM(map.size(), 3);
+}
+
+/**
+ * swap
+ */
+TEST(OrderedPreservingDictTest, test_swap) {
+    ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map = {{1, 10}, {8, 80}, {3, 30}};
+    ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map2 = {{4, 40}, {5, 50}};
+
+    using std::swap;
+    swap(map, map2);
+
+    TORCH_INTERNAL_ASSERT(map == (ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>{{4, 40}, {5, 50}}));
+    TORCH_INTERNAL_ASSERT(map2 == (ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>{{1, 10}, {8, 80}, {3, 30}}));
+
+    map.insert({6, 60});
+    map2.insert({4, 40});
+
+    TORCH_INTERNAL_ASSERT(map == (ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>{{4, 40}, {5, 50}, {6, 60}}));
+    TORCH_INTERNAL_ASSERT(map2 == (ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>{{1, 10}, {8, 80}, {3, 30}, {4, 40}}));
+}
+
+TEST(OrderedPreservingDictTest, test_swap_empty) {
+    ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map = {{1, 10}, {8, 80}, {3, 30}};
+    ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map2;
+
+    using std::swap;
+    swap(map, map2);
+
+    TORCH_INTERNAL_ASSERT(map == (ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>{}));
+    TORCH_INTERNAL_ASSERT(map2 == (ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>{{1, 10}, {8, 80}, {3, 30}}));
+
+    map.insert({6, 60});
+    map2.insert({4, 40});
+
+    TORCH_INTERNAL_ASSERT(map == (ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>{{6, 60}}));
+    TORCH_INTERNAL_ASSERT(map2 == (ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>{{1, 10}, {8, 80}, {3, 30}, {4, 40}}));
 }
 
 

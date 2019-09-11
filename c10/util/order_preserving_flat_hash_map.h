@@ -878,6 +878,8 @@ private:
         swap(num_elements, other.num_elements);
         swap(max_lookups, other.max_lookups);
         swap(_max_load_factor, other._max_load_factor);
+        swap(sentinel, other.sentinel);
+        swap(sentinel_val, other.sentinel_val);
     }
 
     void reset_list() {
