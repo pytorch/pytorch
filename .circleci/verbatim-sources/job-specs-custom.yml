@@ -465,15 +465,14 @@
           command: |
             set -e
             WORKSPACE=/Users/distiller/workspace
+            mkdir -p ${WORKSPACE}/ios
+            cd ${WORKSPACE}/ios
             IOS_ARCH=${IOS_ARCH}
-            cd ${WORKSPACE}
             echo "PWD: `pwd`"
             echo "IOS_ARCH: ${IOS_ARCH}"
             FILENAME=ios_${IOS_ARCH}.h
             touch ${FILENAME}
             echo "hello world" > ${FILENAME}
-            mkdir -p /Users/distiller/workspace/ios
-            mv ${FILENAME} ~workspace/ios/${FILENAME}
             
             
       # - run:
