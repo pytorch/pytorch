@@ -481,9 +481,9 @@ class Tensor(torch._C._TensorBase):
 
         return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=1)
 
-    def as_named(self, *names):
-        names = _resolve_glob(names, self.names, 'as_named')
-        return super(Tensor, self).as_named(names)
+    def refine_names(self, *names):
+        names = _resolve_glob(names, self.names, 'refine_names')
+        return super(Tensor, self).refine_names(names)
 
     def names_(self, *names, **rename_map):
         # Note [names_ / renamed API]

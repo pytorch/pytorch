@@ -106,11 +106,11 @@ inline Tensor Tensor::align_to(DimnameList names) const {
 }
 #endif
 #ifdef BUILD_NAMEDTENSOR
-inline Tensor Tensor::as_named(DimnameList names) const {
+inline Tensor Tensor::refine_names(DimnameList names) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::as_named(const_cast<Tensor&>(*this), names);
+    return TypeDefault::refine_names(const_cast<Tensor&>(*this), names);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::as_named(Tensor(a) self, DimnameList names) -> Tensor(a)");
+    static auto table = globalATenDispatch().getOpTable("aten::refine_names(Tensor(a) self, DimnameList names) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, DimnameList)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), names);
 #endif
 }
