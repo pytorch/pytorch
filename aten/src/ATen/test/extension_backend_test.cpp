@@ -29,8 +29,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
       .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(
         "aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
         TensorTypeId::MSNPUTensorId)
-      .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-    );
+      .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);
   ASSERT_EQ(a.device().index(), 1);
@@ -48,8 +47,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
       .impl_unboxedOnlyKernel<decltype(add_override), &add_override>(
         "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
         TensorTypeId::MSNPUTensorId)
-      .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-    );
+      .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
   add(a, b);
   ASSERT_EQ(test_int, 2);
 
@@ -59,9 +57,11 @@ TEST(BackendExtensionTest, TestRegisterOp) {
 
   // Attempt to register on a schema that has already has a function
   EXPECT_ANY_THROW(
-    globalATenDispatch().registerOp(
-      Backend::MSNPU,
-      "aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-      &empty_override)
+    torch::RegisterOperators()
+      .op("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor", torch::RegisterOperators::options()
+        .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(
+          "aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+          TensorTypeId::MSNPUTensorId)
+        .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   );
 }
