@@ -336,12 +336,12 @@ def ignore(drop=False, **kwargs):
     # for backwards compat
     drop_on_export = kwargs.pop("drop_on_export", None)
     if drop_on_export:
-        warnings.warn("ignore(drop_on_export=True) has been deprecated. TorchScript will now drop the drop "
+        warnings.warn("ignore(drop_on_export=True) has been deprecated. TorchScript will now drop the function "
                       "call on compilation. Use torch.jit.unused now. {}", category=DeprecationWarning)
 
         drop = drop_on_export
     elif drop:
-        warnings.warn("ignore(True) has been deprecated. TorchScript will now drop the drop "
+        warnings.warn("ignore(True) has been deprecated. TorchScript will now drop the function "
                       "call on compilation. Use torch.jit.unused now. {}", category=DeprecationWarning)
 
     def decorator(fn):

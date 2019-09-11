@@ -534,7 +534,6 @@ custom_half_precision = {
     'dot': 1e-2,
     'erf': 1e-3,
     'erfc': 1e-3,
-    'erfinv': 1e-3,
     'exp': 1e-2,
     'expm1': 1e-2,
     'fill': 1e-3,
@@ -591,7 +590,6 @@ simple_pointwise_float = [
     'cosh',
     'erf',
     'erfc',
-    'erfinv',
     'exp',
     'expm1',
     'reciprocal',
@@ -1072,7 +1070,8 @@ class TestCuda(TestCase):
 
             self.assertEqual(x * y, 4.5)
             self.assertEqual(y * x, 4.5)
-            with self.assertRaisesRegex(RuntimeError, "doesn't match the desired"):
+
+            with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
                 y *= x
             x *= y
             self.assertEqual(x, 4.5)
@@ -2156,12 +2155,12 @@ class TestCuda(TestCase):
         x = torch.randn(20, dtype=torch.float32, device='cuda:0')
         y = torch.randn(1, dtype=torch.float32)
         with self.assertRaisesRegex(RuntimeError,
-                                    'expected device cpu and dtype Float but got device cuda:0 and dtype Float'):
+                                    'expected device cpu but got device cuda:0'):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
         # makeing sure half to float promotion is also properly working.
         x = x.half()
         with self.assertRaisesRegex(RuntimeError,
-                                    'expected device cpu and dtype Float but got device cuda:0 and dtype Half'):
+                                    'expected dtype Float but got dtype Half'):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
 
     @skipIfRocm
