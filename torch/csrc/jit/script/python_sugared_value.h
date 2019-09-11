@@ -104,6 +104,54 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
   Value* the_list_;
 };
 
+struct VISIBILITY_HIDDEN ConstantTupleValue : public SugaredValue {
+  explicit ConstantTupleValue(
+      std::vector<std::shared_ptr<SugaredValue>> tup,
+      bool callable = false)
+      : tup_(tup){};
+
+  std::vector<std::shared_ptr<SugaredValue>> asTuple(
+      const SourceRange& loc,
+      Function& m,
+      const c10::optional<size_t>& size_hint = {}) override {
+    return tup_;
+  };
+
+  std::string kind() const override {
+    return "constant tuple";
+  }
+
+  std::vector<std::shared_ptr<SugaredValue>> tup_;
+  bool callable_;
+};
+
+struct VISIBILITY_HIDDEN ConstantTupleMethod : public SugaredValue {
+  explicit ConstantTupleMethod(
+      std::vector<std::shared_ptr<SugaredValue>> tup,
+      const std::string& name)
+      : tup_(tup), name_(name){};
+
+  std::string kind() const override {
+    return name_;
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& f,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    if (inputs.size() || attributes.size()) {
+      throw ErrorReport(loc)
+          << name_ << " method does not accept any arguments";
+    }
+    return std::make_shared<ConstantTupleValue>(tup_);
+  }
+
+  std::vector<std::shared_ptr<SugaredValue>> tup_;
+  const std::string name_;
+};
+
 struct VISIBILITY_HIDDEN OverloadedMethodValue : public SugaredValue {
   OverloadedMethodValue(Value* module, std::vector<std::string> method_names)
       : module_(module), method_names_(std::move(method_names)) {}
@@ -194,6 +242,12 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   Value* self_;
   Module module_;
   py::object py_module_;
+
+  std::vector<std::shared_ptr<SugaredValue>> desugarModuleContainer(
+      bool get_keys,
+      bool get_values,
+      const SourceRange& loc,
+      Function& m);
 };
 
 struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
