@@ -159,7 +159,7 @@ WRAPPER_REGISTRATION = CodeTemplate("""\
 
 C10_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op("${schema_string}", torch::RegisterOperators::options()
-  .impl_unboxedAutogradKernel<${return_type} (${formal_types})>(&VariableType::${api_name})
+  .impl_unboxedAutogradKernel<${return_type} (${formal_types})>("${schema_string}", &VariableType::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 

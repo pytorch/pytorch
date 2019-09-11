@@ -10,6 +10,8 @@
 #include <ATen/core/op_registration/kernel_function.h>
 #include <ATen/core/op_registration/kernel_lambda.h>
 #include <ATen/core/op_registration/infer_schema.h>
+#include <ATen/core/OpsAlreadyMovedToC10.h>
+#include <ATen/core/ATenDispatch.h>
 
 namespace c10 {
 
@@ -195,21 +197,33 @@ public:
     // TODO Remove impl_unboxedOnlyKernel once all of aten can generate boxed kernels
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
-    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyKernel(TensorTypeId dispatch_key) && {
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyKernel(const char* schema_string, TensorTypeId dispatch_key) && {
       static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(dispatch_key);
+      if (op_is_still_on_aten_dispatcher_(schema_string)) {
+        // TODO Remove this once all ops are moved to c10. Also remove schema_string argument from this function.
+        at::globalATenDispatch().registerOp<FuncType>(tensorTypeIdToBackend(dispatch_key), schema_string, kernel_func);
+        return std::move(*this);
+      } else {
+        return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(dispatch_key);
+      }
     }
 
     // TODO Remove impl_unboxedOnlyCatchAllKernel once all of aten can generate boxed kernels
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
-    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyCatchAllKernel() && {
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyCatchAllKernel(const char* schema_string) && {
       static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
+      if (op_is_still_on_aten_dispatcher_(schema_string)) {
+        // TODO Remove this once all ops are moved to c10. Also remove schema_string argument from this function.
+        at::globalATenDispatch().registerOp<FuncType>(at::Backend::Undefined, schema_string, kernel_func);
+        return std::move(*this);
+      } else {
+        return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
+      }
     }
 
     /**
@@ -281,17 +295,55 @@ public:
     }
 
     template<class FuncType>
-    Options&& impl_unboxedAutogradKernel(FuncType* kernel) && {
+    Options&& impl_unboxedAutogradKernel(const char* schema_string, FuncType* kernel) && {
       static_assert(guts::is_function_type<FuncType>::value, "Wrong argument type for impl_unboxedAutogradKernel");
 
       // TODO Infer and check schema
       TORCH_CHECK(kernel != nullptr, "Kernel function pointer cannot be nullptr");
       TORCH_CHECK(unboxedAutogradKernel_ == nullptr, "You can only call impl_unboxedAutogradKernel() once per operator registration.");
-      unboxedAutogradKernel_ = reinterpret_cast<void*>(kernel);
-      return std::move(*this);
+      if (op_is_still_on_aten_dispatcher_(schema_string)) {
+        // TODO Remove this once all ops are moved to c10. Also remove schema_string argument from this function.
+        at::globalATenDispatch().registerVariableOp<FuncType>(schema_string, kernel);
+        return std::move(*this);
+      } else {
+        unboxedAutogradKernel_ = reinterpret_cast<void*>(kernel);
+        return std::move(*this);
+      }
     }
 
   private:
+    static c10::OperatorName parse_operator_name_(const char* schema) {
+      // TODO Remove this function once all aten ops are on c10
+      // We can't depend on the jit function schema parser here, but parsing
+      // the op name is trivial. Let's just do it by hand.
+      std::string schema_str(schema);
+      size_t name_end_pos = schema_str.find_first_of(".(");
+      TORCH_CHECK(name_end_pos != std::string::npos, "Operator schema must contain a '(' character to start the argument list");
+      size_t overload_name_end_pos = name_end_pos + 1;
+      if (schema_str[name_end_pos] == '.') {
+        overload_name_end_pos = schema_str.find_first_of('(', name_end_pos);
+        TORCH_INTERNAL_ASSERT(schema_str[overload_name_end_pos] == '(');
+      }
+      return c10::OperatorName{
+        schema_str.substr(0, name_end_pos),
+        schema_str.substr(name_end_pos + 1, overload_name_end_pos - name_end_pos - 1)
+      };
+    }
+
+    static bool op_is_still_on_aten_dispatcher_(const char* schema_string) {
+      // TODO Remove this function once all aten ops are on c10
+      const auto op_name = parse_operator_name_(schema_string);
+      if (at::aten_ops_already_moved_to_c10().count(op_name) != 0) {
+        // For now, even if an op is in aten_ops_already_moved_to_c10, it is still
+        // not actually moved to c10. It is still on globalATenDispatch.
+        // TODO This is be removed in a diff stacked on top, then this
+        // function will only return true iff the op is in
+        // aten_ops_not_moved_to_c10_yet
+        return true;
+      }
+      return at::aten_ops_not_moved_to_c10_yet().count(op_name) != 0;
+    }
+
     Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator, void* unboxed_kernel_func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
       KernelRegistrationConfig config;
       config.dispatch_key = dispatch_key;
