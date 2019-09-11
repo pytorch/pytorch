@@ -713,6 +713,14 @@ class TestOperators(TestCase):
         inputs = (scores, bbox_deltas, im_info, anchors)
         self.assertONNX(model, inputs)
 
+    def test_dyn_arange(self):
+        class TestModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.arange(input.shape[0])
+
+        input = torch.randn(5, 3, 2)
+        self.assertONNX(TestModel(), input)
+
     def test_layer_norm_aten(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
