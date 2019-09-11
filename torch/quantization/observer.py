@@ -6,7 +6,7 @@ from abc import ABCMeta, abstractmethod
 from functools import partial
 import warnings
 
-from torch._jit_internal import Optional
+from torch._jit_internal import Optional, List
 
 ABC = ABCMeta(str('ABC'), (object,), {})  # compatible with Python 2 *and* 3:
 
@@ -144,6 +144,9 @@ class TensorObserver(ObserverBase):
     r"""
     The module is mainly for debug and records the tensor values during runtime
     """
+    __annotations__ = {
+        "tensor_val": List[Optional[torch.Tensor]],
+    }
     def __init__(self, **kwargs):
         super(TensorObserver, self).__init__(**kwargs)
         self.tensor_val = []
@@ -152,8 +155,13 @@ class TensorObserver(ObserverBase):
         self.tensor_val.append(x.clone())
         return x
 
+    @torch.jit.export
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for TensorObserver")
+
+    @torch.jit.export
+    def get_tensor_value(self):
+        return self.tensor_val
 
 
 def observer(observer_cls, **kwargs):

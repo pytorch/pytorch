@@ -10,7 +10,7 @@ default_qconfig = QConfig(default_weight_observer(),
                           default_observer())
 
 default_debug_qconfig = QConfig(weight=default_weight_observer(),
-                          activation=default_debug_observer())
+                                activation=default_debug_observer())
 
 QConfig_dynamic = namedtuple('QConfig_dynamic', ['weight'])
 
