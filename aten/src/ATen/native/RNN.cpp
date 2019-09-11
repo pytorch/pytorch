@@ -282,14 +282,21 @@ static std::vector<QuantizedCellParamsDynamic> gather_quantized_params_dynamic(
   TORCH_CHECK(
       params.size() % 2 == 0,
       "got an incorrect number of quantized RNN parameters");
+  // PackedLinearWeight is only defined when USE_FBGEMM is defined
+#ifdef USE_FBGEMM
   for (size_t i = 0; i < params.size(); i += 2) {
-    auto& packed_struct_ih = cpp_custom_type_hack::cast<PackedLinearWeight>(params[i]);
-    auto& packed_struct_hh = cpp_custom_type_hack::cast<PackedLinearWeight>(params[i + 1]);
+    auto& packed_struct_ih =
+        cpp_custom_type_hack::cast<PackedLinearWeight>(params[i]);
+    auto& packed_struct_hh =
+        cpp_custom_type_hack::cast<PackedLinearWeight>(params[i + 1]);
     auto bias_ih = packed_struct_ih.bias.value_or(undefined);
     auto bias_hh = packed_struct_hh.bias.value_or(undefined);
     result.emplace_back(params[i], params[i + 1], bias_ih, bias_hh);
   }
   return result;
+#else // USE_FBGEMM
+  TORCH_INTERNAL_ASSERT(false, "Tried to use quantized RNN wihtout FBGEMM!")
+#endif // USE_FBGEMM
 }
 
 static std::vector<QuantizedCellParamsFP16> gather_quantized_params_fp16(
