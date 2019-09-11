@@ -778,12 +778,12 @@ class QuantizationDebugTest(QuantizationTestCase):
         test_only_eval_fn(model, self.calib_data)
         test_only_eval_fn(model, self.calib_data)
         tensor_dict = {}
-        dump_tensor(model, tensor_dict, "$")
+        dump_tensor(model, tensor_dict)
 
         # we can torch,save() and torch_load() in bento for further analysis
-        self.assertTrue('$.fc1.module.activation' in tensor_dict.keys(),
+        self.assertTrue('fc1.module.activation' in tensor_dict.keys(),
                         'activation is not recorded in the dict')
-        self.assertEqual(len(tensor_dict['$.fc1.module.activation']), 2 * len(self.calib_data))
+        self.assertEqual(len(tensor_dict['fc1.module.activation']), 2 * len(self.calib_data))
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
