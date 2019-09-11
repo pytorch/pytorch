@@ -127,7 +127,6 @@ Node* insertObserver(
     observer_module = std::get<0>(qconfig);
   }
   std::string observer_name = "observer_for_" + v->debugName();
-  script::Module observer = observer_module.clone();
   // Temporary workaround to skip inserting duplicate modules,
   // full support will come in next PR
   for (script::Slot s: module.get_module_slots()) {
@@ -135,6 +134,7 @@ Node* insertObserver(
       return nullptr;
     }
   }
+  script::Module observer = observer_module.clone();
   module.register_module(observer_name, observer);
   // Get handle of observer module
   Node* observer_instance = g->create(c10::prim::GetAttr);

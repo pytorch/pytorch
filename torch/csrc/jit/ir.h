@@ -1293,10 +1293,6 @@ struct ProfileOp : public Node {
 struct TORCH_API PythonOp : public Node {
   using Node::Node;
 
-  // should this Python function be skipped over when exported (i.e. for
-  // debugging functions that only run in Python)
-  bool ignore_on_export = false;
-
   virtual std::string name() const = 0;
   virtual void writeScalars(std::ostream& out) const = 0;
   void cloneFrom(Node* other_) override = 0;

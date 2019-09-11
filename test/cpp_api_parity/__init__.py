@@ -12,7 +12,6 @@ TorchNNTestParams = namedtuple(
         'has_parity',
         'cpp_sources',
         'num_attrs_recursive',
-        'options_args',
         'device',
     ]
 )
@@ -26,11 +25,10 @@ TorchNNModuleMetadata = namedtuple(
     [
         'cpp_default_constructor_args',
         'num_attrs_recursive',
-        'options_args',
         'cpp_sources',
     ]
 )
-TorchNNModuleMetadata.__new__.__defaults__ = (None, None, [], '')
+TorchNNModuleMetadata.__new__.__defaults__ = (None, None, '')
 
 '''
 This function expects the parity tracker Markdown file to have the following format:

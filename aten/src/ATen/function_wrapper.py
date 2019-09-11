@@ -113,21 +113,14 @@ ${return_type} ${Type}::${api_name}(${type_method_formals}) {
 """)
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-.registerOp<${return_type} (${formals_types})>(Backend::Undefined, "${schema_string}", &TypeDefault::${api_name})
-""")
-BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-.registerOp<${return_type} (${formals_types})>(Backend::${Backend}, "${schema_string}", &${Type}::${api_name})
-""")
-
-C10_DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op("${schema_string}", torch::RegisterOperators::options()
-  .impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
+  .impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>("${schema_string}")
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
-C10_BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
+BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op("${schema_string}", torch::RegisterOperators::options()
   .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(
-    TensorTypeId::${Backend}TensorId)
+    "${schema_string}", TensorTypeId::${Backend}TensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
@@ -141,13 +134,14 @@ TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
 # add non-virtual declaration to Tensor.cpp
+# TODO: This will need to be adjusted for multiple dispatch
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(tensorTypeIdToBackend(type_id()), is_variable())(${method_actuals});
+    return table->getOp<${return_type} (${formals_types})>(type_set(), is_variable())(${method_actuals});
 #endif
 }
 """)
@@ -160,7 +154,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<${formals_types_with_return}>(op, ${method_actuals});
     } else {
-        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<${formals_types_with_return}>(${method_actuals});
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<${formals_types_with_return}>(${method_actuals});
     }
 #endif
 }
@@ -180,7 +174,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     ${static_dispatch_function_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_backend}, ${inferred_is_variable})(${native_actuals});
+    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set}, ${inferred_is_variable})(${native_actuals});
 #endif
 }
 """)
@@ -196,7 +190,7 @@ static inline ${return_type} ${api_name}(${formals}) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<${formals_types_with_return}>(
             op ${native_actuals_with_comma_prefix});
     } else {
-        return c10::Dispatcher::singleton().lookup(op, backendToTensorTypeId(${inferred_backend}))
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(${inferred_type_set}))
             .callUnboxed<${formals_types_with_return}>(${native_actuals});
     }
 #endif
@@ -209,10 +203,10 @@ STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
 ${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
-switch(${backend}) {
+switch(tensorTypeIdToBackend(impl::dispatchTypeId(${type_set}))) {
     ${static_dispatch_function_switches}
     default:
-        AT_ERROR("${api_name} not implemented for ", at::toString(${backend}));
+        AT_ERROR("${api_name} not implemented for ", at::toString(${type_set}));
 }
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT = CodeTemplate("""\
@@ -232,9 +226,9 @@ static inline ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_function_body}
 #else
-    globalLegacyTypeDispatch().initForBackend(${inferred_backend});
+    globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_backend}, ${inferred_is_variable})(${native_actuals});
+    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set}, ${inferred_is_variable})(${native_actuals});
 #endif
 }
 """)
@@ -480,7 +474,6 @@ TopEnvironment = TypedDict('TopEnvironment', {
     'type_registrations': List[str],
     'type_headers': List[str],
     'function_registrations': List[str],
-    'c10_function_registrations': List[str],
     'c10_ops_already_moved_from_aten_to_c10': List[str],
     'c10_ops_not_moved_from_aten_to_c10_yet': List[str],
     'type_method_declarations': List[str],
@@ -603,7 +596,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals': List[str],
     'formals_types': List[str],
     'formals_types_with_return': List[str],
-    'inferred_backend': str,
+    'inferred_type_set': str,
     'inferred_is_variable': str,
     'inplace': bool,
     'matches_jit_signature': bool,
@@ -1166,7 +1159,11 @@ def create_generic(top_env, declarations):
                             native_arguments=option['method_actuals']))
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
-                    backend='tensorTypeIdToBackend(type_id())',
+                    # TODO: When Variable gets added, this needs to get adjusted
+                    # to avoid picking up the Variable bit.  The correct way
+                    # to encode this is probably to just have Variable in the
+                    # disabled set.
+                    type_set='type_set()',
                     static_dispatch_function_switches=static_dispatch_function_switches)
             else:
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
@@ -1188,14 +1185,15 @@ def create_generic(top_env, declarations):
         def gen_namespace_function(option, dispatch_tensor, dispatch_options):
             # type: (Any, Optional[str], Any) -> FunctionCode
             if dispatch_tensor:
-                option['inferred_backend'] = 'at::detail::infer_backend({})'.format(dispatch_tensor)
+                option['inferred_type_set'] = 'at::detail::infer_tensor_type_set({})'.format(dispatch_tensor)
                 option['inferred_is_variable'] = 'at::detail::infer_is_variable({})'.format(dispatch_tensor)
             elif dispatch_options:
-                option['inferred_backend'] = '{}.backend()'.format(dispatch_options['name'])
+                option['inferred_type_set'] = '{}.type_set()'.format(dispatch_options['name'])
                 option['inferred_is_variable'] = '{}.is_variable()'.format(dispatch_options['name'])
             else:
-                # doesn't depend on a specific backend, use CPU
-                option['inferred_backend'] = 'Backend::CPU'
+                # doesn't depend on a specific backend, use the empty set
+                # TODO: Does this actually work?
+                option['inferred_type_set'] = 'TensorTypeSet()'
                 option['inferred_is_variable'] = 'false'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
@@ -1211,7 +1209,7 @@ def create_generic(top_env, declarations):
                             native_arguments=option['native_actuals']))
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
-                    backend=option['inferred_backend'],
+                    type_set=option['inferred_type_set'],
                     static_dispatch_function_switches=static_dispatch_function_switches)
             else:
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
@@ -1314,12 +1312,8 @@ def create_generic(top_env, declarations):
                 check_namedtensor_enabled(NATIVE_DISPATCH_DECLARATION.substitute(option)))
             top_env['type_method_definitions'].append(
                 check_namedtensor_enabled(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option)))
-            if option['use_c10_dispatcher']:
-                top_env['c10_function_registrations'].append(
-                    check_namedtensor_enabled(C10_DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
-            else:
-                top_env['function_registrations'].append(
-                    check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
+            top_env['function_registrations'].append(
+                check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1402,11 +1396,10 @@ def create_generic(top_env, declarations):
 
 
 def create_derived(backend_type_env, declarations):
-    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str]]
+    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str], List[str], List[str], List[str]]
     type_object_declarations = []  # type: List[str]
     type_object_definitions = []  # type: List[str]
     function_registrations = []  # type: List[str]
-    c10_function_registrations = []  # type: List[str]
     legacy_th_declarations = []  # type: List[str]
     legacy_th_definitions = []  # type: List[str]
     is_cuda = 'CUDA' in backend_type_env['Backend']
@@ -1799,12 +1792,8 @@ def create_derived(backend_type_env, declarations):
                     option['native_type_method_dispatch'] = native_dispatch
                     type_object_definitions.append(
                         NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
-                    if option['use_c10_dispatcher']:
-                        c10_function_registrations.append(
-                            C10_BACKEND_FUNCTION_REGISTRATION.substitute(env))
-                    else:
-                        function_registrations.append(
-                            BACKEND_FUNCTION_REGISTRATION.substitute(env))
+                    function_registrations.append(
+                        BACKEND_FUNCTION_REGISTRATION.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:
@@ -1818,5 +1807,5 @@ def create_derived(backend_type_env, declarations):
                         process_native(option)
                 except NYIError:
                     pass
-    return (type_object_declarations, type_object_definitions, function_registrations, c10_function_registrations,
+    return (type_object_declarations, type_object_definitions, function_registrations,
             legacy_th_declarations, legacy_th_definitions)
