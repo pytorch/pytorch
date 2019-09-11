@@ -1,14 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/nn/module.h>
-#include <torch/nn/modules/batchnorm.h>
-#include <torch/nn/modules/conv.h>
-#include <torch/nn/modules/dropout.h>
-#include <torch/nn/modules/embedding.h>
-#include <torch/nn/modules/functional.h>
-#include <torch/nn/modules/linear.h>
-#include <torch/types.h>
-#include <torch/utils.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
 
@@ -116,6 +108,21 @@ TEST_F(ModulesTest, Linear) {
   ASSERT_EQ(y.size(1), 2);
 
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
+}
+
+TEST_F(ModulesTest, Fold) {
+  Fold model(FoldOptions({4, 5}, {2, 2}));
+  auto x = torch::randn({1, 3 * 2 * 2, 12});
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.size(0), 1);
+  ASSERT_EQ(y.size(1), 3);
+  ASSERT_EQ(y.size(2), 4);
+  ASSERT_EQ(y.size(3), 5);
 }
 
 TEST_F(ModulesTest, SimpleContainer) {
@@ -342,7 +349,8 @@ TEST_F(ModulesTest, PrettyPrintConv) {
       c10::str(Conv2d(Conv2dOptions(3, 4, 5).stride(2))),
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 5], stride=[2, 2])");
 
-  const auto options = Conv2dOptions(3, 4, torch::IntArrayRef{5, 6}).stride({1, 2});
+  const auto options =
+      Conv2dOptions(3, 4, torch::IntArrayRef{5, 6}).stride({1, 2});
   ASSERT_EQ(
       c10::str(Conv2d(options)),
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
