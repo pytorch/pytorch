@@ -932,8 +932,7 @@ jobs:
           at: ~/workspace
       - run:
           <<: *should_run_job
-      - run:
-          <<: checkout
+      - checkout
       - run:
           <<: *ios_brew_update
       - run:
