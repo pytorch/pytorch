@@ -239,9 +239,9 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
     return at::op##_out(self, self);                                   \
   }                                                                    \
   Tensor& _##op##_out_##prefix(Tensor& result, const Tensor& self) {   \
-    checkBackend(#op, result, Backend::device);                        \
     auto iter = TensorIterator::unary_op(result, self,                 \
       /*check_mem_overlap=*/true);                                     \
+    AT_ASSERT(iter.device_type() == DeviceType::CPU);                  \
     op##_stub(iter.device_type(), iter);                               \
     return result;                                                     \
   }
