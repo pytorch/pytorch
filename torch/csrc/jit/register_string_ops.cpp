@@ -730,7 +730,7 @@ auto reg_str_ops_2 =
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
                 .catchAllKernel(
                     [](std::string string, c10::optional<std::string> separator, int64_t max) {
-                      return stringSplit(string, separator, max, false);
+                      return stringSplit(std::move(string), std::move(separator), max, false);
                     }))
 
         .op("aten::rsplit(str self, str? separator=None, int max=-1) -> str[]",
@@ -738,7 +738,7 @@ auto reg_str_ops_2 =
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
                 .catchAllKernel(
                     [](std::string string, c10::optional<std::string> separator, int64_t max) {
-                      return stringSplit(string, separator, max, true);
+                      return stringSplit(std::move(string), std::move(separator), max, true);
                     }));
 } // namespace
 } // namespace jit

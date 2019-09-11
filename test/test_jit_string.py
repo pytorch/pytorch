@@ -5,11 +5,22 @@ from common_utils import run_tests
 class TestScript(JitTestCase):
     def test_str_ops(self):
         self.clearHooks()
+
         def test_str_is(s):
             # type: (str) -> Tuple[bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool]
-            return s.isupper(), s.islower(), s.isdigit(), s.isspace(), \
-                s.isalnum(), s.isalpha(), s.isdecimal(), s.isnumeric(), \
-                s.isidentifier(), s.istitle(), s.isprintable()
+            return (
+                s.isupper(),
+                s.islower(),
+                s.isdigit(),
+                s.isspace(),
+                s.isalnum(),
+                s.isalpha(),
+                s.isdecimal(),
+                s.isnumeric(),
+                s.isidentifier(),
+                s.istitle(),
+                s.isprintable(),
+            )
 
         def test_str_to(s):
             # type: (str) -> Tuple[str, str, str, str, str]
@@ -17,24 +28,36 @@ class TestScript(JitTestCase):
 
         def test_str_strip(s):
             # type: (str) -> Tuple[str, str, str]
-            return (
-                s.lstrip(),
-                s.rstrip(),
-                s.strip(),
-            )
+            return (s.lstrip(), s.rstrip(), s.strip())
 
         def test_str_strip_char_set(s, char_set):
             # type: (str, str) -> Tuple[str, str, str]
-            return (
-                s.lstrip(char_set),
-                s.rstrip(char_set),
-                s.strip(char_set),
-            )
+            return (s.lstrip(char_set), s.rstrip(char_set), s.strip(char_set))
 
-        inputs = ["", "12a", "!B", "12", "a", "B", "aB", "$12", "B12", "AB ",
-                  "  \t", "  \n", "\na", "abc", "123.3", "s a", "b12a ",
-                  "more strings with spaces", "Titular Strings", "\x0acan'tprintthis",
-                  "spaces at the end ", " begin"]
+        inputs = [
+            "",
+            "12a",
+            "!B",
+            "12",
+            "a",
+            "B",
+            "aB",
+            "$12",
+            "B12",
+            "AB ",
+            "  \t",
+            "  \n",
+            "\na",
+            "abc",
+            "123.3",
+            "s a",
+            "b12a ",
+            "more strings with spaces",
+            "Titular Strings",
+            "\x0acan'tprintthis",
+            "spaces at the end ",
+            " begin",
+        ]
 
         def test_str_center(i, s):
             # type: (int, str) -> str
@@ -42,11 +65,11 @@ class TestScript(JitTestCase):
 
         def test_str_center_fc(i, s):
             # type: (int, str) -> str
-            return s.center(i, '*')
+            return s.center(i, "*")
 
         def test_str_center_error(s):
             # type: (str) -> str
-            return s.center(10, '**')
+            return s.center(10, "**")
 
         def test_ljust(s, i):
             # type: (str, int) -> str
@@ -58,7 +81,7 @@ class TestScript(JitTestCase):
 
         def test_ljust_fc_err(s):
             # type: (str) -> str
-            return s.ljust(10, '**')
+            return s.ljust(10, "**")
 
         def test_rjust(s, i):
             # type: (str, int) -> str
@@ -70,7 +93,7 @@ class TestScript(JitTestCase):
 
         def test_rjust_fc_err(s):
             # type: (str) -> str
-            return s.rjust(10, '**')
+            return s.rjust(10, "**")
 
         def test_zfill(s, i):
             # type: (str, int) -> str
@@ -83,12 +106,12 @@ class TestScript(JitTestCase):
             for char_set in ["abc", "123", " ", "\t"]:
                 self.checkScript(test_str_strip_char_set, (input, char_set))
             for i in range(7):
-                self.checkScript(test_str_center, (i, input,))
-                self.checkScript(test_str_center_fc, (i, input,))
+                self.checkScript(test_str_center, (i, input))
+                self.checkScript(test_str_center_fc, (i, input))
                 self.checkScript(test_ljust, (input, i))
-                self.checkScript(test_ljust_fc, (input, i, '*'))
+                self.checkScript(test_ljust_fc, (input, i, "*"))
                 self.checkScript(test_rjust, (input, i))
-                self.checkScript(test_rjust_fc, (input, i, '*'))
+                self.checkScript(test_rjust_fc, (input, i, "*"))
                 self.checkScript(test_zfill, (input, i))
 
         with self.assertRaises(Exception):
@@ -109,8 +132,9 @@ class TestScript(JitTestCase):
                 "hello".count("ell", -3),
                 "hello".count("ell", -10, 1),
                 "hello".count("ell", 0, -10),
-                "hello".count("ell", 0, 10)
+                "hello".count("ell", 0, 10),
             )
+
         self.checkScript(test_count, ())
 
         def test_endswith():
@@ -129,8 +153,9 @@ class TestScript(JitTestCase):
                 "hello".endswith("l", -8),
                 "hello".endswith("l", 0, -5),
                 "hello".endswith("l", -2, 3),
-                "hello".endswith("l", -8, 4)
+                "hello".endswith("l", -8, 4),
             )
+
         self.checkScript(test_endswith, ())
 
         def test_startswith():
@@ -149,20 +174,22 @@ class TestScript(JitTestCase):
                 "hello".startswith("l", -8),
                 "hello".startswith("l", 0, -5),
                 "hello".startswith("l", -2, 3),
-                "hello".startswith("l", -8, 4)
+                "hello".startswith("l", -8, 4),
             )
+
         self.checkScript(test_startswith, ())
 
         def test_expandtabs():
             # type: () -> Tuple[str, str, str, str, str, str]
             return (
-                'xyz\t82345\tabc'.expandtabs(),
-                'xyz\t32345\tabc'.expandtabs(3),
-                'xyz\t52345\tabc'.expandtabs(5),
-                'xyz\t62345\tabc'.expandtabs(6),
-                'xyz\t72345\tabc'.expandtabs(7),
-                'xyz\t62345\tabc'.expandtabs(-5),
+                "xyz\t82345\tabc".expandtabs(),
+                "xyz\t32345\tabc".expandtabs(3),
+                "xyz\t52345\tabc".expandtabs(5),
+                "xyz\t62345\tabc".expandtabs(6),
+                "xyz\t72345\tabc".expandtabs(7),
+                "xyz\t62345\tabc".expandtabs(-5),
             )
+
         self.checkScript(test_expandtabs, ())
 
         def test_rfind():
@@ -178,6 +205,7 @@ class TestScript(JitTestCase):
                 "hello123abc".rfind("12", 4, -4),
                 "hello123abc".rfind("ab", -7, -20),
             )
+
         self.checkScript(test_rfind, ())
 
         def test_find():
@@ -193,6 +221,7 @@ class TestScript(JitTestCase):
                 "hello123abc".find("12", 4, -4),
                 "hello123abc".find("ab", -7, -20),
             )
+
         self.checkScript(test_find, ())
 
         def test_index():
@@ -205,6 +234,7 @@ class TestScript(JitTestCase):
                 "hello123abc".index("ab", -7),
                 "hello123abc".index("12", 4, -4),
             )
+
         self.checkScript(test_index, ())
 
         def test_rindex():
@@ -217,6 +247,7 @@ class TestScript(JitTestCase):
                 "hello123abc".rindex("ab", -7),
                 "hello123abc".rindex("12", 4, -4),
             )
+
         self.checkScript(test_rindex, ())
 
         def test_replace():
@@ -230,6 +261,7 @@ class TestScript(JitTestCase):
                 "ccc".replace("c", "ccc", 3),
                 "cc".replace("c", "ccc", -3),
             )
+
         self.checkScript(test_replace, ())
 
         def test_partition():
@@ -246,6 +278,7 @@ class TestScript(JitTestCase):
                 "ccc".partition("ccc"),
                 "cc".partition("ccc"),
             )
+
         self.checkScript(test_partition, ())
 
         def test_rpartition():
@@ -262,6 +295,7 @@ class TestScript(JitTestCase):
                 "ccc".rpartition("ccc"),
                 "cc".rpartition("ccc"),
             )
+
         self.checkScript(test_rpartition, ())
 
         def test_split():
@@ -278,6 +312,7 @@ class TestScript(JitTestCase):
                 " a*a a*a a ".split("*", -1),
                 " a*a a*a a ".split("a*", 10),
             )
+
         self.checkScript(test_split, ())
 
         def test_rsplit():
@@ -307,6 +342,7 @@ class TestScript(JitTestCase):
                 "hello\v\f\ntest".splitlines(),
                 "hello\ftest".splitlines(),
             )
+
         self.checkScript(test_splitlines, ())
 
         def test_str_cmp(a, b):
@@ -316,5 +352,6 @@ class TestScript(JitTestCase):
         for i in range(len(inputs) - 1):
             self.checkScript(test_str_cmp, (inputs[i], inputs[i + 1]))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     run_tests()
