@@ -156,7 +156,7 @@
       - run:
           <<: *binary_populate_env
       - run:
-          <<: *binary_mac_brew_update
+          <<: *binary_macos_brew_update
       - run:
           <<: *binary_install_miniconda
       - run:
