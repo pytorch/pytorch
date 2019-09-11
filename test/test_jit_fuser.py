@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import FileCheck
 
-from common_utils import run_tests, IS_WINDOWS, skipIfRocm, IS_SANDCASTLE
+from common_utils import run_tests, IS_WINDOWS, IS_SANDCASTLE
 from textwrap import dedent
 from itertools import product, permutations
 
