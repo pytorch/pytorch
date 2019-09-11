@@ -951,8 +951,9 @@ jobs:
             # copy header files
             cp -R ${ARTIFACTS_DIR}/arm64/include ${ZIP_DIR}/install/
             # archvie to FAT bianry
-            lipo -create ${ARTIFACTS_DIR}/x86_64/lib/libtorch_x86_64.a ${ARTIFACTS_DIR}/arm64/lib/libtorch_arm64.a ${ARTIFACTS_DIR}/armv7s/lib/libtorch_armv7s.a -o ${ZIP_DIR}/install/lib/libtorch.a
-            lipo -i {ZIP_DIR}/install/lib/libtorch.a
+            libs=(${ARTIFACTS_DIR}/x86_64/lib/libtorch_x86_64.a ${ARTIFACTS_DIR}/arm64/lib/libtorch_arm64.a ${ARTIFACTS_DIR}/armv7s/lib/libtorch_armv7s.a )
+            lipo -create ${libs[@]} -o ${ZIP_DIR}/install/lib/libtorch.a
+            lipo -i ${ZIP_DIR}/install/lib/libtorch.a
             # make the zip
             touch ${ZIP_DIR}/src/LibTorch.h
             echo "import <torch/script.h>" > ${ZIP_DIR}/src/LibTorch.h
