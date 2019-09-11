@@ -463,6 +463,7 @@ class TestCppApiParity(common.TestCase):
 
         def trace_module(module, input_args):
             module_metadata = torch_nn_modules.module_metadata_map[module.__class__.__name__]
+
             # JIT tracing does not automatically save a module's non-parameter / non-buffer attributes
             # into a ScriptModule's slots, which means we can't access them via `get_attributes()` in C++.
             # Here, we manually register these attributes into the ScriptModule so that we can access them
