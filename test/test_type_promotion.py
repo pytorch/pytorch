@@ -218,12 +218,11 @@ class TestTypePromotion(TestCase):
         # this seems like odd behavior but ints also create float tensors, numpy doesn't have this function.
         self.assertEqual(torch.scalar_tensor(False, device=self.device), torch.tensor(0., device=self.device))
 
-   def test_can_cast(self):
+    def test_can_cast(self):
         self.assertTrue(torch._can_Cast(torch.int32, torch.int64))
         self.assertTrue(torch._can_Cast(torch.int64, torch.int32))
         self.assertTrue(torch._can_Cast(torch.int64, torch.float64))
-        self.assertTrue(torch._can_Cast(torch.int64, torch.float32)) # numpy False
-
+        
         self.assertFalse(torch._can_Cast(torch.float32, torch.int8))
         self.assertFalse(torch._can_Cast(torch.float32, torch.int32))
         self.assertFalse(torch._can_Cast(torch.float32, torch.int64))
