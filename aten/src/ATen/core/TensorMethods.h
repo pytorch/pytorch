@@ -127,6 +127,22 @@ inline Tensor & Tensor::abs_() const {
     return table->getOp<Tensor & (Tensor &)>(type_set(), is_variable())(const_cast<Tensor&>(*this));
 #endif
 }
+inline Tensor Tensor::real() const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::real(const_cast<Tensor&>(*this));
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::real(Tensor self) -> Tensor");
+    return table->getOp<Tensor (const Tensor &)>(type_set(), is_variable())(const_cast<Tensor&>(*this));
+#endif
+}
+inline Tensor Tensor::imag() const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::imag(const_cast<Tensor&>(*this));
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::imag(Tensor self) -> Tensor");
+    return table->getOp<Tensor (const Tensor &)>(type_set(), is_variable())(const_cast<Tensor&>(*this));
+#endif
+}
 inline Tensor Tensor::acos() const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::acos(const_cast<Tensor&>(*this));

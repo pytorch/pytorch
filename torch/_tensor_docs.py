@@ -999,6 +999,13 @@ flip(dims) -> Tensor
 See :func:`torch.flip`
 """)
 
+add_docstr_all('real',
+               r"""
+real() -> Tensor
+
+See :func:`torch.real`
+""")
+
 add_docstr_all('roll',
                r"""
 roll(shifts, dims) -> Tensor
@@ -1093,6 +1100,13 @@ add_docstr_all('ger',
 ger(vec2) -> Tensor
 
 See :func:`torch.ger`
+""")
+
+add_docstr_all('imag',
+               r"""
+imag() -> Tensor
+
+See :func:`torch.imag`
 """)
 
 add_docstr_all('indices',

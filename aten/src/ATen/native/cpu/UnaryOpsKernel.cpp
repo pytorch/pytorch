@@ -62,6 +62,24 @@ static void abs_kernel(TensorIterator& iter) {
   });
 }
 
+static void real_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "real_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return real_impl(a); },
+        [=](Vec256<scalar_t> a) { return a.real(); });
+  });
+}
+
+static void imag_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "imag_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return imag_impl(a); },
+        [=](Vec256<scalar_t> a) { return a.imag(); });
+  });
+}
+
 static void bitwise_not_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     // Boolean type does not work with ~ (bitwise NOT) in C++. bitwise_not wraps this operation for both Boolean and
@@ -330,6 +348,8 @@ REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
+REGISTER_DISPATCH(real_stub, &real_kernel);
+REGISTER_DISPATCH(imag_stub, &imag_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);

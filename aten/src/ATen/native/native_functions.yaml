@@ -131,6 +131,26 @@
     CPU: _abs_out_cpu
     CUDA: _abs_out_cuda
 
+- func: real(Tensor self) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: real.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+  dispatch:
+    CPU: _real_out_cpu
+    CUDA: _abs_out_cuda
+
+- func: imag(Tensor self) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: imag.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+  dispatch:
+    CPU: _imag_out_cpu
+    CUDA: _abs_out_cuda
+
 - func: acos(Tensor self) -> Tensor
   named_guard: False
   variants: function, method

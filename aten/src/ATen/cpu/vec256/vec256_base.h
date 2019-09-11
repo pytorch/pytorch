@@ -175,6 +175,12 @@ public:
     }
     return ret;
   }
+  Vec256<T> real() const {
+    return *this;
+  }
+  Vec256<T> imag() const {
+    return *this;
+  }
   Vec256<T> acos() const {
     return map(std::acos);
   }

@@ -930,6 +930,25 @@ Example::
     tensor([-0., -1., -1.,  1.])
 """.format(**common_args))
 
+add_docstr(torch.real,
+           r"""
+real(input, out=None) -> Tensor
+
+Computes the element-wise real value of the given :attr:`input` tensor.
+
+.. math::
+    \text{out}_{i} = real(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.real(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
+    tensor([ -1,  -2,  3])
+""".format(**common_args))
+
 add_docstr(torch.reciprocal,
            r"""
 reciprocal(input, out=None) -> Tensor
@@ -2240,6 +2259,25 @@ Example::
 
     >>> torch.histc(torch.tensor([1., 2, 1]), bins=4, min=0, max=3)
     tensor([ 0.,  2.,  1.,  0.])
+""".format(**common_args))
+
+add_docstr(torch.imag,
+           r"""
+imag(input, out=None) -> Tensor
+
+Computes the element-wise imag value of the given :attr:`input` tensor.
+
+.. math::
+    \text{out}_{i} = imag(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.imag(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
+    tensor([ 1,  2,  -3])
 """.format(**common_args))
 
 add_docstr(torch.index_select,

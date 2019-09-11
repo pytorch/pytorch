@@ -277,6 +277,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: hardshrink
    .. automethod:: histc
    .. automethod:: ifft
+   .. automethod:: imag
    .. automethod:: index_add_
    .. automethod:: index_add
    .. automethod:: index_copy_
@@ -381,6 +382,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: register_hook
    .. automethod:: remainder
    .. automethod:: remainder_
+   .. automethod:: real
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat

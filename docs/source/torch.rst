@@ -206,6 +206,7 @@ Pointwise Ops
 .. autofunction:: floor
 .. autofunction:: fmod
 .. autofunction:: frac
+.. autofunction:: imag
 .. autofunction:: lerp
 .. autofunction:: log
 .. autofunction:: log10
@@ -217,6 +218,7 @@ Pointwise Ops
 .. autofunction:: mvlgamma
 .. autofunction:: neg
 .. autofunction:: pow
+.. autofunction:: real
 .. autofunction:: reciprocal
 .. autofunction:: remainder
 .. autofunction:: round
