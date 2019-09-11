@@ -1032,6 +1032,10 @@ def log(g, self):
     return g.op("Log", self)
 
 
+def log1p(g, self):
+    return log(g, add(g, sym_help._if_scalar_type_as(g, torch.ones(1), self), self))
+
+
 def pow(g, self, exponent):
     exponent = sym_help._maybe_get_scalar(exponent)
     return g.op("Pow", self, sym_help._if_scalar_type_as(g, exponent, self))
