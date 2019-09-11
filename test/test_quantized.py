@@ -195,7 +195,6 @@ class TestQuantizedOps(TestCase):
                 torch.qint32 : np.int32
             }
             qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
-            # print('C', qC)
             qC_hat = add(qA, qB, scale=scale, zero_point=zero_point)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
                                     "Quantized addition failed.")
@@ -1111,12 +1110,11 @@ class TestQuantizedConv(unittest.TestCase):
             W_q = torch.quantize_linear(W_KRSC, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
             b_q = torch.quantize_linear(b, scale=X_scale * W_scale[0], zero_point=0, dtype=torch.qint32) if use_bias else None
 
-        W_prepack = qconv_prepack(W_q, stride, pad, dilation, groups)
+        W_prepack = qconv_prepack(W_q, b_q, stride, pad, dilation, groups)
 
         Y_q = qconv(
             X_q,
             W_prepack,
-            b_q,
             stride,
             pad,
             dilation,
@@ -1193,9 +1191,11 @@ class TestQuantizedConv(unittest.TestCase):
         strides = [strideH, strideW]
         paddings = [padH, padW]
         dilations = [1, 1]
-        W_packed = qconv_prepack(W_q, strides, paddings, dilations, groups)
+        bias = torch.from_numpy(bias).to(torch.float)
+        W_packed = qconv_prepack(W_q, bias, strides, paddings, dilations, groups)
         # Unpack weights weight unpacking operator (Used for serialization)
-        W_unpacked = qconv_unpack(W_packed)
+        W_unpacked = qconv_unpack(W_packed)[0]
+        bias = qconv_unpack(W_packed)[1]
 
         # Assert equal
         np.testing.assert_equal(W_q.int_repr().numpy(), W_unpacked.int_repr().numpy())

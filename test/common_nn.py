@@ -2194,6 +2194,7 @@ new_module_tests = [
     dict(
         fullname='Fold',
         constructor=lambda: nn.Fold((3, 3), (2, 2), (1, 1), (0, 0), (1, 1)),
+        cpp_constructor_args='(torch::nn::FoldOptions({3, 3}, {2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1}))',
         input_size=(2, 16, 4),
         check_gradgrad=False,
         test_cuda=True,
@@ -2208,6 +2209,7 @@ new_module_tests = [
     dict(
         fullname='Fold_int_input',
         constructor=lambda: nn.Fold(3, 2, 1, 0, 1),
+        cpp_constructor_args='(torch::nn::FoldOptions(3, 2).dilation(1).padding(0).stride(1))',
         input_size=(2, 16, 4),
         check_gradgrad=False,
         test_cuda=True,
@@ -2768,6 +2770,7 @@ loss_reference_fns = {
 criterion_tests = [
     dict(
         module_name='L1Loss',
+        cpp_constructor_args='',
         input_size=(2, 3, 4),
         target_size=(2, 3, 4),
         reference_fn=lambda i, t, _: 1. / i.numel() *
@@ -3094,6 +3097,7 @@ new_criterion_tests = [
     ),
     dict(
         module_name='L1Loss',
+        cpp_constructor_args='',
         input_size=(),
         target_size=(),
         reference_fn=lambda i, t, _: 1. / i.numel() * (i - t).abs().sum(),
