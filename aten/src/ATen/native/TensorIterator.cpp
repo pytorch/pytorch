@@ -662,7 +662,9 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
   iter.add_input(a);
   iter.add_input(b);
   iter.allow_cpu_scalars_ = true;
-  iter.compute_common_dtype_only_for_inputs();
+  if (!out.is_same(a) && !out.is_same(b)) {
+    iter.compute_common_dtype_only_for_inputs();
+  }
   iter.build();
   return iter;
 }
