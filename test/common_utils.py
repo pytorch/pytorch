@@ -513,10 +513,10 @@ try:
                 min_satisfying_examples=1,
                 verbosity=hypothesis.Verbosity.verbose))
 
-        hypothesis.settings.load_profile(
-            "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
-                                                         'dev')
-        )
+    hypothesis.settings.load_profile(
+        "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
+                                                     'dev')
+    )
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
