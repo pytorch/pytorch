@@ -414,10 +414,10 @@
     steps:
       - attach_workspace:
           at: ~/workspace
-      - run:
-          <<: *should_run_job
-      - run:
-          <<: *ios_brew_update
+      # - run:
+      #     <<: *should_run_job
+      # - run:
+      #     <<: *ios_brew_update
       - run:
           name: Upload
           no_output_timeout: "1h"
@@ -471,7 +471,7 @@
             touch ${FILENAME}
             echo "hello world" > ${FILENAME}
             mkdir -p ~/workspace/ios
-            mv ${FILENAME} ~workspace/ios
+            mv ${FILENAME} ~workspace/ios/${FILENAME}
             
             
       # - run:
