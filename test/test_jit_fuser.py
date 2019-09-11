@@ -47,7 +47,6 @@ class TestFuser(JitTestCase):
         self._test_fused_abs(device="cuda")
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @skipIfRocm
     def test_zero_element_tensors(self):
         def decode(sin_t, cos_t):
             theta = torch.atan2(sin_t.float(), cos_t.float())
@@ -358,7 +357,6 @@ class TestFuser(JitTestCase):
     # If this is a real problem, we'll need to revisit Torchscript Function
     # lifetimes in Python.
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
     def test_lerp(self):
         start = torch.randn(4, 1, dtype=torch.float, device='cuda')
         end = torch.randn(1, 4, dtype=torch.float, device='cuda')
