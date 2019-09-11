@@ -68,14 +68,6 @@ bool Message::isRequest() const {
       MessageType::RREF_USER_ACCEPT == type_;
 }
 
-bool Message::requiresResponse() const {
-  return MessageType::PYTHON_CALL == type_ ||
-      MessageType::PYTHON_RREF_FETCH_CALL == type_ ||
-      MessageType::RREF_FORK_NOTIFY == type_ ||
-      MessageType::SCRIPT_CALL == type_ ||
-      MessageType::SCRIPT_RREF_FETCH_CALL == type_;
-}
-
 bool Message::isResponse() const {
   return MessageType::PYTHON_RET == type_ ||
       MessageType::RREF_FETCH_RET == type_ ||

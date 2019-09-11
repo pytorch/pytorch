@@ -73,7 +73,6 @@ class TORCH_API Message final {
   const MessageType& type() const;
 
   bool isRequest() const;
-  bool requiresResponse() const;
   bool isResponse() const;
   bool isShutdown() const;
 

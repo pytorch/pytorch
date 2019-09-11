@@ -186,7 +186,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::sendImpl(
 
   auto requestId = nextId();
   auto future = std::make_shared<FutureMessage>();
-  if (message.requiresResponse()) {
+  if (message.isRequest()) {
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
       futures_[requestId] = future;
@@ -260,10 +260,8 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
 
         Message message = deserialize(work.type_, ss);
 
-        if (message.requiresResponse()) {
+        if (message.isRequest()) {
           send(work.from_, cb_(work.from_, std::move(message)));
-        } else if (message.isRequest()) {
-          cb_(work.from_, std::move(message));
         } else if (message.isResponse()) {
           auto id = message.id();
           {
