@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/irparser.h>
@@ -314,6 +315,7 @@ void InsertObserversImpl(
     std::unordered_set<Value*>& values_to_skip) {
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
+  ConstantPropagation(graph);
   intermediateValuesToSkipObserver(module, method_name, values_to_skip);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
