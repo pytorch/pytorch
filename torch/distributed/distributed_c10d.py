@@ -485,8 +485,7 @@ def _new_process_group_helper(world_size,
             pg = ProcessGroupNCCL(
                 prefix_store,
                 rank,
-                world_size,
-                group_name)
+                world_size)
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
