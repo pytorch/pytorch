@@ -264,12 +264,12 @@ class DistributedChunkSampler(Sampler):
 
     def __iter__(self):
         r"""Stride logic is implemented here"""
-        for idx in self.sampler:
-            if self.num_replicas == 0:
-                yield idx
-            else:
-                if idx % self.num_replicas == self.rank:
-                    yield idx
+        # Fecthes all indices
+        indices = list(self.sampler)
+
+        # Create a strided sublist
+        indices = indices[self.rank:self.num_chunks:self.num_replicas]
+        return iter(indices)
 
     def __len__(self):
         raise NotImplementedError
