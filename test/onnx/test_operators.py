@@ -732,6 +732,10 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x: torch.unique(x, dim=0, sorted=True, return_inverse=False, return_counts=True), x,
                         opset_version=11)
 
+    def test_round(self):
+        x = torch.tensor([0.9920, -1.0362, -1.5000, 2.5000], requires_grad=True)
+        self.assertONNX(lambda x: torch.meshgrid(x), x)
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'
