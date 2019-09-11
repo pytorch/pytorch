@@ -261,7 +261,8 @@ class CyclicalLearningRate : public LearningRateFunctor<T> {
   T operator()(const int64_t iter) const override {
     int cycle = static_cast<int>((iter / (2 * stepsize_)) + 1);
     T x = abs(static_cast<T>(iter) / stepsize_ - 2 * cycle + 1);
-    return (1 + (T(max_lr_) / T(base_lr_) - 1) * std::max(T(0.0), (1 - x)));
+    return (
+        1 + (T(max_lr_) / T(fabs(base_lr_)) - 1) * std::max(T(0.0), (1 - x)));
   }
   T base_lr_;
   T max_lr_;
