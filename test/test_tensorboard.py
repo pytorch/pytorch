@@ -44,8 +44,6 @@ skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
 from common_utils import TestCase, run_tests, TEST_WITH_ASAN
-from google.protobuf import text_format
-from PIL import Image
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)
@@ -66,6 +64,8 @@ if TEST_TENSORBOARD:
     from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
     from torch.utils.tensorboard._convert_np import make_np
     from torch.utils.tensorboard import _caffe2_graph as c2_graph
+    from google.protobuf import text_format
+    from PIL import Image
 
     class TestTensorBoardPyTorchNumpy(BaseTestCase):
         def test_pytorch_np(self):
