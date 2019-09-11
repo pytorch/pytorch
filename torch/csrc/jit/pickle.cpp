@@ -9,7 +9,7 @@ namespace jit {
 void pickle(
     std::function<void(const char* data_start, size_t data_len)> writer,
     const IValue& ivalue,
-    std::vector<at::Tensor>* tensor_table = nullptr) {
+    std::vector<at::Tensor>* tensor_table) {
   Pickler pickler(std::move(writer), tensor_table);
   pickler.protocol();
   pickler.pushIValue(ivalue);
@@ -18,7 +18,7 @@ void pickle(
 
 std::vector<char> pickle(
     const IValue& ivalue,
-    std::vector<at::Tensor>* tensor_table = nullptr) {
+    std::vector<at::Tensor>* tensor_table) {
   std::vector<char> data;
 
   pickle(
