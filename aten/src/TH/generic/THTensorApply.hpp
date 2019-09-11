@@ -17,31 +17,31 @@
 }
 
 // Used for `scatter` and `scatterAdd`
-// Assumes TENSOR1 is real
-//         TENSOR2 is src
-//         TENSOR3 is index
+// Assumes TENSOR1 is index
+//         TENSOR2 is real
+//         TENSOR3 is src
 // Tests:
 //   1. index->size(d) <= src->size(d) for all d
 //   2. index->size(d) <= real->size(d) for all d != dim
 #define TH_TENSOR_DIM_APPLY3_SIZE_SCATTER(TENSOR1, TENSOR2, TENSOR3, DIMENSION) \
 { \
   int shape_check_flag = 0; \
-  for (TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < THTensor_nDimensionLegacyAll(TENSOR1); TH_TENSOR_DIM_APPLY_i++) \
+  for (TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < THTensor_nDimensionLegacyAll(TENSOR2); TH_TENSOR_DIM_APPLY_i++) \
   { \
-    int64_t TENSOR3##_dim_size = THTensor_sizeLegacyNoScalars(TENSOR3, TH_TENSOR_DIM_APPLY_i); \
+    int64_t TENSOR1##_dim_size = THTensor_sizeLegacyNoScalars(TENSOR1, TH_TENSOR_DIM_APPLY_i); \
     if (TH_TENSOR_DIM_APPLY_i != DIMENSION) { \
-      if (TENSOR3##_dim_size > THTensor_sizeLegacyNoScalars(TENSOR1, TH_TENSOR_DIM_APPLY_i)) { \
+      if (TENSOR1##_dim_size > THTensor_sizeLegacyNoScalars(TENSOR2, TH_TENSOR_DIM_APPLY_i)) { \
         shape_check_flag = 1; \
         break; \
       } \
     } \
-    if (TENSOR3##_dim_size > THTensor_sizeLegacyNoScalars(TENSOR2, TH_TENSOR_DIM_APPLY_i)) { \
+    if (TENSOR1##_dim_size > THTensor_sizeLegacyNoScalars(TENSOR3, TH_TENSOR_DIM_APPLY_i)) { \
       shape_check_flag = 1; \
       break; \
     } \
   } \
   if (shape_check_flag == 1) { \
-    AT_ERROR("Expected ", #TENSOR3, " ", TENSOR3->sizes(), " to be smaller size than ", #TENSOR2, " ", TENSOR2->sizes(), " and to be smaller than ", #TENSOR1, " ", TENSOR1->sizes(), " apart from dimension ", DIMENSION); \
+    AT_ERROR("Expected ", #TENSOR1, " ", TENSOR1->sizes(), " to be smaller size than ", #TENSOR3, " ", TENSOR3->sizes(), " and to be smaller than ", #TENSOR2, " ", TENSOR2->sizes(), " apart from dimension ", DIMENSION); \
   } \
 }
 
