@@ -36,9 +36,9 @@ default_set = set([
     'libtorch 2.7m cpu devtoolset7',
     'libtorch 2.7m cpu gcc5.4_cxx11-abi',
     # iOS binary jobs
-    'libtorch-macos-10.2.1-ios-sdk-12-x86_64-binary-build',
-    'libtorch-macos-10.2.1-ios-sdk-12-arm64-binary-build',
-    'libtorch-macos-10.2.1-ios-sdk-12-armv7s-binary-build',
+    'libtorch-ios-10.2.1-nightly-x86_64-build',
+    'libtorch-ios-10.2.1-nightly-arm64-build',
+    'libtorch-ios-10.2.1-nightly-armv7s-build',
     'pytorch-ios-bianry-upload',
 
     # Caffe2 Android

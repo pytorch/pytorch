@@ -1,0 +1,31 @@
+      # Pytorch iOS builds
+      - pytorch_ios_build:
+          name: pytorch_ios_10_2_1_nightly_x86_64_build
+          build_environment: "libtorch-ios-10.2.1-nightly-x86_64-build"
+          ios_platform: "SIMULATOR"
+          ios_arch: "x86_64"
+          use_nnpack: "OFF"
+          requires: 
+            - setup
+      - pytorch_ios_build:
+          name: pytorch_ios_10_2_1_nigthly_arm64_build
+          build_environment: "libtorch-ios-10.2.1-nightly-arm64-build"
+          ios_arch: "arm64"
+          ios_platform: "OS"
+          requires: 
+            - setup
+      - pytorch_ios_build:
+          name: pytorch_ios_10_2_1_nightly_armv7s_build
+          build_environment: "libtorch-ios-10.2.1-nightly-armv7s-build"
+          ios_arch: "armv7s"
+          ios_platform: "OS"
+          requires: 
+            - setup
+      - pytorch_ios_upload:
+          build_environment: "pytorch-ios-bianry-upload"
+          context: org-member
+          requires:
+            - setup
+            - pytorch_ios_10_2_1_nightly_x86_64_build
+            - pytorch_ios_10_2_1_nigthly_arm64_build
+            - pytorch_ios_10_2_1_nightly_armv7s_build
