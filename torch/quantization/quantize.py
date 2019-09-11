@@ -11,7 +11,7 @@ from .QConfig import default_dynamic_qconfig
 import torch.nn.qat as nnqat
 
 
-DEFAULT_SKIP_LIST = [nn.Identity, nn.MaxPool2d, nn.AvgPool2d, nn.AdaptiveAvgPool2d]
+DEFAULT_SKIP_LIST = [nn.Dropout, nn.Identity, nn.MaxPool2d, nn.AvgPool2d, nn.AdaptiveAvgPool2d]
 
 def propagate_qconfig_helper(module, qconfig_dict, skip_list=DEFAULT_SKIP_LIST, qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig`
@@ -226,7 +226,8 @@ DEFAULT_QAT_MODULE_MAPPING = {
 }
 
 DEFAULT_DYNAMIC_MODULE_MAPPING = {
-    nn.Linear: nnqd.Linear
+    nn.Linear: nnqd.Linear,
+    nn.LSTM: nnqd.LSTM,
 }
 
 def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
@@ -255,7 +256,8 @@ def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
     return model
 
 DEFAULT_QCONFIG_DICT = {
-    nn.Linear : default_dynamic_qconfig
+    nn.Linear : default_dynamic_qconfig,
+    nn.LSTM : default_dynamic_qconfig,
 }
 
 def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):

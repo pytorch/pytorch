@@ -16,9 +16,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 #include <algorithm>
 #include <cmath>
@@ -28,33 +26,60 @@
 
 #include <map>
 
-// NOTE:
-// YOU ARE NOT OBLIGED TO USE THESE MACROS
-// If you're writing something more specialized, please don't try to make them
-// work for your case, but just write something new instead.
-
 namespace at {
 namespace native {
 
-Tensor bitwise_not(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  return at::bitwise_not_out(result, self);
-}
-
-Tensor& bitwise_not_(Tensor& self) {
-  return at::bitwise_not_out(self, self);
-}
-
-Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
-  checkBackend("bitwise_not", result, self.type().backend());
+// NOTE: These are helper functions that reduce redundant code in implementing the most typical kind of unary operators.
+// YOU ARE NOT OBLIGED TO USE THESE HELPERS---if you're writing something more specialized, please don't try to make
+// them work for your case, but just write something new instead. Here we use helper functions instead of a flat fat
+// macro that implements everything, because the former allows some simple preprocessing that are unique to some
+// operators (more is forseeable) and is more flexible and elegant than the latter.
+template <typename Stub>
+static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
   auto iter = TensorIterator::unary_op(result, self,
     /*check_mem_overlap=*/true);
-  bitwise_not_stub(iter.device_type(), iter);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
+  stub(iter.device_type(), iter);
   return result;
 }
+
+// out_impl passed into unary_op_impl and unary_op_impl_  must go through at:: device dispatch
+// otherwise it won't dispatch to out-of-source devices like XLA.
+// For example it must be at::bitwise_not_out instead of bitwise_not_out(which is at::native!).
+template <typename OutImpl>
+static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl) {
+  Tensor result = at::empty({0}, self.options());
+  return out_impl(result, self);
+}
+
+template <typename OutImpl>
+static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
+  return out_impl(self, self);
+}
+
+Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
+Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
+Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, at::bitwise_not_out); }
+
+Tensor& ceil_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, ceil_stub); }
+Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
+Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
+
+Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, erfinv_stub); }
+Tensor erfinv(const Tensor& self) { return unary_op_impl(self, at::erfinv_out); }
+Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
+
+Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, digamma_stub); }
+Tensor digamma(const Tensor& self) { return unary_op_impl(self, digamma_out); }
+Tensor& digamma_(Tensor& self) { return unary_op_impl_(self, digamma_out); }
+
+Tensor& neg_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(self.scalar_type() != kBool,
+              "Negation, the `-` operator, on a bool tensor is not supported. "
+              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+  return unary_op_impl_out(result, self, neg_stub);
+}
+Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
+Tensor& neg_(Tensor& self) { return unary_op_impl_(self, at::neg_out); }
 
 Tensor logical_not(const Tensor& self) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
@@ -76,44 +101,6 @@ Tensor& logical_not_out(Tensor& result, const Tensor& self) {
   return result;
 }
 
-Tensor neg(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  return at::neg_out(result, self);
-}
-
-Tensor& neg_(Tensor& self) {
-  return at::neg_out(self, self);
-}
-
-Tensor& neg_out(Tensor& result, const Tensor& self) {
-  TORCH_CHECK(self.scalar_type() != kBool,
-              "Negation, the `-` operator, on a bool tensor is not supported. "
-              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_internal_overlap=*/true);
-  neg_stub(iter.device_type(), iter);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
-  return result;
-}
-
-Tensor ceil(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  return at::ceil_out(result, self);
-}
-
-Tensor& ceil_(Tensor& self) {
-  return at::ceil_out(self, self);
-}
-
-Tensor& ceil_out(Tensor& result, const Tensor& self) {
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_internal_overlap=*/true);
-  ceil_stub(iter.device_type(), iter);
-  return result;
-}
-
 Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
@@ -130,16 +117,7 @@ Tensor clamp_min(const Tensor& self, Scalar min) {
 }
 
 Tensor& _clamp__cpu(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
-  return _clamp_out_cpu(self, self, min, max);
-}
-
-//used internally and not exposed by API
-Tensor& trigamma_out(Tensor& result, const Tensor& self) {
-  checkBackend("trigamma", result, Backend::CPU);
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_mem_overlap=*/true);
-  trigamma_stub(iter.device_type(), iter);
-  return result;
+  return clamp_out(self, self, min, max);
 }
 
 Tensor polygamma(int64_t n, const Tensor& self) {
@@ -151,7 +129,6 @@ Tensor& polygamma_(Tensor& self, int64_t n) {
   return at::polygamma_out(self, n, self);
 }
 Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
-  checkBackend("polygamma", result, Backend::CPU);
   auto iter = TensorIterator::unary_op(result, self,
     /*check_mem_overlap=*/true);
   polygamma_stub(iter.device_type(), iter, n);
@@ -164,41 +141,41 @@ Tensor& _clamp_out_cpu(
     optional<Scalar> min,
     optional<Scalar> max) {
   if (min && max) {
-    legacy::cpu::_th_clamp_out(result, self, *min, *max);
+    checkBackend("clamp", result, Backend::CPU);
+    auto iter = TensorIterator::unary_op(result, self,
+        /*check_mem_overlap=*/true);
+    clamp_stub(iter.device_type(), iter, *min, *max);
   } else if (max) {
-    legacy::cpu::_th_clamp_max_out(result, self, *max);
+    clamp_max_out(result, self, *max);
   } else if (min) {
-    legacy::cpu::_th_clamp_min_out(result, self, *min);
+    clamp_min_out(result, self, *min);
   } else {
     AT_ERROR("At least one of 'min' or 'max' must not be None");
   }
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 
 Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
-  return legacy::cpu::_th_clamp_max_out(self, self, max);
+  return clamp_max_out(self, self, max);
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
-  legacy::cpu::_th_clamp_max_out(result, self, max);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
+  checkBackend("clamp_max", result, Backend::CPU);
+  auto iter = TensorIterator::unary_op(result, self,
+      /*check_mem_overlap=*/true);
+  clamp_max_stub(iter.device_type(), iter, max);
   return result;
 }
 
 Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
-  return legacy::cpu::_th_clamp_min_out(self, self, min);
+  return clamp_min_out(self, self, min);
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
-  legacy::cpu::_th_clamp_min_out(result, self, min);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
+  checkBackend("clamp_min", result, Backend::CPU);
+  auto iter = TensorIterator::unary_op(result, self,
+      /*check_mem_overlap=*/true);
+  clamp_min_stub(iter.device_type(), iter, min);
   return result;
 }
 
@@ -277,18 +254,12 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
   IMPLEMENT_UNARY_OP_CORE(op)                                          \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
-#define IMPLEMENT_UNARY_OP(op)                                         \
-  IMPLEMENT_UNARY_OP_CORE(op)                                          \
-  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
-  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)                       \
-
 IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
 IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
-IMPLEMENT_UNARY_OP_VEC(digamma)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC(exp)
@@ -310,14 +281,15 @@ IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
 
-IMPLEMENT_UNARY_OP(erfinv)
-
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(acos_stub);
 DEFINE_DISPATCH(asin_stub);
 DEFINE_DISPATCH(atan_stub);
 DEFINE_DISPATCH(bitwise_not_stub);
 DEFINE_DISPATCH(ceil_stub);
+DEFINE_DISPATCH(clamp_stub);
+DEFINE_DISPATCH(clamp_max_stub);
+DEFINE_DISPATCH(clamp_min_stub);
 DEFINE_DISPATCH(cos_stub);
 DEFINE_DISPATCH(cosh_stub);
 DEFINE_DISPATCH(digamma_stub);
@@ -345,7 +317,6 @@ DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
-DEFINE_DISPATCH(trigamma_stub);
 DEFINE_DISPATCH(trunc_stub);
 }
 } // namespace at

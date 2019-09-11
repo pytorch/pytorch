@@ -53,11 +53,9 @@ def linear(input, weight, bias=None, scale=None, zero_point=None):
         scale = input.q_scale()
     if zero_point is None:
         zero_point = input.q_zero_point()
-    _packed_weight = torch.ops.quantized.fbgemm_linear_prepack(weight)
-    if bias is not None:
-        bias = torch.quantize_linear(bias.dequantize(), weight.q_scale() * input.q_scale(), 0, torch.qint32)
-    return torch.ops.quantized.fbgemm_linear(input, _packed_weight, bias, scale,
-                                             zero_point)
+    _packed_params = torch.ops.quantized.linear_prepack(weight, bias)
+    return torch.ops.quantized.linear(input, _packed_params, scale,
+                                      zero_point)
 
 def conv2d(input, weight, bias,
            stride=1, padding=0, dilation=1, groups=1,
@@ -116,14 +114,12 @@ def conv2d(input, weight, bias,
     padding = _pair(padding)
     dilation = _pair(dilation)
 
-    prepacked_weight = torch.ops.quantized.fbgemm_conv_prepack(
-        weight.permute([0, 2, 3, 1]), stride, padding, dilation, groups)
-    if bias is not None:
-        bias = torch.quantize_linear(bias.dequantize(), scale=weight.q_scale() * input.q_scale(), zero_point=0, dtype=torch.qint32)
-    return torch.ops.quantized.fbgemm_conv2d(input.permute([0, 2, 3, 1]),
-                                             prepacked_weight, bias,
-                                             stride, padding, dilation,
-                                             groups, scale, zero_point).permute([0, 3, 1, 2])
+    prepacked_weight = torch.ops.quantized.conv_prepack(
+        weight.permute([0, 2, 3, 1]), bias, stride, padding, dilation, groups)
+    return torch.ops.quantized.conv2d(input.permute([0, 2, 3, 1]),
+                                      prepacked_weight,
+                                      stride, padding, dilation,
+                                      groups, scale, zero_point).permute([0, 3, 1, 2])
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):

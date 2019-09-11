@@ -6,6 +6,7 @@ import unittest
 
 import torch
 import torch.distributed as dist
+
 from common_distributed import MultiProcessTestCase
 from common_utils import load_tests, run_tests
 
@@ -68,6 +69,12 @@ if not dist.is_available():
 
 
 def _wrap_with_rpc(func):
+    '''
+        We use this decorator for setting up and tearing down state since
+        MultiProcessTestCase runs each `test*` method in a separate process and
+        each process just runs the `test*` method without actually calling
+        'setUp' and 'tearDown' methods of unittest.
+    '''
     def wrapper(self):
         store = dist.FileStore(self.file.name, self.world_size)
         dist.init_process_group(backend='gloo', rank=self.rank,
@@ -115,6 +122,36 @@ class RpcTest(MultiProcessTestCase):
             RuntimeError, "does not support making RPC calls to self"
         ):
             dist.rpc(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
+
+    def test_duplicated_names(self):
+        store = dist.FileStore(self.file.name, self.world_size)
+        dist.init_process_group(backend="gloo", rank=self.rank,
+                                world_size=self.world_size, store=store)
+        with self.assertRaisesRegex(RuntimeError, "is not unique"):
+            dist.init_model_parallel("duplicated_name")
+        dist.join_rpc()
+
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
+    def test_invalid_names(self):
+        store = dist.FileStore(self.file.name, self.world_size)
+        dist.init_process_group(backend="gloo", rank=self.rank,
+                                world_size=self.world_size, store=store)
+
+        with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
+            dist.init_model_parallel("abc*")
+
+        with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
+            dist.init_model_parallel(" ")
+
+        with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
+            dist.init_model_parallel("")
+
+        # If the number in the message does not match, it is likely that the
+        # value of MAX_NAME_LEN in RPC WorkerId has changed.
+        with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
+            dist.init_model_parallel("".join(["a" for _ in range(500)]))
+
+        dist.join_rpc()
 
     @_wrap_with_rpc
     def test_add(self):
@@ -349,6 +386,33 @@ class RpcTest(MultiProcessTestCase):
     def test_stress_heavy_rpc(self):
         self._stress_test_rpc(heavy_rpc, repeat=20, args=(torch.ones(100, 100),))
 
+    @_wrap_with_rpc
+    def test_builtin_remote_ret(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref = dist.remote('worker{}'.format(dst_rank), torch.add,
+                           args=(torch.ones(n, n), torch.ones(n, n)))
+        self.assertEqual(rref.to_here(), torch.ones(n, n) * 2)
 
-if __name__ == "__main__":
+    @_wrap_with_rpc
+    def test_multi_builtin_remote_ret(self):
+        m = 10
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rrefs = []
+        expected = []
+        for i in range(m):
+            n = n + i
+            rrefs.append(dist.remote(
+                'worker{}'.format(dst_rank),
+                torch.add,
+                args=(torch.ones(n, n), torch.ones(n, n))
+            ))
+            expected.append(torch.ones(n, n) * 2)
+
+        for i in range(m):
+            self.assertEqual(rrefs[i].to_here(), expected[i])
+
+
+if __name__ == '__main__':
     run_tests()

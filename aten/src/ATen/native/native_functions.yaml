@@ -39,7 +39,7 @@
   variants: method
   named_guard: False
 
-- func: view_names(Tensor(a) self, Dimname[]? names) -> Tensor(a)
+- func: renamed(Tensor(a) self, Dimname[]? names) -> Tensor(a)
   variants: method
   named_guard: False
 
@@ -445,8 +445,16 @@
   device_guard: False
 
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
+  named_guard: False
 
 - func: cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+
+- func: cat.names(Tensor[] tensors, Dimname dim) -> Tensor
+  named_guard: False
+
+- func: cat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: ceil(Tensor self) -> Tensor
   named_guard: False
@@ -802,6 +810,12 @@
     SparseCPU: empty_sparse
     SparseCUDA: empty_sparse
 
+- func: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  variants: method
+
+- func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  variants: method
+
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
   dispatch:
     QuantizedCPU: empty_affine_quantized_cpu
@@ -926,6 +940,19 @@
 
 - func: flatten(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor
   variants: function, method
+  named_guard: False
+
+- func: flatten(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: flatten(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: flatten(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor
+  variants: function, method
+  named_guard: False
 
 - func: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
   named_guard: False
@@ -1310,6 +1337,11 @@
 
 - func: logsumexp.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: logsumexp.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
+  variants: function, method
+
+- func: logsumexp.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
@@ -1334,6 +1366,14 @@
 - func: max_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   variants: function, method
 
+- func: max.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  variants: function, method
+
+- func: max.names_dim_max(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
+
+- func: max_values.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
+  variants: function, method
+
 # Return: (Tensor output, Tensor indices)
 - func: max_pool1d_with_indices(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
 
@@ -1355,16 +1395,31 @@
 
 - func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: false
 
 - func: mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: false
 
 - func: mean.out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: false
+
+- func: mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  named_guard: false
+
+- func: mean.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: false
 
 - func: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
 
 - func: median.dim_values(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+
+- func: median.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  variants: function, method
+
+- func: median.names_dim_values(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
 - func: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
@@ -1372,6 +1427,14 @@
 - func: min.dim_min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
 - func: min_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
+  variants: function, method
+
+- func: min.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  variants: function, method
+
+- func: min.names_dim_min(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
+
+- func: min_values.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
   variants: function, method
 
 - func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
@@ -1825,6 +1888,7 @@
     CUDA: relu
     MkldnnCPU: mkldnn_relu
     QuantizedCPU: quantized_relu
+  named_guard: False
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
@@ -2143,17 +2207,33 @@
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: std.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   variants: function
+  named_guard: False
 
 - func: std_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   variants: function
+  named_guard: False
+
+- func: std_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+  variants: function
+  named_guard: False
 
 - func: std.out(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+
+- func: std.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: std.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
@@ -2223,11 +2303,14 @@
 # TODO: namespace threshold in 'nn'
 - func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
   variants: function
+  named_guard: False
 
 - func: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
   variants: function
+  named_guard: False
 
 - func: threshold.out(Tensor self, Scalar threshold, Scalar value, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor
   variants: function
@@ -2355,17 +2438,33 @@
 
 - func: var(Tensor self, bool unbiased=True) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: var.out(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+
+- func: var.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: var.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   variants: function
+  named_guard: false
 
 - func: var_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   variants: function
+  named_guard: False
+
+- func: var_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+  variants: function
+  named_guard: False
 
 - func: view_as(Tensor self, Tensor other) -> Tensor
   variants: method
@@ -2484,6 +2583,17 @@
 
 - func: norm.out(Tensor self, Scalar? p, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: norm.names_ScalarOpt_dim_dtype(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  variants: function, method
+
+- func: norm.names_ScalarOpt_dim(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False) -> Tensor
+  variants: function, method
+
+- func: norm.names_dtype_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+
+- func: norm.names_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
+
 - func: frobenius_norm(Tensor self) -> Tensor
   variants: function
 
@@ -2527,7 +2637,7 @@
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: pow_out
-    CUDA: legacy::cuda::_th_pow_out
+    CUDA: pow_out
     SparseCPU: pow_out_sparse_scalar
     SparseCUDA: pow_out_sparse_scalar
 
@@ -2535,7 +2645,7 @@
   variants: function, method
   dispatch:
     CPU: pow
-    CUDA: legacy::cuda::_th_pow
+    CUDA: pow
     SparseCPU: pow_sparse_scalar
     SparseCUDA: pow_sparse_scalar
 
@@ -2911,6 +3021,11 @@
 
 - func: unbind(Tensor(a) self, int dim=0) -> Tensor(a)[]
   variants: function, method
+  named_guard: False
+
+- func: unbind(Tensor(a) self, Dimname dim) -> Tensor(a)[]
+  variants: function, method
+  named_guard: False
 
 - func: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
   variants: method
@@ -3092,7 +3207,7 @@
 - func: rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih=None, Tensor? b_hh=None) -> Tensor
 
 # Quantized RNN layers
-- func: quantized_lstm(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, *, ScalarType? dtype=None) -> (Tensor, Tensor, Tensor)
+- func: quantized_lstm(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)
 
 # Quantized GRU layers
 
@@ -3164,18 +3279,22 @@
   dispatch:
     CPU: masked_fill__cpu
     CUDA: masked_fill__cuda
+  named_guard: False
 
 - func: masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: masked_fill_.Tensor(Tensor(a!) self, Tensor mask, Tensor value) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: masked_fill__cpu
     CUDA: masked_fill__cuda
+  named_guard: False
 
 - func: masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: masked_scatter_(Tensor(a!) self, Tensor mask, Tensor source) -> Tensor(a!)
   variants: method
@@ -3472,16 +3591,10 @@
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
   variants: method
-  dispatch:
-    CPU: _digamma__cpu
-    CUDA: legacy::cuda::_th_digamma_
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   named_guard: False
   variants: method
-  dispatch:
-    CPU: polygamma_
-    CUDA: legacy::cuda::_th_polygamma_
 
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
   variants: method
@@ -3493,13 +3606,13 @@
   variants: method
   dispatch:
     CPU: pow_
-    CUDA: legacy::cuda::_th_pow_
+    CUDA: pow_
 
 - func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: pow_
-    CUDA: legacy::cuda::_th_pow_
+    CUDA: pow_
 
 - func: lerp_.Scalar(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
   variants: method
@@ -3847,17 +3960,21 @@
   dispatch:
     CPU: legacy::cpu::_th_index_select
     CUDA: legacy::cuda::_th_index_select
+    SparseCPU: index_select_sparse
+    SparseCUDA: index_select_sparse
 
 - func: masked_select.out(Tensor self, Tensor mask, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: masked_select_out_cpu
     CUDA: masked_select_out_cuda
+  named_guard: False
 
 - func: masked_select(Tensor self, Tensor mask) -> Tensor
   variants: method, function
   dispatch:
     CPU: masked_select_cpu
     CUDA: masked_select_cuda
+  named_guard: False
 
 - func: nonzero.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -4055,16 +4172,17 @@
     CPU: _lu_solve_helper_cpu
     CUDA: _lu_solve_helper_cuda
 
+# TODO: remove dispatch section when porting TH CUDA to ATen
 - func: multinomial.out(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_multinomial_out
-    CUDA: legacy::cuda::_th_multinomial_out
+    CPU: multinomial_out
+    CUDA: multinomial_out
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_multinomial
-    CUDA: legacy::cuda::_th_multinomial
+    CPU: multinomial
+    CUDA: multinomial
 
 - func: _multinomial_alias_setup(Tensor probs) -> (Tensor, Tensor)
   variants: function
@@ -4093,35 +4211,17 @@
 
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
-  dispatch:
-    CPU: _digamma_out_cpu
-    CUDA: legacy::cuda::_th_digamma_out
 
 - func: digamma(Tensor self) -> Tensor
   named_guard: False
   variants: method, function
-  dispatch:
-    CPU: digamma
-    CUDA: legacy::cuda::_th_digamma
 
 - func: polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
-  dispatch:
-    CPU: polygamma_out
-    CUDA: legacy::cuda::_th_polygamma_out
 
 - func: polygamma(int n, Tensor self) -> Tensor
   named_guard: False
   variants: method, function
-  dispatch:
-    CPU: polygamma
-    CUDA: legacy::cuda::_th_polygamma
-
-- func: erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  named_guard: False
-  dispatch:
-    CPU: _erfinv_out_cpu
-    CUDA: _erfinv_out_cuda
 
 - func: erfinv(Tensor self) -> Tensor
   named_guard: False
@@ -4130,9 +4230,12 @@
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
   variants: method
+
+- func: erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
-    CPU: _erfinv__cpu
-    CUDA: _erfinv__cuda
+    CPU: erfinv_out
+    CUDA: erfinv_out
 
 - func: sign(Tensor self) -> Tensor
   variants: function, method
@@ -4334,23 +4437,23 @@
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: pow_out
-    CUDA: legacy::cuda::_th_pow_out
+    CUDA: pow_out
 
 - func: pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
   variants: method, function
   dispatch:
     CPU: pow
-    CUDA: legacy::cuda::_th_pow
+    CUDA: pow
 
 - func: pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: pow_out
-    CUDA: legacy::cuda::_th_pow_out
+    CUDA: pow_out
 
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
   dispatch:
     CPU: pow
-    CUDA: legacy::cuda::_th_pow
+    CUDA: pow
 
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -4434,11 +4537,13 @@
   dispatch:
     CPU: legacy::cpu::_th_var
     CUDA: legacy::cuda::_th_var
+  named_guard: False
 
 - func: _std(Tensor self, bool unbiased=True) -> Tensor
   dispatch:
     CPU: legacy::cpu::_th_std
     CUDA: legacy::cuda::_th_std
+  named_guard: False
 
 - func: _addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:

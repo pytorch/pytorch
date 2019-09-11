@@ -18,7 +18,7 @@ from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     ModForWrapping, \
     test_only_eval_fn, test_only_train_fn, \
     prepare_dynamic, convert_dynamic, SingleLayerLinearDynamicModel, \
-    TwoLayerLinearModel, NestedModel, ResNetBase
+    TwoLayerLinearModel, NestedModel, ResNetBase, LSTMDynamicModel
 
 from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
@@ -26,6 +26,7 @@ from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedMod
 from hypothesis import given
 from hypothesis import strategies as st
 import io
+import copy
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
@@ -301,6 +302,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         def checkQuantized(model):
             self.checkDynamicQuantizedLinear(model.fc1)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -324,6 +326,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         def checkQuantized(model):
             self.assertEqual(type(model.fc1), torch.nn.Linear)
             self.checkDynamicQuantizedLinear(model.fc2)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -349,6 +352,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             self.checkDynamicQuantizedLinear(model.fc3)
             self.checkDynamicQuantizedLinear(model.sub2.fc1)
             self.checkLinear(model.sub2.fc2)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -375,6 +379,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             self.checkDynamicQuantizedLinear(model.sub2.fc1)
             self.checkDynamicQuantizedLinear(model.sub2.fc2)
             self.checkDynamicQuantizedLinear(model.fc3)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -405,6 +410,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             self.checkDynamicQuantizedLinear(model.sub2.fc1)
             self.checkDynamicQuantizedLinear(model.sub2.fc2)
             self.checkDynamicQuantizedLinear(model.fc3)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -433,6 +439,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             self.checkLinear(model.sub2.fc1)
             self.checkDynamicQuantizedLinear(model.sub2.fc2)
             test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -440,6 +447,80 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
+    def test_quantized_rnn(self):
+        d_in, d_hid = 2, 2
+        model = LSTMDynamicModel().eval()
+        cell = model.lstm
+
+        # Replace parameter values s.t. the range of values is exactly
+        # 255, thus we will have 0 quantization error in the quantized
+        # GEMM call. This i s for testing purposes.
+        #
+        # Note that the current implementation does not support
+        # accumulation values outside of the range representable by a
+        # 16 bit integer, instead resulting in a saturated value. We
+        # must take care that in our test we do not end up with a dot
+        # product that overflows the int16 range, e.g.
+        # (255*127+255*127) = 64770. So, we hardcode the test values
+        # here and ensure a mix of signedness.
+        vals = [[100, -155],
+                [100, -155],
+                [-155, 100],
+                [-155, 100],
+                [100, -155],
+                [-155, 100],
+                [-155, 100],
+                [100, -155]]
+        if isinstance(cell, torch.nn.LSTM):
+            num_chunks = 4
+        vals = vals[:d_hid * num_chunks]
+        cell.weight_ih_l0 = torch.nn.Parameter(
+            torch.tensor(vals, dtype=torch.float),
+            requires_grad=False)
+        cell.weight_hh_l0 = torch.nn.Parameter(
+            torch.tensor(vals, dtype=torch.float),
+            requires_grad=False)
+
+        ref = copy.deepcopy(cell)
+
+        qconfig_dynamic_dict = {
+            torch.nn.LSTM: default_dynamic_qconfig,
+        }
+        default_dynamic_module_mapping = {
+            torch.nn.LSTM: torch.nn.quantized.dynamic.LSTM,
+        }
+        model_int8 = quantize_dynamic(
+            model, qconfig_dynamic_dict, default_dynamic_module_mapping
+        )
+        cell_int8 = model_int8.lstm
+
+        assert type(cell_int8) == torch.nn.quantized.dynamic.LSTM, \
+            'torch.nn.LSTM should be converted to torch.nn.quantized.dynamic.LSTM after quantize_dynamic'
+
+        niter = 10
+        x = torch.tensor([[100, -155],
+                          [-155, 100],
+                          [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
+
+        h0_vals = [[-155, 100],
+                   [-155, 155],
+                   [100, -155]]
+
+        hx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+        cx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+
+        if isinstance(ref, torch.nn.LSTM):
+            hiddens = (hx, cx)
+
+        ref_out, ref_hid = ref(x, hiddens)
+
+        # Compare int8 quantized to unquantized
+        output_int8, final_hiddens_int8 = cell_int8(x, hiddens)
+
+        torch.testing.assert_allclose(output_int8, ref_out)
+        self.assertEqual(output_int8, ref_out)
+        for out, ref in zip(final_hiddens_int8, ref_hid):
+            torch.testing.assert_allclose(out, ref)
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
@@ -636,9 +717,13 @@ class FusionTest(QuantizationTestCase):
 
 class ObserverTest(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
-    def test_minmax_observer(self, qdtype, qscheme):
-        myobs = MinMaxObserver(dtype=qdtype, qscheme=qscheme)
+           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
+           reduce_range=st.booleans())
+    def test_minmax_observer(self, qdtype, qscheme, reduce_range):
+        # reduce_range cannot be true for symmetric quantization with uint8
+        if qdtype == torch.quint8 and qscheme == torch.per_tensor_symmetric:
+            reduce_range = False
+        myobs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
         x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
         result = myobs(x)
@@ -647,12 +732,20 @@ class ObserverTest(QuantizationTestCase):
         self.assertEqual(myobs.min_val, 1.0)
         self.assertEqual(myobs.max_val, 8.0)
         qparams = myobs.calculate_qparams()
-        if qscheme == torch.per_tensor_symmetric:
-            ref_scale = 0.062745
-            ref_zero_point = 0 if qdtype is torch.qint8 else 128
+        if reduce_range:
+            if qscheme == torch.per_tensor_symmetric:
+                ref_scale = 0.062745 * 255 / 127
+                ref_zero_point = 0 if qdtype is torch.qint8 else 128
+            else:
+                ref_scale = 0.0313725 * 255 / 127
+                ref_zero_point = -64 if qdtype is torch.qint8 else 0
         else:
-            ref_scale = 0.0313725
-            ref_zero_point = -128 if qdtype is torch.qint8 else 0
+            if qscheme == torch.per_tensor_symmetric:
+                ref_scale = 0.062745
+                ref_zero_point = 0 if qdtype is torch.qint8 else 128
+            else:
+                ref_scale = 0.0313725
+                ref_zero_point = -128 if qdtype is torch.qint8 else 0
         self.assertEqual(qparams[1].item(), ref_zero_point)
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
 

@@ -1,11 +1,11 @@
 #pragma once
-#ifdef BUILD_NAMEDTENSOR
-
 #include <ATen/NamedTensor.h>
+
 #include <ATen/core/Tensor.h>
 #include <ATen/core/DimVector.h>
 #include <functional>
 
+#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
@@ -29,7 +29,7 @@ CAFFE2_API std::vector<int64_t> dimnames_to_positions(const Tensor& tensor, Dimn
 //    the same index from the right in other.
 // 3) The output names are obtained by unifying the names individually from the right.
 CAFFE2_API std::vector<Dimname>
-unify_from_right(DimnameList names, DimnameList other);
+unify_from_right(DimnameList names, DimnameList other, const char* action = "broadcast");
 
 namespace namedinference {
 
@@ -38,7 +38,7 @@ namespace namedinference {
 // 2) If result has names, then `names` must be equal to result.names
 void propagate_names(Tensor& result, optional<DimnameList> names);
 void propagate_names(Tensor& result, std::vector<Dimname>&& names, bool validate_names);
-void propagate_names(Tensor& result, optional<std::vector<Dimname>>&& maybe_names, bool validate_names);
+CAFFE2_API void propagate_names(Tensor& result, optional<std::vector<Dimname>>&& maybe_names, bool validate_names);
 void propagate_names(TensorImpl* result, optional<DimnameList> names);
 void propagate_names(TensorImpl* result, std::vector<Dimname>&& names, bool validate_names);
 void propagate_names(TensorImpl* result, optional<std::vector<Dimname>>&& maybe_names, bool validate_names);
@@ -72,6 +72,17 @@ void propagate_names_for_addmv(
 void check_names_for_dot(TensorImpl* vec1, TensorImpl* vec2);
 
 void propagate_names_for_expand(Tensor& result, const Tensor& self);
+
+optional<std::vector<Dimname>> compute_cat_outnames(TensorList tensors);
+
+optional<std::vector<Dimname>> compute_broadcast_outnames(
+    const Tensor& self,
+    const Tensor& other);
+
+optional<std::vector<Dimname>> broadcast_to_outnames(
+    const Tensor& tensor,
+    const Tensor& reference_tensor,
+    const char* op_name);
 
 optional<std::vector<Dimname>> compute_baddbmm_outnames(
     TensorImpl* result,

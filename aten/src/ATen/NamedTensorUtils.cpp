@@ -1,9 +1,8 @@
-#ifdef BUILD_NAMEDTENSOR
-
 #include <ATen/NamedTensorUtils.h>
 #include <bitset>
 #include <sstream>
 
+#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 // Returns "Tensor['N', 'C', 'H', 'W']" for a tensor with names ('N', 'C', 'H', 'W').
@@ -51,10 +50,11 @@ static void report_positional_error(
     const Dimname& name,
     const Dimname& other_name,
     DimnameList names,
-    DimnameList other_names) {
+    DimnameList other_names,
+    const char* action) {
   // TODO(zou3519): Can improve message by checking if names are alignable and suggesting workarounds
   TORCH_CHECK(false,
-      "Error when attempting to broadcast dims ", names, " and dims ",
+      "Error when attempting to ", action, " dims ", names, " and dims ",
       other_names, ": dim ", name, " and dim ", other_name, " are at the same position "
       "from the right but do not match.")
 }
@@ -62,7 +62,8 @@ static void report_positional_error(
 static void check_for_misalignment(
     const Dimname& name,
     DimnameList names,
-    DimnameList other_names) {
+    DimnameList other_names,
+    const char* action) {
   if (name.is_wildcard()) {
     return;
   }
@@ -70,14 +71,17 @@ static void check_for_misalignment(
       [&](const Dimname& candidate) { return name.can_refer_to(candidate); });
   // TODO(zou3519): Can improve message by checking if names are alignable and suggesting workarounds
   TORCH_CHECK(it == other_names.end(),
-      "Misaligned dims when attempting to broadcast dims ", names, " and dims ",
+      "Misaligned dims when attempting to ", action, " dims ", names, " and dims ",
       other_names, ": dim ", name, " appears in a different position from the right "
       "across both lists");
 }
 
 // Assumption: A DimnameList can have no duplicate full names with
 // the exception of wildcards
-std::vector<Dimname> unify_from_right(DimnameList names, DimnameList other_names) {
+std::vector<Dimname> unify_from_right(
+    DimnameList names,
+    DimnameList other_names,
+    const char* action) {
   const auto wildcard = Dimname::wildcard();
   const auto size = std::max(names.size(), other_names.size());
   auto result = std::vector<Dimname>(size, wildcard);
@@ -97,7 +101,7 @@ std::vector<Dimname> unify_from_right(DimnameList names, DimnameList other_names
     // Step 1: Check that the names match
     const auto maybeName = unify(name, other_name);
     if (!maybeName) {
-      report_positional_error(name, other_name, names, other_names);
+      report_positional_error(name, other_name, names, other_names, action);
     }
     *result_it = *maybeName;
 
@@ -106,8 +110,8 @@ std::vector<Dimname> unify_from_right(DimnameList names, DimnameList other_names
       // Let: N = max(len(names), len(other_names))
       //      K = # of special names among names and other_names.
       // This search (including the outer loop) is O(N*K) but typically # of dims is small.
-      check_for_misalignment(name, names, other_names);
-      check_for_misalignment(other_name, other_names, names);
+      check_for_misalignment(name, names, other_names, action);
+      check_for_misalignment(other_name, other_names, names, action);
     }
 
     if (names_it != names.rend()) {
@@ -458,6 +462,49 @@ void propagate_names_for_expand(Tensor& result, const Tensor& self) {
       self.opt_names()->end(),
       outnames.begin() + result_dim - self.dim());
   propagate_names(result, std::move(outnames), /*validate_names=*/false);
+}
+
+optional<std::vector<Dimname>> compute_broadcast_outnames(
+    const Tensor& self,
+    const Tensor& other) {
+  if (!self.has_names() && !other.has_names()) {
+    return nullopt;
+  }
+  return unify_from_right(self.names(), other.names());
+}
+
+optional<std::vector<Dimname>> broadcast_to_outnames(
+    const Tensor& tensor,
+    const Tensor& reference_tensor,
+    const char* op_name) {
+  if (!tensor.has_names() && !reference_tensor.has_names()) {
+    return nullopt;
+  }
+  auto reference_names = reference_tensor.names();
+  auto tensor_names = tensor.names();
+  TORCH_CHECK(
+      reference_names.size() >= tensor_names.size(),
+      op_name, ": attempted to broadcast Tensor", tensor_names, " to Tensor",
+      reference_names, " but the number of dims (", tensor_names.size(),
+      ") must be less than or equal to the number of dims in the tensor (",
+      reference_names.size(), ")");
+  return unify_from_right(reference_names, tensor_names);
+}
+
+optional<std::vector<Dimname>> compute_cat_outnames(TensorList tensors) {
+  if (!at::has_names(tensors)) {
+    return nullopt;
+  }
+  std::vector<Dimname> result;
+  for (const auto& tensor : tensors) {
+    const auto tensor_names = tensor.names();
+    TORCH_CHECK(tensor_names.size() > 0, "zero-dimensional tensor cannot be concatenated");
+    TORCH_CHECK(result.empty() || tensor_names.size() == result.size(),
+        "Tensors must have same number of dimensions: got ", result.size(),
+        " and ", tensor_names.size());
+    result = unify_from_right(result, tensor_names, "cat");
+  }
+  return result;
 }
 
 optional<std::vector<Dimname>> compute_matmul_outnames(

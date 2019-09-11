@@ -108,18 +108,28 @@ std::shared_ptr<SugaredValue> PythonValue::call(
   if (!matched_schema)
     throw ErrorReport(loc) << failure_messages.str();
 
+  // If if a function is marked as dropped,
+  // we throw an exception if it is invoked.
+  if (py::cast<bool>(py::module::import("torch._jit_internal")
+                         .attr("should_drop")(self))) {
+    auto g = m.graph();
+    auto err_msg = insertConstant(
+        *g,
+        IValue(
+            "This Python function is annotated to be ignored and cannot be run"));
+    g->insert(prim::RaiseException, {err_msg}, {}, loc);
+    return std::make_shared<SimpleValue>(
+        g->insertNode(
+             g->createUninitialized(matched_schema->return_types.at(0)))
+            ->output());
+  }
+
   // Release the function object so we can wrap it in a PythonOp
   py::object func = self;
   std::string cconv(inputs.size(), 'd');
   Node* new_node = m.graph()->insertNode(
       m.graph()->createPythonOp(THPObjectPtr(func.release().ptr()), cconv, {}));
 
-  // Mark if function is ignored on export
-  if (py::cast<bool>(py::module::import("torch._jit_internal")
-                         .attr("should_drop_on_export")(self))) {
-    auto python_op = static_cast<PythonOp*>(new_node);
-    python_op->ignore_on_export = true;
-  }
   new_node->setSourceRange(loc);
   for (auto& i : matched_schema->inputs)
     new_node->addInput(i);
@@ -277,6 +287,53 @@ Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
 
+std::vector<std::shared_ptr<SugaredValue>> ModuleValue::desugarModuleContainer(
+    bool get_keys,
+    bool get_values,
+    const SourceRange& loc,
+    Function& m) {
+  // the submodules in the module list may be a mix of python objects
+  // and script Modules. If we need to load a Module, we need its field
+  // name so we can emit 'self.field_name'.
+  std::unordered_map<at::ivalue::Object*, std::string> obj_to_field;
+  for (Slot s : module_.get_module_slots()) {
+    obj_to_field[s.value().toObject().get()] = s.name();
+  }
+
+  std::vector<std::shared_ptr<SugaredValue>> result;
+  for (py::handle py_submodule : py_module_) {
+    py::object obj = py::reinterpret_borrow<py::object>(py_submodule);
+    if (auto sub_module = as_module(obj)) {
+      const auto& name = obj_to_field.at(sub_module->module_object().get());
+      auto name_v =
+          std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
+      Value* module_v = m.graph()->insertGetAttr(self_, name);
+      auto mod_v = std::make_shared<ModuleValue>(module_v, *sub_module, obj);
+
+      if (get_keys && get_values) {
+        std::vector<std::shared_ptr<SugaredValue>> tup;
+        tup.push_back(name_v);
+        tup.push_back(mod_v);
+        result.push_back(
+            std::make_shared<ConstantTupleValue>(ConstantTupleValue(tup)));
+      } else if (get_keys) {
+        result.push_back(name_v);
+      } else if (get_values) {
+        result.push_back(mod_v);
+      } else {
+        TORCH_INTERNAL_ASSERT(false);
+      }
+    } else {
+      result.push_back(toSugaredValue(
+          obj,
+          m,
+          loc,
+          /*is_constant =*/false));
+    }
+  }
+  return result;
+}
+
 std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
     Function& m,
@@ -317,6 +374,26 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   if (!py::hasattr(py_module_, field.c_str())) {
     throw ErrorReport(loc) << "module has no attribute '" << field << "'";
   }
+
+  auto is_mod_dict = py::isinstance(
+      py_module_, py::module::import("torch.jit").attr("_ConstModuleDict"));
+  if (is_mod_dict) {
+    if (field == "items" || field == "keys" || field == "values") {
+      bool get_keys = false;
+      bool get_values = false;
+      if (field == "items") {
+        get_keys = true;
+        get_values = true;
+      } else if (field == "values") {
+        get_values = true;
+      } else {
+        get_keys = true;
+      }
+      return std::make_shared<ConstantTupleMethod>(
+          desugarModuleContainer(get_keys, get_values, loc, m), field);
+    }
+  }
+
   py::object attr = py::getattr(py_module_, field.c_str());
 
   // HACK: This is used for rnn.py to get all the parameters of a Module as a
@@ -387,35 +464,20 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
     const SourceRange& loc,
     Function& m,
     const c10::optional<size_t>& size_hint) {
-  if (!py::isinstance(
-          py_module_, py::module::import("torch.jit").attr("_ConstModuleList")))
+  auto is_mod_dict = py::isinstance(
+      py_module_, py::module::import("torch.jit").attr("_ConstModuleDict"));
+  auto is_mod_list = py::isinstance(
+      py_module_, py::module::import("torch.jit").attr("_ConstModuleList"));
+
+  if (!is_mod_list && !is_mod_dict) {
     return SugaredValue::asTuple(loc, m, size_hint);
-
-  // the submodules in the module list may be a mix of python objects
-  // and script Modules. If we need to load a Module, we need its field
-  // name so we can emit 'self.field_name'.
-  std::unordered_map<at::ivalue::Object*, std::string> obj_to_field;
-  for (Slot s : module_.get_module_slots()) {
-    obj_to_field[s.value().toObject().get()] = s.name();
   }
 
-  std::vector<std::shared_ptr<SugaredValue>> result;
-  for (py::handle py_submodule : py_module_) {
-    py::object obj = py::reinterpret_borrow<py::object>(py_submodule);
-    if (auto sub_module = as_module(obj)) {
-      Value* module_v = m.graph()->insertGetAttr(
-          self_, obj_to_field.at(sub_module->module_object().get()));
-      result.emplace_back(
-          std::make_shared<ModuleValue>(module_v, *sub_module, obj));
-    } else {
-      result.push_back(toSugaredValue(
-          obj,
-          m,
-          loc,
-          /*is_constant =*/false));
-    }
-  }
-  return result;
+  // iterating over a dictionary returns the keys, iterating over a
+  // list returns the values
+  bool get_keys = is_mod_dict;
+  bool get_values = !is_mod_dict;
+  return desugarModuleContainer(get_keys, get_values, loc, m);
 }
 
 void ModuleValue::setAttr(
@@ -477,31 +539,30 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   auto& g = *m.graph();
   if (is_constant) {
     if (py::isinstance<py::bool_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<bool>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<bool>(obj), loc));
     } else if (py::isinstance<py::int_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<int64_t>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
     } else if (py::isinstance<py::float_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<double>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<double>(obj), loc));
     } else if (py::isinstance<py::str>(obj)) {
-      return toSimple(
-          g.insertConstant(py::cast<std::string>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
     } else if (obj.is(py::none())) {
-      return toSimple(g.insertConstant(IValue(), nullptr, loc));
+      return toSimple(g.insertConstant(IValue(), loc));
     } else if (THPDevice_Check(obj.ptr())) {
       auto device = reinterpret_cast<THPDevice*>(obj.ptr());
       return toSimple(g.insertConstant(device->device));
     } else if (THPLayout_Check(obj.ptr())) {
       auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
       const auto v = static_cast<int64_t>(layout->layout);
-      return toSimple(g.insertConstant(v, nullptr, loc));
+      return toSimple(g.insertConstant(v, loc));
     } else if (THPDtype_Check(obj.ptr())) {
       auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
-      return toSimple(g.insertConstant(v, nullptr, loc));
+      return toSimple(g.insertConstant(v, loc));
     } else if (THPQScheme_Check(obj.ptr())) {
       auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
       const auto v = static_cast<uint8_t>(qscheme->qscheme);
-      return toSimple(g.insertConstant(v, nullptr, loc));
+      return toSimple(g.insertConstant(v, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       return std::make_shared<ConstantPythonTupleValue>(obj);
     }
