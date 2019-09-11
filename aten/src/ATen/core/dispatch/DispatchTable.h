@@ -8,6 +8,7 @@
 #include <c10/core/TensorTypeId.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/dispatch/KernelFunction.h>
+#include <ATen/core/ATenDispatch.h>
 
 #include <array>
 #include <atomic>
@@ -209,14 +210,17 @@ private:
         0,
         reverse_index_of_first_tensor_arg_
       );
+      // TODO: This will need to get adjusted for multiple dispatch
       if (C10_UNLIKELY(first_tensor_arg_is_tensor_list_)) {
         auto tensor_list = first_tensor_arg.toTensorListRef();
         if (tensor_list.size() == 0) {
           throw std::runtime_error("Tried to dispatch operator " + operator_name + " based on an empty tensor list. When the first tensor argument of an operator is a tensor list, then it must not be empty.");
         }
-        return tensor_list[0].type_id();
+        // TODO: Don't use legacy extractor; blocked on c10 understanding
+        // variable
+        return c10::legacyExtractTypeId(tensor_list[0].type_set());
       } else {
-        return first_tensor_arg.unsafeToTensorImpl()->type_id();
+        return c10::legacyExtractTypeId(first_tensor_arg.unsafeToTensorImpl()->type_set());
       }
     }
   };
