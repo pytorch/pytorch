@@ -45,6 +45,8 @@ target_compile_options(pytorch PRIVATE
   -fexceptions
 )
 
+target_compile_definitions(pytorch PRIVATE USE_STATIC_DISPATCH)
+
 target_include_directories(pytorch PUBLIC
     ${libtorch_include_DIR}
 )
