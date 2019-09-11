@@ -1953,7 +1953,6 @@ class TestAutograd(TestCase):
         self.assertEqual(device[0], 1)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    @skipIfRocm
     def test_inputbuffer_add_multigpu(self):
         input = torch.randn(1).cuda(0).requires_grad_()
         output = input.cuda(1) + input.cuda(1)
