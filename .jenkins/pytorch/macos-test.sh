@@ -46,6 +46,10 @@ fi
 popd
 
 test_python_all() {
+  # The CircleCI worker hostname doesn't resolve to an address.
+  # This environment variable makes ProcessGroupGloo default to
+  # using the address associated with the loopback interface.
+  export GLOO_SOCKET_IFNAME=lo0
   echo "Ninja version: $(ninja --version)"
   python test/run_test.py --verbose
   assert_git_not_dirty
