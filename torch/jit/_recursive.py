@@ -39,8 +39,48 @@ def copy_to_script_module(original, stubs):
             script_module.register_buffer(name, original._buffers[name])
 
     # Constants annotated via `Final[T]` rather than being added to `__constants__`
-    for name, ann in getattr(original, '__annotations__', {}).items():
+    class_annotations = getattr(original, '__annotations__', {})
+    for name, ann in class_annotations.items():
         if torch._jit_internal.is_final(ann):
+            constants_set.add(name)
+
+    # [optional module]
+    # Map Optional[Module] to `__constants__`.
+    # TODO: when Optional[Module] has first class support, delete this. This is
+    # only here so the user facing API makes more sense (submodules are
+    # type annotated instead of the user adding them to __constants__)
+    def is_optional_module_annotation(ann):
+        if not torch._jit_internal.is_optional(ann):
+            return False
+        element_type = ann.__args__[0]
+        if not inspect.isclass(element_type):
+            return False
+        return issubclass(element_type, torch.nn.Module)
+
+    # Copy annotations, pull types from `__annotations__` or try to infer
+    # the type if possible
+    for name in dir(original):
+        if name in ("training", "__dict__"):
+            # TODO: removing this skip should let us remove the code to add training as an
+            # attribute in python_sugared_value.cpp
+            continue
+        if hasattr(script_module, name):
+            # Don't re-copy properties
+            continue
+        item = getattr(original, name)
+        if name in class_annotations:
+            if is_optional_module_annotation(class_annotations[name]):
+                # See [optional module]
+                continue
+            the_type = torch.jit.annotations.ann_to_type(class_annotations[name])
+        else:
+            the_type = torch._C._jit_try_infer_type(item)
+        if the_type is not None:
+            script_module._c._register_attribute(name, the_type, item)
+
+    for name in class_annotations:
+        annotation = class_annotations[name]
+        if is_optional_module_annotation(annotation):
             constants_set.add(name)
 
     # Copy constants
@@ -53,25 +93,6 @@ def copy_to_script_module(original, stubs):
             # don't recopy constants, should only occur for constant modules/params
             if not hasattr(script_module, name):
                 setattr(script_module, name, getattr(original, name))
-
-    # Copy annotations, pull types from `__annotations__` or try to infer
-    # the type if possible
-    class_annotations = getattr(original, '__annotations__', {})
-    for name in dir(original):
-        if name in ("training", "__dict__"):
-            # TODO: removing this skip should let us remove the code to add training as an
-            # attribute in python_sugared_value.cpp
-            continue
-        if hasattr(script_module, name):
-            # Don't re-copy properties
-            continue
-        item = getattr(original, name)
-        if name in class_annotations:
-            the_type = torch.jit.annotations.ann_to_type(class_annotations[name])
-        else:
-            the_type = torch._C._jit_try_infer_type(item)
-        if the_type is not None:
-            script_module._c._register_attribute(name, the_type, item)
 
     # Copy overloads
     script_module.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
