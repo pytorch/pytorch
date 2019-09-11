@@ -14281,6 +14281,9 @@ class TestRecursiveScript(JitTestCase):
         f.check('Submodule')
         f.run(out[0])
 
+
+        self.assertEqual(m.original_name, 'MyModule')
+
     def test_class_compile(self):
         def other_fn(a, b):
             # type: (int, Tensor) -> Tensor
