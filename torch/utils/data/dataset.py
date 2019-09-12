@@ -266,13 +266,7 @@ class Subset(Dataset):
 
 
 class ChunkDataReader(object):
-    r"""Reads a chunk of data for a particular index.
-
-    Chunks can be files, contents of folder, pieces lines
-    of a text file, etc
-
-    In a distributed setup, each worker would draw different indices
-    by feeding their ID (aka `rank`) into the chunk sampler.
+    r"""Reads a chunk of data given a chunk index.
 
     The reading logic must be implemented inside `__call__` method
     """
@@ -281,9 +275,9 @@ class ChunkDataReader(object):
         pass
 
     def __call__(self, idx):
-        r"""Returns `tuple(data, target)`
+        r"""Returns `list(samples)`
 
-        If `data` and `target` contain tensors, numpy arrays, numbers,
+        If `samples` contain tensors, numpy arrays, numbers,
         dicts or lists, the default collate function can be implicitly used.
         Otherwise, a custom `collate_fn` must be provided to `DataLoader`
 
@@ -295,17 +289,26 @@ class ChunkDataReader(object):
 class ChunkDataset(IterableDataset):
     r"""Dataset which uses hierarchical sampling for efficient data reading.
 
-    Instead of reading the full dataset at once, `ChunkDataset` splits the data in
-    chunks before loading some of them. Each chunk is then shuffled again before being returned.
+    The hierarchical sampling happens by selecting a few chunks to read at a time
+    (first level of sampling) and after they are loaded, they can be shuffled again
+    to achieve the second level of sampling.
 
-    ``ChunkDataset`` extends ``IterableDataset`` because the
-    size of the dataset is unknown .
+    Chunks can be files, contents of folder, lines of a text file, etc
+
+    In a distributed setup, each worker has an instance of `ChunkDataset`
+    that draws different indices by feeding their ID (aka `rank`) into the chunk sampler.
+
+    ``ChunkDataset`` extends ``IterableDataset`` because the total amount of records
+    (or simply the size) is unknown. Only the number of chunks is known for the dataset.
+    However, in a distributed setup, to make all workers complete training at the same time,
+    the chunks need to be roughly similar in size.
 
     Arguments:
-        chunk_sampler (DistributedSampler or DistributedChunkSampler): Sampler used to split dataset in multiple chunks.
-                                       Typically used to split data amongst dataloader workers
+        chunk_sampler (DistributedSampler or DistributedChunkSampler): Draw indices for chunks.
+            Typically used to split data amongst dataloader workers (first level of sampling)
         chunk_reader (ChunkDataReader): Specialized reader
-        shuffle_cache (bool): Setting `True` forces shuffling of the internal chunk cache
+        shuffle_cache (bool): Setting `True` trigger shuffling of the internal chunk cache
+            (second level of sampling) (default: `True`)
     """
 
     def __init__(self, chunk_sampler, chunk_reader, shuffle_cache=True):
@@ -320,8 +323,7 @@ class ChunkDataset(IterableDataset):
 
         # Internal state
         self._chunk_sampler_iter = iter(self.chunk_sampler)
-        self._data_cache = numpy.array([])
-        self._target_cache = numpy.array([])
+        self._cache = numpy.array([])
         self._batch_size = 1
         self._min_cache = 1000
 
@@ -335,49 +337,43 @@ class ChunkDataset(IterableDataset):
         r"""Returns a batch or raises exception when exhausted"""
 
         cache_size = 0
-        if len(self._data_cache) > 0:
-            cache_size = len(self._data_cache)
-        elif len(self._target_cache) > 0:
-            cache_size = len(self._target_cache)
+        if len(self._cache) > 0:
+            cache_size = len(self._cache)
 
         if (cache_size < self._min_cache):
             new_chunk = None
+
+            # Try reading a new chunk
+            # Ignore EOF here because there may be internal cache entries to be returned yet
             try:
                 new_chunk = self.chunk_reader(next(self._chunk_sampler_iter))
-                assert isinstance(new_chunk, tuple), "Chunk data reader must return a `tuple(data, target)`"
+                assert isinstance(new_chunk, list) or isinstance(new_chunk, numpy.ndarray), "Chunk data reader must return a `list(samples)` or numpy.array(samples)"
             except StopIteration:
                 pass
 
+            # Updates internal cache
             if new_chunk and cache_size > 0:
-                if new_chunk[0] is not None:
-                    self._data_cache = numpy.concatenate((self._data_cache, new_chunk[0]))
-                if new_chunk[1] is not None:
-                    self._target_cache = numpy.concatenate((self._target_cache, new_chunk[1]))
+                self._cache = numpy.concatenate((self._cache, new_chunk))
             elif new_chunk:
-                if new_chunk[0] is not None:
-                    self._data_cache = new_chunk[0]
-                if new_chunk[1] is not None:
-                    self._target_cache = new_chunk[1]
+                self._cache = new_chunk
             elif not new_chunk and cache_size == 0:
                 raise StopIteration
 
+            # Apply second level of shuffling
             if self.shuffle_cache:
-                numpy.random.shuffle(self._data_cache)
-                numpy.random.shuffle(self._target_cache)
+                numpy.random.shuffle(self._cache)
 
+        # Get a batch and update internal cache cache
+        if len(self._cache) > 0:
+            batch = self._cache[:self._batch_size]
+            self._cache = self._cache[self._batch_size:]
 
-        if len(self._data_cache) > 0 and len(self._target_cache) > 0:
-            batch = self._data_cache[:self._batch_size], self._target_cache[:self._batch_size]
-            self._data_cache = self._data_cache[self._batch_size:]
-            self._target_cache = self._target_cache[self._batch_size:]
-        elif len(self._data_cache) > 0:
-            batch = self._data_cache[:self._batch_size], None
-            self._data_cache = self._data_cache[self._batch_size:]
+        # If batch size is 1, we return a sample directly - not a list - because
+        # the user will probably use DataLoader auto collation to get a batch
+        if self._batch_size == 1:
+            return batch[0]
         else:
-            batch = None, self._target_cache[:self._batch_size]
-            self._target_cache = self._target_cache[self._batch_size:]
-
-        return batch
+            return batch
 
     def reset(self):
         r"""Resets internal state of ChunkDataset
