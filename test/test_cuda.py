@@ -2784,7 +2784,7 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_triangular_solve(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    @unittest.skip("Spuriously failing")
+    @skipCUDANonDefaultStreamIf(True)
     def test_triangular_solve_batched(self):
         _TestTorchMixin._test_triangular_solve_batched(self, lambda t: t.cuda())
 
