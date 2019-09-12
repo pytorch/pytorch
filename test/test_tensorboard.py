@@ -168,10 +168,12 @@ class TestTensorBoardUtils(BaseTestCase):
     def test_prepare_video(self):
         # At each timeframe, the sum over all other
         # dimensions of the video should be the same.
-        shapes = [(16, 30, 3, 28, 28),
-                    (36, 30, 3, 28, 28),
-                    (19, 29, 3, 23, 19),
-                    (3, 3, 3, 3, 3)]
+        shapes = [
+            (16, 30, 3, 28, 28),
+            (36, 30, 3, 28, 28),
+            (19, 29, 3, 23, 19),
+            (3, 3, 3, 3, 3)
+        ]
         for s in shapes:
             V_input = np.random.random(s)
             V_after = _prepare_video(np.copy(V_input))
@@ -213,9 +215,11 @@ class TestTensorBoardWriter(BaseTestCase):
             n_iter = 0
             writer.add_scalar('data/scalar_systemtime', 0.1, n_iter)
             writer.add_scalar('data/scalar_customtime', 0.2, n_iter, walltime=n_iter)
-            writer.add_scalars('data/scalar_group', {"xsinx": n_iter * np.sin(n_iter),
-                                                        "xcosx": n_iter * np.cos(n_iter),
-                                                        "arctanx": np.arctan(n_iter)}, n_iter)
+            writer.add_scalars('data/scalar_group', {
+                "xsinx": n_iter * np.sin(n_iter),
+                "xcosx": n_iter * np.cos(n_iter),
+                "arctanx": np.arctan(n_iter)
+            }, n_iter)
             x = np.zeros((32, 3, 64, 64))  # output from network
             writer.add_images('Image', x, n_iter)  # Tensor
             writer.add_image_with_boxes('imagebox',
@@ -407,9 +411,15 @@ class TestTensorBoardSummary(BaseTestCase):
         self.assertTrue(compare_proto(summary.histogram('dummy', tensor_N(shape=(1024,)), bins='doane', max_bins=5), self))
 
     def test_custom_scalars(self):
-        layout = {'Taiwan': {'twse': ['Multiline', ['twse/0050', 'twse/2330']]},
-                    'USA': {'dow': ['Margin', ['dow/aaa', 'dow/bbb', 'dow/ccc']],
-                            'nasdaq': ['Margin', ['nasdaq/aaa', 'nasdaq/bbb', 'nasdaq/ccc']]}}
+        layout = {
+            'Taiwan': {
+                'twse': ['Multiline', ['twse/0050', 'twse/2330']]
+            },
+            'USA': {
+                'dow': ['Margin', ['dow/aaa', 'dow/bbb', 'dow/ccc']],
+                'nasdaq': ['Margin', ['nasdaq/aaa', 'nasdaq/bbb', 'nasdaq/ccc']]
+            }
+        }
         summary.custom_scalars(layout)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
 
     def test_hparams_smoke(self):
@@ -451,8 +461,8 @@ def read_expected_content(function_ptr):
     test_dir = os.path.dirname(sys.modules[module_id].__file__)
     functionName = function_ptr.id().split('.')[-1]
     expected_file = os.path.join(test_dir,
-                                    "expect",
-                                    'TestTensorBoard.' + functionName + ".expect")
+                                 "expect",
+                                 'TestTensorBoard.' + functionName + ".expect")
     assert os.path.exists(expected_file)
     with open(expected_file, "r") as f:
         return f.read()
@@ -484,8 +494,8 @@ def write_proto(str_to_compare, function_ptr):
     test_dir = os.path.dirname(sys.modules[module_id].__file__)
     functionName = function_ptr.id().split('.')[-1]
     expected_file = os.path.join(test_dir,
-                                    "expect",
-                                    'TestTensorBoard.' + functionName + ".expect")
+                                 "expect",
+                                 'TestTensorBoard.' + functionName + ".expect")
     with open(expected_file, 'w') as f:
         f.write(str(str_to_compare))
 
