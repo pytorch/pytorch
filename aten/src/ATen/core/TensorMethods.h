@@ -108,7 +108,7 @@ inline Tensor Tensor::align_as(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::align_as(const_cast<Tensor&>(*this), other);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::align_as(Tensor(a) self, Tensor other) -> Tensor(a)");
+    static auto table = globalATenDispatch().getOpTable("aten::align_as(Tensor self, Tensor other) -> Tensor");
     return table->getOp<Tensor (const Tensor &, const Tensor &)>(type_set())(const_cast<Tensor&>(*this), other);
 #endif
 }
