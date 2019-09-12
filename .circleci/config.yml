@@ -75,104 +75,79 @@ ios_brew_update: &ios_brew_update
     brew install expect
     brew install libtool
 
-    ##############################################################################
+    
+##############################################################################
+# Binary build (nightlies nightly build) defaults
+# The binary builds use the docker executor b/c at time of writing the machine
+# executor is limited to only two cores and is painfully slow (4.5+ hours per
+# GPU build). But the docker executor cannot be run with --runtime=nvidia, and
+# so the binary test/upload jobs must run on a machine executor. The package
+# built in the build job is persisted to the workspace, which the test jobs
+# expect. The test jobs just run a few quick smoke tests (very similar to the
+# second-round-user-facing smoke tests above) and then upload the binaries to
+# their final locations. The upload part requires credentials that should only
+# be available to org-members.
+#
+# binary_checkout MUST be run before other commands here. This is because the
+# other commands are written in .circleci/scripts/*.sh , so the pytorch source
+# code must be downloaded on the machine before they can be run. We cannot
+# inline all the code into this file, since that would cause the yaml size to
+# explode past 4 MB (all the code in the command section is just copy-pasted to
+# everywhere in the .circleci/config.yml file where it appears).
+##############################################################################
+
+# Checks out the Pytorch and Builder repos (always both of them), and places
+# them in the right place depending on what executor we're running on. We curl
+# our .sh file from the interweb to avoid yaml size bloat. Note that many jobs
+# do not need both the pytorch and builder repos, so this is a little wasteful
+# (smoke tests and upload jobs do not need the pytorch repo).
+binary_checkout: &binary_checkout
+  name: Checkout pytorch/builder repo
+  command: ~/workspace/.circleci/scripts/binary_checkout.sh
+
+# Parses circleci arguments in a consistent way, essentially routing to the
+# correct pythonXgccXcudaXos build we want
+binary_populate_env: &binary_populate_env
+  name: Set up binary env variables
+  command: ~/workspace/.circleci/scripts/binary_populate_env.sh
+
+binary_install_miniconda: &binary_install_miniconda
+  name: Install miniconda
+  no_output_timeout: "1h"
+  command: ~/workspace/.circleci/scripts/binary_install_miniconda.sh
+
+# This section is used in the binary_test and smoke_test jobs. It expects
+# 'binary_populate_env' to have populated /home/circleci/project/env and it
+# expects another section to populate /home/circleci/project/ci_test_script.sh
+# with the code to run in the docker
+binary_run_in_docker: &binary_run_in_docker
+  name: Run in docker
+  # This step only runs on circleci linux machine executors that themselves
+  # need to start docker images
+  command: ~/workspace/.circleci/scripts/binary_run_in_docker.sh
+
+# This is copied almost verbatim from the macos_brew_update job
+# In version 2.1 and above we could make this a command and pass a parameter to
+# it, but in this version there is no way to pass a parameter to a step
+binary_macos_brew_update: &binary_macos_brew_update
+  name: Brew update and install moreutils and expect
+  no_output_timeout: "1h"
+  command: |
+    set -eux -o pipefail
+    # See https://discourse.brew.sh/t/fetching-homebrew-repos-is-slow/5374/3
+    brew untap caskroom/homebrew-cask
+    # moreutils installs a `parallel` executable by default, which conflicts
+    # with the executable from the GNU `parallel`, so we must unlink GNU
+    # `parallel` first, and relink it afterwards
+    brew update
+    brew unlink parallel
+    brew install moreutils
+    brew link parallel --overwrite
+    brew install expect
+
+##############################################################################
 # Build parameters
 ##############################################################################
-pytorch_params: &pytorch_params
-  parameters:
-    build_environment:
-      type: string
-      default: ""
-    docker_image:
-      type: string
-      default: ""
-    resource_class:
-      type: string
-      default: "large"
-    use_cuda_docker_runtime:
-      type: string
-      default: ""
-  environment:
-    BUILD_ENVIRONMENT: << parameters.build_environment >>
-    DOCKER_IMAGE: << parameters.docker_image >>
-    USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
-  resource_class: << parameters.resource_class >>
-
-pytorch_ios_params: &pytorch_ios_params
-  parameters:
-    build_environment:
-      type: string
-      default: ""
-    ios_arch:
-      type: string
-      default: ""
-    ios_platform:
-      type: string
-      default: ""
-    use_nnpack:
-      type: string
-      default: "ON"
-  environment:
-    BUILD_ENVIRONMENT: << parameters.build_environment >>
-    IOS_ARCH: << parameters.ios_arch >>
-    IOS_PLATFORM: << parameters.ios_platform >>
-    USE_NNPACK: << parameters.use_nnpack >>
-
-
-
-binary_linux_build_params: &binary_linux_build_params
-  parameters:
-    build_environment:
-      type: string
-      default: ""
-    docker_image:
-      type: string
-      default: ""
-    libtorch_variant:
-      type: string
-      default: ""
-    resource_class:
-      type: string
-      default: "2xlarge+"
-  environment:
-    BUILD_ENVIRONMENT: << parameters.build_environment >>
-    LIBTORCH_VARIANT: << parameters.libtorch_variant >>
-  resource_class: << parameters.resource_class >>
-  docker:
-    - image: << parameters.docker_image >>
-
-binary_linux_test_upload_params: &binary_linux_test_upload_params
-  parameters:
-    build_environment:
-      type: string
-      default: ""
-    docker_image:
-      type: string
-      default: ""
-    libtorch_variant:
-      type: string
-      default: ""
-    resource_class:
-      type: string
-      default: "medium"
-    use_cuda_docker_runtime:
-      type: string
-      default: ""
-  environment:
-    BUILD_ENVIRONMENT: << parameters.build_environment >>
-    DOCKER_IMAGE: << parameters.docker_image >>
-    USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
-    LIBTORCH_VARIANT: << parameters.libtorch_variant >>
-  resource_class: << parameters.resource_class >>
-
-binary_mac_params: &binary_mac_params
-  parameters:
-    build_environment:
-      type: string
-      default: ""
-  environment:
-    BUILD_ENVIRONMENT: << parameters.build_environment >>
-
 ##############################################################################
 # Job specs
 ##############################################################################
@@ -599,6 +574,124 @@ jobs:
       - persist_to_workspace:
           root: .
           paths: .circleci/scripts
+
+  
+  # update_s3_htmls job
+  # These jobs create html files for every cpu/cu## folder in s3. The html
+  # files just store the names of all the files in that folder (which are
+  # binary files (.whl files)). This is to allow pip installs of the latest
+  # version in a folder without having to know the latest date. Pip has a flag
+  # -f that you can pass an html file listing a bunch of packages, and pip will
+  # then install the one with the most recent version.
+  update_s3_htmls: &update_s3_htmls
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    - attach_workspace:
+        at: ~/workspace
+    - run:
+        <<: *setup_linux_system_environment
+    - run:
+        <<: *binary_checkout
+    # N.B. we do not run binary_populate_env. The only variable we need is
+    # PIP_UPLOAD_FOLDER (which is 'nightly/' for the nightlies and '' for
+    # releases, and sometimes other things for special cases). Instead we
+    # expect PIP_UPLOAD_FOLDER to be passed directly in the env. This is
+    # because, unlike all the other binary jobs, these jobs only get run once,
+    # in a separate workflow. They are not a step in other binary jobs like
+    # build, test, upload.
+    #
+    # You could attach this to every job, or include it in the upload step if
+    # you wanted. You would need to add binary_populate_env in this case to
+    # make sure it has the same upload folder as the job it's attached to. This
+    # function is idempotent, so it won't hurt anything; it's just a little
+    # unnescessary"
+    - run:
+        name: Update s3 htmls
+        no_output_timeout: "1h"
+        command: |
+          set +x
+          echo "declare -x \"AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}\"" >> /home/circleci/project/env
+          echo "declare -x \"AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}\"" >> /home/circleci/project/env
+          source /home/circleci/project/env
+          set -eux -o pipefail
+          retry () {
+              $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+          }
+          retry pip install awscli==1.6
+          "/home/circleci/project/builder/cron/update_s3_htmls.sh"
+
+  # Update s3 htmls for the nightlies
+  update_s3_htmls_for_nightlies:
+    environment:
+      PIP_UPLOAD_FOLDER: "nightly/"
+    <<: *update_s3_htmls
+
+  # Update s3 htmls for the nightlies for devtoolset7
+  update_s3_htmls_for_nightlies_devtoolset7:
+    environment:
+      PIP_UPLOAD_FOLDER: "nightly/devtoolset7/"
+    <<: *update_s3_htmls
+
+
+  # upload_binary_logs job
+  # The builder hud at pytorch.org/builder shows the sizes of all the binaries
+  # over time. It gets this info from html files stored in S3, which this job
+  # populates every day.
+  upload_binary_sizes: &upload_binary_sizes
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    - attach_workspace:
+        at: ~/workspace
+    - run:
+        <<: *setup_linux_system_environment
+    - run:
+        <<: *binary_checkout
+    - run:
+        <<: *binary_install_miniconda
+    - run:
+        name: Upload binary sizes
+        no_output_timeout: "1h"
+        command: |
+          set +x
+          echo "declare -x \"AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}\"" > /home/circleci/project/env
+          echo "declare -x \"AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}\"" >> /home/circleci/project/env
+          export DATE="$(date -u +%Y_%m_%d)"
+          retry () {
+              $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+          }
+          source /home/circleci/project/env
+          set -eux -o pipefail
+
+          # This is hardcoded to match binary_install_miniconda.sh
+          export PATH="/home/circleci/project/miniconda/bin:$PATH"
+          # Not any awscli will work. Most won't. This one will work
+          retry conda create -qyn aws36 python=3.6
+          source activate aws36
+          pip install awscli==1.16.46
+
+          "/home/circleci/project/builder/cron/upload_binary_sizes.sh"
+
+
+# There is currently no testing for libtorch TODO
+#  binary_linux_libtorch_2.7m_cpu_test:
+#    environment:
+#      BUILD_ENVIRONMENT: "libtorch 2.7m cpu"
+#    resource_class: gpu.medium
+#    <<: *binary_linux_test
+#
+#  binary_linux_libtorch_2.7m_cu90_test:
+#    environment:
+#      BUILD_ENVIRONMENT: "libtorch 2.7m cu90"
+#    resource_class: gpu.medium
+#    <<: *binary_linux_test
+#
+#  binary_linux_libtorch_2.7m_cu100_test:
+#    environment:
+#      BUILD_ENVIRONMENT: "libtorch 2.7m cu100"
+#    resource_class: gpu.medium
+#    <<: *binary_linux_test
 
 
 ##############################################################################
