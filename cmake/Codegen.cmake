@@ -180,8 +180,7 @@ if (INTERN_BUILD_ATEN_OPS)
   # that they are equivalent so it must be a dependency of the script
   set(core_gen_checked_inputs
     ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core/TensorBody.h
-    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core/TensorMethods.h
-    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core/OpsAlreadyMovedToC10.cpp)
+    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core/TensorMethods.h)
 
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen)
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/core_tmp)
