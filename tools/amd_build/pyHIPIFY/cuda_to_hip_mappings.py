@@ -285,6 +285,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("cub/block/block_load.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
     ("cub/device/device_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
     ("cub/device/device_scan.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+    ("nvToolsExt.h", ("roctx.h", CONV_INCLUDE, API_ROCTX)),
 ])
 
 CUDA_IDENTIFIER_MAP = collections.OrderedDict([
@@ -2207,6 +2208,9 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("nvrtcGetPTXSize", ("hiprtcGetCodeSize", CONV_JIT, API_RTC)),
     ("thrust::cuda::", ("thrust::hip::", CONV_MATH_FUNC, API_BLAS)),
     ("cub::", ("hipcub::", CONV_MATH_FUNC, API_BLAS)),
+    ("nvtxMarkA", ("roctxMarkA", CONV_OTHER, API_ROCTX)),
+    ("nvtxRangePushA", ("roctxRangePushA", CONV_OTHER, API_ROCTX)),
+    ("nvtxRangePop", ("roctxRangePop", CONV_OTHER, API_ROCTX)),
 ])
 
 CUDA_SPARSE_MAP = collections.OrderedDict([
