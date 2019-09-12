@@ -1,4 +1,4 @@
-      # Pytorch iOS builds
+      # Pytorch iOS binary builds
       - binary_ios_build:
           name: pytorch_ios_10_2_1_nightly_x86_64_build
           build_environment: "libtorch-ios-10.2.1-nightly-x86_64-build"
