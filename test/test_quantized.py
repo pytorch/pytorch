@@ -774,7 +774,7 @@ class TestDynamicQuantizedLinear(TestCase):
             Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
 
         self.assertEqual(Y_fp32, Y_fp32_ref,
-                         message="torch.ops.quantized.fbgemm_linear_dynamic results are off")
+                         message="torch.ops.quantized.linear_dynamic (fbgemm) results are off")
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
@@ -907,13 +907,13 @@ class TestQuantizedLinear(unittest.TestCase):
         np.testing.assert_equal(
             Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
 
-    """Tests the correctness of the quantized::fbgemm_linear_unpack op."""
+    """Tests the correctness of the quantized::linear_unpack (fbgemm) op."""
     @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,),
                        qparams=hu.qparams(dtypes=torch.qint8)),
            use_channelwise=st.booleans())
     def test_qlinear_unpack(self, W, use_channelwise):
         W, (W_scale, W_zp, torch_type) = W
-
+        torch.backends.quantized.engine = torch.fbgemm
         if use_channelwise:
             output_channels = W.shape[0]
             W_scales = torch.rand(output_channels).to(torch.double)
@@ -1110,12 +1110,11 @@ class TestQuantizedConv(unittest.TestCase):
             W_q = torch.quantize_linear(W_KRSC, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
             b_q = torch.quantize_linear(b, scale=X_scale * W_scale[0], zero_point=0, dtype=torch.qint32) if use_bias else None
 
-        W_prepack = qconv_prepack(W_q, stride, pad, dilation, groups)
+        W_prepack = qconv_prepack(W_q, b_q, stride, pad, dilation, groups)
 
         Y_q = qconv(
             X_q,
             W_prepack,
-            b_q,
             stride,
             pad,
             dilation,
@@ -1142,7 +1141,7 @@ class TestQuantizedConv(unittest.TestCase):
         # assuming the rounding mode is round-to-nearest, ties-to-even.
         np.testing.assert_array_almost_equal(result_ref_q.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=0)
 
-    """Tests the correctness of the quantized::fbgemm_qconv_unpack op."""
+    """Tests the correctness of the quantized::qconv_unpack (fbgemm) op."""
     @given(X=hu.tensor_conv2d(min_batch=1, max_batch=3,
                               min_in_channels=1, max_in_channels=7,
                               min_out_channels=1, max_out_channels=7,
@@ -1192,9 +1191,11 @@ class TestQuantizedConv(unittest.TestCase):
         strides = [strideH, strideW]
         paddings = [padH, padW]
         dilations = [1, 1]
-        W_packed = qconv_prepack(W_q, strides, paddings, dilations, groups)
+        bias = torch.from_numpy(bias).to(torch.float)
+        W_packed = qconv_prepack(W_q, bias, strides, paddings, dilations, groups)
         # Unpack weights weight unpacking operator (Used for serialization)
-        W_unpacked = qconv_unpack(W_packed)
+        W_unpacked = qconv_unpack(W_packed)[0]
+        bias = qconv_unpack(W_packed)[1]
 
         # Assert equal
         np.testing.assert_equal(W_q.int_repr().numpy(), W_unpacked.int_repr().numpy())
