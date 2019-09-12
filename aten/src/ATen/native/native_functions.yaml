@@ -47,7 +47,7 @@
   variants: function, method
   named_guard: False
 
-- func: align_as(Tensor self, Tensor other) -> Tensor
+- func: align_as(Tensor(a) self, Tensor other) -> Tensor(a)
   variants: method
   named_guard: False
 

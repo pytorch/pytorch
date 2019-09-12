@@ -381,7 +381,9 @@ class CAFFE2_API Tensor {
   #ifdef BUILD_NAMEDTENSOR
   Tensor align_to(DimnameList names) const;
   #endif
+  #ifdef BUILD_NAMEDTENSOR
   Tensor align_as(const Tensor & other) const;
+  #endif
   #ifdef BUILD_NAMEDTENSOR
   Tensor refine_names(DimnameList names) const;
   #endif
