@@ -2,7 +2,6 @@
 #include <qnnpack/pack.h>
 #include <qnnpack_func.h>
 #include <cstring>
-#include <cstdlib>
 
 namespace qnnpack {
 
@@ -23,7 +22,7 @@ PrePackConvWeights::PrePackConvWeights(
       const uint32_t c_stride = (groups + (cr - 1)) & -cr;
       const size_t packed_weights_size =
           (sizeof(uint8_t) * kernel_size + sizeof(int32_t)) * c_stride;
-      packed_weights_ = aligned_alloc(16, packed_weights_size);
+      packed_weights_ = malloc(packed_weights_size);
       if (packed_weights_ == nullptr) {
         pytorch_qnnp_log_error(
             "failed to allocate %zu bytes for packed weights",
@@ -101,7 +100,7 @@ PrePackConvWeights::PrePackConvWeights(
       const size_t packed_group_weights_size =
           (sizeof(uint8_t) * kernel_size * k_stride + sizeof(int32_t)) *
           n_stride;
-      packed_weights_ = aligned_alloc(16, packed_group_weights_size * groups);
+      packed_weights_ = malloc(packed_group_weights_size * groups);
       if (packed_weights_ == nullptr) {
         pytorch_qnnp_log_error(
             "failed to allocate %zu bytes for packed weights",
@@ -136,7 +135,7 @@ PrePackConvWeights::PrePackConvWeights(
       const size_t packed_group_weights_size =
           (sizeof(uint8_t) * kernel_size * k_stride + sizeof(int32_t)) *
           n_stride;
-      packed_weights_ = aligned_alloc(16, packed_group_weights_size * groups);
+      packed_weights_ = malloc(packed_group_weights_size * groups);
       if (packed_weights_ == nullptr) {
         pytorch_qnnp_log_error(
             "failed to allocate %zu bytes for packed weights",
