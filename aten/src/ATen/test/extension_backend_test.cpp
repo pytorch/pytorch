@@ -25,7 +25,8 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
 TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(empty({5, 5}, at::kMSNPU));
   auto registry1 = torch::RegisterOperators()
-    .op("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor", torch::RegisterOperators::options()
+    .op(torch::RegisterOperators::options()
+      .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
       .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(TensorTypeId::MSNPUTensorId)
       .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
   Tensor a = empty({5, 5}, at::kMSNPU);
@@ -41,7 +42,8 @@ TEST(BackendExtensionTest, TestRegisterOp) {
 
   EXPECT_ANY_THROW(add(a, b));
   auto registry2 = torch::RegisterOperators()
-    .op("aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", torch::RegisterOperators::options()
+    .op(torch::RegisterOperators::options()
+      .schema("aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor")
       .impl_unboxedOnlyKernel<decltype(add_override), &add_override>(TensorTypeId::MSNPUTensorId)
       .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
   add(a, b);
@@ -54,7 +56,8 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   // Attempt to register on a schema that has already has a function
   EXPECT_ANY_THROW(
     torch::RegisterOperators()
-      .op("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor", torch::RegisterOperators::options()
+      .op(torch::RegisterOperators::options()
+        .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
         .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(TensorTypeId::MSNPUTensorId)
         .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   );

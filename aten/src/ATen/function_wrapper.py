@@ -113,12 +113,14 @@ ${return_type} ${Type}::${api_name}(${type_method_formals}) {
 """)
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op("${schema_string}", torch::RegisterOperators::options()
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
   .impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op("${schema_string}", torch::RegisterOperators::options()
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
   .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
