@@ -8,10 +8,10 @@ import torch.nn._intrinsic as nni
 import torch.nn._intrinsic.quantized as nniq
 import torch.nn._intrinsic.qat as nniqat
 from torch.quantization import \
-    QConfig_dynamic, default_weight_observer, \
+    QConfig_dynamic, default_weight_observer, dump_tensor,\
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
-    quantize_dynamic, default_qconfig, default_qat_qconfig, \
-    default_dynamic_qconfig, MinMaxObserver, HistogramObserver, QuantWrapper
+    quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
+    default_dynamic_qconfig, QuantWrapper, TensorObserver, MinMaxObserver, HistogramObserver
 
 from common_utils import run_tests, tempfile
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
@@ -767,24 +767,69 @@ class ObserverTest(QuantizationTestCase):
         loaded = torch.jit.load(buf)
         self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
 
+@unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
+                 'Quantization requires FBGEMM. FBGEMM does not play'
+                 ' well with UBSAN at the moment, so we skip the test if'
+                 ' we are in a UBSAN environment.')
+class QuantizationDebugTest(QuantizationTestCase):
+    def test_tensor_observer(self):
+        model = SingleLayerLinearModel()
+        model.qconfig = default_debug_qconfig
+        prepare(model)
+        # run the evaluation and dump all tensors
+        test_only_eval_fn(model, self.calib_data)
+        test_only_eval_fn(model, self.calib_data)
+        tensor_dict = {}
+        dump_tensor(model, tensor_dict)
+
+        # we can torch,save() and torch_load() in bento for further analysis
+        self.assertTrue('fc1.module.activation' in tensor_dict.keys(),
+                        'activation is not recorded in the dict')
+        self.assertEqual(len(tensor_dict['fc1.module.activation']), 2 * len(self.calib_data))
+
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
-    def test_histogram_observer(self, qdtype, qscheme):
-        myobs = HistogramObserver(bins=10, dtype=qdtype, qscheme=qscheme)
+    def test_tensor_observer_scriptable(self, qdtype, qscheme):
+        obs = TensorObserver(dtype=qdtype, qscheme=qscheme)
+        scripted = torch.jit.script(obs)
+
+        x = torch.rand(3, 4)
+        obs(x)
+        scripted(x)
+        self.assertTrue(torch.equal(obs.get_tensor_value()[0], scripted.get_tensor_value()[0]))
+        buf = io.BytesIO()
+        torch.jit.save(scripted, buf)
+        buf.seek(0)
+        loaded = torch.jit.load(buf)
+        self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
+
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
+           reduce_range=st.booleans())
+    def test_histogram_observer(self, qdtype, qscheme, reduce_range):
+        myobs = HistogramObserver(bins=10, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
         x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
         myobs(x)
         myobs(y)
-        self.assertEqual(myobs.min_val, -1.5)
-        self.assertEqual(myobs.max_val, 8.5)
+        self.assertEqual(myobs.relaxed_min, -1.5)
+        self.assertEqual(myobs.relaxed_max, 8.5)
         self.assertEqual(myobs.histogram, [0., 0., 1., 2., 1., 2., 3., 2., 1., 1.])
         qparams = myobs.calculate_qparams()
-        if qscheme == torch.per_tensor_symmetric:
-            ref_scale = 0.066666
-            ref_zero_point = 0 if qdtype is torch.qint8 else 128
+        if reduce_range:
+            if qscheme == torch.per_tensor_symmetric:
+                ref_scale = 0.066666 * 255 / 127
+                ref_zero_point = 0 if qdtype is torch.qint8 else 128
+            else:
+                ref_scale = 0.0333333 * 255 / 127
+                ref_zero_point = -64 if qdtype is torch.qint8 else 0
         else:
-            ref_scale = 0.0333333
-            ref_zero_point = -128 if qdtype is torch.qint8 else 0
+            if qscheme == torch.per_tensor_symmetric:
+                ref_scale = 0.066666
+                ref_zero_point = 0 if qdtype is torch.qint8 else 128
+            else:
+                ref_scale = 0.0333333
+                ref_zero_point = -128 if qdtype is torch.qint8 else 0
         self.assertEqual(qparams[1].item(), ref_zero_point)
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
 
