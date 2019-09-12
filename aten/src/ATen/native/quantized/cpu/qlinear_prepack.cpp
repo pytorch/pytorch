@@ -48,7 +48,8 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
   at::Tensor operator()(at::Tensor weight, c10::optional<Tensor> bias) {
     TORCH_CHECK(
         weight.dim() == 2,
-        "The weight tensor for quantized::fbgemm_linear_prepack should be 2-dimensional.");
+        "The weight tensor for quantized::linear_prepack (fbgemm) should"
+        " be 2-dimensional.");
 
     auto N = weight.size(0);
     auto K = weight.size(1);
