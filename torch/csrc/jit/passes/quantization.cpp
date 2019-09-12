@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/quantization.h>
-#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/irparser.h>
@@ -10,8 +10,8 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/subgraph_matcher.h>
 
-#include <stack>
 #include <algorithm>
+#include <stack>
 
 namespace torch {
 namespace jit {
@@ -67,20 +67,26 @@ graph(%self, %input):
 
 bool nodeQuantizable(Node* n) {
   static std::vector<std::string> call_funcs = {
-    "conv2d",
-    "linear",
-    "relu",
+      "conv2d",
+      "linear",
+      "relu",
   };
   std::vector<Symbol> aten_funcs;
-  std::transform(call_funcs.begin(), call_funcs.end(), std::back_inserter(aten_funcs),
-                 [](std::string s) {
-                   return Symbol::aten(s);
-                 });
-  bool is_quantizable = std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) != aten_funcs.end();
+  std::transform(
+      call_funcs.begin(),
+      call_funcs.end(),
+      std::back_inserter(aten_funcs),
+      [](const std::string& s) { return Symbol::aten(s); });
+  bool is_quantizable =
+    std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
+      aten_funcs.end();
   if (n->kind() == prim::CallFunction) {
     auto func_node = n->inputs()[0]->node();
     if (func_node->kind() == prim::Constant) {
-      is_quantizable |= std::find(call_funcs.begin(), call_funcs.end(), func_node->s(attr::name)) != call_funcs.end();
+      is_quantizable |=
+          std::find(
+              call_funcs.begin(), call_funcs.end(), func_node->s(attr::name)) !=
+              call_funcs.end();
     }
   }
   return is_quantizable;
@@ -565,20 +571,17 @@ void InsertQuantDeQuantImpl(
           if (module_instance == graph->inputs()[0]) {
             m = module;
           } else {
-            auto child_module = qh.findChildModuleToQuantize(module_instance);
-            if (child_module) {
-              m = child_module;
-            }
+            m = qh.findChildModuleToQuantize(module_instance);
           }
           if (m) {
             InsertQuantDeQuantImpl(m.value(), module_method_name);
           }
-          if (v->node()->kind() == prim::GetAttr &&
-              v->node()->s(c10::attr::name) == "bias") {
-            qh.quantizeBias(v);
-          } else {
-            qh.quantizeTensor(v);
-          }
+        }
+        if (v->node()->kind() == prim::GetAttr &&
+            v->node()->s(c10::attr::name) == "bias") {
+          qh.quantizeBias(v);
+        } else {
+          qh.quantizeTensor(v);
         }
       }
 
