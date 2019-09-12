@@ -340,16 +340,14 @@ Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
 
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
-  auto tid = self.type_id();
-  auto result = detail::make_tensor<TensorImpl>(Storage(self.storage()), tid);
+  auto result = detail::make_tensor<TensorImpl>(Storage(self.storage()), self.type_set());
   setStrided(result, size, stride, storage_offset);
   return result;
 }
 
 Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
-  auto tid = self.type_id();
-  auto result = detail::make_tensor<QTensorImpl>(Storage(self.storage()), tid, get_qtensorimpl(self)->quantizer());
+  auto result = detail::make_tensor<QTensorImpl>(Storage(self.storage()), self.type_set(), get_qtensorimpl(self)->quantizer());
   setStrided(result, size, stride, storage_offset);
   return result;
 }
@@ -1152,14 +1150,14 @@ Tensor alias(const Tensor& self) {
   if (self.is_quantized()) {
     auto impl = c10::make_intrusive<QTensorImpl>(
                     Storage(self.storage()),
-                    self.type_id(),
+                    self.type_set(),
                     get_qtensorimpl(self)->quantizer());
     impl->set_storage_offset(self.storage_offset());
     impl->set_sizes_and_strides(self.sizes(), self.strides());
     self_ = Tensor(std::move(impl));
   } else {
     auto impl = c10::make_intrusive<TensorImpl>(Storage(self.storage()),
-                                                self.type_id());
+                                                self.type_set());
     impl->set_storage_offset(self.storage_offset());
     impl->set_sizes_and_strides(self.sizes(), self.strides());
     self_ = Tensor(std::move(impl));

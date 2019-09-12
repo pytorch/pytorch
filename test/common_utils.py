@@ -43,7 +43,7 @@ import torch.backends.mkl
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
-torch.backends.cudnn.disable_global_flags()
+torch.backends.disable_global_flags()
 
 
 parser = argparse.ArgumentParser(add_help=False)
@@ -120,6 +120,7 @@ PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
 
 IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
@@ -470,8 +471,7 @@ try:
                 derandomize=True,
                 suppress_health_check=[hypothesis.HealthCheck.too_slow],
                 database=None,
-                max_examples=100,
-                verbosity=hypothesis.Verbosity.verbose))
+                max_examples=100))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(
@@ -494,8 +494,7 @@ try:
                 suppress_health_check=[hypothesis.HealthCheck.too_slow],
                 database=None,
                 max_examples=100,
-                min_satisfying_examples=1,
-                verbosity=hypothesis.Verbosity.verbose))
+                min_satisfying_examples=1))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(
@@ -513,10 +512,10 @@ try:
                 min_satisfying_examples=1,
                 verbosity=hypothesis.Verbosity.verbose))
 
-        hypothesis.settings.load_profile(
-            "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
-                                                         'dev')
-        )
+    hypothesis.settings.load_profile(
+        "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
+                                                     'dev')
+    )
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
@@ -1137,7 +1136,7 @@ def triangular_solve_test_helper(A_dims, b_dims, cast, upper, unitriangular):
 def solve_test_helper(A_dims, b_dims, cast):
     b = cast(torch.randn(*b_dims))
     A = cast(random_fullrank_matrix_distinct_singular_value(*A_dims))
-    return b, A    
+    return b, A
 
 
 def brute_pdist(inp, p=2):
