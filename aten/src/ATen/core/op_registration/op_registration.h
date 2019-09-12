@@ -10,6 +10,9 @@
 #include <ATen/core/op_registration/kernel_function.h>
 #include <ATen/core/op_registration/kernel_lambda.h>
 #include <ATen/core/op_registration/infer_schema.h>
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
+#include <torch/csrc/jit/script/function_schema_parser.h>
+#endif
 #include <ATen/core/OpsAlreadyMovedToC10.h>
 #include <ATen/core/ATenDispatch.h>
 
@@ -30,7 +33,8 @@ namespace c10 {
  * > }
  * >
  * > static auto registry = c10::RegisterOperators()
- * >     .op("my_op", c10::RegisterOperators::options()
+ * >     .op(c10::RegisterOperators::options()
+ * >         .schema("my_op")
  * >         .kernel<my_kernel_cpu>(TensorTypeId::CPUTensorId));
  */
 class CAFFE2_API RegisterOperators final {
@@ -60,6 +64,51 @@ public:
       return std::move(*this).kernel(c10::nullopt, kernel_func, std::move(cache_creator), nullptr, nullptr);
     }
 
+    // internal only for registering caffe2 ops
+    Options&& schema(FunctionSchema&& schema) {
+        TORCH_CHECK(!schemaOrName_.has_value(), "You can only specify the schema once per operator registration.");
+        schemaOrName_ = c10::make_right<OperatorName, FunctionSchema>(std::move(schema));
+        return std::move(*this);
+    }
+
+    /**
+     * Use this to specify the schema for an operator. You can also specify
+     * the operator name only to have the function signature part of the
+     * schema be inferred from the kernel function.
+     *
+     * Example:
+     *
+     * > // Infer function signature from my_kernel_cpu
+     * > static auto registry = c10::RegisterOperators()
+     * >     .op(c10::RegisterOperators::options()
+     * >         .schema("my_op")
+     * >         .kernel<my_kernel_cpu>(TensorTypeId::CPUTensorId));
+     * >
+     * >
+     * > // Explicitly specify full schema
+     * > static auto registry = c10::RegisterOperators()
+     * >     .op(c10::RegisterOperators::options()
+     * >         .schema("my_op(Tensor a) -> Tensor")
+     * >         .kernel<my_kernel_cpu>(TensorTypeId::CPUTensorId));
+     */
+    Options&& schema(const std::string& schemaOrName) {
+      TORCH_CHECK(!schemaOrName_.has_value(), "You can only specify the schema once per operator registration.");
+      TORCH_CHECK(!legacyATenSchema_.has_value(), "You can only specify the schema once per operator registration.");
+
+      if (Options::op_is_still_on_aten_dispatcher_(schemaOrName.c_str())) {
+        TORCH_CHECK(unboxedAutogradKernel_ == nullptr, "For legacy aten ops, the schema() call must happen before any kernel() calls.");
+        TORCH_CHECK(kernels.size() == 0, "For legacy aten ops, the schema() call must happen before any kernel() calls.");
+        legacyATenSchema_ = schemaOrName;
+      } else {
+        #if defined(CAFFE2_IS_XPLAT_BUILD)
+          throw std::logic_error("Tried to register operator " + schemaOrName + ". We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
+        #else
+          schemaOrName_ = torch::jit::parseSchemaOrName(schemaOrName);
+        #endif
+      }
+      return std::move(*this);
+    }
+
     /**
      * Use this to register an operator whose kernel is implemented as a functor.
      * The kernel is only called for inputs matching the given dispatch key.
@@ -75,7 +124,8 @@ public:
      * > }
      * >
      * > static auto registry = c10::RegisterOperators()
-     * >     .op("my_op", c10::RegisterOperators::options()
+     * >     .op(c10::RegisterOperators::options()
+     * >         .schema("my_op")
      * >         .kernel<my_kernel_cpu>(TensorTypeId::CPUTensorId));
      *
      * The functor constructor can take arguments to configure the kernel.
@@ -93,7 +143,8 @@ public:
      * > }
      * >
      * > static auto registry = c10::RegisterOperators()
-     * >     .op("my_op", c10::RegisterOperators::options()
+     * >     .op(c10::RegisterOperators::options()
+     * >         .schema("my_op")
      * >         .kernel<my_kernel_cpu>(TensorTypeId::CPUTensorId, "some_configuration", 3, true));
      */
     template<class KernelFunctor, class... ConstructorParameters>
@@ -120,7 +171,8 @@ public:
      * > }
      * >
      * > static auto registry = c10::RegisterOperators()
-     * >     .op("my_op", c10::RegisterOperators::options()
+     * >     .op(c10::RegisterOperators::options()
+     * >         .schema("my_op")
      * >         .catchAllKernel<my_kernel_cpu>());
      *
      * The functor constructor can take arguments to configure the kernel.
@@ -138,7 +190,8 @@ public:
      * > }
      * >
      * > static auto registry = c10::RegisterOperators()
-     * >     .op("my_op", c10::RegisterOperators::options()
+     * >     .op(c10::RegisterOperators::options()
+     * >         .schema("my_op")
      * >         .catchAllKernel<my_kernel_cpu>("some_configuration", 3, true));
      */
     template<class KernelFunctor, class... ConstructorParameters>
@@ -160,7 +213,8 @@ public:
      * > namespace { Tensor my_kernel_cpu(Tensor a, Tensor b) {...} }
      * >
      * > static auto registry = c10::RegisterOperators()
-     * >     .op("my_op", c10::RegisterOperators::options()
+     * >     .op(c10::RegisterOperators::options()
+     * >         .schema("my_op")
      * >         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(TensorTypeId::CPUTensorId));
      */
     template<class FuncType, FuncType* kernel_func>
@@ -182,7 +236,8 @@ public:
      * > namespace { Tensor my_kernel_cpu(Tensor a, Tensor b) {...} }
      * >
      * > static auto registry = c10::RegisterOperators()
-     * >     .op("my_op", c10::RegisterOperators::options()
+     * >     .op(c10::RegisterOperators::options()
+     * >         .schema("my_op")
      * >         .catchAllKernel<decltype(my_kernel_cpu), &my_kernel_cpu>());
      */
     template<class FuncType, FuncType* kernel_func>
@@ -197,13 +252,14 @@ public:
     // TODO Remove impl_unboxedOnlyKernel once all of aten can generate boxed kernels
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
-    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyKernel(const char* schema_string, TensorTypeId dispatch_key) && {
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyKernel(TensorTypeId dispatch_key) && {
       static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      if (op_is_still_on_aten_dispatcher_(schema_string)) {
-        // TODO Remove this once all ops are moved to c10. Also remove schema_string argument from this function.
-        at::globalATenDispatch().registerOp<FuncType>(tensorTypeIdToBackend(dispatch_key), schema_string, kernel_func);
+      if (legacyATenSchema_.has_value()) {
+        // TODO Remove this once all ops are moved to c10.
+        TORCH_INTERNAL_ASSERT(!schemaOrName_.has_value());
+        at::globalATenDispatch().registerOp<FuncType>(tensorTypeIdToBackend(dispatch_key), legacyATenSchema_->c_str(), kernel_func);
         return std::move(*this);
       } else {
         return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(dispatch_key);
@@ -213,13 +269,14 @@ public:
     // TODO Remove impl_unboxedOnlyCatchAllKernel once all of aten can generate boxed kernels
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
-    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyCatchAllKernel(const char* schema_string) && {
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyCatchAllKernel() && {
       static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      if (op_is_still_on_aten_dispatcher_(schema_string)) {
-        // TODO Remove this once all ops are moved to c10. Also remove schema_string argument from this function.
-        at::globalATenDispatch().registerOp<FuncType>(at::Backend::Undefined, schema_string, kernel_func);
+      if (legacyATenSchema_.has_value()) {
+        // TODO Remove this once all ops are moved to c10.
+        TORCH_INTERNAL_ASSERT(!schemaOrName_.has_value());
+        at::globalATenDispatch().registerOp<FuncType>(at::Backend::Undefined, legacyATenSchema_->c_str(), kernel_func);
         return std::move(*this);
       } else {
         return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
@@ -238,7 +295,8 @@ public:
      * Example:
      *
      * > static auto registry = c10::RegisterOperators()
-     * >     .op("my_op", c10::RegisterOperators::options()
+     * >     .op(c10::RegisterOperators::options()
+     * >         .schema("my_op")
      * >         .kernel(TensorTypeId::CPUTensorId, [] (Tensor a) -> Tensor {...}));
      */
     template<class Lambda>
@@ -269,7 +327,8 @@ public:
      * Example:
      *
      * > static auto registry = c10::RegisterOperators()
-     * >     .op("my_op", c10::RegisterOperators::options()
+     * >     .op(c10::RegisterOperators::options()
+     * >         .schema("my_op")
      * >         .catchAllKernel([] (Tensor a) -> Tensor {...}));
      */
     template<class Lambda>
@@ -295,15 +354,16 @@ public:
     }
 
     template<class FuncType>
-    Options&& impl_unboxedAutogradKernel(const char* schema_string, FuncType* kernel) && {
+    Options&& impl_unboxedAutogradKernel(FuncType* kernel) && {
       static_assert(guts::is_function_type<FuncType>::value, "Wrong argument type for impl_unboxedAutogradKernel");
 
       // TODO Infer and check schema
       TORCH_CHECK(kernel != nullptr, "Kernel function pointer cannot be nullptr");
       TORCH_CHECK(unboxedAutogradKernel_ == nullptr, "You can only call impl_unboxedAutogradKernel() once per operator registration.");
-      if (op_is_still_on_aten_dispatcher_(schema_string)) {
-        // TODO Remove this once all ops are moved to c10. Also remove schema_string argument from this function.
-        at::globalATenDispatch().registerVariableOp<FuncType>(schema_string, kernel);
+      if (legacyATenSchema_.has_value()) {
+        // TODO Remove this once all ops are moved to c10.
+        TORCH_INTERNAL_ASSERT(!schemaOrName_.has_value());
+        at::globalATenDispatch().registerVariableOp<FuncType>(legacyATenSchema_->c_str(), kernel);
         return std::move(*this);
       } else {
         unboxedAutogradKernel_ = reinterpret_cast<void*>(kernel);
@@ -396,6 +456,14 @@ public:
       std::unique_ptr<FunctionSchema> inferred_function_schema;
     };
 
+    // For all modern ops, schemaOrName_ is set.
+    // For legacy ATen ops (i.e. ops on globalATenDispatch()), legacyATenSchema_
+    // is set. We never set both.
+    // TODO This is just a hack to forward some registrations to globalATenDispatch().
+    // We should remove legacyATenSchema_ once all ops are on the c10 dispatcher.
+    c10::optional<c10::either<OperatorName, FunctionSchema>> schemaOrName_;
+    c10::optional<std::string> legacyATenSchema_;
+
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;
     void* unboxedAutogradKernel_; // can be nullptr, not all kernels have this
@@ -415,17 +483,23 @@ public:
   /**
    * Call this to register an operator. See class doc comment for examples.
    */
-  RegisterOperators&& op(const std::string& schemaOrName, Options&& options = RegisterOperators::options()) && {
-    if (!Options::op_is_still_on_aten_dispatcher_(schemaOrName.c_str())) {
-      checkSchemaAndRegisterOp_(schemaOrName, std::move(options));
-    }
+  RegisterOperators&& op(Options&& options) && {
+    checkSchemaAndRegisterOp_(std::move(options));
     return std::move(*this);
+  }
+
+  /**
+   * This is a shorthand for RegisterOperators::op(Options) where you can
+   * specify the operator schema outside of the options parameter.
+   * See class doc comment for examples.
+   */
+  RegisterOperators&& op(const std::string& schemaOrName, Options&& options = RegisterOperators::options()) && {
+    return std::move(*this).op(std::move(options).schema(schemaOrName));
   }
 
   // internal only for registering caffe2 ops
   RegisterOperators&& op(FunctionSchema schema, Options&& options) && {
-    checkSchemaAndRegisterOp_(std::move(schema), std::move(options));
-    return std::move(*this);
+    return std::move(*this).op(std::move(options).schema(std::move(schema)));
   }
 
   template<class FuncType>
@@ -472,7 +546,7 @@ public:
    guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value, RegisterOperators&&>
    op(const std::string& schemaOrName, FuncType* func, Options&& options = RegisterOperators::options()) && {
      constexpr bool AllowLegacyTypes = true;
-     return std::move(*this).op(schemaOrName, std::move(options).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(c10::nullopt, func));
+     return std::move(*this).op(std::move(options).schema(schemaOrName).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(c10::nullopt, func));
    }
 
    /**
@@ -497,7 +571,7 @@ public:
       static_assert(!std::is_base_of<OperatorKernel, FuncType>::value, "c10::OperatorKernel is part of the new kernel registration API and shouldn't be used together with the deprecated registration API. Please use the new RegisterOperators::options().kernel() based API instead.");
 
       constexpr bool AllowLegacyTypes = true;
-      return std::move(*this).op(schemaOrName, std::move(options).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(c10::nullopt, std::forward<FuncType>(func)));
+      return std::move(*this).op(std::move(options).schema(schemaOrName).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(c10::nullopt, std::forward<FuncType>(func)));
     }
 
     template<class FuncType>
@@ -508,16 +582,15 @@ public:
       static_assert(!std::is_base_of<OperatorKernel, FuncType>::value, "c10::OperatorKernel is part of the new kernel registration API and shouldn't be used together with the deprecated registration API. Please use the new RegisterOperators::options().kernel() based API instead.");
 
       constexpr bool AllowLegacyTypes = true;
-      return std::move(*this).op(schemaOrName, std::move(options).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(c10::nullopt, std::forward<FuncType>(func)));
+      return std::move(*this).op(std::move(options).schema(schemaOrName).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(c10::nullopt, std::forward<FuncType>(func)));
     }
 
 private:
-  void checkSchemaAndRegisterOp_(FunctionSchema schema, Options&& config);
-  void checkSchemaAndRegisterOp_(const std::string& schemaOrName, Options&& config);
+  void checkSchemaAndRegisterOp_(Options&& config);
 
-  static c10::FunctionSchema inferSchemaFromKernels_(const std::string& opNameStr, const Options& options);
-  void checkNoDuplicateKernels_(const FunctionSchema& schema, const Options& options);
-  void registerOp_(FunctionSchema&& schema, Options&& options);
+  static c10::FunctionSchema inferSchemaFromKernels_(const OperatorName& opNameStr, const Options& options);
+  void checkNoDuplicateKernels_(const Options& options);
+  void registerOp_(Options&& options);
   void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options, void* unboxedAutogradKernel);
   void registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& options, void* unboxedAutogradKernel);
   static OperatorOptions makeOperatorOptions_(const Options& options);
