@@ -95,6 +95,14 @@ bool Context::hasLAPACK() const {
 #endif
 }
 
+at::QEngine Context::preferredQuantizedEngine() const {
+  return quantized_engine;
+}
+
+void Context::setPreferredQuantizedEngine(at::QEngine e) {
+  quantized_engine = e;
+}
+
 bool Context::setFlushDenormal(bool on) {
   return at::cpu::set_flush_denormal(on);
 }
