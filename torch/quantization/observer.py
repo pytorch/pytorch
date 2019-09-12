@@ -4,10 +4,10 @@ import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
 
+from torch._jit_internal import Optional, List
 import math
 import torch
 import torch.nn as nn
-from torch._jit_internal import Optional
 
 
 ABC = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
@@ -23,7 +23,9 @@ class ObserverBase(ABC, nn.Module):
     the collected statistics.
     """
 
-    def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False):
+    def __init__(
+        self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False
+    ):
         super(ObserverBase, self).__init__()
         self.dtype = dtype
         self.qscheme = qscheme
@@ -123,8 +125,14 @@ class MinMaxObserver(ObserverBase):
         super(MinMaxObserver, self).__init__(**kwargs)
         self.min_val = None
         self.max_val = None
-        if self.qscheme == torch.per_tensor_symmetric and self.reduce_range and self.dtype == torch.quint8:
-            raise NotImplementedError("Cannot reduce range for symmetric quantization for quint8")
+        if (
+            self.qscheme == torch.per_tensor_symmetric
+            and self.reduce_range
+            and self.dtype == torch.quint8
+        ):
+            raise NotImplementedError(
+                "Cannot reduce range for symmetric quantization for quint8"
+            )
 
     def forward(self, x):
         min_val = self.min_val
@@ -157,8 +165,6 @@ class HistogramObserver(ObserverBase):
     __annotations__ = {
         "min_val": Optional[torch.Tensor],
         "max_val": Optional[torch.Tensor],
-        "relaxed_min": torch.Tensor,
-        "relaxed_max": torch.Tensor,
         "histogram": Optional[torch.Tensor],
     }
 
@@ -168,8 +174,6 @@ class HistogramObserver(ObserverBase):
         self.histogram = None
         self.min_val = None
         self.max_val = None
-        self.relaxed_min = torch.tensor([0])
-        self.relaxed_max = torch.tensor([0])
 
     @staticmethod
     def _get_norm(delta_begin, delta_end, density, norm_type):
@@ -424,6 +428,32 @@ class HistogramObserver(ObserverBase):
         return self._calculate_qparams(new_min.item(), new_max.item())
 
 
+
+class TensorObserver(ObserverBase):
+    r"""
+    The module is mainly for debug and records the tensor values during runtime
+    """
+    __annotations__ = {
+        "tensor_val": List[Optional[torch.Tensor]],
+    }
+
+    def __init__(self, **kwargs):
+        super(TensorObserver, self).__init__(**kwargs)
+        self.tensor_val = []
+
+    def forward(self, x):
+        self.tensor_val.append(x.clone())
+        return x
+
+    @torch.jit.export
+    def calculate_qparams(self):
+        raise Exception("calculate_qparams should not be called for TensorObserver")
+
+    @torch.jit.export
+    def get_tensor_value(self):
+        return self.tensor_val
+
+
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)
 
@@ -433,6 +463,8 @@ def default_observer(**kwargs):
     kwargs.setdefault("reduce_range", True)
     return observer(MinMaxObserver, **kwargs)
 
+def default_debug_observer(**kwargs):
+    return observer(TensorObserver, **kwargs)
 
 def default_weight_observer(**kwargs):
     kwargs.setdefault("dtype", torch.qint8)
