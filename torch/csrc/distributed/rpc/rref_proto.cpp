@@ -10,8 +10,7 @@ namespace rpc {
 namespace {
 
 std::vector<IValue> toIValues(const Message& message, MessageType type) {
-  TORCH_INTERNAL_ASSERT(
-      type == message.type(),
+  TORCH_INTERNAL_ASSERT(type == message.type(),
       "Expecting message of type ",
       type,
       ", but got ",
@@ -44,12 +43,11 @@ Message RRefMessageBase::toMessage() const {
 }
 
 at::IValue RRefMessageBase::fromMessage(
-    const Message& message,
-    MessageType type) {
+    const Message& message, MessageType type) {
   auto values = toIValues(message, type);
 
-  TORCH_INTERNAL_ASSERT(
-      values.size() == 1, "ScriptUserDelete expects 1 IValue from message.");
+  TORCH_INTERNAL_ASSERT(values.size() == 1,
+      "ScriptUserDelete expects 1 IValue from message.");
   return std::move(values.back());
 }
 
@@ -60,16 +58,21 @@ const ForkId& ForkMessageBase::forkId() {
 }
 
 Message ForkMessageBase::toMessage() const {
-  return fromIValues({rrefId_.toIValue(), forkId_.toIValue()}, type_);
+  return fromIValues(
+      {
+          rrefId_.toIValue(),
+          forkId_.toIValue()
+      },
+      type_
+  );
 }
 
 std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
-    const Message& message,
-    MessageType type) {
+    const Message& message, MessageType type) {
   auto ivalues = toIValues(message, type);
 
-  TORCH_INTERNAL_ASSERT(
-      ivalues.size() == 2, "ScriptUserDelete expects 2 IValue from message.");
+  TORCH_INTERNAL_ASSERT(ivalues.size() == 2,
+      "ScriptUserDelete expects 2 IValue from message.");
 
   return std::make_pair(
       RRefId::fromIValue(ivalues[0]), ForkId::fromIValue(ivalues[1]));
@@ -78,20 +81,22 @@ std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
 /////////////////////////// RRef Protocol //////////////////////////////////
 
 ScriptRRefFetchCall ScriptRRefFetchCall::fromMessage(const Message& message) {
-  return ScriptRRefFetchCall(RRefId::fromIValue(RRefMessageBase::fromMessage(
-      message, MessageType::SCRIPT_RREF_FETCH_CALL)));
+  return ScriptRRefFetchCall(RRefId::fromIValue(
+      RRefMessageBase::fromMessage(
+          message, MessageType::SCRIPT_RREF_FETCH_CALL)));
 }
 
 PythonRRefFetchCall PythonRRefFetchCall::fromMessage(const Message& message) {
-  return PythonRRefFetchCall(RRefId::fromIValue(RRefMessageBase::fromMessage(
-      message, MessageType::PYTHON_RREF_FETCH_CALL)));
+  return PythonRRefFetchCall(RRefId::fromIValue(
+      RRefMessageBase::fromMessage(
+          message, MessageType::PYTHON_RREF_FETCH_CALL)));
 }
 
-const at::IValue& ScriptRRefFetchRet::value() {
+const at::IValue& RRefFetchRet::value() {
   return value_;
 }
 
-Message ScriptRRefFetchRet::toMessage() const {
+Message RRefFetchRet::toMessage() const {
   std::vector<at::IValue> ivalues;
   ivalues.emplace_back(value_);
   std::vector<torch::Tensor> tensor_table;
@@ -99,10 +104,12 @@ Message ScriptRRefFetchRet::toMessage() const {
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
 
   return Message(
-      std::move(payload), std::move(tensor_table), MessageType::RREF_FETCH_RET);
+      std::move(payload),
+      std::move(tensor_table),
+      MessageType::RREF_FETCH_RET);
 }
 
-ScriptRRefFetchRet ScriptRRefFetchRet::fromMessage(const Message& message) {
+RRefFetchRet RRefFetchRet::fromMessage(const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
 
@@ -111,19 +118,19 @@ ScriptRRefFetchRet ScriptRRefFetchRet::fromMessage(const Message& message) {
   auto values = value.toTuple()->elements();
 
   AT_ASSERT(values.size() == 1, "Expect 1 IValue from message.");
-  return ScriptRRefFetchRet(values.front());
+  return RRefFetchRet(values.front());
 }
 
-ScriptUserDelete ScriptUserDelete::fromMessage(const Message& message) {
-  auto pair =
-      ForkMessageBase::fromMessage(message, MessageType::RREF_USER_DELETE);
-  return ScriptUserDelete(pair.first, pair.second);
+RRefUserDelete RRefUserDelete::fromMessage(const Message& message) {
+  auto pair = ForkMessageBase::fromMessage(
+      message, MessageType::RREF_USER_DELETE);
+  return RRefUserDelete(pair.first, pair.second);
 }
 
-ScriptUserAccept ScriptUserAccept::fromMessage(const Message& message) {
-  auto pair =
-      ForkMessageBase::fromMessage(message, MessageType::RREF_USER_ACCEPT);
-  return ScriptUserAccept(pair.first, pair.second);
+RRefUserAccept RRefUserAccept::fromMessage(const Message& message) {
+  auto pair = ForkMessageBase::fromMessage(
+      message, MessageType::RREF_USER_ACCEPT);
+  return RRefUserAccept(pair.first, pair.second);
 }
 
 RemoteRet RemoteRet::fromMessage(const Message& message) {
@@ -131,23 +138,27 @@ RemoteRet RemoteRet::fromMessage(const Message& message) {
   return RemoteRet(pair.first, pair.second);
 }
 
-worker_id_t ScriptForkNotify::forkDst() const {
+worker_id_t RRefForkNotify::forkDst() const {
   return forkDst_;
 }
 
-Message ScriptForkNotify::toMessage() const {
+Message RRefForkNotify::toMessage() const {
   return fromIValues(
-      {rrefId_.toIValue(), forkId_.toIValue(), IValue(forkDst_)},
-      MessageType::RREF_FORK_NOTIFY);
+      {
+          rrefId_.toIValue(),
+          forkId_.toIValue(),
+          IValue(forkDst_)
+      },
+      MessageType::RREF_FORK_NOTIFY
+  );
 }
 
-ScriptForkNotify ScriptForkNotify::fromMessage(const Message& message) {
+RRefForkNotify RRefForkNotify::fromMessage(const Message& message) {
   auto values = toIValues(message, MessageType::RREF_FORK_NOTIFY);
 
   AT_ASSERT(values.size() == 3, "Expect 3 IValues from message.");
   auto forkDst = values.back().toInt();
-  AT_ASSERT(
-      forkDst < std::numeric_limits<worker_id_t>::max(),
+  AT_ASSERT(forkDst < std::numeric_limits<worker_id_t>::max(),
       "Fork destination worker id out of bound ",
       forkDst);
   values.pop_back();
@@ -155,22 +166,22 @@ ScriptForkNotify ScriptForkNotify::fromMessage(const Message& message) {
   values.pop_back();
   ForkId forkId = ForkId::fromIValue(values.back());
 
-  return ScriptForkNotify(rrefId, forkId, forkDst);
+  return RRefForkNotify(rrefId, forkId, forkDst);
 }
 
-const ForkId& ScriptForkAccept::forkId() const {
+const ForkId& RRefForkAccept::forkId() const {
   return forkId_;
 }
 
-Message ScriptForkAccept::toMessage() {
+Message RRefForkAccept::toMessage() {
   return fromIValues({forkId_.toIValue()}, MessageType::RREF_FORK_ACCEPT);
 }
 
-ScriptForkAccept ScriptForkAccept::fromMessage(const Message& message) {
+RRefForkAccept RRefForkAccept::fromMessage(const Message& message) {
   auto values = toIValues(message, MessageType::RREF_FORK_ACCEPT);
   AT_ASSERT(values.size() == 1, "Expect 1 IValues from message.");
 
-  return ScriptForkAccept(ForkId::fromIValue(values.back()));
+  return RRefForkAccept(ForkId::fromIValue(values.back()));
 }
 
 } // namespace rpc

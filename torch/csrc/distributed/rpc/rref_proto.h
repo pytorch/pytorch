@@ -36,18 +36,17 @@ class TORCH_API ForkMessageBase : public RRefMessageBase {
 
   virtual Message toMessage() const;
   static std::pair<RRefId, ForkId> fromMessage(
-      const Message& message,
-      MessageType type);
+      const Message& message, MessageType type);
 
  protected:
   const ForkId forkId_;
 };
 
 // UserRRef uses this message to fetch the remote RRef value from the owner.
-class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
+class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase  {
  public:
   ScriptRRefFetchCall(const RRefId& rrefId)
-      : RRefMessageBase(rrefId, MessageType::SCRIPT_RREF_FETCH_CALL) {}
+      : RRefMessageBase(rrefId, MessageType::SCRIPT_RREF_FETCH_CALL){}
 
   static ScriptRRefFetchCall fromMessage(const Message& message);
 };
@@ -61,14 +60,14 @@ class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
 };
 
 // OwnerRRef uses this message to send the RRef value to a remote UserRRef
-class TORCH_API ScriptRRefFetchRet final {
+class TORCH_API RRefFetchRet final {
  public:
-  ScriptRRefFetchRet(at::IValue value) : value_(std::move(value)) {}
+  RRefFetchRet(at::IValue value) : value_(std::move(value)) {}
 
   const at::IValue& value();
 
   Message toMessage() const;
-  static ScriptRRefFetchRet fromMessage(const Message& message);
+  static RRefFetchRet fromMessage(const Message& message);
 
  private:
   at::IValue value_;
@@ -76,22 +75,22 @@ class TORCH_API ScriptRRefFetchRet final {
 
 // UserRRef (regardless it's the creator or not) uses this message to notiify
 // OwnerRRef on delete.
-class TORCH_API ScriptUserDelete final : public ForkMessageBase {
+class TORCH_API RRefUserDelete final : public ForkMessageBase {
  public:
-  ScriptUserDelete(const RRefId& rrefId, const ForkId& forkId)
-      : ForkMessageBase(rrefId, forkId, MessageType::RREF_USER_DELETE) {}
+  RRefUserDelete(const RRefId& rrefId, const ForkId& forkId)
+    : ForkMessageBase(rrefId, forkId, MessageType::RREF_USER_DELETE) {}
 
-  static ScriptUserDelete fromMessage(const Message& message);
+  static RRefUserDelete fromMessage(const Message& message);
 };
 
 // The OwnerRRef uses this message to accept a UserRRef. A UserRRef cannot be
 // deleted before receiving this message.
-class TORCH_API ScriptUserAccept final : public ForkMessageBase {
+class TORCH_API RRefUserAccept final : public ForkMessageBase {
  public:
-  ScriptUserAccept(const RRefId& rrefId, const ForkId& forkId)
+  RRefUserAccept(const RRefId& rrefId, const ForkId& forkId)
       : ForkMessageBase(rrefId, forkId, MessageType::RREF_USER_ACCEPT) {}
 
-  static ScriptUserAccept fromMessage(const Message& message);
+  static RRefUserAccept fromMessage(const Message& message);
 };
 
 class TORCH_API RemoteRet final : public ForkMessageBase {
@@ -103,9 +102,9 @@ class TORCH_API RemoteRet final : public ForkMessageBase {
 };
 
 // A UserRRef uses this message to notify owner on fork.
-class TORCH_API ScriptForkNotify final : public ForkMessageBase {
+class TORCH_API RRefForkNotify final : public ForkMessageBase {
  public:
-  ScriptForkNotify(
+  RRefForkNotify(
       const RRefId& rrefId,
       const ForkId& forkId,
       worker_id_t forkDst)
@@ -115,7 +114,7 @@ class TORCH_API ScriptForkNotify final : public ForkMessageBase {
   worker_id_t forkDst() const;
 
   Message toMessage() const;
-  static ScriptForkNotify fromMessage(const Message& message);
+  static RRefForkNotify fromMessage(const Message& message);
 
  private:
   const worker_id_t forkDst_;
@@ -123,14 +122,14 @@ class TORCH_API ScriptForkNotify final : public ForkMessageBase {
 
 // The OwnerRRef uses this message to a UserRRef that its fork request has been
 // accepted. A UserRRef cannot be deleted if it has any pending fork requests.
-class TORCH_API ScriptForkAccept final {
+class TORCH_API RRefForkAccept final {
  public:
-  ScriptForkAccept(const ForkId& forkId) : forkId_(forkId) {}
+  RRefForkAccept(const ForkId& forkId) : forkId_(forkId) {}
 
   const ForkId& forkId() const;
 
   Message toMessage();
-  static ScriptForkAccept fromMessage(const Message& message);
+  static RRefForkAccept fromMessage(const Message& message);
 
  private:
   const ForkId forkId_;

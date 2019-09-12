@@ -43,8 +43,7 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
         return ScriptRet(std::move(stack.front())).toMessage();
       }
       case MessageType::PYTHON_CALL: {
-        auto payload =
-            PythonRpcHandler::generatePythonUDFResult(request, from.id_);
+        auto payload = PythonRpcHandler::generatePythonUDFResult(request, from.id_);
         return Message(
             std::move(payload),
             std::vector<torch::Tensor>(),
@@ -94,7 +93,7 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
         std::shared_ptr<OwnerRRef<IValue>> rref =
             RRefContext::getInstance()->getOrCreateOwnerRRef<IValue>(
                 srf.rrefId());
-        return ScriptRRefFetchRet(rref->getValue()).toMessage();
+        return RRefFetchRet(rref->getValue()).toMessage();
       }
       case MessageType::PYTHON_RREF_FETCH_CALL: {
         PythonRRefFetchCall prf = PythonRRefFetchCall::fromMessage(request);
@@ -102,26 +101,27 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
         std::shared_ptr<OwnerRRef<py::object>> rref =
             RRefContext::getInstance()->getOrCreateOwnerRRef<py::object>(
                 prf.rrefId());
-        return ScriptRRefFetchRet(
-                   PythonRpcHandler::serialize(rref->getValue(), from.id_))
-            .toMessage();
+        return
+            RRefFetchRet(
+                PythonRpcHandler::serialize(rref->getValue(), from.id_)
+            ).toMessage();
       }
       case MessageType::RREF_USER_ACCEPT: {
-        ScriptUserAccept sua = ScriptUserAccept::fromMessage(request);
+        RRefUserAccept rua = RRefUserAccept::fromMessage(request);
         auto& ctx = RRefContext::getInstance();
-        ctx->finishUserRRef(sua.rrefId(), sua.forkId());
+        ctx->finishUserRRef(rua.rrefId(), rua.forkId());
         return Message({}, {}, MessageType::ACK);
       }
       case MessageType::RREF_USER_DELETE: {
-        ScriptUserDelete srd = ScriptUserDelete::fromMessage(request);
-        RRefContext::getInstance()->delForkOfOwner(srd.rrefId(), srd.forkId());
+        RRefUserDelete rud = RRefUserDelete::fromMessage(request);
+        RRefContext::getInstance()->delForkOfOwner(rud.rrefId(), rud.forkId());
         return Message({}, {}, MessageType::ACK);
       }
       case MessageType::RREF_FORK_NOTIFY: {
-        ScriptForkNotify sfn = ScriptForkNotify::fromMessage(request);
+        RRefForkNotify rfn = RRefForkNotify::fromMessage(request);
         auto& ctx = RRefContext::getInstance();
         return ctx->acceptForkRequest(
-            sfn.rrefId(), sfn.forkId(), sfn.forkDst());
+            rfn.rrefId(), rfn.forkId(), rfn.forkDst());
       }
       default: {
         AT_ERROR("Request type ", request.type(), " not supported.");

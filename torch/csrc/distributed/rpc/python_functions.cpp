@@ -109,8 +109,7 @@ PyRRef pyRemoteBuiltin(
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
 
   auto& ctx = RRefContext::getInstance();
-  TORCH_INTERNAL_ASSERT(
-      ctx->getWorkerId() != dst.id_,
+  TORCH_INTERNAL_ASSERT(ctx->getWorkerId() != dst.id_,
       "Does not support creating RRef on self yet.");
   auto userRRef = ctx->createUserRRef<IValue>(dst.id_);
   auto fm = agent.send(
@@ -143,8 +142,7 @@ PyRRef pyRemotePythonUdf(
     const WorkerId& dst,
     const std::string& pickledPythonUDF) {
   auto& ctx = RRefContext::getInstance();
-  TORCH_INTERNAL_ASSERT(
-      ctx->getWorkerId() != dst.id_,
+  TORCH_INTERNAL_ASSERT(ctx->getWorkerId() != dst.id_,
       "Does not support creating RRef on self yet.");
   auto userRRef = ctx->createUserRRef<py::object>(dst.id_);
   auto fm = agent.send(
