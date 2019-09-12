@@ -49,6 +49,21 @@ bool check_ivalue_equality(const c10::IValue& ivalue_python, const c10::IValue& 
     return ivalue_python_vec == ivalue_cpp_list;
   }
 
+  // For Python modules, we allow the use of "none" / "mean" / "sum" to represent the reduction type.
+  // The corresponding data type for C++ modules is `Reduction::Reduction` enum, and here we map the
+  // reduction types between Python version and C++ version.
+  if (ivalue_python.isString() && ivalue_cpp.isInt()) {
+    auto& ivalue_python_str = ivalue_python.toStringRef();
+    auto ivalue_cpp_int = ivalue_cpp.toInt();
+    if (ivalue_python_str == "none") {
+      return ivalue_cpp_int == Reduction::None;
+    } else if (ivalue_python_str == "mean") {
+      return ivalue_cpp_int == Reduction::Mean;
+    } else if (ivalue_python_str == "sum") {
+      return ivalue_cpp_int == Reduction::Sum;
+    }
+  }
+
   if (ivalue_python.tagKind() != ivalue_cpp.tagKind()) {
     AT_ERROR("Value type mismatch: ", "from Python: ", ivalue_python.tagKind(), ", from C++: ", ivalue_cpp.tagKind());
   }
@@ -65,6 +80,8 @@ bool check_ivalue_equality(const c10::IValue& ivalue_python, const c10::IValue& 
     return check_tensor_equality(ivalue_python.toTensor(), ivalue_cpp.toTensor());
   } else if (ivalue_python.isIntList()) {
     return ivalue_python.toIntListRef() == ivalue_cpp.toIntListRef();
+  } else if (ivalue_python.isNone()) {
+    return ivalue_cpp.isNone();
   } else {
     AT_ERROR("Unsupported value type: ", ivalue_python.tagKind());
   }
@@ -101,7 +118,7 @@ TORCH_CHECK(
     ${script_module_prefix}.get_attribute("${python_attr_name}"), c10::IValue(${cpp_module_prefix}->${cpp_attr_name})),
   GENERATE_PARITY_TEST_ERROR_MSG(
     "`${cpp_module_prefix}->${cpp_attr_name}`",
-    ${cpp_module_prefix}->${cpp_attr_name},
+    c10::IValue(${cpp_module_prefix}->${cpp_attr_name}),
     ${script_module_prefix}.get_attribute("${python_attr_name}")));
 """)
 
@@ -201,7 +218,17 @@ class TestCppApiParity(common.TestCase):
         elif type(python_arg) == bool:
             return CppArg(type='bool', value=str(python_arg).lower())
         elif type(python_arg) == str:
-            return CppArg(type='std::string', value='"{}"'.format(python_arg))
+            # if `python_arg` is one of the reduction types, we use the corresponding `Reduction::Reduction` enum.
+            if python_arg in ['none', 'mean', 'sum']:
+                if python_arg == 'none':
+                    cpp_arg = 'Reduction::None'
+                elif python_arg == 'mean':
+                    cpp_arg = 'Reduction::Mean'
+                elif python_arg == 'sum':
+                    cpp_arg = 'Reduction::Sum'
+                return CppArg(type='Reduction::Reduction', value='{}'.format(cpp_arg))
+            else:
+                return CppArg(type='std::string', value='"{}"'.format(python_arg))
         elif type(python_arg) == torch.Tensor:
             return CppArg(
                 type='torch::Tensor',
@@ -227,6 +254,51 @@ class TestCppApiParity(common.TestCase):
         else:
             init_arg_spec = inspect.getfullargspec(python_module_class.__init__)
         return init_arg_spec
+
+    def _prepare_tensors_for_module_input_or_target(self, test_params, tensors):
+        if type(tensors) == tuple:
+            tensors = list(tensors)
+        elif type(tensors) == torch.Tensor:
+            tensors = [tensors]
+        else:
+            raise RuntimeError("Unexpected input type: {}".format(type(tensors)))
+
+        if test_params.device != 'cuda' or TEST_CUDA:
+            tensors = [x.to(test_params.device) for x in tensors]
+
+        return tensors
+
+    def _get_example_inputs(self, test_params):
+        example_inputs = test_params.test_instance._get_input()
+        example_inputs = self._prepare_tensors_for_module_input_or_target(test_params, example_inputs)
+
+        # We set all inputs to torch.nn module to requires grad, so that the backward test can always be run.
+        # However, we skip embedding layers for now, becuase they only accept LongTensor as inputs,
+        # And LongTensor cannot require grad.
+        if test_params.module_name not in ["Embedding", "Embedding_sparse", "EmbeddingBag", "EmbeddingBag_sparse"]:
+            example_inputs = [x.requires_grad_() for x in example_inputs]
+
+        return example_inputs
+
+    def _get_example_targets(self, test_params):
+        example_targets = test_params.test_instance._get_target()
+        example_targets = self._prepare_tensors_for_module_input_or_target(test_params, example_targets)
+        return example_targets
+
+    def _get_forward_input_args(self, test_params):
+        example_inputs = self._get_example_inputs(test_params)
+        if isinstance(test_params.test_instance, common_nn.CriterionTest):
+            example_targets = self._get_example_targets(test_params)
+        else:
+            example_targets = []
+
+        input_args = ()
+        for example_input in example_inputs:
+            input_args += (example_input, )
+        for example_target in example_targets:
+            input_args += (example_target, )
+
+        return input_args
 
     # This tests that Python and C++ torch.nn modules have matching constructor arg names and types.
     def _test_torch_nn_module_ctor_args(self, module_name):
@@ -260,12 +332,13 @@ class TestCppApiParity(common.TestCase):
             # specify it, which means we can't test that the options arg exists).
             # Instead, we test that all options args exist by calling their accessors after constructing the
             # C++ module with the options.
-            if python_default_value is not None:
+            if arg_name not in module_metadata.python_legacy_constructor_args and python_default_value is not None:
                 cpp_module_option += '.{}({})'.format(arg_name, self._python_arg_to_cpp_arg(python_default_value).value)
 
         # Step 3: Generate code to check existence of all Python module constructor args in the C++ module options.
         extra_stmts = [TORCH_NN_MODULE_TEST_OPTIONS_ARG.substitute(options_arg_name=arg_name)
-                       for arg_name in python_default_constructor_arg_names + init_kwargs]
+                       for arg_name in python_default_constructor_arg_names + init_kwargs
+                       if arg_name not in module_metadata.python_legacy_constructor_args]
 
         # Step 4: Compile the test code and run the tests.
         cpp_sources = TORCH_NN_MODULE_COMMON_TEST_HARNESS + module_metadata.cpp_sources
@@ -282,8 +355,8 @@ class TestCppApiParity(common.TestCase):
 
     def _test_torch_nn_module_variant(self, test_params):
         def generate_test_cpp_sources(test_params, template, extra_stmts):
-            example_inputs = test_params.example_inputs
-            input_arg_types = [self._python_arg_to_cpp_arg(arg).type for arg in example_inputs]
+            input_args = self._get_forward_input_args(test_params)
+            input_arg_types = [self._python_arg_to_cpp_arg(arg).type for arg in list(input_args)]
             input_args = ['arg{}'.format(str(i)) for i in range(len(input_arg_types))]
             input_arg_declarations = ['{} {}'.format(arg_type, arg_name) for arg_type, arg_name in zip(input_arg_types, input_args)]
             test_cpp_sources = template.substitute(
@@ -337,9 +410,8 @@ class TestCppApiParity(common.TestCase):
                 return stmts
 
             device = test_params.device
-            python_constructor = test_params.python_constructor
-            python_constructor_args = test_params.python_constructor_args
-            example_inputs = test_params.example_inputs
+            python_constructor = test_params.test_instance.constructor
+            python_constructor_args = test_params.test_instance.constructor_args
 
             torch.manual_seed(2)
             module = python_constructor(*python_constructor_args).to(device)
@@ -353,27 +425,27 @@ class TestCppApiParity(common.TestCase):
 
         def setup_forward_test(test_params):
             device = test_params.device
-            python_constructor = test_params.python_constructor
-            python_constructor_args = test_params.python_constructor_args
-            example_inputs = test_params.example_inputs
+            python_constructor = test_params.test_instance.constructor
+            python_constructor_args = test_params.test_instance.constructor_args
+            input_args = self._get_forward_input_args(test_params)
 
             torch.manual_seed(2)
             module = python_constructor(*python_constructor_args).to(device)
-            python_output = module(*example_inputs)
+            python_output = module(*input_args)
 
-            return (([module], device, python_output, example_inputs),
+            return (([module], device, python_output, input_args),
                     generate_test_cpp_sources(
                         test_params=test_params, template=TORCH_NN_MODULE_TEST_FORWARD, extra_stmts=''))
 
         def setup_backward_test(test_params):
             device = test_params.device
-            python_constructor = test_params.python_constructor
-            python_constructor_args = test_params.python_constructor_args
-            example_inputs = test_params.example_inputs
+            python_constructor = test_params.test_instance.constructor
+            python_constructor_args = test_params.test_instance.constructor_args
+            input_args = self._get_forward_input_args(test_params)
 
             torch.manual_seed(2)
             module = python_constructor(*python_constructor_args).to(device)
-            python_output = module(*example_inputs)
+            python_output = module(*input_args)
             python_output.sum().backward()
             # JIT tracing does not save a module's parameters' gradients into ScriptModule.
             # Instead, we create another module `grad_module` with the same structure as `module`,
@@ -385,11 +457,13 @@ class TestCppApiParity(common.TestCase):
                 if param.grad is not None:
                     grad_param.data = param.grad
 
-            return (([module, grad_module], device, example_inputs),
+            return (([module, grad_module], device, input_args),
                     generate_test_cpp_sources(
                         test_params=test_params, template=TORCH_NN_MODULE_TEST_BACKWARD, extra_stmts=''))
 
-        def trace_module(module, example_inputs):
+        def trace_module(module, input_args):
+            module_metadata = torch_nn_modules.module_metadata_map[module.__class__.__name__]
+
             # JIT tracing does not automatically save a module's non-parameter / non-buffer attributes
             # into a ScriptModule's slots, which means we can't access them via `get_attributes()` in C++.
             # Here, we manually register these attributes into the ScriptModule so that we can access them
@@ -399,7 +473,9 @@ class TestCppApiParity(common.TestCase):
                     register_attrs(sub_module, sub_script_module)
                 for key, value in module.__dict__.items():
                     if key not in TORCH_NN_MODULE_IGNORED_ATTRS:
-                        if type(value) == tuple:
+                        if value is None:
+                            value_type = module_metadata.python_optional_attribute_to_jit_type[key]
+                        elif type(value) == tuple:
                             assert all(isinstance(x, type(value[0])) for x in value), \
                                 "All elements in a tuple attribute of a Python torch.nn module must have the same type."
                             # Here, we set the Python tuple attribute's type to `ListType` in the ScriptModule,
@@ -409,11 +485,10 @@ class TestCppApiParity(common.TestCase):
                             value_type = torch._C.ListType(torch.jit.annotations.ann_to_type(type(value[0])))
                         else:
                             value_type = torch.jit.annotations.ann_to_type(type(value))
-                        script_module._c._register_attribute(
-                            key, value_type, value)
+                        script_module._c._register_attribute(key, value_type, value)
 
             # We use JIT tracing to serialize Python module state, so that we can load it into C++
-            traced_script_module = torch.jit.trace(module, example_inputs)
+            traced_script_module = torch.jit.trace(module, input_args)
             register_attrs(module, traced_script_module)
             return traced_script_module
 
@@ -425,7 +500,7 @@ class TestCppApiParity(common.TestCase):
 
         def test_methods(test_params):
             module_variant_name = test_params.module_variant_name
-            example_inputs = test_params.example_inputs
+            input_args = self._get_forward_input_args(test_params)
 
             args_map = {}
 
@@ -450,12 +525,14 @@ class TestCppApiParity(common.TestCase):
             for method_name, _ in torch_nn_test_methods:
                 args = args_map[method_name]
                 modules = args[0]
-                script_modules = [trace_module(module, example_inputs) for module in modules]
+                script_modules = [trace_module(module, input_args) for module in modules]
                 module_file_names = [serialize_module_into_file(script_module) for script_module in script_modules]
 
                 cpp_args = module_file_names[:]
                 for arg in args[1:]:
-                    if isinstance(arg, list):
+                    if isinstance(arg, tuple):
+                        cpp_args += list(arg)
+                    elif isinstance(arg, list):
                         cpp_args += arg
                     else:
                         cpp_args.append(arg)
@@ -493,35 +570,20 @@ def _compute_module_name(test_params_dict):
     return module_name
 
 
-def _process_test_params(test_params_dict, module_metadata, device):
+def _process_test_params(test_params_dict, module_metadata, device, is_criterion):
     module_name = _compute_module_name(test_params_dict)
     test_params_dict['constructor'] = test_params_dict.get('constructor', getattr(torch.nn, module_name))
-    test = common_nn.TestBase(**test_params_dict)
-    module_variant_name = test.get_name()[5:] + (('_' + device) if device != 'cpu' else '')
-    example_inputs = test._get_input()
-
-    if type(example_inputs) == tuple:
-        example_inputs = list(example_inputs)
-    elif type(example_inputs) == torch.Tensor:
-        example_inputs = [example_inputs]
+    if is_criterion:
+        test = common_nn.CriterionTest(**test_params_dict)
     else:
-        raise RuntimeError("Unexpected input type: {}".format(type(example_inputs)))
+        test = common_nn.ModuleTest(**test_params_dict)
+    module_variant_name = test.get_name()[5:] + (('_' + device) if device != 'cpu' else '')
 
-    # We set all inputs to torch.nn module to requires grad, so that the backward test can always be run.
-    # However, we skip embedding layers for now, becuase they only accept LongTensor as inputs,
-    # And LongTensor cannot require grad.
-    if module_name not in ["Embedding", "Embedding_sparse", "EmbeddingBag", "EmbeddingBag_sparse"]:
-        example_inputs = [x.requires_grad_() for x in example_inputs]
-
-    if device != 'cuda' or TEST_CUDA:
-        example_inputs = [x.to(device) for x in example_inputs]
     return TorchNNTestParams(
         module_name=module_name,
         module_variant_name=module_variant_name,
-        python_constructor=test.constructor,
-        python_constructor_args=test.constructor_args,
+        test_instance=test,
         cpp_constructor_args=test_params_dict.get('cpp_constructor_args'),
-        example_inputs=example_inputs,
         has_parity=test_params_dict.get('has_parity', True),
         cpp_sources=module_metadata.cpp_sources,
         num_attrs_recursive=module_metadata.num_attrs_recursive,
@@ -540,70 +602,74 @@ devices = ['cpu', 'cuda']
 
 torch_nn_test_params_map = {}
 
-all_module_tests = sample_module.module_tests + \
-    common_nn.module_tests + \
-    common_nn.new_module_tests + \
-    common_nn.criterion_tests + \
-    common_nn.new_criterion_tests
 
-for test_params_dict in all_module_tests:
-    # We skip all `torch.nn.functional` tests for now
-    if 'FunctionalModule' in str(test_params_dict.get('constructor', '')):
-        continue
+def add_torch_nn_module_tests(module_tests, is_criterion):
+    for test_params_dict in module_tests:
+        # We skip all `torch.nn.functional` tests for now
+        if 'FunctionalModule' in str(test_params_dict.get('constructor', '')):
+            continue
 
-    module_name = _compute_module_name(test_params_dict)
+        module_name = _compute_module_name(test_params_dict)
 
-    assert hasattr(torch.nn, module_name), \
-        "`torch.nn` doesn't have module `{}`. ".format(module_name) + \
-        "If you are adding a new test, please set `fullname` using format `ModuleName_desc`, " + \
-        "or set `module_name` using format `ModuleName`."
+        assert hasattr(torch.nn, module_name), \
+            "`torch.nn` doesn't have module `{}`. ".format(module_name) + \
+            "If you are adding a new test, please set `fullname` using format `ModuleName_desc`, " + \
+            "or set `module_name` using format `ModuleName`."
 
-    module_full_name = 'torch.nn.' + module_name
-    if module_full_name not in parity_table['torch.nn']:
-        raise RuntimeError(
-            'Module `{}` is not found in Python / C++ API parity table. Please update parity table at {}.'.format(
-                module_full_name, parity_table_path))
+        module_full_name = 'torch.nn.' + module_name
+        if module_full_name not in parity_table['torch.nn']:
+            raise RuntimeError(
+                'Module `{}` is not found in Python / C++ API parity table. Please update parity table at {}.'.format(
+                    module_full_name, parity_table_path))
 
-    has_impl_parity, _ = parity_table['torch.nn'][module_full_name]
+        has_impl_parity, _ = parity_table['torch.nn'][module_full_name]
 
-    def add_ctor_args_test_for_module(module_name, has_impl_parity):
-        ctor_args_test_name = 'test_torch_nn_{}_ctor_args'.format(module_name)
+        def add_ctor_args_test_for_module(module_name, has_impl_parity):
+            ctor_args_test_name = 'test_torch_nn_{}_ctor_args'.format(module_name)
 
-        def ctor_args_test(self):
-            self._test_torch_nn_module_ctor_args(
-                module_name=self._testMethodName.replace('test_torch_nn_', '').replace('_ctor_args', ''))
-
-        if not has_impl_parity:
-            ctor_args_test = unittest.expectedFailure(ctor_args_test)
-
-        # We only run one constructor args test per module
-        if not has_test(ctor_args_test_name):
-            add_test(ctor_args_test_name, ctor_args_test)
-
-    def add_variant_test_for_module(module_name, test_params_dict, has_impl_parity):
-        module_metadata = torch_nn_modules.module_metadata_map[module_name]
-        for device in devices:
-            test_params = _process_test_params(
-                test_params_dict=test_params_dict,
-                module_metadata=module_metadata,
-                device=device)
-            test_name = 'test_torch_nn_{}'.format(test_params.module_variant_name)
-            torch_nn_test_params_map[test_name] = test_params
-
-            def test_fn(self):
-                self._test_torch_nn_module_variant(test_params=torch_nn_test_params_map[self._testMethodName])
-
-            if device == 'cuda':
-                test_fn = unittest.skipIf(not TEST_CUDA, "CUDA unavailable")(test_fn)
+            def ctor_args_test(self):
+                self._test_torch_nn_module_ctor_args(
+                    module_name=self._testMethodName.replace('test_torch_nn_', '').replace('_ctor_args', ''))
 
             if not has_impl_parity:
-                test_fn = unittest.expectedFailure(test_fn)
+                ctor_args_test = unittest.expectedFailure(ctor_args_test)
 
-            add_test(test_name, test_fn)
+            # We only run one constructor args test per module
+            if not has_test(ctor_args_test_name):
+                add_test(ctor_args_test_name, ctor_args_test)
 
-    add_ctor_args_test_for_module(module_name, has_impl_parity)
-    add_variant_test_for_module(module_name, test_params_dict, has_impl_parity)
+        def add_variant_test_for_module(module_name, test_params_dict, has_impl_parity):
+            module_metadata = torch_nn_modules.module_metadata_map[module_name]
+            for device in devices:
+                test_params = _process_test_params(
+                    test_params_dict=test_params_dict,
+                    module_metadata=module_metadata,
+                    device=device,
+                    is_criterion=is_criterion)
+                test_name = 'test_torch_nn_{}'.format(test_params.module_variant_name)
+                torch_nn_test_params_map[test_name] = test_params
 
+                def test_fn(self):
+                    self._test_torch_nn_module_variant(test_params=torch_nn_test_params_map[self._testMethodName])
+
+                if device == 'cuda':
+                    test_fn = unittest.skipIf(not TEST_CUDA, "CUDA unavailable")(test_fn)
+
+                if not has_impl_parity:
+                    test_fn = unittest.expectedFailure(test_fn)
+
+                add_test(test_name, test_fn)
+
+        add_ctor_args_test_for_module(module_name, has_impl_parity)
+        add_variant_test_for_module(module_name, test_params_dict, has_impl_parity)
+
+add_torch_nn_module_tests(
+    sample_module.module_tests + common_nn.module_tests + common_nn.new_module_tests,
+    is_criterion=False)
+
+add_torch_nn_module_tests(
+    common_nn.criterion_tests + common_nn.new_criterion_tests,
+    is_criterion=True)
 
 # Assert that there exists auto-generated tests for SampleModule.
 assert len([name for name in TestCppApiParity.__dict__ if 'SampleModule' in name]) == \

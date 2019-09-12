@@ -45,3 +45,11 @@ TEST(TensorTypeSet, Doubleton) {
     }
   }
 }
+
+TEST(TensorTypeSet, Full) {
+  TensorTypeSet full(TensorTypeSet::FULL);
+  for (uint8_t i = 1; i < static_cast<uint8_t>(TensorTypeId::NumTensorIds); i++) {
+    auto tid = static_cast<TensorTypeId>(i);
+    ASSERT_TRUE(full.has(tid));
+  }
+}
