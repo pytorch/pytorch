@@ -11,7 +11,7 @@ from torch.quantization import \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
     default_dynamic_qconfig, MinMaxObserver, TensorObserver, QuantWrapper
 
-from common_utils import run_tests, tempfile
+from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     SkipQuantModel, QuantStubModel, \
     ModelForFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
@@ -621,10 +621,10 @@ class ScriptabilityTest(QuantizationTestCase):
 
     def test_scriptability_serialization(self):
         # test serialization of quantized functional modules
-        with tempfile.TemporaryFile() as f:
-            torch.save(self.qmodel_under_test, f)
-            f.seek(0)
-            loaded = torch.load(f)
+        b = io.BytesIO()
+        torch.save(self.qmodel_under_test, b)
+        b.seek(0)
+        loaded = torch.load(b)
         self.assertEqual(self.qmodel_under_test.myadd.zero_point, loaded.myadd.zero_point)
         state_dict = self.qmodel_under_test.state_dict()
         self.assertTrue('myadd.zero_point' in state_dict.keys(),
