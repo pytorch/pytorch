@@ -154,7 +154,8 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<${formals_types_with_return}>(op, ${method_actuals});
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<${formals_types_with_return}>(${method_actuals});
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<${formals_types_with_return}>(${method_actuals});
     }
 #endif
 }
