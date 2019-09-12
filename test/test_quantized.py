@@ -774,7 +774,7 @@ class TestDynamicQuantizedLinear(TestCase):
             Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
 
         self.assertEqual(Y_fp32, Y_fp32_ref,
-                         message="torch.ops.quantized.fbgemm_linear_dynamic results are off")
+                         message="torch.ops.quantized.linear_dynamic (fbgemm) results are off")
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
@@ -907,7 +907,7 @@ class TestQuantizedLinear(unittest.TestCase):
         np.testing.assert_equal(
             Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
 
-    """Tests the correctness of the quantized::fbgemm_linear_unpack op."""
+    """Tests the correctness of the quantized::linear_unpack (fbgemm) op."""
     @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,),
                        qparams=hu.qparams(dtypes=torch.qint8)),
            use_channelwise=st.booleans())
@@ -1141,7 +1141,7 @@ class TestQuantizedConv(unittest.TestCase):
         # assuming the rounding mode is round-to-nearest, ties-to-even.
         np.testing.assert_array_almost_equal(result_ref_q.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=0)
 
-    """Tests the correctness of the quantized::fbgemm_qconv_unpack op."""
+    """Tests the correctness of the quantized::qconv_unpack (fbgemm) op."""
     @given(X=hu.tensor_conv2d(min_batch=1, max_batch=3,
                               min_in_channels=1, max_in_channels=7,
                               min_out_channels=1, max_out_channels=7,
