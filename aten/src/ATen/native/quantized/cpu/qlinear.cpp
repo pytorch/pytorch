@@ -3,6 +3,9 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 
+#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <qnnpack_func.h>
+
 #include <algorithm>
 #include <string>
 
@@ -14,7 +17,7 @@ template <bool ReluFused>
 class QLinearInt8 final : public torch::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
-  at::Tensor operator()(
+  at::Tensor fbgemm_linear(
       at::Tensor input,
       at::Tensor packed_weight,
       double output_scale,
@@ -221,7 +224,107 @@ class QLinearInt8 final : public torch::OperatorKernel {
     }
     return output;
   }
-#else // USE_FBGEMM
+#endif
+#ifdef USE_PYTORCH_QNNPACK
+  at::Tensor qnnpack_linear(
+      at::Tensor input,
+      at::Tensor packed_weight,
+      double output_scale,
+      int64_t output_zero_point) {
+    TORCH_CHECK(
+        input.dim() >= 2,
+        "quantized::linear(): Input tensor rank should be >= 2");
+    auto input_contig = input.contiguous();
+
+    auto& pack_ptr = cpp_custom_type_hack::cast<PackedFCWeights>(packed_weight);
+    auto packB = pack_ptr.w.get();
+    auto kernel_zp = pack_ptr.w_zp;
+    auto kernel_scale = pack_ptr.w_scale;
+
+    size_t rows_input = 1;
+    size_t cols_input = input_contig.size(input_contig.dim() - 1);
+    for (size_t i = 0; i < input_contig.dim() - 1; ++i) {
+      rows_input *= input_contig.size(i);
+    }
+
+    size_t rows_w = packB->getOutputChannels();
+    size_t cols_w = packB->getInputChannels();
+
+    TORCH_CHECK(
+        cols_input == cols_w,
+        "quantized::linear(): input size does not match weight dimension 1 size: \
+         got ",
+        cols_input,
+        " but expected ",
+        cols_w);
+
+    // Allocate output Tensor and a buffer for QNNPACK to use
+    Tensor output = at::_empty_affine_quantized(
+        {static_cast<long>(rows_input), static_cast<long>(rows_w)},
+        input.options(),
+        output_scale,
+        output_zero_point);
+
+    auto output_min = ReluFused
+        ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+              .first
+        : std::numeric_limits<uint8_t>::min();
+    auto output_max = ReluFused
+        ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+              .second
+        : std::numeric_limits<uint8_t>::max();
+    const pytorch_qnnp_status runStatus = qnnpack::qnnpackLinear(
+        rows_input /* batch_size */,
+        cols_input /* input_channels */,
+        rows_w /* output_channels */,
+        input_contig.q_zero_point(),
+        input_contig.q_scale(),
+        kernel_zp,
+        kernel_scale,
+        output_zero_point,
+        output_scale,
+        output_min,
+        output_max,
+        (uint8_t*)input_contig.data_ptr<c10::quint8>(),
+        cols_input /* input_stride */,
+        packB->getPackedWeights(),
+        (uint8_t*)output.data_ptr<c10::quint8>(),
+        rows_w /* output_stride */,
+        nullptr /* threadpool */);
+
+    TORCH_INTERNAL_ASSERT(
+        runStatus == pytorch_qnnp_status_success,
+        "failed to run QNNPACK Linear operator");
+
+    return output;
+  }
+#endif
+#if defined(USE_FBGEMM) || defined(USE_PYTORCH_QNNPACK)
+  at::Tensor operator()(
+      at::Tensor input,
+      at::Tensor packed_weight,
+      double output_scale,
+      int64_t output_zero_point) {
+    auto& ctx = at::globalContext();
+
+#ifdef USE_FBGEMM
+    if (ctx.preferredQuantizedEngine() == at::QEngine::FBGEMM) {
+      return fbgemm_linear(
+          input, packed_weight, output_scale, output_zero_point);
+    }
+#endif
+#ifdef USE_PYTORCH_QNNPACK
+    if (ctx.preferredQuantizedEngine() == at::QEngine::QNNPACK) {
+      return qnnpack_linear(
+          input, packed_weight, output_scale, output_zero_point);
+    }
+#endif
+    TORCH_INTERNAL_ASSERT(
+        "Didn't find engine for operation quantized::linear ",
+        toString(ctx.preferredQuantizedEngine()));
+    return at::Tensor();
+  }
+#else // USE_FBGEMM or USE_PYTORCH_QNNPACK
   at::Tensor operator()(
       at::Tensor /* input */,
       at::Tensor /* packed_weight */,
@@ -229,11 +332,13 @@ class QLinearInt8 final : public torch::OperatorKernel {
       int64_t /* output_zero_point */) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
-    // a fallback path and rather fail loudly if we cannot run FBGEMM.
+    // a fallback path and rather fail loudly if we cannot run FBGEMM or
+    // QNNPACK.
     TORCH_CHECK(
-        false, "This PyTorch installation was not built with FBGEMM operators");
+        false,
+        "This PyTorch installation was not built with FBGEMM or QNNPACK operators");
   }
-#endif // USE_FBGEMM
+#endif // USE_FBGEMM or USE_PYTORCH_QNNPACK
 };
 
 static auto registry =

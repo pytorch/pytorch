@@ -1233,30 +1233,33 @@ class TestQNNPackOps(TestCase):
         qY = torch.quantize_linear(Y, scale=scale, zero_point=zero_point, dtype=torch_type)
         self.assertEqual(qY, qY_hat)
 
-    """Tests the correctness of the quantized::qnnpack_linear op."""
-    @given(output_channels=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           X=hu.tensor(shapes=hu.array_shapes(2, 3, 8, 15),
-                       qparams=hu.qparams(dtypes=torch.quint8)))
-    def test_qnnpack_linear(self, output_channels, X):
-        X, (X_scale, X_zp, torch_type) = X
-        qmin = torch.iinfo(torch_type).min
-        qmax = torch.iinfo(torch_type).max
+    @given(batch_size=st.integers(1, 4),
+           input_channels=st.integers(16, 32),
+           output_channels=st.integers(4, 8),
+           use_relu=st.booleans())
+    def test_qlinear_qnnpack(self, batch_size, input_channels, output_channels, use_relu):
+        torch.backends.quantized.engine = torch.qnnpack
 
-        input_channels = X.shape[X.ndim - 1]
+        qlinear_prepack = torch.ops.quantized.linear_prepack
+        if use_relu:
+            qlinear = torch.ops.quantized.linear_relu
+        else:
+            qlinear = torch.ops.quantized.linear
 
-        input_rows = 1
+        X_scale = 1.5
+        X_zp = 5
+        X_value_min = 0
+        X_value_max = 225
+        X_q0 = np.round(
+            np.random.rand(batch_size, input_channels) *
+            (X_value_max - X_value_min)
+            + X_value_min
+        ).astype(np.uint8)
 
-        for x in range(X.ndim - 1):
-            input_rows *= X.shape[x]
-
-        qnnpack_linear = torch.ops.quantized.qnnpack_linear
-
-        X_q0 = np.round(X * (qmin - qmax) + qmin).astype(np.uint8)
-
-        W_scale = 0.4
-        W_zp = 0
-        W_value_min = 0
-        W_value_max = 255
+        W_scales = np.random.rand(output_channels)
+        W_zp = 2
+        W_value_min = -128
+        W_value_max = 127
         W_q0 = np.round(
             np.random.rand(output_channels, input_channels)
             * (W_value_max - W_value_min)
@@ -1266,43 +1269,56 @@ class TestQNNPackOps(TestCase):
         b_value_min = -10
         b_value_max = 10
         b_q0 = np.round(
-            np.random.rand(output_channels) * (b_value_max - b_value_min) + b_value_min
+            np.random.rand(output_channels) *
+            (b_value_max - b_value_min) + b_value_min
         ).astype(np.int32)
 
-        X_scale = 10
-        X_zp = 0
-        X = torch.from_numpy(_dequantize(X_q0, X_scale, X_zp)).to(dtype=torch.float)
-        W = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
-        b = torch.from_numpy(_dequantize(b_q0, X_scale * W_scale, 0)).to(dtype=torch.float)
+        X = torch.from_numpy(_dequantize(
+            X_q0, X_scale, X_zp)).to(dtype=torch.float)
+        X_q = torch.quantize_linear(
+            X, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
 
-        X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
-        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp, dtype=torch.quint8)
-        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
+        W = torch.from_numpy(_dequantize(
+            W_q0, W_scales[0], W_zp)).to(dtype=torch.float)
+        W_q = torch.quantize_linear(W, scale=W_scales[0], zero_point=(
+            W_zp), dtype=torch.quint8)
+        b = torch.from_numpy(_dequantize(
+            b_q0, X_scale * (W_scales[0].item()), 0)).to(dtype=torch.float)
+        b_q = torch.quantize_linear(
+            b, scale=X_scale * (W_scales[0].item()), zero_point=0, dtype=torch.qint32)
 
-        Y_scale = 5.4  # This makes sure that the max output value does not exceed 255.
-        Y_zp = 0
+        # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
+        # Y_scale * 255 (max for uint8).
+        Y_scale = 125.1234
+        Y_zp = 5
+
+        # Weight prepacking operator for quantized Linear
+        W_prepack = qlinear_prepack(W_q, b_q)
+
+        # Quantized Linear operator with prepacked weight
+        Y_q = qlinear(X_q, W_prepack, Y_scale, Y_zp)
 
         # Reference quantized Linear operator
-        Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
-        Y_q_ref_float = _dequantize(Y_q_ref, Y_scale, Y_zp)
-
-        # Quantized linear operator
-        Y_q = qnnpack_linear(X_q, W_q, b_q, Y_scale, Y_zp)
-
+        Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0,
+                              W_scales[0], W_zp, b_q0, Y_scale, Y_zp)
+        if use_relu:
+            Y_q_ref[Y_q_ref < Y_zp] = Y_zp
         # Assert equal
-        np.testing.assert_array_almost_equal(Y_q_ref_float, Y_q.dequantize().numpy(), decimal=4)
+        np.testing.assert_array_almost_equal(Y_q_ref, Y_q.int_repr().numpy(), decimal=4)
 
+        # Test both per-tensor and per-channel quantization
         # Reference quantized result from PyTorch Linear operator
-
         W_fp32 = W_q.dequantize().to(dtype=torch.float)
         X_fp32 = X_q.dequantize().to(dtype=torch.float)
         b_fp32 = b_q.dequantize().to(dtype=torch.float)
         Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
-        Y_fp32_ref = Y_fp32_ref.view(-1, output_channels)
-        Y_q_ref2 = torch.quantize_linear(Y_fp32_ref, Y_scale, Y_zp, torch.quint8)
-
+        if use_relu:
+            Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
+        Y_q_ref2 = torch.quantize_linear(
+            Y_fp32_ref, Y_scale, Y_zp, torch.quint8)
         # Assert equal
-        np.testing.assert_array_almost_equal(Y_q_ref2.dequantize().numpy(), Y_q.dequantize().numpy(), decimal=4)
+        np.testing.assert_equal(
+            Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
 
     """Tests the correctness of the quantized::qnnpack_add op."""
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),

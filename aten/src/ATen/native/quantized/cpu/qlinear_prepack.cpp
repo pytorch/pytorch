@@ -2,8 +2,9 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/quantized/cpu/init_qnnpack.h>
+#include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/quantized/Quantizer.h>
-
 #include <algorithm>
 #include <vector>
 
@@ -12,6 +13,10 @@ namespace caffe2 {
 // Required for cpp_custom_type_hack to work
 CAFFE_KNOWN_TYPE(PackedLinearWeight);
 #endif // USE_FBGEMM
+#ifdef USE_PYTORCH_QNNPACK
+// Required for cpp_custom_type_hack to work
+CAFFE_KNOWN_TYPE(PackedFCWeights);
+#endif // USE_PYTORCH_QNNPACK
 } // namespace caffe2
 
 namespace at {
@@ -44,8 +49,9 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
       }
     }
   }
-
-  at::Tensor operator()(at::Tensor weight, c10::optional<Tensor> bias) {
+  at::Tensor fbgemm_linear_prepack(
+      at::Tensor weight,
+      c10::optional<Tensor> bias) {
     TORCH_CHECK(
         weight.dim() == 2,
         "The weight tensor for quantized::linear_prepack (fbgemm) should"
@@ -117,18 +123,80 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     // point.
     return cpp_custom_type_hack::create(std::move(ret_ptr), weight.options());
   }
-#else // USE_FBGEMM
+#endif
+#ifdef USE_PYTORCH_QNNPACK
+  at::Tensor qnnpack_linear_prepack(
+      at::Tensor weight,
+      c10::optional<Tensor> bias_in) {
+    TORCH_CHECK(
+        weight.dim() == 2,
+        "quantized::linear_prepack (qnnpack): Weight tensor rank should be == 2");
+
+    int64_t rows_w = weight.size(0);
+    int64_t cols_w = weight.size(1);
+    Tensor bias = bias_in.value();
+    TORCH_CHECK(
+        !bias.defined() || (bias.ndimension() == 1 && bias.size(0) == rows_w),
+        "quantized::linear_prepack (qnnpack): Given weight of size ",
+        weight.sizes(),
+        ", expected bias to be 1-dimensional with ",
+        rows_w,
+        " elements",
+        ", but got bias of size ",
+        bias.sizes(),
+        " instead");
+
+    Tensor weight_contig = weight.contiguous();
+    Tensor bias_contig = bias.contiguous();
+
+    initQNNPACK();
+
+    auto wt_ptr = guts::make_unique<PackedFCWeights>(
+        PackedFCWeights{guts::make_unique<qnnpack::PackBMatrix>(
+                            cols_w /* input_channels */,
+                            rows_w /* output_channels */,
+                            weight.q_zero_point(),
+                            weight.q_scale(),
+                            (uint8_t*)weight_contig.data_ptr<c10::quint8>(),
+                            (int32_t*)bias_contig.data_ptr<c10::qint32>()),
+                        weight.q_scale(),
+                        weight.q_zero_point()});
+    return cpp_custom_type_hack::create(std::move(wt_ptr), weight.options());
+  }
+#endif
+#if defined(USE_FBGEMM) || defined(USE_PYTORCH_QNNPACK)
+  at::Tensor operator()(at::Tensor weight, c10::optional<Tensor> bias) {
+    auto& ctx = at::globalContext();
+
+#ifdef USE_FBGEMM
+    if (ctx.preferredQuantizedEngine() == at::QEngine::FBGEMM) {
+      return fbgemm_linear_prepack(weight, bias);
+    }
+#endif
+#ifdef USE_PYTORCH_QNNPACK
+    if (ctx.preferredQuantizedEngine() == at::QEngine::QNNPACK) {
+      return qnnpack_linear_prepack(weight, bias);
+    }
+#endif
+    TORCH_INTERNAL_ASSERT(
+        "Didn't find engine for operation quantized::linear_prepack ",
+        toString(ctx.preferredQuantizedEngine()));
+    return at::Tensor();
+  }
+#else // USE_FBGEMM or USE_PYTORCH_QNNPACK
   at::Tensor operator()(
       at::Tensor /* weight */,
       c10::optional<Tensor> /* bias */
   ) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
-    // a fallback path and rather fail loudly if we cannot run FBGEMM.
+    // a fallback path and rather fail loudly if we cannot run FBGEMM or
+    // QNNPACK.
     TORCH_CHECK(
-        false, "This PyTorch installation was not built with FBGEMM operators");
+        false,
+        "This PyTorch installation was not built with FBGEMM or QNNPACK operators");
   }
-#endif // USE_FBGEMM
+#endif // USE_FBGEMM or USE_PYTORCH_QNNPACK
 };
 
 static auto registry = c10::RegisterOperators().op(

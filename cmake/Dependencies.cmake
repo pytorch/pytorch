@@ -349,6 +349,7 @@ if(USE_PYTORCH_QNNPACK)
         set_property(TARGET pytorch_qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
         set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
         set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+        set_property(TARGET clog PROPERTY POSITION_INDEPENDENT_CODE ON)
       endif()
 
       list(APPEND Caffe2_DEPENDENCY_LIBS pytorch_qnnpack)
@@ -371,6 +372,17 @@ if(USE_NNPACK)
     caffe2_update_option(USE_NNPACK OFF)
   endif()
 endif()
+
+IF(NOT TARGET clog)
+  SET(CLOG_BUILD_TESTS OFF CACHE BOOL "")
+  SET(CLOG_RUNTIME_TYPE "${CPUINFO_RUNTIME_TYPE}" CACHE STRING "")
+  ADD_SUBDIRECTORY(
+    "${CLOG_SOURCE_DIR}"
+    "${CONFU_DEPENDENCIES_BINARY_DIR}/clog")
+  # We build static version of clog but a dynamic library may indirectly depend on it
+  SET_PROPERTY(TARGET clog PROPERTY POSITION_INDEPENDENT_CODE ON)
+ENDIF()
+list(APPEND Caffe2_DEPENDENCY_LIBS clog)
 
 # ---[ Caffe2 uses cpuinfo library in the thread pool
 if (NOT TARGET cpuinfo)
