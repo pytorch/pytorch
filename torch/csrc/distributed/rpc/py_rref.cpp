@@ -12,13 +12,13 @@ namespace {
 // Constants below are used in PyRRef pickling and unpickling. PyRRef is
 // converted into a py::tuple in pickling, and reconstructed from the py::tuple
 // in pickling.
-constexpr int RREF_TUPLE_SIZE = 6;  // number of data fields in the py::tuple
-constexpr int OWNER_IDX = 0;        // index of ownerId in the tuple
-constexpr int RREFID_ON_IDX = 1;    // index of RRefId.createdOn_ in the tuple
-constexpr int RREFID_ID_IDX = 2;    // index of RRefId.localId_ in the tuple
-constexpr int FORKID_ON_IDX = 3;    // index of ForkId.createdOn_ in the tuple
-constexpr int FORKID_ID_IDX = 4;    // index of ForkId.localId_ in the tuple
-constexpr int TYPE_IDX = 5;         // index of type (py::object or IValue)
+constexpr int RREF_TUPLE_SIZE = 6; // number of data fields in the py::tuple
+constexpr int OWNER_IDX = 0; // index of ownerId in the tuple
+constexpr int RREFID_ON_IDX = 1; // index of RRefId.createdOn_ in the tuple
+constexpr int RREFID_ID_IDX = 2; // index of RRefId.localId_ in the tuple
+constexpr int FORKID_ON_IDX = 3; // index of ForkId.createdOn_ in the tuple
+constexpr int FORKID_ID_IDX = 4; // index of ForkId.localId_ in the tuple
+constexpr int TYPE_IDX = 5; // index of type (py::object or IValue)
 
 } // namespace
 
@@ -60,8 +60,7 @@ py::object PyRRef::localValue() {
     auto& ctx = RRefContext::getInstance();
     AT_ERROR(
         "Cannot call localValue() on a non-local reference. Call it on ",
-        ctx->getWorkerName()
-    );
+        ctx->getWorkerName());
   }
 
   if (rref_->isPyObj()) {

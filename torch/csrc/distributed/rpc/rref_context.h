@@ -28,7 +28,6 @@ class RRefContext {
   RRefId genRRefId();
   const std::shared_ptr<RpcAgent>& agent() const;
 
-
   // create a new RRef
   template <typename T>
   std::shared_ptr<OwnerRRef<T>> createOwnerRRef();
@@ -38,16 +37,15 @@ class RRefContext {
 
   template <typename T>
   std::shared_ptr<UserRRef<T>> createUserRRef(
-      worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId);
-
-  // get an existing RRef or create a new one from a serialized
-  // ``RRefForkData``.
-  template <typename T>
-  std::shared_ptr<RRef> getOrCreateRRef(at::IValue&& value);
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      const ForkId& forkId);
 
   template <typename T>
   std::shared_ptr<RRef> getOrCreateRRef(
-      worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId);
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      const ForkId& forkId);
 
   template <typename T>
   std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId);
@@ -56,7 +54,9 @@ class RRefContext {
 
   Message acceptUserRRef(const RRefId& rrefId, const ForkId& forkId);
   Message acceptForkRequest(
-      const RRefId& rrefId, const ForkId& forkId, worker_id_t forkDst);
+      const RRefId& rrefId,
+      const ForkId& forkId,
+      worker_id_t forkDst);
   void finishForkRequest(const ForkId& forkId);
   void finishUserRRef(const RRefId& rrefId, const ForkId& forkId);
 

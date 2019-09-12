@@ -31,7 +31,8 @@ void init() {
 }
 
 std::vector<char> generatePythonUDFResult(
-    const Message& message, worker_id_t dst) {
+    const Message& message,
+    worker_id_t dst) {
   AutoGIL ag;
   auto pickledPythonUDF =
       py::bytes(message.payload().data(), message.payload().size());

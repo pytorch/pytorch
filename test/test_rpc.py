@@ -40,6 +40,28 @@ def nested_remote(dst):
     return rref.to_here()
 
 
+def rref_forward_chain(dst, world_size, rref, ttl):
+    if ttl > 0:
+        current_dst = 'worker{}'.format(dst)
+        next_dst = (dst + 1) % world_size
+        ret_rref = dist.remote(
+            current_dst,
+            rref_forward_chain,
+            args=(
+                next_dst,
+                world_size,
+                rref,
+                ttl - 1
+            )
+        )
+        return [ret_rref]
+    else:
+        return rref.to_here()
+
+
+def rpc_return_rref(dst):
+    return dist.remote(dst, torch.add, args=(torch.ones(2, 2), 1))
+
 def light_rpc():
     return 0
 
@@ -563,6 +585,40 @@ class RpcTest(MultiProcessTestCase):
         )
         with self.assertRaisesRegex(Exception, "ValueError"):
             rref.to_here()
+
+    @_wrap_with_rpc
+    def test_rpc_return_rref(self):
+        n = self.rank + 1
+        dst_rank1 = n % self.world_size
+        dst_rank2 = (n + 1) % self.world_size
+        for i in range(20):
+            rref = dist.rpc(
+                'worker{}'.format(dst_rank1),
+                rpc_return_rref,
+                args=('worker{}'.format(dst_rank2),)
+            )
+            self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1)
+
+    @_wrap_with_rpc
+    def test_rref_forward_chain(self):
+        ttl = 8
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+
+        rref = dist.remote(
+            'worker{}'.format(dst_rank),
+            torch.add,
+            args=(torch.ones(n, n), 1)
+        )
+
+        ret_rref = rref_forward_chain(dst_rank, self.world_size, rref, ttl)
+
+        for i in range(ttl):
+            self.assertEqual(len(ret_rref), 1)
+            ret_rref = ret_rref[0].to_here()
+
+        ret = ret_rref
+        self.assertEqual(ret, torch.add(torch.ones(n, n), 1))
 
 
 if __name__ == '__main__':

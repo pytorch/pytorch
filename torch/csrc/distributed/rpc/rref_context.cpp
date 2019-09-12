@@ -45,11 +45,11 @@ std::shared_ptr<OwnerRRef<T>> RRefContext::createOwnerRRef() {
   return getOrCreateOwnerRRef<T>(genRRefId());
 }
 
-template std::shared_ptr<OwnerRRef<IValue>>
-    RRefContext::createOwnerRRef<IValue>();
+template std::shared_ptr<OwnerRRef<IValue>> RRefContext::createOwnerRRef<
+    IValue>();
 
-template std::shared_ptr<OwnerRRef<py::object>>
-    RRefContext::createOwnerRRef<py::object>();
+template std::shared_ptr<OwnerRRef<py::object>> RRefContext::createOwnerRRef<
+    py::object>();
 
 template <typename T>
 std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(worker_id_t ownerId) {
@@ -57,18 +57,18 @@ std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(worker_id_t ownerId) {
   return createUserRRef<T>(ownerId, genRRefId(), genRRefId());
 }
 
-template std::shared_ptr<UserRRef<IValue>>
-    RRefContext::createUserRRef<IValue>(worker_id_t ownerId);
+template std::shared_ptr<UserRRef<IValue>> RRefContext::createUserRRef<IValue>(
+    worker_id_t ownerId);
 
-template std::shared_ptr<UserRRef<py::object>>
-    RRefContext::createUserRRef<py::object>(worker_id_t ownerId);
-
+template std::shared_ptr<UserRRef<py::object>> RRefContext::createUserRRef<
+    py::object>(worker_id_t ownerId);
 
 template <typename T>
 std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(
-    worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId) {
-  TORCH_CHECK(
-      ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
+    worker_id_t ownerId,
+    const RRefId& rrefId,
+    const ForkId& forkId) {
+  TORCH_CHECK(ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
   // RRefContext does not track user RRefs, it will be destructed when there
   // is no shared_ptrs pointing to it. NB: cannot use make_shared here as the
   // constructor of UserRRef is private
@@ -93,31 +93,22 @@ std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(
   return userRRef;
 }
 
-template std::shared_ptr<UserRRef<IValue>>
-    RRefContext::createUserRRef<IValue>(
-        worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId);
+template std::shared_ptr<UserRRef<IValue>> RRefContext::createUserRRef<IValue>(
+    worker_id_t ownerId,
+    const RRefId& rrefId,
+    const ForkId& forkId);
 
-template std::shared_ptr<UserRRef<py::object>>
-    RRefContext::createUserRRef<py::object>(
-        worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId);
-
-
-template <typename T>
-std::shared_ptr<RRef> RRefContext::getOrCreateRRef(at::IValue&& value) {
-  auto rfd = RRefForkData::fromIValue(std::move(value));
-  return getOrCreateRRef<T>(rfd.ownerId_, rfd.rrefId_, rfd.forkId_);
-}
-
-template std::shared_ptr<RRef>
-    RRefContext::getOrCreateRRef<IValue>(at::IValue&& value);
-
-template std::shared_ptr<RRef>
-    RRefContext::getOrCreateRRef<py::object>(at::IValue&& value);
-
+template std::shared_ptr<UserRRef<py::object>> RRefContext::createUserRRef<
+    py::object>(
+    worker_id_t ownerId,
+    const RRefId& rrefId,
+    const ForkId& forkId);
 
 template <typename T>
 std::shared_ptr<RRef> RRefContext::getOrCreateRRef(
-    worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId) {
+    worker_id_t ownerId,
+    const RRefId& rrefId,
+    const ForkId& forkId) {
   if (ownerId == getWorkerId()) {
     return getOrCreateOwnerRRef<T>(rrefId);
   } else {
@@ -125,14 +116,15 @@ std::shared_ptr<RRef> RRefContext::getOrCreateRRef(
   }
 }
 
-template std::shared_ptr<RRef>
-    RRefContext::getOrCreateRRef<IValue>(
-        worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId);
+template std::shared_ptr<RRef> RRefContext::getOrCreateRRef<IValue>(
+    worker_id_t ownerId,
+    const RRefId& rrefId,
+    const ForkId& forkId);
 
-template std::shared_ptr<RRef>
-    RRefContext::getOrCreateRRef<py::object>(
-        worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId);
-
+template std::shared_ptr<RRef> RRefContext::getOrCreateRRef<py::object>(
+    worker_id_t ownerId,
+    const RRefId& rrefId,
+    const ForkId& forkId);
 
 template <typename T>
 std::shared_ptr<OwnerRRef<T>> RRefContext::getOrCreateOwnerRRef(
@@ -145,8 +137,8 @@ std::shared_ptr<OwnerRRef<T>> RRefContext::getOrCreateOwnerRRef(
     //
     // NB: cannot use make_shared here as the constructor of OwnerRRef is
     // private.
-    auto rref = std::shared_ptr<OwnerRRef<T>>(
-        new OwnerRRef<T>(getWorkerId(), rrefId));
+    auto rref =
+        std::shared_ptr<OwnerRRef<T>>(new OwnerRRef<T>(getWorkerId(), rrefId));
     owners_[rref->id()] = rref;
     return rref;
 
@@ -156,12 +148,11 @@ std::shared_ptr<OwnerRRef<T>> RRefContext::getOrCreateOwnerRRef(
   }
 }
 
-template std::shared_ptr<OwnerRRef<IValue>>
-    RRefContext::getOrCreateOwnerRRef<IValue>(const RRefId& rrefId);
+template std::shared_ptr<OwnerRRef<IValue>> RRefContext::getOrCreateOwnerRRef<
+    IValue>(const RRefId& rrefId);
 
-template std::shared_ptr<OwnerRRef<py::object>>
-    RRefContext::getOrCreateOwnerRRef<py::object>(const RRefId& rrefId);
-
+template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
+    getOrCreateOwnerRRef<py::object>(const RRefId& rrefId);
 
 RRefForkData RRefContext::forkTo(
     const std::shared_ptr<RRef>& rref,
@@ -176,7 +167,7 @@ RRefForkData RRefContext::forkTo(
           agent_->getWorkerId(forkDst),
           acceptUserRRef(forkRequest.rrefId_, forkRequest.forkId_));
 
-      fm->addCallback([forkRequest, this](const Message& message){
+      fm->addCallback([forkRequest, this](const Message& message) {
         handleException(message);
         this->delForkOfOwner(forkRequest.rrefId_, forkRequest.forkId_);
       });
@@ -190,11 +181,8 @@ RRefForkData RRefContext::forkTo(
       // notify owner
       auto fm = agent_->send(
           agent_->getWorkerId(rref->owner()),
-          ScriptForkNotify(
-              forkRequest.rrefId_,
-              forkRequest.forkId_,
-              forkDst
-          ).toMessage());
+          ScriptForkNotify(forkRequest.rrefId_, forkRequest.forkId_, forkDst)
+              .toMessage());
 
       fm->addCallback([this](const Message& message) {
         handleException(message);
@@ -206,19 +194,22 @@ RRefForkData RRefContext::forkTo(
   return forkRequest;
 }
 
-Message RRefContext::acceptUserRRef(const RRefId& rrefId, const ForkId& forkId) {
+Message RRefContext::acceptUserRRef(
+    const RRefId& rrefId,
+    const ForkId& forkId) {
   addForkOfOwner(rrefId, forkId);
   return ScriptUserAccept(rrefId, forkId).toMessage();
 }
 
 Message RRefContext::acceptForkRequest(
-    const RRefId& rrefId, const ForkId& forkId, worker_id_t forkDst) {
+    const RRefId& rrefId,
+    const ForkId& forkId,
+    worker_id_t forkDst) {
   // TODO: add exception handling
   auto fm = agent_->send(
-      agent_->getWorkerId(forkDst),
-      acceptUserRRef(rrefId, forkId));
+      agent_->getWorkerId(forkDst), acceptUserRRef(rrefId, forkId));
 
-  fm->addCallback([rrefId, forkId, this](const Message& message){
+  fm->addCallback([rrefId, forkId, this](const Message& message) {
     handleException(message);
     this->delForkOfOwner(rrefId, forkId);
   });
@@ -243,7 +234,8 @@ void RRefContext::finishUserRRef(const RRefId& rrefId, const ForkId& forkId) {
 
   auto iter = pendingUsers_.find(forkId);
   if (iter != pendingUsers_.end()) {
-    TORCH_INTERNAL_ASSERT(iter->second->id() == rrefId,
+    TORCH_INTERNAL_ASSERT(
+        iter->second->id() == rrefId,
         "Attempt to accept a fork with incorrect RRefId.");
     // UserRRef created before receiving RREF_USER_ACCEPT message
     pendingUsers_.erase(iter);
@@ -266,7 +258,8 @@ void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
 void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto iter = forks_.find(rrefId);
-  TORCH_INTERNAL_ASSERT(iter != forks_.end(),
+  TORCH_INTERNAL_ASSERT(
+      iter != forks_.end(),
       "Inconsistent states, deleting a fork before the owner knows it.");
   auto& rrefForks = iter->second;
   TORCH_INTERNAL_ASSERT(

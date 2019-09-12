@@ -43,7 +43,8 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
         return ScriptRet(std::move(stack.front())).toMessage();
       }
       case MessageType::PYTHON_CALL: {
-        auto payload = PythonRpcHandler::generatePythonUDFResult(request, from.id_);
+        auto payload =
+            PythonRpcHandler::generatePythonUDFResult(request, from.id_);
         return Message(
             std::move(payload),
             std::vector<torch::Tensor>(),
@@ -101,10 +102,9 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
         std::shared_ptr<OwnerRRef<py::object>> rref =
             RRefContext::getInstance()->getOrCreateOwnerRRef<py::object>(
                 prf.rrefId());
-        return
-            ScriptRRefFetchRet(
-                PythonRpcHandler::serialize(rref->getValue(), from.id_)
-            ).toMessage();
+        return ScriptRRefFetchRet(
+                   PythonRpcHandler::serialize(rref->getValue(), from.id_))
+            .toMessage();
       }
       case MessageType::RREF_USER_ACCEPT: {
         ScriptUserAccept sua = ScriptUserAccept::fromMessage(request);
