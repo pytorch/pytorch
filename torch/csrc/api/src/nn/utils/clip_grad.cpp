@@ -15,7 +15,7 @@ float clip_grad_norm_(
   for (const auto& param : parameters) {
     auto& grad = param.grad();
     if (grad.defined()) {
-      params_with_grad.push_back(std::make_unique<Tensor>(param));
+      params_with_grad.push_back(torch::make_unique<Tensor>(param));
     }
   }
   double total_norm = 0.0;
