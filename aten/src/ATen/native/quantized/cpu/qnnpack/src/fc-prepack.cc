@@ -2,6 +2,7 @@
 #include <qnnpack/pack.h>
 #include <qnnpack_func.h>
 #include <cstring>
+#include <cstdlib>
 
 namespace qnnpack {
 PackBMatrix::PackBMatrix(
