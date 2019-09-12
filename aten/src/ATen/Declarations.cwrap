@@ -2289,18 +2289,18 @@
     - cname: cappedRandom
       arguments:
         - THTensor* self
+        - int64_t to
         - arg: THGenerator* generator
           default: nullptr
           kwarg_only: True
-        - int64_t to
     - cname: clampedRandom
       arguments:
         - THTensor* self
+        - int64_t from
+        - int64_t to
         - arg: THGenerator* generator
           default: nullptr
           kwarg_only: True
-        - int64_t from
-        - int64_t to
 ]]
 [[
   name: _th_multinomial_alias_setup
@@ -2334,12 +2334,12 @@
   arguments:
     - arg: THIndexTensor* result
       output: True
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
     - THTensor* q
     - THIndexTensor* J
     - long num_samples
+    - arg: THGenerator* generator
+      default: nullptr
+      kwarg_only: True
 ]]
 [[
   name: _th_multinomial
@@ -2354,13 +2354,13 @@
   arguments:
     - arg: THIndexTensor* result
       output: True
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
     - THTensor* self
     - long num_samples
     - arg: bool replacement
       default: "false"
+    - arg: THGenerator* generator
+      default: nullptr
+      kwarg_only: True
 ]]
 [[
   name: _th_uniform_
@@ -2373,13 +2373,13 @@
   return: self
   arguments:
     - THTensor* self
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
     - arg: double from
       default: 0
     - arg: double to
       default: 1
+    - arg: THGenerator* generator
+      default: nullptr
+      kwarg_only: True
 ]]
 [[
   name: _th_normal
@@ -2396,30 +2396,30 @@
       arguments:
         - arg: THTensor* output
           output: True
-        - arg: THGenerator* generator
-          default: nullptr
-          kwarg_only: True
         - THTensor* mean
         - arg: double std
           default: 1
+        - arg: THGenerator* generator
+          default: nullptr
+          kwarg_only: True
     - cname: normal_stddevs
       arguments:
         - arg: THTensor* output
           output: True
+        - arg: double mean
+        - THTensor* std
         - arg: THGenerator* generator
           default: nullptr
           kwarg_only: True
-        - arg: double mean
-        - THTensor* std
     - cname: normal_means_stddevs
       arguments:
         - arg: THTensor* output
           output: True
+        - THTensor* mean
+        - THTensor* std
         - arg: THGenerator* generator
           default: nullptr
           kwarg_only: True
-        - THTensor* mean
-        - THTensor* std
 ]]
 [[
   name: _th_normal_
@@ -2432,13 +2432,13 @@
   return: self
   arguments:
     - THTensor* self
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
     - arg: double mean
       default: 0
     - arg: double std
       default: 1
+    - arg: THGenerator* generator
+      default: nullptr
+      kwarg_only: True
 ]]
 [[
   name: _th_cauchy_
@@ -2451,13 +2451,13 @@
   return: self
   arguments:
     - THTensor* self
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
     - arg: double median
       default: 0
     - arg: double sigma
       default: 1
+    - arg: THGenerator* generator
+      default: nullptr
+      kwarg_only: True
 ]]
 [[
   name: _th_log_normal_
@@ -2470,13 +2470,13 @@
   return: self
   arguments:
     - THTensor* self
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
     - arg: double mean
       default: 1
     - arg: double std
       default: 2
+    - arg: THGenerator* generator
+      default: nullptr
+      kwarg_only: True
 ]]
 [[
   name: _th_exponential_
@@ -2489,11 +2489,11 @@
   return: self
   arguments:
     - THTensor* self
+    - arg: double lambd
+      default: 1
     - arg: THGenerator* generator
       default: nullptr
       kwarg_only: True
-    - arg: double lambd
-      default: 1
 ]]
 [[
   name: _th_geometric_
@@ -2504,10 +2504,10 @@
   return: self
   arguments:
     - THTensor* self
+    - double p
     - arg: THGenerator* generator
       default: nullptr
       kwarg_only: True
-    - double p
 ]]
 
 [[
