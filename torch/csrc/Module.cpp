@@ -160,7 +160,7 @@ static PyObject * THPModule_crashIfATenASAN(PyObject *module, PyObject *arg) {
   return PyLong_FromLong(at::_crash_if_asan(static_cast<int>(THPUtils_unpackLong(arg))));
 }
 
-static PyObject * THPModule_getNumThreads(PyObject *module)
+static PyObject * THPModule_getNumThreads(PyObject *module, PyObject *noargs)
 {
   return PyLong_FromLong(at::get_num_threads());
 }
@@ -175,7 +175,7 @@ static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
   Py_RETURN_NONE;
 }
 
-static PyObject * THPModule_getNumInteropThreads(PyObject *module)
+static PyObject * THPModule_getNumInteropThreads(PyObject *module, PyObject *noargs)
 {
   return PyLong_FromLong(at::get_num_interop_threads());
 }
@@ -309,7 +309,7 @@ static PyObject *THPModule_setBackcompatBroadcastWarn(PyObject *module, PyObject
   Py_RETURN_NONE;
 }
 
-static PyObject *THPModule_getBackcompatBroadcastWarn(PyObject *module)
+static PyObject *THPModule_getBackcompatBroadcastWarn(PyObject *module, PyObject *noargs)
 {
   if (getBackCompatBroadcastWarn()) Py_RETURN_TRUE;
   else Py_RETURN_FALSE;
@@ -322,13 +322,13 @@ static PyObject *THPModule_setBackcompatKeepdimWarn(PyObject *module, PyObject *
   Py_RETURN_NONE;
 }
 
-static PyObject *THPModule_getBackcompatKeepdimWarn(PyObject *module)
+static PyObject *THPModule_getBackcompatKeepdimWarn(PyObject *module, PyObject *noargs)
 {
   if (getBackCompatKeepdimWarn()) Py_RETURN_TRUE;
   else Py_RETURN_FALSE;
 }
 
-PyObject *THPModule_hasDistributed(PyObject *_unused)
+PyObject *THPModule_hasDistributed(PyObject *_unused, PyObject *noargs)
 {
 #ifdef USE_DISTRIBUTED
   Py_RETURN_TRUE;
@@ -337,14 +337,14 @@ PyObject *THPModule_hasDistributed(PyObject *_unused)
 #endif
 }
 
-static PyObject *THPModule_showConfig(PyObject *module)
+static PyObject *THPModule_showConfig(PyObject *module, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return THPUtils_packString(at::show_config());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject *THPModule_parallelInfo(PyObject *module)
+static PyObject *THPModule_parallelInfo(PyObject *module, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return THPUtils_packString(at::get_parallel_info());
@@ -411,7 +411,7 @@ PyObject *THPModule_setUserEnabledCuDNN(PyObject *_unused, PyObject *arg)
   Py_RETURN_NONE;
 }
 
-PyObject *THPModule_userEnabledCuDNN(PyObject *_unused)
+PyObject *THPModule_userEnabledCuDNN(PyObject *_unused, PyObject *noargs)
 {
   if (at::globalContext().userEnabledCuDNN()) Py_RETURN_TRUE;
   else Py_RETURN_FALSE;
@@ -425,7 +425,7 @@ PyObject *THPModule_setUserEnabledMkldnn(PyObject *_unused, PyObject *arg)
   Py_RETURN_NONE;
 }
 
-PyObject *THPModule_userEnabledMkldnn(PyObject *_unused)
+PyObject *THPModule_userEnabledMkldnn(PyObject *_unused, PyObject *noargs)
 {
   if (at::globalContext().userEnabledMkldnn()) Py_RETURN_TRUE;
   else Py_RETURN_FALSE;
@@ -439,7 +439,7 @@ PyObject *THPModule_setDeterministicCuDNN(PyObject *_unused, PyObject *arg)
   Py_RETURN_NONE;
 }
 
-PyObject *THPModule_deterministicCuDNN(PyObject *_unused)
+PyObject *THPModule_deterministicCuDNN(PyObject *_unused, PyObject *noargs)
 {
   if (at::globalContext().deterministicCuDNN()) Py_RETURN_TRUE;
   else Py_RETURN_FALSE;
@@ -453,7 +453,7 @@ PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
   Py_RETURN_NONE;
 }
 
-PyObject *THPModule_benchmarkCuDNN(PyObject *_unused)
+PyObject *THPModule_benchmarkCuDNN(PyObject *_unused, PyObject *noargs)
 {
   if (at::globalContext().benchmarkCuDNN()) Py_RETURN_TRUE;
   else Py_RETURN_FALSE;
@@ -491,7 +491,7 @@ static PyMethodDef TorchMethods[] = {
   {"_add_docstr",     (PyCFunction)THPModule_addDocStr,       METH_VARARGS, nullptr},
   {"_init_names",     (PyCFunction)THPModule_initNames,       METH_O,       nullptr},
   {"_has_distributed",(PyCFunction)THPModule_hasDistributed,  METH_NOARGS,  nullptr},
-  {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_safe_call",      (PyCFunction)(void(*)(void))THPModule_safeCall, METH_VARARGS | METH_KEYWORDS, nullptr},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, nullptr},
   {"_set_default_dtype", (PyCFunction)THPModule_setDefaultDtype, METH_O, nullptr},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, nullptr},
