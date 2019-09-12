@@ -86,31 +86,44 @@ def probs_to_logits(probs, is_binary=False):
     return torch.log(ps_clamped)
 
 
-def continued_fraction(a, b, x, niters=2000, tol=3.0e-6):
+def continued_fraction(a, b, value, niters=2000, tol=3.0e-7):
     r"""
     Evaluates the continued fraction form of the Incomplete Beta Function,
-    required for Beta CDF `torch.distributions.distribution.Beta()`
+    required for Beta CDF.
+
+    Adapted from Numerical Recipes in C, Section 6.4
+    (http://www.aip.de/groups/soe/local/numres/bookcpdf/c6-4.pdf)
+
+    Args:
+        a (Tensor): concentation1 of Beta distribution
+        b (Tensor): concentation0 of Beta distribution
+        value (Tensor): 
     """
-    #  Init values of 1, update in loop
+    #  Init values, these are updated iteratively.
     bm = az = am = 1.0
-    bz = 1.0 - (a + b) * x / a + 1.0
+    qap = a + 1.0
+    qam = a - 1.0
+    bz = 1.0 - (a + b) * value / qap
 
     for i in range(niters + 1):
         em = float(i + 1)
         tem = em + em
-        d = em * (b - em) * x / ((a - 1.0 + tem) * (a + tem))
+        d = em * (b - em) * value / ((qam + tem) * (a + tem))
         ap = az + d * am
         bp = bz + d * bm
-        d = -(a + em) * (a + b + em) * x / ((a + 1.0 + tem) * (a + tem))
+        d = -(a + em) * ((a + b) + em) * value / ((qap + tem) * (a + tem))
         app = ap + d * az
         bpp = bp + d * bz
-        aold = az
+        a_old = az
         am = ap / bpp
         bm = bp / bpp
         az = app / bpp
         bz = 1.0
-        if (abs(az - aold) < (tol * abs(az))):
+        if abs(az - a_old) < (tol * abs(az)):
+            print(type(az))
             return az
+        elif em >= niters + 1:
+            raise ValueError("Could not converge. Try more iterations")
 
 
 class lazy_property(object):

@@ -71,14 +71,17 @@ class Beta(ExponentialFamily):
         if self._validate_args:
             self._validate_sample(value)
 
-        if (value == 0) or (value == 1):
-            return torch.tensor([1])
+        if (value <= 0) or (value >= 1):
+            return torch.tensor([value])
         else:
-            lbeta = math.lgamma(self.concentration1 + self.concentration0) - math.lgamma(self.concentration1) - math.lgamma(self.concentration0) + self.concentration1 * math.log(value) + self.concentration0 * math.log(1 - value)
-            if (value < (self.concentration1 + 1) / (self.concentration1 + self.concentration0 + 2)):
+            lbeta = torch.lgamma(self.concentration1 + self.concentration0) - torch.lgamma(self.concentration1) - \
+                    torch.lgamma(self.concentration0) + self.concentration1 * torch.log(value) + self.concentration0 * \
+                    torch.log(1.0 - value)
+            if torch.lt(value, (self.concentration1 + 1.0) / (self.concentration1 + self.concentration0 + 2.0)):
                 return math.exp(lbeta) * continued_fraction(self.concentration1, self.concentration0, value) / self.concentration1
             else:
-                return 1 - math.exp(lbeta) * continued_fraction(self.concentration0, self.concentration1, 1 - value) / self.concentration0
+                return 1.0 - math.exp(lbeta) * continued_fraction(self.concentration0, self.concentration1, 1.0 - value) / \
+                        self.concentration0
 
     @property
     def concentration1(self):
@@ -98,7 +101,7 @@ class Beta(ExponentialFamily):
 
     @property
     def _natural_params(self):
-        return (self.concentration1, self.concentration0)
+        return self.concentration1, self.concentration0
 
     def _log_normalizer(self, x, y):
         return torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y)
