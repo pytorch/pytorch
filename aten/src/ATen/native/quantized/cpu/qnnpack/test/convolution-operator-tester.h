@@ -16,8 +16,10 @@
 #include <functional>
 #include <random>
 #include <vector>
+#include <memory>
 
 #include <pytorch_qnnpack.h>
+#include <qnnpack_func.h>
 
 class ConvolutionOperatorTester {
  public:
@@ -358,7 +360,7 @@ class ConvolutionOperatorTester {
     return this->iterations_;
   }
 
-  void testQ8() const {
+  void testQ8(bool runtime_quant = false) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -478,59 +480,93 @@ class ConvolutionOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
-      pytorch_qnnp_operator_t convolution = nullptr;
+      if (runtime_quant) {
+        qnnpack::conv_param_t conv_p(
+            {kernelWidth(), kernelHeight()},
+            {subsamplingWidth(), subsamplingHeight()},
+            {dilationWidth(), dilationHeight()},
+            {paddingTop(), paddingLeft(), paddingBottom(), paddingRight()},
+            groups(),
+            groupInputChannels() * groups(),
+            groupOutputChannels() * groups(),
+            kernelZeroPoint,
+            1.0,
+            qmin(),
+            qmax());
+        auto packW = std::unique_ptr<qnnpack::PrePackConvWeights>(
+            new qnnpack::PrePackConvWeights(
+                conv_p,
+                kernel.data(),
+                bias.data()));
+        const pytorch_qnnp_status runStatus = qnnpack::qnnpackConv(
+            conv_p,
+            packW->getPackedWeights(),
+            batchSize(),
+            inputHeight(),
+            inputWidth(),
+            1.0,
+            inputZeroPoint,
+            inputPtr,
+            outputScale,
+            outputZeroPoint,
+            output.data(),
+            nullptr);
+        ASSERT_EQ(pytorch_qnnp_status_success, runStatus);
+      }
+      else {
+        pytorch_qnnp_operator_t convolution = nullptr;
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_create_convolution2d_nhwc_q8(
-              paddingTop(),
-              paddingRight(),
-              paddingBottom(),
-              paddingLeft(),
-              kernelHeight(),
-              kernelWidth(),
-              subsamplingHeight(),
-              subsamplingWidth(),
-              dilationHeight(),
-              dilationWidth(),
-              groups(),
-              groupInputChannels(),
-              groupOutputChannels(),
-              inputZeroPoint,
-              1.0f /* input scale */,
-              kernelZeroPoint,
-              1.0f /* kernel scale */,
-              kernel.data(),
-              bias.data(),
-              outputZeroPoint,
-              outputScale,
-              qmin(),
-              qmax(),
-              0,
-              &convolution));
+        ASSERT_EQ(
+            pytorch_qnnp_status_success,
+            pytorch_qnnp_create_convolution2d_nhwc_q8(
+                paddingTop(),
+                paddingRight(),
+                paddingBottom(),
+                paddingLeft(),
+                kernelHeight(),
+                kernelWidth(),
+                subsamplingHeight(),
+                subsamplingWidth(),
+                dilationHeight(),
+                dilationWidth(),
+                groups(),
+                groupInputChannels(),
+                groupOutputChannels(),
+                inputZeroPoint,
+                1.0f /* input scale */,
+                kernelZeroPoint,
+                1.0f /* kernel scale */,
+                kernel.data(),
+                bias.data(),
+                outputZeroPoint,
+                outputScale,
+                qmin(),
+                qmax(),
+                0,
+                &convolution));
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_setup_convolution2d_nhwc_q8(
-              convolution,
-              batchSize(),
-              inputHeight(),
-              inputWidth(),
-              inputPtr,
-              inputPixelStride(),
-              output.data(),
-              outputPixelStride(),
-              nullptr /* thread pool */));
+        ASSERT_EQ(
+            pytorch_qnnp_status_success,
+            pytorch_qnnp_setup_convolution2d_nhwc_q8(
+                convolution,
+                batchSize(),
+                inputHeight(),
+                inputWidth(),
+                inputPtr,
+                inputPixelStride(),
+                output.data(),
+                outputPixelStride(),
+                nullptr /* thread pool */));
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_run_operator(convolution, nullptr /* thread pool */));
+        ASSERT_EQ(
+            pytorch_qnnp_status_success,
+            pytorch_qnnp_run_operator(convolution, nullptr /* thread pool */));
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_delete_operator(convolution));
-      convolution = nullptr;
-
+        ASSERT_EQ(
+            pytorch_qnnp_status_success,
+            pytorch_qnnp_delete_operator(convolution));
+        convolution = nullptr;
+      }
       for (size_t i = 0; i < batchSize(); i++) {
         for (size_t y = 0; y < outputHeight(); y++) {
           for (size_t x = 0; x < outputWidth(); x++) {
