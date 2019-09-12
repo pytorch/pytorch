@@ -4,7 +4,7 @@ from . import invoke_rpc_builtin, invoke_rpc_python_udf
 from . import invoke_remote_builtin, invoke_remote_python_udf
 from . import init_rref_context
 from . import ProcessGroupAgent
-from . import WorkerId
+from . import WorkerInfo
 from .internal_rpc_utils import serialize, PythonUDF
 
 import sys
@@ -89,7 +89,7 @@ def get_worker_id(worker_name=None):
 
 
 def _to_worker_id(name_or_id):
-    if isinstance(name_or_id, WorkerId):
+    if isinstance(name_or_id, WorkerInfo):
         return name_or_id
     elif isinstance(name_or_id, str):
         return get_worker_id(name_or_id)

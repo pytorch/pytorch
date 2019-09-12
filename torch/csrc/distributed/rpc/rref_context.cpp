@@ -36,7 +36,8 @@ RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
 template <typename T>
 std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(worker_id_t ownerId) {
   TORCH_CHECK(ownerId != getWorkerId(), "Cannot create UserRRef on owner.");
-  return createUserRRef<T>(ownerId, genRRefId(), genRRefId());
+  return createUserRRef<T>(
+      ownerId, genGloballyUniqueId(), genGloballyUniqueId());
 }
 
 template std::shared_ptr<UserRRef<IValue>> RRefContext::createUserRRef<IValue>(
@@ -146,7 +147,7 @@ RRefForkData RRefContext::forkTo(
     if (rref->isOwner()) {
       // fork from owner
       auto fm = agent_->send(
-          agent_->getWorkerId(forkDst),
+          agent_->getWorkerInfo(forkDst),
           acceptUserRRef(forkRequest.rrefId_, forkRequest.forkId_));
 
       fm->addCallback([forkRequest, this](const Message& message) {
@@ -162,7 +163,7 @@ RRefForkData RRefContext::forkTo(
       }
       // notify owner
       auto fm = agent_->send(
-          agent_->getWorkerId(rref->owner()),
+          agent_->getWorkerInfo(rref->owner()),
           RRefForkNotify(forkRequest.rrefId_, forkRequest.forkId_, forkDst)
               .toMessage());
 
@@ -189,7 +190,7 @@ Message RRefContext::acceptForkRequest(
     worker_id_t forkDst) {
   // TODO: add exception handling
   auto fm = agent_->send(
-      agent_->getWorkerId(forkDst), acceptUserRRef(rrefId, forkId));
+      agent_->getWorkerInfo(forkDst), acceptUserRRef(rrefId, forkId));
 
   fm->addCallback([rrefId, forkId, this](const Message& message) {
     handleException(message);
@@ -202,7 +203,7 @@ Message RRefContext::acceptForkRequest(
 void RRefContext::finishForkRequest(const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto iter = pendingForkRequests_.find(forkId);
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       iter != pendingForkRequests_.end(),
       "Cannot finish a non-exist fork request.");
   pendingForkRequests_.erase(iter);
@@ -210,7 +211,7 @@ void RRefContext::finishForkRequest(const ForkId& forkId) {
 
 void RRefContext::finishUserRRef(const RRefId& rrefId, const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       pendingAcceptedUsers_.find(forkId) == pendingAcceptedUsers_.end(),
       "Inconsistent state, attempt to accept the same UserRRef twice.")
 

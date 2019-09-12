@@ -28,14 +28,14 @@ at::IValue RRefForkData::toIValue() const {
 RRefForkData RRefForkData::fromIValue(const at::IValue& ivalue) {
   auto ivalues = ivalue.toTuple()->elements();
 
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       ivalues.size() == 3,
       "Constructing RRefForkData from ivalue "
       "expects a GenericList of 3 elements, but got ",
       ivalues.size());
 
   int64_t ownerId = ivalues[0].toInt();
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       ownerId < std::numeric_limits<worker_id_t>::max(),
       "RRefId createdOn out of range, got ",
       ownerId);
@@ -53,7 +53,7 @@ RRef::RRef(worker_id_t ownerId, const RRefId& rrefId)
 
 RRefForkData RRef::fork() const {
   return RRefForkData(
-      ownerId_, rrefId_, RRefContext::getInstance()->genRRefId());
+      ownerId_, rrefId_, RRefContext::getInstance()->genGloballyUniqueId());
   // NB: does not support sharing RRefs between users
   // TODO: notify the owner
 }
@@ -66,7 +66,7 @@ UserRRef<T>::UserRRef(
     const RRefId& rrefId,
     const ForkId& forkId)
     : RRef(ownerId, rrefId), forkId_(forkId) {
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       !(forkId_ == rrefId_),
       "User RRef's fork ID should not be the same as its rref Id");
   // Do nothing,
@@ -84,7 +84,7 @@ UserRRef<T>::~UserRRef() {
   auto& ctx = RRefContext::getInstance();
   if (ctx->getWorkerId() != ownerId_) {
     auto fm = ctx->agent()->send(
-        ctx->agent()->getWorkerId(ownerId_),
+        ctx->agent()->getWorkerInfo(ownerId_),
         RRefUserDelete(rrefId_, forkId_).toMessage());
 
     fm->addCallback(
@@ -101,7 +101,8 @@ template <>
 IValue UserRRef<IValue>::toHere() {
   auto& agent = RRefContext::getInstance()->agent();
   std::shared_ptr<FutureMessage> fm = agent->send(
-      agent->getWorkerId(ownerId_), ScriptRRefFetchCall(rrefId()).toMessage());
+      agent->getWorkerInfo(ownerId_),
+      ScriptRRefFetchCall(rrefId()).toMessage());
   const Message& message = fm->wait();
   RRefContext::handleException(message);
   auto srv = RRefFetchRet::fromMessage(message);
@@ -112,7 +113,8 @@ template <>
 py::object UserRRef<py::object>::toHere() {
   auto& agent = RRefContext::getInstance()->agent();
   std::shared_ptr<FutureMessage> fm = agent->send(
-      agent->getWorkerId(ownerId_), PythonRRefFetchCall(rrefId()).toMessage());
+      agent->getWorkerInfo(ownerId_),
+      PythonRRefFetchCall(rrefId()).toMessage());
   const Message& message = fm->wait();
   RRefContext::handleException(message);
   auto srv = RRefFetchRet::fromMessage(message);

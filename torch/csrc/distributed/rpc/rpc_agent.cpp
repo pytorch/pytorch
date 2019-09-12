@@ -6,20 +6,20 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-constexpr size_t WorkerId::MAX_NAME_LEN;
+constexpr size_t WorkerInfo::MAX_NAME_LEN;
 using namespace torch::distributed::autograd;
 
-RpcAgent::RpcAgent(WorkerId workerId, RequestCallback cb)
-    : workerId_(std::move(workerId)), cb_(std::move(cb)) {}
+RpcAgent::RpcAgent(WorkerInfo workerInfo, RequestCallback cb)
+    : workerInfo_(std::move(workerInfo)), cb_(std::move(cb)) {}
 
 RpcAgent::~RpcAgent() = default;
 
-const WorkerId& RpcAgent::getWorkerId() const {
-  return workerId_;
+const WorkerInfo& RpcAgent::getWorkerInfo() const {
+  return workerInfo_;
 }
 
 std::shared_ptr<FutureMessage> RpcAgent::send(
-    const WorkerId& to,
+    const WorkerInfo& to,
     Message&& message) {
   // Record appropriate autograd information before sending the message over the
   // wire.

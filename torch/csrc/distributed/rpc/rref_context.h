@@ -24,15 +24,15 @@ class RRefContext {
   void operator=(const RRefContext&) = delete;
 
   inline worker_id_t getWorkerId() const {
-    return agent_->getWorkerId().id_;
+    return agent_->getWorkerInfo().id_;
   }
 
   inline const std::string& getWorkerName() const {
-    return agent_->getWorkerId().name_;
+    return agent_->getWorkerInfo().name_;
   }
 
-  inline RRefId genRRefId() {
-    return RRefId(getWorkerId(), nextLocalId_++);
+  inline GloballyUniqueId genGloballyUniqueId() {
+    return GloballyUniqueId(getWorkerId(), nextLocalId_++);
   }
 
   inline const std::shared_ptr<RpcAgent>& agent() const {

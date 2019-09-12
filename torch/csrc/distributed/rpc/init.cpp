@@ -31,9 +31,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto module = py::handle(dist_module).cast<py::module>();
 
-  auto workerId = shared_ptr_class_<WorkerId>(module, "WorkerId")
-                      .def_readonly("name", &WorkerId::name_)
-                      .def_readonly("id", &WorkerId::id_);
+  auto workerInfo = shared_ptr_class_<WorkerInfo>(module, "WorkerInfo")
+                        .def_readonly("name", &WorkerInfo::name_)
+                        .def_readonly("id", &WorkerInfo::id_);
 
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
@@ -85,18 +85,18 @@ PyObject* rpc_init(PyObject* /* unused */) {
           py::arg("num_send_recv_threads") = 4)
       .def(
           "get_worker_id",
-          (const WorkerId& (ProcessGroupAgent::*)(void)const) &
-              RpcAgent::getWorkerId,
+          (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
+              RpcAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_id",
-          (const WorkerId& (ProcessGroupAgent::*)(void)const) &
-              RpcAgent::getWorkerId,
+          (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
+              RpcAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_id",
-          (const WorkerId& (ProcessGroupAgent::*)(const std::string&)const) &
-              ProcessGroupAgent::getWorkerId,
+          (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&)const) &
+              ProcessGroupAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "join",
@@ -118,7 +118,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   module.def(
       "invoke_rpc_builtin",
       [](RpcAgent& agent,
-         const WorkerId& dst,
+         const WorkerInfo& dst,
          const std::string& opName,
          const py::args& args,
          const py::kwargs& kwargs) {
@@ -128,7 +128,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   module.def(
       "invoke_rpc_python_udf",
       [](RpcAgent& agent,
-         const WorkerId& dst,
+         const WorkerInfo& dst,
          const std::string& pickledPythonUDF) {
         return pyRpcPythonUdf(agent, dst, pickledPythonUDF);
       });
@@ -136,7 +136,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   module.def(
       "invoke_remote_builtin",
       [](RpcAgent& agent,
-         const WorkerId& dst,
+         const WorkerInfo& dst,
          const std::string& opName,
          const py::args& args,
          const py::kwargs& kwargs) {
@@ -146,7 +146,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   module.def(
       "invoke_remote_python_udf",
       [](RpcAgent& agent,
-         const WorkerId& dst,
+         const WorkerInfo& dst,
          const std::string& pickledPythonUDF) {
         return pyRemotePythonUdf(agent, dst, pickledPythonUDF);
       });

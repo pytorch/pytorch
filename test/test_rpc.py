@@ -183,7 +183,7 @@ class RpcTest(MultiProcessTestCase):
             dist.init_model_parallel("")
 
         # If the number in the message does not match, it is likely that the
-        # value of MAX_NAME_LEN in RPC WorkerId has changed.
+        # value of MAX_NAME_LEN in RPC WorkerInfo has changed.
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
             dist.init_model_parallel("".join(["a" for _ in range(500)]))
 

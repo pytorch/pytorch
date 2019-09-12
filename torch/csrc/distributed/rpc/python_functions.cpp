@@ -90,7 +90,7 @@ py::object toPyObj(const Message& message) {
 
 std::shared_ptr<FutureMessage> pyRpcBuiltin(
     RpcAgent& agent,
-    const WorkerId& dst,
+    const WorkerInfo& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs) {
@@ -101,7 +101,7 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
 
 PyRRef pyRemoteBuiltin(
     RpcAgent& agent,
-    const WorkerId& dst,
+    const WorkerInfo& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs) {
@@ -124,7 +124,7 @@ PyRRef pyRemoteBuiltin(
 
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
-    const WorkerId& dst,
+    const WorkerInfo& dst,
     const std::string& pickledPythonUDF) {
   std::vector<char> data(pickledPythonUDF.begin(), pickledPythonUDF.end());
   std::vector<torch::Tensor> tensor_table;
@@ -137,7 +137,7 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
 
 PyRRef pyRemotePythonUdf(
     RpcAgent& agent,
-    const WorkerId& dst,
+    const WorkerInfo& dst,
     const std::string& pickledPythonUDF) {
   auto& ctx = RRefContext::getInstance();
   TORCH_INTERNAL_ASSERT(

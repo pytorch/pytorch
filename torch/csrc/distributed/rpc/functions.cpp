@@ -24,7 +24,7 @@ Message createException(const Message& request, const std::exception& e) {
       request.id());
 }
 
-Message processRequestBlocking(const WorkerId& from, Message&& request) {
+Message processRequestBlocking(const WorkerInfo& from, Message&& request) {
   try {
     switch (request.type()) {
       case MessageType::SCRIPT_CALL: {

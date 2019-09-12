@@ -13,26 +13,26 @@ py::object toPyObj(const Message& message);
 
 std::shared_ptr<FutureMessage> pyRpcBuiltin(
     RpcAgent& agent,
-    const WorkerId& dst,
+    const WorkerInfo& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs);
 
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
-    const WorkerId& dst,
+    const WorkerInfo& dst,
     const std::string& pickledPythonUDF);
 
 PyRRef pyRemoteBuiltin(
     RpcAgent& agent,
-    const WorkerId& dst,
+    const WorkerInfo& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs);
 
 PyRRef pyRemotePythonUdf(
     RpcAgent& agent,
-    const WorkerId& dst,
+    const WorkerInfo& dst,
     const std::string& pickledPythonUDF);
 
 } // namespace rpc
