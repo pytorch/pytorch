@@ -125,3 +125,12 @@ TEST(FULLY_CONNECTED_OP, small_batch_with_output_stride) {
       .iterations(3)
       .testQ8();
 }
+
+TEST(FULLY_CONNECTED_OP, runtime_quant) {
+  FullyConnectedOperatorTester()
+      .batchSize(4)
+      .inputChannels(4)
+      .outputChannels(4)
+      .iterations(3)
+      .testQ8(true);
+}
