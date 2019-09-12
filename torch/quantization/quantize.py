@@ -12,7 +12,7 @@ from .QConfig import default_dynamic_qconfig
 import torch.nn.qat as nnqat
 
 
-DEFAULT_SKIP_LIST = [nn.Identity, nn.MaxPool2d, nn.AvgPool2d, nn.AdaptiveAvgPool2d]
+DEFAULT_SKIP_LIST = [nn.Dropout, nn.Identity, nn.MaxPool2d, nn.AvgPool2d, nn.AdaptiveAvgPool2d]
 
 def propagate_qconfig_helper(module, qconfig_dict, skip_list=DEFAULT_SKIP_LIST, qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig`
@@ -228,6 +228,7 @@ DEFAULT_QAT_MODULE_MAPPING = {
 
 DEFAULT_DYNAMIC_MODULE_MAPPING = {
     nn.Linear: nnqd.Linear,
+    nn.LSTM: nnqd.LSTM,
 }
 
 def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
@@ -257,6 +258,7 @@ def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
 
 DEFAULT_QCONFIG_DICT = {
     nn.Linear : default_dynamic_qconfig,
+    nn.LSTM : default_dynamic_qconfig,
 }
 
 def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING, dtype=torch.qint8):
@@ -336,3 +338,26 @@ def swap_module(mod, mapping, dtype=torch.qint8):
                 # We want to support float16 dynamic quantization
                 new_mod = mapping[type(mod)].from_float(mod, dtype)
     return new_mod
+
+def dump_tensor(mod, target_dict, prefix=""):
+    r"""Traverse the modules and save the weight and stored activation to given dict.
+    This is mainly used for quantization accuracy debug
+    Args:
+        mod: the top module we want to save all tensors
+        prefix: the prefix for the current module
+        target_dict: the dictionary used to save the tensors
+    """
+    def get_prefix(prefix):
+        return prefix if prefix == "" else prefix + '.'
+
+    weight_unpack = getattr(mod, "weight", None)
+    if weight_unpack is not None and callable(weight_unpack):
+        target_dict[get_prefix(prefix) + 'weight'] = mod.weight()
+    elif hasattr(mod, 'weight'):
+        target_dict[get_prefix(prefix) + 'weight'] = mod.weight
+
+    if hasattr(mod, 'observer'):
+        target_dict[get_prefix(prefix) + 'activation'] = mod.observer.get_tensor_value()
+    for name, child in mod.named_children():
+        module_prefix = get_prefix(prefix) + name if prefix else name
+        dump_tensor(child, target_dict, module_prefix)
