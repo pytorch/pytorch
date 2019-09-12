@@ -29,7 +29,8 @@ install_ubuntu() {
                    rocrand \
                    hipcub \
                    rocthrust \
-                   rccl
+                   rccl \
+		   roctracer
 }
 
 install_centos() {
@@ -61,7 +62,8 @@ install_centos() {
                    rocrand \
                    rccl \
                    hipcub \
-                   rocthrust
+                   rocthrust \
+		   roctracer
 }
  
 # Install Python packages depending on the base OS
