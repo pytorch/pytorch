@@ -145,7 +145,7 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
       echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
       exit 1
     else
-      conda install -q -y cmake
+      conda install -q -y cmake openssl=1.1.1c
     fi
   else
     if ! cmake --version | grep 'cmake version 3\.5'; then
@@ -155,9 +155,6 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
     fi
   fi
 fi
-
-# FIXME: This is a temporary fix before docker image is updated
-conda install -y openssl=1.1.1c
 
 function pip_install() {
   # retry 3 times
