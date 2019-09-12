@@ -803,9 +803,19 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y, z):
                 return torch.meshgrid(x, y, z)
 
+        x = torch.randn(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.randn(5, requires_grad=True)
+        self.run_test(Meshgrid(), (x, y, z))
+
+    def test_meshgrid_scalar(self):
+        class Meshgrid(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.meshgrid(x, y, z)
+
         x = torch.ones(3, requires_grad=True)
         y = torch.zeros(4, requires_grad=True)
-        z = torch.ones(5, requires_grad=True)
+        z = torch.tensor(2.0)
         self.run_test(Meshgrid(), (x, y, z))
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):

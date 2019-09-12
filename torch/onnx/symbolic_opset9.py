@@ -1914,17 +1914,16 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
 
 
 def meshgrid(g, tensor_list):
-    tensors = [t for t in sym_help._unpack_list(tensor_list)]
+    tensors = sym_help._unpack_list(tensor_list)
+    tensors_shape = [g.op("Shape", view(g, t, torch.LongTensor([-1]))) for t in tensors]
+    out_shape = g.op("Concat", *tensors_shape, axis_i=0)
     out = []
-    repeats = [t.type().sizes()[0] if t.isCompleteTensor() else 0 for t in tensors]
     for i, t in enumerate(tensors):
         if t.isCompleteTensor():
-            shape_i = torch.ones(len(tensors), dtype=torch.int64)
-            shape_i[i] = t.type().sizes()[0]
-            repeats_i = torch.tensor(repeats, dtype=torch.int64)
-            repeats_i[i] = 1
-            t_reshaped = _reshape_from_tensor(g, t, g.op("Constant", value_t=torch.LongTensor(shape_i)))
-            out.append(repeat(g, t_reshaped, repeats_i))
+            shape_i = [g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))] * len(tensors)
+            shape_i[i] = g.op("Shape", t)
+            t_reshaped = _reshape_from_tensor(g, t,  g.op("Concat", *shape_i, axis_i=0))
+            out.append(g.op("Expand", t_reshaped, out_shape))
         else:
-            _unimplemented("meshgrid", "Unknown input rank. Cannot compute meshgird dimensions.")
+            _unimplemented("meshgrid", "Unknown input shape. Cannot compute meshgird dimensions.")
     return g.op("prim::ListConstruct", *out)

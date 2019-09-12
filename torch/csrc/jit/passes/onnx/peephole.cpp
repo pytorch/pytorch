@@ -591,15 +591,15 @@ static void fuseListUnpack(Block* b) {
       fuseListUnpack(child_block);
     }
     if (it->kind() == prim::ListUnpack) {
-      if (it->input()->node()->kind() == prim::ListConstruct) {
-        Node* prev = it -> prev();
+      Node* input_node = it->input()->node();
+      if (input_node->kind() == prim::ListConstruct) {
         for (size_t i = 0; i < it->outputs().size(); i++) {
-            auto output = it->outputs().at(i);
-            output->replaceAllUsesWith(prev->inputs().at(i));
+          auto output = it->outputs().at(i);
+          output->replaceAllUsesWith(input_node->inputs().at(i));
         }
       }
 
-      if (it->input()->node()->kind() == onnx::Split) {
+      if (input_node->kind() == onnx::Split) {
         auto origSplitNode = it->inputs().at(0)->node();
         Node* splitNode =
             b->owningGraph()->create(it->inputs().at(0)->node()->kind(), it->outputs().size());
