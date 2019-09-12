@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/quantization.h>
-#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/irparser.h>
@@ -533,20 +533,17 @@ void InsertQuantDeQuantImpl(
           if (module_instance == graph->inputs()[0]) {
             m = module;
           } else {
-            auto child_module = qh.findChildModuleToQuantize(module_instance);
-            if (child_module) {
-              m = child_module;
-            }
+            m = qh.findChildModuleToQuantize(module_instance);
           }
           if (m) {
             InsertQuantDeQuantImpl(m.value(), module_method_name);
           }
-          if (v->node()->kind() == prim::GetAttr &&
-              v->node()->s(c10::attr::name) == "bias") {
-            qh.quantizeBias(v);
-          } else {
-            qh.quantizeTensor(v);
-          }
+        }
+        if (v->node()->kind() == prim::GetAttr &&
+            v->node()->s(c10::attr::name) == "bias") {
+          qh.quantizeBias(v);
+        } else {
+          qh.quantizeTensor(v);
         }
       }
 
