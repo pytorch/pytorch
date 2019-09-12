@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/fuse_linear.h>
 
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/irparser.h>
