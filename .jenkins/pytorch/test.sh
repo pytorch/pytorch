@@ -57,7 +57,7 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
 fi
 
 # FIXME: This is a temporary fix before docker image is updated
-pip_install --user certifi
+conda install -y openssl=1.1.1c
 
 # faulthandler become built-in since 3.3
 if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
