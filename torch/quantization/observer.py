@@ -6,7 +6,7 @@ from abc import ABCMeta, abstractmethod
 from functools import partial
 import warnings
 
-from torch._jit_internal import Optional
+from torch._jit_internal import Optional, List
 
 ABC = ABCMeta(str('ABC'), (object,), {})  # compatible with Python 2 *and* 3:
 
@@ -139,6 +139,32 @@ class MinMaxObserver(ObserverBase):
     def extra_repr(self):
         return 'min_val={}, max_val={}'.format(self.min_val, self.max_val)
 
+
+class TensorObserver(ObserverBase):
+    r"""
+    The module is mainly for debug and records the tensor values during runtime
+    """
+    __annotations__ = {
+        "tensor_val": List[Optional[torch.Tensor]],
+    }
+
+    def __init__(self, **kwargs):
+        super(TensorObserver, self).__init__(**kwargs)
+        self.tensor_val = []
+
+    def forward(self, x):
+        self.tensor_val.append(x.clone())
+        return x
+
+    @torch.jit.export
+    def calculate_qparams(self):
+        raise Exception("calculate_qparams should not be called for TensorObserver")
+
+    @torch.jit.export
+    def get_tensor_value(self):
+        return self.tensor_val
+
+
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)
 
@@ -146,6 +172,9 @@ def default_observer(**kwargs):
     # Restrict activations to be in the range (0,127)
     kwargs.setdefault("reduce_range", True)
     return observer(MinMaxObserver, **kwargs)
+
+def default_debug_observer(**kwargs):
+    return observer(TensorObserver, **kwargs)
 
 def default_weight_observer(**kwargs):
     kwargs.setdefault("dtype", torch.qint8)
