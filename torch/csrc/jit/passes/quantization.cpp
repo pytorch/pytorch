@@ -24,16 +24,16 @@ void findValuesInPattern(
   script::parseIR(pattern, &pattern_graph, vmap);
 
   auto matches = findPatternMatches(pattern_graph, graph);
-  for (auto match : matches) {
+  for (const auto& match : matches) {
     auto output_value = vmap.at("output");
     TORCH_INTERNAL_ASSERT(
         match.values_map.find(output_value) != match.values_map.end(),
         "Didn't find Value output in match result.");
-    values_to_skip.emplace(match.values_map[output_value]);
+    values_to_skip.emplace(match.values_map.at(output_value));
   }
 }
 
-void intermediateValuesToSkipObserver(
+void addIntermediateValuesToSkipObserver(
     const script::Module& module,
     const std::string& method_name,
     std::unordered_set<Value*>& values_to_skip) {
@@ -186,10 +186,15 @@ void InsertObserversImpl(
     const std::string& method_name,
     const ModuleQConfigMap& module_qconfig_map,
     std::unordered_set<Value*>& values_to_skip) {
+  if (module_qconfig_map.count(module.module_object()) == 0) {
+    // the module is added by us, e.g.: observer module
+    return;
+  }
+
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   ConstantPropagation(graph);
-  intermediateValuesToSkipObserver(module, method_name, values_to_skip);
+  addIntermediateValuesToSkipObserver(module, method_name, values_to_skip);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -212,10 +217,6 @@ void InsertObserversImpl(
     auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get()) &&
         values_to_skip.count(v) == 0) {
-      if (module_qconfig_map.count(module.module_object()) == 0) {
-        // the module is added by us, it's an observer module
-        continue;
-      }
       auto qconfig = module_qconfig_map.at(module.module_object());
       if (qconfig) {
         auto observer_node =
@@ -520,19 +521,24 @@ void InsertQuantDeQuantImpl(
     for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end;) {
       Node* n = *it++;
       for (Value* v : n->outputs()) {
-        if (v->type()->isSubtypeOf(TensorType::get())) {
-          if (v->node()->kind() == prim::CallMethod) {
-            auto module_instance = v->node()->inputs()[0];
-            auto module_method_name = v->node()->s(attr::name);
-            // calling method on self
-            if (module_instance == graph->inputs()[0]) {
-              InsertQuantDeQuantImpl(module, module_method_name);
-            } else {
-              auto child_module = qh.findChildModuleToQuantize(module_instance);
-              if (child_module) {
-                InsertQuantDeQuantImpl(child_module.value(), module_method_name);
-              }
+        if (!v->type()->isSubtypeOf(TensorType::get())) {
+          continue;
+        }
+        if (v->node()->kind() == prim::CallMethod) {
+          auto module_instance = v->node()->inputs()[0];
+          auto module_method_name = v->node()->s(attr::name);
+          c10::optional<script::Module> m;
+          // calling method on self
+          if (module_instance == graph->inputs()[0]) {
+            m = module;
+          } else {
+            auto child_module = qh.findChildModuleToQuantize(module_instance);
+            if (child_module) {
+              m = child_module;
             }
+          }
+          if (m) {
+            InsertQuantDeQuantImpl(m.value(), module_method_name);
           }
           if (v->node()->kind() == prim::GetAttr &&
               v->node()->s(c10::attr::name) == "bias") {
@@ -563,11 +569,6 @@ TORCH_API void InsertObservers(
     const std::string& method_name,
     const QConfigDict& qconfig_dict) {
   ModuleQConfigMap module_qconfig_map;
-  // Set of child modules that has the same qconfig
-  // as parent module, used for avoiding inserting
-  // observers for Tensors that's used in child module
-  // and produced by the child module if that module has
-  // the same qconfig as the parent module.
   fillQConfigMap(module,
                  qconfig_dict,
                  module_qconfig_map);
