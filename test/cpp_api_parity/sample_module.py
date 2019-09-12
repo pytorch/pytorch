@@ -15,7 +15,8 @@ When `SampleModule.has_parity` is false, behavior of `reset_parameters` / `forwa
 
 class SampleModule(torch.nn.Module):
     def __init__(self, has_parity, has_submodule, int_option=0, double_option=0.1,
-                 bool_option=False, string_option='0', tensor_option=torch.zeros(1)):
+                 bool_option=False, string_option='0', tensor_option=torch.zeros(1),
+                 int_or_tuple_option=0):
         super(SampleModule, self).__init__()
         self.has_parity = has_parity
         if has_submodule:
@@ -28,6 +29,7 @@ class SampleModule(torch.nn.Module):
         self.bool_option = bool_option
         self.string_option = string_option
         self.tensor_option = tensor_option
+        self.int_or_tuple_option = int_or_tuple_option
         self.register_parameter('param', torch.nn.Parameter(torch.empty(3, 4)))
         self.register_buffer('buffer', torch.empty(4, 5))
         self.attr = 0
@@ -62,6 +64,7 @@ struct C10_EXPORT SampleModuleOptions {
   TORCH_ARG(bool, bool_option) = false;
   TORCH_ARG(std::string, string_option) = "0";
   TORCH_ARG(torch::Tensor, tensor_option) = torch::zeros({1});
+  TORCH_ARG(ExpandingArray<2>, int_or_tuple_option) = 0;
 };
 
 struct C10_EXPORT SampleModuleImpl : public torch::nn::Cloneable<SampleModuleImpl> {
@@ -112,15 +115,7 @@ module_tests = [
 
 torch_nn_modules.module_metadata_map['SampleModule'] = TorchNNModuleMetadata(
     cpp_default_constructor_args='(true)',
-    num_attrs_recursive=18,
-    options_args=[
-        'has_submodule',
-        'int_option',
-        'double_option',
-        'bool_option',
-        'string_option',
-        'tensor_option',
-    ],
+    num_attrs_recursive=20,
     cpp_sources=SAMPLE_MODULE_CPP_SOURCE,
 )
 

@@ -1,5 +1,5 @@
 import unittest
-from common_utils import TestCase, run_tests
+from common_utils import TestCase, run_tests, TEST_NUMPY
 from common_cuda import TEST_CUDA
 from collections import namedtuple
 import itertools
@@ -10,13 +10,23 @@ import torch.nn.functional as F
 from multiprocessing.reduction import ForkingPickler
 import pickle
 import io
+import os
 import sys
 import warnings
 
 
+def check_env_flag(name, default=''):
+    return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
+
+TEST_NAMEDTENSOR = check_env_flag('TEST_NAMEDTENSOR')
+
 skipIfNamedTensorDisabled = \
     unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
                     'PyTorch not compiled with namedtensor support')
+
+skipIfNotTestingNamedTensor = \
+    unittest.skipIf(not TEST_NAMEDTENSOR,
+                    'TEST_NAMEDTENSOR=0; set it to 1 to enable named tensor tests')
 
 def pass_name_to_python_arg_parser(name):
     x = torch.empty(2, names=(name,))
@@ -342,6 +352,48 @@ class TestNamedTensor(TestCase):
             result = torch.full([1, 2, 3], 2, names=names, device=device)
             expected = torch.full([1, 2, 3], 2, device=device).names_(*names)
             self.assertTensorDataAndNamesEqual(result, expected)
+
+    def test_tensor_from_lists(self):
+        names = ('N', 'C')
+        tensor = torch.tensor([[1]], names=names)
+        self.assertEqual(tensor.names, names)
+
+        names = ('N',)
+        tensor = torch.tensor([1], names=names)
+        self.assertEqual(tensor.names, names)
+
+        with self.assertRaisesRegex(RuntimeError, 'Number of names'):
+            names = ('N', 'C')
+            tensor = torch.tensor([1], names=names)
+
+    @unittest.skipIf(not TEST_NUMPY, "no numpy")
+    def test_tensor_from_numpy(self):
+        import numpy as np
+        arr = np.array([[1]])
+        names = ('N', 'C')
+        tensor = torch.tensor([[1]], names=names)
+        self.assertEqual(tensor.names, names)
+
+    def test_tensor_from_tensor(self):
+        x = torch.randn(1, 1)
+        names = ('N', 'C')
+        tensor = torch.tensor(x, names=names)
+        self.assertEqual(tensor.names, names)
+
+    def test_tensor_from_named_tensor(self):
+        x = torch.randn(1, 1, names=('N', 'D'))
+        tensor = torch.tensor(x)
+        self.assertEqual(tensor.names, ('N', 'D'))
+
+        # there's no way to distinguish between names=None and not passing in names.
+        # If the user passes in names=None they are asking for trouble.
+        x = torch.randn(1, 1, names=('N', 'D'))
+        tensor = torch.tensor(x, names=None)
+        self.assertEqual(tensor.names, ('N', 'D'))
+
+        x = torch.randn(1, 1, names=('N', 'D'))
+        with self.assertRaisesRegex(RuntimeError, "Name mismatch"):
+            tensor = torch.tensor(x, names=('N', 'C'))
 
     def test_size(self):
         t = torch.empty(2, 3, 5, names=('N', None, 'C'))
@@ -1443,7 +1495,7 @@ class TestNamedTensor(TestCase):
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):
     if attr.startswith('test_'):
-        new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
+        new_test = skipIfNamedTensorDisabled(skipIfNotTestingNamedTensor(getattr(TestNamedTensor, attr)))
         setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':
