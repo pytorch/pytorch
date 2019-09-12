@@ -318,6 +318,7 @@ import torch.testing
 import torch.backends.cuda
 import torch.backends.mkl
 import torch.backends.openmp
+import torch.backends.quantized
 import torch.utils.data
 import torch.__config__
 import torch.__future__

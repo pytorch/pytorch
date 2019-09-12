@@ -12,9 +12,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #endif
 #include <ATen/core/Variadic.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/NamedTensor.h>
-#endif
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
 #include <ATen/CPUType.h>

@@ -137,8 +137,10 @@ SET(PYTORCH_QNNPACK_INIT_SRCS
   src/average-pooling.c
   src/channel-shuffle.c
   src/clamp.c
+  src/conv-prepack.cc
   src/convolution.c
   src/deconvolution.c
+  src/fc-prepack.cc
   src/fully-connected.c
   src/global-average-pooling.c
   src/leaky-relu.c
@@ -148,6 +150,8 @@ SET(PYTORCH_QNNPACK_INIT_SRCS
   src/operator-delete.c)
 
 SET(PYTORCH_QNNPACK_EXEC_SRCS
+  src/conv-run.cc
+  src/fc-run.cc
   src/indirection.c
   src/operator-run.c)
 
@@ -242,6 +246,7 @@ ELSE()
   MESSAGE(FATAL_ERROR "Unsupported QNNPACK library type \"${PYTORCH_QNNPACK_LIBRARY_TYPE}\". Must be \"static\", \"shared\", or \"default\"")
 ENDIF()
 SET_TARGET_PROPERTIES(pytorch_qnnpack PROPERTIES
+  CXX_STANDARD 11
   C_STANDARD 99
   C_EXTENSIONS YES)
 IF(CMAKE_SYSTEM_PROCESSOR MATCHES "^armv[5-8]" OR IOS_ARCH MATCHES "^armv7")
@@ -364,7 +369,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(convolution-test PRIVATE src test)
-  TARGET_LINK_LIBRARIES(convolution-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  TARGET_LINK_LIBRARIES(convolution-test PRIVATE pytorch_qnnpack clog cpuinfo fp16 gtest gtest_main)
   ADD_TEST(convolution-test convolution-test)
 
   ADD_EXECUTABLE(deconvolution-test test/deconvolution.cc)
@@ -382,7 +387,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(fully-connected-test PRIVATE src test)
-  TARGET_LINK_LIBRARIES(fully-connected-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  TARGET_LINK_LIBRARIES(fully-connected-test PRIVATE pytorch_qnnpack clog cpuinfo fp16 gtest gtest_main)
   ADD_TEST(fully-connected-test fully-connected-test)
 
   ADD_EXECUTABLE(channel-shuffle-test test/channel-shuffle.cc)
