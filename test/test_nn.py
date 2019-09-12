@@ -3336,7 +3336,6 @@ class TestNN(NNTestCase):
         self._test_InstanceNorm_general(nn.InstanceNorm3d, input, dtype=torch.float)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_InstanceNorm3d_general_cuda(self):
         b = random.randint(3, 5)
         c = random.randint(2, 5)
@@ -4007,7 +4006,6 @@ class TestNN(NNTestCase):
         self._test_batchnorm_grad()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_batchnorm_grad_cuda(self):
         self._test_batchnorm_grad("cuda")
         if TEST_CUDNN:
@@ -4211,7 +4209,6 @@ class TestNN(NNTestCase):
         _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_gather_cpu(self):
         self._test_gather(-1)
 
@@ -4287,7 +4284,6 @@ class TestNN(NNTestCase):
                 self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_data_parallel_buffers_requiring_grad(self):
         class TestModule(nn.Module):
             def __init__(self, t):
@@ -4310,7 +4306,6 @@ class TestNN(NNTestCase):
         torch.autograd.gradcheck(fn, (m.t_rg,))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_data_parallel_rnn(self):
 
         class TestModule(torch.nn.Module):
@@ -4771,7 +4766,6 @@ class TestNN(NNTestCase):
         self.assertEqual(out, l(i))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_data_parallel_function_deletion(self):
         # this test case is originated from #16532
         def gradient_penalty(net, x):
