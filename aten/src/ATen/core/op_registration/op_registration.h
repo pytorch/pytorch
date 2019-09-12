@@ -259,7 +259,7 @@ public:
       if (legacyATenSchema_.has_value()) {
         // TODO Remove this once all ops are moved to c10.
         TORCH_INTERNAL_ASSERT(!schemaOrName_.has_value());
-        at::globalATenDispatch().registerOp<FuncType>(tensorTypeIdToBackend(dispatch_key), legacyATenSchema_->c_str(), kernel_func);
+        at::globalATenDispatch().registerOp<FuncType>(dispatch_key, legacyATenSchema_->c_str(), kernel_func);
         return std::move(*this);
       } else {
         return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(dispatch_key);
@@ -276,7 +276,7 @@ public:
       if (legacyATenSchema_.has_value()) {
         // TODO Remove this once all ops are moved to c10.
         TORCH_INTERNAL_ASSERT(!schemaOrName_.has_value());
-        at::globalATenDispatch().registerOp<FuncType>(at::Backend::Undefined, legacyATenSchema_->c_str(), kernel_func);
+        at::globalATenDispatch().registerOp<FuncType>(TensorTypeId::UndefinedTensorId, legacyATenSchema_->c_str(), kernel_func);
         return std::move(*this);
       } else {
         return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
@@ -363,7 +363,7 @@ public:
       if (legacyATenSchema_.has_value()) {
         // TODO Remove this once all ops are moved to c10.
         TORCH_INTERNAL_ASSERT(!schemaOrName_.has_value());
-        at::globalATenDispatch().registerVariableOp<FuncType>(legacyATenSchema_->c_str(), kernel);
+        at::globalATenDispatch().registerOp<FuncType>(TensorTypeId::VariableTensorId, legacyATenSchema_->c_str(), kernel);
         return std::move(*this);
       } else {
         unboxedAutogradKernel_ = reinterpret_cast<void*>(kernel);
