@@ -1868,6 +1868,7 @@ _builtin_ops = [
     (_unwrap_optional, "aten::_unwrap_optional"),
     (_wait, 'aten::wait'),
     (is_scripting, "aten::is_scripting"),
+    (OrderedDict, "aten::OrderedDict"),
     (cudnn.is_acceptable, "aten::cudnn_is_acceptable"),
     (math.ceil, "aten::ceil"),
     (math.copysign, "aten::copysign"),

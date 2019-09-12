@@ -1220,6 +1220,37 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
+         "aten::OrderedDict((t1, t2)[] inputs) -> Dict(t1, t2)(*)",
+         [](const Node* node) -> Operation {
+           TypePtr output_type = node->outputs()[0]->type();
+           TypePtr key_type =
+               static_cast<const DictType*>(output_type.get())->getKeyType();
+           TypePtr value_type =
+               static_cast<const DictType*>(output_type.get())->getValueType();
+           return [key_type, value_type](Stack& stack) {
+             auto inputs = pop(stack).toGenericListRef();
+             auto dict = c10::impl::GenericDict(key_type, value_type);
+             dict.reserve(inputs.size());
+             for (const auto& input : inputs) {
+               const auto tup = input.toTuple()->elements();
+               dict.insert(tup[0], tup[1]);
+             }
+             push(stack, dict);
+             return 0;
+           };
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::OrderedDict() -> Dict(str, Tensor)(*)",
+         [](const Node* node) -> Operation {
+           return [](Stack& stack) {
+             auto dict =
+                 c10::impl::GenericDict(StringType::get(), TensorType::get());
+             push(stack, dict);
+             return 0;
+           };
+         }),
+     Operator(
          "aten::_unwrap_optional(t(a)? optional) -> t(a)",
          [](Stack& stack) {
            auto val = pop(stack);

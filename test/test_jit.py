@@ -39,7 +39,7 @@ from test_module.future_div import div_int_future, div_float_future
 from test_module.no_future_div import div_int_nofuture, div_float_nofuture
 
 # Standard library
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
@@ -18373,6 +18373,13 @@ class TestDict(JitTestCase):
             return x.copy()
 
         self.checkScript(func, (self.dict(),))
+
+    def test_ordered_dict(self):
+        @torch.jit.script
+        def func():
+            return OrderedDict([(1, torch.tensor(3))]), OrderedDict()
+
+        print(func())
 
     def test_items(self):
         def func(x):
