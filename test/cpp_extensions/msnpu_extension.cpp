@@ -65,7 +65,7 @@ void init_msnpu_extension() {
         TensorTypeId::MSNPUTensorId)
       .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
     .op("aten::convolution_backward_overrideable(Tensor grad_output, Tensor input, Tensor weight, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)", torch::RegisterOperators::options()
-      .impl_unboxedOnlyKernel<decltype(fake_convolution), &fake_convolution_backward>(
+      .impl_unboxedOnlyKernel<decltype(fake_convolution_backward), &fake_convolution_backward>(
         "aten::convolution_backward_overrideable(Tensor grad_output, Tensor input, Tensor weight, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)",
         TensorTypeId::MSNPUTensorId)
       .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
