@@ -156,9 +156,6 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
   fi
 fi
 
-# FIXME: This is a temporary fix before docker image is updated
-conda install -y openssl=1.1.1c
-
 function pip_install() {
   # retry 3 times
   pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@"
