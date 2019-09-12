@@ -1698,7 +1698,7 @@ def gather(g, self, dim, index, sparse_grad=False):
     return g.op("ReduceSum", mul, axes_i=[dim], keepdims_i=0)
 
 
-@parse_args('v', 'is', 'b', 'i')
+@parse_args('v', 'is', 'i', 'i')
 def _std(g, input, dim, unbiased, keepdim):
     if input.isCompleteTensor():
         sqrd = g.op("Mul", input, input)
@@ -1713,10 +1713,10 @@ def _std(g, input, dim, unbiased, keepdim):
         meansqrd = g.op("Mul", mean, mean)
         var = g.op("Abs", g.op("Sub", sqrdmean, meansqrd))
         # This is to correct bias in calculating variance, by dividing it over (N - 1) instead on N
-        if unbiased:
+        if unbiased == 1:
             count = numpy.prod(redudced_dims)
-            mul = g.op("Mul", var, g.op("Constant", value_t=torch.tensor(count, dtype=torch.float)))
-            var = g.op("Div", mul, g.op("Constant", value_t=torch.tensor(count - 1, dtype=torch.float)))
+            mul = g.op("Mul", var, g.op("Constant", value_t=torch.tensor(count)))
+            var = g.op("Div", mul, g.op("Constant", value_t=torch.tensor(count - 1)))
         std = g.op("Sqrt", var)
         return std
     else:
@@ -1728,7 +1728,7 @@ def _std(g, input, dim, unbiased, keepdim):
 # torch.std(input, unbiased=True)
 # torch.std(input, dim, keepdim=False, unbiased=True)
 def std(g, input, *args):
-    if args[0].type().isSubtypeOf(ListType.ofInts()):
+    if sym_help._is_value(sym_help._maybe_get_scalar(args[0])):
         return _std(g, input, *args)
     else:
         return _std(g, input, None, args[0], None)
@@ -1823,7 +1823,6 @@ def index(g, self, index):
         #       tensor index = \sum_{i=1}^m (ind_i * \prod_{j=i+1}^m (x_j))
         # After gather, reshape and transpose back.
         adv_idx_indices = [i for i, idx in enumerate(indices) if not idx.node().mustBeNone()]
-
         if len(adv_idx_indices) == 0:
             return self
         elif len(adv_idx_indices) == 1:
