@@ -197,7 +197,7 @@ def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
         jobs_list.append({build_name: {"requires": ["setup"]}})
 
     jobs_dict[toplevel_key] = OrderedDict(
-        triggers=gen_schedule_tree(cron_schedule),
+        # triggers=gen_schedule_tree(cron_schedule),
         jobs=jobs_list,
     )
 
