@@ -6,6 +6,7 @@ namespace distributed {
 namespace rpc {
 
 std::unique_ptr<RRefContext> RRefContext::context_ = nullptr;
+thread_local std::vector<std::shared_ptr<RRef>> RRefContext::rrefArgs_ = {};
 
 void RRefContext::initInstance(std::shared_ptr<RpcAgent> agent) {
   TORCH_CHECK(!RRefContext::context_, "Can only initialize RRefContext once.");
@@ -140,6 +141,11 @@ template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
 RRefForkData RRefContext::forkTo(
     const std::shared_ptr<RRef>& rref,
     worker_id_t forkDst) {
+
+  // keep rref argments alive
+  // TODO: only do this for requests
+  rrefArgs_.push_back(rref);
+
   auto forkRequest = rref->fork();
   if (rref->owner() != forkDst) {
     // if fork destination if not owner, the forked UserRRef needs to be tracked
@@ -255,6 +261,25 @@ void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
     owners_.erase(rrefId);
     forks_.erase(rrefId);
   }
+}
+
+void RRefContext::addRRefArgs(int64_t messageId) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  TORCH_INTERNAL_ASSERT(
+      pendingRRefArgs_.find(messageId) == pendingRRefArgs_.end(),
+      "Cannot set RRef args on the same message twice.");
+
+  pendingRRefArgs_[messageId] = std::move(rrefArgs_);
+  rrefArgs_.clear();
+}
+
+void RRefContext::delRRefArgs(int64_t messageId) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto iter = pendingRRefArgs_.find(messageId);
+  TORCH_INTERNAL_ASSERT(iter != pendingRRefArgs_.end(),
+      "Attempt to delete RRef args for non-exist message.");
+
+  pendingRRefArgs_.erase(iter);
 }
 
 } // namespace rpc
