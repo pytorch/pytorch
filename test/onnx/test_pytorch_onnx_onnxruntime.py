@@ -829,6 +829,9 @@ class TestONNXRuntime(unittest.TestCase):
         model = Log1p()
         self.run_test(model, x)
 
+    # TODO: remove the skip tag once ORT implementation is in place
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedOpsetVersion([11])
     def test_round(self):
         class Round(torch.nn.Module):
             def forward(self, x):

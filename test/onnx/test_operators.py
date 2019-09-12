@@ -734,7 +734,7 @@ class TestOperators(TestCase):
 
     def test_round(self):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 2.5000], requires_grad=True)
-        self.assertONNX(lambda x: torch.meshgrid(x), x)
+        self.assertONNX(lambda x: torch.round(x), x, opset_version=11)
 
 
 if __name__ == '__main__':
