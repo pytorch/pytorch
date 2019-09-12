@@ -1509,7 +1509,6 @@ workflows:
   build:
     jobs:
       - setup
-      - setup
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py2_7_9_build
           requires:
