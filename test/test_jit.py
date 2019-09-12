@@ -1594,8 +1594,9 @@ graph(%Ra, %Rb):
 
         x = torch.randn(3, 4)
         ge = torch.jit.trace(full_with_shape_like, example_inputs=x)
-        y = torch.randn(1, 1, 1)
+        y = torch.randn(2, 7)
         self.assertEqual(ge(y).shape, y.shape)
+        self.assertEqual(ge(x).shape, x.shape)
 
     def test_trace_casts(self):
         casts = [
