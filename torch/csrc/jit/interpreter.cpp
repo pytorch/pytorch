@@ -1007,32 +1007,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
             auto actual = t.defined() ? TensorType::create(t)
                                       : TensorType::get()->withAutogradZero();
-            std::cout << "before auto actual = TensorType::create(t)\n";
             const TypePtr &expected = af.types[inst.X];
-            bool comp = *expected == *actual;
-            if (!comp) {
-              auto texp = expected->cast<TensorType>();
-              auto tact = actual->cast<TensorType>();
-
-              // std::cout << "expected = " << *texp << " autograd = " <<
-              // texp->undefined().has_value() << " requires_grad = " <<
-              // *texp->requiresGrad() << std::endl;
-              // std::cout << "actual = " << *tact << " autograd = " <<
-              // tact->undefined().has_value() << " requires_grad = " <<
-              // *tact->requiresGrad() << std::endl;
-              // return scalar_type_ == rt->scalarType() && sizes() ==
-              // rt->sizes() &&
-              // strides() == rt->strides() && device() == rt->device() &&
-              // requiresGrad() == rt->requiresGrad() && undefined() ==
-              // rt->undefined();
-              std::cout << "sizes = " << (texp->sizes() == tact->sizes())
-                        << std::endl;
-              std::cout << "strides = " << (texp->strides() == tact->strides())
-                        << std::endl;
-              std::cout << "triggered\n";
-            }
             push(stack, *expected == *actual);
-
             ++af.pc;
           } break;
           case TAIL_CALL: {

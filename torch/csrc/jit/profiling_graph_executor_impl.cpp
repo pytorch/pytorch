@@ -44,8 +44,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
     RemoveExpands(copy);
     CanonicalizeOps(copy);
     EliminateDeadCode(copy);
-    std::cout << "Profiling Graph:\n";
-    copy->dump();
     profiling_plan_ = ExecutionPlan(copy);
     // fall-through
   }
@@ -97,8 +95,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   EliminateDeadCode(copy);
   // cache
   optimized_plan_ = ExecutionPlan(copy);
-  std::cout << "Optimized Graph:\n";
-  copy->dump();
   return *optimized_plan_;
 }
 

@@ -61,11 +61,6 @@ void specializeAutogradZero(Graph &g) {
             // where we do not know if a value is Nonzero since at the top level
             // a gradient graph is composed of Linear nodes and AutogradAdds
             // and LinearNodes only appear in these graphs
-
-            if (state[input] == State::Unknown) {
-              std::cout << "State::Unknown:\n";
-              g.dump();
-            }
             AT_ASSERT(state[input] != State::Unknown);
           }
           // hoist the nodes in the GradOf body to be before the linear block
