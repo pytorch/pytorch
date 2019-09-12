@@ -13327,7 +13327,7 @@ def add_neg_dim_tests():
         setattr(_TestTorchMixin, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
 
 # Device-agnostic tests. Instantiated below and not run directly.
-class _TestTorchDeviceType(object):
+class TestTorchDeviceType(TestCase):
     def test_diagonal(self, device):
         x = torch.randn((100, 100), device=device)
         result = torch.diagonal(x)
@@ -13445,7 +13445,7 @@ class _TestTorchDeviceType(object):
         self.assertEqual(matrices_inverse, expected_inv.to(device))
 
 add_neg_dim_tests()
-instantiate_device_type_tests(_TestTorchDeviceType, globals())
+instantiate_device_type_tests(TestTorchDeviceType, globals())
 
 class TestTorch(TestCase, _TestTorchMixin):
     pass
