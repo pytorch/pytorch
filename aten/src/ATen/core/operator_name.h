@@ -18,6 +18,14 @@ inline bool operator!=(const OperatorName& lhs, const OperatorName& rhs) {
   return !operator==(lhs, rhs);
 }
 
+inline std::string toString(const OperatorName& opName) {
+  std::string result = opName.name;
+  if (opName.overload_name.size() != 0) {
+    result += "." + opName.overload_name;
+  }
+  return result;
+}
+
 }
 
 namespace std {
