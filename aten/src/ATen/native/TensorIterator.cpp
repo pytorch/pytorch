@@ -658,7 +658,7 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
     const Tensor& b, bool check_mem_overlap) {
   auto iter = TensorIterator();
   iter.set_check_mem_overlap(check_mem_overlap);
-  iter.add_output(out, a.device(), ScalarType::Bool);
+  iter.add_output(out);
   iter.add_input(a);
   iter.add_input(b);
   iter.allow_cpu_scalars_ = true;

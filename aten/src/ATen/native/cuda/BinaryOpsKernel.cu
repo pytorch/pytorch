@@ -77,20 +77,15 @@ void logical_xor_kernel_cuda(TensorIterator& iter) {
 }
 
 void lt_kernel_cuda(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
-    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.input_dtype(0), "lt_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
-        return a < b;
-      });
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "lt_cuda_result_", [&] {
+    using return_t = scalar_t;
+    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.input_dtype(), "lt_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> return_t {
+         return a < b;
+       });
     });
-  } else {
-    // if return dtype is other then Bool(inplace method)
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "lt_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return a < b;
-      });
-    });
-  }
+  });
 }
 
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);

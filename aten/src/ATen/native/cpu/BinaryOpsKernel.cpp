@@ -104,22 +104,15 @@ void logical_xor_kernel(TensorIterator& iter) {
 }
 
 void lt_kernel(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.input_dtype(0), "lt_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "lt_cpu_result_", [&] {
+    using return_t = scalar_t;
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.input_dtype(), "lt_cpu", [&]() {
       cpu_kernel(iter,
-       [=](scalar_t a, scalar_t b) -> bool {
+       [=](scalar_t a, scalar_t b) -> return_t {
          return a < b;
        });
     });
-  } else {
-    // if return dtype is other then Bool(inplace method)
-    AT_DISPATCH_ALL_TYPES(iter.dtype(), "lt_cpu", [&]() {
-      cpu_kernel(iter,
-       [=](scalar_t a, scalar_t b) -> scalar_t {
-         return a < b;
-       });
-    });
-  }
+  });
 }
 
 } // anonymous namespace
