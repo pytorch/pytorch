@@ -170,7 +170,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def("_jit_pass_fold_quantize",
            [](script::Module& module, const std::string& method_name) {
-             FoldQuantize(module, method_name);
+             FoldQuantizeCallIntoBuffer(module, method_name);
            })
       .def(
           "_jit_pass_quantlint",
