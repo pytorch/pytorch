@@ -104,13 +104,6 @@ void TCPStoreDaemon::run() {
         continue;
       }
 
-      if (fds[fdIdx].revents ^ POLLIN) {
-        throw std::system_error(
-            ECONNABORTED,
-            std::system_category(),
-            "Unexpected poll revent: " + std::to_string(fds[fdIdx].revents) +
-                " on socket: " + std::to_string(fds[fdIdx].fd));
-      }
       // Now query the socket that has the event
       try {
         query(fds[fdIdx].fd);
