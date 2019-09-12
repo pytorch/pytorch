@@ -140,7 +140,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     ${static_dispatch_method_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(type_set(), is_variable())(${method_actuals});
+    return table->getOp<${return_type} (${formals_types})>(type_set())(${method_actuals});
 #endif
 }
 """)
@@ -150,12 +150,8 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     ${static_dispatch_method_body}
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
-    if (is_variable()) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<${formals_types_with_return}>(op, ${method_actuals});
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-            .callUnboxed<${formals_types_with_return}>(${method_actuals});
-    }
+    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+        .callUnboxed<${formals_types_with_return}>(${method_actuals});
 #endif
 }
 """)
@@ -174,7 +170,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     ${static_dispatch_function_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set}, ${inferred_is_variable})(${native_actuals});
+    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${native_actuals});
 #endif
 }
 """)
@@ -186,13 +182,8 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${name}", "${overload_name}"}).value();
-    if (${inferred_is_variable}) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<${formals_types_with_return}>(
-            op ${native_actuals_with_comma_prefix});
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(${inferred_type_set}))
-            .callUnboxed<${formals_types_with_return}>(${native_actuals});
-    }
+    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(${inferred_type_set}))
+        .callUnboxed<${formals_types_with_return}>(${native_actuals});
 #endif
 }
 """)
@@ -228,7 +219,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set}, ${inferred_is_variable})(${native_actuals});
+    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${native_actuals});
 #endif
 }
 """)
@@ -597,7 +588,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals_types': List[str],
     'formals_types_with_return': List[str],
     'inferred_type_set': str,
-    'inferred_is_variable': str,
     'inplace': bool,
     'matches_jit_signature': bool,
     # This controls whether or not we generate the interface in Type or
@@ -1152,6 +1142,18 @@ def create_generic(top_env, declarations):
             # type: (Any) -> FunctionCode
             if isinstance(type_method_dispatch, dict):
                 static_dispatch_function_switches = []
+                # NB: As this code is currently written, there will NEVER be
+                # a backend generated for variable dispatch.  There is nothing
+                # stopping us from actually implementing this, however, if you
+                # really wanted variable on mobile, there's nothing stopping
+                # you from implementing this (however, you would have an
+                # annoying phase problem, since code generation for variable
+                # happens in tools/ which happens later than here.)
+                #
+                # If you pass in a variable to the dispatch, and variable is
+                # enabled, this switch will fail.  This is intentional: you
+                # probably need to disable variable globally in the mobile
+                # calling code.
                 for backend in static_dispatch_backends:
                     if backend in type_method_dispatch:
                         static_dispatch_function_switches.append(STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT.substitute(
@@ -1161,10 +1163,6 @@ def create_generic(top_env, declarations):
                             native_arguments=option['method_actuals']))
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
-                    # TODO: When Variable gets added, this needs to get adjusted
-                    # to avoid picking up the Variable bit.  The correct way
-                    # to encode this is probably to just have Variable in the
-                    # disabled set.
                     type_set='type_set()',
                     static_dispatch_function_switches=static_dispatch_function_switches)
             else:
@@ -1188,15 +1186,12 @@ def create_generic(top_env, declarations):
             # type: (Any, Optional[str], Any) -> FunctionCode
             if dispatch_tensor:
                 option['inferred_type_set'] = 'at::detail::infer_tensor_type_set({})'.format(dispatch_tensor)
-                option['inferred_is_variable'] = 'at::detail::infer_is_variable({})'.format(dispatch_tensor)
             elif dispatch_options:
                 option['inferred_type_set'] = '{}.type_set()'.format(dispatch_options['name'])
-                option['inferred_is_variable'] = '{}.is_variable()'.format(dispatch_options['name'])
             else:
                 # doesn't depend on a specific backend, use the empty set
                 # TODO: Does this actually work?
                 option['inferred_type_set'] = 'TensorTypeSet()'
-                option['inferred_is_variable'] = 'false'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
 

@@ -378,8 +378,9 @@ struct C10_API TensorOptions {
 
   // Resolves the tensor type set specified by the current construction axes.
   TensorTypeSet type_set() const noexcept {
-    // TODO: This should also contain variable eventually
-    return TensorTypeSet(computeTensorTypeId());
+    auto r = TensorTypeSet(computeTensorTypeId());
+    if (is_variable()) r = r.add(TensorTypeId::VariableTensorId);
+    return r;
   }
 
   inline TensorTypeId computeTensorTypeId() const {
