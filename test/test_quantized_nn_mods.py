@@ -6,13 +6,14 @@ import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules import Conv2d
 from torch.nn._intrinsic.quantized import ConvReLU2d
 import torch.quantization
-from common_utils import run_tests, tempfile
+from common_utils import run_tests
 from common_quantization import QuantizationTestCase, prepare_dynamic
 from common_quantized import _calculate_dynamic_qparams
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis_utils import no_deadline
 import unittest
+import io
 
 '''
 Note that tests in this file are just API test, to make sure we wrapped the
@@ -130,10 +131,10 @@ class DynamicModuleAPITest(QuantizationTestCase):
         self.assertEqual(model_dict['weight'], W_q)
         if use_bias:
             self.assertEqual(model_dict['bias'], B)
-        with tempfile.TemporaryFile() as f:
-            torch.save(model_dict, f)
-            f.seek(0)
-            loaded_dict = torch.load(f)
+        b = io.BytesIO()
+        torch.save(model_dict, b)
+        b.seek(0)
+        loaded_dict = torch.load(b)
         for key in model_dict:
             self.assertEqual(model_dict[key], loaded_dict[key])
         loaded_qlinear = nnqd.Linear(in_features, out_features)
@@ -156,10 +157,10 @@ class DynamicModuleAPITest(QuantizationTestCase):
         self.assertEqual(Z_dq, Z_dq2)
 
         # test serialization of module directly
-        with tempfile.TemporaryFile() as f:
-            torch.save(qlinear, f)
-            f.seek(0)
-            loaded = torch.load(f)
+        b = io.BytesIO()
+        torch.save(qlinear, b)
+        b.seek(0)
+        loaded = torch.load(b)
         # This check is disabled pending an issue in PyTorch serialization:
         # https://github.com/pytorch/pytorch/issues/24045
         # self.assertEqual(qlinear.weight(), loaded.weight())
@@ -256,10 +257,10 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(model_dict['weight'], W_q)
         if use_bias:
             self.assertEqual(model_dict['bias'], B_q)
-        with tempfile.TemporaryFile() as f:
-            torch.save(model_dict, f)
-            f.seek(0)
-            loaded_dict = torch.load(f)
+        b = io.BytesIO()
+        torch.save(model_dict, b)
+        b.seek(0)
+        loaded_dict = torch.load(b)
         for key in model_dict:
             self.assertEqual(model_dict[key], loaded_dict[key])
         if use_fused:
@@ -286,10 +287,10 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(Z_q, Z_q2)
 
         # test serialization of module directly
-        with tempfile.TemporaryFile() as f:
-            torch.save(qlinear, f)
-            f.seek(0)
-            loaded = torch.load(f)
+        b = io.BytesIO()
+        torch.save(qlinear, b)
+        b.seek(0)
+        loaded = torch.load(b)
         # This check is disabled pending an issue in PyTorch serialization:
         # https://github.com/pytorch/pytorch/issues/24045
         # self.assertEqual(qlinear.weight(), loaded.weight())
@@ -425,10 +426,10 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(model_dict['weight'], qw)
         if use_bias:
             self.assertEqual(model_dict['bias'], qb)
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save(model_dict, f)
-            f.seek(0)
-            loaded_dict = torch.load(f)
+        b = io.BytesIO()
+        torch.save(model_dict, b)
+        b.seek(0)
+        loaded_dict = torch.load(b)
         for key in model_dict:
             self.assertEqual(loaded_dict[key], model_dict[key])
         if use_fused:
@@ -467,10 +468,10 @@ class ModuleAPITest(QuantizationTestCase):
         loaded_result = loaded_conv_under_test(qX)
         self.assertEqual(loaded_result, result_reference)
 
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save(conv_under_test, f)
-            f.seek(0)
-            loaded_conv = torch.load(f)
+        b = io.BytesIO()
+        torch.save(conv_under_test, b)
+        b.seek(0)
+        loaded_conv = torch.load(b)
 
         self.assertEqual(conv_under_test.bias(), loaded_conv.bias())
         self.assertEqual(conv_under_test.scale, loaded_conv.scale)
