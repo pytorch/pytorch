@@ -83,7 +83,8 @@ inline Tensor & Tensor::names_(c10::optional<DimnameList> names) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, c10::optional<DimnameList>>(op, const_cast<Tensor&>(*this), names);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, c10::optional<DimnameList>>(const_cast<Tensor&>(*this), names);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, c10::optional<DimnameList>>(const_cast<Tensor&>(*this), names);
     }
 #endif
 }
@@ -116,7 +117,8 @@ inline Tensor Tensor::abs() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -142,7 +144,8 @@ inline Tensor Tensor::acos() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -177,7 +180,8 @@ inline Tensor Tensor::add(const Tensor & other, Scalar alpha) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other, alpha);
     }
 #endif
 }
@@ -198,7 +202,8 @@ inline Tensor & Tensor::add_(const Tensor & other, Scalar alpha) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other, alpha);
     }
 #endif
 }
@@ -210,7 +215,8 @@ inline Tensor Tensor::add(Scalar other, Scalar alpha) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar, Scalar>(op, const_cast<Tensor&>(*this), other, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), other, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), other, alpha);
     }
 #endif
 }
@@ -222,7 +228,8 @@ inline Tensor & Tensor::add_(Scalar other, Scalar alpha) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar, Scalar>(op, const_cast<Tensor&>(*this), other, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), other, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), other, alpha);
     }
 #endif
 }
@@ -240,7 +247,8 @@ inline Tensor Tensor::addmv(const Tensor & mat, const Tensor & vec, Scalar beta,
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(op, const_cast<Tensor&>(*this), mat, vec, beta, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), mat, vec, beta, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), mat, vec, beta, alpha);
     }
 #endif
 }
@@ -258,7 +266,8 @@ inline Tensor & Tensor::addmv_(const Tensor & mat, const Tensor & vec, Scalar be
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(op, const_cast<Tensor&>(*this), mat, vec, beta, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), mat, vec, beta, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), mat, vec, beta, alpha);
     }
 #endif
 }
@@ -270,7 +279,8 @@ inline Tensor Tensor::addr(const Tensor & vec1, const Tensor & vec2, Scalar beta
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(op, const_cast<Tensor&>(*this), vec1, vec2, beta, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), vec1, vec2, beta, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), vec1, vec2, beta, alpha);
     }
 #endif
 }
@@ -282,7 +292,8 @@ inline Tensor & Tensor::addr_(const Tensor & vec1, const Tensor & vec2, Scalar b
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(op, const_cast<Tensor&>(*this), vec1, vec2, beta, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), vec1, vec2, beta, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), vec1, vec2, beta, alpha);
     }
 #endif
 }
@@ -294,7 +305,8 @@ inline Tensor Tensor::all(int64_t dim, bool keepdim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, bool>(op, const_cast<Tensor&>(*this), dim, keepdim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, keepdim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, keepdim);
     }
 #endif
 }
@@ -306,7 +318,8 @@ inline bool Tensor::allclose(const Tensor & other, double rtol, double atol, boo
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<bool, const Tensor &, const Tensor &, double, double, bool>(op, const_cast<Tensor&>(*this), other, rtol, atol, equal_nan);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<bool, const Tensor &, const Tensor &, double, double, bool>(const_cast<Tensor&>(*this), other, rtol, atol, equal_nan);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<bool, const Tensor &, const Tensor &, double, double, bool>(const_cast<Tensor&>(*this), other, rtol, atol, equal_nan);
     }
 #endif
 }
@@ -318,7 +331,8 @@ inline Tensor Tensor::any(int64_t dim, bool keepdim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, bool>(op, const_cast<Tensor&>(*this), dim, keepdim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, keepdim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, keepdim);
     }
 #endif
 }
@@ -330,7 +344,8 @@ inline Tensor Tensor::argmax(c10::optional<int64_t> dim, bool keepdim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, c10::optional<int64_t>, bool>(op, const_cast<Tensor&>(*this), dim, keepdim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, c10::optional<int64_t>, bool>(const_cast<Tensor&>(*this), dim, keepdim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, c10::optional<int64_t>, bool>(const_cast<Tensor&>(*this), dim, keepdim);
     }
 #endif
 }
@@ -342,7 +357,8 @@ inline Tensor Tensor::argmin(c10::optional<int64_t> dim, bool keepdim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, c10::optional<int64_t>, bool>(op, const_cast<Tensor&>(*this), dim, keepdim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, c10::optional<int64_t>, bool>(const_cast<Tensor&>(*this), dim, keepdim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, c10::optional<int64_t>, bool>(const_cast<Tensor&>(*this), dim, keepdim);
     }
 #endif
 }
@@ -363,7 +379,8 @@ inline Tensor Tensor::as_strided(IntArrayRef size, IntArrayRef stride, c10::opti
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, IntArrayRef, IntArrayRef, c10::optional<int64_t>>(op, const_cast<Tensor&>(*this), size, stride, storage_offset);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, IntArrayRef, IntArrayRef, c10::optional<int64_t>>(const_cast<Tensor&>(*this), size, stride, storage_offset);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, IntArrayRef, IntArrayRef, c10::optional<int64_t>>(const_cast<Tensor&>(*this), size, stride, storage_offset);
     }
 #endif
 }
@@ -375,7 +392,8 @@ inline Tensor & Tensor::as_strided_(IntArrayRef size, IntArrayRef stride, c10::o
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, IntArrayRef, IntArrayRef, c10::optional<int64_t>>(op, const_cast<Tensor&>(*this), size, stride, storage_offset);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, IntArrayRef, IntArrayRef, c10::optional<int64_t>>(const_cast<Tensor&>(*this), size, stride, storage_offset);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, IntArrayRef, IntArrayRef, c10::optional<int64_t>>(const_cast<Tensor&>(*this), size, stride, storage_offset);
     }
 #endif
 }
@@ -387,7 +405,8 @@ inline Tensor Tensor::asin() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -413,7 +432,8 @@ inline Tensor Tensor::atan() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -445,7 +465,8 @@ inline Tensor Tensor::baddbmm(const Tensor & batch1, const Tensor & batch2, Scal
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(op, const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
     }
 #endif
 }
@@ -463,7 +484,8 @@ inline Tensor & Tensor::baddbmm_(const Tensor & batch1, const Tensor & batch2, S
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(op, const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
     }
 #endif
 }
@@ -533,7 +555,8 @@ inline Tensor Tensor::bitwise_not() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -591,7 +614,8 @@ inline Tensor Tensor::bmm(const Tensor & mat2) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), mat2);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mat2);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mat2);
     }
 #endif
 }
@@ -603,7 +627,8 @@ inline Tensor Tensor::ceil() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -623,7 +648,8 @@ inline std::vector<Tensor> Tensor::chunk(int64_t chunks, int64_t dim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::vector<Tensor>, const Tensor &, int64_t, int64_t>(op, const_cast<Tensor&>(*this), chunks, dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::vector<Tensor>, const Tensor &, int64_t, int64_t>(const_cast<Tensor&>(*this), chunks, dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::vector<Tensor>, const Tensor &, int64_t, int64_t>(const_cast<Tensor&>(*this), chunks, dim);
     }
 #endif
 }
@@ -635,7 +661,8 @@ inline Tensor Tensor::clamp(c10::optional<Scalar> min, c10::optional<Scalar> max
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, c10::optional<Scalar>, c10::optional<Scalar>>(op, const_cast<Tensor&>(*this), min, max);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, c10::optional<Scalar>, c10::optional<Scalar>>(const_cast<Tensor&>(*this), min, max);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, c10::optional<Scalar>, c10::optional<Scalar>>(const_cast<Tensor&>(*this), min, max);
     }
 #endif
 }
@@ -653,7 +680,8 @@ inline Tensor & Tensor::clamp_(c10::optional<Scalar> min, c10::optional<Scalar> 
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, c10::optional<Scalar>, c10::optional<Scalar>>(op, const_cast<Tensor&>(*this), min, max);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, c10::optional<Scalar>, c10::optional<Scalar>>(const_cast<Tensor&>(*this), min, max);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, c10::optional<Scalar>, c10::optional<Scalar>>(const_cast<Tensor&>(*this), min, max);
     }
 #endif
 }
@@ -665,7 +693,8 @@ inline Tensor Tensor::clamp_max(Scalar max) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), max);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), max);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), max);
     }
 #endif
 }
@@ -683,7 +712,8 @@ inline Tensor & Tensor::clamp_max_(Scalar max) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), max);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), max);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), max);
     }
 #endif
 }
@@ -695,7 +725,8 @@ inline Tensor Tensor::clamp_min(Scalar min) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), min);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), min);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), min);
     }
 #endif
 }
@@ -713,7 +744,8 @@ inline Tensor & Tensor::clamp_min_(Scalar min) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), min);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), min);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), min);
     }
 #endif
 }
@@ -733,7 +765,8 @@ inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, bool>(op, const_cast<Tensor&>(*this), src, non_blocking);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, bool>(const_cast<Tensor&>(*this), src, non_blocking);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, bool>(const_cast<Tensor&>(*this), src, non_blocking);
     }
 #endif
 }
@@ -745,7 +778,8 @@ inline Tensor Tensor::cos() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -771,7 +805,8 @@ inline Tensor Tensor::cosh() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -813,7 +848,8 @@ inline Tensor Tensor::det() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -825,7 +861,8 @@ inline Tensor Tensor::diag_embed(int64_t offset, int64_t dim1, int64_t dim2) con
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, int64_t, int64_t>(op, const_cast<Tensor&>(*this), offset, dim1, dim2);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, int64_t, int64_t>(const_cast<Tensor&>(*this), offset, dim1, dim2);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, int64_t, int64_t>(const_cast<Tensor&>(*this), offset, dim1, dim2);
     }
 #endif
 }
@@ -837,7 +874,8 @@ inline Tensor Tensor::diagflat(int64_t offset) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t>(op, const_cast<Tensor&>(*this), offset);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), offset);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), offset);
     }
 #endif
 }
@@ -849,7 +887,8 @@ inline Tensor Tensor::diagonal(int64_t offset, int64_t dim1, int64_t dim2) const
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, int64_t, int64_t>(op, const_cast<Tensor&>(*this), offset, dim1, dim2);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, int64_t, int64_t>(const_cast<Tensor&>(*this), offset, dim1, dim2);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, int64_t, int64_t>(const_cast<Tensor&>(*this), offset, dim1, dim2);
     }
 #endif
 }
@@ -861,7 +900,8 @@ inline Tensor & Tensor::fill_diagonal_(Scalar fill_value, bool wrap) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar, bool>(op, const_cast<Tensor&>(*this), fill_value, wrap);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar, bool>(const_cast<Tensor&>(*this), fill_value, wrap);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar, bool>(const_cast<Tensor&>(*this), fill_value, wrap);
     }
 #endif
 }
@@ -873,7 +913,8 @@ inline Tensor Tensor::div(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -885,7 +926,8 @@ inline Tensor & Tensor::div_(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -897,7 +939,8 @@ inline Tensor Tensor::div(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -909,7 +952,8 @@ inline Tensor & Tensor::div_(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -927,7 +971,8 @@ inline Tensor Tensor::dot(const Tensor & tensor) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), tensor);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), tensor);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), tensor);
     }
 #endif
 }
@@ -961,7 +1006,8 @@ inline Tensor & Tensor::resize_(IntArrayRef size) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, IntArrayRef>(op, const_cast<Tensor&>(*this), size);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, IntArrayRef>(const_cast<Tensor&>(*this), size);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, IntArrayRef>(const_cast<Tensor&>(*this), size);
     }
 #endif
 }
@@ -973,7 +1019,8 @@ inline Tensor Tensor::erf() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -999,7 +1046,8 @@ inline Tensor Tensor::erfc() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1025,7 +1073,8 @@ inline Tensor Tensor::exp() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1051,7 +1100,8 @@ inline Tensor Tensor::expm1() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1077,7 +1127,8 @@ inline Tensor Tensor::expand(IntArrayRef size, bool implicit) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, IntArrayRef, bool>(op, const_cast<Tensor&>(*this), size, implicit);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, IntArrayRef, bool>(const_cast<Tensor&>(*this), size, implicit);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, IntArrayRef, bool>(const_cast<Tensor&>(*this), size, implicit);
     }
 #endif
 }
@@ -1089,7 +1140,8 @@ inline Tensor Tensor::expand_as(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -1101,7 +1153,8 @@ inline Tensor Tensor::flatten(int64_t start_dim, int64_t end_dim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, int64_t>(op, const_cast<Tensor&>(*this), start_dim, end_dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, int64_t>(const_cast<Tensor&>(*this), start_dim, end_dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, int64_t>(const_cast<Tensor&>(*this), start_dim, end_dim);
     }
 #endif
 }
@@ -1143,7 +1196,8 @@ inline Tensor & Tensor::fill_(Scalar value) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), value);
     }
 #endif
 }
@@ -1155,7 +1209,8 @@ inline Tensor & Tensor::fill_(const Tensor & value) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), value);
     }
 #endif
 }
@@ -1167,7 +1222,8 @@ inline Tensor Tensor::floor() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1193,7 +1249,8 @@ inline Tensor Tensor::frac() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1225,7 +1282,8 @@ inline Tensor Tensor::ger(const Tensor & vec2) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), vec2);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), vec2);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), vec2);
     }
 #endif
 }
@@ -1237,7 +1295,8 @@ inline Tensor Tensor::fft(int64_t signal_ndim, bool normalized) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, bool>(op, const_cast<Tensor&>(*this), signal_ndim, normalized);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), signal_ndim, normalized);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), signal_ndim, normalized);
     }
 #endif
 }
@@ -1249,7 +1308,8 @@ inline Tensor Tensor::ifft(int64_t signal_ndim, bool normalized) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, bool>(op, const_cast<Tensor&>(*this), signal_ndim, normalized);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), signal_ndim, normalized);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), signal_ndim, normalized);
     }
 #endif
 }
@@ -1261,7 +1321,8 @@ inline Tensor Tensor::rfft(int64_t signal_ndim, bool normalized, bool onesided) 
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, bool, bool>(op, const_cast<Tensor&>(*this), signal_ndim, normalized, onesided);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, bool, bool>(const_cast<Tensor&>(*this), signal_ndim, normalized, onesided);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, bool, bool>(const_cast<Tensor&>(*this), signal_ndim, normalized, onesided);
     }
 #endif
 }
@@ -1273,7 +1334,8 @@ inline Tensor Tensor::irfft(int64_t signal_ndim, bool normalized, bool onesided,
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, bool, bool, IntArrayRef>(op, const_cast<Tensor&>(*this), signal_ndim, normalized, onesided, signal_sizes);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, bool, bool, IntArrayRef>(const_cast<Tensor&>(*this), signal_ndim, normalized, onesided, signal_sizes);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, bool, bool, IntArrayRef>(const_cast<Tensor&>(*this), signal_ndim, normalized, onesided, signal_sizes);
     }
 #endif
 }
@@ -1293,7 +1355,8 @@ inline Tensor & Tensor::index_copy_(int64_t dim, const Tensor & index, const Ten
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), dim, index, source);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, source);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, source);
     }
 #endif
 }
@@ -1305,7 +1368,8 @@ inline Tensor Tensor::index_copy(int64_t dim, const Tensor & index, const Tensor
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), dim, index, source);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, source);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, source);
     }
 #endif
 }
@@ -1333,7 +1397,8 @@ inline Tensor Tensor::inverse() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1345,7 +1410,8 @@ inline Tensor Tensor::isclose(const Tensor & other, double rtol, double atol, bo
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, double, double, bool>(op, const_cast<Tensor&>(*this), other, rtol, atol, equal_nan);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, double, double, bool>(const_cast<Tensor&>(*this), other, rtol, atol, equal_nan);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, double, double, bool>(const_cast<Tensor&>(*this), other, rtol, atol, equal_nan);
     }
 #endif
 }
@@ -1357,7 +1423,8 @@ inline bool Tensor::is_distributed() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<bool, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1369,7 +1436,8 @@ inline bool Tensor::is_floating_point() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<bool, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1381,7 +1449,8 @@ inline bool Tensor::is_complex() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<bool, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1393,7 +1462,8 @@ inline bool Tensor::is_nonzero() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<bool, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1405,7 +1475,8 @@ inline bool Tensor::is_same_size(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<bool, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<bool, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<bool, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -1417,7 +1488,8 @@ inline bool Tensor::is_signed() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<bool, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1429,7 +1501,8 @@ inline std::tuple<Tensor,Tensor> Tensor::kthvalue(int64_t k, int64_t dim, bool k
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool>(op, const_cast<Tensor&>(*this), k, dim, keepdim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool>(const_cast<Tensor&>(*this), k, dim, keepdim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool>(const_cast<Tensor&>(*this), k, dim, keepdim);
     }
 #endif
 }
@@ -1441,7 +1514,8 @@ inline Tensor Tensor::log() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1467,7 +1541,8 @@ inline Tensor Tensor::log10() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1493,7 +1568,8 @@ inline Tensor Tensor::log1p() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1522,7 +1598,8 @@ inline Tensor Tensor::log2() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1548,7 +1625,8 @@ inline Tensor Tensor::logdet() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1596,7 +1674,8 @@ inline Tensor Tensor::matmul(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -1608,7 +1687,8 @@ inline Tensor Tensor::matrix_power(int64_t n) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t>(op, const_cast<Tensor&>(*this), n);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), n);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), n);
     }
 #endif
 }
@@ -1620,7 +1700,8 @@ inline std::tuple<Tensor,Tensor> Tensor::max(int64_t dim, bool keepdim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(op, const_cast<Tensor&>(*this), dim, keepdim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, keepdim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, keepdim);
     }
 #endif
 }
@@ -1686,7 +1767,8 @@ inline std::tuple<Tensor,Tensor> Tensor::median(int64_t dim, bool keepdim) const
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(op, const_cast<Tensor&>(*this), dim, keepdim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, keepdim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, keepdim);
     }
 #endif
 }
@@ -1708,7 +1790,8 @@ inline std::tuple<Tensor,Tensor> Tensor::min(int64_t dim, bool keepdim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(op, const_cast<Tensor&>(*this), dim, keepdim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, keepdim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, keepdim);
     }
 #endif
 }
@@ -1757,7 +1840,8 @@ inline Tensor Tensor::mm(const Tensor & mat2) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), mat2);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mat2);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mat2);
     }
 #endif
 }
@@ -1769,7 +1853,8 @@ inline std::tuple<Tensor,Tensor> Tensor::mode(int64_t dim, bool keepdim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(op, const_cast<Tensor&>(*this), dim, keepdim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, keepdim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, keepdim);
     }
 #endif
 }
@@ -1790,7 +1875,8 @@ inline Tensor Tensor::mul(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -1811,7 +1897,8 @@ inline Tensor & Tensor::mul_(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -1823,7 +1910,8 @@ inline Tensor Tensor::mul(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -1835,7 +1923,8 @@ inline Tensor & Tensor::mul_(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -1853,7 +1942,8 @@ inline Tensor Tensor::mv(const Tensor & vec) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), vec);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), vec);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), vec);
     }
 #endif
 }
@@ -1865,7 +1955,8 @@ inline Tensor Tensor::mvlgamma(int64_t p) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t>(op, const_cast<Tensor&>(*this), p);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), p);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), p);
     }
 #endif
 }
@@ -1877,7 +1968,8 @@ inline Tensor & Tensor::mvlgamma_(int64_t p) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, int64_t>(op, const_cast<Tensor&>(*this), p);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, int64_t>(const_cast<Tensor&>(*this), p);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, int64_t>(const_cast<Tensor&>(*this), p);
     }
 #endif
 }
@@ -1898,7 +1990,8 @@ inline Tensor Tensor::narrow_copy(int64_t dim, int64_t start, int64_t length) co
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, int64_t, int64_t>(op, const_cast<Tensor&>(*this), dim, start, length);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, int64_t, int64_t>(const_cast<Tensor&>(*this), dim, start, length);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, int64_t, int64_t>(const_cast<Tensor&>(*this), dim, start, length);
     }
 #endif
 }
@@ -1910,7 +2003,8 @@ inline Tensor Tensor::narrow(int64_t dim, int64_t start, int64_t length) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, int64_t, int64_t>(op, const_cast<Tensor&>(*this), dim, start, length);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, int64_t, int64_t>(const_cast<Tensor&>(*this), dim, start, length);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, int64_t, int64_t>(const_cast<Tensor&>(*this), dim, start, length);
     }
 #endif
 }
@@ -1922,7 +2016,8 @@ inline Tensor Tensor::permute(IntArrayRef dims) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, IntArrayRef>(op, const_cast<Tensor&>(*this), dims);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, IntArrayRef>(const_cast<Tensor&>(*this), dims);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, IntArrayRef>(const_cast<Tensor&>(*this), dims);
     }
 #endif
 }
@@ -1934,7 +2029,8 @@ inline Tensor Tensor::numpy_T() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1946,7 +2042,8 @@ inline bool Tensor::is_pinned() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<bool, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1958,7 +2055,8 @@ inline Tensor Tensor::pin_memory() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -1970,7 +2068,8 @@ inline Tensor Tensor::pinverse(double rcond) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, double>(op, const_cast<Tensor&>(*this), rcond);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, double>(const_cast<Tensor&>(*this), rcond);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, double>(const_cast<Tensor&>(*this), rcond);
     }
 #endif
 }
@@ -1982,7 +2081,8 @@ inline Tensor Tensor::reciprocal() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2008,7 +2108,8 @@ inline Tensor Tensor::neg() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2028,7 +2129,8 @@ inline Tensor Tensor::repeat(IntArrayRef repeats) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, IntArrayRef>(op, const_cast<Tensor&>(*this), repeats);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, IntArrayRef>(const_cast<Tensor&>(*this), repeats);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, IntArrayRef>(const_cast<Tensor&>(*this), repeats);
     }
 #endif
 }
@@ -2040,7 +2142,8 @@ inline Tensor Tensor::repeat_interleave(const Tensor & repeats, c10::optional<in
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, c10::optional<int64_t>>(op, const_cast<Tensor&>(*this), repeats, dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, c10::optional<int64_t>>(const_cast<Tensor&>(*this), repeats, dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, c10::optional<int64_t>>(const_cast<Tensor&>(*this), repeats, dim);
     }
 #endif
 }
@@ -2052,7 +2155,8 @@ inline Tensor Tensor::repeat_interleave(int64_t repeats, c10::optional<int64_t> 
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, c10::optional<int64_t>>(op, const_cast<Tensor&>(*this), repeats, dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, c10::optional<int64_t>>(const_cast<Tensor&>(*this), repeats, dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, c10::optional<int64_t>>(const_cast<Tensor&>(*this), repeats, dim);
     }
 #endif
 }
@@ -2064,7 +2168,8 @@ inline Tensor Tensor::reshape(IntArrayRef shape) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, IntArrayRef>(op, const_cast<Tensor&>(*this), shape);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, IntArrayRef>(const_cast<Tensor&>(*this), shape);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, IntArrayRef>(const_cast<Tensor&>(*this), shape);
     }
 #endif
 }
@@ -2076,7 +2181,8 @@ inline Tensor Tensor::reshape_as(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -2088,7 +2194,8 @@ inline Tensor Tensor::round() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2123,7 +2230,8 @@ inline Tensor Tensor::relu() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2158,7 +2266,8 @@ inline Tensor Tensor::prelu(const Tensor & weight) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), weight);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), weight);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), weight);
     }
 #endif
 }
@@ -2176,7 +2285,8 @@ inline std::tuple<Tensor,Tensor> Tensor::prelu_backward(const Tensor & grad_outp
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &, const Tensor &>(op, grad_output, const_cast<Tensor&>(*this), weight);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &, const Tensor &>(grad_output, const_cast<Tensor&>(*this), weight);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &, const Tensor &>(grad_output, const_cast<Tensor&>(*this), weight);
     }
 #endif
 }
@@ -2194,7 +2304,8 @@ inline Tensor Tensor::hardshrink(Scalar lambd) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), lambd);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), lambd);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), lambd);
     }
 #endif
 }
@@ -2212,7 +2323,8 @@ inline Tensor Tensor::hardshrink_backward(const Tensor & grad_out, Scalar lambd)
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, Scalar>(op, grad_out, const_cast<Tensor&>(*this), lambd);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, Scalar>(grad_out, const_cast<Tensor&>(*this), lambd);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, Scalar>(grad_out, const_cast<Tensor&>(*this), lambd);
     }
 #endif
 }
@@ -2224,7 +2336,8 @@ inline Tensor Tensor::rsqrt() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2251,7 +2364,8 @@ inline Tensor Tensor::select(Dimname dim, int64_t index) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Dimname, int64_t>(op, const_cast<Tensor&>(*this), dim, index);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Dimname, int64_t>(const_cast<Tensor&>(*this), dim, index);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Dimname, int64_t>(const_cast<Tensor&>(*this), dim, index);
     }
 #endif
 }
@@ -2264,7 +2378,8 @@ inline Tensor Tensor::select(int64_t dim, int64_t index) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, int64_t>(op, const_cast<Tensor&>(*this), dim, index);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, int64_t>(const_cast<Tensor&>(*this), dim, index);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, int64_t>(const_cast<Tensor&>(*this), dim, index);
     }
 #endif
 }
@@ -2282,7 +2397,8 @@ inline Tensor Tensor::sigmoid() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2308,7 +2424,8 @@ inline Tensor Tensor::sin() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2334,7 +2451,8 @@ inline Tensor Tensor::sinh() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2360,7 +2478,8 @@ inline Tensor Tensor::detach() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2380,7 +2499,8 @@ inline int64_t Tensor::size(int64_t dim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, const Tensor &, int64_t>(op, const_cast<Tensor&>(*this), dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<int64_t, const Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<int64_t, const Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
     }
 #endif
 }
@@ -2393,7 +2513,8 @@ inline int64_t Tensor::size(Dimname dim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, const Tensor &, Dimname>(op, const_cast<Tensor&>(*this), dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<int64_t, const Tensor &, Dimname>(const_cast<Tensor&>(*this), dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<int64_t, const Tensor &, Dimname>(const_cast<Tensor&>(*this), dim);
     }
 #endif
 }
@@ -2406,7 +2527,8 @@ inline Tensor Tensor::slice(int64_t dim, int64_t start, int64_t end, int64_t ste
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, int64_t, int64_t, int64_t>(op, const_cast<Tensor&>(*this), dim, start, end, step);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, int64_t, int64_t, int64_t>(const_cast<Tensor&>(*this), dim, start, end, step);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, int64_t, int64_t, int64_t>(const_cast<Tensor&>(*this), dim, start, end, step);
     }
 #endif
 }
@@ -2418,7 +2540,8 @@ inline std::tuple<Tensor,Tensor> Tensor::slogdet() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2430,7 +2553,8 @@ inline Tensor Tensor::smm(const Tensor & mat2) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), mat2);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mat2);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mat2);
     }
 #endif
 }
@@ -2460,7 +2584,8 @@ inline std::vector<Tensor> Tensor::split(int64_t split_size, int64_t dim) const 
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::vector<Tensor>, const Tensor &, int64_t, int64_t>(op, const_cast<Tensor&>(*this), split_size, dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::vector<Tensor>, const Tensor &, int64_t, int64_t>(const_cast<Tensor&>(*this), split_size, dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::vector<Tensor>, const Tensor &, int64_t, int64_t>(const_cast<Tensor&>(*this), split_size, dim);
     }
 #endif
 }
@@ -2472,7 +2597,8 @@ inline std::vector<Tensor> Tensor::split_with_sizes(IntArrayRef split_sizes, int
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::vector<Tensor>, const Tensor &, IntArrayRef, int64_t>(op, const_cast<Tensor&>(*this), split_sizes, dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::vector<Tensor>, const Tensor &, IntArrayRef, int64_t>(const_cast<Tensor&>(*this), split_sizes, dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::vector<Tensor>, const Tensor &, IntArrayRef, int64_t>(const_cast<Tensor&>(*this), split_sizes, dim);
     }
 #endif
 }
@@ -2484,7 +2610,8 @@ inline Tensor Tensor::squeeze() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2496,7 +2623,8 @@ inline Tensor Tensor::squeeze(int64_t dim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t>(op, const_cast<Tensor&>(*this), dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
     }
 #endif
 }
@@ -2516,7 +2644,8 @@ inline Tensor & Tensor::squeeze_(int64_t dim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, int64_t>(op, const_cast<Tensor&>(*this), dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
     }
 #endif
 }
@@ -2528,7 +2657,8 @@ inline Tensor Tensor::sspaddmm(const Tensor & mat1, const Tensor & mat2, Scalar 
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(op, const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
     }
 #endif
 }
@@ -2548,7 +2678,8 @@ inline int64_t Tensor::stride(int64_t dim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, const Tensor &, int64_t>(op, const_cast<Tensor&>(*this), dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<int64_t, const Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<int64_t, const Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
     }
 #endif
 }
@@ -2561,7 +2692,8 @@ inline int64_t Tensor::stride(Dimname dim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, const Tensor &, Dimname>(op, const_cast<Tensor&>(*this), dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<int64_t, const Tensor &, Dimname>(const_cast<Tensor&>(*this), dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<int64_t, const Tensor &, Dimname>(const_cast<Tensor&>(*this), dim);
     }
 #endif
 }
@@ -2600,7 +2732,8 @@ inline Tensor Tensor::sum_to_size(IntArrayRef size) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, IntArrayRef>(op, const_cast<Tensor&>(*this), size);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, IntArrayRef>(const_cast<Tensor&>(*this), size);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, IntArrayRef>(const_cast<Tensor&>(*this), size);
     }
 #endif
 }
@@ -2612,7 +2745,8 @@ inline Tensor Tensor::sqrt() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2638,7 +2772,8 @@ inline Tensor Tensor::std(bool unbiased) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, bool>(op, const_cast<Tensor&>(*this), unbiased);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, bool>(const_cast<Tensor&>(*this), unbiased);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, bool>(const_cast<Tensor&>(*this), unbiased);
     }
 #endif
 }
@@ -2694,7 +2829,8 @@ inline Tensor Tensor::t() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2714,7 +2850,8 @@ inline Tensor Tensor::tan() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2740,7 +2877,8 @@ inline Tensor Tensor::tanh() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2766,7 +2904,8 @@ inline Tensor Tensor::transpose(int64_t dim0, int64_t dim1) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, int64_t>(op, const_cast<Tensor&>(*this), dim0, dim1);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, int64_t>(const_cast<Tensor&>(*this), dim0, dim1);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, int64_t>(const_cast<Tensor&>(*this), dim0, dim1);
     }
 #endif
 }
@@ -2788,7 +2927,8 @@ inline Tensor & Tensor::transpose_(int64_t dim0, int64_t dim1) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, int64_t, int64_t>(op, const_cast<Tensor&>(*this), dim0, dim1);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, int64_t, int64_t>(const_cast<Tensor&>(*this), dim0, dim1);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, int64_t, int64_t>(const_cast<Tensor&>(*this), dim0, dim1);
     }
 #endif
 }
@@ -2806,7 +2946,8 @@ inline Tensor Tensor::flip(IntArrayRef dims) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, IntArrayRef>(op, const_cast<Tensor&>(*this), dims);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, IntArrayRef>(const_cast<Tensor&>(*this), dims);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, IntArrayRef>(const_cast<Tensor&>(*this), dims);
     }
 #endif
 }
@@ -2832,7 +2973,8 @@ inline Tensor Tensor::rot90(int64_t k, IntArrayRef dims) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, IntArrayRef>(op, const_cast<Tensor&>(*this), k, dims);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, IntArrayRef>(const_cast<Tensor&>(*this), k, dims);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, IntArrayRef>(const_cast<Tensor&>(*this), k, dims);
     }
 #endif
 }
@@ -2844,7 +2986,8 @@ inline Tensor Tensor::trunc() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -2870,7 +3013,8 @@ inline Tensor Tensor::type_as(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -2882,7 +3026,8 @@ inline Tensor Tensor::unsqueeze(int64_t dim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t>(op, const_cast<Tensor&>(*this), dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
     }
 #endif
 }
@@ -2894,7 +3039,8 @@ inline Tensor & Tensor::unsqueeze_(int64_t dim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, int64_t>(op, const_cast<Tensor&>(*this), dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
     }
 #endif
 }
@@ -2906,7 +3052,8 @@ inline Tensor Tensor::var(bool unbiased) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, bool>(op, const_cast<Tensor&>(*this), unbiased);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, bool>(const_cast<Tensor&>(*this), unbiased);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, bool>(const_cast<Tensor&>(*this), unbiased);
     }
 #endif
 }
@@ -2936,7 +3083,8 @@ inline Tensor Tensor::view_as(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -2948,7 +3096,8 @@ inline Tensor Tensor::where(const Tensor & condition, const Tensor & other) cons
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &>(op, condition, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &>(condition, const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &>(condition, const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -2968,7 +3117,8 @@ inline Tensor Tensor::norm(Scalar p) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), p);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), p);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), p);
     }
 #endif
 }
@@ -3028,7 +3178,8 @@ inline Tensor Tensor::clone() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3049,7 +3200,8 @@ inline Tensor & Tensor::resize_as_(const Tensor & the_template) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), the_template);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), the_template);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), the_template);
     }
 #endif
 }
@@ -3070,7 +3222,8 @@ inline Tensor Tensor::pow(Scalar exponent) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), exponent);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), exponent);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), exponent);
     }
 #endif
 }
@@ -3099,7 +3252,8 @@ inline Tensor Tensor::sub(const Tensor & other, Scalar alpha) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other, alpha);
     }
 #endif
 }
@@ -3111,7 +3265,8 @@ inline Tensor & Tensor::sub_(const Tensor & other, Scalar alpha) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other, alpha);
     }
 #endif
 }
@@ -3123,7 +3278,8 @@ inline Tensor Tensor::sub(Scalar other, Scalar alpha) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar, Scalar>(op, const_cast<Tensor&>(*this), other, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), other, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), other, alpha);
     }
 #endif
 }
@@ -3135,7 +3291,8 @@ inline Tensor & Tensor::sub_(Scalar other, Scalar alpha) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar, Scalar>(op, const_cast<Tensor&>(*this), other, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), other, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), other, alpha);
     }
 #endif
 }
@@ -3147,7 +3304,8 @@ inline Tensor Tensor::addmm(const Tensor & mat1, const Tensor & mat2, Scalar bet
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(op, const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
     }
 #endif
 }
@@ -3159,7 +3317,8 @@ inline Tensor & Tensor::addmm_(const Tensor & mat1, const Tensor & mat2, Scalar 
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(op, const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
     }
 #endif
 }
@@ -3177,7 +3336,8 @@ inline Tensor & Tensor::sparse_resize_(IntArrayRef size, int64_t sparse_dim, int
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, IntArrayRef, int64_t, int64_t>(op, const_cast<Tensor&>(*this), size, sparse_dim, dense_dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, IntArrayRef, int64_t, int64_t>(const_cast<Tensor&>(*this), size, sparse_dim, dense_dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, IntArrayRef, int64_t, int64_t>(const_cast<Tensor&>(*this), size, sparse_dim, dense_dim);
     }
 #endif
 }
@@ -3195,7 +3355,8 @@ inline Tensor & Tensor::sparse_resize_and_clear_(IntArrayRef size, int64_t spars
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, IntArrayRef, int64_t, int64_t>(op, const_cast<Tensor&>(*this), size, sparse_dim, dense_dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, IntArrayRef, int64_t, int64_t>(const_cast<Tensor&>(*this), size, sparse_dim, dense_dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, IntArrayRef, int64_t, int64_t>(const_cast<Tensor&>(*this), size, sparse_dim, dense_dim);
     }
 #endif
 }
@@ -3213,7 +3374,8 @@ inline Tensor Tensor::sparse_mask(const Tensor & mask) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), mask);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mask);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mask);
     }
 #endif
 }
@@ -3231,7 +3393,8 @@ inline Tensor Tensor::to_dense() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3249,7 +3412,8 @@ inline int64_t Tensor::sparse_dim() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3267,7 +3431,8 @@ inline int64_t Tensor::_dimI() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3285,7 +3450,8 @@ inline int64_t Tensor::dense_dim() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3303,7 +3469,8 @@ inline int64_t Tensor::_dimV() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3321,7 +3488,8 @@ inline int64_t Tensor::_nnz() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3339,7 +3507,8 @@ inline Tensor Tensor::coalesce() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3357,7 +3526,8 @@ inline bool Tensor::is_coalesced() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<bool, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3375,7 +3545,8 @@ inline Tensor Tensor::_indices() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3393,7 +3564,8 @@ inline Tensor Tensor::_values() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3411,7 +3583,8 @@ inline Tensor & Tensor::_coalesced_(bool coalesced) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, bool>(op, const_cast<Tensor&>(*this), coalesced);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, bool>(const_cast<Tensor&>(*this), coalesced);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, bool>(const_cast<Tensor&>(*this), coalesced);
     }
 #endif
 }
@@ -3429,7 +3602,8 @@ inline Tensor Tensor::indices() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3447,7 +3621,8 @@ inline Tensor Tensor::values() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3459,7 +3634,8 @@ inline int64_t Tensor::numel() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3471,7 +3647,8 @@ inline std::vector<Tensor> Tensor::unbind(int64_t dim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::vector<Tensor>, const Tensor &, int64_t>(op, const_cast<Tensor&>(*this), dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::vector<Tensor>, const Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::vector<Tensor>, const Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
     }
 #endif
 }
@@ -3499,7 +3676,8 @@ inline Tensor Tensor::to_sparse(int64_t sparse_dim) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t>(op, const_cast<Tensor&>(*this), sparse_dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), sparse_dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), sparse_dim);
     }
 #endif
 }
@@ -3517,7 +3695,8 @@ inline Tensor Tensor::to_sparse() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3535,7 +3714,8 @@ inline Tensor Tensor::to_mkldnn() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3553,7 +3733,8 @@ inline Tensor Tensor::dequantize() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3571,7 +3752,8 @@ inline double Tensor::q_scale() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<double, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<double, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<double, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3589,7 +3771,8 @@ inline int64_t Tensor::q_zero_point() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3635,7 +3818,8 @@ inline Tensor Tensor::int_repr() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3685,7 +3869,8 @@ inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) con
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, bool, bool>(op, const_cast<Tensor&>(*this), other, non_blocking, copy);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, bool, bool>(const_cast<Tensor&>(*this), other, non_blocking, copy);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, bool, bool>(const_cast<Tensor&>(*this), other, non_blocking, copy);
     }
 #endif
 }
@@ -3697,7 +3882,8 @@ inline Scalar Tensor::item() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Scalar, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Scalar, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Scalar, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -3746,7 +3932,8 @@ inline Tensor & Tensor::set_(const Tensor & source) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), source);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), source);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), source);
     }
 #endif
 }
@@ -3792,7 +3979,8 @@ inline bool Tensor::is_set_to(const Tensor & tensor) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<bool, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), tensor);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<bool, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), tensor);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<bool, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), tensor);
     }
 #endif
 }
@@ -3810,7 +3998,8 @@ inline Tensor & Tensor::masked_fill_(const Tensor & mask, Scalar value) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), mask, value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), mask, value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), mask, value);
     }
 #endif
 }
@@ -3822,7 +4011,8 @@ inline Tensor Tensor::masked_fill(const Tensor & mask, Scalar value) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), mask, value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), mask, value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), mask, value);
     }
 #endif
 }
@@ -3840,7 +4030,8 @@ inline Tensor & Tensor::masked_fill_(const Tensor & mask, const Tensor & value) 
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), mask, value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mask, value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mask, value);
     }
 #endif
 }
@@ -3852,7 +4043,8 @@ inline Tensor Tensor::masked_fill(const Tensor & mask, const Tensor & value) con
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), mask, value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mask, value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mask, value);
     }
 #endif
 }
@@ -3870,7 +4062,8 @@ inline Tensor & Tensor::masked_scatter_(const Tensor & mask, const Tensor & sour
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), mask, source);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mask, source);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mask, source);
     }
 #endif
 }
@@ -3882,7 +4075,8 @@ inline Tensor Tensor::masked_scatter(const Tensor & mask, const Tensor & source)
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), mask, source);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mask, source);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mask, source);
     }
 #endif
 }
@@ -3903,7 +4097,8 @@ inline Tensor Tensor::view(IntArrayRef size) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, IntArrayRef>(op, const_cast<Tensor&>(*this), size);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, IntArrayRef>(const_cast<Tensor&>(*this), size);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, IntArrayRef>(const_cast<Tensor&>(*this), size);
     }
 #endif
 }
@@ -3921,7 +4116,8 @@ inline Tensor & Tensor::put_(const Tensor & index, const Tensor & source, bool a
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, const Tensor &, bool>(op, const_cast<Tensor&>(*this), index, source, accumulate);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, bool>(const_cast<Tensor&>(*this), index, source, accumulate);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, bool>(const_cast<Tensor&>(*this), index, source, accumulate);
     }
 #endif
 }
@@ -3939,7 +4135,8 @@ inline Tensor & Tensor::index_add_(int64_t dim, const Tensor & index, const Tens
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), dim, index, source);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, source);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, source);
     }
 #endif
 }
@@ -3951,7 +4148,8 @@ inline Tensor Tensor::index_add(int64_t dim, const Tensor & index, const Tensor 
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), dim, index, source);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, source);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, source);
     }
 #endif
 }
@@ -3969,7 +4167,8 @@ inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, Scalar va
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, int64_t, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), dim, index, value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, int64_t, const Tensor &, Scalar>(const_cast<Tensor&>(*this), dim, index, value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, int64_t, const Tensor &, Scalar>(const_cast<Tensor&>(*this), dim, index, value);
     }
 #endif
 }
@@ -3981,7 +4180,8 @@ inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, Scalar value
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), dim, index, value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, Scalar>(const_cast<Tensor&>(*this), dim, index, value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, Scalar>(const_cast<Tensor&>(*this), dim, index, value);
     }
 #endif
 }
@@ -3999,7 +4199,8 @@ inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, const Ten
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), dim, index, value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, value);
     }
 #endif
 }
@@ -4011,7 +4212,8 @@ inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, const Tensor
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), dim, index, value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, value);
     }
 #endif
 }
@@ -4029,7 +4231,8 @@ inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, const Tensor
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), dim, index, src);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, src);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, src);
     }
 #endif
 }
@@ -4041,7 +4244,8 @@ inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, const Tensor & 
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), dim, index, src);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, src);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, src);
     }
 #endif
 }
@@ -4059,7 +4263,8 @@ inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, Scalar value
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, int64_t, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), dim, index, value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, int64_t, const Tensor &, Scalar>(const_cast<Tensor&>(*this), dim, index, value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, int64_t, const Tensor &, Scalar>(const_cast<Tensor&>(*this), dim, index, value);
     }
 #endif
 }
@@ -4071,7 +4276,8 @@ inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, Scalar value) c
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), dim, index, value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, Scalar>(const_cast<Tensor&>(*this), dim, index, value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, Scalar>(const_cast<Tensor&>(*this), dim, index, value);
     }
 #endif
 }
@@ -4089,7 +4295,8 @@ inline Tensor & Tensor::scatter_add_(int64_t dim, const Tensor & index, const Te
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), dim, index, src);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, src);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, src);
     }
 #endif
 }
@@ -4101,7 +4308,8 @@ inline Tensor Tensor::scatter_add(int64_t dim, const Tensor & index, const Tenso
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), dim, index, src);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, src);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, src);
     }
 #endif
 }
@@ -4119,7 +4327,8 @@ inline Tensor & Tensor::lt_(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4137,7 +4346,8 @@ inline Tensor & Tensor::lt_(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4155,7 +4365,8 @@ inline Tensor & Tensor::gt_(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4173,7 +4384,8 @@ inline Tensor & Tensor::gt_(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4191,7 +4403,8 @@ inline Tensor & Tensor::le_(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4209,7 +4422,8 @@ inline Tensor & Tensor::le_(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4227,7 +4441,8 @@ inline Tensor & Tensor::ge_(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4245,7 +4460,8 @@ inline Tensor & Tensor::ge_(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4263,7 +4479,8 @@ inline Tensor & Tensor::eq_(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4281,7 +4498,8 @@ inline Tensor & Tensor::eq_(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4299,7 +4517,8 @@ inline Tensor & Tensor::ne_(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4317,7 +4536,8 @@ inline Tensor & Tensor::ne_(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4335,7 +4555,8 @@ inline Tensor Tensor::__and__(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4353,7 +4574,8 @@ inline Tensor Tensor::__and__(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4371,7 +4593,8 @@ inline Tensor & Tensor::__iand__(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4389,7 +4612,8 @@ inline Tensor & Tensor::__iand__(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4407,7 +4631,8 @@ inline Tensor Tensor::__or__(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4425,7 +4650,8 @@ inline Tensor Tensor::__or__(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4443,7 +4669,8 @@ inline Tensor & Tensor::__ior__(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4461,7 +4688,8 @@ inline Tensor & Tensor::__ior__(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4479,7 +4707,8 @@ inline Tensor Tensor::__xor__(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4497,7 +4726,8 @@ inline Tensor Tensor::__xor__(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4515,7 +4745,8 @@ inline Tensor & Tensor::__ixor__(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4533,7 +4764,8 @@ inline Tensor & Tensor::__ixor__(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4551,7 +4783,8 @@ inline Tensor Tensor::__lshift__(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4569,7 +4802,8 @@ inline Tensor Tensor::__lshift__(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4587,7 +4821,8 @@ inline Tensor & Tensor::__ilshift__(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4605,7 +4840,8 @@ inline Tensor & Tensor::__ilshift__(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4623,7 +4859,8 @@ inline Tensor Tensor::__rshift__(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4641,7 +4878,8 @@ inline Tensor Tensor::__rshift__(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4659,7 +4897,8 @@ inline Tensor & Tensor::__irshift__(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4677,7 +4916,8 @@ inline Tensor & Tensor::__irshift__(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4703,7 +4943,8 @@ inline Tensor & Tensor::atan2_(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4721,7 +4962,8 @@ inline Tensor & Tensor::tril_(int64_t diagonal) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, int64_t>(op, const_cast<Tensor&>(*this), diagonal);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, int64_t>(const_cast<Tensor&>(*this), diagonal);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, int64_t>(const_cast<Tensor&>(*this), diagonal);
     }
 #endif
 }
@@ -4739,7 +4981,8 @@ inline Tensor & Tensor::triu_(int64_t diagonal) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, int64_t>(op, const_cast<Tensor&>(*this), diagonal);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, int64_t>(const_cast<Tensor&>(*this), diagonal);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, int64_t>(const_cast<Tensor&>(*this), diagonal);
     }
 #endif
 }
@@ -4759,7 +5002,8 @@ inline Tensor & Tensor::polygamma_(int64_t n) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, int64_t>(op, const_cast<Tensor&>(*this), n);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, int64_t>(const_cast<Tensor&>(*this), n);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, int64_t>(const_cast<Tensor&>(*this), n);
     }
 #endif
 }
@@ -4777,7 +5021,8 @@ inline Tensor & Tensor::renorm_(Scalar p, int64_t dim, Scalar maxnorm) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar, int64_t, Scalar>(op, const_cast<Tensor&>(*this), p, dim, maxnorm);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar, int64_t, Scalar>(const_cast<Tensor&>(*this), p, dim, maxnorm);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar, int64_t, Scalar>(const_cast<Tensor&>(*this), p, dim, maxnorm);
     }
 #endif
 }
@@ -4795,7 +5040,8 @@ inline Tensor & Tensor::pow_(Scalar exponent) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), exponent);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), exponent);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), exponent);
     }
 #endif
 }
@@ -4813,7 +5059,8 @@ inline Tensor & Tensor::pow_(const Tensor & exponent) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), exponent);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), exponent);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), exponent);
     }
 #endif
 }
@@ -4831,7 +5078,8 @@ inline Tensor & Tensor::lerp_(const Tensor & end, Scalar weight) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), end, weight);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), end, weight);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), end, weight);
     }
 #endif
 }
@@ -4849,7 +5097,8 @@ inline Tensor & Tensor::lerp_(const Tensor & end, const Tensor & weight) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), end, weight);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), end, weight);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), end, weight);
     }
 #endif
 }
@@ -4867,7 +5116,8 @@ inline Tensor & Tensor::fmod_(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4885,7 +5135,8 @@ inline Tensor & Tensor::fmod_(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4903,7 +5154,8 @@ inline Tensor & Tensor::remainder_(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4921,7 +5173,8 @@ inline Tensor & Tensor::remainder_(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -4939,7 +5192,8 @@ inline Tensor & Tensor::addbmm_(const Tensor & batch1, const Tensor & batch2, Sc
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(op, const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
     }
 #endif
 }
@@ -4957,7 +5211,8 @@ inline Tensor Tensor::addbmm(const Tensor & batch1, const Tensor & batch2, Scala
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(op, const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
     }
 #endif
 }
@@ -4969,7 +5224,8 @@ inline Tensor & Tensor::addcdiv_(const Tensor & tensor1, const Tensor & tensor2,
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), tensor1, tensor2, value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), tensor1, tensor2, value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), tensor1, tensor2, value);
     }
 #endif
 }
@@ -5113,7 +5369,8 @@ inline Tensor Tensor::diag(int64_t diagonal) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t>(op, const_cast<Tensor&>(*this), diagonal);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), diagonal);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), diagonal);
     }
 #endif
 }
@@ -5125,7 +5382,8 @@ inline Tensor Tensor::cross(const Tensor & other, c10::optional<int64_t> dim) co
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, c10::optional<int64_t>>(op, const_cast<Tensor&>(*this), other, dim);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, c10::optional<int64_t>>(const_cast<Tensor&>(*this), other, dim);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, c10::optional<int64_t>>(const_cast<Tensor&>(*this), other, dim);
     }
 #endif
 }
@@ -5137,7 +5395,8 @@ inline Tensor Tensor::triu(int64_t diagonal) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t>(op, const_cast<Tensor&>(*this), diagonal);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), diagonal);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), diagonal);
     }
 #endif
 }
@@ -5149,7 +5408,8 @@ inline Tensor Tensor::tril(int64_t diagonal) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t>(op, const_cast<Tensor&>(*this), diagonal);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), diagonal);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t>(const_cast<Tensor&>(*this), diagonal);
     }
 #endif
 }
@@ -5167,7 +5427,8 @@ inline Tensor Tensor::trace() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -5188,7 +5449,8 @@ inline Tensor Tensor::ne(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -5209,7 +5471,8 @@ inline Tensor Tensor::ne(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -5230,7 +5493,8 @@ inline Tensor Tensor::eq(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -5251,7 +5515,8 @@ inline Tensor Tensor::eq(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -5272,7 +5537,8 @@ inline Tensor Tensor::ge(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -5293,7 +5559,8 @@ inline Tensor Tensor::ge(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -5314,7 +5581,8 @@ inline Tensor Tensor::le(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -5335,7 +5603,8 @@ inline Tensor Tensor::le(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -5356,7 +5625,8 @@ inline Tensor Tensor::gt(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -5377,7 +5647,8 @@ inline Tensor Tensor::gt(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -5398,7 +5669,8 @@ inline Tensor Tensor::lt(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -5419,7 +5691,8 @@ inline Tensor Tensor::lt(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -5437,7 +5710,8 @@ inline Tensor Tensor::take(const Tensor & index) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), index);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), index);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), index);
     }
 #endif
 }
@@ -5458,7 +5732,8 @@ inline Tensor Tensor::index_select(int64_t dim, const Tensor & index) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, const Tensor &>(op, const_cast<Tensor&>(*this), dim, index);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &>(const_cast<Tensor&>(*this), dim, index);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &>(const_cast<Tensor&>(*this), dim, index);
     }
 #endif
 }
@@ -5476,7 +5751,8 @@ inline Tensor Tensor::masked_select(const Tensor & mask) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), mask);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mask);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), mask);
     }
 #endif
 }
@@ -5494,7 +5770,8 @@ inline Tensor Tensor::nonzero() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -5506,7 +5783,8 @@ inline std::vector<Tensor> Tensor::nonzero_numpy() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::vector<Tensor>, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::vector<Tensor>, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::vector<Tensor>, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -5524,7 +5802,8 @@ inline Tensor Tensor::gather(int64_t dim, const Tensor & index, bool sparse_grad
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, const Tensor &, bool>(op, const_cast<Tensor&>(*this), dim, index, sparse_grad);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, bool>(const_cast<Tensor&>(*this), dim, index, sparse_grad);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, const Tensor &, bool>(const_cast<Tensor&>(*this), dim, index, sparse_grad);
     }
 #endif
 }
@@ -5536,7 +5815,8 @@ inline Tensor Tensor::addcmul(const Tensor & tensor1, const Tensor & tensor2, Sc
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), tensor1, tensor2, value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), tensor1, tensor2, value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), tensor1, tensor2, value);
     }
 #endif
 }
@@ -5548,7 +5828,8 @@ inline Tensor & Tensor::addcmul_(const Tensor & tensor1, const Tensor & tensor2,
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), tensor1, tensor2, value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), tensor1, tensor2, value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), tensor1, tensor2, value);
     }
 #endif
 }
@@ -5560,7 +5841,8 @@ inline Tensor Tensor::addcdiv(const Tensor & tensor1, const Tensor & tensor2, Sc
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), tensor1, tensor2, value);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), tensor1, tensor2, value);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), tensor1, tensor2, value);
     }
 #endif
 }
@@ -5578,7 +5860,8 @@ inline std::tuple<Tensor,Tensor> Tensor::lstsq(const Tensor & A) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), A);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), A);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), A);
     }
 #endif
 }
@@ -5590,7 +5873,8 @@ inline std::tuple<Tensor,Tensor> Tensor::triangular_solve(const Tensor & A, bool
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &, bool, bool, bool>(op, const_cast<Tensor&>(*this), A, upper, transpose, unitriangular);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &, bool, bool, bool>(const_cast<Tensor&>(*this), A, upper, transpose, unitriangular);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &, bool, bool, bool>(const_cast<Tensor&>(*this), A, upper, transpose, unitriangular);
     }
 #endif
 }
@@ -5602,7 +5886,8 @@ inline std::tuple<Tensor,Tensor> Tensor::symeig(bool eigenvectors, bool upper) c
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &, bool, bool>(op, const_cast<Tensor&>(*this), eigenvectors, upper);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, bool, bool>(const_cast<Tensor&>(*this), eigenvectors, upper);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, bool, bool>(const_cast<Tensor&>(*this), eigenvectors, upper);
     }
 #endif
 }
@@ -5620,7 +5905,8 @@ inline std::tuple<Tensor,Tensor> Tensor::eig(bool eigenvectors) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &, bool>(op, const_cast<Tensor&>(*this), eigenvectors);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, bool>(const_cast<Tensor&>(*this), eigenvectors);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, bool>(const_cast<Tensor&>(*this), eigenvectors);
     }
 #endif
 }
@@ -5632,7 +5918,8 @@ inline std::tuple<Tensor,Tensor,Tensor> Tensor::svd(bool some, bool compute_uv) 
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor,Tensor>, const Tensor &, bool, bool>(op, const_cast<Tensor&>(*this), some, compute_uv);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor,Tensor>, const Tensor &, bool, bool>(const_cast<Tensor&>(*this), some, compute_uv);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor,Tensor>, const Tensor &, bool, bool>(const_cast<Tensor&>(*this), some, compute_uv);
     }
 #endif
 }
@@ -5644,7 +5931,8 @@ inline Tensor Tensor::cholesky(bool upper) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, bool>(op, const_cast<Tensor&>(*this), upper);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, bool>(const_cast<Tensor&>(*this), upper);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, bool>(const_cast<Tensor&>(*this), upper);
     }
 #endif
 }
@@ -5656,7 +5944,8 @@ inline Tensor Tensor::cholesky_solve(const Tensor & input2, bool upper) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, bool>(op, const_cast<Tensor&>(*this), input2, upper);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, bool>(const_cast<Tensor&>(*this), input2, upper);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, bool>(const_cast<Tensor&>(*this), input2, upper);
     }
 #endif
 }
@@ -5668,7 +5957,8 @@ inline std::tuple<Tensor,Tensor> Tensor::solve(const Tensor & A) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), A);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), A);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), A);
     }
 #endif
 }
@@ -5686,7 +5976,8 @@ inline Tensor Tensor::cholesky_inverse(bool upper) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, bool>(op, const_cast<Tensor&>(*this), upper);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, bool>(const_cast<Tensor&>(*this), upper);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, bool>(const_cast<Tensor&>(*this), upper);
     }
 #endif
 }
@@ -5698,7 +5989,8 @@ inline std::tuple<Tensor,Tensor> Tensor::qr(bool some) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &, bool>(op, const_cast<Tensor&>(*this), some);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, bool>(const_cast<Tensor&>(*this), some);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, bool>(const_cast<Tensor&>(*this), some);
     }
 #endif
 }
@@ -5716,7 +6008,8 @@ inline std::tuple<Tensor,Tensor> Tensor::geqrf() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -5734,7 +6027,8 @@ inline Tensor Tensor::orgqr(const Tensor & input2) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), input2);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), input2);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), input2);
     }
 #endif
 }
@@ -5752,7 +6046,8 @@ inline Tensor Tensor::ormqr(const Tensor & input2, const Tensor & input3, bool l
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &, bool, bool>(op, const_cast<Tensor&>(*this), input2, input3, left, transpose);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, bool, bool>(const_cast<Tensor&>(*this), input2, input3, left, transpose);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, bool, bool>(const_cast<Tensor&>(*this), input2, input3, left, transpose);
     }
 #endif
 }
@@ -5764,7 +6059,8 @@ inline Tensor Tensor::lu_solve(const Tensor & LU_data, const Tensor & LU_pivots)
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), LU_data, LU_pivots);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), LU_data, LU_pivots);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), LU_data, LU_pivots);
     }
 #endif
 }
@@ -5796,7 +6092,8 @@ inline Tensor Tensor::lgamma() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -5808,7 +6105,8 @@ inline Tensor Tensor::digamma() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -5820,7 +6118,8 @@ inline Tensor Tensor::polygamma(int64_t n) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, int64_t, const Tensor &>(op, n, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, int64_t, const Tensor &>(n, const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, int64_t, const Tensor &>(n, const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -5832,7 +6131,8 @@ inline Tensor Tensor::erfinv() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -5874,7 +6174,8 @@ inline Tensor Tensor::dist(const Tensor & other, Scalar p) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other, p);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other, p);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other, p);
     }
 #endif
 }
@@ -5886,7 +6187,8 @@ inline Tensor Tensor::atan2(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -5904,7 +6206,8 @@ inline Tensor Tensor::lerp(const Tensor & end, Scalar weight) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), end, weight);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), end, weight);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, Scalar>(const_cast<Tensor&>(*this), end, weight);
     }
 #endif
 }
@@ -5922,7 +6225,8 @@ inline Tensor Tensor::lerp(const Tensor & end, const Tensor & weight) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), end, weight);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), end, weight);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), end, weight);
     }
 #endif
 }
@@ -5940,7 +6244,8 @@ inline Tensor Tensor::histc(int64_t bins, Scalar min, Scalar max) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, Scalar, Scalar>(op, const_cast<Tensor&>(*this), bins, min, max);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, Scalar, Scalar>(const_cast<Tensor&>(*this), bins, min, max);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, Scalar, Scalar>(const_cast<Tensor&>(*this), bins, min, max);
     }
 #endif
 }
@@ -5958,7 +6263,8 @@ inline Tensor Tensor::fmod(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -5976,7 +6282,8 @@ inline Tensor Tensor::fmod(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -5994,7 +6301,8 @@ inline Tensor Tensor::remainder(Scalar other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -6012,7 +6320,8 @@ inline Tensor Tensor::remainder(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -6030,7 +6339,8 @@ inline Tensor Tensor::min(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -6051,7 +6361,8 @@ inline Tensor Tensor::min() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -6069,7 +6380,8 @@ inline Tensor Tensor::max(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -6090,7 +6402,8 @@ inline Tensor Tensor::max() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -6108,7 +6421,8 @@ inline Tensor Tensor::median() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -6129,7 +6443,8 @@ inline std::tuple<Tensor,Tensor> Tensor::sort(int64_t dim, bool descending) cons
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(op, const_cast<Tensor&>(*this), dim, descending);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, descending);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, descending);
     }
 #endif
 }
@@ -6141,7 +6456,8 @@ inline Tensor Tensor::argsort(int64_t dim, bool descending) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, bool>(op, const_cast<Tensor&>(*this), dim, descending);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, descending);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, descending);
     }
 #endif
 }
@@ -6153,7 +6469,8 @@ inline std::tuple<Tensor,Tensor> Tensor::topk(int64_t k, int64_t dim, bool large
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool, bool>(op, const_cast<Tensor&>(*this), k, dim, largest, sorted);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool, bool>(const_cast<Tensor&>(*this), k, dim, largest, sorted);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool, bool>(const_cast<Tensor&>(*this), k, dim, largest, sorted);
     }
 #endif
 }
@@ -6165,7 +6482,8 @@ inline Tensor Tensor::all() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -6177,7 +6495,8 @@ inline Tensor Tensor::any() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
@@ -6195,7 +6514,8 @@ inline Tensor Tensor::renorm(Scalar p, int64_t dim, Scalar maxnorm) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, Scalar, int64_t, Scalar>(op, const_cast<Tensor&>(*this), p, dim, maxnorm);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, Scalar, int64_t, Scalar>(const_cast<Tensor&>(*this), p, dim, maxnorm);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, Scalar, int64_t, Scalar>(const_cast<Tensor&>(*this), p, dim, maxnorm);
     }
 #endif
 }
@@ -6213,7 +6533,8 @@ inline Tensor Tensor::unfold(int64_t dimension, int64_t size, int64_t step) cons
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, int64_t, int64_t, int64_t>(op, const_cast<Tensor&>(*this), dimension, size, step);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, int64_t, int64_t, int64_t>(const_cast<Tensor&>(*this), dimension, size, step);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, int64_t, int64_t, int64_t>(const_cast<Tensor&>(*this), dimension, size, step);
     }
 #endif
 }
@@ -6234,7 +6555,8 @@ inline bool Tensor::equal(const Tensor & other) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<bool, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<bool, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<bool, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
     }
 #endif
 }
@@ -6252,7 +6574,8 @@ inline Tensor Tensor::pow(const Tensor & exponent) const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), exponent);
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), exponent);
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), exponent);
     }
 #endif
 }
@@ -6264,7 +6587,8 @@ inline Tensor Tensor::alias() const {
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
     } else {
-        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set())).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+            .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
     }
 #endif
 }
