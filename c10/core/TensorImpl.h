@@ -145,9 +145,17 @@ struct C10_API NonVariableTypeMode {
 
 #ifdef BUILD_NAMEDTENSOR
 struct C10_API NamedTensorMetaInterface {
-  virtual ~NamedTensorMetaInterface();
-  virtual std::unique_ptr<NamedTensorMetaInterface> clone() const;
-  virtual int64_t slow_dim() const;
+  virtual ~NamedTensorMetaInterface() {};
+  virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {
+    TORCH_INTERNAL_ASSERT(
+      false,
+      "Not implemented: NamedTensorMetaInterface::clone");
+  };
+  virtual int64_t slow_dim() const {
+    TORCH_INTERNAL_ASSERT(
+      false,
+      "Not implemented: NamedTensorMetaInterface::slow_dim");
+  };
 };
 #endif
 
@@ -853,6 +861,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Set the pointer to named tensor metadata.
    */
   void set_named_tensor_meta(std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta) {
+    TORCH_WARN_ONCE(
+        "Named tensors and all their associated APIs are an experimental feature ",
+        "and subject to change. Please do not use them for anything important ",
+        "until they are released as stable.");
 #ifdef DEBUG
     if (named_tensor_meta) {
       TORCH_INTERNAL_ASSERT(named_tensor_meta->slow_dim() == dim());
