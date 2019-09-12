@@ -113,7 +113,7 @@ std::vector<ideep::tensor> get_weight_itensors(const Tensor& flatten_weight,
   auto num_gates = get_num_gates(mode);
   auto num_biases = get_num_biases(mode);
 
-  auto base = flatten_weight.data<float>();
+  auto base = flatten_weight.data_ptr<float>();
   int64_t offset = 0;
   for (int64_t layer = 0; layer < num_layers; layer++) {
     for (int64_t direction = 0; direction < num_directions; direction++) {
@@ -186,6 +186,9 @@ std::tuple<Tensor, Tensor, Tensor> _mkldnn_rnn(const Tensor& input,
     hidden_x = hx_;
   }
 
+  // workspace only used in training
+  ideep::tensor ws;
+
   auto is_single_layer = num_layers * num_directions == 1;
   std::vector<ideep::tensor> hidden_x_arr{hidden_x};
   if (!is_single_layer) {
@@ -212,7 +215,8 @@ std::tuple<Tensor, Tensor, Tensor> _mkldnn_rnn(const Tensor& input,
     std::vector<int64_t> _output_size{seq_length, mini_batch, hidden_size};
     for (int64_t direction = 0; direction < num_directions; direction++) {
       auto index = layer * num_directions + direction;
-      auto reverse = (direction > 0);
+      auto dir = (direction > 0) ? ideep::rnn_direction::unidirectional_right2left
+          : ideep::rnn_direction::unidirectional_left2right;
       ideep::rnn_forward::compute<AllocForMKLDNN>(
           /* input     */ layer_x,
           /* {hx, cx}  */ hidden_x_arr[index],
@@ -221,8 +225,10 @@ std::tuple<Tensor, Tensor, Tensor> _mkldnn_rnn(const Tensor& input,
           /* bias      */ weight_arr[index * 3 + 2],
           /* output    */ {_output_size.cbegin(), _output_size.cend()}, layer_y[direction],
           /* {hy, cy}  */ {_hidden_size.cbegin(), _hidden_size.cend()}, hidden_y_arr[index],
+          /* workspace */ ws,
           /* rnn_kind  */ static_cast<ideep::rnn_kind>(mode),
-          /* direction */ reverse);
+          /* direction */ dir,
+          /* prop_kind */ ideep::prop_kind::forward_inference);
     }
     if (num_directions == 1) {
       layer_x = layer_y[0];
