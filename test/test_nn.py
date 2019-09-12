@@ -3390,7 +3390,7 @@ class TestNN(NNTestCase):
             self.assertRaises(RuntimeError, lambda: ln(input))
 
     def _test_LayerNorm_cuda_half(self):
-        input = torch.empty(2, 3, 3, 2, requires_grad=True).to("cuda", torch.half).random_(1, 10)
+        input = torch.empty(2, 3, 3, 2).to("cuda", torch.half).random_(1, 10).requires_grad_(True)
         m = nn.LayerNorm([3, 2]).to("cuda", torch.half)
         output = m(input)
         output.sum().backward()
@@ -4219,10 +4219,10 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_different_len_dicts(self):
         inputs = (
-            {'a': torch.randn(1, 2, requires_grad=True).cuda(0)},
+            {'a': torch.randn(1, 2, requires_grad=True, device="cuda:0")},
             {
-                'b': torch.randn(1, 2, requires_grad=True).cuda(1),
-                'a': torch.randn(1, 2, requires_grad=True).cuda(1),
+                'b': torch.randn(1, 2, requires_grad=True, device="cuda:1"),
+                'a': torch.randn(1, 2, requires_grad=True, device="cuda:1"),
             }
         )
         with self.assertRaises(ValueError):
@@ -6439,11 +6439,11 @@ class TestNN(NNTestCase):
         first_warn = True
         for rnn in rnns:
             rnn.cuda()
-            input = torch.randn(5, 4, 10, requires_grad=True).cuda()
-            hx = torch.randn(1, 5, 20, requires_grad=True).cuda()
+            input = torch.randn(5, 4, 10, requires_grad=True, device="cuda")
+            hx = torch.randn(1, 5, 20, requires_grad=True, device="cuda")
             all_vars = [input, hx] + list(rnn.parameters())
             if isinstance(rnn, nn.LSTM):
-                cx = torch.randn(1, 5, 20, requires_grad=True).cuda()
+                cx = torch.randn(1, 5, 20, requires_grad=True, device="cuda")
                 all_vars[2:2] = [cx]
                 hx = (hx, cx)
 
@@ -6488,13 +6488,13 @@ class TestNN(NNTestCase):
         for rnn in rnns:
             rnn.bias_ih_l0_reverse = rnn.bias_ih_l0
             rnn.cuda()
-            input = torch.randn(5, 4, 10, requires_grad=True).cuda()
-            hx = torch.randn(2, 5, 20, requires_grad=True).cuda()
+            input = torch.randn(5, 4, 10, requires_grad=True, device="cuda")
+            hx = torch.randn(2, 5, 20, requires_grad=True, device="cuda")
             all_vars = [input, hx] + list(rnn.parameters())
             opt = torch.optim.SGD(rnn.parameters(), lr=0.1)
             opt.zero_grad()
             if isinstance(rnn, nn.LSTM):
-                cx = torch.randn(2, 5, 20, requires_grad=True).cuda()
+                cx = torch.randn(2, 5, 20, requires_grad=True, device="cuda")
                 all_vars[2:2] = [cx]
                 hx = (hx, cx)
 
