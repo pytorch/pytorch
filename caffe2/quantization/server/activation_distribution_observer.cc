@@ -569,6 +569,7 @@ RegisterQuantizationParamsWithHistogramNetObserver::
 
       Histogram hist = Histogram(min, max, bins);
 
+      LOG(INFO) << "Choosing qparams for " << tensor_name;
       TensorQuantizationParams qparams;
       if (max > min) {
         unique_ptr<QuantizationFactory> qfactory(GetQuantizationFactoryOf(op));
