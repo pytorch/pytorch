@@ -181,8 +181,13 @@ class RRef {
 
   virtual ~RRef() = default;
 
-  worker_id_t owner() const;
-  const RRefId& id() const;
+  inline worker_id_t owner() const {
+    return ownerId_;
+  }
+
+  inline const RRefId& rrefId() const {
+    return rrefId_;
+  }
 
   virtual bool isOwner() const = 0;
 
@@ -203,8 +208,13 @@ class RRef {
 template <typename T>
 class UserRRef final : public RRef {
  public:
-  bool isOwner() const override;
-  bool isPyObj() override;
+  inline bool isOwner() const override {
+    return false;
+  }
+
+  inline bool isPyObj() override {
+    return std::is_same<T, py::object>::value;
+  }
 
   const ForkId& forkId() const;
   T toHere();
@@ -224,8 +234,13 @@ class UserRRef final : public RRef {
 template <typename T>
 class OwnerRRef final : public RRef {
  public:
-  bool isOwner() const override;
-  bool isPyObj() override;
+  inline bool isOwner() const override {
+    return true;
+  }
+
+  inline bool isPyObj() override {
+    return std::is_same<T, py::object>::value;
+  }
 
   T getValue() const;
   void setValue(T&& value);
@@ -237,7 +252,7 @@ class OwnerRRef final : public RRef {
       : OwnerRRef(ownerId, rrefId, {}) {}
 
   OwnerRRef(OwnerRRef<T>&& other) noexcept
-      : OwnerRRef(other.owner(), other.id(), std::move(other.value_)) {}
+      : OwnerRRef(other.owner(), other.rrefId(), std::move(other.value_)) {}
 
   OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, c10::optional<T> value)
       : RRef(ownerId, rrefId) {

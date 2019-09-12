@@ -4,6 +4,15 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+static_assert(
+    std::numeric_limits<local_id_t>::max() <=
+        std::numeric_limits<int64_t>::max(),
+    "The max value of local_id_t must be within the range of int64_t");
+static_assert(
+    std::numeric_limits<worker_id_t>::max() <=
+        std::numeric_limits<int64_t>::max(),
+    "The max value of worker_id_t must be within the range of int64_t");
+
 GloballyUniqueId::GloballyUniqueId(worker_id_t createdOn, local_id_t localId)
     : createdOn_(createdOn), localId_(localId) {}
 
@@ -16,8 +25,8 @@ bool GloballyUniqueId::operator!=(const GloballyUniqueId& other) const {
 }
 
 at::IValue GloballyUniqueId::toIValue() const {
-  std::vector<at::IValue> ivalues = {(int64_t)createdOn_, (int64_t)localId_};
-  return c10::ivalue::Tuple::create(std::move(ivalues));
+  return c10::ivalue::Tuple::create(
+      {static_cast<int64_t>(createdOn_), static_cast<int64_t>(localId_)});
 }
 
 GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
@@ -28,18 +37,17 @@ GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
       "expects a GenericList of two elements, but got ",
       ivalues.size());
 
-  worker_id_t createdOn = ivalues[0].toInt();
-  local_id_t localId = ivalues[1].toInt();
-
   TORCH_CHECK(
-      createdOn < std::numeric_limits<worker_id_t>::max(),
+      ivalues[0].toInt() < std::numeric_limits<worker_id_t>::max(),
       "GloballyUniqueId createdOn out of range, got ",
-      createdOn);
+      ivalues[0].toInt());
+  worker_id_t createdOn = ivalues[0].toInt();
 
   TORCH_CHECK(
-      localId < std::numeric_limits<local_id_t>::max(),
+      ivalues[1].toInt() < std::numeric_limits<local_id_t>::max(),
       "GloballyUniqueId localId out of range, got ",
-      localId);
+      ivalues[1].toInt());
+  local_id_t localId = ivalues[1].toInt();
 
   return GloballyUniqueId(createdOn, localId);
 }

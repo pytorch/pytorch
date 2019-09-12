@@ -10,7 +10,8 @@ namespace rpc {
 namespace {
 
 std::vector<IValue> toIValues(const Message& message, MessageType type) {
-  TORCH_INTERNAL_ASSERT(type == message.type(),
+  TORCH_INTERNAL_ASSERT(
+      type == message.type(),
       "Expecting message of type ",
       type,
       ", but got ",
@@ -43,11 +44,12 @@ Message RRefMessageBase::toMessage() const {
 }
 
 at::IValue RRefMessageBase::fromMessage(
-    const Message& message, MessageType type) {
+    const Message& message,
+    MessageType type) {
   auto values = toIValues(message, type);
 
-  TORCH_INTERNAL_ASSERT(values.size() == 1,
-      "ScriptUserDelete expects 1 IValue from message.");
+  TORCH_INTERNAL_ASSERT(
+      values.size() == 1, "ScriptUserDelete expects 1 IValue from message.");
   return std::move(values.back());
 }
 
@@ -58,21 +60,16 @@ const ForkId& ForkMessageBase::forkId() {
 }
 
 Message ForkMessageBase::toMessage() const {
-  return fromIValues(
-      {
-          rrefId_.toIValue(),
-          forkId_.toIValue()
-      },
-      type_
-  );
+  return fromIValues({rrefId_.toIValue(), forkId_.toIValue()}, type_);
 }
 
 std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
-    const Message& message, MessageType type) {
+    const Message& message,
+    MessageType type) {
   auto ivalues = toIValues(message, type);
 
-  TORCH_INTERNAL_ASSERT(ivalues.size() == 2,
-      "ScriptUserDelete expects 2 IValue from message.");
+  TORCH_INTERNAL_ASSERT(
+      ivalues.size() == 2, "ScriptUserDelete expects 2 IValue from message.");
 
   return std::make_pair(
       RRefId::fromIValue(ivalues[0]), ForkId::fromIValue(ivalues[1]));
@@ -81,15 +78,13 @@ std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
 /////////////////////////// RRef Protocol //////////////////////////////////
 
 ScriptRRefFetchCall ScriptRRefFetchCall::fromMessage(const Message& message) {
-  return ScriptRRefFetchCall(RRefId::fromIValue(
-      RRefMessageBase::fromMessage(
-          message, MessageType::SCRIPT_RREF_FETCH_CALL)));
+  return ScriptRRefFetchCall(RRefId::fromIValue(RRefMessageBase::fromMessage(
+      message, MessageType::SCRIPT_RREF_FETCH_CALL)));
 }
 
 PythonRRefFetchCall PythonRRefFetchCall::fromMessage(const Message& message) {
-  return PythonRRefFetchCall(RRefId::fromIValue(
-      RRefMessageBase::fromMessage(
-          message, MessageType::PYTHON_RREF_FETCH_CALL)));
+  return PythonRRefFetchCall(RRefId::fromIValue(RRefMessageBase::fromMessage(
+      message, MessageType::PYTHON_RREF_FETCH_CALL)));
 }
 
 const at::IValue& RRefFetchRet::value() {
@@ -104,9 +99,7 @@ Message RRefFetchRet::toMessage() const {
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
 
   return Message(
-      std::move(payload),
-      std::move(tensor_table),
-      MessageType::RREF_FETCH_RET);
+      std::move(payload), std::move(tensor_table), MessageType::RREF_FETCH_RET);
 }
 
 RRefFetchRet RRefFetchRet::fromMessage(const Message& message) {
@@ -122,14 +115,14 @@ RRefFetchRet RRefFetchRet::fromMessage(const Message& message) {
 }
 
 RRefUserDelete RRefUserDelete::fromMessage(const Message& message) {
-  auto pair = ForkMessageBase::fromMessage(
-      message, MessageType::RREF_USER_DELETE);
+  auto pair =
+      ForkMessageBase::fromMessage(message, MessageType::RREF_USER_DELETE);
   return RRefUserDelete(pair.first, pair.second);
 }
 
 RRefUserAccept RRefUserAccept::fromMessage(const Message& message) {
-  auto pair = ForkMessageBase::fromMessage(
-      message, MessageType::RREF_USER_ACCEPT);
+  auto pair =
+      ForkMessageBase::fromMessage(message, MessageType::RREF_USER_ACCEPT);
   return RRefUserAccept(pair.first, pair.second);
 }
 
@@ -144,13 +137,8 @@ worker_id_t RRefForkNotify::forkDst() const {
 
 Message RRefForkNotify::toMessage() const {
   return fromIValues(
-      {
-          rrefId_.toIValue(),
-          forkId_.toIValue(),
-          IValue(forkDst_)
-      },
-      MessageType::RREF_FORK_NOTIFY
-  );
+      {rrefId_.toIValue(), forkId_.toIValue(), IValue(forkDst_)},
+      MessageType::RREF_FORK_NOTIFY);
 }
 
 RRefForkNotify RRefForkNotify::fromMessage(const Message& message) {
@@ -158,7 +146,8 @@ RRefForkNotify RRefForkNotify::fromMessage(const Message& message) {
 
   AT_ASSERT(values.size() == 3, "Expect 3 IValues from message.");
   auto forkDst = values.back().toInt();
-  AT_ASSERT(forkDst < std::numeric_limits<worker_id_t>::max(),
+  AT_ASSERT(
+      forkDst < std::numeric_limits<worker_id_t>::max(),
       "Fork destination worker id out of bound ",
       forkDst);
   values.pop_back();

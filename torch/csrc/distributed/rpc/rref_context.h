@@ -23,14 +23,21 @@ class RRefContext {
   RRefContext(const RRefContext&) = delete;
   void operator=(const RRefContext&) = delete;
 
-  worker_id_t getWorkerId() const;
-  const std::string& getWorkerName() const;
-  RRefId genRRefId();
-  const std::shared_ptr<RpcAgent>& agent() const;
+  inline worker_id_t getWorkerId() const {
+    return agent_->getWorkerId().id_;
+  }
 
-  // create a new RRef
-  template <typename T>
-  std::shared_ptr<OwnerRRef<T>> createOwnerRRef();
+  inline const std::string& getWorkerName() const {
+    return agent_->getWorkerId().name_;
+  }
+
+  inline RRefId genRRefId() {
+    return RRefId(getWorkerId(), nextLocalId_++);
+  }
+
+  inline const std::shared_ptr<RpcAgent>& agent() const {
+    return agent_;
+  }
 
   template <typename T>
   std::shared_ptr<UserRRef<T>> createUserRRef(worker_id_t ownerId);

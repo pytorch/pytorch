@@ -36,17 +36,18 @@ class TORCH_API ForkMessageBase : public RRefMessageBase {
 
   virtual Message toMessage() const;
   static std::pair<RRefId, ForkId> fromMessage(
-      const Message& message, MessageType type);
+      const Message& message,
+      MessageType type);
 
  protected:
   const ForkId forkId_;
 };
 
 // UserRRef uses this message to fetch the remote RRef value from the owner.
-class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase  {
+class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
  public:
   ScriptRRefFetchCall(const RRefId& rrefId)
-      : RRefMessageBase(rrefId, MessageType::SCRIPT_RREF_FETCH_CALL){}
+      : RRefMessageBase(rrefId, MessageType::SCRIPT_RREF_FETCH_CALL) {}
 
   static ScriptRRefFetchCall fromMessage(const Message& message);
 };
@@ -78,7 +79,7 @@ class TORCH_API RRefFetchRet final {
 class TORCH_API RRefUserDelete final : public ForkMessageBase {
  public:
   RRefUserDelete(const RRefId& rrefId, const ForkId& forkId)
-    : ForkMessageBase(rrefId, forkId, MessageType::RREF_USER_DELETE) {}
+      : ForkMessageBase(rrefId, forkId, MessageType::RREF_USER_DELETE) {}
 
   static RRefUserDelete fromMessage(const Message& message);
 };

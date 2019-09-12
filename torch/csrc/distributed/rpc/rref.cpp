@@ -51,14 +51,6 @@ RRefForkData RRefForkData::fromIValue(const at::IValue& ivalue) {
 RRef::RRef(worker_id_t ownerId, const RRefId& rrefId)
     : ownerId_(ownerId), rrefId_(rrefId) {}
 
-worker_id_t RRef::owner() const {
-  return ownerId_;
-}
-
-const RRefId& RRef::id() const {
-  return rrefId_;
-}
-
 RRefForkData RRef::fork() const {
   return RRefForkData(
       ownerId_, rrefId_, RRefContext::getInstance()->genRRefId());
@@ -95,9 +87,8 @@ UserRRef<T>::~UserRRef() {
         ctx->agent()->getWorkerId(ownerId_),
         RRefUserDelete(rrefId_, forkId_).toMessage());
 
-    fm->addCallback([](const Message& message){
-      RRefContext::handleException(message);
-    });
+    fm->addCallback(
+        [](const Message& message) { RRefContext::handleException(message); });
   }
 }
 
@@ -106,22 +97,11 @@ const ForkId& UserRRef<T>::forkId() const {
   return forkId_;
 }
 
-template <typename T>
-bool UserRRef<T>::isOwner() const {
-  return false;
-}
-
-template <typename T>
-bool UserRRef<T>::isPyObj() {
-  return std::is_same<T, py::object>::value;
-}
-
 template <>
 IValue UserRRef<IValue>::toHere() {
   auto& agent = RRefContext::getInstance()->agent();
   std::shared_ptr<FutureMessage> fm = agent->send(
-      agent->getWorkerId(ownerId_),
-      ScriptRRefFetchCall(id()).toMessage());
+      agent->getWorkerId(ownerId_), ScriptRRefFetchCall(rrefId()).toMessage());
   const Message& message = fm->wait();
   RRefContext::handleException(message);
   auto srv = RRefFetchRet::fromMessage(message);
@@ -132,8 +112,7 @@ template <>
 py::object UserRRef<py::object>::toHere() {
   auto& agent = RRefContext::getInstance()->agent();
   std::shared_ptr<FutureMessage> fm = agent->send(
-      agent->getWorkerId(ownerId_),
-      PythonRRefFetchCall(id()).toMessage());
+      agent->getWorkerId(ownerId_), PythonRRefFetchCall(rrefId()).toMessage());
   const Message& message = fm->wait();
   RRefContext::handleException(message);
   auto srv = RRefFetchRet::fromMessage(message);
@@ -144,11 +123,6 @@ template class UserRRef<IValue>;
 template class UserRRef<py::object>;
 
 //////////////////////////  OwnerRRef  /////////////////////////////////////
-
-template <typename T>
-bool OwnerRRef<T>::isOwner() const {
-  return true;
-}
 
 template <typename T>
 T OwnerRRef<T>::getValue() const {
@@ -165,11 +139,6 @@ void OwnerRRef<T>::setValue(T&& value) {
     value_ = std::move(value);
   }
   valueCV_.notify_all();
-}
-
-template <typename T>
-bool OwnerRRef<T>::isPyObj() {
-  return std::is_same<T, py::object>::value;
 }
 
 template class OwnerRRef<IValue>;
