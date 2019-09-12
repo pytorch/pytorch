@@ -13,13 +13,13 @@ chmod +x ~/Downloads/conda.sh
 export PATH="~/anaconda/bin:${PATH}"
 source ~/anaconda/bin/activate
 # Install dependencies
-conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests
+# conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests
 # sync submodules
 cd ${PROJ_ROOT}
 git submodule sync
 git submodule update --init --recursive
 # export 
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+# export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 # run build script
 chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
 echo "########################################################"
@@ -27,7 +27,9 @@ cat ${PROJ_ROOT}/scripts/build_ios.sh
 echo "########################################################"
 echo "IOS_ARCH: ${IOS_ARCH}"
 echo "IOS_PLATFORM: ${IOS_PLATFORM}"
-BUILD_PYTORCH_MOBILE=1
+export BUILD_PYTORCH_MOBILE=1
+export IOS_ARCH=${IOS_ARCH}
+export IOS_PLATFORM=${IOS_PLATFORM}
 unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
 # CMAKE_ARGS=() ruffjjffkjlvldgitujelnivkbktdifi
 # if [ -n "${IOS_ARCH:-}" ]; then

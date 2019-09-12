@@ -4,7 +4,6 @@
           build_environment: "libtorch-ios-10.2.1-nightly-x86_64-build"
           ios_platform: "SIMULATOR"
           ios_arch: "x86_64"
-          use_nnpack: "OFF"
           requires: 
             - setup
       - binary_ios_build:
