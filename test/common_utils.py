@@ -471,8 +471,7 @@ try:
                 derandomize=True,
                 suppress_health_check=[hypothesis.HealthCheck.too_slow],
                 database=None,
-                max_examples=100,
-                verbosity=hypothesis.Verbosity.verbose))
+                max_examples=100))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(
@@ -495,8 +494,7 @@ try:
                 suppress_health_check=[hypothesis.HealthCheck.too_slow],
                 database=None,
                 max_examples=100,
-                min_satisfying_examples=1,
-                verbosity=hypothesis.Verbosity.verbose))
+                min_satisfying_examples=1))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(
@@ -1138,7 +1136,7 @@ def triangular_solve_test_helper(A_dims, b_dims, cast, upper, unitriangular):
 def solve_test_helper(A_dims, b_dims, cast):
     b = cast(torch.randn(*b_dims))
     A = cast(random_fullrank_matrix_distinct_singular_value(*A_dims))
-    return b, A    
+    return b, A
 
 
 def brute_pdist(inp, p=2):
