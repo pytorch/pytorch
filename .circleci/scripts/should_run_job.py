@@ -38,7 +38,7 @@ default_set = set([
     'libtorch-ios-10.2.1-nightly-x86_64-build',
     'libtorch-ios-10.2.1-nightly-arm64-build',
     'libtorch-ios-10.2.1-nightly-armv7s-build',
-    'libtorch-ios-10.2.1-bianry-upload',
+    'libtorch-ios-10.2.1-nightly-binary-build-upload',
 
     # Caffe2 Android
     'caffe2-py2-android-ubuntu16.04',
