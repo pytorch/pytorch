@@ -104,14 +104,14 @@ static void launch_kernel(int64_t N, const func_t& f) {
 
 template <typename traits, typename func_t, typename index_t, size_t... I>
 C10_HOST_DEVICE typename traits::result_type
-invoke_impl(const func_t &f, char *const data[], const index_t strides[], int i,
+invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i,
             c10::guts::index_sequence<I...>) {
   return f(*(typename traits::template arg<I>::type*)(data[I] + i * strides[I])...);
 }
 
 template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
 C10_HOST_DEVICE typename traits::result_type
-invoke(const func_t &f, char *const data[], const index_t strides[], int i) {
+invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i) {
   using Indices = c10::guts::make_index_sequence<traits::arity>;
   return invoke_impl<traits>(f, data, strides, i, Indices{});
 }
