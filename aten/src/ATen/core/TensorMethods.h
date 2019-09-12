@@ -11,9 +11,7 @@
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <ATen/core/dispatch/Dispatcher.h>
 #endif
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/NamedTensor.h>
-#endif
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
 #include <ATen/CPUType.h>
