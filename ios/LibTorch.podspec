@@ -4,7 +4,7 @@ Pod::Spec.new do |s|
     s.authors          = 'PyTorch Team'
     s.license          = { :type => 'BSD' }
     s.homepage         = 'https://github.com/pytorch/pytorch'
-    s.source           = { :http => 'http://ossci-macos.s3.amazonaws.com/libtorch_x86_arm64.zip' }
+    s.source           = { :http => 'http://ossci-ios-build.s3.amazonaws.com/libtorch_ios_nightly_build.zip' }
     s.summary          = 'The PyTorch C++ library for iOS'
     s.description      = <<-DESC
         The PyTorch C++ library for iOS.
@@ -18,7 +18,7 @@ Pod::Spec.new do |s|
     s.subspec 'Torch' do |ss|
         ss.header_mappings_dir = 'install/include/'
         ss.preserve_paths = 'install/include/**/*.{h,cpp,cc,c}' 
-        ss.vendored_libraries = 'install/lib/libtorch.a'
+        ss.vendored_libraries = 'install/lib/*.a'
         ss.libraries = ['c++', 'stdc++']
     end
     s.user_target_xcconfig = {
@@ -27,8 +27,9 @@ Pod::Spec.new do |s|
         'CLANG_CXX_LANGUAGE_STANDARD' => 'c++11',
         'CLANG_CXX_LIBRARY' => 'libc++'
     }
-    s.pod_target_xcconfig = { 'VALID_ARCHS' => 'x86_64 armv7s arm64' }
-    s.module_name='LibTorch'
-    s.module_map = 'src/framework.modulemap'
+    s.pod_target_xcconfig = { 
+        'HEADER_SEARCH_PATHS' => '$(inherited) "$(PODS_ROOT)/LibTorch/install/include/"', 
+        'VALID_ARCHS' => 'x86_64 armv7s arm64' 
+    }
     s.library = ['c++', 'stdc++']
 end
