@@ -3453,7 +3453,6 @@ class TestNN(NNTestCase):
             self.assertRaises(RuntimeError, lambda: gn(input))
 
     def _test_GroupNorm_cuda_half(self):
-        input = torch.empty(2, 3, 3, 2, requires_grad=True).to("cuda", torch.half).random_(1, 10)
         input = torch.zeros(2, 4, 3, 2, requires_grad=True).cuda().half().random_(1, 10)
         m = nn.GroupNorm(2, 4).to("cuda", torch.half)
         output = m(input)
