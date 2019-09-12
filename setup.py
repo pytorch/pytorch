@@ -61,7 +61,7 @@
 #   BUILD_CAFFE2_OPS=0
 #     disable Caffe2 operators build
 #
-#   USE_GLOO_IBVERBS
+#   USE_IBVERBS
 #     toggle features related to distributed support
 #
 #   USE_OPENCV

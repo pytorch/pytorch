@@ -4,14 +4,14 @@
 #include <cuda_runtime.h>
 #endif
 
-static PyObject * THPStorage_(size)(THPStorage *self)
+static PyObject * THPStorage_(size)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return PyLong_FromLong(THWStorage_(size)(LIBRARY_STATE self->cdata));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(dataPtr)(THPStorage *self)
+static PyObject * THPStorage_(dataPtr)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(THWStorage_(data)(LIBRARY_STATE self->cdata));
@@ -25,7 +25,7 @@ static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *k
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(isPinned)(THPStorage *self)
+static PyObject * THPStorage_(isPinned)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
 #if defined(USE_CUDA)
@@ -36,14 +36,14 @@ static PyObject * THPStorage_(isPinned)(THPStorage *self)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(elementSize)(THPStorage *self)
+static PyObject * THPStorage_(elementSize)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return PyLong_FromLong(THWStorage_(elementSize)(LIBRARY_STATE_NOARGS));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(new)(THPStorage *self)
+static PyObject * THPStorage_(new)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   THWStoragePtr new_storage(THWStorage_(new)(LIBRARY_STATE_NOARGS));
@@ -278,7 +278,7 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
 }
 
 #ifdef THC_GENERIC_FILE
-PyObject * THPStorage_(getDevice)(THPStorage *self)
+PyObject * THPStorage_(getDevice)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return PyLong_FromLong(THCStorage_(getDevice)(LIBRARY_STATE self->cdata));
@@ -302,7 +302,7 @@ PyObject * THPStorage_(_setCdata)(THPStorage *self, PyObject *new_cdata)
 }
 
 static PyMethodDef THPStorage_(methods)[] = {
-  {"copy_", (PyCFunction)THPStorage_(copy_), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"copy_", (PyCFunction)(void(*)(void))THPStorage_(copy_), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"element_size", (PyCFunction)THPStorage_(elementSize), METH_NOARGS, nullptr},
   {"fill_", (PyCFunction)THPStorage_(fill_), METH_O, nullptr},
   {"new", (PyCFunction)THPStorage_(new), METH_NOARGS, nullptr},
@@ -311,12 +311,12 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"data_ptr", (PyCFunction)THPStorage_(dataPtr), METH_NOARGS, nullptr},
   {"is_pinned", (PyCFunction)THPStorage_(isPinned), METH_NOARGS, nullptr},
   {"_write_file", (PyCFunction)THPStorage_(writeFile), METH_VARARGS, nullptr},
-  {"_new_with_file", (PyCFunction)THPStorage_(newWithFile), METH_O | METH_STATIC, nullptr},
+  {"_new_with_file", (PyCFunction)(void(*)(void))THPStorage_(newWithFile), METH_O | METH_STATIC, nullptr},
   {"_set_from_file", (PyCFunction)THPStorage_(setFromFile), METH_VARARGS, nullptr},
 #if !defined(THC_GENERIC_FILE)
-  {"from_buffer", (PyCFunction)THPStorage_(fromBuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"from_buffer", (PyCFunction)(void(*)(void))THPStorage_(fromBuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
 #endif
-  {"from_file", (PyCFunction)THPStorage_(fromFile), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"from_file", (PyCFunction)(void(*)(void))THPStorage_(fromFile), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
 #ifdef THC_GENERIC_FILE
   {"get_device", (PyCFunction)THPStorage_(getDevice), METH_NOARGS, nullptr},
 #endif
