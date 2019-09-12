@@ -627,27 +627,24 @@ int64_t decrement_kernel(int64_t a) {
 
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutogradKernel) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(int dummy) -> int", c10::RegisterOperators::options()
-    .impl_unboxedAutogradKernel(&increment_kernel));
+    .impl_unboxedOnlyKernel(TensorTypeId::VariableTensorId, &increment_kernel));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
-  int64_t result = c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, int64_t>(*op, 4);
+  int64_t result = c10::Dispatcher::singleton().lookup(*op, TensorTypeId::VariableTensorId).callUnboxed<int64_t, int64_t>(*op, 4);
   EXPECT_EQ(5, result);
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_thenCanCallAutogradKernel) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(int dummy) -> int", c10::RegisterOperators::options()
     .catchAllKernel<decltype(decrement_kernel), &decrement_kernel>()
-    .impl_unboxedAutogradKernel(&increment_kernel));
+    .impl_unboxedOnlyKernel(TensorTypeId::VariableTensorId, &increment_kernel));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
-  int64_t result = c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, int64_t>(*op, 4);
+  int64_t result = c10::Dispatcher::singleton().lookup(*op, TensorTypeId::VariableTensorId).callUnboxed<int64_t, int64_t>(*op, 4);
   EXPECT_EQ(5, result);
 }
-
-// TODO Test cases that adding multiple autograd kernels, removing some, and so on works
-//      (similar to test cases above for regular kernels "_whenNewerAndThenOlderKernelDeletedAndOpCalled")
 
 /**
  * This is used to check that a given type works correctly when passed as input
