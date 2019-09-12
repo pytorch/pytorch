@@ -79,6 +79,17 @@ def out_fn(operator):
 
 
 class TestNamedTensor(TestCase):
+    def test_aaa_must_run_first_check_experimental_warning(self):
+        # TODO(rzou): It would be nice for this to be a "real" python warning.
+        # Right now this error message only prints once and doesn't respect
+        # warnings.simplefilter behavior (where python users can control whether
+        # or not to display warnings once, all the time, or never).
+        with warnings.catch_warnings(record=True) as warns:
+            x = torch.randn(3, 3, names=('N', 'C'))
+            self.assertEqual(len(warns), 1)
+            self.assertTrue(str(warns[0].message).startswith(
+                'Named tensors and all their associated APIs are an experimental feature'))
+
     def test_trivial(self):
         pass
 
