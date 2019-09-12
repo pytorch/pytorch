@@ -126,6 +126,9 @@ struct BailOutGraphBuilderForNode {
     WithInsertPoint guard(*block->nodes().end());
     auto updated_max_trip_count =
         copy_graph_->insert(aten::sub, {old_max_count, cur_iter});
+    auto one = copy_graph_->insertConstant({1});
+    updated_max_trip_count =
+        copy_graph_->insert(aten::sub, {updated_max_trip_count, one});
     mapExistingInputForValue(outer_node->inputs()[0], updated_max_trip_count);
     buildBailOutBlockFrom(outer_node);
   }
@@ -152,8 +155,13 @@ struct BailOutGraphBuilderForNode {
     // and loop counts for loops `n` is contained in
     // to make sure we can line bailout grap's inputs up properly
     // with arguments to this BailOut node.
-    getOrAddInputForValue(n->input(0));
-    mapLoopCounts(n);
+
+    // getOrAddInputForValue(n->input(0));
+    // mapLoopCounts(n);
+    for (auto bi : n->inputs()) {
+      getOrAddInputForValue(bi);
+    }
+
     buildBailOutBlockFrom(n);
     // add graph outputs
     for (auto ov : graph_->outputs()) {

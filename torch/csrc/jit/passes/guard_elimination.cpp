@@ -20,11 +20,6 @@ struct GuardElimination {
     GRAPH_DUMP("After moveGuardsToDefs", graph_);
     coalesceGuards(graph_->block());
     GRAPH_DUMP("After coalesceGuards", graph_);
-    runRequiredPasses(graph_);
-    ConstantPropagation(graph_);
-    GRAPH_DUMP("After ConstantPropagation in GuardElimination.run", graph_);
-    PeepholeOptimize(graph_);
-    GRAPH_DUMP("After PeepholeOptimize ", graph_);
     eliminateRedundantGuards(graph_->block());
     GRAPH_DUMP("After eliminateRedundantGuards", graph_);
   }
@@ -92,21 +87,14 @@ struct GuardElimination {
     }
   }
 
+  // we need to make sure there are no ops in between guardee's
+  // output and its guard except for other guards as they can
+  // invalidate shape information.
   bool guardsOutput(Node* guard) {
     auto output = guard->input()->node();
     auto it = guard;
-
-    // This is needed because peephole which we in turn need to eliminate
-    // aten::size also eliminates aten::_grad_sum_to_size
-    // thus moving the guard away from its definition and when we try to walk
-    // back to definition we hit aten::add
-    // Another way to fix this is to not run peephole but have a smaller pass
-    // here which transforms aten::size to a constant
-    std::unordered_set<Symbol> allowed_symbols = {
-        aten::add, aten::neg, aten::div, aten::mul, aten::_grad_sum_to_size};
     while (it != output) {
-      if (it->kind() != prim::Guard && it->kind() != prim::Constant &&
-          allowed_symbols.count(it->kind()) == 0) {
+      if (it->kind() != prim::Guard && it->kind() != prim::Constant) {
         GRAPH_DEBUG("found an unexpected node ", *it,
                     " while trying to eliminate ", *guard);
         return false;
@@ -145,7 +133,8 @@ struct GuardElimination {
     bool all_inputs_guarded = true;
     size_t i = 0;
     for (auto input : n->inputs()) {
-      if (input->node()->kind() == prim::Guard ||
+      if ((input->node()->kind() == prim::Guard &&
+           input->type()->expect<TensorType>()->isSummarized()) ||
           input->node()->kind() == prim::Constant ||
           input->type()->isSubtypeOf(NumberType::get()) ||
           except.count(i) != 0) {
@@ -164,10 +153,12 @@ struct GuardElimination {
   }
 
 private:
-  // `removableGuard` checks if it is valid to remove the `prim::Guard`
-  // guarding the output of some operation.
-  // For a large number of operations, the test is to simply check
-  // that all inputs to the operation are also guarded.
+  // `removableGuard` relies on the following assumptions:
+  // * prim::Guard checks against the properties tracked by `isComplete()`
+  // * Passes shouldn't degrade profiling information in guards
+  // * Passes shouldn't insert nodes between guards and their uses
+  // If these 3 assumptions hold, the guard on op's output can be removed
+  // if its inputs are either prim::Guard's or prim::Constant's
   bool removableGuard(Node *n) {
 
     const static auto no_exceptions = std::unordered_set<size_t>{};
@@ -190,7 +181,6 @@ private:
     case aten::eq:
     case aten::ne:
     case aten::neg:
-    case aten::_grad_sum_to_size:
     case prim::ConstantChunk:
     case aten::size:
       return checkInputs(n, no_exceptions);
@@ -207,6 +197,24 @@ private:
       return checkInputs(n, std::unordered_set<size_t>{1, 2});
     // after some optimizations we might end up with two Guards back-to-back
     // which case we can remove the one whose input is also prim::Guard
+    case aten::_grad_sum_to_size:
+      // skip checking size argument
+      if (checkInputs(n, std::unordered_set<size_t>{1})) {
+        auto asize = n->input(1)->node();
+        if (asize->kind() == prim::Constant) {
+          return true;
+        } else if (asize->matches("aten::size(Tensor self) -> int[]")) {
+          // aten::size is effectively a constant
+          if (asize->input()
+                  ->type()
+                  ->expect<TensorType>()
+                  ->sizes()
+                  .concrete_sizes()) {
+            return true;
+          }
+        }
+      }
+      return false;
     case prim::Guard:
       return true;
     default:

@@ -18,7 +18,7 @@ void specializeAutogradZero(Graph &g) {
   for (Value* input : g.inputs()) {
     const auto& tp = input->type();
     if (auto tt = tp->cast<TensorType>()) {
-      if (tt->autogradZero() && *tt->autogradZero()) {
+      if (tt->undefined() && *tt->undefined()) {
         state[input] = State::Zero;
       } else {
         state[input] = State::Nonzero;
@@ -61,6 +61,11 @@ void specializeAutogradZero(Graph &g) {
             // where we do not know if a value is Nonzero since at the top level
             // a gradient graph is composed of Linear nodes and AutogradAdds
             // and LinearNodes only appear in these graphs
+
+            if (state[input] == State::Unknown) {
+              std::cout << "State::Unknown:\n";
+              g.dump();
+            }
             AT_ASSERT(state[input] != State::Unknown);
           }
           // hoist the nodes in the GradOf body to be before the linear block
@@ -89,7 +94,6 @@ void specializeAutogradZero(Graph &g) {
         } else if (state[a] == State::Nonzero && state[b] == State::Nonzero) {
           // when both are Nonzero, we can use a normal, optimizable add
           // instruction
-
           WithInsertPoint guard(n);
           Value* new_add = toVar(a) + toVar(b);
           state[new_add] = State::Nonzero;
@@ -118,12 +122,18 @@ void specializeAutogradZero(Graph &g) {
       case prim::BailOut: {
         if (auto ptt = n->output()->type()->expect<TensorType>()) {
           state[n->output()] =
-              ptt->autogradZero() ? State::Zero : State::Nonzero;
+              ptt->undefined()
+                  ? *ptt->undefined() ? State::Zero : State::Nonzero
+                  : State::Unknown;
         }
       } break;
       case prim::Guard: {
-        auto ptt = n->output()->type()->expect<TensorType>();
-        state[n->output()] = ptt->autogradZero() ? State::Zero : State::Nonzero;
+        if (auto ptt = n->output()->type()->expect<TensorType>()) {
+          state[n->output()] =
+              ptt->undefined()
+                  ? *ptt->undefined() ? State::Zero : State::Nonzero
+                  : State::Unknown;
+        }
       } break;
       default:
         for (auto o : n->outputs()) {

@@ -760,6 +760,14 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
   }
 
   if (!shouldAnnotate(from)) {
+    if (shouldAnnotate(to)) {
+      auto mto = const_cast<Value *>(to);
+      std::cout << "from = " << *from->type() << std::endl;
+      std::cout << "to = " << *to->type() << std::endl;
+      std::cout << "node = " << *mto->node() << std::endl;
+      mto->node()->owningGraph()->dump();
+      std::cout << *((int *)0);
+    }
     TORCH_INTERNAL_ASSERT(!shouldAnnotate(to));
     return;
   }

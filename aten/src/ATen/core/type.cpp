@@ -29,7 +29,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       }
       out << ")";
     }
-    if (value->autogradZero() && *value->autogradZero()) {
+    if (value->undefined() && *value->undefined()) {
       out << "[AutogradZero]";
     }
   } else if(t.kind() == TypeKind::ListType) {
