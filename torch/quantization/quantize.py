@@ -7,9 +7,9 @@ import torch.nn._intrinsic.quantized as nniq
 import torch.nn._intrinsic.qat as nniqat
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-from .QConfig import default_dynamic_qconfig
+from .QConfig import default_dynamic_qconfig, default_debug_qconfig
 import torch.nn.qat as nnqat
-
+from collections import OrderedDict
 
 DEFAULT_SKIP_LIST = [nn.Dropout, nn.Identity, nn.MaxPool2d, nn.AvgPool2d, nn.AdaptiveAvgPool2d]
 
@@ -127,6 +127,55 @@ class QuantWrapper(nn.Module):
         X = self.quant(X)
         X = self.module(X)
         return self.dequant(X)
+
+class DebuggerWrapper(nn.Module):
+    r"""A wrapper class that wraps the input module that we want to debug, adds
+    tensor observer and collect the observed tensor values into a dict for
+    debugging.
+    """
+
+    def __init__(self, module):
+        super(DebuggerWrapper, self).__init__()
+        self.add_module('module', module)
+        self.module.qconfig = default_debug_qconfig
+        prepare(self.module)
+        self._activation_dict = OrderedDict()
+        self._weight_dict = OrderedDict()
+        self.save_tensor(self.module, self._activation_dict, self._weight_dict)
+
+    def forward(self, X):
+        X = self.module(X)
+        return X
+
+    def activation_dict(self):
+        return self._activation_dict
+
+    def weight_dict(self):
+        return self._weight_dict
+
+    def save_tensor(self, mod, target_activation_dict, target_weight_dict, prefix=""):
+        r"""Traverse the modules and save the weight and stored activation to given dict.
+        This is mainly used for quantization accuracy debug
+        Args:
+            mod: the top module we want to save all tensors
+            target_weight_dict: the dictionary used to save the weight tensors
+            target_activation_dict: the dictionary used to save the activation tensors
+            prefix: the prefix for the current module
+        """
+        def get_prefix(prefix):
+            return prefix if prefix == "" else prefix + '.'
+
+        weight_unpack = getattr(mod, "weight", None)
+        if weight_unpack is not None and callable(weight_unpack):
+            target_weight_dict[get_prefix(prefix) + 'weight'] = mod.weight()
+        elif hasattr(mod, 'weight'):
+            target_weight_dict[get_prefix(prefix) + 'weight'] = mod.weight
+
+        if hasattr(mod, 'observer'):
+            target_activation_dict[get_prefix(prefix) + 'activation'] = mod.observer.get_tensor_value()
+        for name, child in mod.named_children():
+            module_prefix = get_prefix(prefix) + name if prefix else name
+            self.save_tensor(child, target_activation_dict, target_weight_dict, module_prefix)
 
 def add_quant_dequant(module):
     r"""Wrap the leaf child module in QuantWrapper if it has a valid qconfig

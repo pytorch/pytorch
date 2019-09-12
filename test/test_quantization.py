@@ -9,7 +9,7 @@ from torch.quantization import \
     QConfig_dynamic, default_weight_observer, dump_tensor,\
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
-    default_dynamic_qconfig, MinMaxObserver, TensorObserver, QuantWrapper
+    default_dynamic_qconfig, MinMaxObserver, TensorObserver, QuantWrapper, DebuggerWrapper
 
 from common_utils import run_tests, tempfile
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
@@ -800,6 +800,18 @@ class QuantizationDebugTest(QuantizationTestCase):
         buf.seek(0)
         loaded = torch.jit.load(buf)
         self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
+
+    def test_debugger_wrapper(self):
+        model = SingleLayerLinearModel()
+        model_dbg = DebuggerWrapper(model)
+        # run the evaluation
+        test_only_eval_fn(model_dbg, self.calib_data)
+        test_only_eval_fn(model_dbg, self.calib_data)
+
+        # we can torch,save() and torch_load() in bento for further analysis
+        self.assertTrue('fc1.module.activation' in model_dbg.activation_dict().keys(),
+                        'activation is not recorded in the dict')
+        self.assertEqual(len(model_dbg.activation_dict()['fc1.module.activation']), 2 * len(self.calib_data))
 
 if __name__ == '__main__':
     run_tests()
