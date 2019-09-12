@@ -29,20 +29,23 @@ if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
 fi
 
 # Pick docker image
-if [[ "$PACKAGE_TYPE" == conda ]]; then
-  export DOCKER_IMAGE="soumith/conda-cuda"
-elif [[ "$DESIRED_CUDA" == cpu ]]; then
-  export DOCKER_IMAGE="soumith/manylinux-cuda100"
-else
-  export DOCKER_IMAGE="soumith/manylinux-cuda${DESIRED_CUDA:2}"
+export DOCKER_IMAGE=${DOCKER_IMAGE:-}
+if [[ -z "$DOCKER_IMAGE" ]]; then
+  if [[ "$PACKAGE_TYPE" == conda ]]; then
+    export DOCKER_IMAGE="soumith/conda-cuda"
+  elif [[ "$DESIRED_CUDA" == cpu ]]; then
+    export DOCKER_IMAGE="soumith/manylinux-cuda100"
+  else
+    export DOCKER_IMAGE="soumith/manylinux-cuda${DESIRED_CUDA:2}"
+  fi
 fi
 
-# Upload to parallel folder for gcc abis
+# Upload to parallel folder for devtoolsets
 # All nightlies used to be devtoolset3, then devtoolset7 was added as a build
 # option, so the upload was redirected to nightly/devtoolset7 to avoid
 # conflicts with other binaries (there shouldn't be any conflicts). Now we are
 # making devtoolset7 the default.
-if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' || "$(uname)" == 'Darwin' ]]; then
+if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' || "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* || "$(uname)" == 'Darwin' ]]; then
   export PIP_UPLOAD_FOLDER='nightly/'
 else
   # On linux machines, this shouldn't actually be called anymore. This is just

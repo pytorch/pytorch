@@ -7,25 +7,31 @@ namespace torch {
 namespace jit {
 namespace script {
 
+struct Call {
+  std::string fn_name;
+  c10::optional<SourceRange> caller_range;
+};
 
 struct CAFFE2_API ErrorReport : public std::exception {
-  ErrorReport(const ErrorReport& e)
-      : ss(e.ss.str()), context(e.context), the_message(e.the_message) {}
+  ErrorReport(const ErrorReport& e);
 
-  ErrorReport() : context(c10::nullopt) {}
-  explicit ErrorReport(SourceRange r) : context(std::move(r)) {}
+  ErrorReport();
+  explicit ErrorReport(SourceRange r);
   explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
   explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
 
   const char* what() const noexcept override;
 
   struct CAFFE2_API CallStack {
-    // These functions are used to report why a function was being compiled (i.e.
-    // what was the call stack of user functions at compilation time that led to
-    // this error)
+    // These functions are used to report why a function was being compiled
+    // (i.e. what was the call stack of user functions at compilation time that
+    // led to this error)
+    CallStack(const std::string& name);
+    ~CallStack();
+
+    // Change the range that is relevant for the current function (i.e. after
+    // each successful expression compilation, change it to the next expression)
     static void update_pending_range(const SourceRange& range);
-    static void push_function(const std::string& name);
-    static void pop_function();
   };
 
  private:
@@ -35,6 +41,7 @@ struct CAFFE2_API ErrorReport : public std::exception {
   mutable std::stringstream ss;
   c10::optional<SourceRange> context;
   mutable std::string the_message;
+  std::vector<Call> error_stack;
 };
 
 template <typename T>

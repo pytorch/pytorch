@@ -39,7 +39,7 @@ and visualization by TensorBoard. For example:
 This can then be visualized with TensorBoard, which should be installable
 and runnable with::
 
-    pip install tb-nightly  # Until 1.14 moves to the release channel
+    pip install tensorboard
     tensorboard --logdir=runs
 
 

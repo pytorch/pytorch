@@ -93,8 +93,12 @@ class FrontendError(Exception):
         self.source_range = source_range
         self.msg = msg
 
+        # This has to be instantiated here so the ErrorReport is accurate to the
+        # call stack when the FrontendError was raised
+        self.error_report = torch._C.ErrorReport(self.source_range)
+
     def __str__(self):
-        return self.msg + torch._C.ErrorReport(self.source_range).what()
+        return self.msg + self.error_report.what().lstrip()
 
 
 class NotSupportedError(FrontendError):
@@ -159,7 +163,7 @@ def get_jit_def(fn, self_name=None):
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-        raise RuntimeError("expected a single top-level function")
+        raise RuntimeError("Expected a single top-level function")
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
@@ -278,11 +282,7 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_Assign(ctx, stmt):
         rhs = build_expr(ctx, stmt.value)
-        if len(stmt.targets) > 1:
-            start_point = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + 1)
-            raise NotSupportedError(ctx.make_raw_range(start_point.start, rhs.range().end),
-                                    "Performing multiple assignments in a single line isn't supported")
-        lhs = build_expr(ctx, stmt.targets[0])
+        lhs = list(map(lambda x: build_expr(ctx, x), stmt.targets))
         return Assign(lhs, rhs)
 
     @staticmethod
@@ -290,7 +290,7 @@ class StmtBuilder(Builder):
         rhs = build_expr(ctx, stmt.value)
         lhs = build_expr(ctx, stmt.target)
         the_type = build_expr(ctx, stmt.annotation)
-        return Assign(lhs, rhs, the_type)
+        return Assign([lhs], rhs, the_type)
 
     @staticmethod
     def build_Return(ctx, stmt):
@@ -396,6 +396,7 @@ class ExprBuilder(Builder):
     unop_map = {
         ast.Not: 'not',
         ast.USub: '-',
+        ast.Invert: '~',
     }
 
     boolop_map = {
@@ -418,18 +419,23 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Attribute(ctx, expr):
-        # NB: the only attributes we support are for getting methods
-        value = build_expr(ctx, expr.value)
-        # <sigh> name is just a string, so it's not annotated in any way.
-        source = ctx.source
-        pos = find_after(ctx, value.range().end, '.').end  # Start with the dot
-        while source[pos] in string.whitespace:  # Skip whitespace
-            pos += 1
-        start_pos = pos
-        while source[pos] in _identifier_chars:  # Find the identifier itself
-            pos += 1
-        name_range = ctx.make_raw_range(start_pos, pos)
-        return Select(value, Ident(name_range, expr.attr))
+        base = build_expr(ctx, expr.value)
+        # expr.attr is just a string, so it's not annotated in any way, so we have
+        # to build the range manually
+        source = ctx.source.encode('utf-8')
+
+        def get_char(index):
+            if PY2:
+                return source[index]
+            else:
+                return chr(source[index])
+
+        start_pos = base.range().end + 1
+        while get_char(start_pos) in string.whitespace:  # Skip whitespace
+            start_pos += 1
+        end_pos = start_pos + len(expr.attr)
+        name_range = ctx.make_raw_range(start_pos, end_pos)
+        return Select(base, Ident(name_range, expr.attr))
 
     @staticmethod
     def build_Call(ctx, expr):
@@ -485,10 +491,10 @@ class ExprBuilder(Builder):
         op = type(expr.op)
 
         if op == ast.Div and not ctx.uses_true_division:
-            raise RuntimeError('Division of ints in JIT script uses Python 3 true '
-                               'division semantics. Please put `from __future__ '
-                               'import division` at the top of your file')
-
+            err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
+            raise FrontendError(err_range, 'Division of ints in TorchScript uses Python 3 true '
+                                'division semantics. Please put `from __future__ '
+                                'import division` at the top of your file')
         op_token = ExprBuilder.binop_map.get(op)
         if op_token is None:
             err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
@@ -624,19 +630,20 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Constant(ctx, expr):
-        val = expr.value
-        if val is None or isinstance(val, bool):
+        value = expr.value
+        if value is None or isinstance(value, bool):
             # NB: this check has to happen before the int check because bool is
             # a subclass of int
             return ExprBuilder.build_NameConstant(ctx, expr)
-        if isinstance(val, (int, float)):
+        if isinstance(value, (int, float)):
             return ExprBuilder.build_Num(ctx, expr)
-        elif isinstance(val, str):
+        elif isinstance(value, str):
             return ExprBuilder.build_Str(ctx, expr)
-        elif isinstance(val, type(Ellipsis)):
+        elif isinstance(value, type(Ellipsis)):
             return ExprBuilder.build_Ellipsis(ctx, expr)
         else:
-            raise RuntimeError("Unknown Constant expr type for value: ", expr.value)
+            error_range = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(str(value)))
+            raise FrontendError(error_range, "Unknown Constant expression type")
 
     @staticmethod
     def build_Str(ctx, expr):
@@ -687,11 +694,6 @@ class ExprBuilder(Builder):
 
 build_expr = ExprBuilder()
 build_stmt = StmtBuilder()
-
-
-def find_after(ctx, pos, substr, offsets=(0, 0)):
-    new_pos = pos + ctx.source[pos:].index(substr)
-    return ctx.make_raw_range(new_pos + offsets[0], new_pos + len(substr) + offsets[1])
 
 
 def find_before(ctx, pos, substr, offsets=(0, 0)):

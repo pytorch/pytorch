@@ -1,8 +1,8 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-from ...modules.linear import Linear as NNLinear
+import torch.nn as nn
 import torch.nn.functional as F
 
-class Linear(NNLinear):
+class Linear(nn.Linear):
     r"""
     A linear module attached with FakeQuantize modules for both output
     activation and weight, used for quantization aware training.
@@ -19,7 +19,7 @@ class Linear(NNLinear):
             to align with post training flow
         weight: fake quant module for weight
     """
-    __FLOAT_MODULE = NNLinear
+    _FLOAT_MODULE = nn.Linear
 
     def __init__(self, in_features, out_features, bias=True,
                  qconfig=None):
@@ -39,11 +39,11 @@ class Linear(NNLinear):
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
-        assert type(mod) == cls.__FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
-            cls.__FLOAT_MODULE.__name__
+        assert type(mod) == cls._FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
+            cls._FLOAT_MODULE.__name__
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            assert mod.qconfig, 'Input float module must has valid qconfig'
+            assert mod.qconfig, 'Input float module must have a valid qconfig'
             qconfig = mod.qconfig
         qat_linear = cls(mod.in_features, mod.out_features, bias=mod.bias is not None, qconfig=qconfig)
         qat_linear.weight = mod.weight

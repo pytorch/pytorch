@@ -66,8 +66,9 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   size_t len = std::min(size(), end_line - start());
   out << std::string(len, '~')
       << (len < size() ? "...  <--- HERE" : " <--- HERE");
-  out << str.substr(end_line, end_highlight - end_line);
-  if (!str.empty() && str.back() != '\n')
+  auto line_substr = str.substr(end_line, end_highlight - end_line);
+  out << line_substr;
+  if (!line_substr.empty() && line_substr.back() != '\n')
     out << "\n";
   // Retrieve original SourceRange, if present.
   if (auto orig_source_range = findSourceRangeThatGenerated()) {

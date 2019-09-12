@@ -59,10 +59,10 @@ void initializeDtypes() {
   if (!torch_module)
     throw python_error();
 
-#define DEFINE_SCALAR_TYPE(_1, n, _2) at::ScalarType::n,
+#define DEFINE_SCALAR_TYPE(_1, n) at::ScalarType::n,
 
   at::ScalarType all_scalar_types[] = {
-      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_STUBS(DEFINE_SCALAR_TYPE)};
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 
   for (at::ScalarType scalarType : all_scalar_types) {
     std::string primary_name, legacy_name;

@@ -88,7 +88,7 @@ transposeToFront(Tensor self, TensorList indices) {
   return std::make_tuple(self.permute(dims), std::move(transposedIndices));
 }
 
-static std::tuple<Tensor, std::vector<Tensor>, std::vector<int64_t>>
+inline std::tuple<Tensor, std::vector<Tensor>, std::vector<int64_t>>
 transposeToFrontAndInvPerm(Tensor self, TensorList indices) {
   std::vector<int64_t> dims;
   std::vector<int64_t> invPerm;

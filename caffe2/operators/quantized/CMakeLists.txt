@@ -21,7 +21,8 @@ list(APPEND Caffe2_CPU_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/int8_roi_align_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/int8_slice_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/int8_sigmoid_op.cc"
-  "${CMAKE_CURRENT_SOURCE_DIR}/int8_softmax_op.cc")
+  "${CMAKE_CURRENT_SOURCE_DIR}/int8_softmax_op.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/int8_transpose_op.cc")
 
 # ---[ CPU test files
 list(APPEND Caffe2_CPU_TEST_SRCS

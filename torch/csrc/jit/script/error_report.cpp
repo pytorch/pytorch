@@ -7,29 +7,28 @@ namespace torch {
 namespace jit {
 namespace script {
 
-
-struct Call {
-  std::string fn_name;
-  std::unique_ptr<SourceRange> caller_range;
-};
-
-thread_local std::unique_ptr<SourceRange> pending_range;
 thread_local std::vector<Call> calls;
 
+ErrorReport::ErrorReport(const ErrorReport& e)
+    : ss(e.ss.str()),
+      context(e.context),
+      the_message(e.the_message),
+      error_stack(e.error_stack.begin(), e.error_stack.end()) {}
+
+ErrorReport::ErrorReport()
+    : context(c10::nullopt), error_stack(calls.begin(), calls.end()) {}
+ErrorReport::ErrorReport(SourceRange r)
+    : context(std::move(r)), error_stack(calls.begin(), calls.end()) {}
+
 void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
-  pending_range = torch::make_unique<SourceRange>(range);
+  calls.back().caller_range = range;
 }
 
-void ErrorReport::CallStack::push_function(const std::string& name) {
-  if (pending_range != nullptr) {
-    calls.push_back({name, std::move(pending_range)});
-    pending_range = nullptr;
-  } else {
-    calls.push_back({name, nullptr});
-  }
+ErrorReport::CallStack::CallStack(const std::string& name) {
+  calls.push_back({name, c10::nullopt});
 }
 
-void ErrorReport::CallStack::pop_function() {
+ErrorReport::CallStack::~CallStack() {
   calls.pop_back();
 }
 
@@ -43,17 +42,17 @@ const char* ErrorReport::what() const noexcept {
     msg << ".\n";
   }
 
-  if (calls.size() > 0) {
-    msg << "\n";
-    for (auto it = calls.rbegin(); it != calls.rend() - 1; ++it) {
+  if (error_stack.size() > 0) {
+    for (auto it = error_stack.rbegin(); it != error_stack.rend() - 1; ++it) {
+      auto callee = it + 1;
+
       msg << "'" << it->fn_name
-          << "' is being compiled since it was called from '"
-          << (it + 1)->fn_name << "'\n";
-      if (it->caller_range == nullptr) {
-        msg << "<no range>\n";
+          << "' is being compiled since it was called from '" << callee->fn_name
+          << "'\n";
+      if (callee->caller_range) {
+        callee->caller_range->highlight(msg);
       } else {
-        it->caller_range->highlight(msg);
-        msg << "\n";
+        msg << "<no range>\n";
       }
     }
   }

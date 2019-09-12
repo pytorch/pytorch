@@ -24,7 +24,7 @@ getTensorInfo(const at::Tensor& t) {
   }
 
   return TensorInfo<scalar, IndexType>(
-    t.data<scalar>(), dims, sz, st);
+    t.data_ptr<scalar>(), dims, sz, st);
 }
 
 } // detail

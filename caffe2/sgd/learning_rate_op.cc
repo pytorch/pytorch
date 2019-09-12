@@ -32,6 +32,7 @@ Required:
    `alter`: uses  `active_first`, `active_period`, `inactive_period`
    `hill`: uses those in both `linearWarmup` and `inv`, plus `end_multiplier`
    `composite`: uses `sub_policy_num_iters` and additional args with format
+   `cyclic`: uses `max_lr`, `stepsize`
    sub_policy_{sub_policy_index}_{sub_policy_arg}, for example:
    sub_policy_0_policy: "exp", sub_policy_0_gamma: 0.99,
    sub_policy_0_lr_scale: 1.2
@@ -40,6 +41,7 @@ Required:
 
 Optional:
   `stepsize`: defaults to 0
+  `max_lr`: defaults to 0.005
   `gamma`: defaults to 0
   `power`: defaults to 0
   `num_iter`: defaults to 0
@@ -68,6 +70,7 @@ Example usage:
     .Arg("power", "(float, default 1.0) used only for inv policy type")
     .Arg("gamma", "(float, default 1.0) momentum of change")
     .Arg("stepsize", "(float, default 1.0) sampling rate on iterations")
+    .Arg("max_lr", "(float, default 0.005) max learning rate")
     .Arg("active_first", "(boolean, default True) in alter policy")
     .Arg("active_period", "(int64_t, required) in alter policy")
     .Arg("inactive_period", "(int64_t, required) in alter policy")

@@ -1,5 +1,7 @@
 #include <c10d/ProcessGroupGloo.hpp>
 
+#include <unistd.h>
+
 #include <gloo/allgather.h>
 #include <gloo/allreduce.h>
 #include <gloo/barrier.h>
@@ -19,9 +21,31 @@
 #include <c10/cuda/CUDAStream.h>
 #endif
 
+#include <gloo/config.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
+
+#if GLOO_HAVE_TRANSPORT_TCP
 #include <gloo/transport/tcp/device.h>
+#endif
+
+#if GLOO_HAVE_TRANSPORT_UV
+#include <gloo/transport/uv/device.h>
+#endif
+
+// On Linux, check that the tcp transport is available.
+#ifdef __linux__
+#if !GLOO_HAVE_TRANSPORT_TCP
+#error "Expected the tcp transport to be available on Linux."
+#endif
+#endif
+
+// On macOS, check that the uv transport is available.
+#ifdef __APPLE__
+#if !GLOO_HAVE_TRANSPORT_UV
+#error "Expected the uv transport to be available on macOS."
+#endif
+#endif
 
 #define GENERATE_ALL_TYPES(type, func, args...)        \
   switch (type) {                                      \
@@ -195,7 +219,8 @@ void initializeStreamsEvents(
     for (size_t j = 1; j < tensors[i].size(); j++) {
       if (tensors[i][j].device().index() != device_id) {
         throw std::runtime_error(
-            "tensors in the nested tensor vectors need to be on the same device");
+            "tensors in the nested tensor vectors need to "
+            "be on the same device");
       }
     }
   }
@@ -274,6 +299,71 @@ void ProcessGroupGloo::RecvWork::wait() {
 
 ProcessGroupGloo::Options::Options()
     : timeout(std::chrono::milliseconds(10 * 1000)), threads(2) {}
+
+#ifdef __linux__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDeviceForInterface(const std::string& interface) {
+  ::gloo::transport::tcp::attr attr;
+  attr.iface = interface;
+  return ::gloo::transport::tcp::CreateDevice(attr);
+}
+#endif
+
+#ifdef __APPLE__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDeviceForInterface(const std::string& interface) {
+  ::gloo::transport::uv::attr attr;
+  attr.iface = interface;
+  return ::gloo::transport::uv::CreateDevice(attr);
+}
+#endif
+
+#ifdef __linux__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDeviceForHostname(const std::string& hostname) {
+  ::gloo::transport::tcp::attr attr;
+
+  if (hostname.empty()) {
+    // Use the hostname to resolve the network address to
+    // use. Note: if the hostname does not resolve to an address (e.g.
+    // because of misconfigured /etc/hosts file), this will not work.
+    std::array<char, HOST_NAME_MAX> buffer{};
+    auto rv = gethostname(buffer.data(), buffer.size());
+    if (rv != 0) {
+      throw std::system_error(errno, std::system_category());
+    }
+    attr.hostname = buffer.data();
+  } else {
+    attr.hostname = hostname;
+  }
+
+  return ::gloo::transport::tcp::CreateDevice(attr);
+}
+#endif
+
+#ifdef __APPLE__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDeviceForHostname(const std::string& hostname) {
+  ::gloo::transport::uv::attr attr;
+
+  if (hostname.empty()) {
+    // Use the hostname to resolve the network address to
+    // use. Note: if the hostname does not resolve to an address (e.g.
+    // because of misconfigured /etc/hosts file), this will not work.
+    const auto hostNameMax = sysconf(_SC_HOST_NAME_MAX);
+    auto buffer = std::unique_ptr<char[]>(new char[hostNameMax]);
+    auto rv = gethostname(buffer.get(), hostNameMax);
+    if (rv != 0) {
+      throw std::system_error(errno, std::system_category());
+    }
+    attr.hostname = buffer.get();
+  } else {
+    attr.hostname = hostname;
+  }
+
+  return ::gloo::transport::uv::CreateDevice(attr);
+}
+#endif
 
 ProcessGroupGloo::ProcessGroupGloo(
     const std::shared_ptr<Store>& store,
@@ -580,6 +670,38 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
+class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
+ public:
+  AsyncAllreduceCoalescedWork(
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<at::Tensor>& inputs,
+      ReduceOp reduceOp,
+      uint32_t tag)
+      : AsyncAllreduceWork(context, inputs, reduceOp, tag) {}
+
+  void run() override {
+    allreduceCoalesced(inputs);
+  }
+
+ private:
+  void allreduceCoalesced(std::vector<at::Tensor>& tensors) {
+    // reduce coalesced, flattened tensors.
+    at::Tensor coalescedTensor = flattenDenseTensors(tensors);
+    std::vector<at::Tensor> allreduceInput = {coalescedTensor};
+    allreduce(allreduceInput);
+
+    // separate and reshape tensors.
+    size_t offset = 0;
+    for (at::Tensor& tensor : tensors) {
+      const int64_t tensorNumel = tensor.numel();
+      const c10::IntArrayRef tensorShape = tensor.sizes();
+      tensor.copy_(coalescedTensor.slice(0, offset, offset + tensorNumel)
+                       .view(tensorShape));
+      offset += tensorNumel;
+    }
+  }
+};
+
 class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncSparseAllreduceWork(
@@ -611,7 +733,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Construct from an existing metadata tensor to facilitate structured
     // access to metadata from peers, after gathering it.
     explicit SparseTensorMetadata(at::Tensor metadata)
-        : metadata_(metadata), data_(metadata_.data<long>()) {
+        : metadata_(metadata), data_(metadata_.data_ptr<int64_t>()) {
       AT_ASSERT(metadata.scalar_type() == at::kLong);
       AT_ASSERT(metadata.dim() == 1);
       AT_ASSERT(metadata.size(0) == dim);
@@ -661,7 +783,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
    protected:
     at::Tensor metadata_;
-    long* data_;
+    int64_t* data_;
   };
 
   // Sparse allreduce is implemented with allgather on indices and values.
@@ -686,7 +808,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Sanity check dimensionality across ranks.
     {
       const auto expected = metadata[context->rank].sizes();
-      for (size_t i = 0; i < context->size; i++) {
+      for (auto i = 0; i < context->size; i++) {
         if (i == context->rank) {
           continue;
         }
@@ -700,11 +822,11 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     auto values = allgather_values(input, metadata);
 
     // Perform global reduction.
-    AT_ASSERT(indices.size() == context->size);
-    AT_ASSERT(values.size() == context->size);
+    AT_ASSERT(static_cast<int>(indices.size()) == context->size);
+    AT_ASSERT(static_cast<int>(values.size()) == context->size);
     auto output = at::sparse_coo_tensor(
         indices[0], values[0], input.sizes(), input.options());
-    for (size_t i = 1; i < context->size; i++) {
+    for (auto i = 1; i < context->size; i++) {
       output += at::sparse_coo_tensor(
           indices[i], values[i], input.sizes(), input.options());
     }
@@ -745,7 +867,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // Allgather metadata
     gloo::AllgatherOptions opts(context);
-    opts.setOutput(buffer.data<long>(), buffer.numel());
+    opts.setOutput(buffer.data_ptr<int64_t>(), buffer.numel());
     opts.setTag(tag);
     gloo::allgather(opts);
 
@@ -769,7 +891,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // Allgather indices.
     gloo::AllgatherOptions opts(context);
-    opts.setOutput(buffer.data<long>(), buffer.numel());
+    opts.setOutput(buffer.data_ptr<int64_t>(), buffer.numel());
     opts.setTag(tag);
     gloo::allgather(opts);
 
@@ -996,6 +1118,66 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     throw std::runtime_error("Invalid backend");
   }
 
+  enqueue(work);
+  return work;
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
+    std::vector<at::Tensor>& tensors,
+    const AllreduceCoalescedOptions& opts) {
+  static auto invalidArgument = [](const std::string& msg) {
+    throw std::invalid_argument(
+        "ProcessGroupGloo::allreduce_coalesced: " + msg);
+  };
+  assertNonEmpty(invalidArgument, tensors);
+
+  // tensors will be flattened and concatenated (coalesced). This means that
+  // input
+  // tensors must have the same device, layout and type.
+  assertLayoutMatch(invalidArgument, tensors);
+  if (!std::all_of(tensors.begin(), tensors.end(), [&](at::Tensor& t) {
+        return t.type() == tensors[0].type();
+      })) {
+    invalidArgument("tensors must all have the same type");
+  }
+  if (!std::all_of(tensors.begin(), tensors.end(), [&](at::Tensor& t) {
+        return t.device() == tensors[0].device();
+      })) {
+    invalidArgument("tensors must all be on the same device");
+  }
+
+  const c10::Device& device = tensors[0].device();
+  const c10::Layout& layout = tensors[0].layout();
+
+  // invalid arguments are detected early here before any calls to nextTag()
+  // which result in the collectiveCounter_ being incremented.
+  switch (device.type()) {
+    case c10::kCPU:
+      break;
+    default:
+      invalidArgument("unsupported device type");
+  }
+
+  switch (layout) {
+    case c10::kStrided:
+      break;
+    default:
+      invalidArgument("unsupported layout");
+  }
+
+  std::shared_ptr<AsyncWork> work;
+  const uint32_t tag = nextTag();
+  std::shared_ptr<gloo::Context> context = getContext(tag);
+  if (device.type() == c10::kCPU) {
+    if (layout == c10::kStrided) {
+      work = std::make_shared<AsyncAllreduceCoalescedWork>(
+          std::move(context), tensors, opts.reduceOp, tag);
+    } else {
+      invalidArgument("unsupported layout");
+    }
+  } else {
+    throw std::runtime_error("Invalid backend");
+  }
   enqueue(work);
   return work;
 }

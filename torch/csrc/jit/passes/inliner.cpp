@@ -9,7 +9,7 @@ namespace prim {
 using namespace ::c10::prim;
 }
 
-void inlineCalls(Block* block) {
+void inlineCalls(Block* block, bool recurse) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* cur = *it++;
@@ -20,28 +20,32 @@ void inlineCalls(Block* block) {
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
         cur->removeInput(0);
-        inlineCallTo(cur, *fun_type->function()->graph());
-        if (!function_constant->hasUses()) {
-          function_constant->destroy();
+        if (recurse) {
+          Inline(*fun_type->function()->graph(), recurse);
         }
+        inlineCallTo(cur, *fun_type->function()->graph());
       } break;
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
-        auto function =
-            cur->input(0)->type()->expect<ClassType>()->getMethod(name);
-        inlineCallTo(cur, *function->graph());
+        if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
+          auto function = class_type->getMethod(name);
+          if (recurse) {
+            Inline(*function->graph(), recurse);
+          }
+          inlineCallTo(cur, *function->graph());
+        }
       } break;
       default: {
         for (auto b : cur->blocks()) {
-          inlineCalls(b);
+          inlineCalls(b, recurse);
         }
       } break;
     }
   }
 }
 
-void Inline(Graph& graph) {
-  inlineCalls(graph.block());
+void Inline(Graph& graph, bool recurse) {
+  inlineCalls(graph.block(), recurse);
 }
 
 } // namespace jit

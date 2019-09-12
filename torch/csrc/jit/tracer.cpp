@@ -102,7 +102,7 @@ Value* TracingState::getValue(const IValue& var) {
   } if (var.isTensor()) {
     auto ten = var.toTensor();
     if (!ten.defined()) {
-      Node* n = graph->createNone(TensorType::get());
+      Node* n = graph->createNone();
       return graph->insertNode(n)->output();
     }
     for (size_t i = 0; i < env_stack.size(); ++i) {
@@ -182,7 +182,7 @@ Value* TracingState::getOutput(const IValue& iv) {
    if (iv.isTensor()) {
      at::Tensor var = iv.toTensor();
      if (!var.defined()) {
-       Node *n = graph->createNone(TensorType::get());
+       Node* n = graph->createNone();
        return graph->insertNode(n)->output();
      }
 
@@ -399,7 +399,7 @@ void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
     detail::genericAddInput(n, *value);
   } else {
     Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone(IntType::get()))->output();
+    Value* none = g->insertNode(g->createNone())->output();
     n->addInput(none);
   }
 }
@@ -411,7 +411,7 @@ void addInputs(Node* n, const char* name /* unused */, const c10::optional<bool>
     detail::genericAddInput(n, *value);
   } else {
     Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone(BoolType::get()))->output();
+    Value* none = g->insertNode(g->createNone())->output();
     n->addInput(none);
   }
 }
@@ -435,7 +435,7 @@ void addInputs(
     detail::genericAddInput(n, *value);
   } else {
     Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone(NumberType::get()))->output();
+    Value* none = g->insertNode(g->createNone())->output();
     n->addInput(none);
   }
 }
@@ -450,8 +450,7 @@ void addInputs(Node* n, const char* name, at::Generator* value) {
     detail::badArgType(value);
   }
   Graph* g = n->owningGraph();
-  Value* undef_gen =
-      g->insertNode(g->createNone(GeneratorType::get()))->output();
+  Value* undef_gen = g->insertNode(g->createNone())->output();
   n->addInput(undef_gen);
 }
 void addInputs(Node* n, const char* name, at::Device value) {
@@ -474,7 +473,7 @@ void addInputs(
     detail::genericAddInput(n, static_cast<int64_t>(*value));
   } else {
     Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone(IntType::get()))->output();
+    Value* none = g->insertNode(g->createNone())->output();
     n->addInput(none);
   }
 }
@@ -486,7 +485,7 @@ void addInputs(
     detail::genericAddInput(n, static_cast<int64_t>(*value));
   } else {
     Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone(IntType::get()))->output();
+    Value* none = g->insertNode(g->createNone())->output();
     n->addInput(none);
   }
 }

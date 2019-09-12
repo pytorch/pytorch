@@ -6,13 +6,13 @@
 namespace at {
 
 namespace {
-  DeviceType sparseTensorIdToDeviceType(TensorTypeId type_id) {
-    if (type_id == SparseCPUTensorId()) {
+  DeviceType sparseTensorSetToDeviceType(TensorTypeSet type_set) {
+    if (type_set.has(TensorTypeId::SparseCPUTensorId)) {
       return kCPU;
-    } else if (type_id == SparseCUDATensorId()) {
+    } else if (type_set.has(TensorTypeId::SparseCUDATensorId)) {
       return kCUDA;
     } else {
-      AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", type_id);
+      AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", type_set);
     }
   }
 }
@@ -30,13 +30,13 @@ namespace {
 //
 // This means that we allocate a [1,0] size indices tensor and a [0] size
 // values tensor for such an empty tensor.
-SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeMeta& data_type)
-  :   SparseTensorImpl(type_id, data_type
-      , at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(ScalarType::Long))
-      , at::empty({0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(data_type))) {}
+SparseTensorImpl::SparseTensorImpl(at::TensorTypeSet type_set, const caffe2::TypeMeta& data_type)
+  :   SparseTensorImpl(type_set, data_type
+      , at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(type_set)).dtype(ScalarType::Long))
+      , at::empty({0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(type_set)).dtype(data_type))) {}
 
-SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeMeta& data_type, at::Tensor indices, at::Tensor values)
-    : TensorImpl(type_id, data_type, values.device())
+SparseTensorImpl::SparseTensorImpl(at::TensorTypeSet type_set, const caffe2::TypeMeta& data_type, at::Tensor indices, at::Tensor values)
+    : TensorImpl(type_set, data_type, values.device())
     , sparse_dim_(1)
     , dense_dim_(0)
     , indices_(std::move(indices))

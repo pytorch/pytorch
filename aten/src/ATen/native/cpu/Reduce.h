@@ -13,7 +13,8 @@ using namespace vec256;
 #define VEC_LOOP_HEADER(func_t, data) \
   using scalar_t = typename function_traits<func_t>::result_type; \
   using Vec = Vec256<scalar_t>; \
-  char* out_ptr = data[0];
+  char* out_ptr = data[0]; \
+  (void) out_ptr;
 
 // reduction that is contiguous over the input in dim 0
 template <typename traits>
@@ -131,7 +132,7 @@ for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIterator &iter, c
 template<typename traits, std::size_t i = 0, typename... tuple_t>
 static inline typename std::enable_if<i < sizeof...(tuple_t), std::size_t>::type
 for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIterator &iter, const int num_outputs) {
-  if (i < num_outputs) {
+  if (i < (size_t)num_outputs) {
     set_result<traits>(i, std::get<i>(t), iter, num_outputs);
     return for_each_in_tuple<traits, i + 1, tuple_t...>(t, iter, num_outputs);
   }
@@ -142,7 +143,7 @@ template<typename traits, typename... res_t>
 static void set_results(const std::tuple<res_t...>& result, const TensorIterator &iter, const int num_outputs) {
   AT_ASSERT(num_outputs >= 1);
   std::size_t result_size = for_each_in_tuple<traits>(result, iter, num_outputs);
-  AT_ASSERT(num_outputs == result_size);
+  AT_ASSERT((size_t)num_outputs == result_size);
 }
 
 template <typename T, typename... Args>

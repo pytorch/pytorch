@@ -16,7 +16,7 @@ namespace torch { namespace autograd {
 struct TORCH_API CopyBackwards : public Node {
   variable_list apply(variable_list&& grads) override;
 
-  at::DeprecatedTypeProperties *src_type = nullptr; // initialized for safety.
+  at::TensorOptions src_options;
   at::Device src_device = at::kCPU;
 };
 

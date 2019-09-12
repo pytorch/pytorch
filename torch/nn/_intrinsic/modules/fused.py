@@ -25,3 +25,4 @@ class ConvBnReLU2d(torch.nn.Sequential):
         assert type(conv) == Conv2d and type(bn) == BatchNorm2d and \
             type(relu) == ReLU, 'Incorrect types for input modules{}{}{}' \
             .format(type(conv), type(bn), type(relu))
+        super(ConvBnReLU2d, self).__init__(conv, bn, relu)

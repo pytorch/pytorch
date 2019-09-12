@@ -9,8 +9,6 @@
 #include <sstream>
 #include <thread>
 
-#include <gloo/transport/tcp/device.h>
-
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/test/TestUtils.hpp>
@@ -42,8 +40,8 @@ class SignalTest {
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
     options.timeout = std::chrono::milliseconds(50);
-    ::gloo::transport::tcp::attr attr;
-    options.devices.push_back(::gloo::transport::tcp::CreateDevice(attr));
+    options.devices.push_back(
+        ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
     ::c10d::ProcessGroupGloo pg(store, rank, size, options);
 
@@ -127,9 +125,8 @@ class CollectiveTest {
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
     options.timeout = std::chrono::milliseconds(50);
-
-    ::gloo::transport::tcp::attr attr;
-    options.devices.push_back(::gloo::transport::tcp::CreateDevice(attr));
+    options.devices.push_back(
+        ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
     pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
         new ::c10d::ProcessGroupGloo(store, rank, size, options));
@@ -181,7 +178,7 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
   auto outputs = copyTensors(inputs);
   for (auto i = 0; i < size; i++) {
     auto& tensor = outputs[i][0];
-    auto data = tensor.data<float>();
+    auto data = tensor.data_ptr<float>();
     for (auto j = 0; j < tensor.numel(); j++) {
       if (data[j] != expected) {
         throw std::runtime_error("BOOM!");
@@ -234,7 +231,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
       for (auto k = 0; k < size; k++) {
         for (auto l = 0; l < stride; l++) {
           auto& tensor = outputs[k][l];
-          auto data = tensor.data<float>();
+          auto data = tensor.data_ptr<float>();
           for (auto n = 0; n < tensor.numel(); n++) {
             if (data[n] != expected) {
               throw std::runtime_error("BOOM!");

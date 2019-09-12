@@ -126,115 +126,6 @@ static THTensor* THNN_(newViewWeight)(THTensor *weight)
   return weight;
 }
 
-
-// Kernel for fast unfold+copy
-// Borrowed from Theano
-// Authors: Arjun Jain, Frédéric Bastien, Jan Schlüter, Nicolas Ballas
-
-static void THNN_(unfolded_acc_vol)(
-          THTensor *finput,
-          THTensor *input,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH,
-          int64_t nInputPlane,
-          int64_t inputDepth,
-          int64_t inputWidth,
-          int64_t inputHeight,
-          int64_t outputDepth,
-          int64_t outputWidth,
-          int64_t outputHeight)
-{
-  scalar_t *input_data = input->data<scalar_t>();
-  scalar_t *finput_data = finput->data<scalar_t>();
-
-  int64_t n = nInputPlane * inputHeight * inputWidth * inputDepth;
-  at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
-    int64_t line_index_offset = start;
-    int64_t line_seg_len = (end - start);
-
-    int64_t w = line_index_offset % inputWidth + pW;
-    int64_t h_index = line_index_offset / inputWidth;
-    int64_t h = h_index % inputHeight + pH;
-    int64_t d_index = h_index / inputHeight;
-    int64_t d = d_index % inputDepth + pT;
-    int64_t c = d_index / inputDepth;
-
-    int64_t outputHW = outputHeight * outputWidth;
-    int64_t outputDHW = outputDepth * outputHW;
-    int64_t kHkW = kH*kW;
-    int64_t kTkHkW = kT*kHkW;
-
-    int64_t coeff_d_col = outputHW - dT * kHkW * outputDHW;
-    int64_t coeff_h_col = outputWidth - dH * kW * outputDHW;
-    int64_t coeff_w_col = (1 - dW * outputDHW);
-
-    int64_t count = 0;
-    while (count < line_seg_len) {
-      // compute the start and end of the output
-      int64_t w_col_start = (w < kW) ? 0 : (w - kW) / dW + 1;
-      int64_t w_col_tmp = w / dW + 1;
-      int64_t w_col_end = w_col_tmp < outputWidth? w_col_tmp : outputWidth;
-
-      int64_t h_col_start = (h < kH) ? 0 : (h - kH) / dH + 1;
-      int64_t h_col_tmp = h / dH + 1;
-      int64_t h_col_end = h_col_tmp < outputHeight? h_col_tmp : outputHeight;
-
-      int64_t d_col_start = (d < kT) ? 0 : (d - kT) / dT + 1;
-      int64_t d_col_tmp = d / dT + 1;
-      int64_t d_col_end = d_col_tmp < outputDepth? d_col_tmp : outputDepth;
-
-      scalar_t val = 0;
-      int64_t offset = (c * kTkHkW + d * kHkW + h * kW + w) * outputDHW;
-
-      int64_t offset_w_col_start = w_col_start * coeff_w_col;
-      int64_t offset_d_col_start = d_col_start * coeff_d_col;
-      int64_t offset_h_col_start = h_col_start * coeff_h_col;
-      int64_t offset_w_col = offset_w_col_start + offset;
-      int64_t offset_d_col;
-      int64_t offset_h_col;
-      int64_t w_col, d_col, h_col;
-      for (w_col = w_col_start; w_col < w_col_end; ++w_col) {
-        offset_d_col = offset_d_col_start + offset_w_col;
-        for (d_col = d_col_start; d_col < d_col_end; ++d_col) {
-          offset_h_col = offset_h_col_start + offset_d_col;
-          for (h_col = h_col_start; h_col < h_col_end; ++h_col) {
-            val += finput_data[offset_h_col];
-            offset_h_col += coeff_h_col;
-          }
-          offset_d_col += coeff_d_col;
-        }
-        offset_w_col += coeff_w_col;
-      }
-
-      input_data[line_index_offset+count] = val;
-      count++;
-
-      if (count < line_seg_len) {
-        if (w - pW + 1 == inputWidth) {
-          w = pW;
-          if (h - pH + 1 == inputHeight) {
-            h = pH;
-            if (d - pT + 1 == inputDepth) {
-              d = pT;
-              c++;
-            }
-            else d++;
-          }
-          else h++;
-        }
-        else w++;
-      }
-    }
-  });
-}
-
 /*
   Modified from the version of CUDA implementation, but the loop iterations is larger than that one.
   The larger loop could lower the proportion of openmp overhead. And the inner part in loop is simpler.
@@ -522,6 +413,115 @@ void THNN_(VolumetricConvolutionMM_updateOutput)(
 }
 
 #if !defined(TH_REAL_IS_LONG)
+
+// Kernel for fast unfold+copy
+// Borrowed from Theano
+// Authors: Arjun Jain, Frédéric Bastien, Jan Schlüter, Nicolas Ballas
+
+static void THNN_(unfolded_acc_vol)(
+          THTensor *finput,
+          THTensor *input,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH,
+          int64_t nInputPlane,
+          int64_t inputDepth,
+          int64_t inputWidth,
+          int64_t inputHeight,
+          int64_t outputDepth,
+          int64_t outputWidth,
+          int64_t outputHeight)
+{
+  scalar_t *input_data = input->data<scalar_t>();
+  scalar_t *finput_data = finput->data<scalar_t>();
+
+  int64_t n = nInputPlane * inputHeight * inputWidth * inputDepth;
+  at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+    int64_t line_index_offset = start;
+    int64_t line_seg_len = (end - start);
+
+    int64_t w = line_index_offset % inputWidth + pW;
+    int64_t h_index = line_index_offset / inputWidth;
+    int64_t h = h_index % inputHeight + pH;
+    int64_t d_index = h_index / inputHeight;
+    int64_t d = d_index % inputDepth + pT;
+    int64_t c = d_index / inputDepth;
+
+    int64_t outputHW = outputHeight * outputWidth;
+    int64_t outputDHW = outputDepth * outputHW;
+    int64_t kHkW = kH*kW;
+    int64_t kTkHkW = kT*kHkW;
+
+    int64_t coeff_d_col = outputHW - dT * kHkW * outputDHW;
+    int64_t coeff_h_col = outputWidth - dH * kW * outputDHW;
+    int64_t coeff_w_col = (1 - dW * outputDHW);
+
+    int64_t count = 0;
+    while (count < line_seg_len) {
+      // compute the start and end of the output
+      int64_t w_col_start = (w < kW) ? 0 : (w - kW) / dW + 1;
+      int64_t w_col_tmp = w / dW + 1;
+      int64_t w_col_end = w_col_tmp < outputWidth? w_col_tmp : outputWidth;
+
+      int64_t h_col_start = (h < kH) ? 0 : (h - kH) / dH + 1;
+      int64_t h_col_tmp = h / dH + 1;
+      int64_t h_col_end = h_col_tmp < outputHeight? h_col_tmp : outputHeight;
+
+      int64_t d_col_start = (d < kT) ? 0 : (d - kT) / dT + 1;
+      int64_t d_col_tmp = d / dT + 1;
+      int64_t d_col_end = d_col_tmp < outputDepth? d_col_tmp : outputDepth;
+
+      scalar_t val = 0;
+      int64_t offset = (c * kTkHkW + d * kHkW + h * kW + w) * outputDHW;
+
+      int64_t offset_w_col_start = w_col_start * coeff_w_col;
+      int64_t offset_d_col_start = d_col_start * coeff_d_col;
+      int64_t offset_h_col_start = h_col_start * coeff_h_col;
+      int64_t offset_w_col = offset_w_col_start + offset;
+      int64_t offset_d_col;
+      int64_t offset_h_col;
+      int64_t w_col, d_col, h_col;
+      for (w_col = w_col_start; w_col < w_col_end; ++w_col) {
+        offset_d_col = offset_d_col_start + offset_w_col;
+        for (d_col = d_col_start; d_col < d_col_end; ++d_col) {
+          offset_h_col = offset_h_col_start + offset_d_col;
+          for (h_col = h_col_start; h_col < h_col_end; ++h_col) {
+            val += finput_data[offset_h_col];
+            offset_h_col += coeff_h_col;
+          }
+          offset_d_col += coeff_d_col;
+        }
+        offset_w_col += coeff_w_col;
+      }
+
+      input_data[line_index_offset+count] = val;
+      count++;
+
+      if (count < line_seg_len) {
+        if (w - pW + 1 == inputWidth) {
+          w = pW;
+          if (h - pH + 1 == inputHeight) {
+            h = pH;
+            if (d - pT + 1 == inputDepth) {
+              d = pT;
+              c++;
+            }
+            else d++;
+          }
+          else h++;
+        }
+        else w++;
+      }
+    }
+  });
+}
+
 
 static void THNN_(VolumetricConvolutionMM_updateGradInput_frame)(
           THTensor *gradInput,
