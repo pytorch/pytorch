@@ -17,9 +17,7 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/NamedTensor.h>
-#endif
 
 namespace caffe2 {
 class Tensor;
@@ -220,12 +218,12 @@ class CAFFE2_API Tensor {
 
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        tensorTypeIdToBackend(type_id()),
+        tensorTypeIdToBackend(legacyExtractTypeId(type_set())),
         scalar_type(),
         is_variable());
   }
-  TensorTypeId type_id() const {
-    return impl_->type_id();
+  TensorTypeSet type_set() const {
+    return impl_->type_set();
   }
   ScalarType scalar_type() const {
     return typeMetaToScalarType(impl_->dtype());
@@ -923,23 +921,19 @@ Tensor make_tensor(Args&&... args) {
   return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
 }
 
-inline Backend infer_backend(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return tensorTypeIdToBackend(t.type_id());
-}
-inline Backend infer_backend(const TensorList & tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tensorTypeIdToBackend(tl[0].type_id());
+inline TensorTypeSet infer_tensor_type_set(const Tensor & tl) {
+  return tl.type_set();
 }
 
-inline bool infer_is_variable(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return t.is_variable();
-}
-inline bool infer_is_variable(const TensorList & tl) {
+inline TensorTypeSet infer_tensor_type_set(TensorList tl) {
   TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tl[0].is_variable();
+  return tl[0].type_set();
 }
+
 } // namespace detail
+
+static inline TensorTypeId legacyExtractTypeId(const Tensor& t) {
+  return legacyExtractTypeId(t.type_set());
+}
 
 } // namespace at
