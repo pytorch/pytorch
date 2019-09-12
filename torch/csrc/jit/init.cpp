@@ -417,6 +417,7 @@ void initJITBindings(PyObject* module) {
     script::parseIR(input, &*graph);
     return graph;
   });
+  m.def("parse_schema", parseSchema);
 
   py::class_<FunctionSchema>(m, "FunctionSchema")
       .def_property_readonly(
@@ -428,6 +429,10 @@ void initJITBindings(PyObject* module) {
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(
           "returns", [](FunctionSchema& self) { return self.returns(); })
+      .def("__eq__", [](const FunctionSchema& self,
+            const FunctionSchema& other) {
+          return self == other;
+        })
       .def("__str__", [](FunctionSchema& self) {
         std::stringstream ss;
         ss << self;

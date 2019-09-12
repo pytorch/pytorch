@@ -670,7 +670,7 @@ void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor
 
   elems_per_row = THTensor_sizeLegacyNoScalars(index, dim);
 
-  TH_TENSOR_DIM_APPLY3(scalar_t, tensor, scalar_t, src, int64_t, index, dim,
+  TH_TENSOR_DIM_APPLY3(int64_t, index, scalar_t, tensor, scalar_t, src, dim,
                        TH_TENSOR_DIM_APPLY3_SIZE_SCATTER,
                        for (i = 0; i < elems_per_row; ++i)
                        {
@@ -702,7 +702,7 @@ void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTen
 
   elems_per_row = THTensor_sizeLegacyNoScalars(index, dim);
 
-  TH_TENSOR_DIM_APPLY3(scalar_t, tensor, scalar_t, src, int64_t, index, dim,
+  TH_TENSOR_DIM_APPLY3(int64_t, index, scalar_t, tensor, scalar_t, src, dim,
                        TH_TENSOR_DIM_APPLY3_SIZE_SCATTER,
                        for (i = 0; i < elems_per_row; ++i)
                        {
