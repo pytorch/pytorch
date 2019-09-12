@@ -200,7 +200,7 @@ PyObject *THPVariable_get_version(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPVariable_get_grad_fn(THPVariable *self)
+PyObject *THPVariable_get_grad_fn(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
@@ -211,7 +211,7 @@ PyObject *THPVariable_get_grad_fn(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
-static int THPVariable_set_grad_fn(THPVariable *self, PyObject *obj)
+static int THPVariable_set_grad_fn(THPVariable *self, PyObject *obj, void *unused)
 {
   HANDLE_TH_ERRORS
   THPUtils_assertRet(-1, obj, "Deletion of _grad_fn not allowed. Detach tensor instead!");
@@ -221,14 +221,14 @@ static int THPVariable_set_grad_fn(THPVariable *self, PyObject *obj)
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-static PyObject *THPVariable_is_leaf(THPVariable *self)
+static PyObject *THPVariable_is_leaf(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
   return PyBool_FromLong(!self->cdata.grad_fn());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_get_data(THPVariable *self)
+static PyObject * THPVariable_get_data(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
   auto var = self->cdata.variable_data();
@@ -236,7 +236,7 @@ static PyObject * THPVariable_get_data(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_data(THPVariable *self, PyObject *data)
+int THPVariable_set_data(THPVariable *self, PyObject *data, void *unused)
 {
   HANDLE_TH_ERRORS
   THPUtils_assertRet(-1, data, "Deleting tensor data is not allowed. Delete tensor instead!");
@@ -249,14 +249,14 @@ int THPVariable_set_data(THPVariable *self, PyObject *data)
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-PyObject *THPVariable_get_grad(THPVariable *self)
+PyObject *THPVariable_get_grad(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
   return THPVariable_Wrap(self->cdata.grad());
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
+int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
@@ -288,7 +288,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-PyObject *THPVariable_get_volatile(THPVariable *self)
+PyObject *THPVariable_get_volatile(THPVariable *self, void *unused)
 {
   const char* msg = "volatile was removed (Variable.volatile is always False)";
   PyErr_WarnEx(PyExc_UserWarning, msg, 1);
@@ -308,14 +308,14 @@ PyObject *THPVariable_get_output_nr(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPVariable_get_requires_grad(THPVariable *self)
+PyObject *THPVariable_get_requires_grad(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
   return PyBool_FromLong(self->cdata.requires_grad());
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPVariable_get_ndim(THPVariable *self)
+PyObject *THPVariable_get_ndim(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
   return PyInt_FromLong(self->cdata.dim());
@@ -323,7 +323,7 @@ PyObject *THPVariable_get_ndim(THPVariable *self)
 }
 
 #ifdef BUILD_NAMEDTENSOR
-PyObject *THPVariable_get_names(THPVariable *self)
+PyObject *THPVariable_get_names(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
   // The long-term plan is to return a list of (python) torch.Dimname.
