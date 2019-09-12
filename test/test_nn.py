@@ -5347,7 +5347,7 @@ class TestNN(NNTestCase):
 
             m2 = nn.Conv2d(2, 2, kernel_size=3, bias=False).to(device, dtype)
             m2.weight.data.copy_(m.weight.data[2:])
-            i2 = i.data[:, 2:].contiguous().requires_grad_(Truee)
+            i2 = i.data[:, 2:].contiguous().requires_grad_(True)
             output2 = m2(i2)
             output2.backward(grad_output[:, 2:].contiguous())
 
