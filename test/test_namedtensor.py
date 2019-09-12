@@ -10,13 +10,23 @@ import torch.nn.functional as F
 from multiprocessing.reduction import ForkingPickler
 import pickle
 import io
+import os
 import sys
 import warnings
 
 
+def check_env_flag(name, default=''):
+    return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
+
+TEST_NAMEDTENSOR = check_env_flag('TEST_NAMEDTENSOR')
+
 skipIfNamedTensorDisabled = \
     unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
                     'PyTorch not compiled with namedtensor support')
+
+skipIfNotTestingNamedTensor = \
+    unittest.skipIf(not TEST_NAMEDTENSOR,
+                    'TEST_NAMEDTENSOR=0; set it to 1 to enable named tensor tests')
 
 def pass_name_to_python_arg_parser(name):
     x = torch.empty(2, names=(name,))
@@ -69,6 +79,17 @@ def out_fn(operator):
 
 
 class TestNamedTensor(TestCase):
+    def test_aaa_must_run_first_check_experimental_warning(self):
+        # TODO(rzou): It would be nice for this to be a "real" python warning.
+        # Right now this error message only prints once and doesn't respect
+        # warnings.simplefilter behavior (where python users can control whether
+        # or not to display warnings once, all the time, or never).
+        with warnings.catch_warnings(record=True) as warns:
+            x = torch.randn(3, 3, names=('N', 'C'))
+            self.assertEqual(len(warns), 1)
+            self.assertTrue(str(warns[0].message).startswith(
+                'Named tensors and all their associated APIs are an experimental feature'))
+
     def test_trivial(self):
         pass
 
@@ -1485,7 +1506,7 @@ class TestNamedTensor(TestCase):
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):
     if attr.startswith('test_'):
-        new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
+        new_test = skipIfNamedTensorDisabled(skipIfNotTestingNamedTensor(getattr(TestNamedTensor, attr)))
         setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':

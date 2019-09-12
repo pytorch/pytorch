@@ -1553,6 +1553,40 @@ graph(%Ra, %Rb):
     def test_trace_size_with_grad(self):
         self.do_trace_size(True)
 
+    def do_trace_arange(self, requires_grad):
+        def arange(x):
+            return torch.arange(x.shape[0])
+
+        def arange_scalar(x):
+            return torch.arange(12)
+
+        def arange_start_end(x):
+            return torch.arange(start=x.shape[0], end=x.shape[0] + 5)
+
+        x = torch.randn(5, 3, 2, requires_grad=requires_grad)
+        y = torch.randn(8, 2, 4, requires_grad=requires_grad)
+
+        # Check that it behaves as expected
+        traced_arange = torch.jit.trace(arange, x)
+        self.assertEqual(traced_arange(y), arange(y))
+        self.assertEqual(traced_arange(x), arange(x))
+
+        traced_arange_scalar = torch.jit.trace(arange_scalar, x)
+        self.assertEqual(traced_arange_scalar(y), arange_scalar(y))
+        self.assertEqual(traced_arange_scalar(x), arange_scalar(x))
+
+        traced_arange_start_end = torch.jit.trace(arange_start_end, x)
+        self.assertEqual(traced_arange_start_end(y), arange_start_end(y))
+        self.assertEqual(traced_arange_start_end(x), arange_start_end(x))
+
+    def test_trace_arange(self):
+        self.do_trace_arange(False)
+
+    # test the different graph_executor path that happens when
+    # gradients are required and sizes are involved
+    def test_trace_arange_with_grad(self):
+        self.do_trace_arange(True)
+
     def test_trace_casts(self):
         casts = [
             lambda x: x.byte(),
@@ -1875,7 +1909,6 @@ graph(%Ra, %Rb):
 
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @skipIfRocm
     def test_dropout_cuda(self):
         # Dropout AD is dispatched to _fused_dropout in CUDA case,
         # which is not included in TestJitGeneratedFunctional
@@ -12019,13 +12052,6 @@ a")
             FooMod(), (torch.rand(3, 4),), f,
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
-    def test_trace_checker_arange_as_constant(self):
-        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Graphs differed across invocations!'):
-            @_trace(torch.rand(3, 4), check_inputs=[(torch.rand(4, 5),)])
-            def foo(x):
-                y = torch.arange(0, x.shape[0]).double()
-                return x + y.unsqueeze(1)
-
     @suppress_warnings
     def test_trace_checker_dot_data(self):
         with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Tensor-valued Constant nodes differed in value '
@@ -15004,6 +15030,36 @@ class TestRecursiveScript(JitTestCase):
 
         self.checkModule(M(), (torch.randn(2, 2),))
 
+    def test_module_repr(self):
+        class Submodule(nn.Module):
+            def forward(self, x):
+                return x
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv = nn.Conv2d(10, 10, 3)
+                self.lin = nn.Linear(10, 10)
+                self.sub = Submodule()
+
+            def forward(self, x):
+                return self.lin(x) + self.sub(x) + self.conv(x)
+
+        m = torch.jit.script(MyModule())
+
+        with self.capture_stdout() as out:
+            print(m)
+
+        f = FileCheck()
+        f.check('MyModule')
+        f.check('Conv2d')
+        f.check('Linear')
+        f.check('Submodule')
+        f.run(out[0])
+
+
+        self.assertEqual(m.original_name, 'MyModule')
+
     def test_class_compile(self):
         def other_fn(a, b):
             # type: (int, Tensor) -> Tensor
@@ -17534,7 +17590,6 @@ class TestDataParallel(JitTestCase):
             self.assertEqual(replica(replica_input).data, expected_output)
 
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_python_submodule_exception(self):
         module = self.Msm1(self.Mpy()).cuda()
         msg = "Cannot replicate.*"
@@ -17542,14 +17597,12 @@ class TestDataParallel(JitTestCase):
             dp.replicate(module, {0, 1})
 
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_python_submodule_script(self):
         module = self.Mpy1(self.Msm()).cuda()
         replicas = dp.replicate(module, {0, 1})
         self.check_replicas(module, replicas)
 
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_shared_module(self):
         s = self.Msm()
         p1 = self.Mpy1(s)
@@ -17558,14 +17611,12 @@ class TestDataParallel(JitTestCase):
         self.check_replicas(module, replicas)
 
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_traced_module(self):
         module = torch.jit.trace(self.Mpy1(self.Mpy()), torch.ones(2, 2)).cuda()
         replicas = dp.replicate(module, {0, 1})
         self.check_replicas(module, replicas)
 
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_tensor_sharing(self):
         module = self.Msm1(self.Msm()).cuda()
         replica = dp.replicate(module, {0, 1})
@@ -17589,6 +17640,29 @@ class TestDataParallel(JitTestCase):
 
 
 class TestList(JitTestCase):
+    def test_in_check(self):
+        def int_in(x):
+            # type: (List[int]) -> bool
+            return 2 in x
+
+        self.checkScript(int_in, ([1, 2, 3],))
+        self.checkScript(int_in, ([1, 3, 3],))
+
+        def float_in(x):
+            # type: (List[float]) -> bool
+            return 2. in x
+
+        self.checkScript(float_in, ([1., 2., 3.],))
+        self.checkScript(float_in, ([1., 3., 3.],))
+
+        def str_in(x):
+            # type: (List[str]) -> bool
+            return 'hi' in x
+
+        self.checkScript(str_in, (['not', 'here'],))
+        self.checkScript(str_in, (['hi', 'bye'],))
+        self.checkScript(str_in, ([],))
+
     def test_list_literal(self):
         def reassign():
             x = [1]
