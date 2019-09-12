@@ -1,3 +1,4 @@
+echo ""
 echo "PWD: `pwd`"
 WORKSPACE=/Users/distiller/workspace
 PROJ_ROOT=/Users/distiller/project
@@ -21,17 +22,20 @@ lipo -create ${ARTIFACTS_DIR}/arm64/lib/libnnpack.a ${ARTIFACTS_DIR}/armv7s/lib/
 lipo -i ${ZIP_DIR}/install/lib/*.a
 # copy the umbrella header
 if [ -e ${PROJ_ROOT}/ios/LibTorch.h ]; then
-    cp ${PROJ_ROOT}/ios/LibTorch.h ${ZIP_DIR}/src/LibTorch.h
+    cp ${PROJ_ROOT}/ios/LibTorch.h ${ZIP_DIR}/src/
+    cp ${PROJ_ROOT}/ios/README.md ${ZIP_DIR}/src/
 else
     echo "LibTorch.h not found!"
     touch ${ZIP_DIR}/src/LibTorch.h
     echo "import <torch/script.h>" > ${ZIP_DIR}/src/LibTorch.h
 fi
 # zip the library
-timestamp=`date +"%Y-%m-%d_%H-%M-%S`
-ZIPFILE=libtorch_ios_nightly_build_${timestamp}.zip
+timestamp=`date +"%Y-%m-%d_%H-%M-%S"`
+ZIPFILE=libtorch_ios_nightly_build.zip
 cd ${ZIP_DIR}
-zip -r ${ZIPFILE} install src
+touch version.txt
+echo `date +%s` > version.txt
+zip -r ${ZIPFILE} install src version.txt
 # upload to aws
 brew install awscli
 set +x
