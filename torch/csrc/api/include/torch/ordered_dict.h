@@ -225,7 +225,7 @@ class OrderedDict<Key, Value>::Item {
   }
 
   /// Returns a `(key, value)` pair.
-  const std::pair<const Key, Value>& pair() const noexcept {
+  const std::pair<Key, Value>& pair() const noexcept {
     return pair_;
   }
 
