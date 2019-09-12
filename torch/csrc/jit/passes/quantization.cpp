@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/subgraph_matcher.h>
 
 #include <stack>
+#include <algorithm>
 
 namespace torch {
 namespace jit {
@@ -65,15 +66,17 @@ graph(%self, %input):
 }
 
 bool nodeQuantizable(Node* n) {
-  static std::vector<Symbol> aten_funcs = {
-    Symbol::aten("conv2d"),
-    Symbol::aten("linear")
-  };
-  bool is_quantizable = std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) != aten_funcs.end();
   static std::vector<std::string> call_funcs = {
+    "conv2d",
     "linear",
-    "relu"
+    "relu",
   };
+  std::vector<Symbol> aten_funcs;
+  std::transform(call_funcs.begin(), call_funcs.end(), std::back_inserter(aten_funcs),
+                 [](std::string s) {
+                   return Symbol::aten(s);
+                 });
+  bool is_quantizable = std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) != aten_funcs.end();
   if (n->kind() == prim::CallFunction) {
     auto func_node = n->inputs()[0]->node();
     if (func_node->kind() == prim::Constant) {
@@ -83,7 +86,7 @@ bool nodeQuantizable(Node* n) {
   return is_quantizable;
 }
 
-bool valueNeedsToBeObserved(Value* v) {
+bool valueNeedsToBeQuantized(Value* v) {
   if (!v->type()->isSubtypeOf(TensorType::get())) {
     return false;
   }
@@ -246,13 +249,10 @@ void InsertObserversImpl(
   // point is the beginning of graph node. This also safe guards against
   // observing a potentially mutated value due to some in-place operation
   Value* self = graph->inputs()[0];
-  std::unordered_set<Value*> values_observed;
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
-    if (valueNeedsToBeObserved(v) &&
-        values_to_skip.count(v) == 0 &&
-        values_observed.count(v) == 0) {
-      values_observed.emplace(v);
+    if (!values_to_skip.count(v) &&
+        valueNeedsToBeQuantized(v)) {
       auto qconfig = module_qconfig_map.at(module.module_object());
       if (qconfig) {
         auto observer_node =
@@ -269,8 +269,7 @@ void InsertObserversImpl(
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
-      // Skip nodes that we don't need to observe, e.g. 'prim::Constant' or
-      // observer nodes
+      // Skip observer nodes
       if (observer_for_input.count(n) != 0) {
         continue;
       }
@@ -278,11 +277,9 @@ void InsertObserversImpl(
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
-        if (valueNeedsToBeObserved(v) &&
-            values_to_skip.count(v) == 0 &&
-            values_observed.count(v) == 0) {
+        if (!values_to_skip.count(v) &&
+            valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
-          values_observed.emplace(v);
         }
         if (v->node()->kind() == prim::CallMethod) {
           // If we find a call to a method of a child module,
