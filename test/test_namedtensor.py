@@ -1,5 +1,5 @@
 import unittest
-from common_utils import TestCase, run_tests
+from common_utils import TestCase, run_tests, TEST_NUMPY
 from common_cuda import TEST_CUDA
 from collections import namedtuple
 import itertools
@@ -10,13 +10,23 @@ import torch.nn.functional as F
 from multiprocessing.reduction import ForkingPickler
 import pickle
 import io
+import os
 import sys
 import warnings
 
 
+def check_env_flag(name, default=''):
+    return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
+
+TEST_NAMEDTENSOR = check_env_flag('TEST_NAMEDTENSOR')
+
 skipIfNamedTensorDisabled = \
     unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
                     'PyTorch not compiled with namedtensor support')
+
+skipIfNotTestingNamedTensor = \
+    unittest.skipIf(not TEST_NAMEDTENSOR,
+                    'TEST_NAMEDTENSOR=0; set it to 1 to enable named tensor tests')
 
 def pass_name_to_python_arg_parser(name):
     x = torch.empty(2, names=(name,))
@@ -69,6 +79,17 @@ def out_fn(operator):
 
 
 class TestNamedTensor(TestCase):
+    def test_aaa_must_run_first_check_experimental_warning(self):
+        # TODO(rzou): It would be nice for this to be a "real" python warning.
+        # Right now this error message only prints once and doesn't respect
+        # warnings.simplefilter behavior (where python users can control whether
+        # or not to display warnings once, all the time, or never).
+        with warnings.catch_warnings(record=True) as warns:
+            x = torch.randn(3, 3, names=('N', 'C'))
+            self.assertEqual(len(warns), 1)
+            self.assertTrue(str(warns[0].message).startswith(
+                'Named tensors and all their associated APIs are an experimental feature'))
+
     def test_trivial(self):
         pass
 
@@ -342,6 +363,48 @@ class TestNamedTensor(TestCase):
             result = torch.full([1, 2, 3], 2, names=names, device=device)
             expected = torch.full([1, 2, 3], 2, device=device).names_(*names)
             self.assertTensorDataAndNamesEqual(result, expected)
+
+    def test_tensor_from_lists(self):
+        names = ('N', 'C')
+        tensor = torch.tensor([[1]], names=names)
+        self.assertEqual(tensor.names, names)
+
+        names = ('N',)
+        tensor = torch.tensor([1], names=names)
+        self.assertEqual(tensor.names, names)
+
+        with self.assertRaisesRegex(RuntimeError, 'Number of names'):
+            names = ('N', 'C')
+            tensor = torch.tensor([1], names=names)
+
+    @unittest.skipIf(not TEST_NUMPY, "no numpy")
+    def test_tensor_from_numpy(self):
+        import numpy as np
+        arr = np.array([[1]])
+        names = ('N', 'C')
+        tensor = torch.tensor([[1]], names=names)
+        self.assertEqual(tensor.names, names)
+
+    def test_tensor_from_tensor(self):
+        x = torch.randn(1, 1)
+        names = ('N', 'C')
+        tensor = torch.tensor(x, names=names)
+        self.assertEqual(tensor.names, names)
+
+    def test_tensor_from_named_tensor(self):
+        x = torch.randn(1, 1, names=('N', 'D'))
+        tensor = torch.tensor(x)
+        self.assertEqual(tensor.names, ('N', 'D'))
+
+        # there's no way to distinguish between names=None and not passing in names.
+        # If the user passes in names=None they are asking for trouble.
+        x = torch.randn(1, 1, names=('N', 'D'))
+        tensor = torch.tensor(x, names=None)
+        self.assertEqual(tensor.names, ('N', 'D'))
+
+        x = torch.randn(1, 1, names=('N', 'D'))
+        with self.assertRaisesRegex(RuntimeError, "Name mismatch"):
+            tensor = torch.tensor(x, names=('N', 'C'))
 
     def test_size(self):
         t = torch.empty(2, 3, 5, names=('N', None, 'C'))
@@ -686,6 +749,39 @@ class TestNamedTensor(TestCase):
             torch.bernoulli(tensor, out=result)
             self.assertEqual(result.names, names)
 
+    def test_flatten(self):
+        tensor = torch.randn(2, 3, 5, 7, 11, names=('N', 'C', 'D', 'H', 'W'))
+
+        # basic
+        out = tensor.flatten('D', 'W', 'features')
+        self.assertEqual(out.names, ['N', 'C', 'features'])
+        self.assertEqual(out.renamed(None), tensor.renamed(None).view(2, 3, -1))
+
+        # int overload
+        out = tensor.flatten(2, 4, 'features')
+        self.assertEqual(out.names, ['N', 'C', 'features'])
+        self.assertEqual(out.renamed(None), tensor.renamed(None).view(2, 3, -1))
+
+        # list overload
+        out = tensor.flatten(['D', 'H', 'W'], 'features')
+        self.assertEqual(out.names, ['N', 'C', 'features'])
+        self.assertEqual(out.renamed(None), tensor.renamed(None).view(2, 3, -1))
+
+        # Non-contiguous flatten: N and H are not "adjacent" in memory.
+        sentences = torch.randn(2, 3, 5, 7, names=('N', 'T', 'H', 'D'))
+        sentences = sentences.transpose('T', 'H')
+        out = sentences.flatten('N', 'H', 'N_H')
+        self.assertEqual(out.names, ['N_H', 'T', 'D'])
+
+        with self.assertRaisesRegex(RuntimeError, "Name 'L' not found in"):
+            tensor.flatten(['D', 'L'], 'features')
+
+        with self.assertRaisesRegex(RuntimeError, "must be consecutive in"):
+            tensor.flatten(['D', 'W'], 'features')
+
+        with self.assertRaisesRegex(RuntimeError, "must be consecutive in"):
+            tensor.flatten(['H', 'D', 'W'], 'features')
+
     def test_reduction_fns(self):
         def check_output(output, expected_names):
             if isinstance(output, torch.Tensor):
@@ -735,23 +831,27 @@ class TestNamedTensor(TestCase):
             'supports_complete_reduce',
             'supports_multidim_reduce',
             'supports_out_variant',
+            'supports_keepdim',
+            'output_lambda',
         ])
 
         tests = [
-            Case('sum', True, True, True),
-            Case('prod', True, False, True),
-            Case('mean', True, True, True),
-            Case('var', True, True, True),
-            Case('std', True, True, True),
-            Case('std_mean', True, True, False),
-            Case('var_mean', True, True, False),
+            Case('sum', True, True, True, True, None),
+            Case('prod', True, False, True, True, None),
+            Case('mean', True, True, True, True, None),
+            Case('var', True, True, True, True, None),
+            Case('std', True, True, True, True, None),
+            Case('std_mean', True, True, False, True, None),
+            Case('var_mean', True, True, False, True, None),
+            Case('unbind', False, False, False, False, None),
         ]
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             op_name = testcase.op_name
             test_simple_reduce(op_name, device)
-            test_keepdim(op_name, device)
 
+            if testcase.supports_keepdim:
+                test_keepdim(op_name, device)
             if testcase.supports_out_variant:
                 test_out_variant(op_name, device)
             if testcase.supports_complete_reduce:
@@ -1406,7 +1506,7 @@ class TestNamedTensor(TestCase):
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):
     if attr.startswith('test_'):
-        new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
+        new_test = skipIfNamedTensorDisabled(skipIfNotTestingNamedTensor(getattr(TestNamedTensor, attr)))
         setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':

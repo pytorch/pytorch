@@ -56,7 +56,7 @@ py::object toPyObj(const Message& message) {
       return torch::jit::createPyObjectForStack(std::move(stack));
     }
     case MessageType::PYTHON_RET: {
-      return PythonRpcHandler::loadPythonUDFResult(message);
+      return PythonRpcHandler::getInstance().loadPythonUDFResult(message);
     }
     case MessageType::EXCEPTION: {
       std::string err(message.payload().begin(), message.payload().end());
