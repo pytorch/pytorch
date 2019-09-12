@@ -266,11 +266,13 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
           send(work.from_, std::move(response));
         } else if (message.isResponse()) {
           auto id = message.id();
+          std::shared_ptr<FutureMessage> fm = nullptr;
           {
             std::lock_guard<std::mutex> lock{futureMutex_};
-            futures_[id]->markCompleted(std::move(message));
+            fm = futures_[id];
             futures_.erase(id);
           }
+          fm->markCompleted(std::move(message));
         } else {
           // TODO: pass the error back to the caller instead of crashing here.
           AT_ERROR("unrecognized message type ", message.type());

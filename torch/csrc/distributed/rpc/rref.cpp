@@ -93,7 +93,7 @@ UserRRef<T>::~UserRRef() {
   if (ctx->getWorkerId() != ownerId_) {
     auto fm = ctx->agent()->send(
         ctx->agent()->getWorkerId(ownerId_),
-        ScriptUserDelete(ownerId_, rrefId_, forkId_).toMessage());
+        ScriptUserDelete(rrefId_, forkId_).toMessage());
 
     fm->addCallback([](const Message& message){
       RRefContext::handleException(message);
@@ -121,7 +121,7 @@ IValue UserRRef<IValue>::toHere() {
   auto& agent = RRefContext::getInstance()->agent();
   std::shared_ptr<FutureMessage> fm = agent->send(
       agent->getWorkerId(ownerId_),
-      ScriptRRefFetchCall(id().toIValue()).toMessage());
+      ScriptRRefFetchCall(id()).toMessage());
   const Message& message = fm->wait();
   RRefContext::handleException(message);
   auto srv = ScriptRRefFetchRet::fromMessage(message);
@@ -133,7 +133,7 @@ py::object UserRRef<py::object>::toHere() {
   auto& agent = RRefContext::getInstance()->agent();
   std::shared_ptr<FutureMessage> fm = agent->send(
       agent->getWorkerId(ownerId_),
-      PythonRRefFetchCall(id().toIValue()).toMessage());
+      PythonRRefFetchCall(id()).toMessage());
   const Message& message = fm->wait();
   RRefContext::handleException(message);
   auto srv = ScriptRRefFetchRet::fromMessage(message);

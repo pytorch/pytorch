@@ -191,7 +191,6 @@ RRefForkData RRefContext::forkTo(
       auto fm = agent_->send(
           agent_->getWorkerId(rref->owner()),
           ScriptForkNotify(
-              forkRequest.ownerId_,
               forkRequest.rrefId_,
               forkRequest.forkId_,
               forkDst
@@ -200,7 +199,7 @@ RRefForkData RRefContext::forkTo(
       fm->addCallback([this](const Message& message) {
         handleException(message);
         auto sfa = ScriptForkAccept::fromMessage(message);
-        this->finishForkRequest(sfa.forkId_);
+        this->finishForkRequest(sfa.forkId());
       });
     }
   }
@@ -209,7 +208,7 @@ RRefForkData RRefContext::forkTo(
 
 Message RRefContext::acceptUserRRef(const RRefId& rrefId, const ForkId& forkId) {
   addForkOfOwner(rrefId, forkId);
-  return ScriptUserAccept(getWorkerId(), rrefId, forkId).toMessage();
+  return ScriptUserAccept(rrefId, forkId).toMessage();
 }
 
 Message RRefContext::acceptForkRequest(

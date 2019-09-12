@@ -72,7 +72,7 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
         ownerRRef->setValue(std::move(stack.front()));
 
         ctx->addForkOfOwner(rrefId, forkId);
-        return RemoteRet(ctx->getWorkerId(), rrefId, forkId).toMessage();
+        return RemoteRet(rrefId, forkId).toMessage();
       }
       case MessageType::PYTHON_REMOTE_CALL: {
         PythonRemoteCall prc = PythonRemoteCall::fromMessage(request);
@@ -85,22 +85,22 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
         ownerRRef->setValue(PythonRpcHandler::runPythonUDF(prc.udf()));
 
         ctx->addForkOfOwner(rrefId, forkId);
-        return RemoteRet(ctx->getWorkerId(), rrefId, forkId).toMessage();
+        return RemoteRet(rrefId, forkId).toMessage();
       }
       case MessageType::SCRIPT_RREF_FETCH_CALL: {
         ScriptRRefFetchCall srf = ScriptRRefFetchCall::fromMessage(request);
         // TODO: make this asynchronous
         std::shared_ptr<OwnerRRef<IValue>> rref =
             RRefContext::getInstance()->getOrCreateOwnerRRef<IValue>(
-                RRefId::fromIValue(srf.value()));
+                srf.rrefId());
         return ScriptRRefFetchRet(rref->getValue()).toMessage();
       }
       case MessageType::PYTHON_RREF_FETCH_CALL: {
-        PythonRRefFetchCall srf = PythonRRefFetchCall::fromMessage(request);
+        PythonRRefFetchCall prf = PythonRRefFetchCall::fromMessage(request);
         // TODO: make this asynchronous
         std::shared_ptr<OwnerRRef<py::object>> rref =
             RRefContext::getInstance()->getOrCreateOwnerRRef<py::object>(
-                RRefId::fromIValue(srf.value()));
+                prf.rrefId());
         return
             ScriptRRefFetchRet(
                 PythonRpcHandler::serialize(rref->getValue(), from.id_)
@@ -109,28 +109,19 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
       case MessageType::RREF_USER_ACCEPT: {
         ScriptUserAccept sua = ScriptUserAccept::fromMessage(request);
         auto& ctx = RRefContext::getInstance();
-        TORCH_INTERNAL_ASSERT(ctx->getWorkerId() == sua.owner_,
-            "Worker ",
-            ctx->getWorkerId(),
-            " received a RREF_USER_ACCEPT message of a different owner ",
-            sua.owner_);
-        ctx->finishUserRRef(sua.rrefId_, sua.forkId_);
+        ctx->finishUserRRef(sua.rrefId(), sua.forkId());
         return Message({}, {}, MessageType::ACK);
       }
       case MessageType::RREF_USER_DELETE: {
         ScriptUserDelete srd = ScriptUserDelete::fromMessage(request);
-        RRefContext::getInstance()->delForkOfOwner(srd.rrefId_, srd.forkId_);
+        RRefContext::getInstance()->delForkOfOwner(srd.rrefId(), srd.forkId());
         return Message({}, {}, MessageType::ACK);
       }
       case MessageType::RREF_FORK_NOTIFY: {
         ScriptForkNotify sfn = ScriptForkNotify::fromMessage(request);
         auto& ctx = RRefContext::getInstance();
-        TORCH_INTERNAL_ASSERT(ctx->getWorkerId() == sfn.owner_,
-            "Worker ",
-            ctx->getWorkerId(),
-            " received a RREF_USER_ACCEPT message of a different owner ",
-            sfn.owner_);
-        return ctx->acceptForkRequest(sfn.rrefId_, sfn.forkId_, sfn.forkDst_);
+        return ctx->acceptForkRequest(
+            sfn.rrefId(), sfn.forkId(), sfn.forkDst());
       }
       default: {
         AT_ERROR("Request type ", request.type(), " not supported.");

@@ -61,12 +61,7 @@ void finishAcceptUserRRef(const Message& message) {
   RRefContext::handleException(message);
   RemoteRet rr = RemoteRet::fromMessage(message);
   auto& ctx = RRefContext::getInstance();
-  TORCH_INTERNAL_ASSERT(ctx->getWorkerId() == rr.owner_,
-      "Worker ",
-      ctx->getWorkerId(),
-      " received a RREF_USER_ACCEPT message of a different owner ",
-      rr.owner_);
-  ctx->finishUserRRef(rr.rrefId_, rr.forkId_);
+  ctx->finishUserRRef(rr.rrefId(), rr.forkId());
 }
 
 } // namespace

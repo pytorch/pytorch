@@ -30,27 +30,87 @@ Message fromIValues(std::vector<IValue> ivalues, MessageType type) {
   return Message(std::move(payload), std::move(tensor_table), type);
 }
 
-}
+} // namespace
 
-const at::IValue& RRefMessageBase::value() {
-  return value_;
-}
+/////////////////////////// RRefMessageBase //////////////////////////////////
 
-at::IValue& RRefMessageBase::valueRef() {
-  return value_;
+const RRefId& RRefMessageBase::rrefId() {
+  return rrefId_;
 }
 
 Message RRefMessageBase::toMessage() const {
+  return fromIValues({rrefId_.toIValue()}, type_);
+}
+
+at::IValue RRefMessageBase::fromMessage(
+    const Message& message, MessageType type) {
+  auto values = toIValues(message, type);
+
+  TORCH_INTERNAL_ASSERT(values.size() == 1,
+      "ScriptUserDelete expects 1 IValue from message.");
+  return std::move(values.back());
+}
+
+/////////////////////////// ForkMessageBase //////////////////////////////////
+
+const ForkId& ForkMessageBase::forkId() {
+  return forkId_;
+}
+
+Message ForkMessageBase::toMessage() const {
+  return fromIValues(
+      {
+          rrefId_.toIValue(),
+          forkId_.toIValue()
+      },
+      type_
+  );
+}
+
+std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
+    const Message& message, MessageType type) {
+  auto ivalues = toIValues(message, type);
+
+  TORCH_INTERNAL_ASSERT(ivalues.size() == 2,
+      "ScriptUserDelete expects 2 IValue from message.");
+
+  return std::make_pair(
+      RRefId::fromIValue(std::move(ivalues[0])),
+      ForkId::fromIValue(std::move(ivalues[1])));
+}
+
+/////////////////////////// RRef Protocol //////////////////////////////////
+
+ScriptRRefFetchCall ScriptRRefFetchCall::fromMessage(const Message& message) {
+  return ScriptRRefFetchCall(RRefId::fromIValue(
+      RRefMessageBase::fromMessage(
+          message, MessageType::SCRIPT_RREF_FETCH_CALL)));
+}
+
+PythonRRefFetchCall PythonRRefFetchCall::fromMessage(const Message& message) {
+  return PythonRRefFetchCall(RRefId::fromIValue(
+      RRefMessageBase::fromMessage(
+          message, MessageType::PYTHON_RREF_FETCH_CALL)));
+}
+
+const at::IValue& ScriptRRefFetchRet::value() {
+  return value_;
+}
+
+Message ScriptRRefFetchRet::toMessage() const {
   std::vector<at::IValue> ivalues;
   ivalues.emplace_back(value_);
   std::vector<torch::Tensor> tensor_table;
   auto payload =
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
 
-  return Message(std::move(payload), std::move(tensor_table), type_);
+  return Message(
+      std::move(payload),
+      std::move(tensor_table),
+      MessageType::RREF_FETCH_RET);
 }
 
-at::IValue RRefMessageBase::fromMessage(const Message& message) {
+ScriptRRefFetchRet ScriptRRefFetchRet::fromMessage(const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
 
@@ -58,107 +118,34 @@ at::IValue RRefMessageBase::fromMessage(const Message& message) {
       jit::unpickle(payload, payload_size, nullptr, &message.tensors());
   auto values = value.toTuple()->elements();
 
-  AT_ASSERT(values.size() == 1, "Expect a single IValue from message.");
-  return std::move(values.front());
-}
-
-ScriptRRefFetchCall ScriptRRefFetchCall::fromMessage(const Message& message) {
-  return ScriptRRefFetchCall(RRefMessageBase::fromMessage(message));
-}
-
-PythonRRefFetchCall PythonRRefFetchCall::fromMessage(const Message& message) {
-  return PythonRRefFetchCall(RRefMessageBase::fromMessage(message));
-}
-
-ScriptRRefFetchRet ScriptRRefFetchRet::fromMessage(const Message& message) {
-  return ScriptRRefFetchRet(RRefMessageBase::fromMessage(message));
-}
-
-Message ScriptUserDelete::toMessage() {
-  return fromIValues(
-      {
-        IValue(owner_),
-        rrefId_.toIValue(),
-        forkId_.toIValue()
-      },
-      MessageType::RREF_USER_DELETE
-  );
+  AT_ASSERT(values.size() == 1, "Expect 1 IValue from message.");
+  return ScriptRRefFetchRet(values.front());
 }
 
 ScriptUserDelete ScriptUserDelete::fromMessage(const Message& message) {
-  auto values = toIValues(message, MessageType::RREF_USER_DELETE);
-
-  TORCH_INTERNAL_ASSERT(values.size() == 3,
-      "ScriptUserDelete expects 3 IValue from message.");
-
-  ForkId forkId = ForkId::fromIValue(std::move(values.back()));
-  values.pop_back();
-  RRefId rrefId = ForkId::fromIValue(std::move(values.back()));
-  values.pop_back();
-  auto owner = values.back().toInt();
-  TORCH_INTERNAL_ASSERT(owner < std::numeric_limits<worker_id_t>::max(),
-      "owner id out of range ", owner);
-  return ScriptUserDelete(worker_id_t(owner), rrefId, forkId);
-}
-
-Message ScriptUserAccept::toMessage() {
-  return fromIValues(
-      {
-        IValue(owner_),
-        rrefId_.toIValue(),
-        forkId_.toIValue()
-      },
-      MessageType::RREF_USER_ACCEPT
-  );
+  auto pair = ForkMessageBase::fromMessage(
+      message, MessageType::RREF_USER_DELETE);
+  return ScriptUserDelete(pair.first, pair.second);
 }
 
 ScriptUserAccept ScriptUserAccept::fromMessage(const Message& message) {
-  auto values = toIValues(message, MessageType::RREF_USER_ACCEPT);
-
-  TORCH_INTERNAL_ASSERT(values.size() == 3,
-      "ScriptUserAccept expects 3 IValue from message.");
-
-  ForkId forkId = ForkId::fromIValue(std::move(values.back()));
-  values.pop_back();
-  RRefId rrefId = ForkId::fromIValue(std::move(values.back()));
-  values.pop_back();
-  auto owner = values.back().toInt();
-  TORCH_INTERNAL_ASSERT(owner < std::numeric_limits<worker_id_t>::max(),
-      "owner id out of range ", owner);
-  return ScriptUserAccept(worker_id_t(owner), rrefId, forkId);
-}
-
-Message RemoteRet::toMessage() {
-  return fromIValues(
-      {
-        IValue(owner_),
-        rrefId_.toIValue(),
-        forkId_.toIValue()
-      },
-      MessageType::REMOTE_RET
-  );
+  auto pair = ForkMessageBase::fromMessage(
+      message, MessageType::RREF_USER_ACCEPT);
+  return ScriptUserAccept(pair.first, pair.second);
 }
 
 RemoteRet RemoteRet::fromMessage(const Message& message) {
-  auto values = toIValues(message, MessageType::REMOTE_RET);
+  auto pair = ForkMessageBase::fromMessage(message, MessageType::REMOTE_RET);
+  return RemoteRet(pair.first, pair.second);
+}
 
-  TORCH_INTERNAL_ASSERT(values.size() == 3,
-      "RemoteRet expects 3 IValue from message.");
-
-  ForkId forkId = ForkId::fromIValue(std::move(values.back()));
-  values.pop_back();
-  RRefId rrefId = ForkId::fromIValue(std::move(values.back()));
-  values.pop_back();
-  auto owner = values.back().toInt();
-  TORCH_INTERNAL_ASSERT(owner < std::numeric_limits<worker_id_t>::max(),
-      "owner id out of range ", owner);
-  return RemoteRet(worker_id_t(owner), rrefId, forkId);
+worker_id_t ScriptForkNotify::forkDst() const {
+  return forkDst_;
 }
 
 Message ScriptForkNotify::toMessage() const {
   return fromIValues(
       {
-          IValue(owner_),
           rrefId_.toIValue(),
           forkId_.toIValue(),
           IValue(forkDst_)
@@ -170,7 +157,7 @@ Message ScriptForkNotify::toMessage() const {
 ScriptForkNotify ScriptForkNotify::fromMessage(const Message& message) {
   auto values = toIValues(message, MessageType::RREF_FORK_NOTIFY);
 
-  AT_ASSERT(values.size() == 4, "Expect 4 IValues from message.");
+  AT_ASSERT(values.size() == 3, "Expect 3 IValues from message.");
   auto forkDst = values.back().toInt();
   AT_ASSERT(forkDst < std::numeric_limits<worker_id_t>::max(),
       "Fork destination worker id out of bound ",
@@ -179,12 +166,12 @@ ScriptForkNotify ScriptForkNotify::fromMessage(const Message& message) {
   RRefId rrefId = RRefId::fromIValue(std::move(values.back()));
   values.pop_back();
   ForkId forkId = ForkId::fromIValue(std::move(values.back()));
-  values.pop_back();
-  auto owner = values.back().toInt();
-  TORCH_INTERNAL_ASSERT(owner < std::numeric_limits<worker_id_t>::max(),
-      "owner id out of range ", owner);
 
-  return ScriptForkNotify(owner, rrefId, forkId, forkDst);
+  return ScriptForkNotify(rrefId, forkId, forkDst);
+}
+
+const ForkId& ScriptForkAccept::forkId() const {
+  return forkId_;
 }
 
 Message ScriptForkAccept::toMessage() {
