@@ -6440,7 +6440,7 @@ class TestNN(NNTestCase):
         first_warn = True
         for rnn in rnns:
             rnn.cuda()
-            input = torch.randn(5, 4, 10, requires_grad=True).cuda(), requires_grad=True
+            input = torch.randn(5, 4, 10, requires_grad=True).cuda()
             hx = torch.randn(1, 5, 20, requires_grad=True).cuda()
             all_vars = [input, hx] + list(rnn.parameters())
             if isinstance(rnn, nn.LSTM):
