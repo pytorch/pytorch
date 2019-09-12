@@ -191,6 +191,7 @@ def add_torch_libs():
         "torch/csrc/api/src/nn/modules/dropout.cpp",
         "torch/csrc/api/src/nn/modules/embedding.cpp",
         "torch/csrc/api/src/nn/modules/fold.cpp",
+        "torch/csrc/api/src/nn/utils/clip_grad.cpp",
         "torch/csrc/api/src/nn/modules/functional.cpp",
         "torch/csrc/api/src/nn/modules/linear.cpp",
         "torch/csrc/api/src/nn/modules/loss.cpp",

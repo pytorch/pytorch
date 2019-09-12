@@ -537,6 +537,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/maxpool.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/named_any.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/utils/clip_grad.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
