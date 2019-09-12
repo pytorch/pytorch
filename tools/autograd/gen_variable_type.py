@@ -154,12 +154,8 @@ ${return_type} VariableType::${api_name}(${type_method_formals}) {
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
-.registerVariableOp<${return_type} (${formal_types})>("${schema_string}", &VariableType::${api_name})
-""")
-
-C10_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op("${schema_string}", torch::RegisterOperators::options()
-  .impl_unboxedAutogradKernel<${return_type} (${formal_types})>(&VariableType::${api_name})
+  .impl_unboxedAutogradKernel<${return_type} (${formal_types})>("${schema_string}", &VariableType::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
@@ -463,7 +459,6 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
     type_declarations = []
     type_definitions = []
     wrapper_registrations = []
-    c10_wrapper_registrations = []
 
     for declaration in aten_declarations:
         formal_types = [arg['type'] for arg in declaration['arguments']]
@@ -474,15 +469,11 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 declaration, type_definition_body=body))
         wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
             declaration, formal_types=formal_types))
-        if declaration['use_c10_dispatcher']:
-            c10_wrapper_registrations.append(C10_WRAPPER_REGISTRATION.substitute(
-                declaration, formal_types=formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,
         'type_derived_method_definitions': type_definitions,
         'wrapper_registrations': wrapper_registrations,
-        'c10_wrapper_registrations': c10_wrapper_registrations,
     }
     if header:
         write(out, 'VariableType.h', VARIABLE_TYPE_H, env)

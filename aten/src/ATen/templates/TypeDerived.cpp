@@ -44,10 +44,7 @@ Tensor * ${Type}::add(Tensor & a, Tensor & b) {
 ${type_derived_method_definitions}
 
 #ifndef USE_STATIC_DISPATCH
-static auto& registerer = globalATenDispatch()
+static auto registerer = torch::RegisterOperators()
   ${function_registrations};
-
-static auto c10_registerer = c10::RegisterOperators()
-  ${c10_function_registrations};
 #endif
 }

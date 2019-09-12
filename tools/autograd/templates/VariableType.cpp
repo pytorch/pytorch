@@ -34,11 +34,8 @@ ${type_derived_method_definitions}
 
 namespace {
 
-static auto& registerer = globalATenDispatch()
+static auto registerer = torch::RegisterOperators()
   ${wrapper_registrations};
-
-static auto c10_registerer = c10::RegisterOperators()
-  ${c10_wrapper_registrations};
 
 }
 
