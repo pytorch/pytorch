@@ -12169,15 +12169,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         for idx in iter_indices(x):
             self.assertEqual(x[idx] >= y[idx], ge[idx] == 1)
 
-    def test_comparison_ops_dtype(self):
-        for device in torch.testing.get_all_device_types():
-            x = torch.tensor([-1, 0, 1], dtype=torch.float, device=device)
-            y = torch.tensor([-1, 0, 1], dtype=torch.double, device=device)
-            self.assertEqual(x.lt(y).dtype == torch.bool)
-            self.assertEqual(y.lt(x).dtype == torch.bool)
-            self.assertEqual(x.lt_(y).dtype == torch.float)
-            self.assertEqual(y.lt_(x).dtype == torch.double)
-
     def test_bitwise_ops(self):
         x = torch.randn(5, 5).gt(0)
         y = torch.randn(5, 5).gt(0)
