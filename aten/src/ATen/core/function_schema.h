@@ -118,6 +118,14 @@ struct OperatorName final {
   std::string overload_name;
 };
 
+inline std::string toString(const OperatorName& opName) {
+  std::string result = opName.name;
+  if (opName.overload_name.size() != 0) {
+    result += "." + opName.overload_name;
+  }
+  return result;
+}
+
 struct FunctionSchema {
   FunctionSchema(
       std::string name,
@@ -237,9 +245,9 @@ public:
     return false;
   }
 
-  // can a function with this schema be substituted for a function of rhs's 
+  // can a function with this schema be substituted for a function of rhs's
   // schema and have the program typecheck?
-  // as_method - if true, treat this schema as a method and ignore 
+  // as_method - if true, treat this schema as a method and ignore
   // the first argument, which will be the object in both cases
   bool isSubtypeOf(const FunctionSchema& rhs, bool as_method, std::ostream* why_not=nullptr) const;
 };
