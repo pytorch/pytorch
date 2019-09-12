@@ -3270,7 +3270,7 @@ class TestNN(NNTestCase):
 
     def _test_InstanceNorm_cuda_half(self, cls, input):
         # THNN
-        input = torch.Tensor(input.cuda().half().random_(1, 10), requires_grad=True)
+        input = input.cuda().half().random_(1, 10).requires_grad_(True)
         m = cls(input.size(1), affine=True, track_running_stats=True).to("cuda", torch.half)
         thnn_output = m(input)
         thnn_output.sum().backward()
@@ -3390,7 +3390,7 @@ class TestNN(NNTestCase):
             self.assertRaises(RuntimeError, lambda: ln(input))
 
     def _test_LayerNorm_cuda_half(self):
-        input = torch.Tensor(torch.empty(2, 3, 3, 2).to("cuda", torch.half).random_(1, 10), requires_grad=True)
+        input = torch.empty(2, 3, 3, 2, requires_grad=True).to("cuda", torch.half).random_(1, 10)
         m = nn.LayerNorm([3, 2]).to("cuda", torch.half)
         output = m(input)
         output.sum().backward()
@@ -3453,7 +3453,7 @@ class TestNN(NNTestCase):
             self.assertRaises(RuntimeError, lambda: gn(input))
 
     def _test_GroupNorm_cuda_half(self):
-        input = torch.Tensor(torch.empty(2, 3, 3, 2).to("cuda", torch.half).random_(1, 10), requires_grad=True)
+        input = torch.empty(2, 3, 3, 2, requires_grad=True).to("cuda", torch.half).random_(1, 10)
         input = torch.zeros(2, 4, 3, 2, requires_grad=True).cuda().half().random_(1, 10)
         m = nn.GroupNorm(2, 4).to("cuda", torch.half)
         output = m(input)
@@ -4220,10 +4220,10 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_different_len_dicts(self):
         inputs = (
-            {'a': torch.Tensor(torch.randn(1, 2).cuda(0), requires_grad=True)},
+            {'a' torch.randn(1, 2, requires_grad=True).cuda(0)},
             {
-                'b': torch.Tensor(torch.randn(1, 2).cuda(1), requires_grad=True),
-                'a': torch.Tensor(torch.randn(1, 2).cuda(1), requires_grad=True)
+                'b': torch.randn(1, 2, requires_grad=True).cuda(1),
+                'a': torch.randn(1, 2, requires_grad=True).cuda(1),
             }
         )
         with self.assertRaises(ValueError):
@@ -5304,14 +5304,14 @@ class TestNN(NNTestCase):
         m1 = nn.Conv2d(2, 2, kernel_size=3).to(device, dtype)
         m1.weight.data.copy_(m.weight.data[:2])
         m1.bias.data.copy_(m.bias.data[:2])
-        i1 = torch.Tensor(i.data[:, :2].contiguous(), requires_grad=True)
+        i1 = i.data[:, :2].contiguous().requires_grad_(True)
         output1 = m1(i1)
         output1.backward(grad_output[:, :2].contiguous())
 
         m2 = nn.Conv2d(2, 2, kernel_size=3).to(device, dtype)
         m2.weight.data.copy_(m.weight.data[2:])
         m2.bias.data.copy_(m.bias.data[2:])
-        i2 = torch.Tensor(i.data[:, 2:].contiguous(), requires_grad=True)
+        i2 = i.data[:, 2:].contiguous().requires_grad_(True)
         output2 = m2(i2)
         output2.backward(grad_output[:, 2:].contiguous())
 
@@ -5341,13 +5341,13 @@ class TestNN(NNTestCase):
 
             m1 = nn.Conv2d(2, 2, kernel_size=3, bias=False).to(device, dtype)
             m1.weight.data.copy_(m.weight.data[:2])
-            i1 = torch.Tensor(i.data[:, :2].contiguous(), requires_grad=True)
+            i1 = i.data[:, :2].contiguous().requires_grad_(True)
             output1 = m1(i1)
             output1.backward(grad_output[:, :2].contiguous())
 
             m2 = nn.Conv2d(2, 2, kernel_size=3, bias=False).to(device, dtype)
             m2.weight.data.copy_(m.weight.data[2:])
-            i2 = torch.Tensor(i.data[:, 2:].contiguous(), requires_grad=True)
+            i2 = i.data[:, 2:].contiguous().requires_grad_(Truee)
             output2 = m2(i2)
             output2.backward(grad_output[:, 2:].contiguous())
 
@@ -5377,13 +5377,13 @@ class TestNN(NNTestCase):
 
             m1 = nn.Conv2d(2, 8, kernel_size=3, bias=False).to(device, dtype)
             m1.weight.data.copy_(m.weight.data[:8])
-            i1 = torch.Tensor(i.data[:, :2].contiguous(), requires_grad=True)
+            i1 = i.data[:, :2].contiguous().requires_grad_(True)
             output1 = m1(i1)
             output1.backward(grad_output[:, :8].contiguous())
 
             m2 = nn.Conv2d(2, 8, kernel_size=3, bias=False).to(device, dtype)
             m2.weight.data.copy_(m.weight.data[8:])
-            i2 = torch.Tensor(i.data[:, 2:].contiguous(), requires_grad=True)
+            i2 = i.data[:, 2:].contiguous().requires_grad_(True)
             output2 = m2(i2)
             output2.backward(grad_output[:, 8:].contiguous())
 
@@ -6440,11 +6440,11 @@ class TestNN(NNTestCase):
         first_warn = True
         for rnn in rnns:
             rnn.cuda()
-            input = torch.Tensor(torch.randn(5, 4, 10).cuda(), requires_grad=True)
-            hx = torch.Tensor(torch.randn(1, 5, 20).cuda(), requires_grad=True)
+            input = torch.randn(5, 4, 10, requires_grad=True).cuda(), requires_grad=True
+            hx = torch.randn(1, 5, 20, requires_grad=True).cuda()
             all_vars = [input, hx] + list(rnn.parameters())
             if isinstance(rnn, nn.LSTM):
-                cx = torch.Tensor(torch.randn(1, 5, 20).cuda(), requires_grad=True)
+                cx = torch.randn(1, 5, 20, requires_grad=True).cuda()
                 all_vars[2:2] = [cx]
                 hx = (hx, cx)
 
@@ -6489,13 +6489,13 @@ class TestNN(NNTestCase):
         for rnn in rnns:
             rnn.bias_ih_l0_reverse = rnn.bias_ih_l0
             rnn.cuda()
-            input = torch.Tensor(torch.randn(5, 4, 10).cuda(), requires_grad=True)
-            hx = torch.Tensor(torch.randn(2, 5, 20).cuda(), requires_grad=True)
+            input = torch.randn(5, 4, 10, requires_grad=True).cuda()
+            hx = torch.randn(2, 5, 20, requires_grad=True).cuda()
             all_vars = [input, hx] + list(rnn.parameters())
             opt = torch.optim.SGD(rnn.parameters(), lr=0.1)
             opt.zero_grad()
             if isinstance(rnn, nn.LSTM):
-                cx = torch.Tensor(torch.randn(2, 5, 20).cuda(), requires_grad=True)
+                cx = torch.randn(2, 5, 20, requires_grad=True).cuda()
                 all_vars[2:2] = [cx]
                 hx = (hx, cx)
 
@@ -6543,16 +6543,16 @@ class TestNN(NNTestCase):
 
                     is_lstm = isinstance(rnn, nn.LSTM)
                     if is_lstm:
-                        hx = (torch.Tensor(hx_val.clone(), requires_grad=True),
-                              torch.Tensor(hx_val.clone().add(1), requires_grad=True))
-                        hx_cuda = (torch.Tensor(hx_val.clone().cuda(), requires_grad=True),
-                                   torch.Tensor(hx_val.clone().cuda().add(1), requires_grad=True))
+                        hx = (hx_val.clone().requires_grad_(True),
+                              hx_val.clone().add(1).requires_grad_(True))
+                        hx_cuda = (hx_val.clone().cuda().requires_grad_(True),
+                                   hx_val.clone().cuda().add(1).requires_grad_(True))
                     else:
-                        hx = torch.Tensor(hx_val.clone(), requires_grad=True)
-                        hx_cuda = torch.Tensor(hx_val.clone().cuda(), requires_grad=True)
+                        hx = hx_val.clone().requires_grad_(True)
+                        hx_cuda = hx_val.clone().cuda().requires_grad_(True)
 
-                    inp = torch.Tensor(input_val.clone(), requires_grad=True)
-                    inp_cu = torch.Tensor(input_val.clone().cuda(), requires_grad=True)
+                    inp = input_val.clone().requires_grad_(True)
+                    inp_cu = input_val.clone().cuda().requires_grad_(True)
                     output1, hy1 = rnn(inp, hx)
                     output2, hy2 = rnn_cuda(inp_cu, hx_cuda)
                     if is_lstm:
@@ -6910,16 +6910,16 @@ class TestNN(NNTestCase):
 
             if isinstance(input_val, rnn_utils.PackedSequence):
                 input = rnn_utils.PackedSequence(
-                    torch.Tensor(input_val.data.data, requires_grad=True), input_val.batch_sizes)
+                    input_val.data.data.requires_grad_(True), input_val.batch_sizes)
                 input_var = input.data
             else:
-                input = torch.Tensor(input_val.clone(), requires_grad=True)
+                input = input_val.clone().requires_grad_(True)
                 input_var = input
             if is_lstm:
-                hx = (torch.Tensor(hx_val.clone(), requires_grad=True),
-                      torch.Tensor(hx_val.add(1), requires_grad=True))
+                hx = (hx_val.clone().requires_grad_(True),
+                      hx_val.add(1).requires_grad_(True))
             else:
-                hx = torch.Tensor(hx_val.clone(), requires_grad=True)
+                hx = hx_val.clone().requires_grad_(True)
 
             if cuda:
                 rnn.cuda()
