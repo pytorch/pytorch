@@ -5,7 +5,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-std::unique_ptr<RRefContext> RRefContext::context_;
+std::unique_ptr<RRefContext> RRefContext::context_ = nullptr;
 
 void RRefContext::initInstance(std::shared_ptr<RpcAgent> agent) {
   TORCH_CHECK(!RRefContext::context_, "Can only initialize RRefContext once.");

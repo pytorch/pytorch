@@ -208,6 +208,11 @@ class RRef {
 template <typename T>
 class UserRRef final : public RRef {
  public:
+  UserRRef(const UserRRef& other) = delete;
+  UserRRef(UserRRef&& other) = delete;
+  UserRRef& operator=(const UserRRef other) = delete;
+  UserRRef& operator=(UserRRef&& other) = delete;
+
   inline bool isOwner() const override {
     return false;
   }
@@ -234,6 +239,11 @@ class UserRRef final : public RRef {
 template <typename T>
 class OwnerRRef final : public RRef {
  public:
+  OwnerRRef(const OwnerRRef& other) = delete;
+  OwnerRRef(OwnerRRef&& other) = delete;
+  OwnerRRef& operator=(const OwnerRRef other) = delete;
+  OwnerRRef& operator=(OwnerRRef&& other) = delete;
+
   inline bool isOwner() const override {
     return true;
   }
@@ -250,9 +260,6 @@ class OwnerRRef final : public RRef {
 
   OwnerRRef(worker_id_t ownerId, const RRefId& rrefId)
       : OwnerRRef(ownerId, rrefId, {}) {}
-
-  OwnerRRef(OwnerRRef<T>&& other) noexcept
-      : OwnerRRef(other.owner(), other.rrefId(), std::move(other.value_)) {}
 
   OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, c10::optional<T> value)
       : RRef(ownerId, rrefId) {

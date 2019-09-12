@@ -110,7 +110,7 @@ RRefFetchRet RRefFetchRet::fromMessage(const Message& message) {
       jit::unpickle(payload, payload_size, nullptr, &message.tensors());
   auto values = value.toTuple()->elements();
 
-  AT_ASSERT(values.size() == 1, "Expect 1 IValue from message.");
+  TORCH_INTERNAL_ASSERT(values.size() == 1, "Expect 1 IValue from message.");
   return RRefFetchRet(values.front());
 }
 
@@ -144,9 +144,9 @@ Message RRefForkNotify::toMessage() const {
 RRefForkNotify RRefForkNotify::fromMessage(const Message& message) {
   auto values = toIValues(message, MessageType::RREF_FORK_NOTIFY);
 
-  AT_ASSERT(values.size() == 3, "Expect 3 IValues from message.");
+  TORCH_INTERNAL_ASSERT(values.size() == 3, "Expect 3 IValues from message.");
   auto forkDst = values.back().toInt();
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       forkDst < std::numeric_limits<worker_id_t>::max(),
       "Fork destination worker id out of bound ",
       forkDst);
@@ -168,7 +168,7 @@ Message RRefForkAccept::toMessage() {
 
 RRefForkAccept RRefForkAccept::fromMessage(const Message& message) {
   auto values = toIValues(message, MessageType::RREF_FORK_ACCEPT);
-  AT_ASSERT(values.size() == 1, "Expect 1 IValues from message.");
+  TORCH_INTERNAL_ASSERT(values.size() == 1, "Expect 1 IValues from message.");
 
   return RRefForkAccept(ForkId::fromIValue(values.back()));
 }

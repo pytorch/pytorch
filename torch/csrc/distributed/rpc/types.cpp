@@ -38,13 +38,13 @@ GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
       ivalues.size());
 
   TORCH_CHECK(
-      ivalues[0].toInt() < std::numeric_limits<worker_id_t>::max(),
+      ivalues[0].toInt() <= std::numeric_limits<worker_id_t>::max(),
       "GloballyUniqueId createdOn out of range, got ",
       ivalues[0].toInt());
   worker_id_t createdOn = ivalues[0].toInt();
 
   TORCH_CHECK(
-      ivalues[1].toInt() < std::numeric_limits<local_id_t>::max(),
+      ivalues[1].toInt() <= std::numeric_limits<local_id_t>::max(),
       "GloballyUniqueId localId out of range, got ",
       ivalues[1].toInt());
   local_id_t localId = ivalues[1].toInt();
