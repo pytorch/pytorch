@@ -1239,6 +1239,12 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
     #ifdef BUILD_NAMEDTENSOR
         {"aten::scatter_add", "dimname"},
     #endif
+        {"aten::bitwise_xor", "Tensor_out"},
+        {"aten::bitwise_xor", "Scalar_out"},
+        {"aten::bitwise_xor", "Scalar"},
+        {"aten::bitwise_xor", "Tensor"},
+        {"aten::bitwise_xor_", "Scalar"},
+        {"aten::bitwise_xor_", "Tensor"},
         {"aten::addbmm", "out"},
         {"aten::random_", "from"},
         {"aten::random_", "to"},
