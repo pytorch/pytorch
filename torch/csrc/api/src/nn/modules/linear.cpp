@@ -59,13 +59,13 @@ void BilinearImpl::reset() {
   }
 }
 
-void LinearImpl::pretty_print(std::ostream& stream) const {
+void BilinearImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha << "torch::nn::Bilinear(in1=" << options.in1_
          << ", in2=" << options.in2_ << ", out=" << options.out_ << ", with_bias=" << options.with_bias_
          << ")";
 }
 
-Tensor LinearImpl::forward(const Tensor& input1, const Tensor& input2) {
+Tensor BilinearImpl::forward(const Tensor& input1, const Tensor& input2) {
   AT_ASSERT(!options.with_bias_ || bias.defined());
   return torch::bilinear(input1, input2, weight, bias);
 }

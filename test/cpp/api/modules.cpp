@@ -214,6 +214,22 @@ TEST_F(ModulesTest, Linear) {
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
 }
 
+TEST_F(ModulesTest, Bilinear) {
+  Bilinear model(5, 3, 2);
+  auto x1 = torch::randn({10, 5}, torch::requires_grad());
+  auto x2 = torch::randn({10, 3}, torch::requires_grad());
+  auto y = model(x1, x2);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.size(0), 10);
+  ASSERT_EQ(y.size(1), 2);
+
+  ASSERT_EQ(model->weight.grad().numel(), 2 * 5 * 3);
+}
+
 TEST_F(ModulesTest, Fold) {
   Fold model(FoldOptions({4, 5}, {2, 2}));
   auto x = torch::randn({1, 3 * 2 * 2, 12});
@@ -452,6 +468,11 @@ TEST_F(ModulesTest, L1Loss) {
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in=3, out=4, with_bias=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintBilinear) {
+  ASSERT_EQ(
+      c10::str(Bilinear(3, 2, 4)), "torch::nn::Bilinear(in1=3, in2=2, out=4, with_bias=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintConv) {
