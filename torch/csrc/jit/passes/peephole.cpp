@@ -2,7 +2,6 @@
 #include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/symbolic_variable.h>
 
 namespace torch {
 namespace jit {
@@ -117,17 +116,18 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
                   "aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
             WithInsertPoint guard(node);
 
-            auto mm_node = node->input(mm_side)->node();
-            SymbolicVariable add_mat(node->input(1 - mm_side));
-            SymbolicVariable mat1(mm_node->input(0));
-            SymbolicVariable mat2(mm_node->input(1));
+            auto* graph = node->owningGraph();
+            auto* mm_node = node->input(mm_side)->node();
+            auto* add_mat = node->input(1 - mm_side);
+            auto* mat1 = mm_node->input(0);
+            auto* mat2 = mm_node->input(1);
 
-            auto mat1_type = mat1.value()->type()->expect<TensorType>();
-            auto mat_scalar_type = mat1_type->scalarType();
-            if (!mat_scalar_type) {
-              auto mat2_type = mat2.value()->type()->expect<TensorType>();
-              mat_scalar_type = mat2_type->scalarType();
+            // Attempts to find a matrix with a defined scalar type to type as
+            auto* type_as_mat = mat1;
+            if (!type_as_mat->type()->expect<TensorType>()->scalarType()) {
+              type_as_mat = mat2;
             }
+            auto mat_scalar_type = type_as_mat->type()->expect<TensorType>()->scalarType();
 
             // we can't use type_as if we don't know the target type (mm), the
             // bias needs to be coerced to
@@ -142,13 +142,27 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
             if (add_mat_type->sizes().size() &&
                 *add_mat_type->sizes().size() == 0 &&
                 !mustBeEqual(add_mat_type->scalarType(), mat_scalar_type)) {
-              add_mat = add_mat.type_as(mat1);
+              auto* type_as_node = graph->insertNode(graph->create(aten::type_as, 1));
+              type_as_node->addInput(add_mat);
+              type_as_node->addInput(type_as_mat);
+              add_mat = type_as_node->output();
+              if (add_mat_type->isComplete()) {
+                auto new_type = add_mat_type->withScalarType(mat_scalar_type)->contiguous();
+                add_mat->setType(new_type);
+              }
             }
 
-            SymbolicVariable addmm_value = add_mat.addmm(mat1, mat2);
+            auto* addmm_node = graph->insertNode(graph->create(aten::addmm, 1));
+            auto* cOne = graph->insertConstant(1);
+            addmm_node->addInput(add_mat);
+            addmm_node->addInput(mat1);
+            addmm_node->addInput(mat2);
+            addmm_node->addInput(cOne);
+            addmm_node->addInput(cOne);
+            auto* addmm_value = addmm_node->output();
 
             // Copy shape information from output node
-            ((Value*)addmm_value)->copyMetadata(node->output());
+            addmm_value->copyMetadata(node->output());
             GRAPH_UPDATE(
                 "Fusing ",
                 mm_node->input(0)->debugName(),
@@ -157,7 +171,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
                 " and ",
                 node->input(1 - mm_side)->debugName(),
                 " into ",
-                addmm_value.value()->debugName());
+                addmm_value->debugName());
             node->output()->replaceAllUsesWith(addmm_value);
           }
         }

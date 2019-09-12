@@ -58,7 +58,7 @@ TEST(TestScalar, TestScalar) {
   Half h = bar.toHalf();
   Scalar h2 = h;
   cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " "
-       << bar.toDouble() << " " << what.isIntegral() << "\n";
+       << bar.toDouble() << " " << what.isIntegral(false) << "\n";
   auto gen = at::detail::getDefaultCPUGenerator();
   {
     // See Note [Acquire lock when using random generators]

@@ -433,6 +433,10 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.sqrt(x), x)
 
+    def test_rsqrt(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.rsqrt(x), x)
+
     def test_equal(self):
         x = torch.randn(1, 2, 3, 1, requires_grad=False).int()
         y = torch.randn(1, 4, requires_grad=False).int()
@@ -709,6 +713,14 @@ class TestOperators(TestCase):
         inputs = (scores, bbox_deltas, im_info, anchors)
         self.assertONNX(model, inputs)
 
+    def test_dyn_arange(self):
+        class TestModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.arange(input.shape[0])
+
+        input = torch.randn(5, 3, 2)
+        self.assertONNX(TestModel(), input)
+
     def test_layer_norm_aten(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
@@ -722,6 +734,11 @@ class TestOperators(TestCase):
     def test_frobenius_norm(self):
         x = torch.randn(2, 3, 4).float()
         self.assertONNX(lambda x: torch.norm(x, p="fro", dim=(0, 1), keepdim=True), x)
+
+    def test_unique(self):
+        x = torch.randint(3, (2, 3, 4, 5)).float()
+        self.assertONNX(lambda x: torch.unique(x, dim=0, sorted=True, return_inverse=False, return_counts=True), x,
+                        opset_version=11)
 
 
 if __name__ == '__main__':

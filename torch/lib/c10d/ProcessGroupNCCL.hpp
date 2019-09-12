@@ -120,27 +120,38 @@ class ProcessGroupNCCL : public ProcessGroup {
     friend class ProcessGroupNCCL;
   };
 
-  // Constructor will also check the number of available GPUs in the system
+  // If you wish to create multiple process groups, each with a potentially
+  // different rank and size, you can do so by passing a new store instance
+  // to each one. If you have only a single store object, you can
+  // use the `c10d::PrefixStore` to derive scoped instances.
+  // This is also what the Python API in torch.distributed does.
   //
-  // Group support:
+  // The process group instance keeps a reference to the store because
+  // it may be used long after the constructor runs. In fact, the constructor
+  // doesn't create any NCCL communicators. A single NCCL communicator can
+  // only be used on a specific set of devices, and are therefore created
+  // on-demand when a collective runs. If another collective is executed later,
+  // against a different set of devices, the process group creates another NCCL
+  // communicator. These NCCL communicators are cached and reused if possible.
   //
-  // In order to support multiple NCCL process groups, each of which has
-  // different group ranks, we need to use groupName to identify each group
-  // to ensure the correct behavior. In other words, each process group that
-  // has different group ranks needs to have a different and unique groupName
-  // to avoid clashing into undefined behaviors.
-  //
-  // In Python frontend API of torch.distributed, it guarantees that each group
-  // will have a unique name to be passed into the ProcessGroupNCCL constructor.
-  // If you would like to use ProcessGroupNCCL constructor directly, it is
-  // your reponsibility to do so as well.
   ProcessGroupNCCL(
       const std::shared_ptr<Store>& store,
       int rank,
       int size,
-      const std::string& groupName = "",
       const std::chrono::milliseconds& opTimeout =
           std::chrono::milliseconds(kProcessGroupNCCLOpTimeoutMillis));
+
+  // This constructor includes the deprecated `groupName` argument.
+  // If you have existing code that uses the `groupName`, you can replace
+  // it by specifying a `c10d::PrefixStore(groupName, store)` for store.
+  C10_DEPRECATED ProcessGroupNCCL(
+      const std::shared_ptr<Store>& store,
+      int rank,
+      int size,
+      const std::string& groupName,
+      const std::chrono::milliseconds& opTimeout =
+          std::chrono::milliseconds(kProcessGroupNCCLOpTimeoutMillis))
+      : ProcessGroupNCCL(store, rank, size, opTimeout) {}
 
   virtual ~ProcessGroupNCCL();
 
@@ -151,6 +162,11 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> allreduce_coalesced(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceCoalescedOptions& opts =
+          AllreduceCoalescedOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
@@ -252,11 +268,13 @@ class ProcessGroupNCCL : public ProcessGroup {
  protected:
   static const int64_t kWatchdogThreadSleepMillis;
 
-  // Store that is used to exchange each Ranks's NCCL unique ID
+  // The store is used to broadcast the NCCL unique ID of rank 0.
   std::shared_ptr<Store> store_;
 
-  // The process group name
-  std::string groupName_;
+  // The number of NCCL communicators that have been created during
+  // the lifetime of this process group. This sequence number is
+  // used to scope keys used in the store.
+  uint64_t ncclCommCounter_{0};
 
   // The NCCL communicator that the process group has cached.
   // The key is a list of GPU devices that an operation is operating on
@@ -302,17 +320,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   // The CUDA events used to sync NCCL streams
   std::unordered_map<std::string, std::vector<at::cuda::CUDAEvent>> ncclEvents_;
 
-  // ID of this process group
-  std::string processGroupID_;
-
-  // Group Prefix and ID of this process group
-  std::string groupPgID_;
-
   // Device Indexes used for all collectives in this group
   std::set<int> usedDeviceIdxs_;
-
-  // processGroupID tracking
-  static std::mutex pgTrackingLock_;
 
   // map from the key: "group name + pg counter (ID)" to the
   // unique NCCL ID count. This needs to be group and pg specific

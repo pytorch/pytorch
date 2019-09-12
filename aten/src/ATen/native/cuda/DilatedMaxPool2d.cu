@@ -202,9 +202,9 @@ void max_pool2d_with_indices_out_cuda_template(
     [&] {
       using accscalar_t = acc_type<scalar_t, true>;
 
-      scalar_t *output_data = output.data<scalar_t>();
-      scalar_t *input_data = input.data<scalar_t>();
-      int64_t *indices_data = indices.data<int64_t>();
+      scalar_t *output_data = output.data_ptr<scalar_t>();
+      scalar_t *input_data = input.data_ptr<scalar_t>();
+      int64_t *indices_data = indices.data_ptr<int64_t>();
 
       MaxPoolForward<scalar_t, scalar_t>
         <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -309,9 +309,9 @@ void max_pool2d_with_indices_backward_out_cuda_template(
     [&] {
       using accscalar_t = acc_type<scalar_t, true>;
 
-      scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-      scalar_t *gradInput_data = gradInput.data<scalar_t>();
-      int64_t *indices_data = indices.data<int64_t>();
+      scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+      scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+      int64_t *indices_data = indices.data_ptr<int64_t>();
 
       MaxPoolBackward<scalar_t, accscalar_t>
         <<<grid, BACKWARD_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(

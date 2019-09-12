@@ -21,9 +21,7 @@ struct TORCH_API Function {
         graph_(std::move(graph)),
         function_creator_(std::move(function_creator)) {}
 
-  void run(Stack& stack) {
-    get_executor().run(stack);
-  }
+  void run(Stack &stack) { get_executor().run(stack); }
 
   void run(Stack&& stack) {
     run(stack);
@@ -61,12 +59,7 @@ struct TORCH_API Function {
     return *this;
   }
 
-  const FunctionSchema& getSchema() const {
-    if (schema_ == nullptr) {
-      schema_ = make_unique<FunctionSchema>(defaultSchemaFor(*this));
-    }
-    return *schema_;
-  }
+  const FunctionSchema& getSchema() const;
 
   std::string pretty_print_schema() const {
     AT_ASSERT(schema_);
@@ -102,23 +95,6 @@ struct TORCH_API Function {
   }
 
  private:
-  static FunctionSchema defaultSchemaFor(const Function& function) {
-    std::vector<Argument> args;
-    std::vector<Argument> returns;
-    Graph& g = *function.graph();
-    size_t num_inputs = function.num_inputs();
-    for (size_t i = 0; i < num_inputs; ++i) {
-      const Value* v = g.inputs().at(i);
-      std::string name = v->hasDebugName() ? v->debugNameBase()
-                                           : ("argument_" + std::to_string(i));
-      args.emplace_back(std::move(name), unshapedType(g.inputs()[i]->type()));
-    }
-    for (size_t i = 0; i < g.outputs().size(); ++i) {
-      returns.emplace_back("", unshapedType(g.outputs()[i]->type()));
-    }
-    return {function.name(), "", std::move(args), std::move(returns)};
-  }
-
   c10::QualifiedName name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
 

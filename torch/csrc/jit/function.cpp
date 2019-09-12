@@ -4,6 +4,25 @@
 
 namespace torch {
 namespace jit {
+namespace {
+FunctionSchema defaultSchemaFor(const Function& function) {
+  std::vector<Argument> args;
+  std::vector<Argument> returns;
+  Graph& g = *function.graph();
+  size_t num_inputs = function.num_inputs();
+  for (size_t i = 0; i < num_inputs; ++i) {
+    const Value* v = g.inputs().at(i);
+    std::string name = v->hasDebugName() ? v->debugNameBase()
+                                         : ("argument_" + std::to_string(i));
+    args.emplace_back(std::move(name), unshapedType(g.inputs()[i]->type()));
+  }
+  for (size_t i = 0; i < g.outputs().size(); ++i) {
+    returns.emplace_back("", unshapedType(g.outputs()[i]->type()));
+  }
+  return {function.name(), "", std::move(args), std::move(returns)};
+}
+} // namespace
+
 struct RecursiveMethodCallError : public std::exception {};
 void placeholderCreator(Function&) {
   throw RecursiveMethodCallError();
@@ -27,5 +46,11 @@ void Function::ensure_defined() {
   check_single_output();
 }
 
+const FunctionSchema& Function::getSchema() const {
+  if (schema_ == nullptr) {
+    schema_ = make_unique<FunctionSchema>(defaultSchemaFor(*this));
+  }
+  return *schema_;
+}
 } // namespace jit
 } // namespace torch

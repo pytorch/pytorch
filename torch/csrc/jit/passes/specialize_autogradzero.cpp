@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
-#include <torch/csrc/jit/symbolic_variable.h>
 
 namespace torch {
 namespace jit {
@@ -89,9 +88,15 @@ void specializeAutogradZero(Graph& g) {
           // when both are Nonzero, we can use a normal, optimizable add
           // instruction
           WithInsertPoint guard(n);
-          Value* new_add = toVar(a) + toVar(b);
-          state[new_add] = State::Nonzero;
-          n->output()->replaceAllUsesWith(new_add);
+          auto* g = n->owningGraph();
+          auto* cOne = g->insertConstant(1);
+          auto* add_node = g->insertNode(g->create(aten::add, 1));
+          add_node->addInput(a);
+          add_node->addInput(b);
+          add_node->addInput(cOne);
+          auto* add_output = add_node->output();
+          state[add_output] = State::Nonzero;
+          n->output()->replaceAllUsesWith(add_output);
           it.destroyCurrent();
         } else {
           // otherwise we have conditionally-Nonzero things, and we need

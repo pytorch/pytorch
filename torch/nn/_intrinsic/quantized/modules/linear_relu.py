@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch.nn.quantized as nnq
-import torch.nn._intrinsic as nni
+import torch.nn._intrinsic
 import torch
 
 class LinearReLU(nnq.Linear):
@@ -20,15 +20,14 @@ class LinearReLU(nnq.Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    _FLOAT_MODULE = nni.LinearReLU
+    _FLOAT_MODULE = torch.nn._intrinsic.LinearReLU
 
     def __init__(self, in_features, out_features, bias=True):
         super(LinearReLU, self).__init__(in_features, out_features, bias)
 
     def forward(self, input):
-        Y_q = torch.ops.quantized.fbgemm_linear_relu(
-            input, self._packed_weight,
-            self.bias,
+        Y_q = torch.ops.quantized.linear_relu(
+            input, self._packed_params,
             float(self.scale),
             int(self.zero_point))
         return Y_q

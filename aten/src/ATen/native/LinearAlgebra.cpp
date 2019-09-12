@@ -10,6 +10,7 @@
 #include <numeric>
 #include <vector>
 #include <limits>
+#include <ATen/NamedTensorUtils.h>
 
 namespace at {
 namespace native {
@@ -25,8 +26,13 @@ static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
   TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "Invalid argument passed to lu");
   auto n = self.size(-1);
   auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs).sum(-1, /*keepdim=*/false, /*dtype=*/self.scalar_type()).fmod_(2);
-  return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1),
-                                    lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1));
+  auto u_diagonal = lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+
+  // We have to manually set the diagonal to 0 due to an issue with MAGMA's getrf_batched routine
+  if (self.dim() > 2 && self.is_cuda()) {
+    u_diagonal.index_put_(infos.nonzero_numpy(), at::zeros({}, self.options()));
+  }
+  return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1), u_diagonal);
 }
 
 Tensor det(const Tensor& self) {
@@ -289,7 +295,19 @@ Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
 Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
   Scalar beta(0.0);
   Scalar alpha(1.0);
-  return bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
+#ifdef BUILD_NAMEDTENSOR
+  {
+  NoNamesGuard guard;
+#endif
+  bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
+#ifdef BUILD_NAMEDTENSOR
+  }
+  namedinference::propagate_names(
+      result,
+      namedinference::compute_bmm_outnames(result, batch1, batch2),
+      /*validate_names=*/false);
+#endif
+  return result;
 }
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
@@ -322,6 +340,9 @@ Tensor matmul(
     c10::optional<Tensor> out_opt,
     const Tensor& tensor1,
     const Tensor& tensor2) {
+#ifdef BUILD_NAMEDTENSOR
+  NoNamesGuard guard;
+#endif
   auto dim_tensor1 = tensor1.dim();
   auto dim_tensor2 = tensor2.dim();
   auto has_out = out_opt.has_value();
@@ -429,11 +450,24 @@ Tensor matmul(
 }
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
-  return at::native::matmul(c10::nullopt, tensor1, tensor2);
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
+#endif
+  auto result = at::native::matmul(c10::nullopt, tensor1, tensor2);
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
 
 Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor2) {
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
+#endif
   at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
   return result;
 }
 
