@@ -195,22 +195,6 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
 
 AutogradMetaInterface::~AutogradMetaInterface() {}
 
-#ifdef BUILD_NAMEDTENSOR
-NamedTensorMetaInterface::~NamedTensorMetaInterface() {}
-
-std::unique_ptr<NamedTensorMetaInterface> NamedTensorMetaInterface::clone() const {
-  TORCH_INTERNAL_ASSERT(
-      false,
-      "Attempting to clone a NamedTensorMetaInterface instance.");
-}
-
-int64_t NamedTensorMetaInterface::slow_dim() const {
-  TORCH_INTERNAL_ASSERT(
-      false,
-      "NamedTensorMetaInterface::slow_dim not implemented.");
-}
-#endif
-
 bool NonVariableTypeMode::is_enabled() {
   return !impl::tls_variable_is_enabled();
 }

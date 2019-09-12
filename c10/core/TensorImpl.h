@@ -145,9 +145,17 @@ struct C10_API NonVariableTypeMode {
 
 #ifdef BUILD_NAMEDTENSOR
 struct C10_API NamedTensorMetaInterface {
-  virtual ~NamedTensorMetaInterface();
-  virtual std::unique_ptr<NamedTensorMetaInterface> clone() const;
-  virtual int64_t slow_dim() const;
+  virtual ~NamedTensorMetaInterface() {};
+  virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {
+    TORCH_INTERNAL_ASSERT(
+      false,
+      "Not implemented: NamedTensorMetaInterface::clone");
+  };
+  virtual int64_t slow_dim() const {
+    TORCH_INTERNAL_ASSERT(
+      false,
+      "Not implemented: NamedTensorMetaInterface::slow_dim");
+  };
 };
 #endif
 
