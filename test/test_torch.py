@@ -6499,26 +6499,32 @@ class _TestTorchMixin(torchtest):
 
     @staticmethod
     def _test_pinverse(self, conv_fn):
+        from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
+
         def run_test(M):
             # Testing against definition for pseudo-inverses
             MPI = torch.pinverse(M)
-            self.assertEqual(M, M.mm(MPI).mm(M), 1e-8, 'pseudo-inverse condition 1')
-            self.assertEqual(MPI, MPI.mm(M).mm(MPI), 1e-8, 'pseudo-inverse condition 2')
-            self.assertEqual(M.mm(MPI), (M.mm(MPI)).t(), 1e-8, 'pseudo-inverse condition 3')
-            self.assertEqual(MPI.mm(M), (MPI.mm(M)).t(), 1e-8, 'pseudo-inverse condition 4')
-
-        # Square matrix
-        M = conv_fn(torch.randn(5, 5))
-        run_test(M)
-
-        # Rectangular matrix
-        M = conv_fn(torch.randn(3, 4))
-        run_test(M)
+            if M.numel() > 0:
+                self.assertEqual(M, M.matmul(MPI).matmul(M), 1e-8, 'pseudo-inverse condition 1')
+                self.assertEqual(MPI, MPI.matmul(M).matmul(MPI), 1e-8, 'pseudo-inverse condition 2')
+                self.assertEqual(M.matmul(MPI), (M.matmul(MPI)).transpose(-2, -1), 1e-8, 'pseudo-inverse condition 3')
+                self.assertEqual(MPI.matmul(M), (MPI.matmul(M)).transpose(-2, -1), 1e-8, 'pseudo-inverse condition 4')
+            else:
+                self.assertEqual(M.shape, MPI.shape[:-2] + (MPI.shape[-1], MPI.shape[-2]))
+        for sizes in [(5, 5), (3, 5, 5), (3, 7, 5, 5),  # square matrices
+                      (3, 2), (5, 3, 2), (7, 5, 3, 2),  # fat matrices
+                      (2, 3), (5, 2, 3), (7, 5, 2, 3),  # thin matrices
+                      (0, 0), (0, 2), (2, 0), (3, 0, 0), (0, 3, 0), (0, 0, 3)]:  # zero numel matrices
+            M = conv_fn(torch.randn(*sizes))
+            run_test(M)
 
         # Test inverse and pseudo-inverse for invertible matrix
-        M = torch.randn(5, 5)
-        M = conv_fn(M.mm(M.t()))
-        self.assertEqual(conv_fn(torch.eye(5)), M.pinverse().mm(M), 1e-7, 'pseudo-inverse for invertible matrix')
+        for sizes in [(5, 5), (3, 5, 5), (3, 7, 5, 5)]:
+            matsize = sizes[-1]
+            batchdims = sizes[:-2]
+            M = fullrank(matsize, *batchdims)
+            self.assertEqual(conv_fn(torch.eye(matsize)).expand(sizes), M.pinverse().matmul(M),
+                             1e-7, 'pseudo-inverse for invertible matrix')
 
     @skipIfNoLapack
     def test_pinverse(self):
