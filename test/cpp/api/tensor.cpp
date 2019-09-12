@@ -319,9 +319,3 @@ TEST(TensorTest, Data) {
   const auto tensor2 = at::empty({3, 3});
   ASSERT_THROW(tensor2.data(), c10::Error);
 }
-
-TEST(TensorTest, Grad) {
-  const auto tensor = torch::ones({1}, at::TensorOptions().dtype(at::kFloat).requires_grad(true));
-  tensor.backward();
-  std::cout << tensor.grad().defined() << std::endl;
-}
