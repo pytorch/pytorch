@@ -1,3 +1,5 @@
+import torch
+
 from cpp_api_parity import TorchNNModuleMetadata
 
 # NOTE: In order to let Python/C++ API parity test pass for any of the modules here,
@@ -20,8 +22,15 @@ from cpp_api_parity import TorchNNModuleMetadata
 #     as the Python module constructor.
 #
 # `num_attrs_recursive`: the number of attributes (including parameters, buffers and non-tensor
-#     attributes) of a module. If the module contains any submodule, the submodule's attributes
-#     also need to be counted.
+#     attributes) of the Python module. If the module contains any submodule, the submodule's
+#     attributes also need to be counted.
+#
+# `python_legacy_constructor_args`: (optional) list of legacy Python constructor args that are
+#     ignored in Python/C++ API parity test.
+#
+# `python_optional_attribute_to_jit_type`: (optional) map between Python None-able module
+#     attribute to its corresponding JIT type. For example, in `AvgPool2d`:
+#     { "divisor_override": torch._C.OptionalType(torch._C.IntType.get()) }
 module_metadata_map = {
     'Conv1d': TorchNNModuleMetadata(),
     'Conv2d': TorchNNModuleMetadata(),
@@ -30,16 +39,43 @@ module_metadata_map = {
     'ConvTranspose2d': TorchNNModuleMetadata(),
     'ConvTranspose3d': TorchNNModuleMetadata(),
     'Unfold': TorchNNModuleMetadata(),
-    'Fold': TorchNNModuleMetadata(),
-    'MaxPool1d': TorchNNModuleMetadata(),
-    'MaxPool2d': TorchNNModuleMetadata(),
-    'MaxPool3d': TorchNNModuleMetadata(),
+    'Fold': TorchNNModuleMetadata(
+        cpp_default_constructor_args="(3, 2)",
+        num_attrs_recursive=5,
+    ),
+    'MaxPool1d': TorchNNModuleMetadata(
+        cpp_default_constructor_args="(2)",
+        num_attrs_recursive=6,
+    ),
+    'MaxPool2d': TorchNNModuleMetadata(
+        cpp_default_constructor_args="(2)",
+        num_attrs_recursive=6,
+    ),
+    'MaxPool3d': TorchNNModuleMetadata(
+        cpp_default_constructor_args="(2)",
+        num_attrs_recursive=6,
+    ),
     'MaxUnpool1d': TorchNNModuleMetadata(),
     'MaxUnpool2d': TorchNNModuleMetadata(),
     'MaxUnpool3d': TorchNNModuleMetadata(),
-    'AvgPool1d': TorchNNModuleMetadata(),
-    'AvgPool2d': TorchNNModuleMetadata(),
-    'AvgPool3d': TorchNNModuleMetadata(),
+    'AvgPool1d': TorchNNModuleMetadata(
+        cpp_default_constructor_args="(2)",
+        num_attrs_recursive=5,
+    ),
+    'AvgPool2d': TorchNNModuleMetadata(
+        cpp_default_constructor_args="(2)",
+        num_attrs_recursive=6,
+        python_optional_attribute_to_jit_type={
+            "divisor_override": torch._C.OptionalType(torch._C.IntType.get()),
+        }
+    ),
+    'AvgPool3d': TorchNNModuleMetadata(
+        cpp_default_constructor_args="(2)",
+        num_attrs_recursive=6,
+        python_optional_attribute_to_jit_type={
+            "divisor_override": torch._C.OptionalType(torch._C.IntType.get()),
+        }
+    ),
     'FractionalMaxPool2d': TorchNNModuleMetadata(),
     'LPPool1d': TorchNNModuleMetadata(),
     'LPPool2d': TorchNNModuleMetadata(),
@@ -114,7 +150,11 @@ module_metadata_map = {
     'EmbeddingBag': TorchNNModuleMetadata(),
     'CosineSimilarity': TorchNNModuleMetadata(),
     'PairwiseDistance': TorchNNModuleMetadata(),
-    'L1Loss': TorchNNModuleMetadata(),
+    'L1Loss': TorchNNModuleMetadata(
+        cpp_default_constructor_args="()",
+        num_attrs_recursive=1,
+        python_legacy_constructor_args=['size_average', 'reduce'],
+    ),
     'MSELoss': TorchNNModuleMetadata(),
     'CrossEntropyLoss': TorchNNModuleMetadata(),
     'CTCLoss': TorchNNModuleMetadata(),

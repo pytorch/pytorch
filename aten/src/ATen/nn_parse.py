@@ -235,6 +235,8 @@ def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_ch
     return {
         'mode': 'NN',
         'name': name,
+        'cpu_bfloat16': True if backend_types is not None and 'CPU' in backend_types and
+                'BFloat16' in backend_types['CPU'] else False,
         'backend_types': backend_types,
         'arguments': arguments,
         'return': 'argument 0' if inplace else get_return(arguments),
