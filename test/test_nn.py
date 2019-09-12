@@ -4220,7 +4220,7 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_different_len_dicts(self):
         inputs = (
-            {'a' torch.randn(1, 2, requires_grad=True).cuda(0)},
+            {'a': torch.randn(1, 2, requires_grad=True).cuda(0)},
             {
                 'b': torch.randn(1, 2, requires_grad=True).cuda(1),
                 'a': torch.randn(1, 2, requires_grad=True).cuda(1),
