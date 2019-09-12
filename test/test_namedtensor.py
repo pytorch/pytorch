@@ -1052,7 +1052,22 @@ class TestNamedTensor(TestCase):
     def test_as_strided_cuda(self):
         self._test_as_strided('cuda')
 
-    def test_no_jit_support(self):
+    def test_no_jit_tracer_support(self):
+        def foo(x):
+            return torch.full(x.shape, 2, names=('N',))
+
+        with self.assertRaisesRegex(RuntimeError, 'not supported with the tracer'):
+            x = torch.randn(3)
+            torch.jit.trace(foo, example_inputs=x)
+
+        def bar(x):
+            return x.select('N', 1)
+
+        with self.assertRaisesRegex(RuntimeError, 'not supported with the tracer'):
+            x = torch.randn(3)
+            torch.jit.trace(bar, example_inputs=x)
+
+    def test_no_jit_script_support(self):
         @torch.jit.script
         def foo(x):
             return x + 1
