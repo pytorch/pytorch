@@ -13,6 +13,7 @@
 #include <tuple>
 #include <THC/THCNumerics.cuh>
 #include <thrust/tuple.h>
+#include <thrust/pair.h>
 
 
 namespace at { namespace native {
@@ -168,6 +169,24 @@ void min_values_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void argmax_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "argmax_cuda", [&]() {
+    gpu_reduce_kernel<scalar_t, int64_t>(
+    iter, arg_reduce_wrapper([]GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+      return (THCNumerics<scalar_t>::isnan(a) || a > b);
+    }), thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::lower_bound(), 0));
+  });
+}
+
+void argmin_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "argmin_cuda", [&]() {
+    gpu_reduce_kernel<scalar_t, scalar_t>(
+    iter, arg_reduce_wrapper([]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return (THCNumerics<scalar_t>::isnan(a) || a < b);
+    }), thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::upper_bound(), 0));
+  });
+}
+
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_cuda);
 REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda);
@@ -177,5 +196,7 @@ REGISTER_DISPATCH(and_stub, &and_kernel_cuda);
 REGISTER_DISPATCH(or_stub, &or_kernel_cuda);
 REGISTER_DISPATCH(max_values_stub, &max_values_kernel_cuda);
 REGISTER_DISPATCH(min_values_stub, &min_values_kernel_cuda);
+REGISTER_DISPATCH(argmax_stub, &argmax_kernel_cuda);
+REGISTER_DISPATCH(argmin_stub, &argmin_kernel_cuda);
 
 }} // namespace at::native

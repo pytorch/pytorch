@@ -50,7 +50,7 @@ struct WelfordOps {
   bool take_sqrt;
  public:
   using acc_t = WelfordData<acc_scalar_t, index_t, combine_t>;
-  inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data) const {
+  inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, index_t /*idx*/) const {
     acc_scalar_t delta = data - acc.mean;
     // using acc.nf(combine_t) here, as acc.n(index_t) would still be converted
     // accumulation in reduce is done through index_T
@@ -114,12 +114,12 @@ template <typename acc_t, typename factor_t>
 struct MeanOps {
   factor_t factor;
 
-  inline C10_DEVICE acc_t reduce(acc_t a, acc_t b) const {
-    return a + b;
+  inline C10_DEVICE acc_t reduce(acc_t a, acc_t b, int64_t /*idx*/) const {
+    return combine(a, b);
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
-    return reduce(a, b);
+    return a + b;
   }
 
   inline C10_DEVICE acc_t project(acc_t a) const {
@@ -139,7 +139,7 @@ struct MeanOps {
 template <typename acc_t>
 struct AbsMinOps {
 
-  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data) const {
+  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
     return MIN(acc, std::abs(data));
   }
 
@@ -161,7 +161,7 @@ struct AbsMinOps {
 template <typename acc_t>
 struct AbsMaxOps {
 
-  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data) const {
+  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
     return MAX(acc, std::abs(data));
   }
 
@@ -184,7 +184,7 @@ template <typename acc_t>
 struct NormOps {
   acc_t norm;
 
-  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data) const {
+  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
     return acc + compat_pow(std::abs(data), norm);
   }
 
@@ -208,7 +208,7 @@ struct NormOps {
 
 template <typename acc_t>
 struct NormZeroOps {
-  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data) const {
+  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
     return acc + (data==acc_t(0) ? acc_t(0) : acc_t(1));
   }
 
@@ -229,7 +229,7 @@ struct NormZeroOps {
 
 template <typename acc_t>
 struct NormOneOps {
-  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data) const {
+  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
     return acc + std::abs(data);
   }
 

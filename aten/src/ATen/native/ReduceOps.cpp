@@ -30,6 +30,8 @@ DEFINE_DISPATCH(and_stub);
 DEFINE_DISPATCH(or_stub);
 DEFINE_DISPATCH(min_values_stub);
 DEFINE_DISPATCH(max_values_stub);
+DEFINE_DISPATCH(argmax_stub);
+DEFINE_DISPATCH(argmin_stub);
 
 static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
   ScalarType scalarType = self.scalar_type();
@@ -89,19 +91,19 @@ static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask,
 
 static TensorIterator make_reduction(
     const char* name, Tensor& result, const Tensor& self, IntArrayRef dim,
-    bool keepdim, ScalarType dtype)
+    bool keepdim, ScalarType in_dtype, ScalarType out_dtype)
 {
   // check that result type and dtype match if provided
   TORCH_CHECK(
-      !result.defined() || result.scalar_type() == dtype,
+      !result.defined() || result.scalar_type() == out_dtype,
       name, ": provided dtype must match dtype of result. Got ",
       toString(result.scalar_type()),
       " and ",
-      toString(dtype),
+      toString(out_dtype),
       ".");
   int64_t ndim = self.dim();
   auto mask = make_dim_mask(dim, ndim);
-  allocate_reduction_result(result, self, mask, keepdim, dtype);
+  allocate_reduction_result(result, self, mask, keepdim, out_dtype);
   auto viewed_result = review_reduce_result(result, ndim, mask, keepdim);
 #ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
@@ -111,11 +113,19 @@ static TensorIterator make_reduction(
   // efficiency.
   // not generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
-  if (self.scalar_type() == dtype ||
-      (self.is_cuda() && self.scalar_type() == kHalf && dtype == kFloat)) {
+  if (self.scalar_type() == in_dtype ||
+      (self.is_cuda() && self.scalar_type() == kHalf && in_dtype == kFloat)) {
     return TensorIterator::reduce_op(viewed_result, self);
   }
-  return TensorIterator::reduce_op(viewed_result, self.to(dtype));
+  return TensorIterator::reduce_op(viewed_result, self.to(in_dtype));
+}
+
+static TensorIterator make_reduction(
+    const char* name, Tensor& result, const Tensor& self, IntArrayRef dim,
+    bool keepdim, ScalarType dtype)
+{
+  // Assuming in_dtype == out_dtype
+  return make_reduction(name, result, self, dim, keepdim, dtype, dtype);
 }
 
 static TensorIterator make_reduction(
@@ -612,6 +622,56 @@ Tensor max_values(const Tensor& self, DimnameList dims, bool keepdim) {
   return at::max_values(self, dimnames_to_positions(self, dims), keepdim);
 }
 #endif
+
+Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
+  TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+  "argmax only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
+  TORCH_CHECK(self.numel() > 0, "cannot perform argmax of an empty tensor");
+  if (dim) {
+    auto dim_wrapped = maybe_wrap_dim(dim.value(), self.dim());
+    auto itr = make_reduction("argmax", result, self, dim_wrapped, keepdim,
+        self.scalar_type(), at::kLong);
+    argmax_stub(itr.device_type(), itr);
+  }
+  else
+  {
+    auto x = self.reshape({-1});
+    auto itr = make_reduction("argmax", result, x, 0, false, self.scalar_type(),
+        at::kLong);
+    argmax_stub(itr.device_type(), itr);
+  }
+  return result;
+}
+
+Tensor argmax(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
+  Tensor result = at::empty({0}, self.options().dtype(at::kLong));
+  return at::native::argmax_out(result, self, dim, keepdims);
+}
+
+Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
+  TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+  "argmin only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
+  TORCH_CHECK(self.numel() > 0, "cannot perform argmin of an empty tensor");
+  if (dim) {
+    auto dim_wrapped = maybe_wrap_dim(dim.value(), self.dim());
+    auto itr = make_reduction("argmin", result, self, dim_wrapped, keepdim,
+        self.scalar_type(), at::kLong);
+    argmin_stub(itr.device_type(), itr);
+  }
+  else
+  {
+    auto x = self.reshape({-1});
+    auto itr = make_reduction("argmin", result, x, 0, false,
+        self.scalar_type(), at::kLong);
+    argmin_stub(itr.device_type(), itr);
+  }
+  return result;
+}
+
+Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
+  Tensor result = at::empty({0}, self.options().dtype(at::kLong));
+  return at::native::argmin_out(result, self, dim, keepdims);
+}
 
 static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
   TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
