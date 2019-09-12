@@ -281,11 +281,6 @@ def find_factory_functions(declarations):
 
 
 def should_trace(declaration):
-    # Short-term plan: Don't support tracing Dimname.
-    # Long-term plan: Add Dimname as a first-class type to the JIT.
-    if any('Dimname' in arg['simple_type'] for arg in declaration['arguments']):
-        return False
-
     # Operations involving Storage or Type are not traceable at the moment
     if any(arg['simple_type'] in {'Storage', 'Type', 'ConstQuantizerPtr'} for arg in declaration['arguments']):
         return False

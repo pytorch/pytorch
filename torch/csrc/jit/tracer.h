@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/Dimname.h>
 
 #include <torch/csrc/utils/variadic.h>
 
@@ -280,6 +281,7 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<at::ScalarType>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::MemoryFormat value);
+TORCH_API void addInputs(Node* n, const char* name, c10::optional<at::DimnameList> value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
