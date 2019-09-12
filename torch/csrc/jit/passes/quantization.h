@@ -88,6 +88,11 @@ TORCH_API script::Module InsertQuantDeQuant(
  */
 TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
 
+/** \brief Recursively perform quant fusion on all the graphs that is invoked
+ *  in the method
+ */
+TORCH_API void QuantFusion(script::Module& module, const std::string method_name);
+
 /** \brief Fold Conv2d-BatchNorm2d into Conv2d in forward method of this module
  * and all its submodules.
  *

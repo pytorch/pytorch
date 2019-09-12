@@ -703,6 +703,41 @@ graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale,
   }
 }
 
+void QuantFusion(script::Module& module, const std::string method_name) {
+  auto method = module.get_method(method_name);
+  auto graph = method.graph();
+  QuantFusion(graph);
+
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      if (n->kind() == prim::CallMethod) {
+        auto called_method_name = n->s(attr::name);
+        auto module_instance = n->inputs()[0];
+        if (module_instance->node()->kind() == prim::GetAttr) {
+          auto child_module_name = module_instance->node()->s(attr::name);
+          auto child_module = module.find_module(child_module_name);
+          TORCH_INTERNAL_ASSERT(
+              child_module,
+              "Child module " + child_module_name + " does not exist");
+          // Recursively call QuantFusion on the method
+          QuantFusion(child_module.value(), called_method_name);
+        } else {
+          TORCH_INTERNAL_ASSERT(
+              module_instance == graph->inputs()[0],
+              "We only support call method either on %self"
+              "or child instance in quant_fusion right now");
+          QuantFusion(module, called_method_name);
+        }
+      }
+    }
+  }
+
+}
+
 struct ConvBNParameters {
   at::Tensor conv_w;
   at::Tensor conv_b;
