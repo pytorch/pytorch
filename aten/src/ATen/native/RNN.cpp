@@ -577,7 +577,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
       const PackedSequence& input,
       const hidden_type& input_hidden,
       const cell_params& params) const override {
-    TORCH_CHECK(input.batch_sizes.device().is_cpu(), "batch_sizes should always be on CPU")
+
     std::vector<at::Tensor> step_outputs;
     std::vector<hidden_type> hiddens;
     int64_t input_offset = 0;
@@ -638,7 +638,6 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
       const PackedSequence& input,
       const hidden_type& input_hidden,
       const cell_params& params) const override {
-    TORCH_CHECK(input.batch_sizes.device().is_cpu(), "batch_sizes should always be on CPU")
     std::vector<at::Tensor> step_outputs;
     int64_t input_offset = input.data.size(0);
     int64_t num_steps = input.batch_sizes.size(0);

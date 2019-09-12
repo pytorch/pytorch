@@ -76,6 +76,8 @@ class PackedSequence(PackedSequence_):
 
         # support being called as `PackedSequence(data, batch_sizes, sorted_indices)`
         if batch_sizes is not None:
+            if batch_sizes.device != 'cpu':
+                raise ValueError("batch_sizes should always be on CPU")
             return super(PackedSequence, cls).__new__(
                 cls, data, batch_sizes, sorted_indices, unsorted_indices)
 
