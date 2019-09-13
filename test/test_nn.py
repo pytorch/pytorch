@@ -4563,7 +4563,7 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel(self):
         l = nn.Linear(10, 5).float().cuda()
-        i = torch.randn(20, 10).float().cuda(1)
+        i = torch.randn(20, 10, dtype=torch.float, device="cuda:1")
         l.cuda(1)
         expected_out = l(i)
         loss = expected_out.sum()
@@ -5109,9 +5109,9 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_Conv2d_inconsistent_types_on_GPU_with_cudnn(self):
-        inputs = torch.randn(4, 1, 7, 7).float().cuda()
-        weights = torch.randn(1, 1, 3, 3).double().cuda()
-        bias = torch.randn(1).double().cuda()
+        inputs = torch.randn(4, 1, 7, 7, dtype=torch.float, device="cuda")
+        weights = torch.randn(1, 1, 3, 3, dtype=torch.double, device="cuda")
+        bias = torch.randn(1, dtype=torch.double, device="cuda")
 
         with torch.backends.cudnn.flags(enabled=True):
             # inconsistent types should raise an exception
