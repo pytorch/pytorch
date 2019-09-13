@@ -28,8 +28,8 @@ install_ubuntu() {
                    hipcub \
                    rocthrust \
                    rccl \
-		   rocprofiler-dev \
-		   roctracer-dev
+                   rocprofiler-dev \
+                   roctracer-dev
 }
 
 install_centos() {
@@ -60,8 +60,8 @@ install_centos() {
                    rccl \
                    hipcub \
                    rocthrust \
-		   rocprofiler-dev \
-		   roctracer-dev
+                   rocprofiler-dev \
+                   roctracer-dev
 }
  
 # Install Python packages depending on the base OS
