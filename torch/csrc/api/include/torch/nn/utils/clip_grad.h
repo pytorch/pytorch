@@ -12,7 +12,10 @@ float clip_grad_norm_(
     float max_norm,
     float norm_type = 2.0);
 
-float clip_grad_norm_(Tensor parameters, float max_norm, float norm_type = 2.0);
+float clip_grad_norm_(
+    Tensor& parameters,
+    float max_norm,
+    float norm_type = 2.0);
 
 } // namespace nn
 } // namespace torch

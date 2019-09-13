@@ -45,7 +45,7 @@ float clip_grad_norm_(
   return total_norm;
 }
 
-float clip_grad_norm_(Tensor parameters, float max_norm, float norm_type) {
+float clip_grad_norm_(Tensor& parameters, float max_norm, float norm_type) {
   std::vector<Tensor> params = {parameters};
   return clip_grad_norm_(params, max_norm, norm_type);
 }
