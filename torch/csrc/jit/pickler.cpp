@@ -9,6 +9,10 @@ namespace jit {
 
 using ::c10::IValue;
 
+// Protocol 2 is the highest that can be decoded by Python 2
+// See https://docs.python.org/3/library/pickle.html#data-stream-format
+constexpr static uint8_t PROTOCOL_VERSION = 2;
+
 const char* getClassName(PicklerClass cls) {
   switch (cls) {
     case PicklerClass::TENSOR:

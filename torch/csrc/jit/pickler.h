@@ -10,9 +10,6 @@
 
 namespace torch {
 namespace jit {
-// Protocol 2 is the highest that can be decoded by Python 2
-// See https://docs.python.org/3/library/pickle.html#data-stream-format
-constexpr static uint8_t PROTOCOL_VERSION = 2;
 
 // See Python's pickletools.py for a detailed description of each of these codes
 enum class PickleOpCode : char {
