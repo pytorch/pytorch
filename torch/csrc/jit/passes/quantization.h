@@ -84,6 +84,15 @@ TORCH_API script::Module InsertQuantDeQuant(
  * Right now this is a fusion for fbgemm backend and only works for quantized
  * conv op, we'll extend to more ops and more backends in the future.
  *
+ * Currently supported fusion:
+ * q(conv2d(dq(a), dq(w), dq(b))) --> to_nchw(fbgemm_conv2d(prepack(to_nhwc(a)),
+ *                                                          prepack(to_nhwc(w)),
+ *                                                          prepack(to_nhwc(b))))
+ *
+ * q(linear(dq(a), dq(w), dq(b))) --> to_nchw(fbgemm_linear(prepack(to_nhwc(a)),
+ *                                                          prepack(to_nhwc(w)),
+ *                                                          prepack(to_nhwc(b))))
+ *
  * \param graph the graph we want to apply fusion
  */
 TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
