@@ -11,6 +11,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/LegacyTypeDispatch.h>
@@ -219,12 +220,15 @@ class CAFFE2_API Tensor {
 
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        tensorTypeIdToBackend(type_id()),
+        // TODO: When we build in Variable here, we need to change the
+        // signature of getDeprecatedTypeProperties to collapse backend
+        // and is_variable into TensorTypeSet
+        tensorTypeIdToBackend(type_set().highestPriorityTypeId()),
         scalar_type(),
         is_variable());
   }
-  TensorTypeId type_id() const {
-    return impl_->type_id();
+  TensorTypeSet type_set() const {
+    return impl_->type_set();
   }
   ScalarType scalar_type() const {
     return typeMetaToScalarType(impl_->dtype());
@@ -317,19 +321,42 @@ class CAFFE2_API Tensor {
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() && = delete;
 
-  // Return a `PackedTensorAccessor` for CUDA `Tensor`s. You have to specify scalar type and
+  // Return a `GenericPackedTensorAccessor` for CUDA `Tensor`s. You have to specify scalar type and
   // dimension. You can optionally specify RestrictPtrTraits as a template parameter to
   // cast the data pointer to a __restrict__ pointer.
-  // In order to use this, your CUDA kernel has to take a corresponding PackedTensorAccessor
+  // In order to use this, your CUDA kernel has to take a corresponding GenericPackedTensorAccessor
   // as an argument.
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-  PackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const& {
+  GenericPackedTensorAccessor<T,N,PtrTraits,index_t> generic_packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
-    return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data_ptr<T>()),sizes().data(),strides().data());
+    return GenericPackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data_ptr<T>()),sizes().data(),strides().data());
   }
-  template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-  PackedTensorAccessor<T,N> packed_accessor() && = delete;
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+  GenericPackedTensorAccessor<T,N> generic_packed_accessor() && = delete;
+
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor32<T,N,PtrTraits> packed_accessor32() const& {
+    return generic_packed_accessor<T,N,PtrTraits,int32_t>();
+  }
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor32<T,N,PtrTraits> packed_accessor32() && = delete;
+
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor64<T,N,PtrTraits> packed_accessor64() const& {
+    return generic_packed_accessor<T,N,PtrTraits,int64_t>();
+  }
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor64<T,N,PtrTraits> packed_accessor64() && = delete;
+
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+  C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
+  GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const & {
+    return generic_packed_accessor<T,N,PtrTraits,index_t>();
+  }
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+  C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
+  GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() && = delete;
 
   Tensor operator-() const;
   Tensor& operator+=(const Tensor & other);
@@ -689,6 +716,9 @@ class CAFFE2_API Tensor {
   Tensor values() const;
   int64_t numel() const;
   std::vector<Tensor> unbind(int64_t dim=0) const;
+  #ifdef BUILD_NAMEDTENSOR
+  std::vector<Tensor> unbind(Dimname dim) const;
+  #endif
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
   Tensor to_mkldnn() const;
@@ -895,13 +925,13 @@ Tensor make_tensor(Args&&... args) {
   return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
 }
 
-inline Backend infer_backend(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return tensorTypeIdToBackend(t.type_id());
+inline TensorTypeSet infer_tensor_type_set(const Tensor & tl) {
+  return tl.type_set();
 }
-inline Backend infer_backend(const TensorList & tl) {
+
+inline TensorTypeSet infer_tensor_type_set(TensorList tl) {
   TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tensorTypeIdToBackend(tl[0].type_id());
+  return tl[0].type_set();
 }
 
 inline bool infer_is_variable(const Tensor & t) {
@@ -913,5 +943,9 @@ inline bool infer_is_variable(const TensorList & tl) {
   return tl[0].is_variable();
 }
 } // namespace detail
+
+static inline TensorTypeId legacyExtractTypeId(const Tensor& t) {
+  return legacyExtractTypeId(t.type_set());
+}
 
 } // namespace at

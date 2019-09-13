@@ -30,7 +30,10 @@ module_metadata_map = {
     'ConvTranspose2d': TorchNNModuleMetadata(),
     'ConvTranspose3d': TorchNNModuleMetadata(),
     'Unfold': TorchNNModuleMetadata(),
-    'Fold': TorchNNModuleMetadata(),
+    'Fold': TorchNNModuleMetadata(
+        cpp_default_constructor_args="(3, 2)",
+        num_attrs_recursive=5,
+    ),
     'MaxPool1d': TorchNNModuleMetadata(),
     'MaxPool2d': TorchNNModuleMetadata(),
     'MaxPool3d': TorchNNModuleMetadata(),

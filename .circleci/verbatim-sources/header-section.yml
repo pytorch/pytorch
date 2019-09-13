@@ -63,3 +63,14 @@ macos_brew_update: &macos_brew_update
     brew install expect
     brew install libomp
 
+ios_brew_update: &ios_brew_update
+  name: Brew update and install iOS toolchains
+  no_output_timeout: "1h"
+  command: |
+    set -ex
+    brew update
+    brew unlink parallel
+    brew install moreutils
+    brew link parallel --overwrite
+    brew install expect
+    brew install libtool

@@ -260,7 +260,7 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
                                    (void*)&fBeta, c, rocblas_datatype_f16_r, (int)ldc, strideC,
                                    c, rocblas_datatype_f16_r, (int)ldc, strideC,
                                    (int) batchCount, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
-                                   0, 0, NULL, NULL));
+                                   0, 0));
 #else
   THCublasCheck(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
   THCublasCheck(cublasGemmStridedBatchedEx(handle,
