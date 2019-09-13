@@ -168,6 +168,10 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
       .def("_jit_pass_fuse_linear", &FuseLinear)
+      .def("_jit_pass_fold_quantize",
+           [](script::Module& module, const std::string& method_name) {
+             FoldQuantizeCallIntoBuffer(module, method_name);
+           })
       .def(
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
