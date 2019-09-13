@@ -73,6 +73,14 @@ inline void Tensor::set_data(const Tensor & new_data) const {
     return table->getOp<void (const Tensor &, const Tensor &)>(type_set())(const_cast<Tensor&>(*this), new_data);
 #endif
 }
+inline Tensor Tensor::data() const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::data(const_cast<Tensor&>(*this));
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::data(Tensor self) -> Tensor");
+    return table->getOp<Tensor (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+#endif
+}
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor & Tensor::names_(c10::optional<DimnameList> names) const {
 #ifdef USE_STATIC_DISPATCH
@@ -98,7 +106,27 @@ inline Tensor Tensor::align_to(DimnameList names) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::align_to(const_cast<Tensor&>(*this), names);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::align_to(Tensor self, DimnameList names) -> Tensor");
+    static auto table = globalATenDispatch().getOpTable("aten::align_to(Tensor(a) self, DimnameList names) -> Tensor(a)");
+    return table->getOp<Tensor (const Tensor &, DimnameList)>(type_set())(const_cast<Tensor&>(*this), names);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::align_as(const Tensor & other) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::align_as(const_cast<Tensor&>(*this), other);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::align_as(Tensor self, Tensor other) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, const Tensor &)>(type_set())(const_cast<Tensor&>(*this), other);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::refine_names(DimnameList names) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::refine_names(const_cast<Tensor&>(*this), names);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::refine_names(Tensor(a) self, DimnameList names) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, DimnameList)>(type_set())(const_cast<Tensor&>(*this), names);
 #endif
 }
