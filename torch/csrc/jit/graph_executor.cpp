@@ -551,7 +551,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
     // Phase 0. Inline functions, then clean up any artifacts that the inliner
     //          left in that may inhibit optimization
-    Inline(*opt_graph);
+    Inline(*opt_graph, true);
     LowerSimpleTuples(opt_graph);
     ConstantPooling(opt_graph);
 
