@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import FileCheck
 
-from common_utils import run_tests, IS_WINDOWS, skipIfRocm, IS_SANDCASTLE
+from common_utils import run_tests, IS_WINDOWS, IS_SANDCASTLE
 from textwrap import dedent
 from itertools import product, permutations
 
@@ -47,7 +47,6 @@ class TestFuser(JitTestCase):
         self._test_fused_abs(device="cuda")
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @skipIfRocm
     def test_zero_element_tensors(self):
         def decode(sin_t, cos_t):
             theta = torch.atan2(sin_t.float(), cos_t.float())
@@ -358,7 +357,6 @@ class TestFuser(JitTestCase):
     # If this is a real problem, we'll need to revisit Torchscript Function
     # lifetimes in Python.
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
     def test_lerp(self):
         start = torch.randn(4, 1, dtype=torch.float, device='cuda')
         end = torch.randn(1, 4, dtype=torch.float, device='cuda')
@@ -568,7 +566,6 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
-    @skipIfRocm
     @enable_cpu_fuser
     def test_fusion_reuse_multi_gpu(self):
         def fn(x, y):
@@ -589,7 +586,6 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
-    @skipIfRocm
     @enable_cpu_fuser
     def test_kernel_cache_multi_gpu(self):
         def not_fusible(x):
@@ -619,7 +615,6 @@ class TestFuser(JitTestCase):
         self.assertEqual(new_cache_size - prev_cache_size, 1)
 
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
-    @skipIfRocm
     def test_nonzero_device_cuda(self):
         device = 'cuda:' + str(1)
         x = torch.tensor([0.4], dtype=torch.float, device=device)

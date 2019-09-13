@@ -21,7 +21,7 @@ from torch.autograd.profiler import (profile, format_time, EventList,
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm, slowTest,
-                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS)
+                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
@@ -1924,7 +1924,6 @@ class TestAutograd(TestCase):
         torch.autograd.grad(y, x)  # should not error!
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    @skipIfRocm
     def test_unused_output_gpu(self):
         from torch.nn.parallel._functions import Broadcast
         x = Variable(torch.randn(5, 5).float().cuda(), requires_grad=True)
@@ -1953,7 +1952,6 @@ class TestAutograd(TestCase):
         self.assertEqual(device[0], 1)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    @skipIfRocm
     def test_inputbuffer_add_multigpu(self):
         input = torch.randn(1).cuda(0).requires_grad_()
         output = input.cuda(1) + input.cuda(1)
@@ -3554,6 +3552,7 @@ for shape in [(1,), ()]:
         s = TestCase.runWithPytorchAPIUsageStderr(code)
         self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
 
+    @unittest.skipIf(IS_MACOS, "Fails with SIGBUS on macOS; https://github.com/pytorch/pytorch/issues/25941")
     def test_deep_reentrant(self):
 
         class DeepReentrant(Function):
