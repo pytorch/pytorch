@@ -51,20 +51,12 @@ macos_brew_update: &macos_brew_update
   no_output_timeout: "1h"
   command: |
     set -ex
-
-    # Update repositories manually
-    for path in $(find /usr/local/Homebrew -type d -name .git)
-    do
-      cd $path/..
-      git fetch --depth=1 origin
-      git reset --hard origin/master
-    done
-
-    export HOMEBREW_NO_AUTO_UPDATE=1
-
+    # See https://discourse.brew.sh/t/fetching-homebrew-repos-is-slow/5374/3
+    brew untap caskroom/homebrew-cask
     # moreutils installs a `parallel` executable by default, which conflicts
     # with the executable from the GNU `parallel`, so we must unlink GNU
     # `parallel` first, and relink it afterwards
+    brew update
     brew unlink parallel
     brew install moreutils
     brew link parallel --overwrite
@@ -76,22 +68,11 @@ ios_brew_update: &ios_brew_update
   no_output_timeout: "1h"
   command: |
     set -ex
-
-    # Update repositories manually
-    for path in $(find /usr/local/Homebrew -type d -name .git)
-    do
-      cd $path/..
-      git fetch --depth=1 origin
-      git reset --hard origin/master
-    done
-
-    export HOMEBREW_NO_AUTO_UPDATE=1
-
-    # moreutils installs a `parallel` executable by default, which conflicts
-    # with the executable from the GNU `parallel`, so we must unlink GNU
-    # `parallel` first, and relink it afterwards
+    brew update
     brew unlink parallel
     brew install moreutils
     brew link parallel --overwrite
     brew install expect
     brew install libtool
+
+    

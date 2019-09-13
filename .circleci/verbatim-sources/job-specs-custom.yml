@@ -158,13 +158,14 @@
           no_output_timeout: "1h"
           command: |
             set -e
+
             export IN_CIRCLECI=1
 
             # Install sccache
             sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
             sudo chmod +x /usr/local/bin/sccache
-            export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
 
+            export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
             # This IAM user allows write access to S3 bucket for sccache
             set +x
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
@@ -174,14 +175,14 @@
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
 
-            # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
-            cp -a ~/project ~/workspace
+            mkdir -p /Users/distiller/pytorch-ci-env/workspace
 
+            # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
+            cp -a /Users/distiller/project/. /Users/distiller/pytorch-ci-env/workspace
       - persist_to_workspace:
-          root: ~/workspace
+          root: /Users/distiller/pytorch-ci-env
           paths:
-            - miniconda3
-            - project
+            - "*"
 
   pytorch_macos_10_13_py3_test:
     environment:
@@ -205,7 +206,10 @@
             export IN_CIRCLECI=1
 
             # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
-            cp -a ~/workspace/project/. ~/project
+            # TODO: I'm not sure why we can't just run our job in
+            # ~/workspace and call it a day
+            # NB: Yes, you need workspace twice
+            cp -a ~/workspace/workspace/. /Users/distiller/project
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
@@ -405,7 +409,7 @@
         destination: artifacts.tgz
 
   pytorch_ios_build:
-    <<: *pytorch_ios_params
+    <<: *pytorch_ios_params  
     macos:
       xcode: "10.2.1"
     steps:
@@ -425,7 +429,7 @@
             export IN_CIRCLECI=1
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
-            export TCLLIBPATH="/usr/local/lib"
+            export TCLLIBPATH="/usr/local/lib" 
 
             # Install conda
             curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
@@ -439,18 +443,18 @@
             cd ${PROJ_ROOT}
             git submodule sync
             git submodule update --init --recursive
-            # export
+            # export 
             export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
             # run build script
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
-            CMAKE_ARGS=()
+            CMAKE_ARGS=() 
             if [ -n "${IOS_ARCH:-}" ]; then
               CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
             fi
             if [ -n "${IOS_PLATFORM:-}" ]; then
               CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
             fi
-            if [ -n "${USE_NNPACK:-}" ]; then
+            if [ -n "${USE_NNPACK:-}" ]; then 
               CMAKE_ARGS+=("-DUSE_NNPACK=${USE_NNPACK}")
             fi
             CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
