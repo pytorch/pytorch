@@ -142,7 +142,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       TORCH_CHECK(
           bias.size(0) == K,
           "bias should have K elements: " + std::to_string(K));
-      bias_ptr = reinterpret_cast<float*>(bias.data_ptr<float>());
+      bias_ptr = bias.data_ptr<float>();
     }
 
     std::vector<float> output_multiplier_float(1, 0.0);
