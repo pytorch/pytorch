@@ -366,7 +366,7 @@ class QuantizeHelper {
  public:
   QuantizeHelper(const script::Module& m) : module_(m) {}
   IValue getQParams(Value* v);
-  c10::optional<script::Module> findChildModuleToQuantize(Value* v);
+  c10::optional<script::Module> findChildModuleToQuantize(Value* child_instance);
   void quantizeBias(Value* v);
   void quantizeTensor(Value* v, bool insert_after = true);
   void removeObserver(Value* v, const std::string& observer_name);
@@ -479,21 +479,18 @@ void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
 }
 
 c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
-    Value* v) {
-  if (v->node()->kind() == prim::CallMethod) {
-    auto child_instance = v->node()->inputs()[0];
+    Value* child_instance) {
+  TORCH_INTERNAL_ASSERT(
+      child_instance->node()->kind() == prim::GetAttr,
+      "Child instance should come from GetAttr.");
+  auto child_module_name = child_instance->node()->s(attr::name);
+  if (child_module_name.find("observer_for_") == std::string::npos) {
+    auto child_module = module_.find_module(child_module_name);
     TORCH_INTERNAL_ASSERT(
-        child_instance->node()->kind() == prim::GetAttr,
-        "Child instance should come from GetAttr.");
-    auto child_module_name = child_instance->node()->s(attr::name);
-    if (child_module_name.find("observer_for_") == std::string::npos) {
-      auto child_module = module_.find_module(child_module_name);
-      TORCH_INTERNAL_ASSERT(
-          child_module,
-          "InsertQuantDeQuant - Child module " + child_module_name +
-              " does not exist");
-      return child_module;
-    }
+        child_module,
+        "InsertQuantDeQuant - Child module " + child_module_name +
+        " does not exist");
+    return child_module;
   }
   return c10::nullopt;
 }
@@ -515,49 +512,48 @@ void InsertQuantDeQuantImpl(
     }
   }
 
-  std::vector<Value*> values_to_quantize;
-  std::unordered_map<script::ModulePtr, script::Module>
-      child_modules_to_quantize;
   QuantizeHelper qh(module);
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
-    for (Node* n : b->nodes()) {
+    for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end;) {
+      Node* n = *it++;
       for (Value* v : n->outputs()) {
-        if (v->type()->isSubtypeOf(TensorType::get())) {
-          auto child_module = qh.findChildModuleToQuantize(v);
-          if (child_module) {
-            child_modules_to_quantize[child_module.value().module_object()] =
-                child_module.value();
+        if (!v->type()->isSubtypeOf(TensorType::get())) {
+          continue;
+        }
+        if (v->node()->kind() == prim::CallMethod) {
+          auto module_instance = v->node()->inputs()[0];
+          auto module_method_name = v->node()->s(attr::name);
+          c10::optional<script::Module> m;
+          // calling method on self
+          if (module_instance == graph->inputs()[0]) {
+            m = module;
+          } else {
+            m = qh.findChildModuleToQuantize(module_instance);
           }
-          values_to_quantize.push_back(v);
+          if (m) {
+            InsertQuantDeQuantImpl(m.value(), module_method_name);
+          }
+        }
+        if (v->node()->kind() == prim::GetAttr &&
+            v->node()->s(c10::attr::name) == "bias") {
+          qh.quantizeBias(v);
+        } else {
+          qh.quantizeTensor(v);
         }
       }
 
-      // Schedule subblocks (if any) for visiting.
       for (Block* subblock : n->blocks()) {
         blocks_to_visit.push(subblock);
       }
     }
   }
 
-  for (Value* v : values_to_quantize) {
-    if (v->node()->kind() == prim::GetAttr &&
-        v->node()->s(c10::attr::name) == "bias") {
-      qh.quantizeBias(v);
-    } else {
-      qh.quantizeTensor(v);
-    }
-  }
-
   for (Value* v : input_values) {
     qh.quantizeTensor(v, false);
-  }
-
-  for (auto& item : child_modules_to_quantize) {
-    InsertQuantDeQuantImpl(item.second, "forward");
   }
 
   qh.destroyNodes();
