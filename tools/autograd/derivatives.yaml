@@ -386,7 +386,7 @@
 - name: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   self: not_implemented("histc")
 
-- name: index(Tensor self, Tensor?[] indices) -> Tensor
+- name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(zeros_like(self), indices, grad)
   indices: TensorList()
 

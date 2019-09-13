@@ -1231,7 +1231,7 @@
 
 - func: _cufft_clear_plan_cache(int device_index) -> void
 
-- func: index(Tensor self, Tensor?[] indices) -> Tensor
+- func: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   variants: function, method
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 
