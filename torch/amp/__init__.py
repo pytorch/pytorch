@@ -11,7 +11,12 @@ Persistent values are stored explicitly in user scripts
 import torch
 import types
 
-from .grad_scaling import scale_outputs, add_amp_attributes, set_scale_growth_rate, get_scale_growth_rate
+from .grad_scaling import scale_outputs, \
+                          add_amp_attributes,\
+                          set_scale_growth_factor, \
+                          get_scale_growth_factor, \
+                          set_scale_backoff_factor, \
+                          get_scale_backoff_factor
 
 __all__ = ["scale_outputs",
            "add_amp_attributes",

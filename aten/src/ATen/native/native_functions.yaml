@@ -4562,6 +4562,16 @@
     CUDA: legacy::cuda::_th_addmm_
   named_guard: False
 
+- func: _amp_unscale_inf_check_(Tensor(!a) scaled_grad, Tensor current_scale, Tensor found_inf) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CUDA: _amp_unscale_inf_check_cuda
+
+- func: _amp_update_scale(Tensor current_scale, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _amp_update_scale_cuda
+
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
     CPU: legacy::cpu::_th_cat

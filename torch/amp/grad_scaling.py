@@ -1,14 +1,42 @@
 import torch
 
-_scale_growth_rate = 1.001
+
+# Instead of maintaining these values and providing getters and setters, do we want to fold them
+# into the functional interface by permitting them as arguments to unscale and unscale_and_step?
+_scale_growth_factor = 1.001
+_scale_backoff_factor = 0.5
 
 
-def get_scale_growth_rate(new_growth_rate):
-    return _scale_growth_rate
+def get_scale_growth_factor():
+    r"""
+    Returns:
+        A float containing the default scale growth factor.
+    """
+    return _scale_growth_factor
 
 
-def set_scale_growth_rate(new_growth_rate):
-    _scale_growth_rate = new_growth_rate
+def set_scale_growth_factor(new_factor):
+    r"""
+    Arguments:
+        A float to be used as the default scale growth factor.
+    """
+    _scale_growth_factor = new_factor
+
+
+def get_scale_backoff_factor():
+    r"""
+    Returns:
+        A float containing the default scale backoff factor.
+    """
+    return _scale_backoff_factor
+
+
+def set_scale_backoff_factor(new_factor):
+    r"""
+    Arguments:
+        A float to be used as the default scale backoff factor.
+    """
+    _scale_backoff_factor = new_factor
 
 
 def scale_outputs(outputs, current_scale, scaling_enabled=True):
@@ -24,13 +52,13 @@ def scale_outputs(outputs, current_scale, scaling_enabled=True):
         Outputs scaled by ``current_scale``, or ``outputs`` if ``scaling_enabled=False``.
     """
     outputs = list(outputs)
+
     if scaling_enabled:
         return [output*current_scale for output in outputs]
     else:
         return outputs
 
-# Should we allow a found_inf argument to communicate the result of a previous inf check (as for step_after_unscale)
-# so that unscale_and_step can bail out early?
+
 def unscale_and_step(self,
                      closure=None,
                      current_scale=None,
@@ -85,7 +113,7 @@ def unscale_and_step(self,
             raise ValueError("Closure use is not currently supported.  It's tricky, but not impossible, and we're trying "
                              "to decide if it's worth implementing.  If you require closure use, please comment on "
                              "https://github.com/pytorch/pytorch/issues/25081, which will help us gauge demand.")
-    
+
         found, recommended_scale = self.unscale(current_scale,
                                                 scale_scheduler=scale_scheduler)
 
@@ -104,14 +132,16 @@ def unscale_and_step(self,
 
 
 def _next_recommended_scale(current_scale, found_inf):
-    # Implement
-    # if found_inf:
-    #     current_scale = current_scale*0.5
-    # else:
-    #     current_scale = current_scale*_scale_growth_rate
-    # using purely asynchronous dispatches.
-    # These are only manipulating a single value, so they shouldn't be a bottleneck, but they could be fused into one custom op.
-    return (current_scale - 0.5 * current_scale * found_inf) * (_get_scale_growth_rate() - (_get_scale_growth_rate - 1.0) *found_inf)
+    r"""
+    The kernel carries out
+    if found_inf:
+        current_scale = current_scale*_scale_backoff_factor
+    else:
+        current_scale = current_scale*_scale_growth_factor
+    In principle I could do this with primitive ops, while remaining asynchronous (a fun exercise).  But given dispatch
+    and Cuda launch overhead, there's no point spending 20ish microseconds on what could be a single op.
+    """
+    return torch._amp_update_scale(current_scale, found_inf, get_scale_growth_factor(), get_scale_backoff_factor())
 
 
 def unscale(self, current_scale=None, scale_scheduler=None, scaling_enabled=True)
@@ -131,7 +161,7 @@ def unscale(self, current_scale=None, scale_scheduler=None, scaling_enabled=True
 
     Arguments:
         current_scale (torch.cuda.FloatTensor):  The value most recently used to scale gradients (by e.g. a call to :func:`amp.scale_outputs`).
-        scale_scheduler (callable, optional):  Function to customize how the recommended scale is updated
+        scale_scheduler (callable, optional):  Function to customize how the recommended scale is updated.
             If supplied, ``scale_scheduler`` should take 2 arguments.  Both will be one-element ``torch.cuda.FloatTensors``.
             The first will contain the current scale value.  The second will contain ``1.0`` if gradients currently contain
             inf or nan, and ``0.0`` otherwise.  The scheduler should use these arguments to determine the next recommended scale,
@@ -233,20 +263,13 @@ def step_after_unscale(self,
 
         if skip_if_inf:
             if found_inf.item():
-                return None, found_inf, recommended_scale
+                return None
             else:
-                return self.step(), found_inf, recommended_scale
+                return self.step()
         else:
-            return self.step(), found_inf, recommended_scale
-    else:
-        return self.step(closure), None, None
-    if scaling_enabled:
-        if not found_inf.item():
             return self.step()
-        else:
-            return None
     else:
-        return self.step()
+        return self.step(closure)
 
 
 def _add_amp_attributes(optimizer):
