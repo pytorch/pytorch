@@ -320,7 +320,7 @@ TEST(TensorTest, Data) {
   ASSERT_THROW(tensor2.data(), c10::Error);
 }
 
-TEST(TensorTest, Backward_Grad_IsLeaf_OutputNr) {
+TEST(TensorTest, Backward_Grad_IsLeaf_OutputNr_Version) {
   const auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
   const auto y = x * x;
   y.backward();
@@ -329,6 +329,8 @@ TEST(TensorTest, Backward_Grad_IsLeaf_OutputNr) {
   ASSERT_FALSE(y.is_leaf());
   ASSERT_EQ(x.output_nr(), 0);
   ASSERT_EQ(y.output_nr(), 0);
+  ASSERT_EQ(x.version(), 0);
+  ASSERT_EQ(y.version(), 0);
 
   const auto x2 = at::tensor({5}, at::TensorOptions().requires_grad(false));
   const auto y2 = x2 * x2;
@@ -338,4 +340,6 @@ TEST(TensorTest, Backward_Grad_IsLeaf_OutputNr) {
   ASSERT_THROW(y2.is_leaf(), c10::Error);
   ASSERT_THROW(x2.output_nr(), c10::Error);
   ASSERT_THROW(y2.output_nr(), c10::Error);
+  ASSERT_THROW(x2.version(), c10::Error);
+  ASSERT_THROW(y2.version(), c10::Error);
 }
