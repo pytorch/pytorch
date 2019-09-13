@@ -20,14 +20,6 @@ docker_config_defaults: &docker_config_defaults
     aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4}
     aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
 
-# This system setup script is meant to run before the CI-related scripts, e.g.,
-# installing Git client, checking out code, setting up CI env, and
-# building/testing.
-setup_linux_system_environment: &setup_linux_system_environment
-  name: Set Up System Environment
-  no_output_timeout: "1h"
-  command: ~/workspace/.circleci/scripts/setup_linux_system_environment.sh
-
 setup_ci_environment: &setup_ci_environment
   name: Set Up CI Environment After attach_workspace
   no_output_timeout: "1h"
@@ -47,6 +39,16 @@ commands:
           name: Should run job
           no_output_timeout: "2m"
           command: ~/workspace/.circleci/scripts/should_run_job.sh
+
+  # This system setup script is meant to run before the CI-related scripts, e.g.,
+  # installing Git client, checking out code, setting up CI env, and
+  # building/testing.
+  setup_linux_system_environment:
+    steps:
+      - run:
+          name: Set Up System Environment
+          no_output_timeout: "1h"
+          command: ~/workspace/.circleci/scripts/setup_linux_system_environment.sh
 
   brew_update:
     description: "Update Homebrew and install base formulae"
@@ -290,8 +292,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - checkout
     - run:
         <<: *setup_ci_environment
@@ -349,8 +350,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
     - run:
@@ -388,8 +388,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - checkout
     - run:
         <<: *setup_ci_environment
@@ -450,8 +449,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
     - run:
@@ -651,8 +649,7 @@ jobs:
     # TODO: We shouldn't attach the workspace multiple times
     - attach_workspace:
         at: /home/circleci/project
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
     - run:
@@ -673,8 +670,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
     - attach_workspace:
@@ -702,8 +698,7 @@ jobs:
         at: ~/workspace
     - attach_workspace:
         at: /home/circleci/project
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
     - run:
@@ -859,8 +854,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
     - run:
@@ -895,8 +889,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
     - run:
@@ -942,8 +935,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
     - run:
@@ -1100,8 +1092,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     - should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - checkout
     - run:
         <<: *setup_ci_environment
@@ -1196,8 +1187,7 @@ jobs:
           if [ -z "${CIRCLE_PULL_REQUEST:-}" ]; then
             circleci step halt
           fi
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - checkout
     - run:
         <<: *setup_ci_environment
@@ -1289,8 +1279,7 @@ jobs:
     steps:
     - attach_workspace:
         at: ~/workspace
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *binary_checkout
     # N.B. we do not run binary_populate_env. The only variable we need is
@@ -1344,8 +1333,7 @@ jobs:
     steps:
     - attach_workspace:
         at: ~/workspace
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *binary_checkout
     - run:

@@ -60,8 +60,7 @@
     # TODO: We shouldn't attach the workspace multiple times
     - attach_workspace:
         at: /home/circleci/project
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
     - run:
@@ -82,8 +81,7 @@
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
     - attach_workspace:
@@ -111,8 +109,7 @@
         at: ~/workspace
     - attach_workspace:
         at: /home/circleci/project
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
     - run:
