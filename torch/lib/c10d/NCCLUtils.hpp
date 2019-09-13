@@ -1,14 +1,16 @@
 #pragma once
 
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR < 4)
-#error "Need NCCL version 2.4+"
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
-#error "Need NCCL version 2.4+"
-#endif
-
 #include <nccl.h>
 #include <memory>
+
+// Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
+// and ncclCommGetAsyncError() are not supported in earlier versions.
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 4)
+#define ENABLE_NCCL_ERROR_CHECKING
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#define ENABLE_NCCL_ERROR_CHECKING
+#endif
 
 #define C10D_NCCL_CHECK(cmd)                                              \
   do {                                                                    \
@@ -33,9 +35,14 @@ class NCCLComm {
 
   ~NCCLComm() noexcept(false) {
     if (ncclComm_ && !aborted_) {
-      // Use ncclCommAbort instead of ncclCommDestroy here since ncclCommDestroy
-      // could block forever waiting for work to complete on the communicator.
+#ifdef ENABLE_NCCL_ERROR_CHECKING
+      // Use ncclCommAbort instead of ncclCommDestroy here since
+      // ncclCommDestroy could block forever waiting for work to complete on
+      // the communicator.
       ncclCommAbort();
+#else
+      C10D_NCCL_CHECK(::ncclCommDestroy(ncclComm_));
+#endif
     }
   }
 
@@ -76,6 +83,7 @@ class NCCLComm {
   }
 
   void ncclCommAbort() {
+#ifdef ENABLE_NCCL_ERROR_CHECKING
     if (aborted_) {
       // Should not abort twice.
       return;
@@ -89,6 +97,10 @@ class NCCLComm {
     if (ncclAsyncErr_ == ncclSuccess) {
       ncclAsyncErr_ = ncclSystemError;
     }
+#else
+    // This is a NOOP, if error checks are disabled.
+    return;
+#endif
   }
 
   bool isAborted() const {
@@ -96,11 +108,16 @@ class NCCLComm {
   }
 
   ncclResult_t checkForNcclError() {
+#ifdef ENABLE_NCCL_ERROR_CHECKING
     if (ncclAsyncErr_ != ncclSuccess) {
       return ncclAsyncErr_;
     }
     C10D_NCCL_CHECK(ncclCommGetAsyncError(ncclComm_, &ncclAsyncErr_));
     return ncclAsyncErr_;
+#else
+    // Always return success, if error checks are disabled.
+    return ncclSuccess;
+#endif
   }
 
  protected:

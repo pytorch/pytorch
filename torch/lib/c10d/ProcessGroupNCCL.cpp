@@ -246,14 +246,31 @@ ProcessGroupNCCL::ProcessGroupNCCL(
         std::string(NCCL_BLOCKING_WAIT));
   }
 
+  // Generate the Process Group ID for current PG, this needs to be identical
+  // for all processes
+  std::unique_lock<std::mutex> lock(pgTrackingLock_);
+  // Default group is an empty string
+  const auto groupKey = groupName_ + "_";
+  if (processGroupCounterMap_.count(groupKey) == 0) {
+    processGroupCounterMap_[groupKey] = -1;
+  }
+  ++processGroupCounterMap_[groupKey];
+  processGroupID_ = std::to_string(processGroupCounterMap_[groupKey]);
+  groupPgID_ = groupName_ + "_" + processGroupID_;
+  pgUniqueNCCLIDCnt_[groupPgID_] = -1;
+
+#ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_ =
       std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
+#endif
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   terminateWatchdog_.store(true);
   watchdogCV_.notify_one();
+#ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_.join();
+#endif
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
