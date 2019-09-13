@@ -108,18 +108,28 @@ std::shared_ptr<SugaredValue> PythonValue::call(
   if (!matched_schema)
     throw ErrorReport(loc) << failure_messages.str();
 
+  // If if a function is marked as dropped,
+  // we throw an exception if it is invoked.
+  if (py::cast<bool>(py::module::import("torch._jit_internal")
+                         .attr("should_drop")(self))) {
+    auto g = m.graph();
+    auto err_msg = insertConstant(
+        *g,
+        IValue(
+            "This Python function is annotated to be ignored and cannot be run"));
+    g->insert(prim::RaiseException, {err_msg}, {}, loc);
+    return std::make_shared<SimpleValue>(
+        g->insertNode(
+             g->createUninitialized(matched_schema->return_types.at(0)))
+            ->output());
+  }
+
   // Release the function object so we can wrap it in a PythonOp
   py::object func = self;
   std::string cconv(inputs.size(), 'd');
   Node* new_node = m.graph()->insertNode(
       m.graph()->createPythonOp(THPObjectPtr(func.release().ptr()), cconv, {}));
 
-  // Mark if function is ignored on export
-  if (py::cast<bool>(py::module::import("torch._jit_internal")
-                         .attr("should_drop_on_export")(self))) {
-    auto python_op = static_cast<PythonOp*>(new_node);
-    python_op->ignore_on_export = true;
-  }
   new_node->setSourceRange(loc);
   for (auto& i : matched_schema->inputs)
     new_node->addInput(i);
@@ -477,31 +487,30 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   auto& g = *m.graph();
   if (is_constant) {
     if (py::isinstance<py::bool_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<bool>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<bool>(obj), loc));
     } else if (py::isinstance<py::int_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<int64_t>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
     } else if (py::isinstance<py::float_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<double>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<double>(obj), loc));
     } else if (py::isinstance<py::str>(obj)) {
-      return toSimple(
-          g.insertConstant(py::cast<std::string>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
     } else if (obj.is(py::none())) {
-      return toSimple(g.insertConstant(IValue(), nullptr, loc));
+      return toSimple(g.insertConstant(IValue(), loc));
     } else if (THPDevice_Check(obj.ptr())) {
       auto device = reinterpret_cast<THPDevice*>(obj.ptr());
       return toSimple(g.insertConstant(device->device));
     } else if (THPLayout_Check(obj.ptr())) {
       auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
       const auto v = static_cast<int64_t>(layout->layout);
-      return toSimple(g.insertConstant(v, nullptr, loc));
+      return toSimple(g.insertConstant(v, loc));
     } else if (THPDtype_Check(obj.ptr())) {
       auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
-      return toSimple(g.insertConstant(v, nullptr, loc));
+      return toSimple(g.insertConstant(v, loc));
     } else if (THPQScheme_Check(obj.ptr())) {
       auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
       const auto v = static_cast<uint8_t>(qscheme->qscheme);
-      return toSimple(g.insertConstant(v, nullptr, loc));
+      return toSimple(g.insertConstant(v, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       return std::make_shared<ConstantPythonTupleValue>(obj);
     }

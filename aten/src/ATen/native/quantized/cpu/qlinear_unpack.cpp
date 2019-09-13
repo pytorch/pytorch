@@ -10,7 +10,8 @@ namespace {
 class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
-  at::Tensor operator()(at::Tensor packed_weight) {
+  std::tuple<at::Tensor, c10::optional<Tensor>> operator()(
+      at::Tensor packed_weight) {
     // Pull out the PackBMatrix instance from the owning tensor.
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedLinearWeight>(packed_weight);
@@ -49,10 +50,12 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
     // (QLinearUnpackWeightInt8): ");
     packB->unpack(weight_ptr_int8);
 
-    return weight_origin;
+    return std::tuple<at::Tensor, c10::optional<Tensor>>(
+        weight_origin, pack_ptr.bias);
   }
 #else // USE_FBGEMM
-  at::Tensor operator()(at::Tensor /* weight */
+  std::tuple<at::Tensor, c10::optional<Tensor>> operator()(
+      at::Tensor /* weight */
   ) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
@@ -64,7 +67,7 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    "quantized::fbgemm_linear_unpack(Tensor W_prepack) -> Tensor W_origin",
+    "quantized::linear_unpack(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
     c10::RegisterOperators::options().kernel<QLinearUnpackWeightInt8>(
         TensorTypeId::CPUTensorId));
 

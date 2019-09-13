@@ -23,7 +23,11 @@ DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
       worker_id >= 0 && worker_id <= kMaxWorkerId,
       "worker_id needs to be in the range [0, 65535]")
 
-  auto& container = getInstance();
+  auto& container = getInstanceInternal();
+  TORCH_CHECK(
+      !container.initialized_,
+      "Container is already initialized! Cannot initialize it twice!");
+
   container.worker_id_ = worker_id;
   container.next_context_id_ = static_cast<int64_t>(worker_id)
       << kAutoIncrementBits;
@@ -37,24 +41,27 @@ DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
 }
 
 DistAutogradContainer& DistAutogradContainer::getInstance() {
+  auto& instance = getInstanceInternal();
+  TORCH_CHECK(
+      instance.initialized_,
+      "Need to initialize distributed autograd using "
+      "torch.distributed.autograd.init()");
+  return instance;
+}
+
+DistAutogradContainer& DistAutogradContainer::getInstanceInternal() {
   static DistAutogradContainer container;
   return container;
 }
 
 int64_t DistAutogradContainer::newAutogradMessageId() {
-  checkInitialized();
-
-  // Check for int64_t max overflow.
-  TORCH_INTERNAL_ASSERT(
-      next_autograd_message_id_ < std::numeric_limits<int64_t>::max());
   // Check for overflow into workerId_ section.
   TORCH_INTERNAL_ASSERT(next_autograd_message_id_ < max_id_);
   return next_autograd_message_id_++;
 }
 
-DistAutogradContext& DistAutogradContainer::createContext(int64_t context_id) {
-  checkInitialized();
-
+DistAutogradContext& DistAutogradContainer::getOrCreateContext(
+    int64_t context_id) {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   auto it = autograd_context_.find(context_id);
   if (it != autograd_context_.end()) {
@@ -71,19 +78,8 @@ DistAutogradContext& DistAutogradContainer::createContext(int64_t context_id) {
   return context;
 }
 
-void DistAutogradContainer::checkInitialized() {
-  TORCH_CHECK(
-      initialized_,
-      "Need to initialize distributed autograd using "
-      "torch.distributed.autograd.init()");
-}
-
 const DistAutogradContext& DistAutogradContainer::newContext() {
-  checkInitialized();
-
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
-  // Check for int64_t max overflow.
-  TORCH_INTERNAL_ASSERT(next_context_id_ < std::numeric_limits<int64_t>::max());
   // Check for overflow into workerId_ section.
   TORCH_INTERNAL_ASSERT(next_context_id_ < max_id_);
 
@@ -103,7 +99,6 @@ bool DistAutogradContainer::hasValidContext() const {
 }
 
 DistAutogradContext& DistAutogradContainer::currentContext() {
-  checkInitialized();
   TORCH_CHECK(
       hasValidContext(),
       "Current thread doesn't have a valid autograd context. Please wrap your "
@@ -119,7 +114,6 @@ DistAutogradContext& DistAutogradContainer::currentContext() {
 }
 
 void DistAutogradContainer::releaseContext(int64_t context_id) {
-  checkInitialized();
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   TORCH_CHECK(
       autograd_context_.find(context_id) != autograd_context_.end(),
@@ -135,7 +129,6 @@ void DistAutogradContainer::releaseContext(int64_t context_id) {
 
 DistAutogradContext& DistAutogradContainer::retrieveContext(
     int64_t context_id) {
-  checkInitialized();
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   TORCH_CHECK(
       autograd_context_.find(context_id) != autograd_context_.end(),

@@ -1,8 +1,14 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
+#include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/rpc_with_autograd.h>
 #include <torch/torch.h>
+
+using namespace torch::distributed::autograd;
+using namespace torch::distributed::rpc;
 
 TEST(DistAutogradTest, TestSendFunction) {
   // Initialize input tensors requiring grad.
@@ -12,10 +18,13 @@ TEST(DistAutogradTest, TestSendFunction) {
   ASSERT_FALSE(in1.grad().defined());
   ASSERT_FALSE(in2.grad().defined());
 
+  auto& autogradContainer = DistAutogradContainer::init(0);
+  autogradContainer.newContext();
+  DistAutogradContext& autogradContext = autogradContainer.currentContext();
   // Attach the send autograd function to tensors.
-  std::vector<at::IValue> ivalues{in1, in2};
-  auto send_function =
-      torch::distributed::autograd::addSendRpcBackward(ivalues);
+  std::vector<torch::Tensor> tensors = {in1, in2};
+  addSendRpcBackward(autogradContext, AutogradMetadata(1, 1), tensors);
+  auto send_function = autogradContext.sendFunctions()[1];
   ASSERT_NE(send_function, nullptr);
 
   // Build loss and attach it as input to send autograd function.
@@ -39,9 +48,13 @@ TEST(DistAutogradTest, TestSendFunctionInvalidInputs) {
   auto in1 = torch::ones({3, 3}, options);
   auto in2 = torch::ones({3, 3}, options);
 
+  auto& autogradContainer = DistAutogradContainer::init(0);
+  autogradContainer.newContext();
+  DistAutogradContext& autogradContext = autogradContainer.currentContext();
   // Attach the send autograd function to tensors.
-  auto send_function =
-      torch::distributed::autograd::addSendRpcBackward({in1, in2});
+  std::vector<torch::Tensor> tensors = {in1, in2};
+  addSendRpcBackward(autogradContext, AutogradMetadata(1, 1), tensors);
+  auto send_function = autogradContext.sendFunctions()[1];
 
   // Build loss and attach it as input to send autograd function.
   auto loss = torch::autograd::Variable(torch::ones({3, 3}));

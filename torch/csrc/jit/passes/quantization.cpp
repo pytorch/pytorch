@@ -128,6 +128,13 @@ Node* insertObserver(
   }
   std::string observer_name = "observer_for_" + v->debugName();
   script::Module observer = observer_module.clone();
+  // Temporary workaround to skip inserting duplicate modules,
+  // full support will come in next PR
+  for (script::Slot s: module.get_module_slots()) {
+    if (s.name() == observer_name) {
+      return nullptr;
+    }
+  }
   module.register_module(observer_name, observer);
   // Get handle of observer module
   Node* observer_instance = g->create(c10::prim::GetAttr);
@@ -262,9 +269,8 @@ void InsertObserversImpl(
         v->node()->s(c10::attr::name) == "bias") {
       continue;
     }
-    if (v->node()->kind() == prim::CallMethod &&
-        v->node()->s(attr::name) == "forward") {
-      // If we find a call to forward function of a child module,
+    if (v->node()->kind() == prim::CallMethod) {
+      // If we find a call to method of a child module,
       // we'll recursively insert observers for the forward function to
       // the child module.
       // One important detail is that currently we insert observer twice for
@@ -272,19 +278,22 @@ void InsertObserversImpl(
       // this is required if child module has different qconfig from the
       // parent module, but it should be removed if they have the same
       // qconfig, we'll do this in a separate PR.
-      // Another note is that right now we only insert observer for "forward"
-      // function, but we may need to extend to all functions.
       auto child_instance = v->node()->inputs()[0];
-      TORCH_INTERNAL_ASSERT(
-          child_instance->node()->kind() == prim::GetAttr,
-          "Child instance should come from GetAttr.");
-      auto child_module_name = child_instance->node()->s(attr::name);
-      auto child_module = module.find_module(child_module_name);
-      TORCH_INTERNAL_ASSERT(
-          child_module,
-          "Child module " + child_module_name + " does not exist");
-      // Recursively insert observer for the forward function of child module
-      InsertObserversImpl(child_module.value(), "forward", module_qconfig_map);
+      if (child_instance->node()->kind() == prim::GetAttr) {
+        auto child_module_name = child_instance->node()->s(attr::name);
+        auto child_module = module.find_module(child_module_name);
+        TORCH_INTERNAL_ASSERT(
+            child_module,
+            "Child module " + child_module_name + " does not exist");
+        // Recursively insert observer for the forward function of child module
+        InsertObserversImpl(child_module.value(), v->node()->s(attr::name), module_qconfig_map);
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            child_instance == graph->inputs()[0],
+            "We only support call method either on %self"
+            "or child instance in insert_observers_pass right now");
+        InsertObserversImpl(module, v->node()->s(attr::name), module_qconfig_map);
+      }
     }
     auto qconfig = module_qconfig_map.at(module.module_object());
     // Skip inserting observer if no qconfig is specified
@@ -622,8 +631,8 @@ graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale,
         %in_param : int[] = prim::ListConstruct(%0, %2, %3, %1)
         %a_perm : Tensor = aten::permute(%a_quant, %in_param)
         %w_perm : Tensor = aten::permute(%w_quant, %in_param)
-        %w_packed = quantized::fbgemm_conv_prepack(%w_perm, %stride, %padding, %dilation, %groups)
-        %r = quantized::fbgemm_conv2d(%a_perm, %w_packed, %b_quant, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
+        %w_packed = quantized::conv_prepack(%w_perm, %stride, %padding, %dilation, %groups)
+        %r = quantized::conv2d(%a_perm, %w_packed, %b_quant, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
         %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
         %r_perm = aten::permute(%r, %out_param)
         return (%r_perm))";

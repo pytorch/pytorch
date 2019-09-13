@@ -125,8 +125,7 @@ class TestDistAutograd(MultiProcessTestCase):
             self.assertEqual(2, len(next_funcs))
             self.assertEqual('torch::distributed::autograd::RecvRpcBackward', next_funcs[0][0].name())
             self.assertEqual('torch::distributed::autograd::RecvRpcBackward', next_funcs[1][0].name())
-            self.assertEquals(next_funcs[0][0], next_funcs[1][0])
-
+            self.assertEqual(next_funcs[0][0], next_funcs[1][0])
 
         # autograd context should be cleaned up by now.
         with self.assertRaises(RuntimeError):

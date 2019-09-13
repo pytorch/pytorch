@@ -5,6 +5,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Device.h>
+#include <c10/core/TensorTypeSet.h>
 
 #include <c10/util/Optional.h>
 #include <c10/util/C++17.h>
@@ -348,8 +349,37 @@ struct C10_API TensorOptions {
   }
 
   // Resolves the ATen backend specified by the current construction axes.
+  // TODO: Deprecate this
   Backend backend() const noexcept {
     return at::tensorTypeIdToBackend(computeTensorTypeId());
+  }
+
+  /// Return the right-biased merge of two TensorOptions.  This has the
+  /// effect of overwriting settings from self with specified options
+  /// of options.
+  ///
+  /// NB: This merging operation does NOT respect device merges.
+  /// For example, if you device({kCUDA, 1}).merge_in(kCUDA)
+  /// you will get kCUDA in the end!  Functions like Tensor.new_empty
+  /// ensure the right device is selected anyway by way of a
+  /// device guard.
+  ///
+  TensorOptions merge_in(TensorOptions options) const noexcept {
+    TensorOptions r = options;
+    if (!r.has_device()) r.set_device(device());
+    if (!r.has_dtype()) r.set_dtype(dtype());
+    if (!r.has_layout()) r.set_layout(layout());
+    // NB: requires grad is right biased; not a logical AND/OR!
+    if (!r.has_requires_grad()) r.set_requires_grad(requires_grad());
+    if (!r.has_is_variable()) r.set_is_variable(is_variable());
+    if (!r.has_pinned_memory()) r.set_pinned_memory(pinned_memory());
+    return r;
+  }
+
+  // Resolves the tensor type set specified by the current construction axes.
+  TensorTypeSet type_set() const noexcept {
+    // TODO: This should also contain variable eventually
+    return TensorTypeSet(computeTensorTypeId());
   }
 
   inline TensorTypeId computeTensorTypeId() const {
@@ -609,6 +639,10 @@ inline DeviceType computeDeviceType(TensorTypeId tid) {
     return DeviceType::HIP;
   } else if (tid == TensorTypeId::MkldnnCPUTensorId) {
     return DeviceType::CPU;
+  } else if (tid == TensorTypeId::ComplexCPUTensorId) {
+    return DeviceType::CPU;
+  } else if (tid == TensorTypeId::ComplexCUDATensorId) {
+    return DeviceType::CUDA;
   } else {
     AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
   }

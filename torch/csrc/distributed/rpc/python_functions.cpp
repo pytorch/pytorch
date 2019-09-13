@@ -1,72 +1,41 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/python_udf_call.h>
+#include <torch/csrc/distributed/rpc/python_udf_resp.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
-using namespace torch::distributed::autograd;
+namespace {
 
-py::object to_py_obj(const Message& message) {
-  switch (message.type()) {
-    case MessageType::SCRIPT_RET: {
-      ScriptRet ret = ScriptRet::fromMessage(message);
-      Stack stack;
-      stack.push_back(ret.value());
-      return torch::jit::createPyObjectForStack(std::move(stack));
-    }
-    case MessageType::PYTHON_RET: {
-      return PythonRpcHandler::loadPythonUDFResult(message);
-    }
-    case MessageType::EXCEPTION: {
-      std::string err(message.payload().begin(), message.payload().end());
-      throw std::runtime_error(err);
-    }
-    default: {
-      AT_ERROR("Unrecognized response message type ", message.type());
-    }
-  }
-}
-
-std::shared_ptr<FutureMessage> py_rpc_builtin(
-    RpcAgent& agent,
-    const WorkerId& dst,
+std::shared_ptr<Operator> matchBuiltinOp(
     const std::string& opName,
     const py::args& args,
-    const py::kwargs& kwargs) {
-    // builtin operators.
-    Symbol symbol = Symbol::fromQualString(opName);
-    if (symbol.is_aten()) {
-      Stack stack;
-      for (const auto& op : torch::jit::getAllOperatorsFor(symbol)) {
-        try {
-          // FIXME: This is temporary solution. We should at least refactor
-          // ``createStackForSchema`` to avoid throwing an error.
-          stack = torch::jit::createStackForSchema(
-              op->schema(), args, kwargs, c10::nullopt);
+    const py::kwargs& kwargs,
+    Stack& stack) {
+  Symbol symbol = Symbol::fromQualString(opName);
+  if (symbol.is_aten()) {
+    for (const auto& op : torch::jit::getAllOperatorsFor(symbol)) {
+      try {
+        // FIXME: This is temporary solution. We should at least refactor
+        // ``createStackForSchema`` to avoid throwing an error.
+        stack = torch::jit::createStackForSchema(
+            op->schema(), args, kwargs, c10::nullopt);
 
-        } catch (std::runtime_error& e) {
-          VLOG(1) << "Couldn't match schema: " << op->schema()
-                  << " to args: " << args << " and kwargs: " << kwargs
-                  << ", reason: " << e.what();
-          continue;
-        }
-
-        Message message = ScriptCall(op, std::move(stack)).toMessage();
-        auto& autogradContainer = DistAutogradContainer::getInstance();
-        if (autogradContainer.hasValidContext()) {
-          // Retrieve the appropriate context to modify.
-          auto& autogradContext = autogradContainer.currentContext();
-
-          // Record autograd information for 'send'.
-          addSendRpcBackward(autogradContext, message);
-        }
-
-        // Found the right op! Send it along...
-        return agent.send(dst, std::move(message));
+      } catch (std::runtime_error& e) {
+        VLOG(1) << "Couldn't match schema: " << op->schema()
+                << " to args: " << args << " and kwargs: " << kwargs
+                << ", reason: " << e.what();
+        continue;
       }
+
+      // Found the right op!
+      return op;
     }
+  }
 
   AT_ERROR(
       "Failed to match operator name ",
@@ -77,19 +46,113 @@ std::shared_ptr<FutureMessage> py_rpc_builtin(
       ", kwargs: ",
       kwargs,
       ") to a builtin operator");
+
+  // builtin operators.
 }
 
-std::shared_ptr<FutureMessage> py_rpc_python_udf(
+} // namespace
+
+using namespace torch::distributed::autograd;
+
+py::object toPyObjInternal(RpcBase* rpc, MessageType messageType) {
+  switch (messageType) {
+    case MessageType::SCRIPT_RET: {
+      auto ret = static_cast<ScriptRet*>(rpc);
+      Stack stack;
+      stack.push_back(ret->value());
+      return torch::jit::createPyObjectForStack(std::move(stack));
+    }
+    case MessageType::PYTHON_RET: {
+      // TODO: Try to avoid a copy here.
+      auto resp = static_cast<PythonUDFResp*>(rpc);
+      return PythonRpcHandler::loadPythonUDFResult(resp->pickledPayload());
+    }
+    case MessageType::MESSAGE_WITH_AUTOGRAD_RESP: {
+      auto rpcWithAutograd = static_cast<RpcWithAutograd*>(rpc);
+      const auto& autogradMetadata = rpcWithAutograd->autogradMetadata();
+
+      // Attach 'recv' autograd function.
+      DistAutogradContext* autogradContext = addRecvRpcBackward(
+          rpcWithAutograd->autogradMetadata(), rpcWithAutograd->tensors());
+
+      // Handle the original RPC.
+      return toPyObjInternal(
+          rpcWithAutograd->moveWrappedRpc().get(),
+          rpcWithAutograd->wrappedMessageType());
+    }
+    default: {
+      AT_ERROR("Unrecognized response message type ", messageType);
+    }
+  }
+}
+
+py::object toPyObj(const Message& message) {
+  return toPyObjInternal(deserializeResponse(message).get(), message.type());
+}
+
+std::shared_ptr<FutureMessage> pyRpcBuiltin(
+    RpcAgent& agent,
+    const WorkerId& dst,
+    const std::string& opName,
+    const py::args& args,
+    const py::kwargs& kwargs) {
+  Stack stack;
+  auto op = matchBuiltinOp(opName, args, kwargs, stack);
+  std::unique_ptr<ScriptCall> scriptCall(new ScriptCall(op, std::move(stack)));
+  auto& autogradContainer = DistAutogradContainer::getInstance();
+  if (autogradContainer.hasValidContext()) {
+    // Retrieve the appropriate context to modify.
+    auto& autogradContext = autogradContainer.currentContext();
+
+    // Wrap the original rpc with autograd information.
+    AutogradMetadata autogradMetadata(
+        autogradContext.context_id(), autogradContainer.newAutogradMessageId());
+    RpcWithAutograd rpcWithAutograd(
+        MessageType::MESSAGE_WITH_AUTOGRAD_REQ,
+        autogradMetadata,
+        std::move(scriptCall));
+
+    // Record autograd information for 'send'.
+    addSendRpcBackward(
+        autogradContext, autogradMetadata, rpcWithAutograd.tensors());
+
+    return agent.send(dst, std::move(rpcWithAutograd.toMessage()));
+  } else {
+    return agent.send(dst, std::move(scriptCall->toMessage()));
+  }
+}
+
+std::shared_ptr<RRef> pyRemoteBuiltin(
+    RpcAgent& agent,
+    const WorkerId& dst,
+    const std::string& opName,
+    const py::args& args,
+    const py::kwargs& kwargs) {
+  Stack stack;
+  auto op = matchBuiltinOp(opName, args, kwargs, stack);
+
+  auto& ctx = RRefContext::getInstance();
+  auto userRRef = ctx->createUserRRef(dst.id_);
+  agent.send(
+      dst,
+      ScriptRemoteCall(
+          op,
+          std::move(stack),
+          userRRef->id().toIValue(),
+          userRRef->forkId().toIValue())
+          .toMessage());
+  return userRRef;
+}
+
+std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& pickledPythonUDF) {
-  std::vector<char> data(pickledPythonUDF.begin(), pickledPythonUDF.end());
-  std::vector<torch::Tensor> tensor_table;
-
-  return agent.send(dst,
-                    Message(std::move(data),
-                            std::move(tensor_table),
-                            MessageType::PYTHON_CALL));
+  return agent.send(
+      dst,
+      PythonUDFCall(
+          std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()))
+          .toMessage());
 }
 
 } // namespace rpc

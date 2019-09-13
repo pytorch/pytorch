@@ -1,5 +1,4 @@
 #include <torch/csrc/distributed/rpc/future_message.h>
-#include <torch/csrc/distributed/autograd/utils.h>
 
 namespace torch {
 namespace distributed {
@@ -7,14 +6,8 @@ namespace rpc {
 
 const Message& FutureMessage::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
-  finished_cv_.wait(lock, [this]{return completed_.load();});
+  finished_cv_.wait(lock, [this] { return completed_.load(); });
 
-  // Record autograd information if required, before passing the message to the
-  // user.
-  if (message_.hasAutogradMetadata()) {
-    // Attach the 'recv' autograd function.
-    torch::distributed::autograd::addRecvRpcBackward(message_);
-  }
   return message_;
 }
 
@@ -58,6 +51,6 @@ void FutureMessage::fireCallbacks() {
   callbacks_.clear();
 }
 
-}
-}
-}
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

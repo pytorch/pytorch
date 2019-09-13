@@ -63,7 +63,17 @@ macos_brew_update: &macos_brew_update
     brew install expect
     brew install libomp
 
-
+ios_brew_update: &ios_brew_update
+  name: Brew update and install iOS toolchains
+  no_output_timeout: "1h"
+  command: |
+    set -ex
+    brew update
+    brew unlink parallel
+    brew install moreutils
+    brew link parallel --overwrite
+    brew install expect
+    brew install libtool
 ##############################################################################
 # Binary build (nightlies nightly build) defaults
 # The binary builds use the docker executor b/c at time of writing the machine
@@ -150,15 +160,31 @@ pytorch_params: &pytorch_params
     use_cuda_docker_runtime:
       type: string
       default: ""
-    multi_gpu:
-      type: string
-      default: ""
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     DOCKER_IMAGE: << parameters.docker_image >>
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
-    MULTI_GPU: << parameters.multi_gpu >>
   resource_class: << parameters.resource_class >>
+
+pytorch_ios_params: &pytorch_ios_params
+  parameters:
+    build_environment:
+      type: string
+      default: ""
+    ios_arch:
+      type: string
+      default: ""
+    ios_platform:
+      type: string
+      default: ""
+    use_nnpack:
+      type: string
+      default: "ON"
+  environment:
+    BUILD_ENVIRONMENT: << parameters.build_environment >>
+    IOS_ARCH: << parameters.ios_arch >>
+    IOS_PLATFORM: << parameters.ios_platform >>
+    USE_NNPACK: << parameters.use_nnpack >>
 
 caffe2_params: &caffe2_params
   parameters:
@@ -278,11 +304,6 @@ jobs:
             NAMED_FLAG="export BUILD_NAMEDTENSOR=1"
           fi
 
-          # dispatch aten ops statically for mobile
-          if [[ ${BUILD_ENVIRONMENT} == *"android"* ]]; then
-            NAMED_FLAG="export USE_STATIC_DISPATCH=1"
-          fi
-
           export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -348,13 +369,12 @@ jobs:
           else
             export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
-          if [ -n "${MULTI_GPU}" ]; then
+          if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           else
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"'&& echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
   caffe2_linux_build:
     <<: *caffe2_params
     machine:
@@ -1258,7 +1278,61 @@ jobs:
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
-  
+
+  pytorch_ios_build:
+    <<: *pytorch_ios_params  
+    macos:
+      xcode: "10.2.1"
+    steps:
+      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+      - attach_workspace:
+          at: ~/workspace
+      - run:
+          <<: *should_run_job
+      - checkout
+      - run:
+          <<: *ios_brew_update
+      - run:
+          name: Build
+          no_output_timeout: "1h"
+          command: |
+            set -e
+            export IN_CIRCLECI=1
+            WORKSPACE=/Users/distiller/workspace
+            PROJ_ROOT=/Users/distiller/project
+            export TCLLIBPATH="/usr/local/lib" 
+
+            # Install conda
+            curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+            chmod +x ~/Downloads/conda.sh
+            /bin/bash ~/Downloads/conda.sh -b -p ~/anaconda
+            export PATH="~/anaconda/bin:${PATH}"
+            source ~/anaconda/bin/activate
+            # Install dependencies
+            conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests
+            # sync submodules
+            cd ${PROJ_ROOT}
+            git submodule sync
+            git submodule update --init --recursive
+            # export 
+            export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+            # run build script
+            chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
+            CMAKE_ARGS=() 
+            if [ -n "${IOS_ARCH:-}" ]; then
+              CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
+            fi
+            if [ -n "${IOS_PLATFORM:-}" ]; then
+              CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
+            fi
+            if [ -n "${USE_NNPACK:-}" ]; then 
+              CMAKE_ARGS+=("-DUSE_NNPACK=${USE_NNPACK}")
+            fi
+            CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+            CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
+            CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+
+            unbuffer ${PROJ_ROOT}/scripts/build_ios.sh ${CMAKE_ARGS[@]} 2>&1 | ts  
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
   # files just store the names of all the files in that folder (which are
@@ -1640,7 +1714,6 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-multigpu-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:339"
           use_cuda_docker_runtime: "1"
-          multi_gpu: "1"
           resource_class: gpu.large
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda9_cudnn7_py3_NO_AVX2_test
@@ -1830,6 +1903,21 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
+      # Pytorch iOS builds
+      - pytorch_ios_build:
+          name: pytorch_ios_10_2_1_x86_64_build
+          build_environment: "pytorch-ios-10.2.1-x86_64_build"
+          ios_platform: "SIMULATOR"
+          use_nnpack: "OFF"
+          requires: 
+            - setup
+      - pytorch_ios_build:
+          name: pytorch_ios_10_2_1_arm64_build
+          build_environment: "pytorch-ios-10.2.1-arm64_build"
+          ios_arch: "arm64"
+          requires: 
+            - setup
+
       - caffe2_linux_build:
           name: caffe2_py2_gcc4_8_ubuntu14_04_build
           requires:
@@ -1840,7 +1928,7 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-gcc4.8-ubuntu14.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:301"
       - caffe2_linux_test:
           name: caffe2_py2_gcc4_8_ubuntu14_04_test
           requires:
@@ -1852,7 +1940,7 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-gcc4.8-ubuntu14.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:301"
           resource_class: large
       - caffe2_linux_build:
           name: caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
@@ -1864,7 +1952,7 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-cuda9.0-cudnn7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:301"
       - caffe2_linux_test:
           name: caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_test
           requires:
@@ -1877,14 +1965,14 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-cuda9.0-cudnn7-ubuntu16.04-test"
           use_cuda_docker_runtime: "1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:301"
           resource_class: gpu.medium
       - caffe2_linux_build:
           name: caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:301"
       - caffe2_linux_test:
           name: caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_test
           requires:
@@ -1892,14 +1980,14 @@ workflows:
             - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build
           build_environment: "caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04-test"
           use_cuda_docker_runtime: "1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:301"
           resource_class: gpu.medium
       - caffe2_linux_build:
           name: caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-py2-cuda9.1-cudnn7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.1-cudnn7-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.1-cudnn7-ubuntu16.04:301"
       - caffe2_linux_test:
           name: caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_test
           requires:
@@ -1907,35 +1995,35 @@ workflows:
             - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
           build_environment: "caffe2-py2-cuda9.1-cudnn7-ubuntu16.04-test"
           use_cuda_docker_runtime: "1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.1-cudnn7-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.1-cudnn7-ubuntu16.04:301"
           resource_class: gpu.medium
       - caffe2_linux_build:
           name: caffe2_py2_mkl_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-py2-mkl-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-mkl-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-mkl-ubuntu16.04:301"
       - caffe2_linux_test:
           name: caffe2_py2_mkl_ubuntu16_04_test
           requires:
             - setup
             - caffe2_py2_mkl_ubuntu16_04_build
           build_environment: "caffe2-py2-mkl-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-mkl-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-mkl-ubuntu16.04:301"
           resource_class: large
       - caffe2_linux_build:
           name: caffe2_onnx_py2_gcc5_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-onnx-py2-gcc5-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:301"
       - caffe2_linux_test:
           name: caffe2_onnx_py2_gcc5_ubuntu16_04_test
           requires:
             - setup
             - caffe2_onnx_py2_gcc5_ubuntu16_04_build
           build_environment: "caffe2-onnx-py2-gcc5-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:301"
           resource_class: large
       - caffe2_linux_build:
           name: caffe2_py2_clang3_8_ubuntu16_04_build
@@ -1947,7 +2035,7 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-clang3.8-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.8-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.8-ubuntu16.04:301"
           build_only: "1"
       - caffe2_linux_build:
           name: caffe2_py2_clang3_9_ubuntu16_04_build
@@ -1959,35 +2047,35 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-clang3.9-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.9-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.9-ubuntu16.04:301"
           build_only: "1"
       - caffe2_linux_build:
           name: caffe2_py2_clang7_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-py2-clang7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang7-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang7-ubuntu16.04:301"
           build_only: "1"
       - caffe2_linux_build:
           name: caffe2_onnx_py3_6_clang7_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-onnx-py3.6-clang7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:301"
       - caffe2_linux_test:
           name: caffe2_onnx_py3_6_clang7_ubuntu16_04_test
           requires:
             - setup
             - caffe2_onnx_py3_6_clang7_ubuntu16_04_build
           build_environment: "caffe2-onnx-py3.6-clang7-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:301"
           resource_class: large
       - caffe2_linux_build:
           name: caffe2_py2_android_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-py2-android-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-android-ubuntu16.04:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-android-ubuntu16.04:301"
           build_only: "1"
       - caffe2_linux_build:
           name: caffe2_py2_cuda9_0_cudnn7_centos7_build
@@ -1999,7 +2087,7 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-cuda9.0-cudnn7-centos7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-centos7:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-centos7:301"
       - caffe2_linux_test:
           name: caffe2_py2_cuda9_0_cudnn7_centos7_test
           requires:
@@ -2012,7 +2100,7 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-cuda9.0-cudnn7-centos7-test"
           use_cuda_docker_runtime: "1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-centos7:287"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-centos7:301"
           resource_class: gpu.medium
       - caffe2_macos_build:
           name: caffe2_py2_ios_macos10_13_build

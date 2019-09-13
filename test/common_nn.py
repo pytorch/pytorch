@@ -3402,7 +3402,8 @@ class TestBase(object):
             elif fn_name in self._extra_kwargs:
                 self._arg_cache[name] = self._extra_kwargs[fn_name]()
             else:
-                assert size_name in self._extra_kwargs
+                assert size_name in self._extra_kwargs, \
+                    "Missing `{}`, `{}` or `{}` for {}".format(name, size_name, fn_name, self.get_name())
 
                 def map_tensor_sizes(sizes):
                     if isinstance(sizes, list):

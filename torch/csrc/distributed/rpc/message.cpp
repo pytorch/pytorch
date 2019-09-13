@@ -16,13 +16,8 @@ Message::Message(
     std::vector<char>&& payload,
     std::vector<torch::Tensor>&& tensors,
     MessageType type,
-    int64_t id,
-    const AutogradMetadata& autograd_metadata)
-    : payload_(payload),
-      tensors_(tensors),
-      type_(type),
-      id_(id),
-      autograd_metadata_(autograd_metadata) {}
+    int64_t id)
+    : payload_(payload), tensors_(tensors), type_(type), id_(id) {}
 
 Message::Message(const Message& other) = default;
 
@@ -31,23 +26,13 @@ Message::Message(Message&& other) noexcept = default;
 Message& Message::operator=(Message const& rhs) & {
   auto payload = rhs.payload_;
   auto tensors = rhs.tensors_;
-  Message(
-      std::move(payload),
-      std::move(tensors),
-      rhs.type_,
-      rhs.id_,
-      rhs.autograd_metadata_)
+  Message(std::move(payload), std::move(tensors), rhs.type_, rhs.id_)
       .swap(*this);
   return *this;
 }
 
 Message& Message::operator=(Message&& rhs) & {
-  Message(
-      std::move(rhs.payload_),
-      std::move(rhs.tensors_),
-      rhs.type_,
-      rhs.id_,
-      rhs.autograd_metadata_)
+  Message(std::move(rhs.payload_), std::move(rhs.tensors_), rhs.type_, rhs.id_)
       .swap(*this);
   return *this;
 }
@@ -57,7 +42,10 @@ void Message::swap(Message& rhs) noexcept {
   std::swap(tensors_, rhs.tensors_);
   std::swap(type_, rhs.type_);
   std::swap(id_, rhs.id_);
-  std::swap(autograd_metadata_, rhs.autograd_metadata_);
+}
+
+std::vector<char>&& Message::movePayload() {
+  return std::move(payload_);
 }
 
 const std::vector<char>& Message::payload() const {
@@ -77,13 +65,25 @@ const MessageType& Message::type() const {
 }
 
 bool Message::isRequest() const {
-  return MessageType::SCRIPT_CALL == type_
-      || MessageType::PYTHON_CALL == type_;
+  return MessageType::SCRIPT_CALL == type_ ||
+      MessageType::PYTHON_CALL == type_ || MessageType::REMOTE_CALL == type_ ||
+      MessageType::MESSAGE_WITH_AUTOGRAD_REQ == type_ ||
+      MessageType::RREF_FETCH_CALL == type_ ||
+      MessageType::RREF_USER_CREATE == type_ ||
+      MessageType::RREF_USER_DELETE == type_;
+}
+
+bool Message::requiresResponse() const {
+  return MessageType::SCRIPT_CALL == type_ ||
+      MessageType::PYTHON_CALL == type_ ||
+      MessageType::MESSAGE_WITH_AUTOGRAD_REQ == type_ ||
+      MessageType::RREF_FETCH_CALL == type_;
 }
 
 bool Message::isResponse() const {
-  return MessageType::SCRIPT_RET == type_
-      || MessageType::PYTHON_RET == type_;
+  return MessageType::SCRIPT_RET == type_ || MessageType::PYTHON_RET == type_ ||
+      MessageType::RREF_FETCH_RET == type_ ||
+      MessageType::MESSAGE_WITH_AUTOGRAD_RESP == type_;
 }
 
 bool Message::isShutdown() const {
@@ -98,51 +98,6 @@ void Message::setId(int64_t id) {
   id_ = id;
 }
 
-bool Message::hasAutogradMetadata() const {
-  return (
-      getAutogradContextId() != kInvalidAutogradId &&
-      getAutogradMessageId() != kInvalidAutogradId);
-}
-
-void Message::setAutogradMetadata(const AutogradMetadata& autograd_metadata) {
-  autograd_metadata_ = autograd_metadata;
-}
-
-void Message::AutogradMetadata::setAutogradContextId(
-    int64_t autograd_context_id) {
-  autograd_context_id_ = autograd_context_id;
-}
-
-void Message::AutogradMetadata::setAutogradMessageId(
-    int64_t autograd_message_id) {
-  autograd_message_id_ = autograd_message_id;
-}
-
-int64_t Message::getAutogradContextId() const {
-  return autograd_metadata_.getAutogradContextId();
-}
-
-int64_t Message::getAutogradMessageId() const {
-  return autograd_metadata_.getAutogradMessageId();
-}
-
-int64_t Message::AutogradMetadata::getAutogradContextId() const {
-  return autograd_context_id_;
-}
-
-int64_t Message::AutogradMetadata::getAutogradMessageId() const {
-  return autograd_message_id_;
-}
-
-Message::AutogradMetadata::AutogradMetadata()
-    : autograd_context_id_(kInvalidAutogradId),
-      autograd_message_id_(kInvalidAutogradId) {}
-
-Message::AutogradMetadata::AutogradMetadata(
-    int64_t autograd_context_id,
-    int64_t autograd_message_id)
-    : autograd_context_id_(autograd_context_id),
-      autograd_message_id_(autograd_message_id) {}
-}
-}
-}
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

@@ -12,7 +12,7 @@ namespace rpc {
 class RequestCallback {
  public:
   // Invoke the callback.
-  Message operator()(Message&& request);
+  Message operator()(Message& request);
 
   virtual ~RequestCallback() {}
 
@@ -24,7 +24,7 @@ class RequestCallback {
   // containing an exception. Different rpc agent implementations are expected
   // to ensure delivery of the response/exception based on their implementation
   // specific mechanisms.
-  virtual Message processMessage(Message&& request) = 0;
+  virtual Message processMessage(Message& request) = 0;
 };
 
 } // namespace rpc
