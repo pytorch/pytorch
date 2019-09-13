@@ -71,9 +71,9 @@ c10::optional<std::string> getFuncName(
     return c10::nullopt;
   }
   auto qname = qname_opt.value().qualifiedName();
-  auto rdot_idx = qname.rfind(".");
+  auto rdot_idx = qname.rfind('.');
   if (rdot_idx != std::string::npos) {
-    return qname.substr(qname.rfind(".") + 1, qname.length());
+    return qname.substr(rdot_idx + 1, qname.length());
   } else {
     return qname;
   }
