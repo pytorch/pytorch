@@ -29,7 +29,7 @@ echo "IOS_PLATFORM: ${IOS_PLATFORM}"
 export BUILD_PYTORCH_MOBILE=1
 export IOS_ARCH=${IOS_ARCH}
 export IOS_PLATFORM=${IOS_PLATFORM}
-unbuffer ${PROJ_ROOT}/scripts/build_ios.sh -DUSE_QNNPACK=OFF 2>&1 | ts
+unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
 #store the binary
 cd ${WORKSPACE}
 DEST_DIR=${WORKSPACE}/ios
