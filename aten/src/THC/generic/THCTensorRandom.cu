@@ -32,16 +32,13 @@ void THCTensor_(renormRows)(struct THCState* state,
 
 void THCTensor_(multinomial)(struct THCState *state,
                               THCudaLongTensor *self,
-                              at::Generator* gen_,
                               THCTensor *prob_dist,
                               int n_sample,
-                              int with_replacement)
+                              int with_replacement,
+                              at::Generator* gen_)
 {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, prob_dist));
   auto gen = at::get_generator_or_default<at::CUDAGenerator>(gen_, at::cuda::detail::getDefaultCUDAGenerator());
   int inputSize = THCTensor_(nDimensionLegacyAll)(state, prob_dist);
-  THArgCheck(inputSize > 0 && inputSize <= 2, 2,
-             "prob_dist must be 1 or 2 dim");
 
   // Categories are in the innermost dimension
   int64_t numDist =
@@ -49,20 +46,7 @@ void THCTensor_(multinomial)(struct THCState *state,
   int64_t numCategoriesLong =
     inputSize == 1 ? THCTensor_(sizeLegacyNoScalars)(state, prob_dist, 0) :
     THCTensor_(sizeLegacyNoScalars)(state, prob_dist, 1);
-
-  // Since the index tensor is float, numCategories cannot exceed max
-  // float integer precision
-  THArgCheck(numCategoriesLong <= FLOAT32_MAX_CONSECUTIVE_INT, 2,
-             "number of categories cannot exceed 2^24");
   int numCategories = (int) numCategoriesLong;
-
-  THArgCheck(n_sample > 0, 3, "cannot sample <= 0 samples");
-
-  if (!with_replacement) {
-    THArgCheck(n_sample <= numCategories, 2,
-               "cannot sample n_sample > prob_dist:size(1) samples without "
-               "replacement");
-  }
 
   int free_prob_dist = 0;
 
@@ -282,7 +266,7 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
   THCTensor_free(state, probs);
 }
 
-void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, at::Generator* gen_, THCTensor *_q, THCudaLongTensor *_J, int n_sample){
+void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCTensor *_q, THCudaLongTensor *_J, int n_sample, at::Generator* gen_){
   THArgCheck(_q->dim() == 1, 1,
              "expected 1-D probability table, got %d-D probability table instead",
              _q->dim());

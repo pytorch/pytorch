@@ -35,6 +35,9 @@
 - func: set_data(Tensor(a!) self, Tensor new_data) -> void
   variants: method
 
+- func: data(Tensor self) -> Tensor
+  variants: method
+
 - func: names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
   named_guard: False
@@ -43,11 +46,19 @@
   variants: method
   named_guard: False
 
-- func: align_to(Tensor self, DimnameList names) -> Tensor
+- func: align_to(Tensor(a) self, DimnameList names) -> Tensor(a)
   variants: function, method
   named_guard: False
 
+- func: align_as(Tensor self, Tensor other) -> Tensor
+  variants: method
+  named_guard: False
+
 - func: align_tensors(Tensor[] tensors) -> Tensor[]
+  named_guard: False
+
+- func: refine_names(Tensor(a) self, DimnameList names) -> Tensor(a)
+  variants: method
   named_guard: False
 
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
@@ -2637,7 +2648,7 @@
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: pow_out
-    CUDA: legacy::cuda::_th_pow_out
+    CUDA: pow_out
     SparseCPU: pow_out_sparse_scalar
     SparseCUDA: pow_out_sparse_scalar
 
@@ -2645,7 +2656,7 @@
   variants: function, method
   dispatch:
     CPU: pow
-    CUDA: legacy::cuda::_th_pow
+    CUDA: pow
     SparseCPU: pow_sparse_scalar
     SparseCUDA: pow_sparse_scalar
 
@@ -3606,13 +3617,13 @@
   variants: method
   dispatch:
     CPU: pow_
-    CUDA: legacy::cuda::_th_pow_
+    CUDA: pow_
 
 - func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: pow_
-    CUDA: legacy::cuda::_th_pow_
+    CUDA: pow_
 
 - func: lerp_.Scalar(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
   variants: method
@@ -4172,16 +4183,17 @@
     CPU: _lu_solve_helper_cpu
     CUDA: _lu_solve_helper_cuda
 
+# TODO: remove dispatch section when porting TH CUDA to ATen
 - func: multinomial.out(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: multinomial_out_cpu
-    CUDA: legacy::cuda::_th_multinomial_out
+    CPU: multinomial_out
+    CUDA: multinomial_out
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
   variants: method, function
   dispatch:
-    CPU: multinomial_cpu
-    CUDA: legacy::cuda::_th_multinomial
+    CPU: multinomial
+    CUDA: multinomial
 
 - func: _multinomial_alias_setup(Tensor probs) -> (Tensor, Tensor)
   variants: function
@@ -4436,23 +4448,23 @@
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: pow_out
-    CUDA: legacy::cuda::_th_pow_out
+    CUDA: pow_out
 
 - func: pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
   variants: method, function
   dispatch:
     CPU: pow
-    CUDA: legacy::cuda::_th_pow
+    CUDA: pow
 
 - func: pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: pow_out
-    CUDA: legacy::cuda::_th_pow_out
+    CUDA: pow_out
 
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
   dispatch:
     CPU: pow
-    CUDA: legacy::cuda::_th_pow
+    CUDA: pow
 
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
