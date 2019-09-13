@@ -1063,7 +1063,6 @@ graph(%x : Tensor,
         test_module(M2, 'prim::CallMethod[name="forward"]', 0)
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("temoprarily disable the test")
     def test_insert_quant_dequant(self):
         class Observer(torch.nn.Module):
             def __init__(self):
