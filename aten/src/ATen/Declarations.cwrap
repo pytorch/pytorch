@@ -33,8 +33,7 @@
         - THStorage* source
         - long storage_offset
         - IntArrayRefSize size
-        - arg: IntArrayRef stride
-          default: {}
+        - IntArrayRef stride
 ]]
 [[
   name: _th_fill_
@@ -1877,8 +1876,7 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - arg: long diagonal
-      default: 0
+    - long diagonal
   aten_custom_call: |
     if (self_->dim() == 0) {
       throw std::runtime_error("Input must be 1-d or 2-d");
