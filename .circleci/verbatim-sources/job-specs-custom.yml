@@ -10,8 +10,7 @@
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
     - run:
@@ -46,8 +45,7 @@
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
     - run:
@@ -93,8 +91,7 @@
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
     - run:
@@ -251,8 +248,7 @@
       image: ubuntu-1604:201903-01
     steps:
     - should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - checkout
     - run:
         <<: *setup_ci_environment
@@ -347,8 +343,7 @@
           if [ -z "${CIRCLE_PULL_REQUEST:-}" ]; then
             circleci step halt
           fi
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - checkout
     - run:
         <<: *setup_ci_environment
