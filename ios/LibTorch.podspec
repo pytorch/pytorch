@@ -22,13 +22,13 @@ Pod::Spec.new do |s|
         ss.libraries = ['c++', 'stdc++']
     end
     s.user_target_xcconfig = {
-        'HEADER_SEARCH_PATHS' => '$(inherited) "$(PODS_ROOT)/#{s.name}/install/include/"', 
-        'OTHER_LDFLAGS' => '-force_load "$(PODS_ROOT)/#{s.name}/install/lib/libtorch.a"',
+        'HEADER_SEARCH_PATHS' => '$(inherited) "$(PODS_ROOT)/LibTorch/install/include/"', 
+        'OTHER_LDFLAGS' => '-force_load "$(PODS_ROOT)/LibTorch/install/lib/libtorch.a"',
         'CLANG_CXX_LANGUAGE_STANDARD' => 'c++11',
         'CLANG_CXX_LIBRARY' => 'libc++'
     }
     s.pod_target_xcconfig = { 
-        'HEADER_SEARCH_PATHS' => '$(inherited) "$(PODS_ROOT)/#{s.name}/install/include/"', 
+        'HEADER_SEARCH_PATHS' => '$(inherited) "$(PODS_ROOT)/LibTorch/install/include/"', 
         'VALID_ARCHS' => 'x86_64 armv7s arm64' 
     }
     s.library = ['c++', 'stdc++']
