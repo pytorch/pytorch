@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
     s.name             = 'LibTorch'
-    s.version          = '0.0.1'
+    s.version          = '0.0.2'
     s.authors          = 'PyTorch Team'
     s.license          = { :type => 'BSD' }
     s.homepage         = 'https://github.com/pytorch/pytorch'
