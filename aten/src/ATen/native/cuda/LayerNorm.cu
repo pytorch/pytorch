@@ -173,7 +173,7 @@ void cuWelfordMuSigma2(
       for (int k = 0; k < 8; k += 2) {
         float2 curr = __half22float2(*((__half2*)(lvals + l + k)));
         cuWelfordOnlineSum(curr.x, mu, sigma2, count);
-	    cuWelfordOnlineSum(curr.y, mu, sigma2, count);
+      cuWelfordOnlineSum(curr.y, mu, sigma2, count);
       }
     }
     for (; l < N; ++l) {
@@ -247,7 +247,7 @@ template<> __device__ __host__ inline double rsqrt(double v) {
 //      {
 //          extern __device__ void error(void);
 //          error();
-//          return NULL;
+//          return nullptr;
 //      }
 //  };
 // https://github.com/NVIDIA/apex/issues/246
@@ -291,7 +291,7 @@ void cuApplyLayerNorm(
   // 1) blockDim.x == warpSize
   // 2) Tensors are contiguous
   //
-  for (auto i1=blockIdx.y; i1 < M; i1 += gridDim.y) {
+  for (int i1=blockIdx.y; i1 < M; i1 += gridDim.y) {
     SharedMemory<U> shared;
     U* buf = shared.getPointer();
     U mu, sigma2;
@@ -301,7 +301,7 @@ void cuApplyLayerNorm(
     U c_rstd = rsqrt(sigma2 + eps);
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
-    if (weight != NULL && bias != NULL) {
+    if (weight != nullptr && bias != nullptr) {
       for (int i = thrx; i < N; i+=numx) {
         U curr = static_cast<U>(lvals[i]);
         ovals[i] = weight[i] * static_cast<T>(c_rstd * (curr - mu)) + bias[i];
@@ -399,7 +399,7 @@ void cuLoadAddStridedInputs(
 }
 
 template<typename T, typename U> __global__
-void cuComputePartGradweightbias(
+void cuComputePartGradWeightBias(
     const T* __restrict__ grad_out,
     const T* __restrict__ input,
     const int M,
@@ -467,7 +467,7 @@ void cuComputePartGradweightbias(
 }
 
 template<typename T, typename U> __global__
-void cuComputeGradweightbias(
+void cuComputeGradWeightBias(
     const U* part_grad_weight,
     const U* part_grad_bias,
     const int part_size,
@@ -529,7 +529,7 @@ void cuComputeGradInput(
     const T* weight,
     T* grad_input)
 {
-  for (auto i1=blockIdx.y; i1 < M; i1 += gridDim.y) {
+  for (int i1=blockIdx.y; i1 < M; i1 += gridDim.y) {
     U sum_loss1 = U(0);
     U sum_loss2 = U(0);
     const U c_mean = mean[i1];
@@ -538,7 +538,7 @@ void cuComputeGradInput(
     const T* k_grad_out = grad_out + i1 * N;
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
-    if (weight != NULL) {
+    if (weight != nullptr) {
       int l = 4 * thrx;
       for (; l + 3 < N; l += 4 * numx) {
         for (int k = 0; k < 4; ++k) {
@@ -610,7 +610,7 @@ void cuComputeGradInput(
     U fH = (U)N;
     U term1 = (U(1) / fH) * c_rstd;
     T* k_grad_input = grad_input + i1 * N;
-    if (weight != NULL) {
+    if (weight != nullptr) {
       for (int l = thrx; l < N; l += numx) {
         const U c_h = static_cast<U>(k_input[l]);
         const U c_loss = static_cast<U>(k_grad_out[l]);
@@ -653,15 +653,15 @@ void HostApplyLayerNorm(
     const dim3 blocks(1, std::min((uint64_t)M, maxGridY), 1);
     int nshared = 
         threads.y > 1 ? 
-	      threads.y * sizeof(U) + (threads.y / 2) * sizeof(U) : 
-	      0;
+        threads.y * sizeof(U) + (threads.y / 2) * sizeof(U) : 
+        0;
     cuApplyLayerNorm<<<blocks, threads, nshared, stream>>>(
-		    output,
-		    mean,
-		    rstd,
-		    input,
-		    M, N,
-		    U(eps),
+        output,
+        mean,
+        rstd,
+        input,
+        M, N,
+        U(eps),
         weight, bias);
 }
 
@@ -674,7 +674,6 @@ void HostLayerNormGradient(
     int M,
     int N,
     const T* weight,
-    const T* bias,
     double eps,
     T* grad_input,
     T* grad_weight,
@@ -682,7 +681,7 @@ void HostLayerNormGradient(
 {
     auto stream = at::cuda::getCurrentCUDAStream().stream();
 
-    if (weight != NULL && bias != NULL) {
+    if (grad_weight != nullptr && grad_bias != nullptr) {
       // compute grad_weight(j) and grad_bias(j)
       const int part_size = 16;
       const dim3 threads2(32, 4, 1);
@@ -692,42 +691,44 @@ void HostLayerNormGradient(
       const int nshared2 = nshared2_a > nshared2_b ? nshared2_a : nshared2_b;
       Tensor part_grad_weight = at::empty({part_size, N}, input.options().dtype(input.scalar_type() == at::ScalarType::Half ? at::ScalarType::Float : input.scalar_type()));
       Tensor part_grad_bias = at::empty_like(part_grad_weight);
-      cuComputePartGradweightbias<<<blocks2, threads2, nshared2, stream>>>(
-		      grad_out,
-		      input.data_ptr<T>(),
-		      M, N,
-		      mean,
-		      rstd,
-		      U(eps),
-		      part_grad_weight.data_ptr<U>(),
-		      part_grad_bias.data_ptr<U>());
+      cuComputePartGradWeightBias<<<blocks2, threads2, nshared2, stream>>>(
+          grad_out,
+          input.data_ptr<T>(),
+          M, N,
+          mean,
+          rstd,
+          U(eps),
+          part_grad_weight.data_ptr<U>(),
+          part_grad_bias.data_ptr<U>());
 
       const dim3 threads3(32,8,1);
       const dim3 blocks3((N + threads2.x - 1) / threads2.x, 1, 1);
       const int nshared3 = threads3.x * threads3.y * sizeof(U);
-      cuComputeGradweightbias<<<blocks3, threads3, nshared3, stream>>>(
-		      part_grad_weight.data_ptr<U>(),
-		      part_grad_bias.data_ptr<U>(),
-		      part_size,
-		      M, N,
-		      grad_weight,
-		      grad_bias);
+      cuComputeGradWeightBias<<<blocks3, threads3, nshared3, stream>>>(
+          part_grad_weight.data_ptr<U>(),
+          part_grad_bias.data_ptr<U>(),
+          part_size,
+          M, N,
+          grad_weight,
+          grad_bias);
     }
 
     // compute grad_input
-    const uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
-    const dim3 blocks1(1, std::min((uint64_t)M, maxGridY), 1);
-    const dim3 threads1(32,4,1);
-    int nshared = threads1.y > 1 ? threads1.y * threads1.x * sizeof(U) : 0;
-    cuComputeGradInput<<<blocks1, threads1, nshared, stream>>>(
-            grad_out,
-            input.data_ptr<T>(),
-            M, N,
-            mean,
-            rstd,
-            U(eps),
-            weight,
-            grad_input);
+    if (grad_input != nullptr) {
+      const uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
+      const dim3 blocks1(1, std::min((uint64_t)M, maxGridY), 1);
+      const dim3 threads1(32,4,1);
+      int nshared = threads1.y > 1 ? threads1.y * threads1.x * sizeof(U) : 0;
+      cuComputeGradInput<<<blocks1, threads1, nshared, stream>>>(
+              grad_out,
+              input.data_ptr<T>(),
+              M, N,
+              mean,
+              rstd,
+              U(eps),
+              weight,
+              grad_input);
+    }
 }
 
 }  // namespace
@@ -761,21 +762,27 @@ std::tuple<Tensor, Tensor, Tensor> native_layer_norm_cuda(
   return std::make_tuple(output, mean, rstd);
 }
 
-std::tuple<Tensor, Tensor, Tensor> native_layer_norm_backward_cuda(
+std::tuple<Tensor, Tensor, Tensor> non_differentiable_native_layer_norm_backward_cuda(
   const Tensor& grad_out,
   const Tensor& input,
   const Tensor& mean,
   const Tensor& rstd,
   const Tensor& weight,
-  const Tensor& bias,
   int64_t M,
   int64_t N,
   double eps,
   std::array<bool, 3> grad_input_mask)
 {
-  Tensor grad_input = at::empty_like(input);
-  Tensor grad_weight = at::empty_like(weight);
-  Tensor grad_bias = at::empty_like(bias);
+  Tensor grad_input;
+  Tensor grad_weight;
+  Tensor grad_bias;
+  if (grad_input_mask[0]) {
+    grad_input = at::native::empty_like(input);
+  }
+  if (grad_input_mask[1] || grad_input_mask[2]) {
+    grad_weight = at::native::empty_like(weight);
+    grad_bias = at::native::empty_like(weight);
+  }
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "cuComputeGradInput",
     [&]() {
       using accscalar_t = at::acc_type<scalar_t, true>;
@@ -785,14 +792,11 @@ std::tuple<Tensor, Tensor, Tensor> native_layer_norm_backward_cuda(
         rstd.data_ptr<accscalar_t>(),
         input,
         M, N,
-        // TMJ pass nullptr argument for weight, bias, grad_weight and grad_bias
-        // if weight Tensor is nullptr on input.
         weight.defined() ? weight.data_ptr<scalar_t>() : nullptr,
-        weight.defined() ? bias.data_ptr<scalar_t>() : nullptr,
         eps,
-        grad_input.data_ptr<scalar_t>(),
-        weight.defined() ? grad_weight.data_ptr<scalar_t>() : nullptr,
-        weight.defined() ? grad_bias.data_ptr<scalar_t>() : nullptr
+        grad_input.defined() ? grad_input.data_ptr<scalar_t>() : nullptr,
+        grad_weight.defined() ? grad_weight.data_ptr<scalar_t>() : nullptr,
+        grad_bias.defined() ? grad_bias.data_ptr<scalar_t>() : nullptr
       );
     });
   return std::make_tuple(grad_input, grad_weight, grad_bias);

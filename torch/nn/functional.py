@@ -301,7 +301,7 @@ Args:
         size of the pooling region will be used. Default: None
 """)
 
-layer_norm = _add_docstr(torch.layer_norm, r"""
+layer_norm = _add_docstr(torch._C._nn.layer_norm, r"""
 layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5) -> Tensor
 
 Applies Layer Normalization for last certain number of dimensions.

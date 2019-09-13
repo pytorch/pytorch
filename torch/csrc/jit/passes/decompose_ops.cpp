@@ -34,7 +34,7 @@ c10::optional<bool> isDefined(Value* tensor) {
 bool isDecomposableNorm(Node* normalize_op) {
   static const OperatorSet decomposable_normalization_ops = {
       "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
-      "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, bool cudnn_enable) -> Tensor",
+      "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> Tensor",
   };
   Value* input = normalize_op->namedInput(attr::input);
   if (!input->type()->isSubtypeOf(TensorType::get())) {
@@ -161,7 +161,7 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
       it->output()->replaceAllUsesWith(new_output);
       it.destroyCurrent();
     } else if (it->matches(
-          "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, bool cudnn_enable) -> Tensor")) {
+          "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> Tensor")) {
       if (!isDecomposableNorm(*it)) {
         continue;
       }
@@ -212,7 +212,7 @@ void DecomposeOps(std::shared_ptr<Graph>& graph) {
           norm_invstd = 1 / (torch.sqrt(norm_var + eps))
           return ((input - norm_mean) * norm_invstd)
 
-      def layer_norm(input : Tensor, normalized_shape : List[int], eps : float, cudnn_enable : bool) -> Tensor:
+      def layer_norm(input : Tensor, normalized_shape : List[int], eps : float) -> Tensor:
           input_ndim = input.dim()
           normalized_ndim = len(normalized_shape)
           n = 1
