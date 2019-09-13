@@ -98,13 +98,10 @@ struct Argument {
   // this function check whether this Argument is backward compatible with
   // the old one. we consider the following cases are backward compatible:
   //   1) two arguments are equal
-  //   2) if not a return value, old's type should be subtype of this;
-  //      otherwise, this arg's type should be subtype of old
-  //   3) old has no default value, and this Argument provides default
-  //      value
+  //   2) this arg's type should be subtype of old
+  //   3) this arg must provide the same default value if old arg has one,
   bool isBackwardCompatibleWith(
       const Argument& old,
-      bool is_return,
       std::ostream* why_not=nullptr) const;
 
 private:

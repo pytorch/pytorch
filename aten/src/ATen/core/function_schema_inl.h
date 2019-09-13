@@ -53,14 +53,9 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
 
 inline bool Argument::isBackwardCompatibleWith(
       const Argument& old,
-      bool is_return,
       std::ostream* why_not) const {
     const Argument* lhs = this;
     const Argument* rhs = &old;
-    // functions are covariant in arguments but contravariant in returns
-    if (is_return) {
-      std::swap(lhs, rhs);
-    }
     if (!(lhs->name() == rhs->name()
         && lhs->N() == rhs->N()
         && lhs->alias_info() == rhs->alias_info())) {
@@ -117,16 +112,18 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
     return false;
   }
   for (size_t i = 0; i < returns().size(); ++i) {
-    if (!returns().at(i).isBackwardCompatibleWith(
-          old.returns().at(i), true /* is_return */, why_not)) {
+    // functions are covariant in arguments but contravariant in returns
+    if (!old.returns().at(i).isBackwardCompatibleWith(
+          returns().at(i),
+          why_not)) {
       return false;
     }
   }
   std::vector<const Argument*> args, old_args;
-  std::unordered_map<std::string, const Argument*> kwargs, old_kwargs;
+  std::map<std::string, const Argument*> kwargs, old_kwargs;
   auto split_func = [](const std::vector<Argument>& arguments,
       std::vector<const Argument*>* positionals,
-      std::unordered_map<std::string, const Argument*>* nameds) {
+      std::map<std::string, const Argument*>* nameds) {
     for (const Argument& arg : arguments) {
       if (!arg.kwarg_only()) {
         positionals->emplace_back(&arg);
@@ -134,42 +131,48 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
       nameds->emplace(arg.name(), &arg);
     }
   };
+  // we split args into positional and keyward parts,
   split_func(arguments(), &args, &kwargs);
   split_func(old.arguments(), &old_args, &old_kwargs);
   if (old_args.size() > args.size()) {
     return false;
   }
+  // make sure that all the old positional args have their corresponding
+  // backward compatible positional args in this schema
   for (size_t i = 0; i < old_args.size(); ++i) {
     if (!args.at(i)->isBackwardCompatibleWith(
           *old_args.at(i),
-          false /* is_return */,
           why_not)) {
       return false;
     }
   }
+  // check the extra positional args in this schema either has corresponding
+  // backward compatible keyward args since positional args also can be used as
+  // a keyward arg, or provided default values
   for (size_t i = old_args.size(); i < args.size(); ++i) {
     if (!args.at(i)->default_value()) {
       auto it = old_kwargs.find(args.at(i)->name());
       if (it == old_kwargs.end() ||
           !args.at(i)->isBackwardCompatibleWith(
             *it->second,
-            false /* is_return */,
             why_not)) {
         return false;
       }
     }
   }
+  // make sure that all the keyword args in the old schema have their
+  // corresponding backward compatible keyward args in this schema
   for (auto& kv : old_kwargs) {
     auto it = kwargs.find(kv.first);
     if (it == kwargs.end() ||
         !it->second->isBackwardCompatibleWith(
           *kv.second,
-          false /* is_return */,
           why_not)) {
       return false;
     }
     kwargs.erase(it);
   }
+  // check all the extra keyword args in this schema provide default values
   for (auto& kv : kwargs) {
     if (!kv.second->default_value()) {
       return false;
