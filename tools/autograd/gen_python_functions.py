@@ -36,6 +36,7 @@ SKIP_PYTHON_BINDINGS = [
     'set_quantizer_',
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
+    'data'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature

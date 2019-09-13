@@ -216,9 +216,11 @@ private:
         if (tensor_list.size() == 0) {
           throw std::runtime_error("Tried to dispatch operator " + operator_name + " based on an empty tensor list. When the first tensor argument of an operator is a tensor list, then it must not be empty.");
         }
-        return at::impl::dispatchTypeId(tensor_list[0].type_set());
+        // TODO: Don't use legacy extractor; blocked on c10 understanding
+        // variable
+        return c10::legacyExtractTypeId(tensor_list[0].type_set());
       } else {
-        return at::impl::dispatchTypeId(first_tensor_arg.unsafeToTensorImpl()->type_set());
+        return c10::legacyExtractTypeId(first_tensor_arg.unsafeToTensorImpl()->type_set());
       }
     }
   };

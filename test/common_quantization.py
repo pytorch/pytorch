@@ -61,6 +61,7 @@ def prepare_dynamic(model, qconfig_dict=None):
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
     def setUp(self):
+        super(QuantizationTestCase, self).setUp()
         self.calib_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
         self.train_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
         self.img_data = [(torch.rand(2, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
@@ -278,8 +279,8 @@ class AnnotatedCustomConfigNestedModel(torch.nn.Module):
             'dtype': torch.quint8,
             'qscheme': torch.per_tensor_affine
         }
-        custom_qconfig = QConfig(weight=default_weight_observer(),
-                                 activation=default_observer(**custom_options))
+        custom_qconfig = QConfig(activation=default_observer(**custom_options),
+                                 weight=default_weight_observer())
         self.sub2.fc1.qconfig = custom_qconfig
 
         self.sub2.fc1 = QuantWrapper(self.sub2.fc1)
