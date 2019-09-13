@@ -38,6 +38,9 @@
 - func: data(Tensor self) -> Tensor
   variants: method
 
+- func: is_leaf(Tensor self) -> bool
+  variants: method
+
 - func: names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
   named_guard: False
