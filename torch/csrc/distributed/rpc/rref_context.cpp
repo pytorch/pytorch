@@ -6,7 +6,6 @@ namespace distributed {
 namespace rpc {
 
 std::unique_ptr<RRefContext> RRefContext::context_ = nullptr;
-thread_local std::vector<std::shared_ptr<RRef>> RRefContext::rrefArgs_ = {};
 
 void RRefContext::initInstance(std::shared_ptr<RpcAgent> agent) {
   TORCH_CHECK(!RRefContext::context_, "Can only initialize RRefContext once.");
@@ -94,7 +93,28 @@ std::shared_ptr<RRef> RRefContext::getOrCreateRRef(
     const RRefId& rrefId,
     const ForkId& forkId) {
   if (ownerId == getWorkerId()) {
-    return getOrCreateOwnerRRef<T>(rrefId);
+    auto ownerRRef = getOrCreateOwnerRRef<T>(rrefId);
+    // See Note [Fork Request]
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto rrefIter = forks_.find(rrefId);
+    // Although we know that someone (either a UserRRef or a OwnerRRef) has
+    // sent a fork request RREF_FORK_NOTIFY from somewhere, this could still be
+    // the first time the owner sees this rrefId, as there is no order
+    // guarantee on message delivery. Hence, the owner might not know about the
+    // forkId either. However, we know that (1) there will be an
+    // RREF_FORK_NOTIFY message arriving in the future, or (2) the message might
+    // have already arrived.
+    if (rrefIter != forks_.end()) {
+      auto forkIter = rrefIter->second.find(forkId);
+      if (forkIter != rrefIter->second.end()) {
+        // scenario (2): fork request arrived before rpc/remote request/response
+        delForkOfOwnerNoLock(rrefId, forkId);
+        return ownerRRef;
+      }
+    }
+    // scenario (1): fork request will arrive after rpc/remote request/response
+    expectingForkReqeusts_.insert(forkId);
+    return ownerRRef;
   } else {
     return createUserRRef<T>(ownerId, rrefId, forkId);
   }
@@ -142,43 +162,58 @@ RRefForkData RRefContext::forkTo(
     const std::shared_ptr<RRef>& rref,
     worker_id_t forkDst) {
 
-  // keep rref argments alive
-  // TODO: only do this for requests
-  rrefArgs_.push_back(rref);
-
   auto forkRequest = rref->fork();
-  if (rref->owner() != forkDst) {
-    // if fork destination if not owner, the forked UserRRef needs to be tracked
-    // properly
-    if (rref->isOwner()) {
-      // fork from owner
-      auto fm = agent_->send(
-          agent_->getWorkerInfo(forkDst),
-          acceptUserRRef(forkRequest.rrefId_, forkRequest.forkId_));
+  // Note [Fork Request]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~
+  //
+  // Forked UserRRef needs to be tracked properly, regardless if the destination
+  // is the owner or not. If the destination is a user, it is obvious that, the
+  // RRef needs to be kept alive on owner. If the destination is the owner, we
+  // still need the fork request. Because:
+  //
+  // (1) As we use ThreadPool on both sender and receiver, there is no guarantee
+  //     on message delivery order. It is possible that the delete message is
+  //     processed before some earlier rpc/remote calls which use this RRef as
+  //     an argument, and the delete message might have triggered the deletion
+  //     of the OwnerRRef.
+  //
+  // (2) Similar problem exist if the RRef is involved in the response from a
+  //     user to the owner.
+  //
+  // Therefore, the RRefForkNotify message is always sent no matter if the owner
+  // is the destination or not. If the owner is the destination, the owner will
+  // not create any UserRRefs using the ForkId. Instead, it only adds the ForkId
+  // into forks_, which will later be dropped in getOrCreateRRef(...).
+  // Otherwise, if the destination is a user, the callee user will use the
+  // ForkId to create a UserRRef and that UserRRef will control the lifetime of
+  // the ForkId on owner.
+  if (rref->isOwner()) {
+    // fork from owner
+    auto fm = agent_->send(
+        agent_->getWorkerInfo(forkDst),
+        acceptUserRRef(forkRequest.rrefId_, forkRequest.forkId_));
 
-      fm->addCallback([forkRequest, this](const Message& message) {
-        handleException(message);
-        this->delForkOfOwner(forkRequest.rrefId_, forkRequest.forkId_);
-      });
-    } else {
-      // fork from user, rref cannot be destructed until the fork request is
-      // accepted by the owner
-      {
-        std::lock_guard<std::mutex> lock(mutex_);
-        pendingForkRequests_[forkRequest.forkId_] = rref;
-      }
-      // notify owner
-      auto fm = agent_->send(
-          agent_->getWorkerInfo(rref->owner()),
-          RRefForkNotify(forkRequest.rrefId_, forkRequest.forkId_, forkDst)
-              .toMessage());
-
-      fm->addCallback([this](const Message& message) {
-        handleException(message);
-        auto rfa = RRefForkAccept::fromMessage(message);
-        this->finishForkRequest(rfa.forkId());
-      });
+    fm->addCallback([](const Message& message) {
+      handleException(message);
+    });
+  } else {
+    // fork from user, rref cannot be destructed until the fork request is
+    // accepted by the owner
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      pendingForkRequests_[forkRequest.forkId_] = rref;
     }
+    // notify owner
+    auto fm = agent_->send(
+        agent_->getWorkerInfo(rref->owner()),
+        RRefForkNotify(forkRequest.rrefId_, forkRequest.forkId_, forkDst)
+            .toMessage());
+
+    fm->addCallback([this](const Message& message) {
+      handleException(message);
+      auto rfa = RRefForkAccept::fromMessage(message);
+      this->finishForkRequest(rfa.forkId());
+    });
   }
   return forkRequest;
 }
@@ -193,15 +228,28 @@ Message RRefContext::acceptUserRRef(
 Message RRefContext::acceptForkRequest(
     const RRefId& rrefId,
     const ForkId& forkId,
-    worker_id_t forkDst) {
-  // TODO: add exception handling
-  auto fm = agent_->send(
-      agent_->getWorkerInfo(forkDst), acceptUserRRef(rrefId, forkId));
+    const worker_id_t forkDst) {
+  if (forkDst == getWorkerId()) {
+    // forking to the owner
+    // See Note [Fork Request]
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto iter = expectingForkReqeusts_.find(forkId);
+    if (iter == expectingForkReqeusts_.end()) {
+      // fork request arrives before the rpc/remote request/response
+      addForkOfOwnerNoLock(rrefId, forkId);
+    } else {
+      // rpc/remote request/response arrives before the fork request
+      expectingForkReqeusts_.erase(iter);
+    }
+  } else {
+    // forking to a user
+    auto fm = agent_->send(
+        agent_->getWorkerInfo(forkDst), acceptUserRRef(rrefId, forkId));
 
-  fm->addCallback([rrefId, forkId, this](const Message& message) {
-    handleException(message);
-    this->delForkOfOwner(rrefId, forkId);
-  });
+    fm->addCallback([](const Message& message) {
+      handleException(message);
+    });
+  }
   // notify fork caller UserRRef
   return RRefForkAccept(forkId).toMessage();
 }
@@ -236,6 +284,16 @@ void RRefContext::finishUserRRef(const RRefId& rrefId, const ForkId& forkId) {
 
 void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
+  addForkOfOwnerNoLock(rrefId, forkId);
+}
+
+void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  delForkOfOwnerNoLock(rrefId, forkId);
+}
+
+void RRefContext::addForkOfOwnerNoLock(
+    const RRefId& rrefId, const ForkId& forkId) {
   auto& rrefForks = forks_[rrefId];
   TORCH_INTERNAL_ASSERT(
       rrefForks.find(forkId) == rrefForks.end(),
@@ -244,8 +302,8 @@ void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   rrefForks.insert(forkId);
 }
 
-void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
-  std::lock_guard<std::mutex> lock(mutex_);
+void RRefContext::delForkOfOwnerNoLock(
+    const RRefId& rrefId, const ForkId& forkId) {
   auto iter = forks_.find(rrefId);
   TORCH_INTERNAL_ASSERT(
       iter != forks_.end(),
@@ -261,25 +319,6 @@ void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
     owners_.erase(rrefId);
     forks_.erase(rrefId);
   }
-}
-
-void RRefContext::addRRefArgs(int64_t messageId) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  TORCH_INTERNAL_ASSERT(
-      pendingRRefArgs_.find(messageId) == pendingRRefArgs_.end(),
-      "Cannot set RRef args on the same message twice.");
-
-  pendingRRefArgs_[messageId] = std::move(rrefArgs_);
-  rrefArgs_.clear();
-}
-
-void RRefContext::delRRefArgs(int64_t messageId) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  auto iter = pendingRRefArgs_.find(messageId);
-  TORCH_INTERNAL_ASSERT(iter != pendingRRefArgs_.end(),
-      "Attempt to delete RRef args for non-exist message.");
-
-  pendingRRefArgs_.erase(iter);
 }
 
 } // namespace rpc

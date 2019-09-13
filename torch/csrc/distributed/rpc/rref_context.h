@@ -63,33 +63,21 @@ class RRefContext {
   Message acceptForkRequest(
       const RRefId& rrefId,
       const ForkId& forkId,
-      worker_id_t forkDst);
+      const worker_id_t forkDst);
   void finishForkRequest(const ForkId& forkId);
   void finishUserRRef(const RRefId& rrefId, const ForkId& forkId);
 
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
   void delForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
 
-  inline const std::vector<std::shared_ptr<RRef>>& getRRefArgs() const {
-    return rrefArgs_;
-  }
-
-  void addRRefArgs(int64_t messageId);
-  void delRRefArgs(int64_t messageId);
-
  private:
   RRefContext(std::shared_ptr<RpcAgent>);
 
+  void addForkOfOwnerNoLock(const RRefId& rrefId, const ForkId& forkId);
+  void delForkOfOwnerNoLock(const RRefId& rrefId, const ForkId& forkId);
+
   static std::unique_ptr<RRefContext> context_;
   static std::atomic<local_id_t> nextLocalId_;
-
-  // RRef arguments involved in a RPC/Remote call. These need to be kept alive
-  // until the the cal is acked by the callee. Otherwise, as we don't enforce
-  // FIFO message delivery/processing, the RRef might be deleted before the
-  // usage.
-  static thread_local std::vector<std::shared_ptr<RRef>> rrefArgs_;
-  std::unordered_map<int64_t, std::vector<std::shared_ptr<RRef>>>
-      pendingRRefArgs_;
 
   const std::shared_ptr<RpcAgent> agent_;
   mutable std::mutex mutex_;
@@ -124,6 +112,8 @@ class RRefContext {
   //     mess up RRef reference counts.
   std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash>
       pendingForkRequests_;
+
+  std::unordered_set<ForkId, ForkId::Hash> expectingForkReqeusts_;
 
   // RREF_USER_ACCEPT message arrives before the UserRRef was created. This may
   // occur as the RREF_USER_ACCEPT is sent from owner to the callee UserRRef,
