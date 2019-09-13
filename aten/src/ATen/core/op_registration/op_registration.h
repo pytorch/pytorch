@@ -13,6 +13,8 @@
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/script/function_schema_parser.h>
 #endif
+#include <ATen/core/OpsAlreadyMovedToC10.h>
+#include <ATen/core/ATenDispatch.h>
 
 namespace c10 {
 
@@ -90,13 +92,21 @@ public:
      * >         .kernel<my_kernel_cpu>(TensorTypeId::CPUTensorId));
      */
     Options&& schema(const std::string& schemaOrName) {
-      #if defined(CAFFE2_IS_XPLAT_BUILD)
-        throw std::logic_error("Tried to register operator " + schemaOrName + ". We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
-      #else
-        TORCH_CHECK(!schemaOrName_.has_value(), "You can only specify the schema once per operator registration.");
-        schemaOrName_ = torch::jit::parseSchemaOrName(schemaOrName);
-        return std::move(*this);
-      #endif
+      TORCH_CHECK(!schemaOrName_.has_value(), "Tried to register operator ", schemaOrName," but specified schema multiple times. You can only specify the schema once per operator registration.");
+      TORCH_CHECK(!legacyATenSchema_.has_value(), "Tried to register operator ", schemaOrName," but specified schema multiple times. You can only specify the schema once per operator registration.");
+
+      if (Options::op_is_still_on_aten_dispatcher_(schemaOrName.c_str())) {
+        TORCH_CHECK(unboxedAutogradKernel_ == nullptr, "For legacy aten ops, the schema() call must happen before any kernel() calls. Operator was ", schemaOrName);
+        TORCH_CHECK(kernels.size() == 0, "For legacy aten ops, the schema() call must happen before any kernel() calls. Operator was ", schemaOrName);
+        legacyATenSchema_ = schemaOrName;
+      } else {
+        #if defined(CAFFE2_IS_XPLAT_BUILD)
+          throw std::logic_error("Tried to register operator " + schemaOrName + ". We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
+        #else
+          schemaOrName_ = torch::jit::parseSchemaOrName(schemaOrName);
+        #endif
+      }
+      return std::move(*this);
     }
 
     /**
@@ -246,7 +256,14 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(dispatch_key);
+      if (legacyATenSchema_.has_value()) {
+        // TODO Remove this once all ops are moved to c10.
+        TORCH_INTERNAL_ASSERT(!schemaOrName_.has_value());
+        at::globalATenDispatch().registerOp<FuncType>(dispatch_key, legacyATenSchema_->c_str(), kernel_func);
+        return std::move(*this);
+      } else {
+        return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(dispatch_key);
+      }
     }
 
     // TODO Remove impl_unboxedOnlyCatchAllKernel once all of aten can generate boxed kernels
@@ -256,7 +273,14 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
+      if (legacyATenSchema_.has_value()) {
+        // TODO Remove this once all ops are moved to c10.
+        TORCH_INTERNAL_ASSERT(!schemaOrName_.has_value());
+        at::globalATenDispatch().registerOp<FuncType>(TensorTypeId::UndefinedTensorId, legacyATenSchema_->c_str(), kernel_func);
+        return std::move(*this);
+      } else {
+        return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
+      }
     }
 
     /**
@@ -329,16 +353,61 @@ public:
       return std::move(*this);
     }
 
-    template<class Result, class... Args>
-    Options&& impl_unboxedAutogradKernel(Result (*kernel)(Args...)) && {
+    template<class FuncType>
+    Options&& impl_unboxedAutogradKernel(FuncType* kernel) && {
+      static_assert(guts::is_function_type<FuncType>::value, "Wrong argument type for impl_unboxedAutogradKernel");
+
       // TODO Infer and check schema
       TORCH_CHECK(kernel != nullptr, "Kernel function pointer cannot be nullptr");
       TORCH_CHECK(unboxedAutogradKernel_ == nullptr, "You can only call impl_unboxedAutogradKernel() once per operator registration.");
-      unboxedAutogradKernel_ = reinterpret_cast<void*>(kernel);
-      return std::move(*this);
+      if (legacyATenSchema_.has_value()) {
+        // TODO Remove this once all ops are moved to c10.
+        TORCH_INTERNAL_ASSERT(!schemaOrName_.has_value());
+        at::globalATenDispatch().registerOp<FuncType>(TensorTypeId::VariableTensorId, legacyATenSchema_->c_str(), kernel);
+        return std::move(*this);
+      } else {
+        unboxedAutogradKernel_ = reinterpret_cast<void*>(kernel);
+        return std::move(*this);
+      }
     }
 
   private:
+    static c10::OperatorName parse_operator_name_(const char* schema) {
+      // TODO Remove this function once all aten ops are on c10
+      // We can't depend on the jit function schema parser here, but parsing
+      // the op name is trivial. Let's just do it by hand.
+      std::string schema_str(schema);
+      size_t name_end_pos = schema_str.find_first_of(".(");
+      if (name_end_pos == std::string::npos) {
+        name_end_pos = schema_str.size();
+      }
+      size_t overload_name_end_pos = name_end_pos + 1;
+      if (schema_str[name_end_pos] == '.') {
+        overload_name_end_pos = schema_str.find_first_of('(', name_end_pos);
+        if (overload_name_end_pos == std::string::npos) {
+          overload_name_end_pos = name_end_pos + 1;
+        }
+      }
+      return c10::OperatorName{
+        schema_str.substr(0, name_end_pos),
+        (overload_name_end_pos > name_end_pos + 1) ? schema_str.substr(name_end_pos + 1, overload_name_end_pos - name_end_pos - 1) : ""
+      };
+    }
+
+    static bool op_is_still_on_aten_dispatcher_(const char* schema_string) {
+      // TODO Remove this function once all aten ops are on c10
+      const auto op_name = parse_operator_name_(schema_string);
+      if (at::aten_ops_already_moved_to_c10().count(op_name) != 0) {
+        // For now, even if an op is in aten_ops_already_moved_to_c10, it is still
+        // not actually moved to c10. It is still on globalATenDispatch.
+        // TODO This is be removed in a diff stacked on top, then this
+        // function will only return true iff the op is in
+        // aten_ops_not_moved_to_c10_yet
+        return true;
+      }
+      return at::aten_ops_not_moved_to_c10_yet().count(op_name) != 0;
+    }
+
     Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator, void* unboxed_kernel_func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
       KernelRegistrationConfig config;
       config.dispatch_key = dispatch_key;
@@ -366,7 +435,10 @@ public:
       return std::move(*this).kernel(
         std::move(dispatch_key),
         nullptr,
-        nullptr,  // setting cache creator to nullptr so calling the kernel doesn't need to call it, which would be expensive
+        // setting cache creator to nullptr so calling the kernel doesn't need to call it, which would be expensive
+        // This, however, only works if there are no constructor parameters (i.e. no runtime function pointer)
+        // Backend extensions use runtime function pointers, so we need a cache if sizeof...(ConstructorParameters) != 0
+        (sizeof...(ConstructorParameters) == 0) ? KernelCacheCreatorFunction(nullptr) : detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
         reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
         detail::FunctionSchemaInferer<KernelFunctor>()()
       );
@@ -392,7 +464,14 @@ public:
       std::unique_ptr<FunctionSchema> inferred_function_schema;
     };
 
+    // For all modern ops, schemaOrName_ is set.
+    // For legacy ATen ops (i.e. ops on globalATenDispatch()), legacyATenSchema_
+    // is set. We never set both.
+    // TODO This is just a hack to forward some registrations to globalATenDispatch().
+    // We should remove legacyATenSchema_ once all ops are on the c10 dispatcher.
     c10::optional<c10::either<OperatorName, FunctionSchema>> schemaOrName_;
+    c10::optional<std::string> legacyATenSchema_;
+
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;
     void* unboxedAutogradKernel_; // can be nullptr, not all kernels have this

@@ -4,6 +4,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/alias_info.h>
+#include <ATen/core/operator_name.h>
 #include <unordered_map>
 
 namespace c10 {
@@ -111,19 +112,6 @@ inline bool operator==(const Argument& lhs, const Argument& rhs) {
           && detail::defaultValueEquals_(lhs.default_value(), rhs.default_value())
           && lhs.kwarg_only() == rhs.kwarg_only()
           && lhs.alias_info() == rhs.alias_info();
-}
-
-struct OperatorName final {
-  std::string name;
-  std::string overload_name;
-};
-
-inline std::string toString(const OperatorName& opName) {
-  std::string result = opName.name;
-  if (opName.overload_name.size() != 0) {
-    result += "." + opName.overload_name;
-  }
-  return result;
 }
 
 struct FunctionSchema {
