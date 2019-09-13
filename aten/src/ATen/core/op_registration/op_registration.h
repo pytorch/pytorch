@@ -92,12 +92,12 @@ public:
      * >         .kernel<my_kernel_cpu>(TensorTypeId::CPUTensorId));
      */
     Options&& schema(const std::string& schemaOrName) {
-      TORCH_CHECK(!schemaOrName_.has_value(), "You can only specify the schema once per operator registration.");
-      TORCH_CHECK(!legacyATenSchema_.has_value(), "You can only specify the schema once per operator registration.");
+      TORCH_CHECK(!schemaOrName_.has_value(), "Tried to register operator ", schemaOrName," but specified schema multiple times. You can only specify the schema once per operator registration.");
+      TORCH_CHECK(!legacyATenSchema_.has_value(), "Tried to register operator ", schemaOrName," but specified schema multiple times. You can only specify the schema once per operator registration.");
 
       if (Options::op_is_still_on_aten_dispatcher_(schemaOrName.c_str())) {
-        TORCH_CHECK(unboxedAutogradKernel_ == nullptr, "For legacy aten ops, the schema() call must happen before any kernel() calls.");
-        TORCH_CHECK(kernels.size() == 0, "For legacy aten ops, the schema() call must happen before any kernel() calls.");
+        TORCH_CHECK(unboxedAutogradKernel_ == nullptr, "For legacy aten ops, the schema() call must happen before any kernel() calls. Operator was ", schemaOrName);
+        TORCH_CHECK(kernels.size() == 0, "For legacy aten ops, the schema() call must happen before any kernel() calls. Operator was ", schemaOrName);
         legacyATenSchema_ = schemaOrName;
       } else {
         #if defined(CAFFE2_IS_XPLAT_BUILD)
