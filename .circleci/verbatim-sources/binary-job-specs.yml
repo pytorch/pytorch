@@ -61,8 +61,7 @@
     - attach_workspace:
         at: /home/circleci/project
     - setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         <<: *binary_checkout
     - run:
@@ -82,8 +81,7 @@
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
     - setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - attach_workspace:
         at: /home/circleci/project
     - run:
@@ -110,8 +108,7 @@
     - attach_workspace:
         at: /home/circleci/project
     - setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         <<: *binary_checkout
     - run:
