@@ -501,35 +501,5 @@ PickleOpCode Unpickler::readOpCode() {
   return static_cast<PickleOpCode>(read<uint8_t>());
 }
 
-IValue unpickle(
-    std::function<bool(char*, size_t)> reader,
-    ObjCallback obj_callback,
-    const std::vector<at::Tensor>* tensor_table) {
-  Unpickler unpickler(
-      std::move(reader), std::move(obj_callback), tensor_table);
-  return unpickler.parse_ivalue();
-}
-
-IValue unpickle(
-    const char* data,
-    size_t size,
-    ObjCallback obj_callback,
-    const std::vector<at::Tensor>* tensor_table) {
-  size_t bytes_read = 0;
-  return unpickle(
-      [&](char* buffer, size_t len) {
-        if (bytes_read + len > size) {
-          return false;
-        }
-        // Copy len bytes into buffer
-        const char* start = data + bytes_read;
-        std::memcpy(buffer, start, len);
-        bytes_read += len;
-        return true;
-      },
-      std::move(obj_callback),
-      tensor_table);
-}
-
 } // namespace jit
 } // namespace torch
