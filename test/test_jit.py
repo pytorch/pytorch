@@ -1119,8 +1119,8 @@ graph(%x : Tensor,
 
     def test_quant_fusion(self):
         input_strs = [
-        # aten::conv2d --> quantized::conv2d
-        """
+            # aten::conv2d --> quantized::conv2d
+            """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
 %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
@@ -1149,8 +1149,8 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         # CHECK: aten::_dequantize_linear
         %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
         return (%r_dequant)""",
-        # addmm -> quantized::linear
-        """
+            # addmm -> quantized::linear
+            """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
 %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
@@ -1180,8 +1180,8 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         # CHECK: aten::_dequantize_linear
         %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
         return (%r_dequant)""",
-        # matmul(with bias) -> quantized::linear
-        """
+            # matmul(with bias) -> quantized::linear
+            """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
 %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
@@ -1212,8 +1212,8 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         # CHECK: aten::_dequantize_linear
         %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
         return (%r_dequant)""",
-        # matmul(without bias) -> quantized::linear
-        """
+            # matmul(without bias) -> quantized::linear
+            """
 graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
 %r_scale, %r_zero_point, %r_dtype):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
