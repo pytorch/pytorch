@@ -23,8 +23,8 @@ from common_utils import TestCase
 #   (3) Prefer using test decorators defined in this file to others.
 #       For example, using the @skipIfNoLapack decorator instead of the
 #       @skipCPUIfNoLapack will cause the test to not run on CUDA if
-#       LAPACK is not available, which is wrong. If you need to use a
-#       decorator you may have to port it.
+#       LAPACK is not available, which is wrong. If you need to use a decorator
+#       you may want to ask about porting it to this framework.
 #
 #   See the TestTorchDeviceType class in test_torch.py for an example.
 #
@@ -40,7 +40,7 @@ from common_utils import TestCase
 # test used type in its signature. These tests will be put in classes named
 # GenericTestClassName<DEVICE_TYPE>. For example, test_diagonal in TestTorchDeviceType
 # becomes test_diagonal_cpu in TestTorchDeviceTypeCPU and test_diagonal_cuda in
-# TestTorchDeviceTypeCUDA. Tests with datatypes have the "torch." part of the
+# TestTorchDeviceTypeCUDA. Tests with dtypes have the "torch." part of the
 # dtype name removed, so tests instantiated from a dtype test like test_neg are
 # named test_neg_cpu_float32, test_neg_cuda_int64... These tests receive the
 # device_type and dtype corresponding to their names as arguments.
@@ -84,10 +84,10 @@ from common_utils import TestCase
 #       appropriate string.
 #   (3) Add logic to this file that appends your base class to
 #       device_type_test_bases when your device type is available.
-#   (4) (Optional) Define the "supported_dtypes" attribute to
-#       a list of dtypes your device type supports.
-#   (5) (Optional) Write setUpClass/tearDownClass class methods that
+#   (4) (Optional) Write setUpClass/tearDownClass class methods that
 #       instantiate dependencies (see MAGMA in CUDATestBase).
+#   (5) (Optional) Override the "instantiate_test" method for total
+#       control over how your class creates tests.
 #
 # setUpClass is called AFTER tests have been created and BEFORE and ONLY IF
 # they are run. This makes it useful for initializing devices and dependencies.
@@ -95,7 +95,7 @@ from common_utils import TestCase
 
 # List of device type test bases that can be used to instantiate tests.
 # See below for how this list is populated. If you're adding a device type
-# you should check if it's available and (if it is) and it to this list.
+# you should check if it's available and (if it is) add it to this list.
 device_type_test_bases = []
 
 # List of all Torch dtypes.
@@ -103,9 +103,9 @@ all_dtypes = [torch.float64, torch.float32, torch.float16,
               torch.int64, torch.int32, torch.int16, torch.int8,
               torch.uint8, torch.bool]
 
+
 class DeviceTypeTestBase(TestCase):
     device_type = "generic_device_type"
-    supported_dtypes = all_dtypes
 
     # Returns the dtypes the test has requested.
     # Prefers device-specific dtype specifications over generic ones.
@@ -113,16 +113,7 @@ class DeviceTypeTestBase(TestCase):
     def _get_dtypes(cls, test):
         if not hasattr(test, 'dtypes'):
             return None
-        d = getattr(test, 'dtypes')
-        if cls.device_type in d:
-            return d[cls.device_type]
-        return d.get('all', None)
-
-    # Raises unittest.SkipTest if the dtype in not in supported_dtypes.
-    def _skip_if_unsupported_dtype(self, dtype):
-        if dtype not in self.supported_dtypes:
-            reason = "unsupported dtype '{0}'".format(str(dtype))
-            raise unittest.SkipTest(reason)
+        return test.dtypes.get(cls.device_type, test.dtypes.get('all', None))
 
     # Creates device-specific tests.
     @classmethod
@@ -130,7 +121,7 @@ class DeviceTypeTestBase(TestCase):
         test_name = test.__name__ + "_" + cls.device_type
 
         dtypes = cls._get_dtypes(test)
-        if dtypes is None or len(dtypes) == 0:
+        if dtypes is None:
             # Test has no dtype variants
             @wraps(test)
             def instantiated_test(self, test=test):
@@ -140,22 +131,19 @@ class DeviceTypeTestBase(TestCase):
         else:
             # Test has dtype variants
             for dtype in dtypes:
-                dtype_str = str(dtype).rsplit('.', maxsplit=1)[1]
+                dtype_str = str(dtype).split('.')[1]
                 dtype_test_name = test_name + "_" + dtype_str
 
                 @wraps(test)
                 def instantiated_test(self, test=test, dtype=dtype):
-                    self._skip_if_unsupported_dtype(dtype)
                     return test(self, cls.device_type, dtype)
 
                 setattr(cls, dtype_test_name, instantiated_test)
 
+
 class CPUTestBase(DeviceTypeTestBase):
     device_type = "cpu"
 
-    @classmethod
-    def setUpClass(cls):
-        cls.has_lapack = torch._C.has_lapack
 
 class CUDATestBase(DeviceTypeTestBase):
     device_type = "cuda"
@@ -168,10 +156,12 @@ class CUDATestBase(DeviceTypeTestBase):
         torch.ones(1).cuda()
         cls.has_magma = torch.cuda.has_magma
 
+
 # Adds available device-type-specific test base classes
 device_type_test_bases.append(CPUTestBase)
 if torch.cuda.is_available():
     device_type_test_bases.append(CUDATestBase)
+
 
 # Adds 'instantiated' device-specific test cases to the given scope.
 # The tests in these test cases are derived from the generic tests in
@@ -223,6 +213,7 @@ def instantiate_device_type_tests(generic_test_class, scope):
         device_type_test_class.__module__ = generic_test_class.__module__
         scope[class_name] = device_type_test_class
 
+
 # Decorator that specifies a variant of the test for each of the given
 # dtypes should be instantiated.
 # Notes:
@@ -244,12 +235,14 @@ class dtypes(object):
         d = getattr(fn, 'dtypes', {})
         assert self.device_type not in d, "dtypes redefinition for {0}".format(self.device_type)
         d[self.device_type] = self.args
-        setattr(fn, 'dtypes', d)
+        fn.dtypes = d
         return fn
+
 
 # Sugar that requests a variant of the test for each dtype.
 def allDtypes(fn):
     return dtypes(*all_dtypes)(fn)
+
 
 # Sugar that requests a variant of the test for each dtype EXCEPT those given.
 class allDtypesExcept(dtypes):
@@ -258,17 +251,20 @@ class allDtypesExcept(dtypes):
         filtered = [x for x in all_dtypes if x not in args]
         super(allDtypesExcept, self).__init__(*filtered)
 
+
 # Overrides specified dtypes on the CPU.
 class dtypesIfCPU(dtypes):
 
     def __init__(self, *args):
         super(dtypesIfCPU, self).__init__(*args, device_type='cpu')
 
+
 # Overrides specified dtypes on CUDA.
 class dtypesIfCUDA(dtypes):
 
     def __init__(self, *args):
         super(dtypesIfCUDA, self).__init__(*args, device_type='cuda')
+
 
 # Decorator that specifies a test dependency.
 # Notes:
@@ -296,11 +292,13 @@ class skipIf(object):
             return fn(slf, device, *args, **kwargs)
         return dep_fn
 
+
 # Specifies a CPU dependency.
 class skipCPUIf(skipIf):
 
     def __init__(self, dep, reason):
         super(skipCPUIf, self).__init__(dep, reason, device_type='cpu')
+
 
 # Specifies a CUDA dependency.
 class skipCUDAIf(skipIf):
@@ -308,9 +306,11 @@ class skipCUDAIf(skipIf):
     def __init__(self, dep, reason):
         super(skipCUDAIf, self).__init__(dep, reason, device_type='cuda')
 
+
 # Specifies LAPACK as a CPU dependency.
 def skipCPUIfNoLapack(fn):
     return skipCPUIf(torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
+
 
 # Specifies MAGMA as a CUDA dependency.
 def skipCUDAIfNoMagma(fn):
