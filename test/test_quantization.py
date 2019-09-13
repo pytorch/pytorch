@@ -6,12 +6,12 @@ import torch.nn._intrinsic as nni
 import torch.nn._intrinsic.quantized as nniq
 import torch.nn._intrinsic.qat as nniqat
 from torch.quantization import \
-    QConfig_dynamic, default_weight_observer, \
+    QConfig_dynamic, default_weight_observer, dump_tensor,\
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
-    quantize_dynamic, default_qconfig, default_qat_qconfig, \
-    default_dynamic_qconfig, MinMaxObserver, QuantWrapper
+    quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
+    default_dynamic_qconfig, MinMaxObserver, TensorObserver, QuantWrapper
 
-from common_utils import run_tests, tempfile
+from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     SkipQuantModel, QuantStubModel, \
     ModelForFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
@@ -302,6 +302,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         def checkQuantized(model):
             self.checkDynamicQuantizedLinear(model.fc1)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -325,6 +326,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         def checkQuantized(model):
             self.assertEqual(type(model.fc1), torch.nn.Linear)
             self.checkDynamicQuantizedLinear(model.fc2)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -350,6 +352,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             self.checkDynamicQuantizedLinear(model.fc3)
             self.checkDynamicQuantizedLinear(model.sub2.fc1)
             self.checkLinear(model.sub2.fc2)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -376,6 +379,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             self.checkDynamicQuantizedLinear(model.sub2.fc1)
             self.checkDynamicQuantizedLinear(model.sub2.fc2)
             self.checkDynamicQuantizedLinear(model.fc3)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -406,6 +410,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             self.checkDynamicQuantizedLinear(model.sub2.fc1)
             self.checkDynamicQuantizedLinear(model.sub2.fc2)
             self.checkDynamicQuantizedLinear(model.fc3)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -434,6 +439,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             self.checkLinear(model.sub2.fc1)
             self.checkDynamicQuantizedLinear(model.sub2.fc2)
             test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -513,8 +519,34 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         torch.testing.assert_allclose(output_int8, ref_out)
         self.assertEqual(output_int8, ref_out)
-        for out, ref in zip(final_hiddens_int8, ref_hid):
-            torch.testing.assert_allclose(out, ref)
+        for out_val, ref_val in zip(final_hiddens_int8, ref_hid):
+            torch.testing.assert_allclose(out_val, ref_val)
+
+        class ScriptWrapper(torch.nn.Module):
+            def __init__(self, cell):
+                super(ScriptWrapper, self).__init__()
+                self.cell = cell
+
+            def forward(self, x, hiddens):
+                # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+                return self.cell(x, hiddens)
+
+        # TODO: TorchScript overloads don't work without this wrapper
+        cell_script = torch.jit.script(ScriptWrapper(cell_int8))
+        out_script, hid_script = cell_script(x, hiddens)
+        self.assertEqual(len(out_script), len(ref_out))
+        for out_val, ref_val in zip(out_script, ref_out):
+            torch.testing.assert_allclose(out_val, ref_val)
+
+        # Test save/load
+        b = io.BytesIO()
+        torch.jit.save(cell_script, b)
+        b.seek(0)
+        loaded = torch.jit.load(b)
+        out_loaded, hid_loaded = loaded(x, hiddens)
+        for loaded_val, ref_val in zip(out_loaded, ref_out):
+            torch.testing.assert_allclose(loaded_val, ref_val)
+
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
@@ -589,10 +621,10 @@ class ScriptabilityTest(QuantizationTestCase):
 
     def test_scriptability_serialization(self):
         # test serialization of quantized functional modules
-        with tempfile.TemporaryFile() as f:
-            torch.save(self.qmodel_under_test, f)
-            f.seek(0)
-            loaded = torch.load(f)
+        b = io.BytesIO()
+        torch.save(self.qmodel_under_test, b)
+        b.seek(0)
+        loaded = torch.load(b)
         self.assertEqual(self.qmodel_under_test.myadd.zero_point, loaded.myadd.zero_point)
         state_dict = self.qmodel_under_test.state_dict()
         self.assertTrue('myadd.zero_point' in state_dict.keys(),
@@ -758,6 +790,42 @@ class ObserverTest(QuantizationTestCase):
         buf.seek(0)
         loaded = torch.jit.load(buf)
         self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
+
+@unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
+                 'Quantization requires FBGEMM. FBGEMM does not play'
+                 ' well with UBSAN at the moment, so we skip the test if'
+                 ' we are in a UBSAN environment.')
+class QuantizationDebugTest(QuantizationTestCase):
+    def test_tensor_observer(self):
+        model = SingleLayerLinearModel()
+        model.qconfig = default_debug_qconfig
+        prepare(model)
+        # run the evaluation and dump all tensors
+        test_only_eval_fn(model, self.calib_data)
+        test_only_eval_fn(model, self.calib_data)
+        tensor_dict = {}
+        dump_tensor(model, tensor_dict)
+
+        # we can torch,save() and torch_load() in bento for further analysis
+        self.assertTrue('fc1.module.activation' in tensor_dict.keys(),
+                        'activation is not recorded in the dict')
+        self.assertEqual(len(tensor_dict['fc1.module.activation']), 2 * len(self.calib_data))
+
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
+    def test_tensor_observer_scriptable(self, qdtype, qscheme):
+        obs = TensorObserver(dtype=qdtype, qscheme=qscheme)
+        scripted = torch.jit.script(obs)
+
+        x = torch.rand(3, 4)
+        obs(x)
+        scripted(x)
+        self.assertTrue(torch.equal(obs.get_tensor_value()[0], scripted.get_tensor_value()[0]))
+        buf = io.BytesIO()
+        torch.jit.save(scripted, buf)
+        buf.seek(0)
+        loaded = torch.jit.load(buf)
+        self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
 
 if __name__ == '__main__':
     run_tests()

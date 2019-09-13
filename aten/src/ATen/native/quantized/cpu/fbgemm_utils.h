@@ -26,6 +26,7 @@ struct FBGEMM_API PackedLinearWeight {
 
 struct FBGEMM_API PackedConvWeight {
   std::unique_ptr<fbgemm::PackWeightsForConv<2>> w;
+  c10::optional<at::Tensor> bias;
   std::vector<int32_t> col_offsets;
   std::vector<int64_t> kernel;
   std::vector<float> w_scale;
