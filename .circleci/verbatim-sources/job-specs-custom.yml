@@ -11,8 +11,7 @@
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
     - setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: Perf Test
         no_output_timeout: "1h"
@@ -46,8 +45,7 @@
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
     - setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: Doc Build and Push
         no_output_timeout: "1h"
@@ -92,8 +90,7 @@
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
     - setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: Doc Build and Push
         no_output_timeout: "1h"
@@ -250,8 +247,7 @@
     - should_run_job
     - setup_linux_system_environment
     - checkout
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: pytorch android gradle build
         no_output_timeout: "1h"
@@ -345,8 +341,7 @@
           fi
     - setup_linux_system_environment
     - checkout
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: pytorch android gradle build only x86_32 (for PR)
         no_output_timeout: "1h"

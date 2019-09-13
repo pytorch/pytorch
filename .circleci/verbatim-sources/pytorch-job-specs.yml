@@ -8,8 +8,7 @@ jobs:
     - should_run_job
     - setup_linux_system_environment
     - checkout
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: Build
         no_output_timeout: "1h"
@@ -65,8 +64,7 @@ jobs:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
     - setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: Test
         no_output_timeout: "90m"

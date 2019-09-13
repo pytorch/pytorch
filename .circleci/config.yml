@@ -19,11 +19,6 @@ docker_config_defaults: &docker_config_defaults
     # This IAM user only allows read-write access to ECR
     aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4}
     aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
-
-setup_ci_environment: &setup_ci_environment
-  name: Set Up CI Environment After attach_workspace
-  no_output_timeout: "1h"
-  command: ~/workspace/.circleci/scripts/setup_ci_environment.sh
 commands:
   # NB: This command must be run as the first command in a job. It
   # attaches the workspace at ~/workspace; this workspace is generated
@@ -49,6 +44,13 @@ commands:
           name: Set Up System Environment
           no_output_timeout: "1h"
           command: ~/workspace/.circleci/scripts/setup_linux_system_environment.sh
+
+  setup_ci_environment:
+    steps:
+      - run:
+          name: Set Up CI Environment After attach_workspace
+          no_output_timeout: "1h"
+          command: ~/workspace/.circleci/scripts/setup_ci_environment.sh
 
   brew_update:
     description: "Update Homebrew and install base formulae"
@@ -294,8 +296,7 @@ jobs:
     - should_run_job
     - setup_linux_system_environment
     - checkout
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: Build
         no_output_timeout: "1h"
@@ -351,8 +352,7 @@ jobs:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
     - setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: Test
         no_output_timeout: "90m"
@@ -390,8 +390,7 @@ jobs:
     - should_run_job
     - setup_linux_system_environment
     - checkout
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: Build
         no_output_timeout: "1h"
@@ -450,8 +449,7 @@ jobs:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
     - setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: Test
         no_output_timeout: "1h"
@@ -650,8 +648,7 @@ jobs:
     - attach_workspace:
         at: /home/circleci/project
     - setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         <<: *binary_checkout
     - run:
@@ -671,8 +668,7 @@ jobs:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
     - setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - attach_workspace:
         at: /home/circleci/project
     - run:
@@ -699,8 +695,7 @@ jobs:
     - attach_workspace:
         at: /home/circleci/project
     - setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         <<: *binary_checkout
     - run:
@@ -855,8 +850,7 @@ jobs:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
     - setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: Perf Test
         no_output_timeout: "1h"
@@ -890,8 +884,7 @@ jobs:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
     - setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: Doc Build and Push
         no_output_timeout: "1h"
@@ -936,8 +929,7 @@ jobs:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
     - setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: Doc Build and Push
         no_output_timeout: "1h"
@@ -1094,8 +1086,7 @@ jobs:
     - should_run_job
     - setup_linux_system_environment
     - checkout
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: pytorch android gradle build
         no_output_timeout: "1h"
@@ -1189,8 +1180,7 @@ jobs:
           fi
     - setup_linux_system_environment
     - checkout
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: pytorch android gradle build only x86_32 (for PR)
         no_output_timeout: "1h"
