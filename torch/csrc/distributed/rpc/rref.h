@@ -29,6 +29,9 @@ class UserRRef;
 struct RRefForkData {
   at::IValue toIValue() const;
 
+  py::tuple toPyTuple() const;
+  static RRefForkData fromPyTuple(py::tuple obj);
+
   const worker_id_t ownerId_;
   const RRefId rrefId_;
   const ForkId forkId_;

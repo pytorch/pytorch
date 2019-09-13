@@ -8,6 +8,17 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace {
+
+constexpr int RFD_TUPLE_SIZE = 5; // number of RRefForkData fields in py::tuple
+constexpr int OWNER_IDX = 0; // index of ownerId in the tuple
+constexpr int RREFID_ON_IDX = 1; // index of RRefId.createdOn_ in the tuple
+constexpr int RREFID_ID_IDX = 2; // index of RRefId.localId_ in the tuple
+constexpr int FORKID_ON_IDX = 3; // index of ForkId.createdOn_ in the tuple
+constexpr int FORKID_ID_IDX = 4; // index of ForkId.localId_ in the tuple
+
+} // namespace
+
 std::atomic<local_id_t> RRefContext::nextLocalId_{0};
 
 //////////////////////////  RRefForkData  /////////////////////////////////
@@ -21,6 +32,29 @@ RRefForkData::RRefForkData(
 at::IValue RRefForkData::toIValue() const {
   return c10::ivalue::Tuple::create(
       {(int64_t)ownerId_, rrefId_.toIValue(), forkId_.toIValue()});
+}
+
+py::tuple RRefForkData::toPyTuple() const {
+  return py::make_tuple(
+      ownerId_,
+      rrefId_.createdOn_,
+      rrefId_.localId_,
+      forkId_.createdOn_,
+      forkId_.localId_);
+}
+
+RRefForkData RRefForkData::fromPyTuple(py::tuple t) {
+  TORCH_INTERNAL_ASSERT(
+      t.size() == RFD_TUPLE_SIZE,
+      "Pickled RRefForkData must contain 5 numbers.");
+  worker_id_t ownerId = t[OWNER_IDX].cast<worker_id_t>();
+  RRefId rrefId = RRefId(
+      t[RREFID_ON_IDX].cast<worker_id_t>(),
+      t[RREFID_ID_IDX].cast<local_id_t>());
+  RRefId forkId = RRefId(
+      t[FORKID_ON_IDX].cast<worker_id_t>(),
+      t[FORKID_ID_IDX].cast<local_id_t>());
+  return RRefForkData(ownerId, rrefId, forkId);
 }
 
 RRefForkData RRefForkData::fromIValue(const at::IValue& ivalue) {

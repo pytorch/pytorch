@@ -12,13 +12,9 @@ namespace {
 // Constants below are used in PyRRef pickling and unpickling. PyRRef is
 // converted into a py::tuple in pickling, and reconstructed from the py::tuple
 // in pickling.
-constexpr int RREF_TUPLE_SIZE = 6; // number of data fields in the py::tuple
-constexpr int OWNER_IDX = 0; // index of ownerId in the tuple
-constexpr int RREFID_ON_IDX = 1; // index of RRefId.createdOn_ in the tuple
-constexpr int RREFID_ID_IDX = 2; // index of RRefId.localId_ in the tuple
-constexpr int FORKID_ON_IDX = 3; // index of ForkId.createdOn_ in the tuple
-constexpr int FORKID_ID_IDX = 4; // index of ForkId.localId_ in the tuple
-constexpr int TYPE_IDX = 5; // index of type (py::object or IValue)
+constexpr int RREF_TUPLE_SIZE = 2; // number of data fields in the py::tuple
+constexpr int RFD_IDX = 0; // index of RRefForkData
+constexpr int TYPE_IDX = 1; // index of type (py::object or IValue)
 
 } // namespace
 
@@ -76,37 +72,19 @@ py::object PyRRef::localValue() {
 py::tuple PyRRef::pickle() const {
   auto& ctx = RRefContext::getInstance();
   auto rfd = ctx->forkTo(rref_, currentDst);
-  auto& ownerId = rfd.ownerId_;
-  auto& rrefId = rfd.rrefId_;
-  auto& forkId = rfd.forkId_;
-  bool isPyObj = rref_->isPyObj();
-
-  auto t = py::make_tuple(
-      ownerId,
-      rrefId.createdOn_,
-      rrefId.localId_,
-      forkId.createdOn_,
-      forkId.localId_,
-      isPyObj);
-  return t;
+  return py::make_tuple(rfd.toPyTuple(), rref_->isPyObj());
 }
 
 PyRRef PyRRef::unpickle(const py::tuple& t) {
   TORCH_INTERNAL_ASSERT(
       t.size() == RREF_TUPLE_SIZE, "Pickled RRef must contain 6 numbers.");
   auto& ctx = RRefContext::getInstance();
-  worker_id_t ownerId = t[OWNER_IDX].cast<worker_id_t>();
-  RRefId rrefId = RRefId(
-      t[RREFID_ON_IDX].cast<worker_id_t>(),
-      t[RREFID_ID_IDX].cast<local_id_t>());
-  RRefId forkId = RRefId(
-      t[FORKID_ON_IDX].cast<worker_id_t>(),
-      t[FORKID_ID_IDX].cast<local_id_t>());
+  auto rfd = RRefForkData::fromPyTuple(t[RFD_IDX].cast<py::tuple>());
   bool isPyObj = t[TYPE_IDX].cast<bool>();
   if (isPyObj) {
-    return PyRRef(ctx->getOrCreateRRef<py::object>(ownerId, rrefId, forkId));
+    return PyRRef(ctx->getOrCreateRRef<py::object>(rfd));
   } else {
-    return PyRRef(ctx->getOrCreateRRef<IValue>(ownerId, rrefId, forkId));
+    return PyRRef(ctx->getOrCreateRRef<IValue>(rfd));
   }
 }
 

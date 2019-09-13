@@ -49,10 +49,7 @@ class RRefContext {
       const ForkId& forkId);
 
   template <typename T>
-  std::shared_ptr<RRef> getOrCreateRRef(
-      worker_id_t ownerId,
-      const RRefId& rrefId,
-      const ForkId& forkId);
+  std::shared_ptr<RRef> getOrCreateRRef(const RRefForkData& rfd);
 
   template <typename T>
   std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId);

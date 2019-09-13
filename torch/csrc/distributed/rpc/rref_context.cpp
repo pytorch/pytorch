@@ -88,10 +88,10 @@ template std::shared_ptr<UserRRef<py::object>> RRefContext::createUserRRef<
     const ForkId& forkId);
 
 template <typename T>
-std::shared_ptr<RRef> RRefContext::getOrCreateRRef(
-    worker_id_t ownerId,
-    const RRefId& rrefId,
-    const ForkId& forkId) {
+std::shared_ptr<RRef> RRefContext::getOrCreateRRef(const RRefForkData& rfd) {
+  auto& ownerId = rfd.ownerId_;
+  auto& rrefId = rfd.rrefId_;
+  auto& forkId = rfd.forkId_;
   if (ownerId == getWorkerId()) {
     auto ownerRRef = getOrCreateOwnerRRef<T>(rrefId);
     // See Note [Fork Request]
@@ -120,14 +120,10 @@ std::shared_ptr<RRef> RRefContext::getOrCreateRRef(
 }
 
 template std::shared_ptr<RRef> RRefContext::getOrCreateRRef<IValue>(
-    worker_id_t ownerId,
-    const RRefId& rrefId,
-    const ForkId& forkId);
+    const RRefForkData& rfd);
 
 template std::shared_ptr<RRef> RRefContext::getOrCreateRRef<py::object>(
-    worker_id_t ownerId,
-    const RRefId& rrefId,
-    const ForkId& forkId);
+    const RRefForkData& rfd);
 
 template <typename T>
 std::shared_ptr<OwnerRRef<T>> RRefContext::getOrCreateOwnerRRef(
