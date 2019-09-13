@@ -12,6 +12,3 @@
           ios_arch: "arm64"
           requires: 
             - setup
-
-
-

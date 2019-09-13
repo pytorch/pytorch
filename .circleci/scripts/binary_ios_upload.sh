@@ -1,3 +1,6 @@
+#!/bin/bash
+set -eux -o pipefail
+
 echo ""
 echo "PWD: `pwd`"
 WORKSPACE=/Users/distiller/workspace
