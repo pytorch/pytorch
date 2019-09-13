@@ -9950,6 +9950,22 @@ class _TestTorchMixin(torchtest):
         val += 10
         self.assertEqual(val in x, False)
 
+    def test_isin(self):
+        a = torch.LongTensor([[1, 2, 3], [1, 1, 2], [3, 5, 1]])
+        result = torch.ByteTensor([[1, 1, 0], [1, 1, 1], [0, 1, 1]])
+
+        self.assertEqual(a.isin(torch.LongTensor([1, 2, 5])), result)
+
+        a = torch.LongTensor([[1, 2, 3], [1, 1, 2], [3, 5, 1]])
+        result = torch.ByteTensor([[1, 0, 0], [1, 1, 0], [0, 0, 1]])
+
+        self.assertEqual(a.isin(torch.LongTensor([1])), result)
+
+        a = torch.LongTensor([[6, 7, 8], [9, 0, 3], [4, 6, 7]])
+        result = torch.ByteTensor([[0, 0, 0], [0, 0, 0], [0, 0, 0]])
+
+        self.assertEqual(a.isin(torch.LongTensor([1, 2, 5])), result)
+
     @staticmethod
     def _test_rot90(self, use_cuda=False):
         device = torch.device("cuda" if use_cuda else "cpu")

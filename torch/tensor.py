@@ -318,6 +318,14 @@ class Tensor(torch._C._TensorBase):
         """
         return torch.unique_consecutive(self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
+    def isin(self, other):
+        r""" Compares a tensor element-wise with a list of possible values.
+
+        See :func:`torch.isin`
+        """
+        result = (self[..., None] == other).any(-1)
+        return result.type(torch.ByteTensor)
+
     def __rsub__(self, other):
         return _C._VariableFunctions.rsub(self, other)
 
