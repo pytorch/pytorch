@@ -5,10 +5,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
+    - should_run_job
     - run:
         <<: *setup_linux_system_environment
     - checkout
@@ -67,10 +64,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
+    - should_run_job
     - run:
         <<: *setup_linux_system_environment
     - run:
