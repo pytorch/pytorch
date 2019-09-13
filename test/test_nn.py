@@ -5280,11 +5280,10 @@ class TestNN(NNTestCase):
                     self.assertRaises(ValueError, lambda: m(i, (h, w)))
 
     def test_ConvTranspose3d_correct_output_size(self):
-        for dtype in [torch.bfloat16, torch.float, torch.double]:
-            # Check that ConvTranspose3d can take a 5d output_size.
-            m = nn.ConvTranspose3d(2, 2, 2).to(dtype)
-            i = torch.rand(1, 2, 1, 1, 1).to(dtype)
-            out = m(i, output_size=(1, 2, 2, 2, 2))
+        # Check that ConvTranspose3d can take a 5d output_size.
+        m = nn.ConvTranspose3d(2, 2, 2)
+        i = torch.rand(1, 2, 1, 1, 1)
+        out = m(i, output_size=(1, 2, 2, 2, 2))
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_ConvTranspose2d_half_cublas_gemm(self):
@@ -5298,9 +5297,9 @@ class TestNN(NNTestCase):
     def _test_Conv2d_naive_groups(self, device="cpu", dtype=torch.float):
         # Check that grouped convolutions matches two half convolutions
         m = nn.Conv2d(4, 4, kernel_size=3, groups=2).to(device, dtype)
-        i = torch.randn(2, 4, 6, 6, device=device, requires_grad=True).to(dtype)
+        i = torch.randn(2, 4, 6, 6, device=device, dtype=dtype, requires_grad=True)
         output = m(i)
-        grad_output = torch.randn(2, 4, 4, 4, device=device).to(dtype)
+        grad_output = torch.randn(2, 4, 4, 4, device=device, dtype=dtype)
         output.backward(grad_output)
 
         m1 = nn.Conv2d(2, 2, kernel_size=3).to(device, dtype)
