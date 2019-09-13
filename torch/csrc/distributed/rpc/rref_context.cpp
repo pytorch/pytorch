@@ -104,16 +104,15 @@ std::shared_ptr<RRef> RRefContext::getOrCreateRRef(
     // forkId either. However, we know that (1) there will be an
     // RREF_FORK_NOTIFY message arriving in the future, or (2) the message might
     // have already arrived.
-    if (rrefIter != forks_.end()) {
-      auto forkIter = rrefIter->second.find(forkId);
-      if (forkIter != rrefIter->second.end()) {
-        // scenario (2): fork request arrived before rpc/remote request/response
-        delForkOfOwnerNoLock(rrefId, forkId);
-        return ownerRRef;
-      }
+    if (rrefIter != forks_.end() &&
+        rrefIter->second.find(forkId) != rrefIter->second.end()) {
+      // scenario (2): fork request arrived before rpc/remote request/response
+      delForkOfOwnerNoLock(rrefId, forkId);
+    } else {
+      // scenario (1): fork request will arrive after rpc/remote
+      // request/response
+      expectingForkReqeusts_.insert(forkId);
     }
-    // scenario (1): fork request will arrive after rpc/remote request/response
-    expectingForkReqeusts_.insert(forkId);
     return ownerRRef;
   } else {
     return createUserRRef<T>(ownerId, rrefId, forkId);
@@ -161,7 +160,6 @@ template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
 RRefForkData RRefContext::forkTo(
     const std::shared_ptr<RRef>& rref,
     worker_id_t forkDst) {
-
   auto forkRequest = rref->fork();
   // Note [Fork Request]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -193,9 +191,7 @@ RRefForkData RRefContext::forkTo(
         agent_->getWorkerInfo(forkDst),
         acceptUserRRef(forkRequest.rrefId_, forkRequest.forkId_));
 
-    fm->addCallback([](const Message& message) {
-      handleException(message);
-    });
+    fm->addCallback([](const Message& message) { handleException(message); });
   } else {
     // fork from user, rref cannot be destructed until the fork request is
     // accepted by the owner
@@ -246,9 +242,7 @@ Message RRefContext::acceptForkRequest(
     auto fm = agent_->send(
         agent_->getWorkerInfo(forkDst), acceptUserRRef(rrefId, forkId));
 
-    fm->addCallback([](const Message& message) {
-      handleException(message);
-    });
+    fm->addCallback([](const Message& message) { handleException(message); });
   }
   // notify fork caller UserRRef
   return RRefForkAccept(forkId).toMessage();
@@ -293,7 +287,8 @@ void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
 }
 
 void RRefContext::addForkOfOwnerNoLock(
-    const RRefId& rrefId, const ForkId& forkId) {
+    const RRefId& rrefId,
+    const ForkId& forkId) {
   auto& rrefForks = forks_[rrefId];
   TORCH_INTERNAL_ASSERT(
       rrefForks.find(forkId) == rrefForks.end(),
@@ -303,7 +298,8 @@ void RRefContext::addForkOfOwnerNoLock(
 }
 
 void RRefContext::delForkOfOwnerNoLock(
-    const RRefId& rrefId, const ForkId& forkId) {
+    const RRefId& rrefId,
+    const ForkId& forkId) {
   auto iter = forks_.find(rrefId);
   TORCH_INTERNAL_ASSERT(
       iter != forks_.end(),

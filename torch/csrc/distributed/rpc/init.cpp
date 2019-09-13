@@ -32,8 +32,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
   auto module = py::handle(dist_module).cast<py::module>();
 
   auto workerInfo = shared_ptr_class_<WorkerInfo>(module, "WorkerInfo")
-                      .def_readonly("name", &WorkerInfo::name_)
-                      .def_readonly("id", &WorkerInfo::id_);
+                        .def_readonly("name", &WorkerInfo::name_)
+                        .def_readonly("id", &WorkerInfo::id_);
 
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")

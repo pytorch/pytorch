@@ -19,8 +19,8 @@ RRefForkData::RRefForkData(
     : ownerId_(ownerId), rrefId_(rrefId), forkId_(forkId) {}
 
 at::IValue RRefForkData::toIValue() const {
-  return c10::ivalue::Tuple::create({
-      (int64_t)ownerId_, rrefId_.toIValue(), forkId_.toIValue()});
+  return c10::ivalue::Tuple::create(
+      {(int64_t)ownerId_, rrefId_.toIValue(), forkId_.toIValue()});
 }
 
 RRefForkData RRefForkData::fromIValue(const at::IValue& ivalue) {
@@ -99,7 +99,8 @@ template <>
 IValue UserRRef<IValue>::toHere() {
   auto& agent = RRefContext::getInstance()->agent();
   std::shared_ptr<FutureMessage> fm = agent->send(
-      agent->getWorkerInfo(ownerId_), ScriptRRefFetchCall(rrefId()).toMessage());
+      agent->getWorkerInfo(ownerId_),
+      ScriptRRefFetchCall(rrefId()).toMessage());
   const Message& message = fm->wait();
   RRefContext::handleException(message);
   auto srv = RRefFetchRet::fromMessage(message);
@@ -110,7 +111,8 @@ template <>
 py::object UserRRef<py::object>::toHere() {
   auto& agent = RRefContext::getInstance()->agent();
   std::shared_ptr<FutureMessage> fm = agent->send(
-      agent->getWorkerInfo(ownerId_), PythonRRefFetchCall(rrefId()).toMessage());
+      agent->getWorkerInfo(ownerId_),
+      PythonRRefFetchCall(rrefId()).toMessage());
   const Message& message = fm->wait();
   RRefContext::handleException(message);
   auto srv = RRefFetchRet::fromMessage(message);

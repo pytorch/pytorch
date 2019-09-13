@@ -47,9 +47,9 @@ ScriptRemoteCall ScriptRemoteCall::fromMessage(const Message& message) {
   auto values = value.toTuple()->elements();
 
   // remove the last element from values and convert it back to an RRef
-  auto retForkId = RRefId::fromIValue(std::move(values.back()));
+  auto retForkId = RRefId::fromIValue(values.back());
   values.pop_back();
-  auto retRRefId = ForkId::fromIValue(std::move(values.back()));
+  auto retRRefId = ForkId::fromIValue(values.back());
   values.pop_back();
 
   auto op = ScriptCall::fromIValues(values);
