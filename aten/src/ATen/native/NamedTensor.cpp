@@ -89,6 +89,38 @@ static std::vector<int64_t> aligned_size(
   return expanded_sizes;
 }
 
+Tensor refine_names(const Tensor& self, DimnameList names) {
+  const auto self_names = self.names();
+  TORCH_CHECK(self_names.size() == names.size(),
+      "refine_names: cannot coerce Tensor", self_names, " to Tensor", names,
+      " because they have a different number of dims (",
+      self_names.size(), " and ", names.size(), " respectively).");
+  check_names_valid_for(self, names);
+
+  for (size_t idx = 0; idx < self_names.size(); idx++) {
+    const auto& self_name = self_names[idx];
+    const auto& out_name = names[idx];
+    if (self_name == out_name || self_name.is_wildcard()) {
+      continue;
+    }
+    if (out_name.is_wildcard()) {
+      TORCH_CHECK(false,
+          "refine_names: cannot coerse Tensor", self_names, " to Tensor", names,
+          " because ", self_name, " is more specific than ", out_name, " at index ",
+          idx);
+    }
+    TORCH_CHECK(false,
+        "refine_names: cannot coerse Tensor", self_names, " to Tensor", names,
+        " because ", self_name, " is different from ", out_name, " at index ",
+        idx);
+    TORCH_INTERNAL_ASSERT(false); // done handling errors
+  }
+
+  auto result = self.alias();
+  internal_set_names_inplace(result, names);
+  return result;
+}
+
 // [Alignment rules]
 // Aligns `tensor` to names with the following rules:
 // 1) Check that tensor.names is a subsequence (not necessarily contiguous) of `names`.
