@@ -552,12 +552,11 @@ class ScriptModuleSerializer {
  private:
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
-    std::vector<at::Tensor> tensors;
     Pickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
         },
-        &tensors);
+        nullptr);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();

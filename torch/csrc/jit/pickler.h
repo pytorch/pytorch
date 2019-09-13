@@ -156,6 +156,8 @@ class Pickler {
   void pushIntList(const IValue& ivalue);
   void pushList(const IValue& ivalue);
   void pushTensor(const IValue& ivalue);
+  void pushTensorReference(const IValue& ivalue);
+  void pushLiteralTensor(const IValue& ivalue);
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
   // unmemoized version

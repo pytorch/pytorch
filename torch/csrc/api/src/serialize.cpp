@@ -38,39 +38,29 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
   pickler.pushDict(dict_ivalue);
   pickler.stop();
 
-  std::vector<at::Tensor> tensors;
-  jit::pickle(writer, ivalue, &tensors);
+  jit::Pickler data_pickler(writer, /*tensor_table=*/nullptr);
+  data_pickler.protocol();
+  data_pickler.pushIValue(ivalue);
+  data_pickler.stop();
+
+  auto writeable_tensors = data_pickler.tensorData();
 
   std::vector<at::IValue> keys;
-  keys.reserve(tensors.size());
-  std::vector<TypePtr> types(tensors.size(), StringType::get());
+  keys.reserve(writeable_tensors.size());
+  std::vector<TypePtr> types(writeable_tensors.size(), StringType::get());
 
-  // Each unique storage should only be saved 1 time
-  std::unordered_set<const void*> memoized_storages;
-
-  for (size_t i = 0; i < tensors.size(); i++) {
-    void* addr = tensors.at(i).storage().unsafeGetStorageImpl();
-    if (memoized_storages.count(addr) > 0) {
-      continue;
-    }
+  for (size_t i = 0; i < writeable_tensors.size(); i++) {
     keys.emplace_back(std::to_string(i));
-    memoized_storages.insert(addr);
   }
-  memoized_storages.clear();
 
   auto keys_tuple = at::ivalue::Tuple::create(keys, TupleType::create(types));
-  jit::pickle(writer, keys_tuple, &tensors);
+  jit::pickle(writer, keys_tuple);
 
-  for (const auto& tensor : tensors) {
-    void* addr = tensor.storage().unsafeGetStorageImpl();
-    if (memoized_storages.count(addr) > 0) {
-      continue;
-    }
-    auto data = jit::getWriteableTensorData(tensor);
-    size_t numel = data.numel();
+  for (const auto& tensor_data : writeable_tensors) {
+    const char* addr = tensor_data.data();
+    size_t numel = tensor_data.numel();
     writer(reinterpret_cast<const char*>(&numel), sizeof(numel));
-    writer(data.data(), data.sizeInBytes());
-    memoized_storages.insert(addr);
+    writer(addr, tensor_data.sizeInBytes());
   }
 
   return data;

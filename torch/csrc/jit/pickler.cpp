@@ -310,6 +310,14 @@ void Pickler::pushGlobal(
 }
 
 void Pickler::pushTensor(const IValue& ivalue) {
+  if (tensor_table_ == nullptr) {
+    pushLiteralTensor(ivalue);
+  } else {
+    pushTensorReference(ivalue);
+  }
+}
+
+void Pickler::pushLiteralTensor(const IValue& ivalue) {
   // In contrast to tensor references, literal tensors are included in the
   // pickle program binary blob. They are written to the file after the STOP
   // opcode. They can't be included in the pickle program itself without a bunch
@@ -363,12 +371,6 @@ void Pickler::pushTensor(const IValue& ivalue) {
 
   // Call torch._utils._rebuild_tensor_v2
   push<PickleOpCode>(PickleOpCode::REDUCE);
-
-  // Store the tensor so it can be written later
-  TORCH_INTERNAL_ASSERT(
-      tensor_table_,
-      "Pickler tried to write a tensor but had no tensor table to write to");
-  tensor_table_->emplace_back(std::move(tensor));
 }
 
 void Pickler::pushClass(PicklerClass cls) {
@@ -428,6 +430,18 @@ void Pickler::pushLong(const std::string& data) {
   pushBytes(data);
 }
 
+void Pickler::pushTensorReference(const IValue& ivalue) {
+  pushClass(PicklerClass::TENSOR);
+  tensor_table_->push_back(ivalue.toTensor());
+  int64_t tensor_id = tensor_table_->size() - 1;
+  // Reduce arguments are spread (e.g. `*args`) before calling the global,
+  // so wrap in a tuple
+  push<PickleOpCode>(PickleOpCode::MARK);
+  pushIValue(tensor_id);
+  push<PickleOpCode>(PickleOpCode::TUPLE);
+
+  push<PickleOpCode>(PickleOpCode::REDUCE);
+}
 
 void Pickler::pushDict(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
