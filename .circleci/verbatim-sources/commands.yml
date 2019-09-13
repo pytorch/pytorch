@@ -18,17 +18,13 @@ commands:
             git fetch --depth=1 origin
             git reset --hard origin/master
             done
-      - run:
-          # Installs expect and moreutils so that we can call `unbuffer` and `ts`.
-          name: Install moreutils and expect
-          no_output_timeout: "10m"
-          command: |
-            set -ex
+
             export HOMEBREW_NO_AUTO_UPDATE=1
 
+            # Install expect and moreutils so that we can call `unbuffer` and `ts`.
             # moreutils installs a `parallel` executable by default, which conflicts
             # with the executable from the GNU `parallel`, so we must unlink GNU
-            # `parallel` first, and relink it afterwards
+            # `parallel` first, and relink it afterwards.
             brew unlink parallel
             brew install moreutils
             brew link parallel --overwrite
