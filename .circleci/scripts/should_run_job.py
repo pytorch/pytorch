@@ -41,6 +41,7 @@ default_set = set([
     # Caffe2 OSX
     'caffe2-py2-system-macos10.13',
     # PyTorch OSX
+    'pytorch-macos-10.13-py3',
     'pytorch-macos-10.13-cuda9.2-cudnn7-py3',
     # PyTorch Android
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build',
