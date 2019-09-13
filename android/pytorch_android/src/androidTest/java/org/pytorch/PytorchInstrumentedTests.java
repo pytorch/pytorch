@@ -1,11 +1,13 @@
 package org.pytorch;
 
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+
 import android.content.Context;
-
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-
+import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -13,14 +15,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.HashMap;
 import java.util.Map;
-
-import androidx.test.ext.junit.runners.AndroidJUnit4;
-import androidx.test.platform.app.InstrumentationRegistry;
-
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
 
 @RunWith(AndroidJUnit4.class)
 public class PytorchInstrumentedTests {
@@ -36,7 +33,7 @@ public class PytorchInstrumentedTests {
   public void testForwardNull() throws IOException {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     final IValue input =
-        IValue.tensor(Tensor.newTensor(new long[] {1}, Tensor.allocateByteBuffer(1)));
+        IValue.tensor(Tensor.newByteTensor(new long[] {1}, Tensor.allocateByteBuffer(1)));
     assertTrue(input.isTensor());
     final IValue output = module.forward(input);
     assertTrue(output.isNull());
@@ -97,13 +94,13 @@ public class PytorchInstrumentedTests {
 
   @Test
   public void testEqTensor() throws IOException {
-    final long[] inputTensorShape = new long[] {1, 3, 224, 224};
-    final long numElements = Tensor.numel(inputTensorShape);
+    final long[] inputTensorDims = new long[] {1, 3, 224, 224};
+    final long numElements = Tensor.numElements(inputTensorDims);
     final float[] inputTensorData = new float[(int) numElements];
     for (int i = 0; i < numElements; ++i) {
       inputTensorData[i] = i;
     }
-    final Tensor inputTensor = Tensor.newTensor(inputTensorShape, inputTensorData);
+    final Tensor inputTensor = Tensor.newFloatTensor(inputTensorDims, inputTensorData);
 
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     final IValue input = IValue.tensor(inputTensor);
@@ -113,7 +110,7 @@ public class PytorchInstrumentedTests {
     assertTrue(output.isTensor());
     final Tensor outputTensor = output.getTensor();
     assertNotNull(outputTensor);
-    assertArrayEquals(inputTensorShape, outputTensor.shape);
+    assertArrayEquals(inputTensorDims, outputTensor.dims);
     float[] outputData = outputTensor.getDataAsFloatArray();
     for (int i = 0; i < numElements; i++) {
       assertTrue(inputTensorData[i] == outputData[i]);
@@ -219,8 +216,8 @@ public class PytorchInstrumentedTests {
 
   @Test
   public void testTensorMethods() {
-    long[] shape = new long[] {1, 3, 224, 224};
-    final int numel = (int) Tensor.numel(shape);
+    long[] dims = new long[] {1, 3, 224, 224};
+    final int numel = (int) Tensor.numElements(dims);
     int[] ints = new int[numel];
     float[] floats = new float[numel];
 
@@ -231,16 +228,16 @@ public class PytorchInstrumentedTests {
       floats[i] = i / 1000.f;
     }
 
-    Tensor tensorBytes = Tensor.newTensor(shape, bytes);
-    assertTrue(tensorBytes.dtype() == Tensor.DTYPE_BYTE);
+    Tensor tensorBytes = Tensor.newByteTensor(dims, bytes);
+    assertTrue(tensorBytes.isByteTensor());
     assertArrayEquals(bytes, tensorBytes.getDataAsByteArray());
 
-    Tensor tensorInts = Tensor.newTensor(shape, ints);
-    assertTrue(tensorInts.dtype() == Tensor.DTYPE_INT32);
+    Tensor tensorInts = Tensor.newIntTensor(dims, ints);
+    assertTrue(tensorInts.isIntTensor());
     assertArrayEquals(ints, tensorInts.getDataAsIntArray());
 
-    Tensor tensorFloats = Tensor.newTensor(shape, floats);
-    assertTrue(tensorFloats.dtype() == Tensor.DTYPE_FLOAT32);
+    Tensor tensorFloats = Tensor.newFloatTensor(dims, floats);
+    assertTrue(tensorFloats.isFloatTensor());
     float[] floatsOut = tensorFloats.getDataAsFloatArray();
     assertTrue(floatsOut.length == numel);
     for (int i = 0; i < numel; i++) {
@@ -250,11 +247,11 @@ public class PytorchInstrumentedTests {
 
   @Test(expected = IllegalStateException.class)
   public void testTensorIllegalStateOnWrongType() {
-    long[] shape = new long[] {1, 3, 224, 224};
-    final int numel = (int) Tensor.numel(shape);
+    long[] dims = new long[] {1, 3, 224, 224};
+    final int numel = (int) Tensor.numElements(dims);
     float[] floats = new float[numel];
-    Tensor tensorFloats = Tensor.newTensor(shape, floats);
-    assertTrue(tensorFloats.dtype() == Tensor.DTYPE_FLOAT32);
+    Tensor tensorFloats = Tensor.newFloatTensor(dims, floats);
+    assertTrue(tensorFloats.isFloatTensor());
     tensorFloats.getDataAsByteArray();
   }
 

@@ -23,6 +23,6 @@ public class TorchVisionInstrumentedTests {
   public void smokeTest() {
     Bitmap bitmap = Bitmap.createBitmap(320, 240, Bitmap.Config.ARGB_8888);
     Tensor tensor = TensorImageUtils.bitmapToFloatTensorTorchVisionForm(bitmap);
-    assertArrayEquals(new long[] {1l, 3l, 240l, 320l}, tensor.shape);
+    assertArrayEquals(new long[] {1l, 3l, 240l, 320l}, tensor.dims);
   }
 }
