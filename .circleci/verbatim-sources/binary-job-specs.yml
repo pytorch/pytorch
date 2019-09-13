@@ -155,8 +155,7 @@
           <<: *binary_checkout
       - run:
           <<: *binary_populate_env
-      - run:
-          <<: *binary_macos_brew_update
+      - brew_update
       - run:
           <<: *binary_install_miniconda
       - run:
@@ -185,8 +184,7 @@
         <<: *binary_checkout
     - run:
         <<: *binary_populate_env
-    - run:
-        <<: *binary_macos_brew_update
+    - brew_update
     - run:
         <<: *binary_install_miniconda
 
@@ -226,8 +224,7 @@
         <<: *binary_checkout
     - run:
         <<: *binary_populate_env
-    - run:
-        <<: *binary_macos_brew_update
+    - brew_update
     - run:
         <<: *binary_install_miniconda
     - attach_workspace: # TODO - we can `cp` from ~/workspace
