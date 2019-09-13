@@ -675,6 +675,7 @@ class TestDynamicQuantizedLinear(TestCase):
         use_channelwise=st.booleans())
     def test_qlinear(self, batch_size, input_channels, output_channels,
                      use_bias, use_relu, use_multi_dim_input, use_channelwise):
+        torch.backends.quantized.engine = torch.fbgemm
         qlinear_prepack = torch.ops.quantized.linear_prepack
         if use_relu:
             qlinear_dynamic = torch.ops.quantized.linear_relu_dynamic
@@ -792,6 +793,7 @@ class TestQuantizedLinear(unittest.TestCase):
            use_channelwise=st.booleans())
     def test_qlinear(self, batch_size, input_channels, output_channels, use_bias,
                      use_relu, use_multi_dim_input, use_channelwise):
+        torch.backends.quantized.engine = torch.fbgemm
         qlinear_prepack = torch.ops.quantized.linear_prepack
         if use_relu:
             qlinear = torch.ops.quantized.linear_relu
