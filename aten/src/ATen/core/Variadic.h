@@ -49,7 +49,7 @@ struct IterArgs {
   void operator()(at::ArrayRef<T> args) {
     for (const auto& arg : args) {
       self()(arg);
-      if (short_circuit())
+      if (self().short_circuit())
         return;
     }
   }
@@ -61,7 +61,7 @@ struct IterArgs {
     self()(at::ArrayRef<T>{args});
   }
 
-  bool short_circuit() {
+  constexpr bool short_circuit() {
     return false;
   }
 
