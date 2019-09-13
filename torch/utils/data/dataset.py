@@ -4,7 +4,7 @@ import random
 
 from torch._utils import _accumulate
 from torch import randperm
-from torch.utils.data import DistributedSampler, DistributedChunkSampler
+from torch.utils.data import DistributedSampler, ChunkDataReader, DistributedChunkSampler
 from torch.utils.data._utils.worker import get_worker_info
 
 
@@ -265,43 +265,26 @@ class Subset(Dataset):
         return len(self.indices)
 
 
-class ChunkDataReader(object):
-    r"""Reads a chunk of data given a chunk index.
-
-    The reading logic must be implemented inside `__call__` method
-    """
-
-    def __init__(self):
-        pass
-
-    def __call__(self, idx):
-        r"""Returns `list(samples)`
-
-        If `samples` contain tensors, numpy arrays, numbers,
-        dicts or lists, the default collate function can be implicitly used.
-        Otherwise, a custom `collate_fn` must be provided to `DataLoader`
-
-        When no more data is available, `StopIteration` must be raised.
-        """
-        raise NotImplementedError
-
-
 class ChunkDataset(IterableDataset):
     r"""Dataset which uses hierarchical sampling for efficient data reading.
 
-    The hierarchical sampling happens by selecting a few chunks to read at a time
-    (first level of sampling) and after they are loaded, they can be shuffled again
-    to achieve the second level of sampling.
 
-    Chunks can be files, contents of folder, lines of a text file, etc
+    ``ChunkDataset`` is a stateful dataset that supports hierarchical sampling and
+    efficient reading through chunks. A chunk is selected based on a sampling strategy
+    (first level) and its content is shuffled (second level) before producing
+    a batch or an example.
 
-    In a distributed setup, each worker has an instance of `ChunkDataset`
-    that draws different indices by feeding their ID (aka `rank`) into the chunk sampler.
+    In this context, chunks could be files, contents of folder,
+    sections of large text file, etc. For better efficiency, chunks should have roughly
+    the same length. Consult ``ChunkDataReader`` for more details.
 
-    ``ChunkDataset`` extends ``IterableDataset`` because the total amount of records
+    ``ChunkDataset`` extends ``IterableDataset`` because the length of the dataset
     (or simply the size) is unknown. Only the number of chunks is known for the dataset.
-    However, in a distributed setup, to make all workers complete training at the same time,
-    the chunks need to be roughly similar in size.
+
+    In a distributed setup, each worker has an instance of ``ChunkDataset`` that uses
+    ``DistributedChunkSampler`` sampler to select chunksbased on their ID (aka `rank`).
+    Once a chunk index has been selected, it is passed to ``ChunkDataReader`` that will load
+    data in ``ChunkDataset`` internal cache. Only then ``ChunkDataset`` returns batches.
 
     Arguments:
         chunk_sampler (DistributedSampler or DistributedChunkSampler): Draw indices for chunks.
