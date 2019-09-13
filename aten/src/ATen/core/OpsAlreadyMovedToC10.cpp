@@ -761,7 +761,7 @@ const std::unordered_set<c10::OperatorName>& aten_ops_not_moved_to_c10_yet() {
         {"aten::group_norm", ""},
         {"aten::_cufft_set_plan_cache_max_size", ""},
         {"aten::_cufft_clear_plan_cache", ""},
-        {"aten::index", ""},
+        {"aten::index", "Tensor"},
         {"aten::index_put_", ""},
         {"aten::index_put", ""},
         {"aten::_index_put_impl_", ""},

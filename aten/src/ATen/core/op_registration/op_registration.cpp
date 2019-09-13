@@ -58,7 +58,7 @@ void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
         options.aliasAnalysisKind_ == AliasAnalysisKind::FROM_SCHEMA ||
             !schema.hasAnyAliasInfo(),
         "In operator registration: Tried to register operator ",
-        toString(options.schemaOrName_->right()),
+        options.schemaOrName_->right(),
         " with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA.");
 
     for (auto& kernel : options.kernels) {
@@ -97,7 +97,7 @@ void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
     TORCH_CHECK(
         options.aliasAnalysisKind_ != AliasAnalysisKind::FROM_SCHEMA,
         "In operator registration: Tried to register operator ",
-        toString(name),
+        options.schemaOrName_->right(),
         " with AliasAnalysisKind::FROM_SCHEMA, but the schema is inferred.");
 
     // Register all kernels with the schema we inferred
