@@ -65,17 +65,13 @@ graph(%self, %input):
   }
 }
 
-c10::optional<std::string> getFuncName(
-    const c10::optional<c10::QualifiedName>& qname_opt) {
-  if (!qname_opt) {
-    return c10::nullopt;
-  }
-  auto qname = qname_opt.value().qualifiedName();
-  auto rdot_idx = qname.rfind('.');
+std::string getFuncName(const c10::QualifiedName& qname) {
+  auto name = qname.qualifiedName();
+  auto rdot_idx = name.rfind('.');
   if (rdot_idx != std::string::npos) {
-    return qname.substr(rdot_idx + 1, qname.length());
+    return name.substr(rdot_idx + 1, name.length());
   } else {
-    return qname;
+    return name;
   }
 }
 
@@ -96,11 +92,11 @@ bool nodeQuantizable(Node* n) {
       aten_funcs.end();
   if (n->kind() == prim::CallFunction) {
     auto func_node = n->inputs()[0]->node();
-    auto func_type = func_node->output()->type()->expect<FunctionType>();
-    auto func_name = getFuncName(func_type->name());
-    if (func_name && func_node->kind() == prim::Constant) {
+    auto func = func_node->output()->type()->expect<FunctionType>()->function();
+    auto func_name = getFuncName(func->qualname());
+    if (func_node->kind() == prim::Constant) {
       is_quantizable |=
-          std::find(call_funcs.begin(), call_funcs.end(), func_name.value()) !=
+          std::find(call_funcs.begin(), call_funcs.end(), func_name) !=
           call_funcs.end();
     }
   }
