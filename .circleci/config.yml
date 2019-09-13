@@ -1760,16 +1760,6 @@ workflows:
           docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
-      #- binary_linux_libtorch_2.7m_cpu_test:
-      #    requires:
-      #      - binary_linux_libtorch_2.7m_cpu_build
-      #- binary_linux_libtorch_2.7m_cu90_test:
-      #    requires:
-      #      - binary_linux_libtorch_2.7m_cu90_build
-      #- binary_linux_libtorch_2.7m_cu101_test:
-      #    requires:
-      #      - binary_linux_libtorch_2.7m_cu101_build
-
       # Nightly uploads
       - binary_linux_upload:
           name: binary_linux_manywheel_2_7m_cu101_devtoolset7_upload
