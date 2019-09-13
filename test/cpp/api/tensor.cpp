@@ -319,3 +319,15 @@ TEST(TensorTest, Data) {
   const auto tensor2 = at::empty({3, 3});
   ASSERT_THROW(tensor2.data(), c10::Error);
 }
+
+TEST(TensorTest, Grad) {
+  const auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  const auto y = x * x;
+  y.backward();
+  ASSERT_EQ(x.grad().item<float>(), 10.0);
+
+  const auto x2 = at::tensor({5});
+  const auto y2 = x2 * x2;
+  ASSERT_THROW(y2.backward(), c10::Error);
+  ASSERT_THROW(x2.grad(), c10::Error);
+}
