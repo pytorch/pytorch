@@ -320,7 +320,7 @@ TEST(TensorTest, Data) {
   ASSERT_THROW(tensor2.data(), c10::Error);
 }
 
-TEST(TensorTest, BackwardAndGrad) {
+TEST(TensorTest, Backward_Grad_IsLeaf) {
   const auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
   const auto y = x * x;
   y.backward();
