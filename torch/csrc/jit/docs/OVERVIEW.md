@@ -1049,7 +1049,7 @@ The current logging level is `GRAPH_UPDATE` meaning that both `GRAPH_DUMP` and `
 one specifies a file(s) in `PYTORCH_JIT_LOG_LEVEL`.
 
 `GRAPH_DEBUG` can be enabled by prefixing a file name with an `>` as in `>alias_analysis`.
-`>>` and `>>>` are also valid and **curently** are equivalent to `GRAPH_DEBUG` as there is no logging level that is
+`>>` and `>>>` are also valid and **currently** are equivalent to `GRAPH_DEBUG` as there is no logging level that is
 higher than `GRAPH_DEBUG`. 
 
 ## DifferentiableGraphOp ##
