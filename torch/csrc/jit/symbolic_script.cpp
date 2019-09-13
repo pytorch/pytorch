@@ -202,20 +202,6 @@ const std::vector<std::string> functions = {
 
         #     return result0, result1, backward
 
-        def AD_mm_backward_self(grad, mat2):
-            return grad.mm(mat2.t())
-
-        def AD_mm_backward_mat2(grad, self):
-            return self.t().mm(grad)
-
-        def mm(self, mat2):
-            def backward(grad_output):
-                grad_self = AD_mm_backward_self(grad_output, mat2)
-                grad_mat2 = AD_mm_backward_mat2(grad_output, self)
-                return grad_self, grad_mat2
-
-            return torch.mm(self, mat2), backward
-
         def AD_permute_backward(grad,
                                 fwd_dims: List[int]):
             ndims = len(fwd_dims)
@@ -1371,6 +1357,29 @@ const std::vector<std::string> functions = {
                 return grad_output, None
             return torch.remainder(self, other), backward
 
+        def AD_column_major(mat):
+            return mat.stride(0)==1 and mat.stride(1) == mat.size(0)
+
+        def AD_mm_backward_self(grad, mat2, mat1):
+            if AD_column_major(mat1):
+                return mat2.mm(grad.t()).t()
+            else:
+                return grad.mm(mat2.t())
+
+        def AD_mm_backward_mat2(grad, self, mat2):
+            if self.is_sparse or not AD_column_major(mat2):
+                return self.t().mm(grad)
+            else:
+                return grad.t().mm(self).t()
+
+        def mm(self, mat2):
+            def backward(grad_output):
+                grad_self = AD_mm_backward_self(grad_output, mat2, self)
+                grad_mat2 = AD_mm_backward_mat2(grad_output, self, mat2)
+                return grad_self, grad_mat2
+
+            return torch.mm(self, mat2), backward
+
         def addmm(self,
                   mat1,
                   mat2,
@@ -1381,8 +1390,8 @@ const std::vector<std::string> functions = {
             self_size = torch._size_if_not_equal(self.size(), result.size())
             def backward(grad_output):
                 self_grad = (grad_output * beta)._grad_sum_to_size(self_size)
-                mat1_grad = grad_output.mm(mat2.t()) * alpha
-                mat2_grad = mat1.t().mm(grad_output) * alpha
+                mat1_grad = AD_mm_backward_self(grad_output, mat2, mat1) * alpha
+                mat2_grad = AD_mm_backward_mat2(grad_output, mat1, mat2) * alpha
                 return self_grad, mat1_grad, mat2_grad, None, None
             return result, backward
 
