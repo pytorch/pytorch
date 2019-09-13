@@ -35,10 +35,9 @@ class CAFFE2_API Dispatcher final {
 private:
   struct OperatorDef final {
     explicit OperatorDef(FunctionSchema&& schema, OperatorOptions&& options)
-    : op(std::move(schema), std::move(options)), refcount(0) {}
+    : op(std::move(schema), std::move(options)) {}
 
     impl::OperatorEntry op;
-    size_t refcount;
   };
   friend class OperatorHandle;
 
