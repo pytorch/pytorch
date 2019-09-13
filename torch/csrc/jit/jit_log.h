@@ -31,7 +31,7 @@
 
 // `GRAPH_DEBUG` can be enabled by prefixing a file name with an `>` as in
 // `>alias_analysis`.
-// `>>` and `>>>` are also valid and **curently** are equivalent to
+// `>>` and `>>>` are also valid and **currently** are equivalent to
 // `GRAPH_DEBUG` as there is no logging level that is
 // higher than `GRAPH_DEBUG`.
 
