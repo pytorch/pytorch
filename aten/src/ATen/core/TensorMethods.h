@@ -29,6 +29,9 @@ struct MultiDispatchTensorTypeSet : IterArgs<MultiDispatchTensorTypeSet> {
   void operator()(const at::Tensor& x) {
     ts = ts | x.type_set();
   }
+  void operator()(TensorOptions x) {
+    ts = ts | x.type_set();
+  }
   void operator()(at::ArrayRef<at::Tensor> xs) {
     for (const auto& x : xs) {
       ts = ts | x.type_set();
@@ -823,7 +826,7 @@ inline Tensor Tensor::new_empty(IntArrayRef size, const TensorOptions & options)
     return TypeDefault::new_empty(const_cast<Tensor&>(*this), size, options);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, IntArrayRef, const TensorOptions &)>(type_set(/* HMMMM */))(const_cast<Tensor&>(*this), size, options);
+    return table->getOp<Tensor (const Tensor &, IntArrayRef, const TensorOptions &)>(at::detail::multi_dispatch_tensor_type_set(*this, options))(const_cast<Tensor&>(*this), size, options);
 #endif
 }
 inline Tensor Tensor::new_full(IntArrayRef size, Scalar fill_value, const TensorOptions & options) const {
@@ -831,7 +834,7 @@ inline Tensor Tensor::new_full(IntArrayRef size, Scalar fill_value, const Tensor
     return TypeDefault::new_full(const_cast<Tensor&>(*this), size, fill_value, options);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, IntArrayRef, Scalar, const TensorOptions &)>(type_set(/* HMMMM */))(const_cast<Tensor&>(*this), size, fill_value, options);
+    return table->getOp<Tensor (const Tensor &, IntArrayRef, Scalar, const TensorOptions &)>(at::detail::multi_dispatch_tensor_type_set(*this, options))(const_cast<Tensor&>(*this), size, fill_value, options);
 #endif
 }
 inline Tensor & Tensor::resize_(IntArrayRef size) const {
@@ -3025,7 +3028,7 @@ inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool 
     return TypeDefault::to(const_cast<Tensor&>(*this), options, non_blocking, copy);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::to.dtype_layout(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, bool non_blocking=False, bool copy=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, const TensorOptions &, bool, bool)>(type_set(/* HMMMM */))(const_cast<Tensor&>(*this), options, non_blocking, copy);
+    return table->getOp<Tensor (const Tensor &, const TensorOptions &, bool, bool)>(at::detail::multi_dispatch_tensor_type_set(*this, options))(const_cast<Tensor&>(*this), options, non_blocking, copy);
 #endif
 }
 inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking, bool copy) const {
