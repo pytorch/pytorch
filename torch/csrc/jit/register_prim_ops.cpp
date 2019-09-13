@@ -2815,6 +2815,17 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::requires_grad_(Tensor(a!) self, bool reverse=False) -> Tensor(a)",
+        [](Stack& stack) {
+          bool requires_grad = pop(stack).toBool();
+          at::Tensor t;
+          pop(stack, t);
+          t.set_requires_grad(requires_grad);
+          push(stack, t);
+          return 0;
+        },
+        aliasAnalysisConservative()),
+    Operator(
         "aten::_list_to_tensor(int[] self) -> Tensor",
         [](Stack& stack) {
           c10::List<int64_t> l = pop(stack).toIntList();
