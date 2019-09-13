@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
+#include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -166,6 +167,9 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_quant_fusion",
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
+      .def(
+          "_jit_pass_fuse_linear",
+          [](std::shared_ptr<Graph>& g) { return FuseLinear(g); })
       .def(
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
@@ -417,6 +421,7 @@ void initJITBindings(PyObject* module) {
     script::parseIR(input, &*graph);
     return graph;
   });
+  m.def("parse_schema", parseSchema);
 
   py::class_<FunctionSchema>(m, "FunctionSchema")
       .def_property_readonly(
@@ -428,6 +433,10 @@ void initJITBindings(PyObject* module) {
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(
           "returns", [](FunctionSchema& self) { return self.returns(); })
+      .def("__eq__", [](const FunctionSchema& self,
+            const FunctionSchema& other) {
+          return self == other;
+        })
       .def("__str__", [](FunctionSchema& self) {
         std::stringstream ss;
         ss << self;

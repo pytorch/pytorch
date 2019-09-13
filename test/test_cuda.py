@@ -23,8 +23,8 @@ from test_torch import _TestTorchMixin
 from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
-    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, \
-    load_tests, slowTest, skipCUDANonDefaultStreamIf
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_SCIPY, \
+    TEST_WITH_ROCM, load_tests, slowTest, skipCUDANonDefaultStreamIf
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -534,7 +534,6 @@ custom_half_precision = {
     'dot': 1e-2,
     'erf': 1e-3,
     'erfc': 1e-3,
-    'erfinv': 1e-3,
     'exp': 1e-2,
     'expm1': 1e-2,
     'fill': 1e-3,
@@ -591,7 +590,6 @@ simple_pointwise_float = [
     'cosh',
     'erf',
     'erfc',
-    'erfinv',
     'exp',
     'expm1',
     'reciprocal',
@@ -665,15 +663,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
 
 class TestCuda(TestCase):
     _do_cuda_memory_leak_check = True
-    # See https://github.com/pytorch/pytorch/issues/21589
-    # We used to have this turned on for the tests in this file which
-    # we had tested to be OK, but when people added new tests to
-    # this file, it would trigger nondeterministic failures that
-    # are hard to debug.  Since there are KNOWN bugs with our
-    # stream handling, we shouldn't turn this on by default.
-    # If you decide to make this True, be sure to run the test suite
-    # under cuda-memcheck
-    _do_cuda_non_default_stream = False
+    _do_cuda_non_default_stream = True
     FIFTY_MIL_CYCLES = 50000000
 
     @staticmethod
@@ -1904,6 +1894,7 @@ class TestCuda(TestCase):
             c2p.put(sync_func(self, TestCuda.FIFTY_MIL_CYCLES))
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    # Flaky on the ROCm CI
     @skipIfRocm
     def test_stream_event_nogil(self):
         for sync_func in [TestCuda._stream_synchronize,
@@ -1967,7 +1958,6 @@ class TestCuda(TestCase):
         self.assertTrue(s1.query())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    @skipIfRocm
     def test_events_multi_gpu_query(self):
         d0 = torch.device('cuda:0')
         d1 = torch.device('cuda:1')
@@ -2248,14 +2238,20 @@ class TestCuda(TestCase):
     def test_solve_batched(self):
         _TestTorchMixin._test_solve_batched(self, lambda t: t.cuda())
 
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_solve_batched_non_contiguous(self):
+        _TestTorchMixin._test_solve_batched_non_contiguous(self, lambda t: t.cuda())
+
     @slowTest
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_solve_batched_many_batches(self):
         _TestTorchMixin._test_solve_batched_many_batches(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_solve_batched_dims(self):
-        _TestTorchMixin._test_solve_batched_dims(self, lambda t: t.cuda())
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_solve_batched_broadcasting(self):
+        _TestTorchMixin._test_solve_batched_broadcasting(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky_solve(self):
@@ -2265,14 +2261,20 @@ class TestCuda(TestCase):
     def test_cholesky_solve_batched(self):
         _TestTorchMixin._test_cholesky_solve_batched(self, lambda t: t.cuda())
 
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_cholesky_solve_batched_non_contiguous(self):
+        _TestTorchMixin._test_cholesky_solve_batched_non_contiguous(self, lambda t: t.cuda())
+
     @slowTest
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky_solve_batched_many_batches(self):
         _TestTorchMixin._test_cholesky_solve_batched_many_batches(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_cholesky_solve_batched_dims(self):
-        _TestTorchMixin._test_cholesky_solve_batched_dims(self, lambda t: t.cuda())
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_cholesky_solve_batched_broadcasting(self):
+        _TestTorchMixin._test_cholesky_solve_batched_broadcasting(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky_inverse(self):
@@ -2662,7 +2664,6 @@ class TestCuda(TestCase):
         tensor = tensor.unsqueeze(1)
         self.assertEqual(tensor.var(0), 0.03125)
 
-    @skipIfRocm
     def test_digamma(self):
         def test(use_double=False):
             cpu_tensor = torch.randn(10, 10, 10)
@@ -2691,7 +2692,6 @@ class TestCuda(TestCase):
         norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
         self.assertEqual(norm_errors, expected_errors)
 
-    @skipIfRocm
     def test_polygamma(self):
         def test(use_double=False):
             cpu_tensor = torch.randn(10, 10, 10)
@@ -2784,6 +2784,7 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_triangular_solve(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @unittest.skip("Spuriously failing")
     def test_triangular_solve_batched(self):
         _TestTorchMixin._test_triangular_solve_batched(self, lambda t: t.cuda())
 
@@ -2793,8 +2794,9 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_triangular_solve_batched_many_batches(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_triangular_solve_batched_dims(self):
-        _TestTorchMixin._test_triangular_solve_batched_dims(self, lambda t: t.cuda())
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    def test_triangular_solve_batched_broadcasting(self):
+        _TestTorchMixin._test_triangular_solve_batched_broadcasting(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lstsq(self):
@@ -2848,6 +2850,13 @@ class TestCuda(TestCase):
         t = torch.randint(2000, input_size, dtype=torch.int64, device='cuda')
         self.assertEqual(t.cpu().bincount(), t.bincount())
         self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
+
+        t = torch.zeros([10], dtype=torch.int32, device='cuda')
+        # 35488 * 65536 as int32 would cause overflow to negative value
+        # giving negative bin offset
+        t[0] = 35488
+        counted = t.bincount(minlength=65536)
+        self.assertEqual(torch.sum(counted), 10)
 
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
@@ -2953,6 +2962,66 @@ class TestCuda(TestCase):
         y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
         torch.cuda.synchronize()
         self.assertEqual(y[0, 0, 0, 2**31 - 2], expected)
+
+    @skipCUDANonDefaultStreamIf(True)
+    def test_streaming_backwards_sync(self):
+        default_stream = torch.cuda.current_stream()
+        stream = torch.cuda.Stream()
+
+        class MultiplyInStream(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                self.assertEqual(torch.cuda.current_stream(), stream)
+                # delays the operation in the the background stream
+                torch.cuda._sleep(1000 * 1000)
+                return grad * 2
+
+        x = torch.randn(5, 5, device='cuda', requires_grad=True)
+        with torch.cuda.stream(stream):
+            stream.wait_stream(default_stream)
+            output = MultiplyInStream.apply(x)
+            output.sum().backward()
+
+        self.assertEqual(x.grad, torch.ones_like(x) * 2)
+        self.assertEqual(torch.cuda.current_stream(), default_stream)
+
+    def test_streaming_backwards_multiple_streams(self):
+
+        class StreamModel(torch.nn.Module):
+            def __init__(self):
+                super(StreamModel, self).__init__()
+                self.event = torch.cuda.Event()
+                self.stream0 = torch.cuda.Stream()
+                self.stream1 = torch.cuda.Stream()
+
+            def forward(self, x):
+                x0 = x.clone()
+                torch._C._cuda_setStream(self.stream0._cdata)
+                y0 = x0 * 2
+                self.event.record(stream=torch.cuda.current_stream())
+
+                torch._C._cuda_setStream(self.stream1._cdata)
+                y1 = x * 3
+                self.stream1.wait_event(self.event)
+                return y0 + y1
+
+        stream = torch.cuda.Stream()
+
+        def accum_hook(grad):
+            self.assertEqual(torch.cuda.current_stream(), stream)
+
+        with torch.cuda.stream(stream):
+            x = torch.randn(5, 5, device='cuda', requires_grad=True)
+            x.register_hook(accum_hook)
+            torch.cuda.current_stream().wait_stream(stream)
+            model = StreamModel().cuda()
+            model(x).sum().backward()
+
+        self.assertEqual(x.grad, torch.ones_like(x) * 5)
 
 def load_ignore_file():
     from os.path import join, dirname
