@@ -1,6 +1,6 @@
 import bisect
 import warnings
-import numpy
+import random
 
 from torch._utils import _accumulate
 from torch import randperm
@@ -323,7 +323,7 @@ class ChunkDataset(IterableDataset):
 
         # Internal state
         self._chunk_sampler_iter = iter(self.chunk_sampler)
-        self._cache = numpy.array([])
+        self._cache = []
         self._batch_size = 1
         self._min_cache = 1000
 
@@ -347,13 +347,13 @@ class ChunkDataset(IterableDataset):
             # Ignore EOF here because there may be internal cache entries to be returned yet
             try:
                 new_chunk = self.chunk_reader(next(self._chunk_sampler_iter))
-                assert isinstance(new_chunk, list) or isinstance(new_chunk, numpy.ndarray), "Chunk data reader must return a `list(samples)` or numpy.array(samples)"
+                assert isinstance(new_chunk, list), "Chunk data reader must return a `list(samples)`"
             except StopIteration:
                 pass
 
             # Updates internal cache
             if new_chunk and cache_size > 0:
-                self._cache = numpy.concatenate((self._cache, new_chunk))
+                self._cache = self._cache + new_chunk
             elif new_chunk:
                 self._cache = new_chunk
             elif not new_chunk and cache_size == 0:
@@ -361,7 +361,7 @@ class ChunkDataset(IterableDataset):
 
             # Apply second level of shuffling
             if self.shuffle_cache:
-                numpy.random.shuffle(self._cache)
+                random.shuffle(self._cache)
 
         # Get a batch and update internal cache cache
         if len(self._cache) > 0:
