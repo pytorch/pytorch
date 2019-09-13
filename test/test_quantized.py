@@ -1473,7 +1473,7 @@ class TestQNNPackOps(TestCase):
 
         np.testing.assert_array_almost_equal(result_ref_q.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=0)
 
-    """Tests the correctness of the quantized::qconv_unpack (fbgemm) op."""
+    """Tests the correctness of the quantized::qconv_unpack (qnnpack) op."""
     @given(X=hu.tensor_conv2d(min_batch=1, max_batch=3,
                               min_in_channels=1, max_in_channels=7,
                               min_out_channels=1, max_out_channels=7,
