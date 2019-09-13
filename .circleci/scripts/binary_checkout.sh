@@ -41,6 +41,9 @@ popd
 # Clone the Builder master repo
 git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
+git remote add pietern https://github.com/pietern/builder.git
+git fetch pietern
+git reset --hard pietern/macos-distributed
 echo "Using builder from "
 git --no-pager log --max-count 1
 popd
