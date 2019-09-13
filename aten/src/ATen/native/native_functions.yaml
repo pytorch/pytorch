@@ -35,6 +35,9 @@
 - func: set_data(Tensor(a!) self, Tensor new_data) -> void
   variants: method
 
+- func: data(Tensor self) -> Tensor
+  variants: method
+
 - func: names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
   named_guard: False

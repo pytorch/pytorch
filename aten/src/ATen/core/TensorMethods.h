@@ -73,6 +73,14 @@ inline void Tensor::set_data(const Tensor & new_data) const {
     return table->getOp<void (const Tensor &, const Tensor &)>(type_set())(const_cast<Tensor&>(*this), new_data);
 #endif
 }
+inline Tensor Tensor::data() const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::data(const_cast<Tensor&>(*this));
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::data(Tensor self) -> Tensor");
+    return table->getOp<Tensor (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+#endif
+}
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor & Tensor::names_(c10::optional<DimnameList> names) const {
 #ifdef USE_STATIC_DISPATCH
