@@ -14,12 +14,53 @@
 namespace torch {
 namespace jit {
 
-JitLoggingLevels jit_log_level() {
+static std::unordered_map<std::string, size_t>
+parseJITLogOption(const char *option) {
+
+  std::stringstream in_ss;
+  in_ss << "function:";
+  if (option) {
+    in_ss << option;
+  }
+
+  std::unordered_map<std::string, size_t> files_to_levels;
+  std::string line;
+  while (std::getline(in_ss, line, ':')) {
+    if (line.size() == 0) {
+      continue;
+    }
+
+    auto index_at = line.find_last_of('>');
+    auto begin_index = index_at == std::string::npos ? 0 : index_at + 1;
+    size_t logging_level = index_at == std::string::npos ? 1 : index_at + 2;
+    auto end_index = line.find_last_of('.') == std::string::npos
+                         ? line.size()
+                         : line.find_last_of('.');
+    auto filename = line.substr(begin_index, end_index - begin_index);
+    files_to_levels.insert({filename, logging_level});
+  }
+
+  return files_to_levels;
+}
+
+bool is_enabled(const char *cfname, JitLoggingLevels level) {
+
   static const char* c_log_level = std::getenv("PYTORCH_JIT_LOG_LEVEL");
-  static const JitLoggingLevels log_level = c_log_level
-      ? static_cast<JitLoggingLevels>(std::atoi(c_log_level))
-      : JitLoggingLevels::OFF;
-  return log_level;
+  static const std::unordered_map<std::string, size_t> files_to_levels =
+      parseJITLogOption(c_log_level);
+  std::string fname{cfname};
+  fname = c10::detail::StripBasename(fname);
+  auto end_index = fname.find_last_of('.') == std::string::npos
+                       ? fname.size()
+                       : fname.find_last_of('.');
+  auto fname_no_ext = fname.substr(0, end_index);
+
+  auto it = files_to_levels.find(fname_no_ext);
+  if (it == files_to_levels.end()) {
+    return false;
+  }
+
+  return level <= static_cast<JitLoggingLevels>(it->second);
 }
 
 // Unfortunately, in `GraphExecutor` where `log_function` is invoked
@@ -69,9 +110,6 @@ std::string jit_log_prefix(
 
 std::ostream& operator<<(std::ostream& out, JitLoggingLevels level) {
   switch (level) {
-    case JitLoggingLevels::OFF:
-      TORCH_INTERNAL_ASSERT("UNREACHABLE");
-      break;
     case JitLoggingLevels::GRAPH_DUMP:
       out << "DUMP";
       break;
