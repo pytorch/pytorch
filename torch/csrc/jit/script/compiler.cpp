@@ -112,9 +112,13 @@ struct RefinementSet {
 
  private:
   static Refinements unionList(const Refinements& a, const Refinements& b) {
-    Refinements result;
-    result.insert(result.end(), a.begin(), a.end());
-    result.insert(result.end(), b.begin(), b.end());
+    Refinements result = a;
+    for (const Refinement& r : b) {
+      auto it = std::find(a.begin(), a.end(), r);
+      if (it == a.end()) {
+        result.push_back(r);
+      }
+    }
     return result;
   }
 
@@ -944,11 +948,12 @@ struct to_ir {
     // statement must be var {is, is not} None
     auto name = Var(lhs).name().name();
     // XXX - while it should in theory be possible to specialize
-    // the `x is None` to know x has type none, we have previously not
+    // the `x is None` to know x has type NoneType, we have previously not
     // done this. Unfortunately, doing this will make the type None
     // propagate further in all loaded models. The handling of
     // unwrap_optional will fail in these cases since export did
-    // not expect that the input would be none. To enable this,
+    // not expect that the input would be none and an unannotated None.
+    // cannot be passed to unwrapoptional To enable this,
     // we need to (1) implement a real casting operator
     // annotated(T, X) that stays in the graph and does the cast
     // and (2) only enable this OPTIONAL_NONE when loading newer
@@ -1245,6 +1250,23 @@ struct to_ir {
       const CondValue& cond_value,
       const List<Stmt>& trueBranch,
       const List<Stmt>& falseBranch) {
+    // this is a static if statement: that is, it contains a subset
+    // of operators where we are willing to specialize the if statement
+    // to be only the true or false branch when the condition is statically
+    // known. This is used to meta-program modules, for instance, when a
+    // submodule is absent, an is None check can be used to ensure the
+    // accesses to the None check, which would error, are not compiled.
+    if (cond_value.staticIf()) {
+      if (*cond_value.staticIf()) {
+        insertRefinements(loc, cond_value.refinements());
+        emitStatements(trueBranch);
+      } else {
+        insertRefinements(loc, cond_value.refinements().Not());
+        emitStatements(falseBranch);
+      }
+      return;
+    }
+
     Value* cond_value_bool = emitToBool(cond_value.value());
     Node* n = graph->insertNode(create(prim::If, loc, 0));
     n->addInput(cond_value_bool);
@@ -1451,23 +1473,6 @@ struct to_ir {
   void emitIf(const If& stmt) {
     Expr cond = stmt.cond();
     CondValue cond_value = emitCondExpr(cond);
-    // this is a static if statement: that is, it contains a subset
-    // of operators where we are willing to specialize the if statement
-    // to be only the true or false branch when the condition is statically
-    // known. This is used to meta-program modules, for instance, when a
-    // submodule is absent, an is None check can be used to ensure the
-    // accesses to the None check, which would error, are not compiled.
-    if (cond_value.staticIf()) {
-      if (*cond_value.staticIf()) {
-        insertRefinements(stmt.range(), cond_value.refinements());
-        emitStatements(stmt.trueBranch());
-      } else {
-        insertRefinements(stmt.range(), cond_value.refinements().Not());
-        emitStatements(stmt.falseBranch());
-      }
-      return;
-    }
-
     emitIfElseBlocks(
         stmt.range(), cond_value, stmt.trueBranch(), stmt.falseBranch());
   }
