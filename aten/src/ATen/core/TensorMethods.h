@@ -1060,7 +1060,7 @@ inline Tensor Tensor::index(TensorList indices) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::index(const_cast<Tensor&>(*this), indices);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::index(Tensor self, Tensor?[] indices) -> Tensor");
+    static auto table = globalATenDispatch().getOpTable("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor");
     return table->getOp<Tensor (const Tensor &, TensorList)>(type_set())(const_cast<Tensor&>(*this), indices);
 #endif
 }
