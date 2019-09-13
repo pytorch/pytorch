@@ -1914,16 +1914,13 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
 
 
 def meshgrid(g, tensor_list):
-    tensors = sym_help._unpack_list(tensor_list)
-    tensors_shape = [g.op("Shape", view(g, t, torch.LongTensor([-1]))) for t in tensors]
+    tensors = [view(g, t, torch.LongTensor([-1])) for t in sym_help._unpack_list(tensor_list)]
+    tensors_shape = [g.op("Shape", t) for t in tensors]
     out_shape = g.op("Concat", *tensors_shape, axis_i=0)
     out = []
     for i, t in enumerate(tensors):
-        if t.isCompleteTensor():
-            shape_i = [g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))] * len(tensors)
-            shape_i[i] = g.op("Shape", t)
-            t_reshaped = _reshape_from_tensor(g, t,  g.op("Concat", *shape_i, axis_i=0))
-            out.append(g.op("Expand", t_reshaped, out_shape))
-        else:
-            _unimplemented("meshgrid", "Unknown input shape. Cannot compute meshgird dimensions.")
+        shape_i = [g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))] * len(tensors)
+        shape_i[i] = g.op("Shape", t)
+        t_reshaped = _reshape_from_tensor(g, t, g.op("Concat", *shape_i, axis_i=0))
+        out.append(g.op("Expand", t_reshaped, out_shape))
     return g.op("prim::ListConstruct", *out)
