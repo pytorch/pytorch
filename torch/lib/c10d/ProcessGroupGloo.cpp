@@ -1,5 +1,8 @@
 #include <c10d/ProcessGroupGloo.hpp>
 
+#include <netdb.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <gloo/allgather.h>
@@ -300,6 +303,43 @@ void ProcessGroupGloo::RecvWork::wait() {
 ProcessGroupGloo::Options::Options()
     : timeout(std::chrono::milliseconds(10 * 1000)), threads(2) {}
 
+namespace {
+
+// Gloo assumes that this machine's hostname can always be resolved
+// to an address. If it doesn't it throws a runtime error saying
+// that it can't be resolved. Instead of catching it, we choose
+// to proactively check if an address can be resolved, so we can
+// gracefully fall back to an alternative if it doesn't.
+bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  struct addrinfo* result;
+  auto rv = getaddrinfo(hostname.c_str(), nullptr, &hints, &result);
+  if (rv < 0) {
+    return false;
+  }
+  struct addrinfo* rp;
+  for (rp = result; rp != nullptr; rp = rp->ai_next) {
+    auto fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+    if (fd == -1) {
+      continue;
+    }
+    rv = bind(fd, rp->ai_addr, rp->ai_addrlen);
+    if (rv == -1) {
+      close(fd);
+      continue;
+    }
+    close(fd);
+    break;
+  }
+  freeaddrinfo(result);
+  return rp != nullptr;
+}
+
+} // namespace
+
 #ifdef __linux__
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDeviceForInterface(const std::string& interface) {
@@ -322,21 +362,12 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDeviceForHostname(const std::string& hostname) {
   ::gloo::transport::tcp::attr attr;
-
-  if (hostname.empty()) {
-    // Use the hostname to resolve the network address to
-    // use. Note: if the hostname does not resolve to an address (e.g.
-    // because of misconfigured /etc/hosts file), this will not work.
-    std::array<char, HOST_NAME_MAX> buffer{};
-    auto rv = gethostname(buffer.data(), buffer.size());
-    if (rv != 0) {
-      throw std::system_error(errno, std::system_category());
-    }
-    attr.hostname = buffer.data();
-  } else {
-    attr.hostname = hostname;
-  }
-
+  attr.hostname = hostname;
+  TORCH_CHECK(
+      doesHostnameResolveToUsableAddress(attr.hostname),
+      "Cannot resolve ",
+      hostname,
+      " to a (local) address");
   return ::gloo::transport::tcp::CreateDevice(attr);
 }
 #endif
@@ -345,23 +376,64 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDeviceForHostname(const std::string& hostname) {
   ::gloo::transport::uv::attr attr;
+  attr.hostname = hostname;
+  TORCH_CHECK(
+      doesHostnameResolveToUsableAddress(attr.hostname),
+      "Cannot resolve ",
+      hostname,
+      " to a (local) address");
+  return ::gloo::transport::uv::CreateDevice(attr);
+}
+#endif
 
-  if (hostname.empty()) {
-    // Use the hostname to resolve the network address to
-    // use. Note: if the hostname does not resolve to an address (e.g.
-    // because of misconfigured /etc/hosts file), this will not work.
-    const auto hostNameMax = sysconf(_SC_HOST_NAME_MAX);
-    auto buffer = std::unique_ptr<char[]>(new char[hostNameMax]);
-    auto rv = gethostname(buffer.get(), hostNameMax);
-    if (rv != 0) {
-      throw std::system_error(errno, std::system_category());
-    }
-    attr.hostname = buffer.get();
-  } else {
-    attr.hostname = hostname;
+#ifdef __linux__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDefaultDevice() {
+  ::gloo::transport::tcp::attr attr;
+
+  // Use the hostname to resolve the network address to
+  // use. Note: if the hostname does not resolve to an address (e.g.
+  // because of misconfigured /etc/hosts file), this will not work.
+  std::array<char, HOST_NAME_MAX> buffer{};
+  auto rv = gethostname(buffer.data(), buffer.size());
+  if (rv != 0) {
+    throw std::system_error(errno, std::system_category());
+  }
+  attr.hostname = buffer.data();
+
+  // Use this machine's hostname if it resolves to an address.
+  if (doesHostnameResolveToUsableAddress(attr.hostname)) {
+    return ::gloo::transport::tcp::CreateDevice(attr);
   }
 
-  return ::gloo::transport::uv::CreateDevice(attr);
+  // Otherwise, use the loopback interface.
+  return createDeviceForInterface("lo");
+}
+#endif
+
+#ifdef __APPLE__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDefaultDevice() {
+  ::gloo::transport::uv::attr attr;
+
+  // Use the hostname to resolve the network address to
+  // use. Note: if the hostname does not resolve to an address (e.g.
+  // because of misconfigured /etc/hosts file), this will not work.
+  const auto hostNameMax = sysconf(_SC_HOST_NAME_MAX);
+  auto buffer = std::unique_ptr<char[]>(new char[hostNameMax]);
+  auto rv = gethostname(buffer.get(), hostNameMax);
+  if (rv != 0) {
+    throw std::system_error(errno, std::system_category());
+  }
+  attr.hostname = buffer.get();
+
+  // Use this machine's hostname if it resolves to an address.
+  if (doesHostnameResolveToUsableAddress(attr.hostname)) {
+    return ::gloo::transport::uv::CreateDevice(attr);
+  }
+
+  // Otherwise, use the loopback interface.
+  return createDeviceForInterface("lo0");
 }
 #endif
 
