@@ -12,7 +12,7 @@ Pod::Spec.new do |s|
     s.default_subspec = 'Core'
     s.subspec 'Core' do |ss|
         ss.dependency 'LibTorch/Torch'
-        ss.source_files = 'src/*.{h,cpp,cc}'
+        ss.source_files = 'src/*.{h,cpp,c,cc}'
         ss.public_header_files = ['src/LibTorch.h']
     end
     s.subspec 'Torch' do |ss|
