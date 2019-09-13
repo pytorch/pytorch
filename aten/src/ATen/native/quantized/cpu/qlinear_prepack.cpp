@@ -15,7 +15,7 @@ CAFFE_KNOWN_TYPE(PackedLinearWeight);
 #endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
 // Required for cpp_custom_type_hack to work
-CAFFE_KNOWN_TYPE(PackedFCWeights);
+CAFFE_KNOWN_TYPE(PackedLinearWeightsQnnp);
 #endif // USE_PYTORCH_QNNPACK
 } // namespace caffe2
 
@@ -151,16 +151,17 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
 
     initQNNPACK();
 
-    auto wt_ptr = guts::make_unique<PackedFCWeights>(
-        PackedFCWeights{guts::make_unique<qnnpack::PackBMatrix>(
-                            cols_w /* input_channels */,
-                            rows_w /* output_channels */,
-                            weight.q_zero_point(),
-                            weight.q_scale(),
-                            (uint8_t*)weight_contig.data_ptr<c10::quint8>(),
-                            (int32_t*)bias_contig.data_ptr<c10::qint32>()),
-                        weight.q_scale(),
-                        weight.q_zero_point()});
+    auto wt_ptr =
+        guts::make_unique<PackedLinearWeightsQnnp>(PackedLinearWeightsQnnp{
+            guts::make_unique<qnnpack::PackBMatrix>(
+                cols_w /* input_channels */,
+                rows_w /* output_channels */,
+                weight.q_zero_point(),
+                weight.q_scale(),
+                (uint8_t*)weight_contig.data_ptr<c10::quint8>(),
+                (int32_t*)bias_contig.data_ptr<c10::qint32>()),
+            weight.q_scale(),
+            weight.q_zero_point()});
     return cpp_custom_type_hack::create(std::move(wt_ptr), weight.options());
   }
 #endif

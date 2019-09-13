@@ -9,7 +9,7 @@ struct QnnpackOperatorDeleter {
     pytorch_qnnp_delete_operator(op);
   }
 };
-struct PackedFCWeights {
+struct PackedLinearWeightsQnnp {
   std::unique_ptr<qnnpack::PackBMatrix> w;
   double w_scale;
   int64_t w_zp;

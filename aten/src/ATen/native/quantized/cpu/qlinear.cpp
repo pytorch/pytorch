@@ -236,7 +236,8 @@ class QLinearInt8 final : public torch::OperatorKernel {
         "quantized::linear(): Input tensor rank should be >= 2");
     auto input_contig = input.contiguous();
 
-    auto& pack_ptr = cpp_custom_type_hack::cast<PackedFCWeights>(packed_weight);
+    auto& pack_ptr =
+        cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(packed_weight);
     auto packB = pack_ptr.w.get();
     auto kernel_zp = pack_ptr.w_zp;
     auto kernel_scale = pack_ptr.w_scale;
