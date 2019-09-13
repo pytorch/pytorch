@@ -29,7 +29,7 @@ from .gen_autograd_functions import uses_single_grad
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward', 'set_data'
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward', 'set_data', 'data'
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -153,7 +153,7 @@ ${return_type} VariableType::${api_name}(${type_method_formals}) {
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
-.registerVariableOp<${return_type} (${formal_types})>("${schema_string}", &VariableType::${api_name})
+.registerOp<${return_type} (${formal_types})>(TensorTypeId::VariableTensorId, "${schema_string}", &VariableType::${api_name})
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
