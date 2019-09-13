@@ -1,5 +1,5 @@
-/** \brief Fusing linear patterns as single at::linear for easier pattern matching
- *  in later passes
+/** \brief Fusing linear patterns as single at::linear for easier pattern
+ * matching in later passes
  */
 #pragma once
 
@@ -13,5 +13,5 @@ namespace jit {
  * This pass can be deleted once the JIT can emit the aten::linear in the future
  */
 TORCH_API void FuseLinear(std::shared_ptr<Graph>& graph);
-
-}} // torch::jit
+} // namespace jit
+} // namespace torch
