@@ -13340,9 +13340,17 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(result, expected)
 
     @dtypes(torch.float, torch.double, torch.long, torch.int, torch.short,
-            torch.uint8, torch.int8)
+            torch.uint8, torch.int8, torch.bool)
     def test_neg(self, device, dtype):
         float_types = [torch.float, torch.double, torch.long]
+
+        if dtype == torch.bool:
+            self.assertRaisesRegex(
+                RuntimeError,
+                r"Negation, the `\-` operator, on a bool tensor is not supported. "
+                r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
+                lambda: - torch.tensor([False, True], device=device))
+            return
 
         if dtype in float_types:
             a = torch.randn(100, 90).type(dtype).to(device)
@@ -13366,13 +13374,6 @@ class TestTorchDeviceType(TestCase):
         # test via __neg__ operator
         res_neg_op = -a.clone()
         self.assertEqual(res_neg_op, res_add)
-
-        # bool
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"Negation, the `\-` operator, on a bool tensor is not supported. "
-            r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
-            lambda: - torch.tensor([False, True], device=device))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
