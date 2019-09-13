@@ -83,7 +83,7 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
   constexpr int VLEN = 8;
   constexpr auto min_val = std::numeric_limits<typename T::underlying>::min();
   constexpr auto max_val = std::numeric_limits<typename T::underlying>::max();
-  std::size_t i = 0;
+  int i = 0;
   __m256 inverse_scale_v = _mm256_set1_ps(inverse_scale);
   __m256i permute_mask_v =
       _mm256_set_epi32(0x07, 0x03, 0x06, 0x02, 0x05, 0x01, 0x04, 0x00);
