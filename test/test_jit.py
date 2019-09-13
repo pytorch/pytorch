@@ -1123,7 +1123,7 @@ graph(%x : Tensor,
                    .run(str(m._c._get_module('conv')._get_method('conv2d_forward').graph))
 
     def test_quant_fusion(self):
-        input_str = """
+        input_strs = ["""
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
 %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
@@ -1151,12 +1151,40 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %r_intrepr = aten::int_repr(%r_quant)
         # CHECK: aten::_dequantize_linear
         %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_dequant)
-)
-"""
-        graph = parse_ir(input_str)
-        torch._C._jit_pass_quant_fusion(graph)
-        FileCheck().run(input_str, graph)
+        return (%r_dequant)""",
+                      """
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
+%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype):
+        %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
+        # CHECK-NOT: aten::int_repr
+        %a_intrepr = aten::int_repr(%a_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %w_quant = aten::quantize_linear(%w, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::int_repr
+        %w_intrepr = aten::int_repr(%w_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::int_repr
+        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
+        %b_intrepr = aten::int_repr(%b_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
+        # CHECK: quantized::fbgemm_linear_prepack
+        # CHECK: quantized::fbgemm_linear
+        # CHECK-NOT: aten::linear
+        %r = aten::linear(%a_dequant, %w_dequant, %b_dequant)
+        # CHECK-NOT: aten::quantize_linear
+        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        # CHECK: aten::int_repr
+        %r_intrepr = aten::int_repr(%r_quant)
+        # CHECK: aten::_dequantize_linear
+        %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_dequant)"""]
+        for input_str in input_strs:
+            graph = parse_ir(input_str)
+            torch._C._jit_pass_quant_fusion(graph)
+            FileCheck().run(input_str, graph)
 
     @_tmp_donotuse_dont_inline_everything
     def test_foldbn_trivial(self):

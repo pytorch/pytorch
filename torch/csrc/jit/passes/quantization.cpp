@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/quantization.h>
-#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/irparser.h>
@@ -128,7 +129,7 @@ Node* insertObserver(
   std::string observer_name = "observer_for_" + v->debugName();
   // Temporary workaround to skip inserting duplicate modules,
   // full support will come in next PR
-  for (script::Slot s: module.get_module_slots()) {
+  for (script::Slot s : module.get_module_slots()) {
     if (s.name() == observer_name) {
       return nullptr;
     }
@@ -257,14 +258,20 @@ void InsertObserversImpl(
             TORCH_INTERNAL_ASSERT(
                 child_module,
                 "Child module " + child_module_name + " does not exist");
-            // Recursively insert observer for the forward function of child module
-            InsertObserversImpl(child_module.value(), module_method_name, module_qconfig_map, values_to_skip);
+            // Recursively insert observer for the forward function of child
+            // module
+            InsertObserversImpl(
+                child_module.value(),
+                module_method_name,
+                module_qconfig_map,
+                values_to_skip);
           } else {
             TORCH_INTERNAL_ASSERT(
                 module_instance == graph->inputs()[0],
                 "We only support call method either on %self"
                 "or child instance in insert_observers_pass right now");
-            InsertObserversImpl(module, module_method_name, module_qconfig_map, values_to_skip);
+            InsertObserversImpl(
+                module, module_method_name, module_qconfig_map, values_to_skip);
           }
         }
       }
@@ -366,7 +373,8 @@ class QuantizeHelper {
  public:
   QuantizeHelper(const script::Module& m) : module_(m) {}
   IValue getQParams(Value* v);
-  c10::optional<script::Module> findChildModuleToQuantize(Value* child_instance);
+  c10::optional<script::Module> findChildModuleToQuantize(
+      Value* child_instance);
   void quantizeBias(Value* v);
   void quantizeTensor(Value* v, bool insert_after = true);
   void removeObserver(Value* v, const std::string& observer_name);
@@ -489,7 +497,7 @@ c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
     TORCH_INTERNAL_ASSERT(
         child_module,
         "InsertQuantDeQuant - Child module " + child_module_name +
-        " does not exist");
+            " does not exist");
     return child_module;
   }
   return c10::nullopt;
@@ -558,7 +566,6 @@ void InsertQuantDeQuantImpl(
 
   qh.destroyNodes();
 }
-
 } // namespace
 
 TORCH_API void InsertObservers(
@@ -566,14 +573,9 @@ TORCH_API void InsertObservers(
     const std::string& method_name,
     const QConfigDict& qconfig_dict) {
   ModuleQConfigMap module_qconfig_map;
-  fillQConfigMap(module,
-                 qconfig_dict,
-                 module_qconfig_map);
+  fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   std::unordered_set<Value*> values_to_skip;
-  InsertObserversImpl(module,
-                      method_name,
-                      module_qconfig_map,
-                      values_to_skip);
+  InsertObserversImpl(module, method_name, module_qconfig_map, values_to_skip);
 }
 
 script::Module InsertQuantDeQuant(
@@ -602,7 +604,11 @@ void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph) {
-  std::string pattern = R"(
+  // First fuse aten::linear op
+  FuseLinear(graph);
+  const std::unordered_map<std::string, std::string> pattern_and_replacements =
+      {// quantized::conv2d
+       {R"(
 graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_intrepr = aten::int_repr(%a_quant)
         %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
@@ -612,9 +618,8 @@ graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale,
         %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b_dequant, %c, %d, %e, %f)
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_quant))";
-
-  std::string replacement = R"(
+        return (%r_quant))",
+        R"(
 graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %0 : int = prim::Constant[value=0]()
         %1 : int = prim::Constant[value=1]()
@@ -627,10 +632,38 @@ graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale,
         %r = quantized::conv2d(%a_perm, %w_packed, %b_quant, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
         %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
         %r_perm = aten::permute(%r, %out_param)
-        return (%r_perm))";
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(pattern, replacement);
-  rewriter.runOnGraph(graph);
+        return (%r_perm))"},
+       // quantized::linear
+       {R"(
+graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype):
+        %a_intrepr = aten::int_repr(%a_quant)
+        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %w_intrepr = aten::int_repr(%w_quant)
+        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        %b_intrepr = aten::int_repr(%b_quant)
+        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
+        %r = aten::linear(%a_dequant, %w_dequant, %b_dequant)
+        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant))",
+        R"(
+graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype):
+        %0 : int = prim::Constant[value=0]()
+        %1 : int = prim::Constant[value=1]()
+        %2 : int = prim::Constant[value=2]()
+        %3 : int = prim::Constant[value=3]()
+        %in_param : int[] = prim::ListConstruct(%0, %2, %3, %1)
+        %a_perm : Tensor = aten::permute(%a_quant, %in_param)
+        %w_perm : Tensor = aten::permute(%w_quant, %in_param)
+        %w_packed = quantized::fbgemm_linear_prepack(%w_perm)
+        %r = quantized::fbgemm_linear(%a_perm, %w_packed, %b_quant, %r_scale, %r_zero_point)
+        %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
+        %r_perm = aten::permute(%r, %out_param)
+        return (%r_perm))"}};
+  for (const auto& item : pattern_and_replacements) {
+    SubgraphRewriter rewriter;
+    rewriter.RegisterRewritePattern(item.first, item.second);
+    rewriter.runOnGraph(graph);
+  }
 }
 
 struct ConvBNParameters {
@@ -792,6 +825,5 @@ graph(%self, %x):
     }
   }
 }
-
 } // namespace jit
 } // namespace torch
