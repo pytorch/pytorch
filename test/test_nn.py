@@ -5988,6 +5988,14 @@ class TestNN(NNTestCase):
 
             (hx + cx).sum().backward()
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_pack_sequence_batch_sizes_throw(self):
+        with self.assertRaisesRegex(ValueError, r"batch_sizes should always be on CPU"):
+            m = nn.LSTM(3, 4, bidirectional=True, num_layers=2).to('cuda')
+            a = torch.rand(5, 3, device='cuda')
+            b = torch.tensor([1, 1, 1, 1, 1], device='cuda')
+            input = nn.utils.rnn.PackedSequence(a, b)
+
     def test_Transformer_cell(self):
         # this is just a smoke test; these modules are implemented through
         # autograd so no Jacobian test is needed
