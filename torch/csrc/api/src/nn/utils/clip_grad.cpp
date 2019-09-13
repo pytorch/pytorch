@@ -34,7 +34,9 @@ float clip_grad_norm_(
     }
     total_norm = std::pow(total_norm, 1.0 / norm_type);
   }
-  auto clip_coef = max_norm / (total_norm + 1e-6);
+
+  const auto EPS = 1e-6;
+  auto clip_coef = max_norm / (total_norm + EPS);
   if (clip_coef < 1) {
     for (auto& param : params_with_grad) {
       param.grad().mul_(clip_coef);
