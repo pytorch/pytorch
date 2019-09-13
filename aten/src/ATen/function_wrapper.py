@@ -113,10 +113,10 @@ ${return_type} ${Type}::${api_name}(${type_method_formals}) {
 """)
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-.registerOp<${return_type} (${formals_types})>(Backend::Undefined, "${schema_string}", &TypeDefault::${api_name})
+.registerOp<${return_type} (${formals_types})>(TensorTypeId::UndefinedTensorId, "${schema_string}", &TypeDefault::${api_name})
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-.registerOp<${return_type} (${formals_types})>(Backend::${Backend}, "${schema_string}", &${Type}::${api_name})
+.registerOp<${return_type} (${formals_types})>(TensorTypeId::${Backend}TensorId, "${schema_string}", &${Type}::${api_name})
 """)
 
 # Generate a file that lists all functions and their schema string. Used for XLA
@@ -129,13 +129,14 @@ TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
 # add non-virtual declaration to Tensor.cpp
+# TODO: This will need to be adjusted for multiple dispatch
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(tensorTypeIdToBackend(type_id()), is_variable())(${method_actuals});
+    return table->getOp<${return_type} (${formals_types})>(type_set())(${method_actuals});
 #endif
 }
 """)
@@ -154,7 +155,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     ${static_dispatch_function_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_backend}, ${inferred_is_variable})(${native_actuals});
+    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${native_actuals});
 #endif
 }
 """)
@@ -165,10 +166,10 @@ STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
 ${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
-switch(${backend}) {
+switch(tensorTypeIdToBackend(impl::dispatchTypeId(${type_set}))) {
     ${static_dispatch_function_switches}
     default:
-        AT_ERROR("${api_name} not implemented for ", at::toString(${backend}));
+        AT_ERROR("${api_name} not implemented for ", at::toString(${type_set}));
 }
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT = CodeTemplate("""\
@@ -188,9 +189,9 @@ static inline ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_function_body}
 #else
-    globalLegacyTypeDispatch().initForBackend(${inferred_backend});
+    globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_backend}, ${inferred_is_variable})(${native_actuals});
+    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${native_actuals});
 #endif
 }
 """)
@@ -396,13 +397,11 @@ ALLOC_WRAP = {
 # Replacements for constants when calling into TH
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${ScalarType}'),
-    ('__last_dim', 'self.ndimension()-1'),
 ]
 
 # Replacements for constants in header file function definitions
 HEADER_CONSTANT_REPLACEMENTS = [
     (r'AS_REAL\((.*)\)', r'\1'),
-    ('__last_dim', '-1'),
 ]
 
 
@@ -550,8 +549,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals_with_defaults': List[str],
     'formals': List[str],
     'formals_types': List[str],
-    'inferred_backend': str,
-    'inferred_is_variable': str,
+    'inferred_type_set': str,
     'inplace': bool,
     'matches_jit_signature': bool,
     # This controls whether or not we generate the interface in Type or
@@ -1094,6 +1092,18 @@ def create_generic(top_env, declarations):
             # type: (Any) -> FunctionCode
             if isinstance(type_method_dispatch, dict):
                 static_dispatch_function_switches = []
+                # NB: As this code is currently written, there will NEVER be
+                # a backend generated for variable dispatch.  There is nothing
+                # stopping us from actually implementing this, however, if you
+                # really wanted variable on mobile, there's nothing stopping
+                # you from implementing this (however, you would have an
+                # annoying phase problem, since code generation for variable
+                # happens in tools/ which happens later than here.)
+                #
+                # If you pass in a variable to the dispatch, and variable is
+                # enabled, this switch will fail.  This is intentional: you
+                # probably need to disable variable globally in the mobile
+                # calling code.
                 for backend in static_dispatch_backends:
                     if backend in type_method_dispatch:
                         static_dispatch_function_switches.append(STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT.substitute(
@@ -1103,7 +1113,7 @@ def create_generic(top_env, declarations):
                             native_arguments=option['method_actuals']))
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
-                    backend='tensorTypeIdToBackend(type_id())',
+                    type_set='type_set()',
                     static_dispatch_function_switches=static_dispatch_function_switches)
             else:
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
@@ -1116,15 +1126,13 @@ def create_generic(top_env, declarations):
         def gen_namespace_function(option, dispatch_tensor, dispatch_options):
             # type: (Any, Optional[str], Any) -> FunctionCode
             if dispatch_tensor:
-                option['inferred_backend'] = 'at::detail::infer_backend({})'.format(dispatch_tensor)
-                option['inferred_is_variable'] = 'at::detail::infer_is_variable({})'.format(dispatch_tensor)
+                option['inferred_type_set'] = 'at::detail::infer_tensor_type_set({})'.format(dispatch_tensor)
             elif dispatch_options:
-                option['inferred_backend'] = '{}.backend()'.format(dispatch_options['name'])
-                option['inferred_is_variable'] = '{}.is_variable()'.format(dispatch_options['name'])
+                option['inferred_type_set'] = '{}.type_set()'.format(dispatch_options['name'])
             else:
-                # doesn't depend on a specific backend, use CPU
-                option['inferred_backend'] = 'Backend::CPU'
-                option['inferred_is_variable'] = 'false'
+                # doesn't depend on a specific backend, use the empty set
+                # TODO: Does this actually work?
+                option['inferred_type_set'] = 'TensorTypeSet()'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
 
@@ -1139,7 +1147,7 @@ def create_generic(top_env, declarations):
                             native_arguments=option['native_actuals']))
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
-                    backend=option['inferred_backend'],
+                    type_set=option['inferred_type_set'],
                     static_dispatch_function_switches=static_dispatch_function_switches)
             else:
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
@@ -1156,7 +1164,8 @@ def create_generic(top_env, declarations):
         # TensorBody.h, TensorMethods.h) is checked into the repo and must be
         # the same regardless of BUILD_NAMEDTENSOR status.
         is_named_tensor_only = (has_named_tensor_formals(formals) or
-                                option['api_name'] == 'align_tensors')
+                                option['api_name'] == 'align_tensors' or
+                                option['api_name'] == 'align_as')
 
         def check_namedtensor_enabled(code):
             if is_named_tensor_only:
