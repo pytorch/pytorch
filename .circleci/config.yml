@@ -40,61 +40,64 @@ setup_ci_environment: &setup_ci_environment
   name: Set Up CI Environment After attach_workspace
   no_output_timeout: "1h"
   command: ~/workspace/.circleci/scripts/setup_ci_environment.sh
+commands:
+  brew_update:
+    description: "Update Homebrew and install base formulae"
+    steps:
+      - run:
+          name: Update Homebrew
+          no_output_timeout: "10m"
+          command: |
+            set -ex
 
-# Installs expect and moreutils so that we can call `unbuffer` and `ts`.
-# Also installs OpenMP
-# !!!!NOTE!!!! this is copied into a binary_macos_brew_update job which is the
-# same but does not install libomp. If you are changing this, consider if you
-# need to change that step as well.
-macos_brew_update: &macos_brew_update
-  name: Brew update and install moreutils, expect and libomp
-  no_output_timeout: "1h"
-  command: |
-    set -ex
+            # Update repositories manually.
+            # Running `brew update` produces a comparison between the
+            # current checkout and the updated checkout, which takes a
+            # very long time because the existing checkout is 2y old.
+            for path in $(find /usr/local/Homebrew -type d -name .git)
+            do
+            cd $path/..
+            git fetch --depth=1 origin
+            git reset --hard origin/master
+            done
 
-    # Update repositories manually
-    for path in $(find /usr/local/Homebrew -type d -name .git)
-    do
-      cd $path/..
-      git fetch --depth=1 origin
-      git reset --hard origin/master
-    done
+            export HOMEBREW_NO_AUTO_UPDATE=1
 
-    export HOMEBREW_NO_AUTO_UPDATE=1
+            # Install expect and moreutils so that we can call `unbuffer` and `ts`.
+            # moreutils installs a `parallel` executable by default, which conflicts
+            # with the executable from the GNU `parallel`, so we must unlink GNU
+            # `parallel` first, and relink it afterwards.
+            brew unlink parallel
+            brew install moreutils
+            brew link parallel --overwrite
+            brew install expect
 
-    # moreutils installs a `parallel` executable by default, which conflicts
-    # with the executable from the GNU `parallel`, so we must unlink GNU
-    # `parallel` first, and relink it afterwards
-    brew unlink parallel
-    brew install moreutils
-    brew link parallel --overwrite
-    brew install expect
-    brew install libomp
+  brew_install:
+    description: "Install Homebrew formulae"
+    parameters:
+      formulae:
+        type: string
+        default: ""
+    steps:
+      - run:
+          name: Install << parameters.formulae >>
+          no_output_timeout: "10m"
+          command: |
+            set -ex
+            export HOMEBREW_NO_AUTO_UPDATE=1
+            brew install << parameters.formulae >>
 
-ios_brew_update: &ios_brew_update
-  name: Brew update and install iOS toolchains
-  no_output_timeout: "1h"
-  command: |
-    set -ex
+  run_brew_for_macos_build:
+    steps:
+      - brew_update
+      - brew_install:
+          formulae: libomp
 
-    # Update repositories manually
-    for path in $(find /usr/local/Homebrew -type d -name .git)
-    do
-      cd $path/..
-      git fetch --depth=1 origin
-      git reset --hard origin/master
-    done
-
-    export HOMEBREW_NO_AUTO_UPDATE=1
-
-    # moreutils installs a `parallel` executable by default, which conflicts
-    # with the executable from the GNU `parallel`, so we must unlink GNU
-    # `parallel` first, and relink it afterwards
-    brew unlink parallel
-    brew install moreutils
-    brew link parallel --overwrite
-    brew install expect
-    brew install libtool
+  run_brew_for_ios_build:
+    steps:
+      - brew_update
+      - brew_install:
+          formulae: libtool
 
 ##############################################################################
 # Binary build (nightlies nightly build) defaults
@@ -145,26 +148,6 @@ binary_run_in_docker: &binary_run_in_docker
   # This step only runs on circleci linux machine executors that themselves
   # need to start docker images
   command: ~/workspace/.circleci/scripts/binary_run_in_docker.sh
-
-# This is copied almost verbatim from the macos_brew_update job
-# In version 2.1 and above we could make this a command and pass a parameter to
-# it, but in this version there is no way to pass a parameter to a step
-binary_macos_brew_update: &binary_macos_brew_update
-  name: Brew update and install moreutils and expect
-  no_output_timeout: "1h"
-  command: |
-    set -eux -o pipefail
-    # See https://discourse.brew.sh/t/fetching-homebrew-repos-is-slow/5374/3
-    brew untap caskroom/homebrew-cask
-    # moreutils installs a `parallel` executable by default, which conflicts
-    # with the executable from the GNU `parallel`, so we must unlink GNU
-    # `parallel` first, and relink it afterwards
-    brew update
-    brew unlink parallel
-    brew install moreutils
-    brew link parallel --overwrite
-    brew install expect
-
 ##############################################################################
 # Build parameters
 ##############################################################################
@@ -541,8 +524,7 @@ jobs:
       - run:
           <<: *should_run_job
       - checkout
-      - run:
-          <<: *macos_brew_update
+      - run_brew_for_macos_build
       - run:
           name: Build
           no_output_timeout: "1h"
@@ -772,8 +754,7 @@ jobs:
           <<: *binary_checkout
       - run:
           <<: *binary_populate_env
-      - run:
-          <<: *binary_macos_brew_update
+      - brew_update
       - run:
           <<: *binary_install_miniconda
       - run:
@@ -802,8 +783,7 @@ jobs:
         <<: *binary_checkout
     - run:
         <<: *binary_populate_env
-    - run:
-        <<: *binary_macos_brew_update
+    - brew_update
     - run:
         <<: *binary_install_miniconda
 
@@ -843,8 +823,7 @@ jobs:
         <<: *binary_checkout
     - run:
         <<: *binary_populate_env
-    - run:
-        <<: *binary_macos_brew_update
+    - brew_update
     - run:
         <<: *binary_install_miniconda
     - attach_workspace: # TODO - we can `cp` from ~/workspace
@@ -1044,8 +1023,7 @@ jobs:
       - run:
           <<: *should_run_job
       - checkout
-      - run:
-          <<: *macos_brew_update
+      - run_brew_for_macos_build
       - run:
           name: Build
           no_output_timeout: "1h"
@@ -1088,8 +1066,7 @@ jobs:
           at: ~/workspace
       - run:
           <<: *should_run_job
-      - run:
-          <<: *macos_brew_update
+      - run_brew_for_macos_build
       - run:
           name: Test
           no_output_timeout: "1h"
@@ -1115,8 +1092,7 @@ jobs:
       - run:
           <<: *should_run_job
       - checkout
-      - run:
-          <<: *macos_brew_update
+      - run_brew_for_macos_build
       - run:
           name: Build
           no_output_timeout: "1h"
@@ -1308,8 +1284,7 @@ jobs:
       - run:
           <<: *should_run_job
       - checkout
-      - run:
-          <<: *ios_brew_update
+      - run_brew_for_ios_build
       - run:
           name: Build
           no_output_timeout: "1h"
