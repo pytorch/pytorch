@@ -225,6 +225,17 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.result_type(torch.tensor([1., 1.], dtype=torch.float), 1.), torch.float)
         self.assertEqual(torch.result_type(torch.tensor(1., dtype=torch.float), torch.tensor(1, dtype=torch.double)), torch.double)
 
+    def test_promote_types(self):
+         self.assertEqual(torch._promote_Types(torch.int8, torch.float32), torch.float32)
+         self.assertEqual(torch._promote_Types(torch.uint8, torch.float64), torch.float64)
+         self.assertEqual(torch._promote_Types(torch.int16, torch.int8), torch.int16)
+         self.assertEqual(torch._promote_Types(torch.int32, torch.int64), torch.int64)
+         self.assertEqual(torch._promote_Types(torch.float32, torch.int64), torch.float32)
+         self.assertEqual(torch._promote_Types(torch.float64, torch.int32), torch.float64)
+         self.assertEqual(torch._promote_Types(torch.bool, torch.int32), torch.int32)
+         self.assertEqual(torch._promote_Types(torch.bool, torch.bool), torch.bool)
+
+
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):
     def setUp(self):

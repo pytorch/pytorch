@@ -103,4 +103,8 @@ ScalarType result_type(const Tensor &tensor, const Scalar other) {
   return at::_result_type(tensors);
 }
 
+ScalarType _promote_Types(ScalarType a, ScalarType b) {
+  return at::promoteTypes(a, b);
+}
+
 }} // namespace at::native

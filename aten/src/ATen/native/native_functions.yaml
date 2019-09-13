@@ -29,6 +29,9 @@
 - func: _cast_Half(Tensor self, bool non_blocking=False) -> Tensor
   variants: function
 
+- func: _promote_Types(ScalarType from, ScalarType to) -> ScalarType
+  variants: function
+
 - func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> void
   variants: method
 
