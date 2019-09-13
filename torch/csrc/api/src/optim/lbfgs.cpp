@@ -108,14 +108,14 @@ torch::Tensor LBFGS::step(LossClosure closure) {
     }
 
     /**
-     * comute step length
+     * compute step length
      */
 
     // reset initial guess for step size
     if (n_iter == 1) {
       t = torch::min(ONE, ONE / abs_grad_sum) * options.learning_rate_;
     } else {
-      t = torch::tensor(options.learning_rate_, torch::kFloat32);
+      t = torch::tensor(options.learning_rate_, flat_grad.options());
     }
 
     Tensor gtd = flat_grad.dot(d);
