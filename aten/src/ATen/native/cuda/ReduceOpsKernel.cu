@@ -172,18 +172,18 @@ void min_values_kernel_cuda(TensorIterator& iter) {
 void argmax_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmax_cuda", [&]() {
     gpu_reduce_kernel<scalar_t, int64_t>(
-    iter, arg_reduce_wrapper([]GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
-      return (THCNumerics<scalar_t>::isnan(a) || a > b);
-    }), thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::lower_bound(), 0));
+      iter,
+      ArgMaxOps<scalar_t>{},
+      thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::lower_bound(), 0));
   });
 }
 
 void argmin_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmin_cuda", [&]() {
-    gpu_reduce_kernel<scalar_t, scalar_t>(
-    iter, arg_reduce_wrapper([]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return (THCNumerics<scalar_t>::isnan(a) || a < b);
-    }), thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::upper_bound(), 0));
+    gpu_reduce_kernel<scalar_t, int64_t>(
+      iter,
+      ArgMinOps<scalar_t>{},
+      thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::upper_bound(), 0));
   });
 }
 

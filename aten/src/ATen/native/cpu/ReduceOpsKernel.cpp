@@ -167,36 +167,6 @@ static void max_values_kernel_impl(TensorIterator& iter) {
   });
 }
 
-template <typename func_t>
-struct arg_reduce_wrapper_t {
-  using scalar_t = typename binary_function_traits<func_t>::arg1_t;
-  using index_t = int64_t;
-  using arg_t = std::pair<scalar_t, index_t>;
-
-  func_t comp;
-
-  arg_reduce_wrapper_t(const func_t& op) : comp(op) {
-  }
-
-  static index_t project(arg_t arg) {
-    return arg.second;
-  }
-
-  arg_t reduce(arg_t arg, scalar_t val, int64_t idx) const {
-    return comp(arg.first, val) ? arg : arg_t(val, idx);
-  }
-
-  arg_t combine(arg_t a, arg_t b) const {
-    return comp(a.first, b.first) ? a : b;
-  }
-};
-
-// Wrap a comparator(scalar_t, scalar_t) to perform index reduction like arg{max,min}
-template <typename func_t>
-arg_reduce_wrapper_t<func_t> arg_reduce_wrapper(const func_t& op) {
-  return arg_reduce_wrapper_t<func_t>{ op };
-}
-
 // Maximum and minimum possible scalar values, including infinities
 
 template <typename scalar_t>
@@ -215,10 +185,8 @@ static void argmax_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmax_cpu", [&] {
     binary_kernel_reduce(
       iter,
-      arg_reduce_wrapper([](scalar_t a, scalar_t b) {
-        return std::isnan(a) || a > b;
-      }),
-      std::pair<scalar_t, int64_t>(lower_bound<scalar_t>(), 0));
+      ArgMaxOps<scalar_t>{},
+      std::pair<scalar_t, int64_t>(lower_bound<scalar_t>(), -1));
   });
 }
 
@@ -226,10 +194,8 @@ static void argmin_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmin_cpu", [&] {
     binary_kernel_reduce(
       iter,
-      arg_reduce_wrapper([](scalar_t a, scalar_t b) {
-        return std::isnan(a) || a < b;
-      }),
-      std::pair<scalar_t, int64_t>(upper_bound<scalar_t>(), 0));
+      ArgMinOps<scalar_t>{},
+      std::pair<scalar_t, int64_t>(upper_bound<scalar_t>(), -1));
   });
 }
 

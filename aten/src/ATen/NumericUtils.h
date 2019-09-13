@@ -1,3 +1,4 @@
+#pragma once
 #include <cmath>
 #include <type_traits>
 #include <c10/util/BFloat16.h>

@@ -17,7 +17,6 @@
 #include <type_traits>
 #include <utility>
 #include <thrust/tuple.h>
-#include <thrust/pair.h>
 
 namespace at { namespace native {
 
@@ -260,49 +259,12 @@ struct func_wrapper_t {
   __device__ arg_t reduce(arg_t acc, scalar_t val, int64_t idx) const {
     return combine(acc, val);
   }
-
 };
 
 template <typename scalar_t, typename func_t>
 func_wrapper_t<scalar_t, func_t> func_wrapper(const func_t& op) {
   return func_wrapper_t<scalar_t, func_t> { op };
 }
-
-template <typename func_t>
-struct arg_reduce_wrapper_t {
-  using scalar_t = typename binary_function_traits<func_t>::arg1_t;
-  using index_t = int64_t;
-  using arg_t = thrust::pair<scalar_t, index_t>;
-
-  func_t comp;
-
-  arg_reduce_wrapper_t(const func_t& op) : comp(op) {
-  }
-
-  static __device__ index_t project(arg_t arg) {
-    return arg.second;
-  }
-
-  static __device__ arg_t warp_shfl_down(arg_t arg, int offset) {
-    return arg_t(WARP_SHFL_DOWN(arg.first, offset),
-                 WARP_SHFL_DOWN(arg.second, offset));
-  }
-
-  __device__ arg_t reduce(arg_t arg, scalar_t val, int64_t idx) const {
-    return comp(arg.first, val) ? arg : arg_t(val, idx);
-  }
-
-  __device__ arg_t combine(arg_t a, arg_t b) const {
-    return comp(a.first, b.first) ? a : b;
-  }
-};
-
-// Wrap a comparator(scalar_t, scalar_t) to perform index reduction like arg{max,min}
-template <typename func_t>
-arg_reduce_wrapper_t<func_t> arg_reduce_wrapper(const func_t& op) {
-  return arg_reduce_wrapper_t<func_t>{ op };
-}
-
 
 template <typename scalar_t, typename ops_t, typename index_t, typename out_scalar_t=scalar_t, int vt0=4>
 struct ReduceOp {
