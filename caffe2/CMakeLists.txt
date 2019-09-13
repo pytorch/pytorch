@@ -423,6 +423,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/check_alias_annotation.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/memory_dag.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/quantization.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/fuse_linear.cpp
     ${TORCH_SRC_DIR}/csrc/jit/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
@@ -525,6 +526,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/avgpool.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/dropout.cpp

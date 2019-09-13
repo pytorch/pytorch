@@ -4,15 +4,10 @@
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - should_run_job
+    - setup_linux_system_environment
     - checkout
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: Build
         no_output_timeout: "1h"
@@ -69,14 +64,9 @@
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *setup_linux_system_environment
-    - run:
-        <<: *should_run_job
-    - run:
-        <<: *setup_ci_environment
+    - should_run_job
+    - setup_linux_system_environment
+    - setup_ci_environment
     - run:
         name: Test
         no_output_timeout: "1h"
@@ -137,13 +127,9 @@
       xcode: "9.0"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - attach_workspace:
-          at: ~/workspace
-      - run:
-          <<: *should_run_job
+      - should_run_job
       - checkout
-      - run:
-          <<: *macos_brew_update
+      - run_brew_for_macos_build
       - run:
           name: Build
           no_output_timeout: "1h"
