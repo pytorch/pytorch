@@ -22,18 +22,18 @@ TEST_F(ClipGradTest, ClipGrad) {
   auto linear_layer = m.l1;
   float max_norm = 2;
   auto compute_norm = [linear_layer](float norm_type) -> float {
-    double inf = std::numeric_limits<double>::infinity();
-    double total_norm = 0.0;
+    float inf = std::numeric_limits<float>::infinity();
+    float total_norm = 0.0;
     if (norm_type != inf) {
       for (const auto& p : linear_layer->parameters()) {
         auto param_norm = torch::norm(p.grad(), norm_type);
-        total_norm += torch::pow(param_norm, norm_type).item().toDouble();
+        total_norm += torch::pow(param_norm, norm_type).item().toFloat();
       }
       total_norm = std::pow(total_norm, 1.0 / norm_type);
       return total_norm;
     } else {
       for (const auto& p : linear_layer->parameters()) {
-        auto param_max = p.grad().abs().max().item().toDouble();
+        auto param_max = p.grad().abs().max().item().toFloat();
         if (param_max > total_norm) {
           total_norm = param_max;
         }
@@ -57,12 +57,12 @@ TEST_F(ClipGradTest, ClipGrad) {
       torch::arange(1.0, 101).view({10, 10}),
       torch::ones(10).div(1000),
   };
-  auto norm_types = {
+  std::vector<float> norm_types = {
       0.5,
       1.5,
       2.0,
       4.0,
-      std::numeric_limits<double>::infinity(),
+      std::numeric_limits<float>::infinity(),
   };
   for (auto norm_type : norm_types) {
     for (int i = 0; i < grads.size(); i++) {
@@ -77,7 +77,7 @@ TEST_F(ClipGradTest, ClipGrad) {
     ASSERT_FLOAT_EQ(norm_after, max_norm);
     EXPECT_PRED_FORMAT2(::testing::FloatLE, norm_after, max_norm);
     auto scaled = compare_scaling(grads);
-    ASSERT_NEAR(0, scaled.std().item().toDouble(), 1e-7);
+    ASSERT_NEAR(0, scaled.std().item().toFloat(), 1e-7);
   }
   // Small gradients should be lefted unchanged
   grads = {
