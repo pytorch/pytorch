@@ -1,5 +1,5 @@
 #include "bytecode.h"
-#include <Aten/core/dispatch/Dispatcher.h>
+#include <aten/src/ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 
 namespace torch {
