@@ -23,8 +23,8 @@ from test_torch import _TestTorchMixin
 from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
-    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, \
-    load_tests, slowTest, skipCUDANonDefaultStreamIf
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_SCIPY, \
+    TEST_WITH_ROCM, load_tests, slowTest, skipCUDANonDefaultStreamIf
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -663,15 +663,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
 
 class TestCuda(TestCase):
     _do_cuda_memory_leak_check = True
-    # See https://github.com/pytorch/pytorch/issues/21589
-    # We used to have this turned on for the tests in this file which
-    # we had tested to be OK, but when people added new tests to
-    # this file, it would trigger nondeterministic failures that
-    # are hard to debug.  Since there are KNOWN bugs with our
-    # stream handling, we shouldn't turn this on by default.
-    # If you decide to make this True, be sure to run the test suite
-    # under cuda-memcheck
-    _do_cuda_non_default_stream = False
+    _do_cuda_non_default_stream = True
     FIFTY_MIL_CYCLES = 50000000
 
     @staticmethod
@@ -1902,7 +1894,6 @@ class TestCuda(TestCase):
             c2p.put(sync_func(self, TestCuda.FIFTY_MIL_CYCLES))
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    @skipIfRocm
     def test_stream_event_nogil(self):
         for sync_func in [TestCuda._stream_synchronize,
                           TestCuda._event_synchronize,
@@ -1965,7 +1956,6 @@ class TestCuda(TestCase):
         self.assertTrue(s1.query())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    @skipIfRocm
     def test_events_multi_gpu_query(self):
         d0 = torch.device('cuda:0')
         d1 = torch.device('cuda:1')
@@ -2248,14 +2238,20 @@ class TestCuda(TestCase):
     def test_solve_batched(self):
         _TestTorchMixin._test_solve_batched(self, lambda t: t.cuda())
 
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_solve_batched_non_contiguous(self):
+        _TestTorchMixin._test_solve_batched_non_contiguous(self, lambda t: t.cuda())
+
     @slowTest
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_solve_batched_many_batches(self):
         _TestTorchMixin._test_solve_batched_many_batches(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_solve_batched_dims(self):
-        _TestTorchMixin._test_solve_batched_dims(self, lambda t: t.cuda())
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_solve_batched_broadcasting(self):
+        _TestTorchMixin._test_solve_batched_broadcasting(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky_solve(self):
@@ -2265,14 +2261,20 @@ class TestCuda(TestCase):
     def test_cholesky_solve_batched(self):
         _TestTorchMixin._test_cholesky_solve_batched(self, lambda t: t.cuda())
 
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_cholesky_solve_batched_non_contiguous(self):
+        _TestTorchMixin._test_cholesky_solve_batched_non_contiguous(self, lambda t: t.cuda())
+
     @slowTest
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky_solve_batched_many_batches(self):
         _TestTorchMixin._test_cholesky_solve_batched_many_batches(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_cholesky_solve_batched_dims(self):
-        _TestTorchMixin._test_cholesky_solve_batched_dims(self, lambda t: t.cuda())
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_cholesky_solve_batched_broadcasting(self):
+        _TestTorchMixin._test_cholesky_solve_batched_broadcasting(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky_inverse(self):
@@ -2662,7 +2664,6 @@ class TestCuda(TestCase):
         tensor = tensor.unsqueeze(1)
         self.assertEqual(tensor.var(0), 0.03125)
 
-    @skipIfRocm
     def test_digamma(self):
         def test(use_double=False):
             cpu_tensor = torch.randn(10, 10, 10)
@@ -2691,7 +2692,6 @@ class TestCuda(TestCase):
         norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
         self.assertEqual(norm_errors, expected_errors)
 
-    @skipIfRocm
     def test_polygamma(self):
         def test(use_double=False):
             cpu_tensor = torch.randn(10, 10, 10)
@@ -2793,8 +2793,9 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_triangular_solve_batched_many_batches(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_triangular_solve_batched_dims(self):
-        _TestTorchMixin._test_triangular_solve_batched_dims(self, lambda t: t.cuda())
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    def test_triangular_solve_batched_broadcasting(self):
+        _TestTorchMixin._test_triangular_solve_batched_broadcasting(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lstsq(self):
@@ -2961,6 +2962,7 @@ class TestCuda(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(y[0, 0, 0, 2**31 - 2], expected)
 
+    @skipCUDANonDefaultStreamIf(True)
     def test_streaming_backwards_sync(self):
         default_stream = torch.cuda.current_stream()
         stream = torch.cuda.Stream()
