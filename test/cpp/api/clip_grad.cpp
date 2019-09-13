@@ -9,7 +9,7 @@
 using namespace torch::nn;
 using namespace torch::test;
 
-struct ClipGradTest : torch::test::SeedingFixture, torch::Tensor {};
+struct ClipGradTest : torch::test::SeedingFixture {};
 
 class TestLinearModel : public torch::nn::Module {
  public:
