@@ -145,9 +145,17 @@ struct C10_API NonVariableTypeMode {
 
 #ifdef BUILD_NAMEDTENSOR
 struct C10_API NamedTensorMetaInterface {
-  virtual ~NamedTensorMetaInterface();
-  virtual std::unique_ptr<NamedTensorMetaInterface> clone() const;
-  virtual int64_t slow_dim() const;
+  virtual ~NamedTensorMetaInterface() {};
+  virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {
+    TORCH_INTERNAL_ASSERT(
+      false,
+      "Not implemented: NamedTensorMetaInterface::clone");
+  };
+  virtual int64_t slow_dim() const {
+    TORCH_INTERNAL_ASSERT(
+      false,
+      "Not implemented: NamedTensorMetaInterface::slow_dim");
+  };
 };
 #endif
 
@@ -826,6 +834,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   void set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> autograd_meta) {
     autograd_meta_ = std::move(autograd_meta);
+    if (autograd_meta_) {
+      type_set_ = type_set_.add(TensorTypeId::VariableTensorId);
+    } else {
+      type_set_ = type_set_.remove(TensorTypeId::VariableTensorId);
+    }
   }
 
   /**
@@ -839,6 +852,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Detach the autograd metadata unique_ptr from this tensor, and return it.
    */
   std::unique_ptr<c10::AutogradMetaInterface> detach_autograd_meta() {
+    type_set_ = type_set_.remove(TensorTypeId::VariableTensorId);
     return std::move(autograd_meta_);
   }
 
@@ -847,6 +861,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Set the pointer to named tensor metadata.
    */
   void set_named_tensor_meta(std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta) {
+    TORCH_WARN_ONCE(
+        "Named tensors and all their associated APIs are an experimental feature ",
+        "and subject to change. Please do not use them for anything important ",
+        "until they are released as stable.");
 #ifdef DEBUG
     if (named_tensor_meta) {
       TORCH_INTERNAL_ASSERT(named_tensor_meta->slow_dim() == dim());
@@ -1522,7 +1540,15 @@ protected:
     dest_impl->storage_offset_ = src_impl->storage_offset_;
     dest_impl->data_type_ = src_impl->data_type_;
     dest_impl->device_opt_ = src_impl->device_opt_;
+    // This may temporarily violate invariant that
+    // type_set_.has(VariableTensorId) iff autograd_meta_ != nullptr...
     dest_impl->type_set_ = src_impl->type_set_;
+    // ...so refresh Variable in autograd_meta_
+    if (dest_impl->autograd_meta_) {
+      dest_impl->type_set_ = dest_impl->type_set_.add(TensorTypeId::VariableTensorId);
+    } else {
+      dest_impl->type_set_ = dest_impl->type_set_.remove(TensorTypeId::VariableTensorId);
+    }
     dest_impl->is_contiguous_ = src_impl->is_contiguous_;
     dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
     dest_impl->reserved_ = src_impl->reserved_;
@@ -1543,12 +1569,17 @@ protected:
   static const char * const err_msg_tensor_metadata_change_not_allowed;
 
   Storage storage_;
+
+private:
   // This pointer points to an AutogradMeta struct that stores autograd-specific fields
   // (such as grad_ / grad_fn_ / grad_accumulator_).
   // This pointer always has unique ownership (meaning only one TensorImpl can own it
   // at a time).
+  // This is private because we must maintain dispatcher invariants on it
+  // in type_set_.
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
+protected:
 #ifdef BUILD_NAMEDTENSOR
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
 #endif
