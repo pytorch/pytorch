@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/script/module_python.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/auto_gil.h>
@@ -450,7 +451,15 @@ inline IValue toIValue(
       }
       return toIValue(obj, type->expect<OptionalType>()->getElementType());
     }
+    case TypeKind::InterfaceType:
     case TypeKind::ClassType: {
+      auto mod = script::as_module(py::reinterpret_borrow<py::object>(obj));
+      if (mod.has_value()) {
+        auto iv = mod->module_object();
+        TORCH_CHECK(iv->type()->isSubtypeOf(type));
+        return iv;
+      }
+      TORCH_CHECK(!type->cast<InterfaceType>());
       auto classType = type->expect<ClassType>();
       // 1. create a bare ivalue
       const size_t numAttrs = classType->numAttributes();
@@ -466,6 +475,8 @@ inline IValue toIValue(
         const auto& contained = py::getattr(obj, attrName.c_str());
         userObj->setSlot(slot, toIValue(contained, attrType));
       }
+      //if (classType.is_module()) {
+      //}
       return userObj;
     }
     case TypeKind::NumberType: {
@@ -486,7 +497,6 @@ inline IValue toIValue(
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
-    case TypeKind::InterfaceType:
       break;
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
