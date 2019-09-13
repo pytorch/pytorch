@@ -43,8 +43,12 @@
   variants: method
   named_guard: False
 
-- func: align_to(Tensor self, DimnameList names) -> Tensor
+- func: align_to(Tensor(a) self, DimnameList names) -> Tensor(a)
   variants: function, method
+  named_guard: False
+
+- func: align_as(Tensor self, Tensor other) -> Tensor
+  variants: method
   named_guard: False
 
 - func: align_tensors(Tensor[] tensors) -> Tensor[]
