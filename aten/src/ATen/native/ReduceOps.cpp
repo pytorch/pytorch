@@ -625,21 +625,18 @@ Tensor max_values(const Tensor& self, DimnameList dims, bool keepdim) {
 
 Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
   TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-  "argmax only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
+      "argmax only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   TORCH_CHECK(self.numel() > 0, "cannot perform argmax of an empty tensor");
+  Tensor in;
   if (dim) {
-    auto dim_wrapped = maybe_wrap_dim(dim.value(), self.dim());
-    auto itr = make_reduction("argmax", result, self, dim_wrapped, keepdim,
-        self.scalar_type(), at::kLong);
-    argmax_stub(itr.device_type(), itr);
+    in = self;
+  } else {
+    in = self.reshape({-1});
+    keepdim = false;
   }
-  else
-  {
-    auto x = self.reshape({-1});
-    auto itr = make_reduction("argmax", result, x, 0, false, self.scalar_type(),
-        at::kLong);
-    argmax_stub(itr.device_type(), itr);
-  }
+  auto itr = make_reduction("argmax", result, in, dim.value_or(0), keepdim,
+      self.scalar_type(), at::kLong);
+  argmax_stub(itr.device_type(), itr);
   return result;
 }
 
@@ -650,21 +647,18 @@ Tensor argmax(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
 
 Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
   TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-  "argmin only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
+      "argmin only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   TORCH_CHECK(self.numel() > 0, "cannot perform argmin of an empty tensor");
+  Tensor in;
   if (dim) {
-    auto dim_wrapped = maybe_wrap_dim(dim.value(), self.dim());
-    auto itr = make_reduction("argmin", result, self, dim_wrapped, keepdim,
-        self.scalar_type(), at::kLong);
-    argmin_stub(itr.device_type(), itr);
+    in = self;
+  } else {
+    in = self.reshape({-1});
+    keepdim = false;
   }
-  else
-  {
-    auto x = self.reshape({-1});
-    auto itr = make_reduction("argmin", result, x, 0, false,
-        self.scalar_type(), at::kLong);
-    argmin_stub(itr.device_type(), itr);
-  }
+  auto itr = make_reduction("argmin", result, in, dim.value_or(0), keepdim,
+      self.scalar_type(), at::kLong);
+  argmin_stub(itr.device_type(), itr);
   return result;
 }
 
