@@ -78,8 +78,6 @@ std::string getFuncName(const c10::QualifiedName& qname) {
 bool nodeQuantizable(Node* n) {
   static std::vector<std::string> call_funcs = {
       "conv2d",
-      "addmm",
-      "matmul",
       "relu",
   };
   std::vector<Symbol> aten_funcs;
