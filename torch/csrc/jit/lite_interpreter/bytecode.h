@@ -28,7 +28,7 @@ class Method{
   std::vector<c10::IValue> registers_;
 };
 
-class Bytecode {
+class TORCH_API Bytecode {
  public:
   c10::IValue run_method(const std::string& method_name, Stack& stack);
   void append_method(const Method& method);

@@ -21,7 +21,7 @@ namespace torch {
 namespace jit {
 
 using caffe2::serialize::PyTorchStreamReader;
-
+void postSetStateValidate(const IValue& v);
 namespace {
 
 struct ClassResolver : public script::Resolver {
@@ -129,10 +129,29 @@ IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
   auto ivalue = unpickle(
       reinterpret_cast<const char*>(attributes_ptr.get()),
       attributes_size,
-      [&](const c10::QualifiedName& qn) {
+      [&](const c10::QualifiedName& qn, IValue input) {
         importCallback(qn.prefix());
-        return c10::StrongTypePtr(
+        at::StrongTypePtr type = c10::StrongTypePtr(
             compilation_unit_, compilation_unit_->get_class(qn));
+        auto cls = type.type_->expect<at::ClassType>();
+        size_t n = cls->numAttributes();
+        if (checkHasValidSetGetState(type.type_)) {
+          auto obj = c10::ivalue::Object::create(type, n);
+          // XXX: Do not optimize __setstate__, so that we don't try to
+          // specialize the class before it is initialized.
+          setGraphExecutorOptimize(false);
+          (*type.type_->getMethod("__setstate__"))({obj, input});
+          setGraphExecutorOptimize(true);
+          postSetStateValidate(obj);
+          return std::move(obj);
+        } else {
+          auto dict = std::move(input).toGenericDict();
+          auto obj = c10::ivalue::Object::create(type, n);
+          for (size_t i = 0; i < n; ++i) {
+            obj->setSlot(i, dict.at(cls->getAttributeName(i)));
+          }
+          return std::move(obj);
+        }
       },
       &constants_table_);
   return ivalue;

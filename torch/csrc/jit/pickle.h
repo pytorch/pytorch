@@ -1,11 +1,10 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/pickler.h>
-
+#include <torch/csrc/jit/unpickler.h>
 
 namespace torch {
 namespace jit {
-
 /// Save a `torch::IValue` in a format compatible with Python's `pickle` module
 ///
 /// If present, `tensor_table` is a pointer to a table in which tensors that
@@ -55,7 +54,7 @@ TORCH_API void pickle(
 /// See `torch::pickle` for details.
 TORCH_API IValue unpickle(
     std::function<bool(char*, size_t)> reader,
-    ClassResolver class_resolver,
+    ObjCallback obj_callback,
     const std::vector<at::Tensor>* tensor_table);
 
 /// Decode a chunk of memory containing pickled data into its `torch::IValue`s.
@@ -67,7 +66,7 @@ TORCH_API IValue unpickle(
 TORCH_API IValue unpickle(
     const char* data,
     size_t size,
-    ClassResolver class_resolver = nullptr,
+    ObjCallback obj_callback = nullptr,
     const std::vector<at::Tensor>* tensor_table = nullptr);
 
 } // namespace jit

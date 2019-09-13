@@ -1,7 +1,7 @@
 #include "import_bytecode.h"
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/unpickler.h>
 #include <caffe2/serialize/inline_container.h>
 
 
@@ -118,21 +118,32 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
     return true;
   };
 
-  auto class_resolver = [&](const c10::QualifiedName& qn) {
+  auto obj_callback = [&](const c10::QualifiedName& qn, IValue input) {
     if (compilation_unit_->get_class(qn) == nullptr) {
       auto typeptr = ClassType::create(qn, compilation_unit_, true);
       compilation_unit_->register_type(typeptr);
     }
-    return c10::StrongTypePtr(
+    at::StrongTypePtr type = c10::StrongTypePtr(
         compilation_unit_, compilation_unit_->get_class(qn));
+    auto dict = std::move(input).toGenericDict();
+    size_t ndict = dict.size();
+    auto obj = c10::ivalue::Object::create(type, ndict);
+    auto it = dict.begin();
+    for (size_t i = 0; i < ndict; ++i) {
+      obj->setSlot(i, (*it).value());
+      ++it;
+    }
+    return obj;
   };
+
   auto read_record = [&](const std::string& name) {
     std::stringstream ss;
     ss << archive_name << "/" << name;
     return std::get<0>(reader_->getRecord(ss.str()));
   };
+
   Unpickler unpickler(
-      reader, std::move(class_resolver), std::move(read_record), device_, true);
+      reader, std::move(obj_callback), std::move(read_record), device_, true);
   return unpickler.parse_ivalue();
 }
 

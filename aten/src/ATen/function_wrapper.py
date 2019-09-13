@@ -129,13 +129,14 @@ TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
 # add non-virtual declaration to Tensor.cpp
+# TODO: This will need to be adjusted for multiple dispatch
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(tensorTypeIdToBackend(type_id()), is_variable())(${method_actuals});
+    return table->getOp<${return_type} (${formals_types})>(type_set(), is_variable())(${method_actuals});
 #endif
 }
 """)
@@ -154,7 +155,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     ${static_dispatch_function_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_backend}, ${inferred_is_variable})(${native_actuals});
+    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set}, ${inferred_is_variable})(${native_actuals});
 #endif
 }
 """)
@@ -165,10 +166,10 @@ STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
 ${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
-switch(${backend}) {
+switch(tensorTypeIdToBackend(impl::dispatchTypeId(${type_set}))) {
     ${static_dispatch_function_switches}
     default:
-        AT_ERROR("${api_name} not implemented for ", at::toString(${backend}));
+        AT_ERROR("${api_name} not implemented for ", at::toString(${type_set}));
 }
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT = CodeTemplate("""\
@@ -188,9 +189,9 @@ static inline ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_function_body}
 #else
-    globalLegacyTypeDispatch().initForBackend(${inferred_backend});
+    globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_backend}, ${inferred_is_variable})(${native_actuals});
+    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set}, ${inferred_is_variable})(${native_actuals});
 #endif
 }
 """)
@@ -550,7 +551,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals_with_defaults': List[str],
     'formals': List[str],
     'formals_types': List[str],
-    'inferred_backend': str,
+    'inferred_type_set': str,
     'inferred_is_variable': str,
     'inplace': bool,
     'matches_jit_signature': bool,
@@ -1103,7 +1104,11 @@ def create_generic(top_env, declarations):
                             native_arguments=option['method_actuals']))
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
-                    backend='tensorTypeIdToBackend(type_id())',
+                    # TODO: When Variable gets added, this needs to get adjusted
+                    # to avoid picking up the Variable bit.  The correct way
+                    # to encode this is probably to just have Variable in the
+                    # disabled set.
+                    type_set='type_set()',
                     static_dispatch_function_switches=static_dispatch_function_switches)
             else:
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
@@ -1116,14 +1121,15 @@ def create_generic(top_env, declarations):
         def gen_namespace_function(option, dispatch_tensor, dispatch_options):
             # type: (Any, Optional[str], Any) -> FunctionCode
             if dispatch_tensor:
-                option['inferred_backend'] = 'at::detail::infer_backend({})'.format(dispatch_tensor)
+                option['inferred_type_set'] = 'at::detail::infer_tensor_type_set({})'.format(dispatch_tensor)
                 option['inferred_is_variable'] = 'at::detail::infer_is_variable({})'.format(dispatch_tensor)
             elif dispatch_options:
-                option['inferred_backend'] = '{}.backend()'.format(dispatch_options['name'])
+                option['inferred_type_set'] = '{}.type_set()'.format(dispatch_options['name'])
                 option['inferred_is_variable'] = '{}.is_variable()'.format(dispatch_options['name'])
             else:
-                # doesn't depend on a specific backend, use CPU
-                option['inferred_backend'] = 'Backend::CPU'
+                # doesn't depend on a specific backend, use the empty set
+                # TODO: Does this actually work?
+                option['inferred_type_set'] = 'TensorTypeSet()'
                 option['inferred_is_variable'] = 'false'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
@@ -1139,7 +1145,7 @@ def create_generic(top_env, declarations):
                             native_arguments=option['native_actuals']))
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
-                    backend=option['inferred_backend'],
+                    type_set=option['inferred_type_set'],
                     static_dispatch_function_switches=static_dispatch_function_switches)
             else:
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
