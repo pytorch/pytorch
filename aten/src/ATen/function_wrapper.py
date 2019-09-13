@@ -431,13 +431,11 @@ ALLOC_WRAP = {
 # Replacements for constants when calling into TH
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${ScalarType}'),
-    ('__last_dim', 'self.ndimension()-1'),
 ]
 
 # Replacements for constants in header file function definitions
 HEADER_CONSTANT_REPLACEMENTS = [
     (r'AS_REAL\((.*)\)', r'\1'),
-    ('__last_dim', '-1'),
 ]
 
 
@@ -1171,18 +1169,12 @@ def create_generic(top_env, declarations):
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, native_arguments=option['method_actuals'])
 
-            if not option['use_c10_dispatcher']:
-                return FunctionCode(
-                    declaration=TENSOR_METHOD_DECLARATION.substitute(
-                        option, static_dispatch_method_body=static_dispatch_method_body),
-                    definition=TENSOR_METHOD_DEFINITION.substitute(
-                        option, static_dispatch_method_body=static_dispatch_method_body))
-            else:
-                return FunctionCode(
-                    declaration=TENSOR_METHOD_DECLARATION.substitute(
-                        option, static_dispatch_method_body=static_dispatch_method_body),
-                    definition=C10_TENSOR_METHOD_DEFINITION.substitute(
-                        option, static_dispatch_method_body=static_dispatch_method_body))
+            method_definition = (C10_TENSOR_METHOD_DEFINITION if option['use_c10_dispatcher'] else TENSOR_METHOD_DEFINITION)
+            return FunctionCode(
+                declaration=TENSOR_METHOD_DECLARATION.substitute(
+                    option, static_dispatch_method_body=static_dispatch_method_body),
+                definition=method_definition.substitute(
+                    option, static_dispatch_method_body=static_dispatch_method_body))
 
         def gen_namespace_function(option, dispatch_tensor, dispatch_options):
             # type: (Any, Optional[str], Any) -> FunctionCode
@@ -1231,7 +1223,8 @@ def create_generic(top_env, declarations):
         # TensorBody.h, TensorMethods.h) is checked into the repo and must be
         # the same regardless of BUILD_NAMEDTENSOR status.
         is_named_tensor_only = (has_named_tensor_formals(formals) or
-                                option['api_name'] == 'align_tensors')
+                                option['api_name'] == 'align_tensors' or
+                                option['api_name'] == 'align_as')
 
         def check_namedtensor_enabled(code):
             if is_named_tensor_only:
