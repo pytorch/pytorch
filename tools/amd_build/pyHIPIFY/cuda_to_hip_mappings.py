@@ -2209,6 +2209,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("nvrtcGetPTXSize", ("hiprtcGetCodeSize", CONV_JIT, API_RTC)),
     ("thrust::cuda::", ("thrust::hip::", CONV_MATH_FUNC, API_BLAS)),
     ("cub::", ("hipcub::", CONV_MATH_FUNC, API_BLAS)),
+    ("nvtxMark", ("roctxMark", CONV_OTHER, API_ROCTX)),
     ("nvtxMarkA", ("roctxMarkA", CONV_OTHER, API_ROCTX)),
     ("nvtxRangePushA", ("roctxRangePushA", CONV_OTHER, API_ROCTX)),
     ("nvtxRangePop", ("roctxRangePop", CONV_OTHER, API_ROCTX)),
