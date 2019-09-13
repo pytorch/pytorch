@@ -97,7 +97,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward_cpu(
       &ddY,
       &dX,
       &dgamma);
-  return std::make_tuple(ddY, dX, dgamma);
+  return std::make_tuple(ddY * 0.5, dX, dgamma);
 }
 
 Tensor layer_norm(
