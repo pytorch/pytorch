@@ -176,9 +176,44 @@ class LearningRateOp final : public Operator<Context> {
           this->template GetSingleArgument<float>(arg_prefix + "max_lr", 0.005);
       int stepsize =
           this->template GetSingleArgument<int>(arg_prefix + "stepsize", 0);
+      T decay =
+          this->template GetSingleArgument<int>(arg_prefix + "decay", 1.0);
       DCHECK_GT(stepsize, 0);
       DCHECK_GE(max_lr, base_lr_);
-      return new CyclicalLearningRate<T>(base_lr_, max_lr, stepsize);
+      return new CyclicalLearningRate<T>(base_lr_, max_lr, stepsize, decay);
+    } else if (policy == "constantThenLinearWarmup") {
+      T start_warmup_multiplier = this->template GetSingleArgument<float>(
+          arg_prefix + "start_warmup_multiplier", 0.1);
+      int64_t constant_warmup_num_iter = this->template GetSingleArgument<int>(
+          arg_prefix + "constant_warmup_num_iter", 10000000);
+      int64_t linear_warmup_num_iter = this->template GetSingleArgument<int>(
+          arg_prefix + "linear_warmup_num_iter", 10000000);
+      return new ConstantThenLinearWarmupLearningRate<T>(
+          start_warmup_multiplier,
+          constant_warmup_num_iter,
+          linear_warmup_num_iter);
+    } else if (policy == "compositeCyclical") {
+      T start_warmup_multiplier = this->template GetSingleArgument<float>(
+          arg_prefix + "start_warmup_multiplier", 0.1);
+      int64_t constant_warmup_num_iter = this->template GetSingleArgument<int>(
+          arg_prefix + "constant_warmup_num_iter", 10000000);
+      int64_t linear_warmup_num_iter = this->template GetSingleArgument<int>(
+          arg_prefix + "linear_warmup_num_iter", 10000000);
+      T cyclical_max_lr = this->template GetSingleArgument<float>(
+          arg_prefix + "cyclical_max_lr", 0.05);
+      int cyclical_step_size = this->template GetSingleArgument<int>(
+          arg_prefix + "cyclical_step_size", 1000000);
+      T cyclical_decay = this->template GetSingleArgument<float>(
+          arg_prefix + "cyclical_decay", 1.0);
+      DCHECK_GE(cyclical_max_lr, base_lr_);
+      return new CompositeCyclicalLearningRate<T>(
+          base_lr_,
+          start_warmup_multiplier,
+          constant_warmup_num_iter,
+          linear_warmup_num_iter,
+          cyclical_max_lr,
+          cyclical_step_size,
+          cyclical_decay);
     } else {
       CAFFE_THROW("Unknown learning rate policy: ", policy);
       return NULL;

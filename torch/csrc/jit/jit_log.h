@@ -19,8 +19,7 @@ struct Node;
 struct Graph;
 
 enum class JitLoggingLevels {
-  OFF,
-  GRAPH_DUMP,
+  GRAPH_DUMP = 0,
   GRAPH_UPDATE,
   GRAPH_DEBUG,
 };
@@ -42,12 +41,14 @@ TORCH_API std::string jit_log_prefix(
     int l,
     const std::string& in_str);
 
+TORCH_API bool is_enabled(const char *cfname, JitLoggingLevels level);
+
 TORCH_API std::ostream& operator<<(std::ostream& out, JitLoggingLevels level);
 
-#define JIT_LOG(level, ...)                                                   \
-  if (jit_log_level() != JitLoggingLevels::OFF && jit_log_level() >= level) { \
-    std::cerr << jit_log_prefix(                                              \
-        level, __FILE__, __LINE__, ::c10::str(__VA_ARGS__));                  \
+#define JIT_LOG(level, ...)                                                    \
+  if (is_enabled(__FILE__, level)) {                                           \
+    std::cerr << jit_log_prefix(level, __FILE__, __LINE__,                     \
+                                ::c10::str(__VA_ARGS__));                      \
   }
 
 // tries to reconstruct original python source
