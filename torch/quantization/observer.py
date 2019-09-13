@@ -221,7 +221,7 @@ class HistogramObserver(ObserverBase):
         Compute the quantization error if we use start_bin to end_bin as the
         min and max to do the quantization.
         """
-        dst_nbins = 256
+        dst_nbins = 2**torch.iinfo(torch.int8).bits
         bin_width = (self.max_val.item() - self.min_val.item()) / self.bins
 
         norm = 0.0
@@ -412,7 +412,7 @@ class HistogramObserver(ObserverBase):
             self.min_val = combined_min
             self.max_val = combined_max
 
-    def calculate_qparams(self, norm_type="L2", search_type="NonLinear", **kwargs):
+    def calculate_qparams(self, norm_type="L2"):
         if self.histogram is None:
             raise Exception("must run observer before calling calculate_qparams!")
         assert self.bins == len(self.histogram), (
@@ -420,9 +420,6 @@ class HistogramObserver(ObserverBase):
             "supplied while making this observer"
         )
 
-        assert (
-            search_type == "NonLinear"
-        ), "Only non-linear search type for min/max is currently supported (aka L2 approx) "
         new_min, new_max = self._non_linear_param_search(norm_type)
 
         return self._calculate_qparams(new_min.item(), new_max.item())
