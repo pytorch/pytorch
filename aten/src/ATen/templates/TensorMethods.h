@@ -29,6 +29,9 @@ struct MultiDispatchTensorTypeSet : IterArgs<MultiDispatchTensorTypeSet> {
   void operator()(const at::Tensor& x) {
     ts = ts | x.type_set();
   }
+  void operator()(TensorOptions x) {
+    ts = ts | x.type_set();
+  }
   void operator()(at::ArrayRef<at::Tensor> xs) {
     for (const auto& x : xs) {
       ts = ts | x.type_set();
