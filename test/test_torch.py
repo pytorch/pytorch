@@ -239,6 +239,7 @@ class _TestTorchMixin(torchtest):
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
                        'align_to',  # BUILD_NAMEDTENSOR only
+                       'align_as',  # BUILD_NAMEDTENSOR only
                        'renamed',  # BUILD_NAMEDTENSOR only
                        'names_',  # BUILD_NAMEDTENSOR only
                        'has_names',  # BUILD_NAMEDTENSOR only
