@@ -5,7 +5,6 @@ from collections import OrderedDict
 import cimodel.data.binary_build_data as binary_build_data
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
-import cimodel.lib.visualization as visualization
 
 
 class Conf(object):
@@ -133,6 +132,7 @@ def gen_schedule_tree(cron_timing):
         },
     }]
 
+
 def get_nightly_uploads():
     configs = gen_build_env_list(False)
     mylist = []
@@ -141,6 +141,7 @@ def get_nightly_uploads():
         mylist.append(conf.gen_workflow_job("upload", phase_dependency))
 
     return mylist
+
 
 def get_nightly_tests():
 
@@ -168,9 +169,6 @@ def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
         triggers=gen_schedule_tree(cron_schedule),
         jobs=jobs_list,
     )
-
-    graph = visualization.generate_graph(get_root(smoke, toplevel_key))
-    graph.draw(toplevel_key + "-config-dimensions.png", prog="twopi")
 
 
 def add_binary_build_jobs(jobs_dict):

@@ -52,7 +52,7 @@ class Conf:
         if self.cuda_version:
             cuda_parms.extend(["cuda" + self.cuda_version, "cudnn7"])
         result = leading + ["linux", self.distro] + cuda_parms + self.parms
-        if (not for_docker and self.parms_list_ignored_for_docker_image is not None):
+        if not for_docker and self.parms_list_ignored_for_docker_image is not None:
             result = result + self.parms_list_ignored_for_docker_image
         return result
 
@@ -107,11 +107,9 @@ class Conf:
         else:
             job_name = "pytorch_linux_build"
 
-
         if not self.is_important:
-            # If you update this, update
-            # caffe2_build_definitions.py too
-            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+            conf_tree.set_unimportant_branch_filters(job_def)
+
         job_def.update(self.gen_workflow_params(phase))
 
         return {job_name : job_def}
@@ -157,7 +155,11 @@ def gen_dependent_configs(xenial_parent_config):
 
         configs.append(c)
 
-    for x in ["pytorch_short_perf_test_gpu", "pytorch_python_doc_push", "pytorch_cpp_doc_push"]:
+    for x in [
+        "pytorch_short_perf_test_gpu",
+        "pytorch_python_doc_push",
+        "pytorch_cpp_doc_push",
+    ]:
         configs.append(HiddenConf(x, parent_build=xenial_parent_config))
 
     return configs

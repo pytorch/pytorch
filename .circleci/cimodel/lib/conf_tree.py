@@ -17,6 +17,10 @@ def XImportant(name):
     return (name, [("important", [X(True)])])
 
 
+def set_unimportant_branch_filters(job_definition):
+    job_definition["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+
+
 @dataclass
 class Ver:
     """
