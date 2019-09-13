@@ -14,6 +14,16 @@ commands:
           no_output_timeout: "2m"
           command: ~/workspace/.circleci/scripts/should_run_job.sh
 
+  # This system setup script is meant to run before the CI-related scripts, e.g.,
+  # installing Git client, checking out code, setting up CI env, and
+  # building/testing.
+  setup_linux_system_environment:
+    steps:
+      - run:
+          name: Set Up System Environment
+          no_output_timeout: "1h"
+          command: ~/workspace/.circleci/scripts/setup_linux_system_environment.sh
+
   brew_update:
     description: "Update Homebrew and install base formulae"
     steps:
