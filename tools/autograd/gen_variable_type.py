@@ -29,7 +29,7 @@ from .gen_autograd_functions import uses_single_grad
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward', 'set_data'
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward', 'set_data', 'data'
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -281,11 +281,6 @@ def find_factory_functions(declarations):
 
 
 def should_trace(declaration):
-    # Short-term plan: Don't support tracing Dimname.
-    # Long-term plan: Add Dimname as a first-class type to the JIT.
-    if any('Dimname' in arg['simple_type'] for arg in declaration['arguments']):
-        return False
-
     # Operations involving Storage or Type are not traceable at the moment
     if any(arg['simple_type'] in {'Storage', 'Type', 'ConstQuantizerPtr'} for arg in declaration['arguments']):
         return False
