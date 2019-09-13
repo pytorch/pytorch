@@ -202,6 +202,8 @@ pytorch_ios_params: &pytorch_ios_params
     IOS_PLATFORM: << parameters.ios_platform >>
     USE_NNPACK: << parameters.use_nnpack >>
 
+
+
 caffe2_params: &caffe2_params
   parameters:
     build_environment:
@@ -803,7 +805,49 @@ jobs:
           cat "$script"
           source "$script"
 
-
+  binary_ios_build:
+    <<: *pytorch_ios_params
+    macos:
+      xcode: "10.2.1"
+    steps:
+    - attach_workspace:
+        at: ~/workspace
+    - run:
+        <<: *should_run_job
+    - checkout
+    - run:
+        <<: *ios_brew_update
+    - run:
+        name: Build
+        contxt: org-member
+        no_output_timeout: "1h"
+        command: |
+          script="/Users/distiller/project/.circleci/scripts/binary_ios_build.sh"
+          cat "$script"
+          source "$script"
+    - persist_to_workspace:
+        root: /Users/distiller/workspace/
+        paths: ios
+  
+  binary_ios_upload: 
+    <<: *pytorch_ios_params
+    macos:
+      xcode: "10.2.1"
+    steps:
+    - attach_workspace:
+        at: ~/workspace
+    - run:
+        <<: *should_run_job
+    - checkout
+    - run:
+        <<: *ios_brew_update
+    - run:
+        name: Upload
+        no_output_timeout: "1h"
+        command: |
+          script="/Users/distiller/project/.circleci/scripts/binary_ios_upload.sh"
+          cat "$script"
+          source "$script"
   setup:
     docker:
       - image: circleci/python:3.7.3
@@ -1818,7 +1862,7 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
-      # Pytorch iOS builds
+      # Pytorch iOS PR builds
       - pytorch_ios_build:
           name: pytorch_ios_10_2_1_x86_64_build
           build_environment: "pytorch-ios-10.2.1-x86_64_build"
@@ -1832,7 +1876,6 @@ workflows:
           ios_arch: "arm64"
           requires:
             - setup
-
       - caffe2_linux_build:
           name: caffe2_py2_gcc4_8_ubuntu14_04_build
           requires:
@@ -2978,6 +3021,36 @@ workflows:
           build_environment: "libtorch 2.7 cpu"
           requires:
             - setup
+      # Pytorch iOS binary builds
+      - binary_ios_build:
+          name: pytorch_ios_10_2_1_nightly_x86_64_build
+          build_environment: "libtorch-ios-10.2.1-nightly-x86_64-build"
+          ios_platform: "SIMULATOR"
+          ios_arch: "x86_64"
+          requires: 
+            - setup
+      - binary_ios_build:
+          name: pytorch_ios_10_2_1_nigthly_arm64_build
+          build_environment: "libtorch-ios-10.2.1-nightly-arm64-build"
+          ios_arch: "arm64"
+          ios_platform: "OS"
+          requires: 
+            - setup
+      - binary_ios_build:
+          name: pytorch_ios_10_2_1_nightly_armv7s_build
+          build_environment: "libtorch-ios-10.2.1-nightly-armv7s-build"
+          ios_arch: "armv7s"
+          ios_platform: "OS"
+          requires: 
+            - setup
+      - binary_ios_upload:
+          build_environment: "libtorch-ios-10.2.1-nightly-binary-build-upload"
+          context: org-member
+          requires:
+            - setup
+            - pytorch_ios_10_2_1_nightly_x86_64_build
+            - pytorch_ios_10_2_1_nigthly_arm64_build
+            - pytorch_ios_10_2_1_nightly_armv7s_build
 ##############################################################################
 # Nightly tests
 ##############################################################################

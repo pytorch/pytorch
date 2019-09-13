@@ -80,7 +80,8 @@ bool nodeQuantizable(Node* n) {
       "conv2d",
       "relu",
   };
-  std::vector<Symbol> aten_funcs;
+  std::vector<Symbol> aten_funcs = {Symbol::aten("addmm"),
+                                    Symbol::aten("matmul")};
   std::transform(
       call_funcs.begin(),
       call_funcs.end(),
