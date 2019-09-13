@@ -21,9 +21,7 @@ struct TORCH_API Function {
         graph_(std::move(graph)),
         function_creator_(std::move(function_creator)) {}
 
-  void run(Stack& stack) {
-    get_executor().run(stack);
-  }
+  void run(Stack &stack) { get_executor().run(stack); }
 
   void run(Stack&& stack) {
     run(stack);
