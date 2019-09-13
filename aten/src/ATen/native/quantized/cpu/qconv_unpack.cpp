@@ -18,7 +18,7 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
   std::tuple<at::Tensor, c10::optional<Tensor>> fbgemm_conv_unpack(
-      at::Tensor packed_weight) {
+      at::Tensor packed_weights) {
     // Pull out the packed weight instance from the owning tensor.
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedConvWeight>(packed_weights);

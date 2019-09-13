@@ -1335,7 +1335,7 @@ class TestQNNPackOps(TestCase):
 
         W = torch.from_numpy(W)
         W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp,
-                                        dtype=torch_type)
+                                    dtype=torch_type)
 
         # Weight prepacking operator for quantized Linear
         W_prepack = qlinear_prepack(W_q)
