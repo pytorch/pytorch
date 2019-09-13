@@ -388,7 +388,7 @@ def cmpfiles_with_eol_normalization(a, b, names):
 def is_namedtensor_only_decl(decl):
     if 'Dimname' in decl['schema_string']:
         return True
-    if decl['name'] == 'align_tensors':
+    if decl['name'] == 'align_tensors' or decl['name'] == 'align_as':
         return True
     return False
 
