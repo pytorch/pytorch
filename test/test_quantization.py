@@ -838,8 +838,8 @@ class QuantizationDebugTest(QuantizationTestCase):
         y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
         myobs(x)
         myobs(y)
-        self.assertEqual(myobs.relaxed_min, -1.5)
-        self.assertEqual(myobs.relaxed_max, 8.5)
+        self.assertEqual(myobs.min_val, -1.5)
+        self.assertEqual(myobs.max_val, 8.5)
         self.assertEqual(myobs.histogram, [0., 0., 1., 2., 1., 2., 3., 2., 1., 1.])
         qparams = myobs.calculate_qparams()
         if reduce_range:

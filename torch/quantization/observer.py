@@ -162,8 +162,8 @@ class HistogramObserver(ObserverBase):
     """
 
     __annotations__ = {
-        "relaxed_min": Optional[torch.Tensor],
-        "relaxed_max": Optional[torch.Tensor],
+        "min_val": Optional[torch.Tensor],
+        "max_val": Optional[torch.Tensor],
         "histogram": Optional[torch.Tensor],
     }
 
@@ -171,25 +171,25 @@ class HistogramObserver(ObserverBase):
         super(HistogramObserver, self).__init__(**kwargs)
         self.bins = bins
         self.histogram = None
-        self.relaxed_min = None
-        self.relaxed_max = None
+        self.min_val = None
+        self.max_val = None
 
     def forward(self, x):
-        min_val = self.relaxed_min
-        max_val = self.relaxed_max
+        min_val = self.min_val
+        max_val = self.max_val
         histogram = self.histogram
         if min_val is None or max_val is None or histogram is None:
             min_val = torch.min(x)
             max_val = torch.max(x)
             range = max_val - min_val
-            self.relaxed_min = min_val - 0.5 * range
-            self.relaxed_max = max_val + 0.5 * range
+            self.min_val = min_val - 0.5 * range
+            self.max_val = max_val + 0.5 * range
             self.histogram = torch.histc(
                 x, self.bins, min=min_val - 0.5 * range, max=max_val + 0.5 * range
             )
         else:
             if min_val < torch.min(x) or max_val > torch.max(x):
-                warnings.warn("Incoming data is outside the relaxed_min/max range.")
+                warnings.warn("Incoming data is outside the min_val/max_val range.")
             new_histogram = torch.histc(
                 x, self.bins, min=min_val, max=max_val
             )
@@ -197,8 +197,8 @@ class HistogramObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        min_val = self.relaxed_min
-        max_val = self.relaxed_max
+        min_val = self.min_val
+        max_val = self.max_val
         histogram = self.histogram
 
         if min_val is None or max_val is None or histogram is None:
