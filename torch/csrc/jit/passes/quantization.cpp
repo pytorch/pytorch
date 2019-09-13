@@ -825,5 +825,43 @@ graph(%self, %x):
     }
   }
 }
+
+void FoldQuantizeCallIntoBuffer(
+    script::Module& module,
+    const std::string& method_name) {
+  // TODO: extra filter on scale/zero_point/dtype to make sure they are Constant
+  const std::string pattern = R"(
+graph(%self, %scale, %zero_point, %dtype):
+   %weight = prim::GetAttr[name="weight"](%self)
+   %weight_quant = aten::quantize_linear(%weight, %scale, %zero_point, %dtype)
+   return (%weight_quant))";
+  Graph pattern_graph;
+  std::unordered_map<std::string, Value*> vmap;
+  script::parseIR(pattern, &pattern_graph, vmap);
+  auto method = module.get_method(method_name);
+  auto graph = method.graph();
+  auto matches = findPatternMatches(pattern_graph, *graph);
+  for (const auto& match : matches) {
+    auto match_vmap = match.values_map;
+    auto* weight = match_vmap.at(vmap.at("weight"));
+    auto float_weight = module.get_parameter("weight").variable_data();
+    auto scale = toIValue(match_vmap.at(vmap.at("scale"))).value().toDouble();
+    auto zero_point =
+        toIValue(match_vmap.at(vmap.at("zero_point"))).value().toInt();
+    auto dtype =
+        toIValue(match_vmap.at(vmap.at("dtype"))).value().toScalarType();
+    module.register_buffer(
+        "_quantized_weight",
+        at::quantize_linear(float_weight, scale, zero_point, dtype));
+  }
+
+  std::string replacement = R"(
+graph(%self, %scale, %zero_point, %dtype):
+    %weight_quant = prim::GetAttr[name="_quantized_weight"](%self)
+    return (%weight_quant))";
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(pattern, replacement);
+  rewriter.runOnGraph(graph);
+}
 } // namespace jit
 } // namespace torch

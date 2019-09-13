@@ -1331,6 +1331,23 @@ graph(%input, %weight):
             torch._C._jit_pass_fuse_linear(graph)
             FileCheck().run(input_str, graph)
 
+    @_tmp_donotuse_dont_inline_everything
+    def test_fold_quantize(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.weight = torch.nn.Parameter(torch.tensor([2], dtype=torch.float))
+
+            def forward(self, x):
+                return torch.quantize_linear(self.weight, 2.0, 0, torch.quint8)
+
+        m = torch.jit.script(M())
+        torch._C._jit_pass_fold_quantize(m._c, 'forward')
+        self.assertTrue(m._c._has_attribute('_quantized_weight'))
+        FileCheck().check_not('GetAttr[name="weight"]') \
+                   .check('GetAttr[name="_quantized_weight"]') \
+                   .run(m._c._get_method('forward').graph)
+
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
         # --> mulmul(mulmul(x,y,z), x, y)
