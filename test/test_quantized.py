@@ -1009,7 +1009,7 @@ class TestQuantizedConv(unittest.TestCase):
             use_relu,
             use_channelwise
     ):
-
+        torch.backends.quantized.engine = torch.fbgemm
         qconv = torch.ops.quantized.conv2d
         if use_relu:
             qconv = torch.ops.quantized.conv2d_relu
@@ -1163,6 +1163,7 @@ class TestQuantizedConv(unittest.TestCase):
            padH=st.integers(1, 2), padW=st.integers(1, 2),
            channelwise=st.booleans())
     def test_qconv_unpack(self, X, strideH, strideW, padH, padW, channelwise):
+        torch.backends.quantized.engine = torch.fbgemm
         (inputs, filters, bias, groups) = X
         inputs, (inputs_scale, inputs_zero_point, inputs_qtype) = inputs
         filters, (filters_scale, filters_zero_point, filters_qtype) = filters

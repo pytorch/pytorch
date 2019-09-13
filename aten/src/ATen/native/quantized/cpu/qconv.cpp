@@ -278,13 +278,13 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       int64_t output_zero_point) {
     TORCH_CHECK(
         act.ndimension() == 4,
-        "qnnpack_conv2d(): Expected activation tensor to be 4-dimensional");
+        "quanitzed::conv2d (qnnpack): Expected activation tensor to be 4-dimensional");
     TORCH_CHECK(stride.size() == 2, "qnnpack_conv2d(): 2D convolution only");
     TORCH_CHECK(
         padding.size() == 2,
-        "qnnpack_conv2d(): Specify top/left padding only. \
+        "quanitzed::conv2d (qnnpack): Specify top/left padding only. \
         bottom/right padding assumed to be equal to top/left");
-    TORCH_CHECK(dilation.size() == 2, "qnnpack_conv2d(): 2D convolution only");
+    TORCH_CHECK(dilation.size() == 2, "quanitzed::conv2d (qnnpack): 2D convolution only");
 
     PackedConvWeightsQnnp& pack_ptr =
         cpp_custom_type_hack::cast<PackedConvWeightsQnnp>(packed_weight);
@@ -337,11 +337,11 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     TORCH_CHECK(
         std::all_of(
             outShape.begin(), outShape.end(), [](int64_t i) { return i > 0; }),
-        "qnnpack_conv2d(): each dimension of output tensor should be greater "
+        "quanitzed::conv2d (qnnpack): each dimension of output tensor should be greater "
         "than 0")
     TORCH_CHECK(
         (outShape[3] == out_ch),
-        "qnnpack_conv2d(): Number of filters must be equal to number of "
+        "quanitzed::conv2d (qnnpack): Number of filters must be equal to number of "
         "output channels")
 
     // Allocate output Tensor and a buffer for QNNPACK to use
@@ -367,7 +367,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
 
     TORCH_INTERNAL_ASSERT(
         runStatus == pytorch_qnnp_status_success,
-        "failed to run QNNPACK Conv operator");
+        "failed to run quanitzed::conv2d (qnnpack) operator");
 
     return output;
   }

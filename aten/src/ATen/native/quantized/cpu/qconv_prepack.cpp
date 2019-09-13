@@ -155,7 +155,6 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         dilation.size() == 2, " quantized::conv_prepack (qnnpack): 2D convolution only");
 
     initQNNPACK();
-    Tensor bias = bias_in.value();
 
     // QNNPACK expects weights to be of the format {out_c, kH, kW, in_c/groups}
     const size_t out_ch = weight.size(0);
@@ -163,6 +162,13 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     const uint32_t kernel_w = weight.size(2);
     const size_t in_ch = weight.size(3) * groups;
 
+    Tensor bias;
+    if (bias_in.has_value()) {
+      bias = bias_in.value();
+    } else {
+      bias = at::empty(out_ch, at::kFloat);
+      bias = at::quantize_linear(bias, 1.0, 0, kQInt32);
+    }
     TORCH_CHECK(
         !bias.defined() || (bias.ndimension() == 1 && bias.size(0) == out_ch),
         "quantized::conv_prepack (qnnpack): expected bias to be 1-dimensional with ",
