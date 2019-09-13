@@ -14,12 +14,7 @@ from common_utils import TestCase
 #       compatibility.
 #   (2) Each test method should have have the signature
 #           testX(self, device)
-#       OR
-#           testX(self, device, dtype)
 #       The device argument will be a string like 'cpu' or 'cuda.'
-#       If the dtype argument is in the signature the test must be decorated
-#       with a dtypes decorator (see below). This will instantiate a variant
-#       of the test for each dtype.
 #   (3) Prefer using test decorators defined in this file to others.
 #       For example, using the @skipIfNoLapack decorator instead of the
 #       @skipCPUIfNoLapack will cause the test to not run on CUDA if
@@ -35,15 +30,10 @@ from common_utils import TestCase
 # discoverable device-specific test classes from your generic class. It will
 # also hide the tests in your generic class so they're not run directly.
 #
-# For each generic testX, a new test textX_<device_type> or a suite of tests
-# testX_<device_type>_<dtype> will be created, depending on whether the generic
-# test used type in its signature. These tests will be put in classes named
-# GenericTestClassName<DEVICE_TYPE>. For example, test_diagonal in TestTorchDeviceType
-# becomes test_diagonal_cpu in TestTorchDeviceTypeCPU and test_diagonal_cuda in
-# TestTorchDeviceTypeCUDA. Tests with dtypes have the "torch." part of the
-# dtype name removed, so tests instantiated from a dtype test like test_neg are
-# named test_neg_cpu_float32, test_neg_cuda_int64... These tests receive the
-# device_type and dtype corresponding to their names as arguments.
+# For each generic testX, a new test textX_<device_type>  will be created.
+# These tests will be put in classes named GenericTestClassName<DEVICE_TYPE>.
+# For example, test_diagonal in TestTorchDeviceType becomes test_diagonal_cpu
+# in TestTorchDeviceTypeCPU and test_diagonal_cuda in TestTorchDeviceTypeCUDA.
 #
 # In short, if you write a test signature like
 #   def textX(self, device)
@@ -52,27 +42,17 @@ from common_utils import TestCase
 #   def textX_cuda(self, device='cuda')
 #   def testX_xla(self, device='xla')
 #   ...
-# And if you accept a dtype
-#   @dtypes(torch.float, torch.double)
-#   def testX(self, device, dtype)
-# It becomes
-#   def testX_cpu_float32(self, device='cpu', dtype=torch.float32)
-#   def testX_cpu_float64(self, device='cpu', dtype=torch.float64)
-#   def testX_cuda_float32(self, device='cuda', dtype=torch.float32)
-#   ...
 #
 # These tests can be run directly like normal tests:
 # "python test_torch.py TestTorchDeviceTypeCPU.test_diagonal_cpu"
-# "python test_torch.py TestTorchDeviceTypeCUDA.test_neg_cuda_float64"
 #
 # Collections of tests can be run using pytest filtering. For example,
 # "pytest test_torch.py -k 'test_diag'"
-# will run test_diag on every device (and with every dtype, if applicable).
-# To specify particular device types or dtypes the 'and' keyword can be used:
+# will run test_diag on every available device.
+# To specify particular device types the 'and' keyword can be used:
 # "pytest test_torch.py -k 'test_diag and cpu'"
-# "pytest test_torch.py -k 'test_neg and cuda and float'"
 # pytest filtering also makes it easy to run all tests on a particular device
-# type or all tests for a particular dtype.
+# type.
 #
 # [ADDING A DEVICE TYPE]
 #
@@ -98,47 +78,20 @@ from common_utils import TestCase
 # you should check if it's available and (if it is) add it to this list.
 device_type_test_bases = []
 
-# List of all Torch dtypes.
-all_dtypes = [torch.float64, torch.float32, torch.float16,
-              torch.int64, torch.int32, torch.int16, torch.int8,
-              torch.uint8, torch.bool]
-
 
 class DeviceTypeTestBase(TestCase):
     device_type = "generic_device_type"
-
-    # Returns the dtypes the test has requested.
-    # Prefers device-specific dtype specifications over generic ones.
-    @classmethod
-    def _get_dtypes(cls, test):
-        if not hasattr(test, 'dtypes'):
-            return None
-        return test.dtypes.get(cls.device_type, test.dtypes.get('all', None))
 
     # Creates device-specific tests.
     @classmethod
     def instantiate_test(cls, test):
         test_name = test.__name__ + "_" + cls.device_type
 
-        dtypes = cls._get_dtypes(test)
-        if dtypes is None:
-            # Test has no dtype variants
-            @wraps(test)
-            def instantiated_test(self, test=test):
-                return test(self, cls.device_type)
+        @wraps(test)
+        def instantiated_test(self, test=test):
+            return test(self, cls.device_type)
 
-            setattr(cls, test_name, instantiated_test)
-        else:
-            # Test has dtype variants
-            for dtype in dtypes:
-                dtype_str = str(dtype).split('.')[1]
-                dtype_test_name = test_name + "_" + dtype_str
-
-                @wraps(test)
-                def instantiated_test(self, test=test, dtype=dtype):
-                    return test(self, cls.device_type, dtype)
-
-                setattr(cls, dtype_test_name, instantiated_test)
+        setattr(cls, test_name, instantiated_test)
 
 
 class CPUTestBase(DeviceTypeTestBase):
@@ -212,58 +165,6 @@ def instantiate_device_type_tests(generic_test_class, scope):
         # This lets the instantiated class be discovered by unittest.
         device_type_test_class.__module__ = generic_test_class.__module__
         scope[class_name] = device_type_test_class
-
-
-# Decorator that specifies a variant of the test for each of the given
-# dtypes should be instantiated.
-# Notes:
-#   (1) Tests that accept the dtype argument MUST use this decorator, the
-#       allDtypes decorator, or the allDtypesExcept decorator so the test will
-#       work with new device types.
-#   (2) Can be overriden using dtypesIfCPU or dtypesIfCUDA.
-#   (3) Prefer the existing decorators to using kwargs here.
-class dtypes(object):
-
-    # Note: *args, **kwargs for Python2 compat.
-    # Python 3 allows (self, *args, device_type='all).
-    def __init__(self, *args, **kwargs):
-        assert all(arg in all_dtypes for arg in args), "Unknown dtype in {0}".format(str(args))
-        self.args = args
-        self.device_type = kwargs.get('device_type', 'all')
-
-    def __call__(self, fn):
-        d = getattr(fn, 'dtypes', {})
-        assert self.device_type not in d, "dtypes redefinition for {0}".format(self.device_type)
-        d[self.device_type] = self.args
-        fn.dtypes = d
-        return fn
-
-
-# Sugar that requests a variant of the test for each dtype.
-def allDtypes(fn):
-    return dtypes(*all_dtypes)(fn)
-
-
-# Sugar that requests a variant of the test for each dtype EXCEPT those given.
-class allDtypesExcept(dtypes):
-
-    def __init__(self, *args):
-        filtered = [x for x in all_dtypes if x not in args]
-        super(allDtypesExcept, self).__init__(*filtered)
-
-
-# Overrides specified dtypes on the CPU.
-class dtypesIfCPU(dtypes):
-
-    def __init__(self, *args):
-        super(dtypesIfCPU, self).__init__(*args, device_type='cpu')
-
-
-# Overrides specified dtypes on CUDA.
-class dtypesIfCUDA(dtypes):
-
-    def __init__(self, *args):
-        super(dtypesIfCUDA, self).__init__(*args, device_type='cuda')
 
 
 # Decorator that specifies a test dependency.

@@ -32,7 +32,7 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, torchtest, TEST_WITH_ROCM
 from multiprocessing.reduction import ForkingPickler
-from common_device_type import instantiate_device_type_tests, dtypes, \
+from common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -13339,41 +13339,40 @@ class TestTorchDeviceType(TestCase):
         expected = torch.diag(x, 17)
         self.assertEqual(result, expected)
 
-    @dtypes(torch.float, torch.double, torch.long, torch.int, torch.short,
-            torch.uint8, torch.int8, torch.bool)
-    def test_neg(self, device, dtype):
+    def test_neg(self, device):
+        int_types = [torch.int, torch.short, torch.int8, torch.uint8]
         float_types = [torch.float, torch.double, torch.long]
 
-        if dtype == torch.bool:
-            self.assertRaisesRegex(
-                RuntimeError,
-                r"Negation, the `\-` operator, on a bool tensor is not supported. "
-                r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
-                lambda: - torch.tensor([False, True], device=device))
-            return
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"Negation, the `\-` operator, on a bool tensor is not supported. "
+            r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
+            lambda: - torch.tensor([False, True], device=device))
+        return
 
-        if dtype in float_types:
-            a = torch.randn(100, 90).type(dtype).to(device)
-        else:
-            a = torch.randint(-128, 128, (100, 90), dtype=dtype, device=device)
-        zeros = torch.Tensor().type(dtype).resize_as_(a).zero_().to(device)
+        for dtype in float_types + int_types:
+            if dtype in float_types:
+                a = torch.randn(100, 90).type(dtype).to(device)
+            else:
+                a = torch.randint(-128, 128, (100, 90), dtype=dtype, device=device)
+            zeros = torch.Tensor().type(dtype).resize_as_(a).zero_().to(device)
 
-        if dtype == torch.uint8:
-            res_add = torch.add(zeros, a, alpha=255)
-        else:
-            res_add = torch.add(zeros, a, alpha=-1)
+            if dtype == torch.uint8:
+                res_add = torch.add(zeros, a, alpha=255)
+            else:
+                res_add = torch.add(zeros, a, alpha=-1)
 
-        res_neg = a.clone()
-        res_neg.neg_()
-        self.assertEqual(res_neg, res_add)
+            res_neg = a.clone()
+            res_neg.neg_()
+            self.assertEqual(res_neg, res_add)
 
-        # test out of place as well
-        res_neg_out_place = a.clone().neg()
-        self.assertEqual(res_neg_out_place, res_add)
+            # test out of place as well
+            res_neg_out_place = a.clone().neg()
+            self.assertEqual(res_neg_out_place, res_add)
 
-        # test via __neg__ operator
-        res_neg_op = -a.clone()
-        self.assertEqual(res_neg_op, res_add)
+            # test via __neg__ operator
+            res_neg_op = -a.clone()
+            self.assertEqual(res_neg_op, res_add)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
