@@ -212,7 +212,7 @@ constexpr scalar_t lower_bound() {
 }
 
 static void argmax_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "argmax_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmax_cpu", [&] {
     binary_kernel_reduce(
       iter,
       arg_reduce_wrapper([](scalar_t a, scalar_t b) {
@@ -223,7 +223,7 @@ static void argmax_kernel_impl(TensorIterator &iter) {
 }
 
 static void argmin_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "argmin_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmin_cpu", [&] {
     binary_kernel_reduce(
       iter,
       arg_reduce_wrapper([](scalar_t a, scalar_t b) {
