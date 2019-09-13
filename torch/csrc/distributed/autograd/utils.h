@@ -13,7 +13,7 @@ namespace autograd {
 //
 // Returns a shared_ptr to the autograd function, so that we can hold a
 // reference to it.
-std::shared_ptr<SendRpcBackward> addSendRpcBackward(
+TORCH_API std::shared_ptr<SendRpcBackward> addSendRpcBackward(
     const std::vector<torch::Tensor>& tensors);
 
 } // namespace autograd

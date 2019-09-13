@@ -17,7 +17,6 @@
 
 #include <c10d/PrefixStore.hpp>
 #include <c10d/TCPStore.hpp>
-#include <gloo/transport/tcp/device.h>
 #include <pybind11/chrono.h>
 
 #include <torch/csrc/Exceptions.h>
@@ -35,28 +34,6 @@ namespace {
 
 #ifdef USE_C10D_GLOO
 constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
-
-std::shared_ptr<::gloo::transport::Device> createDeviceForDefaultHostname() {
-  ::gloo::transport::tcp::attr attr;
-
-  // Use the hostname to resolve the network address to
-  // use. Note: if the hostname does not resolve to an address (e.g.
-  // because of misconfigured /etc/hosts file), this will not work.
-  std::array<char, HOST_NAME_MAX> hostname{};
-  auto rv = gethostname(hostname.data(), hostname.size());
-  if (rv != 0) {
-    throw std::system_error(errno, std::system_category());
-  }
-  attr.hostname = hostname.data();
-  return ::gloo::transport::tcp::CreateDevice(attr);
-}
-
-std::shared_ptr<::gloo::transport::Device> createDeviceForInterface(
-    std::string iface) {
-  ::gloo::transport::tcp::attr attr;
-  attr.iface = std::move(iface);
-  return ::gloo::transport::tcp::CreateDevice(attr);
-}
 #endif
 
 std::vector<std::string> split(char separator, const std::string& string) {
@@ -130,7 +107,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout);
 
-  py::class_<::c10d::AllreduceCoalescedOptions>(module, "AllreduceCoalescedOptions")
+  py::class_<::c10d::AllreduceCoalescedOptions>(
+      module, "AllreduceCoalescedOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceCoalescedOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::AllreduceCoalescedOptions::timeout);
@@ -445,20 +423,17 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def_readwrite("threads", &::c10d::ProcessGroupGloo::Options::threads);
 
   processGroupGloo.def_static(
-      "create_tcp_device",
+      "create_device",
       [](const std::string& hostname, const std::string& interface)
           -> std::shared_ptr<::gloo::transport::Device> {
-        ::gloo::transport::tcp::attr attr;
         if (!hostname.empty()) {
-          attr.hostname = hostname;
-        } else if (!interface.empty()) {
-          attr.iface = interface;
-        } else {
-          // Neither argument is specified; Gloo itself will use the
-          // hostname
-          // Nothing specified, default to something useful
+          return ::c10d::ProcessGroupGloo::createDeviceForHostname(hostname);
         }
-        return ::gloo::transport::tcp::CreateDevice(attr);
+        if (!interface.empty()) {
+          return ::c10d::ProcessGroupGloo::createDeviceForInterface(interface);
+        }
+        throw std::invalid_argument(
+            "Specify either `hostname` or `interface` argument.");
       },
       py::arg("hostname") = "",
       py::arg("interface") = "");
@@ -480,10 +455,15 @@ They are used in specifying strategies for reduction collectives, e.g.,
             char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV);
             if (ifnameEnv) {
               for (const auto& iface : split(',', ifnameEnv)) {
-                options.devices.push_back(createDeviceForInterface(iface));
+                options.devices.push_back(
+                    ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
               }
             } else {
-              options.devices.push_back(createDeviceForDefaultHostname());
+              // If no hostname is specified, this function looks up
+              // the machine's hostname and returns a device instance
+              // associated with the address that the hostname resolves to.
+              options.devices.push_back(
+                  ::c10d::ProcessGroupGloo::createDeviceForHostname(""));
             }
 
             options.timeout = timeout;

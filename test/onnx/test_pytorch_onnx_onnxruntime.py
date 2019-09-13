@@ -72,6 +72,12 @@ class TestONNXRuntime(unittest.TestCase):
     opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True  # For IR version 3 type export.
 
+    def setUp(self):
+        torch.manual_seed(0)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(0)
+        np.random.seed(seed=0)
+
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True, batch_size=2, use_gpu=True):
         run_model_test(self, model, batch_size=batch_size,
                        input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
@@ -832,7 +838,7 @@ class TestONNXRuntime(unittest.TestCase):
             return input
 
         input = make_input(RNN_BATCH_SIZE)
-        self.run_test(model, input, batch_size=RNN_BATCH_SIZE, atol=1e-7)
+        self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
 
         # test that the model still runs with a different batch size
         other_input = make_input(RNN_BATCH_SIZE + 1)
@@ -908,11 +914,11 @@ class TestONNXRuntime(unittest.TestCase):
             return input
 
         input = make_input(RNN_BATCH_SIZE)
-        self.run_test(model, input, batch_size=RNN_BATCH_SIZE, atol=1e-5)
+        self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
 
         # test that the model still runs with a different batch size
         other_input = make_input(RNN_BATCH_SIZE + 1)
-        self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1, atol=1e-5)
+        self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1)
 
 
 def make_test(name, base, layer, bidirectional, initial_state,

@@ -60,7 +60,9 @@ TESTS = [
     'jit_fuser',
     'tensorboard',
     'namedtensor',
+    'type_promotion',
     'jit_disabled',
+    'function_schema',
 ]
 
 # skip < 3.6 b/c fstrings added in 3.6

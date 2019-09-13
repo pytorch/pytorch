@@ -7,7 +7,6 @@ r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
 
-import hypothesis
 import io
 import torch
 import torch.nn as nn
@@ -17,15 +16,6 @@ from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, QConfig, default_observer, default_weight_observer, \
     default_qat_qconfig, propagate_qconfig, convert, DEFAULT_DYNAMIC_MODULE_MAPPING
-
-
-# Disable deadline testing if this version of hypthesis supports it, otherwise
-# just return the original function
-def no_deadline(fn):
-    try:
-        return hypothesis.settings(deadline=None)(fn)
-    except hypothesis.errors.InvalidArgument:
-        return fn
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -116,19 +106,16 @@ class QuantizationTestCase(TestCase):
             has Quantize and DeQuantize submodules
         """
         self.assertEqual(type(mod.module), nnq.Linear)
-        self.assertEqual(mod.module.bias.dtype, torch.qint32)
         self.checkQuantDequant(mod)
 
     def checkQuantizedLinear(self, mod):
         self.assertEqual(type(mod), nnq.Linear)
-        self.assertEqual(mod.bias.dtype, torch.qint32)
 
     def checkDynamicQuantizedLinear(self, mod):
         r"""Checks that mod has been swapped for an nnqd.Linear
             module, the bias is float.
         """
         self.assertEqual(type(mod), nnqd.Linear)
-        self.assertEqual(mod.bias.dtype, torch.float)
 
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
@@ -189,6 +176,16 @@ class SingleLayerLinearDynamicModel(torch.nn.Module):
 
     def forward(self, x):
         x = self.fc1(x)
+        return x
+
+class LSTMDynamicModel(torch.nn.Module):
+    def __init__(self):
+        super(LSTMDynamicModel, self).__init__()
+        self.qconfig = default_qconfig
+        self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.lstm(x)
         return x
 
 class TwoLayerLinearModel(torch.nn.Module):
@@ -493,4 +490,35 @@ class ResNetBase(torch.nn.Module):
         out = self.myop.add(out, identity)
         out = self.relu2(out)
         out = self.avgpool(out)
+        return out
+
+class ModelMultipleOps(torch.nn.Module):
+    def __init__(self):
+        super(ModelMultipleOps, self).__init__()
+        norm_layer = nn.BatchNorm2d
+        inplanes = 3
+        self.conv1 = nn.Conv2d(inplanes, inplanes, (1, 1), bias=False)
+        self.conv2 = nn.Conv2d(inplanes, inplanes, (1, 1), bias=False)
+        self.bn1 = norm_layer(inplanes)
+        self.relu1 = nn.ReLU()
+        self.relu2 = nn.ReLU()
+        self.downsample = torch.nn.Identity()
+        self.skip_add = nn.quantized.FloatFunctional()
+        self.cat = nn.quantized.FloatFunctional()
+        self.avgpool = nn.AdaptiveAvgPool2d((4, 4))
+        self.fc = nn.Linear(12, 6)
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out)
+        identity = self.downsample(x)
+        out = self.skip_add.add(out, identity)
+        out = self.relu2(out)
+        out = self.avgpool(out)
+        out = self.conv2(out)
+        out = torch.nn.functional.max_pool2d(out, 2, 2)
+        out = self.cat.cat([out, out])
+        out = out.view(-1, 3 * 2 * 2)
+        out = self.fc(out)
         return out

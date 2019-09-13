@@ -85,9 +85,6 @@ class Conf:
             resource_class = "large"
             if self.gpu_resource:
                 resource_class = "gpu." + self.gpu_resource
-
-                if self.gpu_resource == "large":
-                    parameters["multi_gpu"] = miniutils.quote("1")
             parameters["resource_class"] = resource_class
         return parameters
 
