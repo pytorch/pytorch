@@ -1894,6 +1894,8 @@ class TestCuda(TestCase):
             c2p.put(sync_func(self, TestCuda.FIFTY_MIL_CYCLES))
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    # Flaky on the ROCm CI
+    @skipIfRocm
     def test_stream_event_nogil(self):
         for sync_func in [TestCuda._stream_synchronize,
                           TestCuda._event_synchronize,
@@ -2784,6 +2786,7 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_triangular_solve(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @unittest.skip("Spuriously failing")
     def test_triangular_solve_batched(self):
         _TestTorchMixin._test_triangular_solve_batched(self, lambda t: t.cuda())
 

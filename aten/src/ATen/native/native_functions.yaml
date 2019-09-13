@@ -35,6 +35,9 @@
 - func: set_data(Tensor(a!) self, Tensor new_data) -> void
   variants: method
 
+- func: data(Tensor self) -> Tensor
+  variants: method
+
 - func: names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
   named_guard: False
@@ -43,11 +46,19 @@
   variants: method
   named_guard: False
 
-- func: align_to(Tensor self, DimnameList names) -> Tensor
+- func: align_to(Tensor(a) self, DimnameList names) -> Tensor(a)
   variants: function, method
   named_guard: False
 
+- func: align_as(Tensor self, Tensor other) -> Tensor
+  variants: method
+  named_guard: False
+
 - func: align_tensors(Tensor[] tensors) -> Tensor[]
+  named_guard: False
+
+- func: refine_names(Tensor(a) self, DimnameList names) -> Tensor(a)
+  variants: method
   named_guard: False
 
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)

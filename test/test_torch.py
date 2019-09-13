@@ -239,10 +239,12 @@ class _TestTorchMixin(torchtest):
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
                        'align_to',  # BUILD_NAMEDTENSOR only
+                       'align_as',  # BUILD_NAMEDTENSOR only
                        'renamed',  # BUILD_NAMEDTENSOR only
                        'names_',  # BUILD_NAMEDTENSOR only
                        'has_names',  # BUILD_NAMEDTENSOR only
                        'rename',  # BUILD_NAMEDTENSOR only
+                       'refine_names',  # BUILD_NAMEDTENSOR only
                        )
         test_namespace(torch.nn)
         test_namespace(torch.nn.functional, 'assert_int_or_pair', 'feature_alpha_dropout')
@@ -9949,6 +9951,15 @@ class _TestTorchMixin(torchtest):
         self.assertEqual(val in x, True)
         val += 10
         self.assertEqual(val in x, False)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type("foo")),
+            lambda: "foo" in x)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type([1, 2])),
+            lambda: [1, 2] in x)
 
     @staticmethod
     def _test_rot90(self, use_cuda=False):
