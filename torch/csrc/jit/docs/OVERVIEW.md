@@ -1028,8 +1028,8 @@ with prim::DifferentiableGraph_0 = graph(%13 : Float(*, *),
 
 ## JIT Logging ##
 
-Logging is a very useful debugging technique, especially in the context of compilers. Compilers perform a series of passes and analyses and logging can help to trace issues such as wrong results or segmentation faults  erroneous
-all the way back to the original transformation.
+Logging is a very useful debugging technique, especially in the context of compilers. Compilers perform a series of passes and analyses and logging can help to trace issues such as wrong results or segmentation faults
+all the way back to the original erroneous transformation.
 
 `TorchScript` offers a simple logging facility that can enabled by setting an environment variable `PYTORCH_JIT_LOG_LEVEL`.
 
