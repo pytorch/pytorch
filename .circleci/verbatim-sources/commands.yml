@@ -24,6 +24,13 @@ commands:
           no_output_timeout: "1h"
           command: ~/workspace/.circleci/scripts/setup_linux_system_environment.sh
 
+  setup_ci_environment:
+    steps:
+      - run:
+          name: Set Up CI Environment After attach_workspace
+          no_output_timeout: "1h"
+          command: ~/workspace/.circleci/scripts/setup_ci_environment.sh
+
   brew_update:
     description: "Update Homebrew and install base formulae"
     steps:

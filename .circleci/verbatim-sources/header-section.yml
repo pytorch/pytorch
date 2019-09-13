@@ -19,8 +19,3 @@ docker_config_defaults: &docker_config_defaults
     # This IAM user only allows read-write access to ECR
     aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4}
     aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
-
-setup_ci_environment: &setup_ci_environment
-  name: Set Up CI Environment After attach_workspace
-  no_output_timeout: "1h"
-  command: ~/workspace/.circleci/scripts/setup_ci_environment.sh
