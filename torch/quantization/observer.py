@@ -4,9 +4,10 @@ import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
 
+from torch._jit_internal import Optional, List
+import numpy as np
 import torch
 import torch.nn as nn
-from torch._jit_internal import Optional
 
 
 ABC = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
@@ -22,7 +23,9 @@ class ObserverBase(ABC, nn.Module):
     the collected statistics.
     """
 
-    def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False):
+    def __init__(
+        self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False
+    ):
         super(ObserverBase, self).__init__()
         self.dtype = dtype
         self.qscheme = qscheme
@@ -46,6 +49,36 @@ class ObserverBase(ABC, nn.Module):
     @abstractmethod
     def calculate_qparams(self, **kwargs):
         pass
+
+    def _calculate_per_channel_qparams(self, min_vals, max_vals):
+        # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
+        """
+        Given min and max value tensors, this function calculates per channel
+        quantization parameters
+        """
+        if min_vals is None or max_vals is None:
+            warnings.warn(
+                "must run observer before calling calculate_qparams.\
+                                    Returning default scale and zero point "
+            )
+            return torch.tensor([1.0]), torch.tensor([0])
+
+        for i in range(len(min_vals)):
+            assert (
+                min_vals[i] <= max_vals[i]
+            ), "min {} should be less than max {}".format(min_vals[i], max_vals[i])
+
+        scales = torch.ones(min_vals.size())
+        zero_points = torch.ones(min_vals.size())
+        for i in range(len(scales)):
+            # scales[i], zero_points[i] = self._calculate_qparams(
+            qparam = self._calculate_qparams(
+                min_vals[i], max_vals[i]
+            )
+            scales[i] = float(qparam[0])
+            zero_points[i] = int(qparam[1])
+
+        return scales, zero_points
 
     def _calculate_qparams(self, min_val, max_val):
         # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
@@ -122,8 +155,14 @@ class MinMaxObserver(ObserverBase):
         super(MinMaxObserver, self).__init__(**kwargs)
         self.min_val = None
         self.max_val = None
-        if self.qscheme == torch.per_tensor_symmetric and self.reduce_range and self.dtype == torch.quint8:
-            raise NotImplementedError("Cannot reduce range for symmetric quantization for quint8")
+        if (
+            self.qscheme == torch.per_tensor_symmetric
+            and self.reduce_range
+            and self.dtype == torch.quint8
+        ):
+            raise NotImplementedError(
+                "Cannot reduce range for symmetric quantization for quint8"
+            )
 
     def forward(self, x):
         min_val = self.min_val
@@ -180,23 +219,37 @@ class PerChannelMinMaxObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        min_vals = self.min_vals
-        max_vals = self.max_vals
-        if min_vals is None or max_vals is None:
-            scales = torch.ones(1)
-            zero_points = torch.zeros(1)
-        else:
-            scales = torch.ones(min_vals.size())
-            zero_points = torch.ones(min_vals.size())
-            for i in range(len(scales)):
-                scales[i], zero_points[i] = self._calculate_qparams(
-                    min_vals[i], max_vals[i]
-                )
-        return scales, zero_points
+        return self._calculate_per_channel_qparams(self.min_vals, self.max_vals)
 
     @torch.jit.export
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
+
+
+
+class TensorObserver(ObserverBase):
+    r"""
+    The module is mainly for debug and records the tensor values during runtime
+    """
+    __annotations__ = {
+        "tensor_val": List[Optional[torch.Tensor]],
+    }
+
+    def __init__(self, **kwargs):
+        super(TensorObserver, self).__init__(**kwargs)
+        self.tensor_val = []
+
+    def forward(self, x):
+        self.tensor_val.append(x.clone())
+        return x
+
+    @torch.jit.export
+    def calculate_qparams(self):
+        raise Exception("calculate_qparams should not be called for TensorObserver")
+
+    @torch.jit.export
+    def get_tensor_value(self):
+        return self.tensor_val
 
 
 def observer(observer_cls, **kwargs):
@@ -208,6 +261,8 @@ def default_observer(**kwargs):
     kwargs.setdefault("reduce_range", True)
     return observer(MinMaxObserver, **kwargs)
 
+def default_debug_observer(**kwargs):
+    return observer(TensorObserver, **kwargs)
 
 def default_weight_observer(**kwargs):
     kwargs.setdefault("dtype", torch.qint8)
