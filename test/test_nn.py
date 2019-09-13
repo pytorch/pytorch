@@ -3271,7 +3271,7 @@ class TestNN(NNTestCase):
 
     def _test_InstanceNorm_cuda_half(self, cls, input):
         # THNN
-        input = input.cuda().half().random_(1, 10).requires_grad_(True)
+        input = input.to(device='cuda', dtype=torch.half).random_(1, 10).requires_grad_(True)
         m = cls(input.size(1), affine=True, track_running_stats=True).to("cuda", torch.half)
         thnn_output = m(input)
         thnn_output.sum().backward()
