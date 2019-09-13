@@ -11,12 +11,16 @@ struct QnnpackOperatorDeleter {
 };
 struct PackedLinearWeightsQnnp {
   std::unique_ptr<qnnpack::PackBMatrix> w;
+  at::Tensor orig_weight;
+  at::Tensor bias;
   double w_scale;
   int64_t w_zp;
 };
 
 struct PackedConvWeightsQnnp {
   std::unique_ptr<qnnpack::PrePackConvWeights> w;
+  at::Tensor orig_weight;
+  at::Tensor bias;
   std::vector<int64_t> kernel;
   double w_scale;
   int64_t w_zp;
