@@ -134,7 +134,13 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
 
     int64_t rows_w = weight.size(0);
     int64_t cols_w = weight.size(1);
-    Tensor bias = bias_in.value();
+    Tensor bias;
+    if (bias_in.has_value()) {
+      bias = bias_in.value();
+    } else {
+      bias = at::empty(rows_w, at::kFloat);
+      bias = at::quantize_linear(bias, 1.0, 0, kQInt32);
+    }
     TORCH_CHECK(
         !bias.defined() || (bias.ndimension() == 1 && bias.size(0) == rows_w),
         "quantized::linear_prepack (qnnpack): Given weight of size ",
