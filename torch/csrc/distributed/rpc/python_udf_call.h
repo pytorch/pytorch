@@ -7,7 +7,7 @@ namespace distributed {
 namespace rpc {
 
 // RPC call representing calling a Python UDF over RPC.
-class PythonUDFCall final : public RpcBase {
+class TORCH_API PythonUDFCall final : public RpcBase {
  public:
   PythonUDFCall(std::vector<char>&& pickledPayload);
 

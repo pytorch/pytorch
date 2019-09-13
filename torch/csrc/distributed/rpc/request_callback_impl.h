@@ -8,7 +8,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-class RequestCallbackImpl : public RequestCallback {
+class TORCH_API RequestCallbackImpl : public RequestCallback {
  public:
   Message processMessage(Message& request) override;
 

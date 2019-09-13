@@ -10,7 +10,7 @@ namespace autograd {
 
 // DistAutogradContext which stores information for a single distributed
 // autograd pass on a worker.
-class DistAutogradContext {
+class TORCH_API DistAutogradContext {
  public:
   explicit DistAutogradContext(int64_t context_id);
 

@@ -9,7 +9,7 @@ namespace rpc {
 // Functor which is invoked to process an RPC message. This is an abstract class
 // with some common functionality across all request handlers. Users need to
 // implement this interface to perform the actual business logic.
-class RequestCallback {
+class TORCH_API RequestCallback {
  public:
   // Invoke the callback.
   Message operator()(Message& request);

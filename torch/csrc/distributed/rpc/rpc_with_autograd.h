@@ -6,7 +6,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-struct AutogradMetadata {
+struct TORCH_API AutogradMetadata {
   AutogradMetadata(int64_t autogradContextId, int64_t autogradMessageId);
 
   // autogradContextId_ is a globally unique integer that identifies a
@@ -20,7 +20,7 @@ struct AutogradMetadata {
 // Represents an RPC that includes autograd information. This class basically
 // wraps another `RpcBase` object which represents the actual RPC and has
 // additional autograd information associated with that RPC.
-class RpcWithAutograd final : public RpcBase {
+class TORCH_API RpcWithAutograd final : public RpcBase {
  public:
   RpcWithAutograd(
       MessageType messageType,

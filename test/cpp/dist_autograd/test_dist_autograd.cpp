@@ -10,7 +10,17 @@
 using namespace torch::distributed::autograd;
 using namespace torch::distributed::rpc;
 
-TEST(DistAutogradTest, TestSendFunction) {
+class DistAutogradTest : public ::testing::Test {
+ protected:
+  static void SetUpTestCase() {
+    autogradContainer_ = &DistAutogradContainer::init(0);
+  }
+  static DistAutogradContainer* autogradContainer_;
+};
+
+DistAutogradContainer* DistAutogradTest::autogradContainer_ = nullptr;
+
+TEST_F(DistAutogradTest, TestSendFunction) {
   // Initialize input tensors requiring grad.
   auto options = at::TensorOptions().requires_grad(true);
   auto in1 = torch::ones({3, 3}, options);
@@ -18,9 +28,8 @@ TEST(DistAutogradTest, TestSendFunction) {
   ASSERT_FALSE(in1.grad().defined());
   ASSERT_FALSE(in2.grad().defined());
 
-  auto& autogradContainer = DistAutogradContainer::init(0);
-  autogradContainer.newContext();
-  DistAutogradContext& autogradContext = autogradContainer.currentContext();
+  autogradContainer_->newContext();
+  DistAutogradContext& autogradContext = autogradContainer_->currentContext();
   // Attach the send autograd function to tensors.
   std::vector<torch::Tensor> tensors = {in1, in2};
   addSendRpcBackward(autogradContext, AutogradMetadata(1, 1), tensors);
@@ -43,14 +52,13 @@ TEST(DistAutogradTest, TestSendFunction) {
   ASSERT_TRUE(in2.grad().defined());
 }
 
-TEST(DistAutogradTest, TestSendFunctionInvalidInputs) {
+TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
   auto options = at::TensorOptions().requires_grad(true);
   auto in1 = torch::ones({3, 3}, options);
   auto in2 = torch::ones({3, 3}, options);
 
-  auto& autogradContainer = DistAutogradContainer::init(0);
-  autogradContainer.newContext();
-  DistAutogradContext& autogradContext = autogradContainer.currentContext();
+  autogradContainer_->newContext();
+  DistAutogradContext& autogradContext = autogradContainer_->currentContext();
   // Attach the send autograd function to tensors.
   std::vector<torch::Tensor> tensors = {in1, in2};
   addSendRpcBackward(autogradContext, AutogradMetadata(1, 1), tensors);

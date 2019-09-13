@@ -13,7 +13,7 @@ namespace autograd {
 // addition to this, it also registers the send function in the provided
 // autograd context. Finally, the RPC message is updated with appropriate
 // autograd information for the recipient.
-void addSendRpcBackward(
+TORCH_API void addSendRpcBackward(
     DistAutogradContext& autogradContext,
     const torch::distributed::rpc::AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors);
@@ -26,7 +26,7 @@ void addSendRpcBackward(
 //
 // Returns a pointer to the autograd context created (nullptr in case of no
 // autograd information was needed.)
-DistAutogradContext* addRecvRpcBackward(
+TORCH_API DistAutogradContext* addRecvRpcBackward(
     const torch::distributed::rpc::AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors);
 

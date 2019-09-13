@@ -8,11 +8,11 @@ namespace rpc {
 
 // Given an RPC message received as a request over the wire, deserialize it into
 // the appropriate 'RpcBase' type.
-std::unique_ptr<RpcBase> deserializeRequest(const Message& request);
+TORCH_API std::unique_ptr<RpcBase> deserializeRequest(const Message& request);
 
 // Given an RPC message received as a response over the wire, deserialize it
 // into the appropriate 'RpcBase' type.
-std::unique_ptr<RpcBase> deserializeResponse(const Message& response);
+TORCH_API std::unique_ptr<RpcBase> deserializeResponse(const Message& response);
 
 } // namespace rpc
 } // namespace distributed
