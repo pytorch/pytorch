@@ -66,7 +66,7 @@ graph(%self, %input):
 }
 
 std::string getFuncName(const c10::QualifiedName& qname) {
-  auto name = qname.qualifiedName();
+  const auto& name = qname.qualifiedName();
   auto rdot_idx = name.rfind('.');
   if (rdot_idx != std::string::npos) {
     return name.substr(rdot_idx + 1, name.length());
@@ -890,7 +890,6 @@ graph(%self, %scale, %zero_point, %dtype):
   auto matches = findPatternMatches(pattern_graph, *graph);
   for (const auto& match : matches) {
     auto match_vmap = match.values_map;
-    auto* weight = match_vmap.at(vmap.at("weight"));
     auto float_weight = module.get_parameter("weight").variable_data();
     auto scale = toIValue(match_vmap.at(vmap.at("scale"))).value().toDouble();
     auto zero_point =
