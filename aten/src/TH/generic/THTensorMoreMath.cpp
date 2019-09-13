@@ -366,7 +366,7 @@ void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t a
     THTensor_(select)(matrix2, batch2, 0, batch);
     THTensor_(select)(result_matrix, result, 0, batch);
 
-    THTensor_(addmm)(result_matrix, beta, result_matrix, alpha, matrix1, matrix2);
+    THTensor_(addmm)(result_matrix, result_matrix, matrix1, matrix2, beta, alpha);
   }
 
   c10::raw::intrusive_ptr::decref(matrix1);
