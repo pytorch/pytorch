@@ -104,15 +104,23 @@ void logical_xor_kernel(TensorIterator& iter) {
 }
 
 void lt_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.dtype(), "lt_cpu_result_", [&] {
-    using return_t = scalar_t;
-    AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "lt_cpu", [&]() {
-      cpu_kernel(iter,
-       [=](scalar_t a, scalar_t b) -> return_t {
-         return a < b;
-       });
+  if (iter.dtype() == iter.input_dtype()) {
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.dtype(), "lt_cpu", [&]() {
+      cpu_kernel_vec(iter,
+       [=](scalar_t a, scalar_t b) -> scalar_t { return a < b; },
+       [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a < b; });
     });
-  });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.dtype(), "lt_cpu_result_", [&] {
+      using return_t = scalar_t;
+      AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "lt_cpu", [&]() {
+        cpu_kernel(iter,
+         [=](scalar_t a, scalar_t b) -> return_t {
+           return a < b;
+         });
+      });
+    });
+  }
 }
 
 } // anonymous namespace
