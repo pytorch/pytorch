@@ -707,6 +707,7 @@ const std::unordered_set<c10::OperatorName>& aten_ops_not_moved_to_c10_yet() {
         {"aten::bench__add_at", ""},
         {"aten::backward", ""},
         {"aten::set_data", ""},
+        {"aten::data", ""},
     #ifdef BUILD_NAMEDTENSOR
         {"aten::renamed", ""},
     #endif
@@ -714,7 +715,13 @@ const std::unordered_set<c10::OperatorName>& aten_ops_not_moved_to_c10_yet() {
         {"aten::align_to", ""},
     #endif
     #ifdef BUILD_NAMEDTENSOR
+        {"aten::align_as", ""},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
         {"aten::align_tensors", ""},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::refine_names", ""},
     #endif
         {"aten::_cudnn_rnn", ""},
         {"aten::_cudnn_rnn_backward", ""},

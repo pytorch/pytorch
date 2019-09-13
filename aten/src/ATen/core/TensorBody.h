@@ -410,6 +410,7 @@ class CAFFE2_API Tensor {
   Tensor bench__add_c10(const Tensor & b) const;
   void backward(const Tensor & gradient={}, bool keep_graph=false, bool create_graph=false) const;
   void set_data(const Tensor & new_data) const;
+  Tensor data() const;
   #ifdef BUILD_NAMEDTENSOR
   Tensor & names_(c10::optional<DimnameList> names) const;
   #endif
@@ -418,6 +419,12 @@ class CAFFE2_API Tensor {
   #endif
   #ifdef BUILD_NAMEDTENSOR
   Tensor align_to(DimnameList names) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor align_as(const Tensor & other) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor refine_names(DimnameList names) const;
   #endif
   Tensor abs() const;
   Tensor & abs_() const;
