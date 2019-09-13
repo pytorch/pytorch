@@ -1650,6 +1650,17 @@ graph(%Ra, %Rb):
     def test_trace_arange_with_grad(self):
         self.do_trace_arange(True)
 
+    # Test that a trace of torch.full(x.shape) doesn't store the shape as a constant
+    def test_trace_full_dynamic_shape(self):
+        def full_with_shape_like(x):
+            return torch.full(x.shape, 2)
+
+        x = torch.randn(3, 4)
+        ge = torch.jit.trace(full_with_shape_like, example_inputs=x)
+        y = torch.randn(2, 7)
+        self.assertEqual(ge(y).shape, y.shape)
+        self.assertEqual(ge(x).shape, x.shape)
+
     def test_trace_casts(self):
         casts = [
             lambda x: x.byte(),
