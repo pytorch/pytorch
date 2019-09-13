@@ -156,6 +156,9 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
     "torch/csrc/jit/function.cpp",
+    "torch/csrc/jit/lite_interpreter/bytecode.cpp",
+    "torch/csrc/jit/lite_interpreter/import_bytecode.cpp",
+    "torch/csrc/jit/lite_interpreter/register_ins_ops.cpp",
 ]
 
 libtorch_cuda_sources = [

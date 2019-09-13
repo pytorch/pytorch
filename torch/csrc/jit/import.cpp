@@ -59,14 +59,8 @@ namespace {
 
 
 // This is a deserializer class which loads script modules from pt files.
-// It is able to parse both the new and legacy formats for backward compatibility.
 // Content of the file is written using PyTorchStreamWriter, for details please
 // check caffe2/serialize/inline_container.h.
-// The legacy format:
-// All the records except the last one are tensor data, and the last record
-// is a serialized ModelProto, defined in caffe2/proto/torch.proto.
-// ModelProto contains all the metadata of themodel, and it is serialized as json.
-// The new format:
 // The module is saved in pickle. readArchive() is called to parse and construct
 // the constant table and the script module.
 class ScriptModuleDeserializer final {
