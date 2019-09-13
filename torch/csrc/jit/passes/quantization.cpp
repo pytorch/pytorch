@@ -729,8 +729,7 @@ graph(%a_quant, %w_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_p
         %bias: Tensor? = prim::Constant()
         %r = quantized::fbgemm_linear(%a_perm, %w_packed, %bias, %r_scale, %r_zero_point)
         %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
-        %r_perm = aten::permute(%r, %out_param)
-        return (%r_perm))"}};
+        %r_perm = aten::permute(%r, %out_param)"}};
   for (const auto& item : pattern_and_replacements) {
     SubgraphRewriter rewriter;
     rewriter.RegisterRewritePattern(item.first, item.second);
