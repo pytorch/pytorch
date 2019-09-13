@@ -82,10 +82,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     TORCH_CHECK(stride.size() == 2, "2D convolution only");
     TORCH_CHECK(padding.size() == 2, "2D convolution only");
     TORCH_CHECK(dilation.size() == 2, "2D convolution only");
-    TORCH_CHECK(
-        (dilation[0] == 1 && dilation[1] == 1),
-        "Currently dilation should be 1");
-
     // inputs are in NHWC format
     int N = act.size(0);
     int H = act.size(1);
@@ -126,7 +122,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         groups,
         {kernel_h, kernel_w},
         {stride_h, stride_w},
-        {pad_l, pad_t, pad_l, pad_t});
+        {pad_l, pad_t, pad_l, pad_t},
+        {static_cast<int>(dilation[0]), static_cast<int>(dilation[1])});
 
     fbgemm::DoNothing<> NoOpObj{};
 
