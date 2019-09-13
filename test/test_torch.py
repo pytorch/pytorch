@@ -13343,12 +13343,12 @@ class TestTorchDeviceType(TestCase):
         int_types = [torch.int, torch.short, torch.int8, torch.uint8]
         float_types = [torch.float, torch.double, torch.long]
 
+        # Tests bool tensor negation raises the correct error
         self.assertRaisesRegex(
             RuntimeError,
             r"Negation, the `\-` operator, on a bool tensor is not supported. "
             r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
             lambda: - torch.tensor([False, True], device=device))
-        return
 
         for dtype in float_types + int_types:
             if dtype in float_types:
