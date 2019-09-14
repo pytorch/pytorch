@@ -1962,6 +1962,7 @@ class TestCuda(TestCase):
         with torch.cuda.device(d0):
             s0 = torch.cuda.current_stream()
             e0 = s0.record_event()
+            s0.synchronize()
 
         with torch.cuda.device(d1):
             s1 = torch.cuda.current_stream()
