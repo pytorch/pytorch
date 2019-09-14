@@ -1,5 +1,5 @@
 import unittest
-from common_utils import TestCase, run_tests
+from common_utils import TestCase, run_tests, TEST_NUMPY
 from common_cuda import TEST_CUDA
 from collections import namedtuple
 import itertools
@@ -10,13 +10,23 @@ import torch.nn.functional as F
 from multiprocessing.reduction import ForkingPickler
 import pickle
 import io
+import os
 import sys
 import warnings
 
 
+def check_env_flag(name, default=''):
+    return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
+
+TEST_NAMEDTENSOR = check_env_flag('TEST_NAMEDTENSOR')
+
 skipIfNamedTensorDisabled = \
     unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
                     'PyTorch not compiled with namedtensor support')
+
+skipIfNotTestingNamedTensor = \
+    unittest.skipIf(not TEST_NAMEDTENSOR,
+                    'TEST_NAMEDTENSOR=0; set it to 1 to enable named tensor tests')
 
 def pass_name_to_python_arg_parser(name):
     x = torch.empty(2, names=(name,))
@@ -69,6 +79,17 @@ def out_fn(operator):
 
 
 class TestNamedTensor(TestCase):
+    def test_aaa_must_run_first_check_experimental_warning(self):
+        # TODO(rzou): It would be nice for this to be a "real" python warning.
+        # Right now this error message only prints once and doesn't respect
+        # warnings.simplefilter behavior (where python users can control whether
+        # or not to display warnings once, all the time, or never).
+        with warnings.catch_warnings(record=True) as warns:
+            x = torch.randn(3, 3, names=('N', 'C'))
+            self.assertEqual(len(warns), 1)
+            self.assertTrue(str(warns[0].message).startswith(
+                'Named tensors and all their associated APIs are an experimental feature'))
+
     def test_trivial(self):
         pass
 
@@ -154,6 +175,42 @@ class TestNamedTensor(TestCase):
         self.assertFalse(none_named.has_names())
         self.assertTrue(partially_named.has_names())
         self.assertTrue(fully_named.has_names())
+
+    def test_refine_names(self):
+        # Unnamed tensor -> Unnamed tensor
+        self._test_name_inference(Tensor.refine_names,
+                                  [create('None:1,None:2,None:3'), 'N', 'C', 'H'],
+                                  ['N', 'C', 'H'])
+
+        # Named tensor -> Named tensor
+        self._test_name_inference(Tensor.refine_names,
+                                  [create('N:1,C:2,H:3'), 'N', 'C', 'H'],
+                                  ['N', 'C', 'H'])
+
+        # Partially named tensor -> named tensor
+        self._test_name_inference(Tensor.refine_names,
+                                  [create('None:1,C:2,None:3'), None, 'C', 'H'],
+                                  [None, 'C', 'H'])
+
+        # Too few names
+        self._test_name_inference(Tensor.refine_names,
+                                  [create('None:2,None:3'), 'N', 'C', 'H'],
+                                  maybe_raises_regex="different number of dims")
+
+        # Cannot change Tensor[D] to Tensor[N]
+        self._test_name_inference(Tensor.refine_names,
+                                  [create('D:3'), 'N'],
+                                  maybe_raises_regex="is different from")
+
+        # Cannot change Tensor[D] to Tensor[None]
+        self._test_name_inference(Tensor.refine_names,
+                                  [create('D:3'), None],
+                                  maybe_raises_regex="'D' is more specific than None")
+
+        # globbing behavior exists
+        self._test_name_inference(Tensor.refine_names,
+                                  [create('None:1,None:1,None:2,None:3'), '*', 'C', 'H'],
+                                  [None, None, 'C', 'H'])
 
     def test_repr(self):
         named_tensor = torch.zeros(2, 3).names_('N', 'C')
@@ -342,6 +399,48 @@ class TestNamedTensor(TestCase):
             result = torch.full([1, 2, 3], 2, names=names, device=device)
             expected = torch.full([1, 2, 3], 2, device=device).names_(*names)
             self.assertTensorDataAndNamesEqual(result, expected)
+
+    def test_tensor_from_lists(self):
+        names = ('N', 'C')
+        tensor = torch.tensor([[1]], names=names)
+        self.assertEqual(tensor.names, names)
+
+        names = ('N',)
+        tensor = torch.tensor([1], names=names)
+        self.assertEqual(tensor.names, names)
+
+        with self.assertRaisesRegex(RuntimeError, 'Number of names'):
+            names = ('N', 'C')
+            tensor = torch.tensor([1], names=names)
+
+    @unittest.skipIf(not TEST_NUMPY, "no numpy")
+    def test_tensor_from_numpy(self):
+        import numpy as np
+        arr = np.array([[1]])
+        names = ('N', 'C')
+        tensor = torch.tensor([[1]], names=names)
+        self.assertEqual(tensor.names, names)
+
+    def test_tensor_from_tensor(self):
+        x = torch.randn(1, 1)
+        names = ('N', 'C')
+        tensor = torch.tensor(x, names=names)
+        self.assertEqual(tensor.names, names)
+
+    def test_tensor_from_named_tensor(self):
+        x = torch.randn(1, 1, names=('N', 'D'))
+        tensor = torch.tensor(x)
+        self.assertEqual(tensor.names, ('N', 'D'))
+
+        # there's no way to distinguish between names=None and not passing in names.
+        # If the user passes in names=None they are asking for trouble.
+        x = torch.randn(1, 1, names=('N', 'D'))
+        tensor = torch.tensor(x, names=None)
+        self.assertEqual(tensor.names, ('N', 'D'))
+
+        x = torch.randn(1, 1, names=('N', 'D'))
+        with self.assertRaisesRegex(RuntimeError, "Name mismatch"):
+            tensor = torch.tensor(x, names=('N', 'C'))
 
     def test_size(self):
         t = torch.empty(2, 3, 5, names=('N', None, 'C'))
@@ -989,7 +1088,22 @@ class TestNamedTensor(TestCase):
     def test_as_strided_cuda(self):
         self._test_as_strided('cuda')
 
-    def test_no_jit_support(self):
+    def test_no_jit_tracer_support(self):
+        def foo(x):
+            return torch.full(x.shape, 2, names=('N',))
+
+        with self.assertRaisesRegex(RuntimeError, 'not supported with the tracer'):
+            x = torch.randn(3)
+            torch.jit.trace(foo, example_inputs=x)
+
+        def bar(x):
+            return x.select('N', 1)
+
+        with self.assertRaisesRegex(RuntimeError, 'not supported with the tracer'):
+            x = torch.randn(3)
+            torch.jit.trace(bar, example_inputs=x)
+
+    def test_no_jit_script_support(self):
         @torch.jit.script
         def foo(x):
             return x + 1
@@ -1010,15 +1124,73 @@ class TestNamedTensor(TestCase):
             return_named_tensor(torch.randn(1, 1))
 
     def test_align_to(self):
+        # trivial
+        tensor = create('N:3')
+        output = tensor.align_to('N')
+        self.assertEqual(output.names, ['N'])
+        self.assertEqual(output.shape, [3])
+
+        # unsqueeze behavior
+        tensor = create('N:3')
+        output = tensor.align_to('N', 'D')
+        self.assertEqual(output.names, ['N', 'D'])
+        self.assertEqual(output.shape, [3, 1])
+
+        # transpose behavior
+        tensor = create('N:3,C:2')
+        output = tensor.align_to('C', 'N')
+        self.assertEqual(output.names, ['C', 'N'])
+        self.assertEqual(output.shape, [2, 3])
+
+        # unsqueeze / transpose
+        tensor = create('C:2,N:3,H:5')
+        output = tensor.align_to('N', 'H', 'W', 'C')
+        self.assertEqual(output.names, ['N', 'H', 'W', 'C'])
+        self.assertEqual(output.shape, [3, 5, 1, 2])
+
+        # globbing
+        tensor = create('N:7,H:3,W:5,C:2')
+        output = tensor.align_to('*', 'C', 'H', 'W')
+        self.assertEqual(output.names, ['N', 'C', 'H', 'W'])
+        self.assertEqual(output.shape, [7, 2, 3, 5])
+
+        tensor = create('N:7,C:2,H:3,W:5')
+        output = tensor.align_to('*', 'W', 'H')
+        self.assertEqual(output.names, ['N', 'C', 'W', 'H'])
+        self.assertEqual(output.shape, [7, 2, 5, 3])
+
+        # All input dimensions must be named
+        with self.assertRaisesRegex(RuntimeError, "All input dims must be named"):
+            create('None:2,C:3').align_to('N', 'C')
+
+        # not enough names
+        with self.assertRaisesRegex(RuntimeError, "Cannot find dim 'N'"):
+            create('N:2,C:3').align_to('C')
+
+        # names not found
+        with self.assertRaisesRegex(RuntimeError, "Cannot find dim 'C'"):
+            create('N:2,C:3').align_to('D', 'N')
+
+    def test_align_as(self):
+        # align_as calls align_to internally. align_to has pretty substantial tests,
+        # so just test some basic things here.
+        tensor = create('C:2,N:3,H:5')
+        other = create('N:1,H:1,W:1,C:1')
+        output = tensor.align_as(other)
+        self.assertEqual(output.names, ['N', 'H', 'W', 'C'])
+        self.assertEqual(output.shape, [3, 5, 1, 2])
+
+    def test_align_tensors_two_inputs(self):
         def _test(tensor_namedshape, align_names, expected_sizes, expected_error):
             tensor_names, tensor_sizes = tensor_namedshape
             tensor = torch.empty(*tensor_sizes, names=tensor_names)
+            other = torch.empty([1] * len(align_names), names=align_names)
             if expected_error is not None:
                 with self.assertRaisesRegex(RuntimeError, expected_error):
-                    tensor.align_to(align_names)
+                    torch.align_tensors(tensor, other)
                 return
 
-            output = tensor.align_to(align_names)
+            output, _ = torch.align_tensors(tensor, other)
             self.assertEqual(output.shape, expected_sizes)
             self.assertEqual(output.names, align_names)
 
@@ -1039,10 +1211,6 @@ class TestNamedTensor(TestCase):
                  align_names=['D'],
                  expected_sizes=None,
                  expected_error='not a subsequence'),
-            Case(tensor_namedshape=(['N', 'C'], [2, 3]),
-                 align_names=['C'],
-                 expected_sizes=None,
-                 expected_error='shorter list of dims'),
 
             # single-dim alignment test
             Case(tensor_namedshape=(['C'], [2]),
@@ -1075,10 +1243,6 @@ class TestNamedTensor(TestCase):
                  expected_error=None),
 
             # unnamed tensor tests
-            Case(tensor_namedshape=[None, [2, 3]],
-                 align_names=[None],
-                 expected_sizes=None,
-                 expected_error='shorter list'),
             Case(tensor_namedshape=[None, [2, 3]],
                  align_names=[None, None],
                  expected_sizes=[2, 3],
@@ -1127,14 +1291,12 @@ class TestNamedTensor(TestCase):
             _test(*test)
 
     def test_align_tensors(self):
-        # align_tensors shares code with align_to. test_align_to already tests
-        # the alignment rules, so we don't do that again here.
         def reference_fn(*tensors):
             longest_names = tensors[0].names
             for tensor in tensors:
                 if len(tensor.names) > len(longest_names):
                     longest_names = tensor.names
-            return [tensor.align_to(longest_names) for tensor in tensors]
+            return [tensor.align_to(*longest_names) for tensor in tensors]
 
         x = torch.empty(1, 1, names=('N', 'H'))
         y = torch.empty(2, 3, 5, names=('N', 'C', 'H'))
@@ -1443,7 +1605,7 @@ class TestNamedTensor(TestCase):
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):
     if attr.startswith('test_'):
-        new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
+        new_test = skipIfNamedTensorDisabled(skipIfNotTestingNamedTensor(getattr(TestNamedTensor, attr)))
         setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':

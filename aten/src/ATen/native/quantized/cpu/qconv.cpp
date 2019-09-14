@@ -111,6 +111,13 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     int kernel_h = kernel[0];
     int kernel_w = kernel[1];
 
+    TORCH_CHECK(C == (packB->inputChannels()),
+        "[QConv2D] Given groups=", groups, ", weight of size ",
+        K, ", ",  kernel_h, ", ", kernel_w, ", ", packB->inputChannels(),
+        ", expected input (NHWC) ", N, ", ", H, ", ", W, ", ", C,
+        " to have ", (packB->inputChannels() * groups),
+        " channels, but got ", C, " channels instead");
+
     fbgemm::conv_param_t<> conv_p(
         N, // Batch size
         C, // Number of input channels
@@ -228,8 +235,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
           conv_p,
           act_ptr,
           *packB,
-          reinterpret_cast<uint8_t*>(output.data<c10::quint8>()),
-          buffer.data<int32_t>(),
+          reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+          buffer.data_ptr<int32_t>(),
           outputProcObj,
           0 /* thread_id*/,
           1 /* num_threads */);
