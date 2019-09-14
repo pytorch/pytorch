@@ -12,7 +12,7 @@ from common_utils import TestCase
 #   (1) Only define test methods in the test class itself. Helper methods
 #       and non-methods must be inherited. This limitation is for Python2
 #       compatibility.
-#   (2) Each test method should have have the signature
+#   (2) Each test method should have the signature
 #           testX(self, device)
 #       The device argument will be a string like 'cpu' or 'cuda.'
 #   (3) Prefer using test decorators defined in this file to others.
@@ -87,6 +87,8 @@ class DeviceTypeTestBase(TestCase):
     def instantiate_test(cls, test):
         test_name = test.__name__ + "_" + cls.device_type
 
+        assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
+
         @wraps(test)
         def instantiated_test(self, test=test):
             return test(self, cls.device_type)
@@ -121,7 +123,7 @@ if torch.cuda.is_available():
 # generic_test_class.
 # See note "Generic Device Type Testing."
 def instantiate_device_type_tests(generic_test_class, scope):
-    # Removes the generic test class from its enclosing scope so it's tests
+    # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
 
@@ -177,7 +179,7 @@ def instantiate_device_type_tests(generic_test_class, scope):
 #   (3) Prefer the existing decorators to defining the 'device_type' kwarg.
 class skipIf(object):
 
-    def __init__(self, dep, reason, device_type='all'):
+    def __init__(self, dep, reason, device_type=None):
         self.dep = dep
         self.reason = reason
         self.device_type = device_type
@@ -186,7 +188,7 @@ class skipIf(object):
 
         @wraps(fn)
         def dep_fn(slf, device, *args, **kwargs):
-            if self.device_type == 'all' or self.device_type == slf.device_type:
+            if self.device_type is None or self.device_type == slf.device_type:
                 if not self.dep or (isinstance(self.dep, str) and not getattr(slf, self.dep, False)):
                     raise unittest.SkipTest(self.reason)
 

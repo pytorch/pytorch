@@ -13326,7 +13326,7 @@ def add_neg_dim_tests():
         assert not hasattr(_TestTorchMixin, test_name), "Duplicated test name: " + test_name
         setattr(_TestTorchMixin, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
 
-# Device-agnostic tests. Instantiated below and not run directly.
+# Device-generic tests. Instantiated below and not run directly.
 class TestTorchDeviceType(TestCase):
     def test_diagonal(self, device):
         x = torch.randn((100, 100), device=device)
