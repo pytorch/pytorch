@@ -120,8 +120,8 @@ private:
   // The dispatchTable stores the current kernel for each dispatch key
   LeftRight<DispatchTable> dispatchTable_;
 
-  // In both cases, the list of kernels stores all registered kernels for the
-  // corresponding dispatch key (or for catch-all).
+  // kernels_ stores all registered kernels for the corresponding dispatch key
+  // and catchAllKernels_ stores the catch-all kernels.
   // If an operator library gets loaded that overwrites an already existing kernel,
   // both kernels will be in that list but only the newer one will be in
   // dispatchTable. If any of the kernels go away (say the library gets

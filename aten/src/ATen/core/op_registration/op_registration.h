@@ -424,13 +424,21 @@ public:
 
     template<class KernelFunctor, class... ConstructorParameters>
     Options&& kernelFunctorUnboxedOnly(c10::optional<TensorTypeId>&& dispatch_key, ConstructorParameters&&... constructorParameters) && {
+      // Setting cache_creator to nullptr so calling the kernel doesn't need to call it, which would be expensive.
+      // Since the dispatcher static_cast's cache objects into our functor type to call their operator(), this nullptr
+      // will cause it to create and static_cast an invalid cache object, which is technically illegal in the C++ standard,
+      // but it works as long as operator() does not access any functor members.
+      // Exception: Backend extensions use runtime function pointers and store these in the functor as members,
+      // so we need a cache if sizeof...(ConstructorParameters) != 0
+      auto cache_creator =
+        (sizeof...(ConstructorParameters) == 0)
+        ? KernelCacheCreatorFunction(nullptr)
+        : detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...);
+
       return std::move(*this).kernel(
         std::move(dispatch_key),
         nullptr,
-        // setting cache creator to nullptr so calling the kernel doesn't need to call it, which would be expensive
-        // This, however, only works if there are no constructor parameters (i.e. no runtime function pointer)
-        // Backend extensions use runtime function pointers, so we need a cache if sizeof...(ConstructorParameters) != 0
-        (sizeof...(ConstructorParameters) == 0) ? KernelCacheCreatorFunction(nullptr) : detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
+        std::move(cache_creator),
         reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
         detail::FunctionSchemaInferer<KernelFunctor>()()
       );
