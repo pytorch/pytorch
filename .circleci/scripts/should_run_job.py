@@ -35,6 +35,10 @@ default_set = set([
     'manywheel 2.7mu cpu devtoolset7',
     'libtorch 2.7m cpu devtoolset7',
     'libtorch 2.7m cpu gcc5.4_cxx11-abi',
+    'libtorch-ios-10.2.1-nightly-x86_64-build',
+    'libtorch-ios-10.2.1-nightly-arm64-build',
+    'libtorch-ios-10.2.1-nightly-armv7s-build',
+    'libtorch-ios-10.2.1-nightly-binary-build-upload',
 
     # Caffe2 Android
     'caffe2-py2-android-ubuntu16.04',
