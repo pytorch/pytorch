@@ -6,6 +6,14 @@
 #include <c10/cuda/CUDAGuard.h>
 #endif
 
+#if defined(__s390x__)
+// add any big endian arch here
+#include <endian.h>
+#define le64(s) le64toh(s)
+#else
+#define le64(s) (s)
+#endif
+
 template <class io>
 void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
 {
@@ -22,7 +30,9 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
   data = (scalar_t*)cpu_data.get();
   THCudaCheck(cudaMemcpy(data, THWStorage_(data)(LIBRARY_STATE self), size * sizeof(scalar_t), cudaMemcpyDeviceToHost));
 #endif
+  size = le64(size);
   doWrite(fd, &size, sizeof(int64_t));
+  size = le64(size);
   // fast track for bytes and little endian
   if (sizeof(scalar_t) == 1 || THP_nativeByteOrder() == THPByteOrder::THP_LITTLE_ENDIAN) {
     doWrite(fd, data, sizeof(scalar_t) * size);
@@ -68,6 +78,7 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
   scalar_t *data;
   int64_t size;
   doRead(file, &size, sizeof(int64_t));
+  size = le64(size);
   THWStoragePtr storage;
   if (_storage == nullptr) {
     storage = THWStorage_(newWithSize)(LIBRARY_STATE size);
