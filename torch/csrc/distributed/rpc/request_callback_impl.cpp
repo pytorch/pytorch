@@ -49,8 +49,8 @@ std::unique_ptr<RpcBase> RequestCallbackImpl::processRpc(
     }
     case MessageType::PYTHON_CALL: {
       auto pyCall = static_cast<PythonUDFCall*>(rpc);
-      auto payload =
-          PythonRpcHandler::generatePythonUDFResult(pyCall->pickledPayload());
+      auto payload = PythonRpcHandler::getInstance().generatePythonUDFResult(
+          pyCall->pickledPayload());
       return std::unique_ptr<PythonUDFResp>(
           new PythonUDFResp(std::move(payload)));
     }

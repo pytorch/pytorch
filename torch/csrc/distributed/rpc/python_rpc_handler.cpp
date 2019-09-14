@@ -28,7 +28,8 @@ std::vector<char> PythonRpcHandler::generatePythonUDFResult(
   return payload;
 }
 
-py::object PythonRpcHandler::loadPythonUDFResult(const std::vector<char>& pickledPayload) {
+py::object PythonRpcHandler::loadPythonUDFResult(
+    const std::vector<char>& pickledPayload) {
   AutoGIL ag;
   auto pargs = py::bytes(pickledPayload.data(), pickledPayload.size());
   TORCH_CHECK(loadResultFunction_ != nullptr, "loadResultFunction_ is nullptr");

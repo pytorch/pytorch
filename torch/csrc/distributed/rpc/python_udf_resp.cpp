@@ -4,11 +4,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-PythonUDFResp::PythonUDFResp(std::vector<char>&& pickledPayload)
+PythonUDFResp::PythonUDFResp(std::vector<char> pickledPayload)
     : pickledPayload_(std::move(pickledPayload)) {}
-
-PythonUDFResp::PythonUDFResp(const std::vector<char>& pickledPayload)
-    : pickledPayload_(pickledPayload) {}
 
 Message PythonUDFResp::toMessage() {
   return Message(

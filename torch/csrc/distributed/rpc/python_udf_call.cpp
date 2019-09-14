@@ -4,11 +4,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-PythonUDFCall::PythonUDFCall(std::vector<char>&& pickledPayload)
+PythonUDFCall::PythonUDFCall(std::vector<char> pickledPayload)
     : pickledPayload_(std::move(pickledPayload)) {}
-
-PythonUDFCall::PythonUDFCall(const std::vector<char>& pickledPayload)
-    : pickledPayload_(pickledPayload) {}
 
 Message PythonUDFCall::toMessage() {
   return Message(

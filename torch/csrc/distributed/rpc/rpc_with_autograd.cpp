@@ -35,12 +35,12 @@ RpcWithAutograd::RpcWithAutograd(
     const AutogradMetadata& autogradMetadata,
     std::unique_ptr<RpcBase> wrappedRpc,
     MessageType wrappedMessageType,
-    const std::vector<torch::Tensor>& tensors)
+    std::vector<torch::Tensor> tensors)
     : messageType_(messageType),
       autogradMetadata_(autogradMetadata),
       wrappedRpc_(std::move(wrappedRpc)),
       wrappedMessageType_(wrappedMessageType),
-      tensors_(tensors) {
+      tensors_(std::move(tensors)) {
   TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cannot be null!");
   TORCH_INTERNAL_ASSERT(
       messageType_ == MessageType::MESSAGE_WITH_AUTOGRAD_REQ ||

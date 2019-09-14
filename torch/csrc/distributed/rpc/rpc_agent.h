@@ -99,10 +99,6 @@ class RpcAgent {
   const WorkerId workerId_;
   const std::string workerName_;
   std::unique_ptr<RequestCallback> cb_;
-
-  // The autograd message id to uniquely identify send/recv pairs. First 16 bits
-  // is the worker_id and next 48 bits are auto-incrementing.
-  std::atomic<int64_t> next_autograd_message_id_;
 };
 
 } // namespace rpc

@@ -34,7 +34,7 @@ class TORCH_API RpcWithAutograd final : public RpcBase {
       const AutogradMetadata& autogradMetadata,
       std::unique_ptr<RpcBase> wrappedRpc,
       MessageType wrappedMessageType,
-      const std::vector<torch::Tensor>& tensors);
+      std::vector<torch::Tensor> tensors);
 
   // Destructively creates a message to avoid copies.
   Message toMessage() override;

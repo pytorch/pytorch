@@ -12,7 +12,7 @@ torch::autograd::variable_list RecvRpcBackward::apply(
   // Get size and options for tensors.
   at::IntArrayRef sizes;
   at::TensorOptions o;
-  for (auto v : grads) {
+  for (const auto& v : grads) {
     if (v.defined()) {
       sizes = v.sizes();
       o = static_cast<at::Tensor>(v).options();
