@@ -36,6 +36,57 @@ struct MockKernel final : OperatorKernel {
 private:
   bool* called_;
 };
+
+TEST(OperatorRegistrationTest, whenRegisteringWithSchemaBeforeKernelInOptionsObject_thenCanBeCalled) {
+  bool called = false;
+  auto registrar = c10::RegisterOperators().op(c10::RegisterOperators::options().schema("_test::dummy(Tensor dummy) -> ()").catchAllKernel<MockKernel>(&called));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+  EXPECT_FALSE(called);
+  callOp(*op, dummyTensor(c10::TensorTypeId::CUDATensorId));
+  EXPECT_TRUE(called);
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringWithSchemaAfterKernelInOptionsObject_thenCanBeCalled) {
+  bool called = false;
+  auto registrar = c10::RegisterOperators().op(c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called).schema("_test::dummy(Tensor dummy) -> ()"));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+  EXPECT_FALSE(called);
+  callOp(*op, dummyTensor(c10::TensorTypeId::CUDATensorId));
+  EXPECT_TRUE(called);
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringWithNameBeforeKernelInOptionsObject_thenCanBeCalled) {
+  bool called = false;
+  auto registrar = c10::RegisterOperators().op(c10::RegisterOperators::options().schema("_test::dummy").catchAllKernel<MockKernel>(&called));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+  EXPECT_FALSE(called);
+  callOp(*op, dummyTensor(c10::TensorTypeId::CUDATensorId));
+  EXPECT_TRUE(called);
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringWithNameAfterKernelInOptionsObject_thenCanBeCalled) {
+  bool called = false;
+  auto registrar = c10::RegisterOperators().op(c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called).schema("_test::dummy"));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+  EXPECT_FALSE(called);
+  callOp(*op, dummyTensor(c10::TensorTypeId::CUDATensorId));
+  EXPECT_TRUE(called);
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringWithoutSchema_thenFails) {
+  expectThrows<c10::Error>([] {
+    c10::RegisterOperators().op(c10::RegisterOperators::options().catchAllKernel<DummyKernel>());
+  }, "In operator registration: Tried to register an operator without specifying a schema or operator name.");
+}
+
 TEST(OperatorRegistrationTest, whenCallingOpWithWrongDispatchKey_thenFails) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::TensorTypeId::CPUTensorId));
 
@@ -801,10 +852,6 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     c10::List<std::string>(), [] (const c10::List<std::string>& v) {EXPECT_EQ(0, v.size());},
     c10::List<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
     "(str[] a) -> str[]");
-  testArgTypes<c10::List<Tensor>>::test(
-    c10::List<Tensor>({}), [] (const c10::List<Tensor>& v) {EXPECT_EQ(0, v.size());},
-    c10::List<Tensor>({}), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<at::Tensor>>().size());},
-    "(Tensor[] a) -> Tensor[]");
 
 
   // list types (with non-empty list)
@@ -855,10 +902,6 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     std::vector<std::string>(), [] (const std::vector<std::string>& v) {EXPECT_EQ(0, v.size());},
     std::vector<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
     "(str[] a) -> str[]");
-  testArgTypes<std::vector<Tensor>>::test<TestLegacyAPI>(
-    std::vector<Tensor>({}), [] (const std::vector<Tensor>& v) {EXPECT_EQ(0, v.size());},
-    std::vector<Tensor>({}), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<at::Tensor>>().size());},
-    "(Tensor[] a) -> Tensor[]");
 
 
   // deprecated list types (with non-empty list)
