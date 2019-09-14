@@ -812,11 +812,9 @@ jobs:
     steps:
     - attach_workspace:
         at: ~/workspace
-    - run:
-        <<: *should_run_job
+    - should_run_job
     - checkout
-    - run:
-        <<: *ios_brew_update
+    - run_brew_for_ios_build
     - run:
         name: Build
         contxt: org-member
@@ -836,11 +834,9 @@ jobs:
     steps:
     - attach_workspace:
         at: ~/workspace
-    - run:
-        <<: *should_run_job
+    - should_run_job
     - checkout
-    - run:
-        <<: *ios_brew_update
+    - run_brew_for_ios_build
     - run:
         name: Upload
         no_output_timeout: "1h"
