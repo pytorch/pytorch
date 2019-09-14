@@ -19,9 +19,33 @@ from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_S
 import model_defs.word_language_model as word_language_model
 
 
+def ort_test_with_input(ort_sess, input, output, rtol, atol):
+    input, _ = torch.jit._flatten(input)
+    output, _ = torch.jit._flatten(output)
+
+    def to_numpy(tensor):
+        if tensor.requires_grad:
+            return tensor.detach().cpu().numpy()
+        else:
+            return tensor.cpu().numpy()
+
+    inputs = list(map(to_numpy, input))
+    outputs = list(map(to_numpy, output))
+
+    ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
+    ort_outs = ort_sess.run(None, ort_inputs)
+
+    # compare onnxruntime and PyTorch results
+    assert len(outputs) == len(ort_outs), "number of outputs differ"
+
+    # compare onnxruntime and PyTorch results
+    [np.testing.assert_allclose(out, ort_out, rtol=rtol, atol=atol) for out, ort_out in zip(outputs, ort_outs)]
+
+
 def run_model_test(self, model, batch_size=2, state_dict=None,
                    input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                   example_outputs=None, do_constant_folding=True):
+                   example_outputs=None, do_constant_folding=True,
+                   dynamic_axes=None, test_with_inputs=None):
     model.eval()
 
     if input is None:
@@ -40,31 +64,25 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                           opset_version=self.opset_version,
                           example_outputs=output,
                           do_constant_folding=do_constant_folding,
-                          keep_initializers_as_inputs=self.keep_initializers_as_inputs)
-
-        input, _ = torch.jit._flatten(input)
-        output, _ = torch.jit._flatten(output)
-
-        def to_numpy(tensor):
-            if tensor.requires_grad:
-                return tensor.detach().cpu().numpy()
-            else:
-                return tensor.cpu().numpy()
-
-        inputs = list(map(to_numpy, input))
-        outputs = list(map(to_numpy, output))
+                          keep_initializers_as_inputs=self.keep_initializers_as_inputs,
+                          dynamic_axes=dynamic_axes)
 
 
         # compute onnxruntime output prediction
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
-        ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
-        ort_outs = ort_sess.run(None, ort_inputs)
+        ort_test_with_input(ort_sess, input, output, rtol, atol)
 
-        # compare onnxruntime and PyTorch results
-        assert len(outputs) == len(ort_outs), "number of outputs differ"
+        # if addiional test inputs are provided run the onnx
+        # model with these inputs and check the outputs
+        if test_with_inputs is not None:
+            for test_input in test_with_inputs:
+                if isinstance(test_input, torch.Tensor):
+                    test_input = (test_input,)
+                output = model(*test_input)
+                if isinstance(output, torch.Tensor):
+                    output = (output,)
 
-        # compare onnxruntime and PyTorch results
-        [np.testing.assert_allclose(out, ort_out, rtol=rtol, atol=atol) for out, ort_out in zip(outputs, ort_outs)]
+                ort_test_with_input(ort_sess, test_input, output, rtol, atol)
 
 
 class TestONNXRuntime(unittest.TestCase):
@@ -78,10 +96,12 @@ class TestONNXRuntime(unittest.TestCase):
             torch.cuda.manual_seed_all(0)
         np.random.seed(seed=0)
 
-    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True, batch_size=2, use_gpu=True):
+    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
+                 batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None):
         run_model_test(self, model, batch_size=batch_size,
                        input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
-                       do_constant_folding=do_constant_folding)
+                       do_constant_folding=do_constant_folding,
+                       dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs)
 
     def run_word_language_model(self, model_name):
         ntokens = 50
@@ -279,6 +299,21 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.rand(5, 5, 5)
         self.run_test(DynamicSliceExportMod(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange(self):
+        class ArangeModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.arange(x.shape[0]), \
+                    torch.arange(12), \
+                    torch.arange(start=x.shape[0], end=x.shape[0] + 5)
+
+        x = torch.randn(5, 3, 2)
+        y = torch.randn(8, 3, 2)
+        self.run_test(ArangeModel(), x, test_with_inputs=[y],
+                      dynamic_axes={'input_1': [1],
+                                    'output_1': [0],
+                                    'output_2': [0]})
 
     def _test_index_generic(self, fn):
         class MyModel(torch.nn.Module):
@@ -765,6 +800,21 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    def test_rsqrt(self):
+        class RsqrtModel(torch.nn.Module):
+            def forward(self, x):
+                return x.rsqrt()
+
+        x = torch.randn(4, 2, 3, requires_grad=True).to(dtype=torch.float64)
+        self.run_test(RsqrtModel(), x)
+
+    def test_rsqrt_zeros(self):
+        class RsqrtModel(torch.nn.Module):
+            def forward(self, x):
+                return x.rsqrt()
+        x = torch.zeros(4, 2, 3, requires_grad=True).to(dtype=torch.float64)
+        self.run_test(RsqrtModel(), x)
+
     # TODO: enable opset 11 test once ORT support for unique is in
     @skipIfUnsupportedOpsetVersion([11])
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -796,6 +846,22 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.cumsum(input, dim=0)
         x = torch.randn(2, 3, 4)
         model = CumSum()
+        self.run_test(model, x)
+
+    def test_log(self):
+        class Log(torch.nn.Module):
+            def forward(self, input):
+                return torch.log(input)
+        x = torch.rand(2, 3, 4)
+        model = Log()
+        self.run_test(model, x)
+
+    def test_log1p(self):
+        class Log1p(torch.nn.Module):
+            def forward(self, input):
+                return torch.log1p(input)
+        x = torch.rand(2, 3, 4)
+        model = Log1p()
         self.run_test(model, x)
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):

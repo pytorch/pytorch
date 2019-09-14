@@ -113,10 +113,16 @@ ${return_type} ${Type}::${api_name}(${type_method_formals}) {
 """)
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-.registerOp<${return_type} (${formals_types})>(Backend::Undefined, "${schema_string}", &TypeDefault::${api_name})
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-.registerOp<${return_type} (${formals_types})>(Backend::${Backend}, "${schema_string}", &${Type}::${api_name})
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
 # Generate a file that lists all functions and their schema string. Used for XLA
@@ -136,7 +142,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     ${static_dispatch_method_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(type_set(), is_variable())(${method_actuals});
+    return table->getOp<${return_type} (${formals_types})>(type_set())(${method_actuals});
 #endif
 }
 """)
@@ -155,7 +161,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     ${static_dispatch_function_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set}, ${inferred_is_variable})(${native_actuals});
+    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${native_actuals});
 #endif
 }
 """)
@@ -191,7 +197,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set}, ${inferred_is_variable})(${native_actuals});
+    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${native_actuals});
 #endif
 }
 """)
@@ -217,6 +223,10 @@ if (${name}.defined()) {
 }""")
 
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
+
+OPERATOR_NAME = CodeTemplate("""\
+    {"aten::${operator_name}", "${overload_name}"},
+""")
 
 NAMEDTENSOR_CHECK = CodeTemplate("""\
 #ifdef BUILD_NAMEDTENSOR
@@ -397,13 +407,11 @@ ALLOC_WRAP = {
 # Replacements for constants when calling into TH
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${ScalarType}'),
-    ('__last_dim', 'self.ndimension()-1'),
 ]
 
 # Replacements for constants in header file function definitions
 HEADER_CONSTANT_REPLACEMENTS = [
     (r'AS_REAL\((.*)\)', r'\1'),
-    ('__last_dim', '-1'),
 ]
 
 
@@ -433,6 +441,8 @@ TopEnvironment = TypedDict('TopEnvironment', {
     'type_registrations': List[str],
     'type_headers': List[str],
     'function_registrations': List[str],
+    'c10_ops_already_moved_from_aten_to_c10': List[str],
+    'c10_ops_not_moved_from_aten_to_c10_yet': List[str],
     'type_method_declarations': List[str],
     'type_method_definitions': List[str],
     'tensor_method_declarations': List[str],
@@ -539,6 +549,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'device_guard': bool,
     'device_guard_declaration': str,
     'dispatch_scalar_type_declaration': str,
+    'use_c10_dispatcher': bool,
     'with_gil': bool,
     'cpu_half': bool,
     'cpu_bfloat16': bool,
@@ -552,7 +563,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals': List[str],
     'formals_types': List[str],
     'inferred_type_set': str,
-    'inferred_is_variable': str,
     'inplace': bool,
     'matches_jit_signature': bool,
     # This controls whether or not we generate the interface in Type or
@@ -566,6 +576,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'mode': str,
     'python_module': str,
     'name': str,
+    'operator_name': str,
     'overload_name': str,
     'native_actuals': List[str],
     'native_type_method_dispatch': str,
@@ -593,7 +604,9 @@ FunctionOption = TypedDict('FunctionOption', {
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('name', str),
+    ('operator_name', str),
     ('overload_name', str),
+    ('use_c10_dispatcher', bool),
     ('matches_jit_signature', bool),
     ('schema_string', str),
     ('method_prefix_derived', str),
@@ -1095,6 +1108,18 @@ def create_generic(top_env, declarations):
             # type: (Any) -> FunctionCode
             if isinstance(type_method_dispatch, dict):
                 static_dispatch_function_switches = []
+                # NB: As this code is currently written, there will NEVER be
+                # a backend generated for variable dispatch.  There is nothing
+                # stopping us from actually implementing this, however, if you
+                # really wanted variable on mobile, there's nothing stopping
+                # you from implementing this (however, you would have an
+                # annoying phase problem, since code generation for variable
+                # happens in tools/ which happens later than here.)
+                #
+                # If you pass in a variable to the dispatch, and variable is
+                # enabled, this switch will fail.  This is intentional: you
+                # probably need to disable variable globally in the mobile
+                # calling code.
                 for backend in static_dispatch_backends:
                     if backend in type_method_dispatch:
                         static_dispatch_function_switches.append(STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT.substitute(
@@ -1104,10 +1129,6 @@ def create_generic(top_env, declarations):
                             native_arguments=option['method_actuals']))
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
-                    # TODO: When Variable gets added, this needs to get adjusted
-                    # to avoid picking up the Variable bit.  The correct way
-                    # to encode this is probably to just have Variable in the
-                    # disabled set.
                     type_set='type_set()',
                     static_dispatch_function_switches=static_dispatch_function_switches)
             else:
@@ -1122,15 +1143,12 @@ def create_generic(top_env, declarations):
             # type: (Any, Optional[str], Any) -> FunctionCode
             if dispatch_tensor:
                 option['inferred_type_set'] = 'at::detail::infer_tensor_type_set({})'.format(dispatch_tensor)
-                option['inferred_is_variable'] = 'at::detail::infer_is_variable({})'.format(dispatch_tensor)
             elif dispatch_options:
                 option['inferred_type_set'] = '{}.type_set()'.format(dispatch_options['name'])
-                option['inferred_is_variable'] = '{}.is_variable()'.format(dispatch_options['name'])
             else:
                 # doesn't depend on a specific backend, use the empty set
                 # TODO: Does this actually work?
                 option['inferred_type_set'] = 'TensorTypeSet()'
-                option['inferred_is_variable'] = 'false'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
 
@@ -1162,7 +1180,8 @@ def create_generic(top_env, declarations):
         # TensorBody.h, TensorMethods.h) is checked into the repo and must be
         # the same regardless of BUILD_NAMEDTENSOR status.
         is_named_tensor_only = (has_named_tensor_formals(formals) or
-                                option['api_name'] == 'align_tensors')
+                                option['api_name'] == 'align_tensors' or
+                                option['api_name'] == 'align_as')
 
         def check_namedtensor_enabled(code):
             if is_named_tensor_only:
@@ -1212,6 +1231,14 @@ def create_generic(top_env, declarations):
         if BUILD_NAMEDTENSOR or not is_named_tensor_only:
             top_env['registration_declarations'].append(
                 REGISTRATION_DECLARATION.substitute(option))
+        if option['use_c10_dispatcher']:
+            top_env['c10_ops_already_moved_from_aten_to_c10'].append(
+                check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
+            )
+        else:
+            top_env['c10_ops_not_moved_from_aten_to_c10_yet'].append(
+                check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
+            )
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
@@ -1271,7 +1298,9 @@ def create_generic(top_env, declarations):
             return None
         return OutputDeclaration(
             name=option['api_name'],
+            operator_name=option['operator_name'],
             overload_name=option['overload_name'],
+            use_c10_dispatcher=option['use_c10_dispatcher'],
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],
             method_prefix_derived=option['method_prefix_derived'],
@@ -1724,5 +1753,5 @@ def create_derived(backend_type_env, declarations):
                         process_native(option)
                 except NYIError:
                     pass
-    return (type_object_declarations, type_object_definitions, function_registrations, legacy_th_declarations,
-            legacy_th_definitions)
+    return (type_object_declarations, type_object_definitions, function_registrations,
+            legacy_th_declarations, legacy_th_definitions)

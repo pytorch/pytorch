@@ -65,7 +65,7 @@ py::object toPyObjInternal(RpcBase* rpc, MessageType messageType) {
     case MessageType::PYTHON_RET: {
       // TODO: Try to avoid a copy here.
       auto resp = static_cast<PythonUDFResp*>(rpc);
-      return PythonRpcHandler::loadPythonUDFResult(resp->pickledPayload());
+      return PythonRpcHandler::getInstance().loadPythonUDFResult(resp->pickledPayload());
     }
     case MessageType::MESSAGE_WITH_AUTOGRAD_RESP: {
       auto rpcWithAutograd = static_cast<RpcWithAutograd*>(rpc);

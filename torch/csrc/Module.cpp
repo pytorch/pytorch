@@ -27,6 +27,7 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/QEngine.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/autograd/generated/python_nn_functions.h>
@@ -36,6 +37,7 @@
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/qengines.h>
 #include <torch/csrc/utils/tensor_layouts.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
@@ -107,6 +109,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   torch::utils::initializeLayouts();
   torch::utils::initializeMemoryFormats();
   torch::utils::initializeQSchemes();
+  torch::utils::initializeQEngines();
   torch::utils::initializeDtypes();
   torch::tensors::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
@@ -417,6 +420,20 @@ PyObject *THPModule_userEnabledCuDNN(PyObject *_unused)
   else Py_RETURN_FALSE;
 }
 
+PyObject *THPModule_setUserEnabledMkldnn(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "set_enabled_mkldnn expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setUserEnabledMkldnn(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_userEnabledMkldnn(PyObject *_unused)
+{
+  if (at::globalContext().userEnabledMkldnn()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
+}
+
 PyObject *THPModule_setDeterministicCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_deterministic_cudnn expects a bool, "
@@ -471,6 +488,19 @@ PyObject *THPModule_getDefaultDevice(PyObject *_unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPModule_setPreferredQuantizedEngine(PyObject *_unused, PyObject *arg)
+{
+  TORCH_CHECK(THPQEngine_Check(arg), "qengine arg must be an instance of the torch.qengine");
+  const auto qengine = reinterpret_cast<THPQEngine*>(arg);
+  at::globalContext().setPreferredQuantizedEngine(qengine->qengine);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_preferredQuantizedEngine(PyObject *_unused)
+{
+  return THPQEngine_New(at::globalContext().preferredQuantizedEngine(), "");
+}
+
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       nullptr},
   {"_autograd_init",  (PyCFunction)THPAutograd_initExtension, METH_NOARGS,  nullptr},
@@ -496,6 +526,8 @@ static PyMethodDef TorchMethods[] = {
   {"set_num_interop_threads", (PyCFunction)THPModule_setNumInteropThreads,     METH_O,       nullptr},
   {"_get_cudnn_enabled", (PyCFunction)THPModule_userEnabledCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_enabled", (PyCFunction)THPModule_setUserEnabledCuDNN, METH_O,  nullptr},
+  {"_get_mkldnn_enabled", (PyCFunction)THPModule_userEnabledMkldnn, METH_NOARGS,     nullptr},
+  {"_set_mkldnn_enabled", (PyCFunction)THPModule_setUserEnabledMkldnn, METH_O,  nullptr},
   {"_get_cudnn_benchmark", (PyCFunction)THPModule_benchmarkCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_benchmark", (PyCFunction)THPModule_setBenchmarkCuDNN, METH_O,  nullptr},
   {"_get_cudnn_deterministic", (PyCFunction)THPModule_deterministicCuDNN, METH_NOARGS,     nullptr},
@@ -504,7 +536,9 @@ static PyMethodDef TorchMethods[] = {
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       nullptr},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     nullptr},
   {"get_default_dtype", (PyCFunction)THPModule_getDefaultDtype, METH_NOARGS,  nullptr},
-  {"_get_default_device", (PyCFunction)THPModule_getDefaultDevice, METH_NOARGS,  nullptr},
+  {"_get_default_device", (PyCFunction)THPModule_getDefaultDevice, METH_NOARGS,   nullptr},
+  {"_get_preferred_engine", (PyCFunction)THPModule_preferredQuantizedEngine, METH_NOARGS, nullptr},
+  {"_set_preferred_engine", (PyCFunction)THPModule_setPreferredQuantizedEngine, METH_O, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 
@@ -645,6 +679,7 @@ PyObject* initModule() {
   THPDTypeInfo_init(module);
   THPLayout_init(module);
   THPMemoryFormat_init(module);
+  THPQEngine_init(module);
   THPQScheme_init(module);
   THPDevice_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
