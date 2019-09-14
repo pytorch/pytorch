@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
     s.name             = 'LibTorch'
-    s.version          = '0.0.2'
+    s.version          = '0.0.3'
     s.authors          = 'PyTorch Team'
     s.license          = { :type => 'BSD' }
     s.homepage         = 'https://github.com/pytorch/pytorch'
@@ -9,6 +9,7 @@ Pod::Spec.new do |s|
     s.description      = <<-DESC
         The PyTorch C++ library for iOS.
     DESC
+    s.ios.deployment_target = '12.0'
     s.default_subspec = 'Core'
     s.subspec 'Core' do |ss|
         ss.dependency 'LibTorch/Torch'
@@ -29,7 +30,7 @@ Pod::Spec.new do |s|
     }
     s.pod_target_xcconfig = { 
         'HEADER_SEARCH_PATHS' => '$(inherited) "$(PODS_ROOT)/LibTorch/install/include/"', 
-        'VALID_ARCHS' => 'x86_64 armv7s arm64' 
+        'VALID_ARCHS' => 'x86_64 arm64' 
     }
     s.library = ['c++', 'stdc++']
 end
