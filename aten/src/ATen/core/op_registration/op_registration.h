@@ -397,7 +397,7 @@ public:
     static bool op_is_still_on_aten_dispatcher_(const char* schema_string) {
       // TODO Remove this function once all aten ops are on c10
       const auto op_name = parse_operator_name_(schema_string);
-      if (at::aten_ops_already_moved_to_c10().count(op_name) != 0) {
+      if (at::aten_op_is_already_moved_to_c10(op_name)) {
         // For now, even if an op is in aten_ops_already_moved_to_c10, it is still
         // not actually moved to c10. It is still on globalATenDispatch.
         // TODO This is be removed in a diff stacked on top, then this
@@ -405,7 +405,7 @@ public:
         // aten_ops_not_moved_to_c10_yet
         return true;
       }
-      return at::aten_ops_not_moved_to_c10_yet().count(op_name) != 0;
+      return at::aten_op_is_not_moved_to_c10_yet(op_name);
     }
 
     Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator, void* unboxed_kernel_func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
