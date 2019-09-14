@@ -52,8 +52,8 @@ class TORCH_API SubgraphRewriter {
   // true for a given Match, we'll skip the match
   void runOnGraph(
       std::shared_ptr<Graph>& graph,
-      std::function<
-          bool(const Match&, const std::unordered_map<std::string, Value*>)>
+      const std::function<
+          bool(const Match&, const std::unordered_map<std::string, Value*>)>&
           filter =
               [](const Match&, const std::unordered_map<std::string, Value*>) {
                 return true;
@@ -81,8 +81,8 @@ class TORCH_API SubgraphRewriter {
   void rewriteSinglePatternOnGraph(
       std::shared_ptr<Graph>& graph,
       RewritePatternDescr pattern,
-      std::function<
-          bool(const Match&, const std::unordered_map<std::string, Value*>)>
+      const std::function<
+          bool(const Match&, const std::unordered_map<std::string, Value*>)>&
           filter =
               [](const Match&, const std::unordered_map<std::string, Value*>) {
                 return true;
