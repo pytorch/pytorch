@@ -35,8 +35,11 @@ class ObserverBase(ABC, nn.Module):
         assert self.qscheme in (
             torch.per_tensor_affine,
             torch.per_tensor_symmetric,
-        ), "Default Observer only works for per_tensor_affine and \
-                per_tensor_symmetric quantization scheme"
+            torch.per_channel_affine,
+            torch.per_channel_symmetric,
+        ), "Default Observer only works for per_tensor_affine, \
+                per_tensor_symmetric, per_channel_affine and \
+                per_channel_symmetric quantization scheme"
         assert self.dtype in (
             torch.qint8,
             torch.quint8,
@@ -115,7 +118,7 @@ class ObserverBase(ABC, nn.Module):
             scale = 1.0
             zero_point = 0
         else:
-            if self.qscheme == torch.per_tensor_symmetric:
+            if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
                 max_val = max(-min_val, max_val)
                 scale = max_val / ((qmax - qmin) / 2)
                 scale = max(scale, self.eps)

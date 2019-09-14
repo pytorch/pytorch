@@ -776,7 +776,7 @@ class ObserverTest(QuantizationTestCase):
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
+           qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)))
     def test_per_channel_minmax_observer(self, qdtype, qscheme):
         myobs = PerChannelMinMaxObserver(ch_axis=1, dtype=qdtype, qscheme=qscheme)
         x = torch.tensor([[1.0, 2.0, 2.0, 3.0, 4.0, 6.0], [-4.0, 5.0, 5.0, 6.0, 7.0, 8.0]])
@@ -785,7 +785,7 @@ class ObserverTest(QuantizationTestCase):
         self.assertEqual(myobs.min_vals, [1.0, -4.0])
         self.assertEqual(myobs.max_vals, [6.0, 8.0])
         qparams = myobs.calculate_qparams()
-        if qscheme == torch.per_tensor_symmetric:
+        if qscheme == torch.per_channel_symmetric:
             ref_scales = [0.047058823529412, 0.062745098039216]
             ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
         else:
@@ -795,7 +795,7 @@ class ObserverTest(QuantizationTestCase):
         self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
+           qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)))
     def test_per_channel_minmax_observer_scriptable(self, qdtype, qscheme):
         obs = PerChannelMinMaxObserver(ch_axis=1, dtype=qdtype, qscheme=qscheme)
         scripted = torch.jit.script(obs)
