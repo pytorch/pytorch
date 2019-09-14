@@ -2301,18 +2301,19 @@ graph(%Ra, %Rb):
             return c + 3
 
         # test second matrix column-major
-        a = torch.ones(10, 10)
-        b = torch.ones(10, 10).t().detach().requires_grad_(True)
-        out = torch.ones(10, 10)
-        gO = torch.ones(10, 10)
-        h = b.register_hook(lambda x: self.assertTrue(x.stride(0) == 1 and x.stride(1) == 10))
+        s = 10
+        a = torch.ones(s, s)
+        b = torch.ones(s, s).t().detach().requires_grad_(True)
+        out = torch.ones(s, s)
+        gO = torch.ones(s, s)
+        h = b.register_hook(lambda x: self.assertTrue(x.stride(0) == 1 and x.stride(1) == s))
         c = addmm_fn(a, b, out)
         c.backward(gO)
         h.remove()
         # test first matrix column-major
         b = b.t().detach().requires_grad_(False)
         a = a.t().detach().requires_grad_(True)
-        h = a.register_hook(lambda x: self.assertTrue(x.stride(0) == 1 and x.stride(1) == 10))
+        h = a.register_hook(lambda x: self.assertTrue(x.stride(0) == 1 and x.stride(1) == s))
         c = addmm_fn(a, b, out)
         c.backward(gO)
         h.remove()
