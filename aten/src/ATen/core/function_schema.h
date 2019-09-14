@@ -4,6 +4,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/alias_info.h>
+#include <ATen/core/operator_name.h>
 #include <unordered_map>
 
 namespace c10 {
@@ -112,11 +113,6 @@ inline bool operator==(const Argument& lhs, const Argument& rhs) {
           && lhs.kwarg_only() == rhs.kwarg_only()
           && lhs.alias_info() == rhs.alias_info();
 }
-
-struct OperatorName final {
-  std::string name;
-  std::string overload_name;
-};
 
 struct FunctionSchema {
   FunctionSchema(
@@ -237,9 +233,9 @@ public:
     return false;
   }
 
-  // can a function with this schema be substituted for a function of rhs's 
+  // can a function with this schema be substituted for a function of rhs's
   // schema and have the program typecheck?
-  // as_method - if true, treat this schema as a method and ignore 
+  // as_method - if true, treat this schema as a method and ignore
   // the first argument, which will be the object in both cases
   bool isSubtypeOf(const FunctionSchema& rhs, bool as_method, std::ostream* why_not=nullptr) const;
 };
