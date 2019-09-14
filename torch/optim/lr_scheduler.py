@@ -1,7 +1,7 @@
 import types
 import math
 from torch._six import inf
-from functools import partial, wraps
+from functools import wraps
 import warnings
 import weakref
 from bisect import bisect_right
@@ -384,7 +384,6 @@ class ReduceLROnPlateau(object):
         self.best = None
         self.num_bad_epochs = None
         self.mode_worse = None  # the worse value for the chosen mode
-        self.is_better = None
         self.eps = eps
         self.last_epoch = -1
         self._init_is_better(mode=mode, threshold=threshold,
@@ -433,20 +432,20 @@ class ReduceLROnPlateau(object):
     def in_cooldown(self):
         return self.cooldown_counter > 0
 
-    def _cmp(self, mode, threshold_mode, threshold, a, best):
-        if mode == 'min' and threshold_mode == 'rel':
-            rel_epsilon = 1. - threshold
+    def is_better(self, a, best):
+        if self.mode == 'min' and self.threshold_mode == 'rel':
+            rel_epsilon = 1. - self.threshold
             return a < best * rel_epsilon
 
-        elif mode == 'min' and threshold_mode == 'abs':
-            return a < best - threshold
+        elif self.mode == 'min' and self.threshold_mode == 'abs':
+            return a < best - self.threshold
 
-        elif mode == 'max' and threshold_mode == 'rel':
-            rel_epsilon = threshold + 1.
+        elif self.mode == 'max' and self.threshold_mode == 'rel':
+            rel_epsilon = self.threshold + 1.
             return a > best * rel_epsilon
 
         else:  # mode == 'max' and epsilon_mode == 'abs':
-            return a > best + threshold
+            return a > best + self.threshold
 
     def _init_is_better(self, mode, threshold, threshold_mode):
         if mode not in {'min', 'max'}:
@@ -459,10 +458,9 @@ class ReduceLROnPlateau(object):
         else:  # mode == 'max':
             self.mode_worse = -inf
 
-        self.is_better = partial(self._cmp, mode, threshold_mode, threshold)
-
-    def state_dict(self):
-        return {key: value for key, value in self.__dict__.items() if key not in {'optimizer', 'is_better'}}
+        self.mode = mode
+        self.threshold = threshold
+        self.threshold_mode = threshold_mode
 
     def load_state_dict(self, state_dict):
         self.__dict__.update(state_dict)
