@@ -812,7 +812,6 @@ jobs:
     steps:
     - attach_workspace:
         at: ~/workspace
-    
     - should_run_job
     - checkout
     - run_brew_for_ios_build
@@ -835,7 +834,6 @@ jobs:
     steps:
     - attach_workspace:
         at: ~/workspace
-    
     - should_run_job
     - checkout
     - run_brew_for_ios_build
