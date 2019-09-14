@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/subgraph_matcher.h>
 
+#include <algorithm>
 #include <stack>
 
 namespace torch {
@@ -64,8 +65,59 @@ graph(%self, %input):
   }
 }
 
-static bool outputsNeedToBeObserved(Node* n) {
-  return n->kind() != prim::Constant;
+std::string getFuncName(const c10::QualifiedName& qname) {
+  const auto& name = qname.qualifiedName();
+  auto rdot_idx = name.rfind('.');
+  if (rdot_idx != std::string::npos) {
+    return name.substr(rdot_idx + 1, name.length());
+  } else {
+    return name;
+  }
+}
+
+bool nodeQuantizable(Node* n) {
+  static std::vector<std::string> call_funcs = {
+      "conv2d",
+      "linear",
+      "relu",
+  };
+  std::vector<Symbol> aten_funcs;
+  std::transform(
+      call_funcs.begin(),
+      call_funcs.end(),
+      std::back_inserter(aten_funcs),
+      [](const std::string& s) { return Symbol::aten(s); });
+  bool is_quantizable =
+      std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
+      aten_funcs.end();
+  if (n->kind() == prim::CallFunction) {
+    auto func_node = n->inputs()[0]->node();
+    auto func = func_node->output()->type()->expect<FunctionType>()->function();
+    auto func_name = getFuncName(func->qualname());
+    if (func_node->kind() == prim::Constant) {
+      is_quantizable |=
+          std::find(call_funcs.begin(), call_funcs.end(), func_name) !=
+          call_funcs.end();
+    }
+  }
+  return is_quantizable;
+}
+
+bool valueNeedsToBeQuantized(Value* v) {
+  if (!v->type()->isSubtypeOf(TensorType::get())) {
+    return false;
+  }
+  // Check whether producer is quantizable
+  if (nodeQuantizable(v->node())) {
+    return true;
+  }
+  // Check whether user is quantizable
+  for (const auto& use : v->uses()) {
+    if (nodeQuantizable(use.user)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 Node* traverseToQuantNode(Node* dq) {
@@ -216,8 +268,7 @@ void InsertObserversImpl(
   Value* self = graph->inputs()[0];
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
-    if (v->type()->isSubtypeOf(TensorType::get()) &&
-        values_to_skip.count(v) == 0) {
+    if (!values_to_skip.count(v) && valueNeedsToBeQuantized(v)) {
       auto qconfig = module_qconfig_map.at(module.module_object());
       if (qconfig) {
         auto observer_node =
@@ -234,16 +285,15 @@ void InsertObserversImpl(
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
-      // Skip nodes that we don't need to observe, e.g. 'prim::Constant' or
-      // observer nodes
-      if (!outputsNeedToBeObserved(n) || observer_for_input.count(n) != 0) {
+      // Skip observer nodes
+      if (observer_for_input.count(n) != 0) {
         continue;
       }
 
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
-        if (values_to_skip.count(v) == 0) {
+        if (!values_to_skip.count(v) && valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
         }
         if (v->node()->kind() == prim::CallMethod) {
@@ -284,9 +334,6 @@ void InsertObserversImpl(
 
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
-    if (!v->type()->isSubtypeOf(TensorType::get())) {
-      continue;
-    }
     // Skip inserting observer for bias
     if (v->node()->kind() == prim::GetAttr &&
         v->node()->s(c10::attr::name) == "bias") {
@@ -843,7 +890,6 @@ graph(%self, %scale, %zero_point, %dtype):
   auto matches = findPatternMatches(pattern_graph, *graph);
   for (const auto& match : matches) {
     auto match_vmap = match.values_map;
-    auto* weight = match_vmap.at(vmap.at("weight"));
     auto float_weight = module.get_parameter("weight").variable_data();
     auto scale = toIValue(match_vmap.at(vmap.at("scale"))).value().toDouble();
     auto zero_point =
