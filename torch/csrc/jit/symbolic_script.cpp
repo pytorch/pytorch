@@ -1374,8 +1374,8 @@ const std::vector<std::string> functions = {
 
         def mm(self, mat2):
             def backward(grad_output):
-                grad_self = AD_mm_backward_self(grad_output, mat2, self)
-                grad_mat2 = AD_mm_backward_mat2(grad_output, self, mat2)
+                grad_self = grad_output.mm(mat2.t())
+                grad_mat2 = self.t().mm(grad_output)
                 return grad_self, grad_mat2
 
             return torch.mm(self, mat2), backward
