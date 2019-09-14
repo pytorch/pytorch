@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/fuser/cpu/fused_kernel.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/code_template.h>
 #include <torch/csrc/jit/fuser/compiler.h>
 #include <torch/csrc/jit/fuser/cpu/temp_file.h>
@@ -36,6 +37,7 @@ static const std::string temp_dir = getTempPath();
 static const std::string so_template = temp_dir + "pytorch_fuserXXXXXX.dll";
 static const std::string cpp_template = temp_dir + "pytorch_fuserXXXXXX.cpp";
 static const std::string check_exists_string = "where \"${program}\" > nul 2> nul";
+static std::vector<std::string> env_list;
 constexpr int so_suffix_len = 4;
 constexpr int cpp_suffix_len = 4;
 #else
@@ -54,13 +56,13 @@ static bool programExists(const std::string& program) {
 }
 
 #ifdef _MSC_VER
-std::string exec(const std::string& cmd) {
+c10::optional<std::string> exec(const std::string& cmd) {
   std::array<char, 128> buffer;
   std::string result;
   std::unique_ptr<FILE, decltype(&_pclose)> pipe(
       _popen(cmd.c_str(), "r"), _pclose);
   if (!pipe) {
-    throw std::runtime_error("popen() failed!");
+    return c10::nullopt;
   }
   while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) != nullptr) {
     result += buffer.data();
@@ -76,6 +78,7 @@ inline std::string& rtrim(std::string& s, const char* t = " \t\n\r\f\v") {
 void activate() {
   char* root = nullptr;
   std::string cmd;
+  c10::optional<std::string> exec_out;
   std::string path;
   std::string vcruntime_plat;
   std::string envvars;
@@ -98,13 +101,12 @@ void activate() {
   cmd = "\"" + std::string(root) +
       "\\Microsoft Visual Studio\\Installer\\vswhere.exe\""
       " -latest -prerelease -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath";
-  std::cout << cmd << std::endl;
-  try {
-    path = exec(cmd);
-    rtrim(path);
-  } catch (std::runtime_error&) {
+  exec_out = exec(cmd);
+  if (!exec_out) {
     return;
   }
+  path = *exec_out;
+  rtrim(path);
 
   // Checking whether the activation script `vcvarsall.bat` exists
   path += "\\VC\\Auxiliary\\Build";
@@ -126,20 +128,41 @@ void activate() {
 
   // Getting environment variables after activating VS development shell
   cmd = "\"" + path + "\" " + vcruntime_plat + ">NUL && set";
-  try {
-    envvars = exec(cmd);
-  } catch (std::runtime_error&) {
+  exec_out = exec(cmd);
+  if (!exec_out) {
     return;
   }
+  envvars = *exec_out;
 
   // Setting environment variables to the current environment
   std::istringstream f(envvars);
   std::string envvar;
   while (getline(f, envvar, '\n')) {
-    if (_putenv(envvar.c_str()) == -1) {
-      return;
-    }
+    env_list.push_back(envvar);
   }
+}
+
+intptr_t run(const std::string& cmd) {
+  // Getting the path of `cmd.exe`
+  char* comspec = getenv("COMSPEC");
+  if (!comspec) {
+    comspec = "C:\\Windows\\System32\\cmd.exe";
+  }
+  // Constructing the command line
+  const char* a[] = {"/c", cmd.c_str()};
+  // Constructing the env array
+  // If `env_list` is not empty, then add char pointers ending with nullptr.
+  // Otherwise, it will be nullptr, which implies the default env.
+  std::vector<const char*> e;
+  if (!env_list.empty()) {
+    for (auto& s : env_list) {
+      e.push_back(s.c_str());
+    }
+    e.push_back(nullptr);
+  }
+  // Running the command
+  intptr_t r = _spawnve(_P_WAIT, comspec, a, e.data());
+  return r;
 }
 #endif
 
@@ -224,7 +247,11 @@ static void runCompiler(
   env.s("cpp_file", cpp_file);
   env.s("so_file", so_file);
   std::string result = format(compile_string, env);
+#ifdef _MSC_VER
+  intptr_t r = run(result);
+#else
   int r = system(result.c_str());
+#endif
   if (config.openmp && r != 0) {
     std::cerr
         << "warning: pytorch jit fuser failed to compile with openmp, trying without it...\n";
