@@ -11,15 +11,16 @@ namespace {
 
 SmallVector<int64_t, 4> convOutputShape(
     int N, // mini-batch
+    int K, // output channels
     int H, // input height
     int W, // input width
-    int K, // output channels
     const std::vector<int64_t>& kernel,
     const torch::List<int64_t>& stride,
     const torch::List<int64_t>& padding,
     const torch::List<int64_t>& dilation) {
   SmallVector<int64_t, 4> out_shape;
   out_shape.push_back(N);
+  out_shape.push_back(K);
 
   int H_out = std::floor(
       (H + 2 * padding[0] - dilation[0] * (kernel[0] - 1) - 1) / stride[0] + 1);
@@ -27,7 +28,6 @@ SmallVector<int64_t, 4> convOutputShape(
       (W + 2 * padding[1] - dilation[1] * (kernel[1] - 1) - 1) / stride[1] + 1);
   out_shape.push_back(H_out);
   out_shape.push_back(W_out);
-  out_shape.push_back(K);
 
   return out_shape;
 }
@@ -74,6 +74,15 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       int64_t groups,
       double output_scale,
       int64_t output_zero_point) {
+    // Quantized kernels are all written with NHWC (channels last) layout in
+    // mind. Ideally, we'd be compatible with conv2d behavior and preserve the
+    // inputs layout as is (doing necessary upconversions).
+    //
+    // However, to be more robust, we'd just force output layout to always be
+    // NHWC (channels last) right now, thus opportunistically improving perf.
+    //
+    // This might change when full memory format support lands
+    // See https://github.com/pytorch/pytorch/issues/23403
     TORCH_CHECK(
         fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
     TORCH_CHECK(
@@ -86,13 +95,14 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         (dilation[0] == 1 && dilation[1] == 1),
         "Currently dilation should be 1");
 
-    // inputs are in NHWC format
+    // inputs are strided differently, but logically they are always NCHW
     int N = act.size(0);
-    int H = act.size(1);
-    int W = act.size(2);
-    int C = act.size(3);
+    int C = act.size(1);
+    int H = act.size(2);
+    int W = act.size(3);
 
-    Tensor act_contig = act.contiguous();
+    // FBGEMM requires NHWC
+    Tensor act_contig = act.contiguous(MemoryFormat::ChannelsLast);
     const uint8_t* act_ptr =
         reinterpret_cast<uint8_t*>(act_contig.data_ptr<c10::quint8>());
 
@@ -114,7 +124,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     TORCH_CHECK(C == (packB->inputChannels()),
         "[QConv2D] Given groups=", groups, ", weight of size ",
         K, ", ",  kernel_h, ", ", kernel_w, ", ", packB->inputChannels(),
-        ", expected input (NHWC) ", N, ", ", H, ", ", W, ", ", C,
+        ", expected input (NCHW) ", N, ", ", C, ", ", H, ", ", W,
         " to have ", (packB->inputChannels() * groups),
         " channels, but got ", C, " channels instead");
 
@@ -183,14 +193,17 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     }
 
     auto outShape =
-        convOutputShape(N, H, W, K, kernel, stride, padding, dilation);
+        convOutputShape(N, K, H, W, kernel, stride, padding, dilation);
     TORCH_CHECK(
         std::all_of(
             outShape.begin(), outShape.end(), [](int64_t i) { return i > 0; }),
         "[QConv2D] each dimension of output tensor should be greater than 0")
 
+    // Force output format to be NHWC
+    // TODO: consider preserving input format
     Tensor output = _empty_affine_quantized(
-        outShape, device(kCPU).dtype(kQUInt8), output_scale, output_zero_point);
+        outShape, device(kCPU).dtype(kQUInt8), output_scale, output_zero_point,
+        MemoryFormat::ChannelsLast);
     auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
     if (pack_ptr.q_scheme == kPerTensorAffine) {
