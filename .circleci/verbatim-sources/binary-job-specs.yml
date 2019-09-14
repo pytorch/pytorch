@@ -223,8 +223,8 @@
     steps:
     - attach_workspace:
         at: ~/workspace
-    - run:
-        <<: *should_run_job
+    
+    - should_run_job
     - checkout
     - run:
         <<: *ios_brew_update
@@ -247,8 +247,8 @@
     steps:
     - attach_workspace:
         at: ~/workspace
-    - run:
-        <<: *should_run_job
+    
+    - should_run_job
     - checkout
     - run:
         <<: *ios_brew_update
