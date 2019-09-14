@@ -65,7 +65,7 @@ class FunctionalAPITest(QuantizationTestCase):
 
         b = torch.randn(oC, dtype=torch.float32) if use_bias else None
         q_bias = torch.quantize_linear(b, scale=1.0 / 1024, zero_point=0, dtype=torch.qint32) if use_bias else None
-        q_filters_ref = torch.ops.quantized.conv_prepack(qw.permute([0, 2, 3, 1]),
+        q_filters_ref = torch.ops.quantized.conv_prepack(qw,
                                                          q_bias,
                                                          stride,
                                                          i_padding,
