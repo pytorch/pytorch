@@ -51,13 +51,15 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
       auto zero_points = from_blob(
           pack_ptr.w_zp.data(), pack_ptr.w_zp.size(), device(kCPU).dtype(kInt));
 
-    unpacked_weights = _empty_per_channel_affine_quantized_like(
-        scales.toType(kDouble),
-        zero_points.toType(kLong),
-        {output_channels, kernel_h, kernel_w, C_per_G},
-        {0}, /* The output channel axis is 0 */
-        device(kCPU).dtype(kQInt8));
-   }
+      unpacked_weights = _empty_per_channel_affine_quantized_like(
+          scales.toType(kDouble),
+          zero_points.toType(kLong),
+          {output_channels, kernel_h, kernel_w, C_per_G},
+          {0}, /* The output channel axis is 0 */
+          device(kCPU).dtype(kQInt8));
+    } else {
+      TORCH_CHECK(false, "Unsupported qscheme: ", toString(pack_ptr.q_scheme));
+    }
     int8_t* unpacked_weights_p =
         reinterpret_cast<int8_t*>(unpacked_weights.data_ptr<c10::qint8>());
 

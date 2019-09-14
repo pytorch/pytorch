@@ -1071,6 +1071,7 @@ const std::unordered_set<c10::OperatorName>& aten_ops_not_moved_to_c10_yet() {
         {"aten::_dequantize_linear", ""},
         {"aten::q_per_channel_scales", ""},
         {"aten::q_per_channel_zero_points", ""},
+        {"aten::q_per_channel_axis", ""},
         {"aten::_per_channel_affine_qtensor", ""},
         {"aten::qscheme", ""},
         {"aten::to", "dtype_layout"},

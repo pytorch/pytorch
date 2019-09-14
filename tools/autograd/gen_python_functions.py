@@ -33,7 +33,7 @@ SKIP_PYTHON_BINDINGS = [
     'copy_sparse_to_sparse_', 'copy_',
     'numpy_T',  # this needs to be an attribute in Python, not a function
     'nonzero(_(out|numpy))?',
-    'set_quantizer_',
+    'set_quantizer_', 'q_per_channel_axis',  # return types not supported yet
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
     'data'

@@ -3452,6 +3452,11 @@
   dispatch:
     QuantizedCPU: q_per_channel_zero_points_quant
 
+- func: q_per_channel_axis(Tensor self) -> int[]
+  variants: function, method
+  dispatch:
+    QuantizedCPU: q_per_channel_axis_quant
+
 - func: int_repr(Tensor self) -> Tensor
   use_c10_dispatcher: True
   variants: function, method
