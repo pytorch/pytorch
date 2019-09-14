@@ -1,14 +1,16 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import torch
-import torch.nn as nn
+import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
-import warnings
 
 from torch._jit_internal import Optional, List
+import torch
+import torch.nn as nn
 
-ABC = ABCMeta(str('ABC'), (object,), {})  # compatible with Python 2 *and* 3:
+
+ABC = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
+
 
 class ObserverBase(ABC, nn.Module):
     r"""Observer base Module
@@ -20,7 +22,9 @@ class ObserverBase(ABC, nn.Module):
     the collected statistics.
     """
 
-    def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False):
+    def __init__(
+        self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False
+    ):
         super(ObserverBase, self).__init__()
         self.dtype = dtype
         self.qscheme = qscheme
@@ -52,8 +56,10 @@ class ObserverBase(ABC, nn.Module):
         """
 
         if max_val is None or min_val is None:
-            warnings.warn("must run observer before calling calculate_qparams.\
-                                    Returning default scale and zero point ")
+            warnings.warn(
+                "must run observer before calling calculate_qparams.\
+                                    Returning default scale and zero point "
+            )
             return torch.tensor([1.0]), torch.tensor([0])
 
         assert min_val <= max_val, "min {} should be less than max {}".format(
@@ -102,7 +108,10 @@ class MinMaxObserver(ObserverBase):
     calculate_qparams will calculate scale and zero_point
     """
 
-    __annotations__ = {'min_val' : Optional[torch.Tensor], 'max_val' : Optional[torch.Tensor]}
+    __annotations__ = {
+        "min_val": Optional[torch.Tensor],
+        "max_val": Optional[torch.Tensor],
+    }
 
     def __init__(self, **kwargs):
         #  For x86 quantized kernels, we need to ensure that the vpmaddubsw instruction
@@ -115,8 +124,14 @@ class MinMaxObserver(ObserverBase):
         super(MinMaxObserver, self).__init__(**kwargs)
         self.min_val = None
         self.max_val = None
-        if self.qscheme == torch.per_tensor_symmetric and self.reduce_range and self.dtype == torch.quint8:
-            raise NotImplementedError("Cannot reduce range for symmetric quantization for quint8")
+        if (
+            self.qscheme == torch.per_tensor_symmetric
+            and self.reduce_range
+            and self.dtype == torch.quint8
+        ):
+            raise NotImplementedError(
+                "Cannot reduce range for symmetric quantization for quint8"
+            )
 
     def forward(self, x):
         min_val = self.min_val
@@ -137,7 +152,69 @@ class MinMaxObserver(ObserverBase):
 
     @torch.jit.export
     def extra_repr(self):
-        return 'min_val={}, max_val={}'.format(self.min_val, self.max_val)
+        return "min_val={}, max_val={}".format(self.min_val, self.max_val)
+
+
+class HistogramObserver(ObserverBase):
+    r"""
+    The module records the running histogram of tensor values along with
+    min/max values. calculate_qparams will calculate scale and zero_point
+    """
+
+    __annotations__ = {
+        "min_val": Optional[torch.Tensor],
+        "max_val": Optional[torch.Tensor],
+        "histogram": Optional[torch.Tensor],
+    }
+
+    def __init__(self, bins=2048, **kwargs):
+        super(HistogramObserver, self).__init__(**kwargs)
+        self.bins = bins
+        self.histogram = None
+        self.min_val = None
+        self.max_val = None
+
+    def forward(self, x):
+        min_val = self.min_val
+        max_val = self.max_val
+        histogram = self.histogram
+        if min_val is None or max_val is None or histogram is None:
+            min_val = torch.min(x)
+            max_val = torch.max(x)
+            range = max_val - min_val
+            self.min_val = min_val - 0.5 * range
+            self.max_val = max_val + 0.5 * range
+            self.histogram = torch.histc(
+                x, self.bins, min=min_val - 0.5 * range, max=max_val + 0.5 * range
+            )
+        else:
+            if min_val < torch.min(x) or max_val > torch.max(x):
+                warnings.warn("Incoming data is outside the min_val/max_val range.")
+            new_histogram = torch.histc(
+                x, self.bins, min=min_val, max=max_val
+            )
+            self.histogram = new_histogram + histogram
+
+    @torch.jit.export
+    def calculate_qparams(self):
+        min_val = self.min_val
+        max_val = self.max_val
+        histogram = self.histogram
+
+        if min_val is None or max_val is None or histogram is None:
+            return self._calculate_qparams(None, None)
+        else:
+            histogram_mask = torch.gt(histogram, 0).to(torch.int8)
+            c = torch.cumsum(histogram_mask, 0)
+            # Last non-zero bin
+            max_bin = torch.argmax(histogram_mask)
+            # Only one entry is non-zero, find it.
+            min_bin = torch.argmax(torch.eq(c, 1))
+            bin_width = (max_val - min_val) / histogram.size()[0]
+            new_min = min_val + min_bin * bin_width
+            new_max = min_val + (max_bin + 1) * bin_width
+            return self._calculate_qparams(new_min, new_max)
+
 
 
 class TensorObserver(ObserverBase):
@@ -167,6 +244,7 @@ class TensorObserver(ObserverBase):
 
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)
+
 
 def default_observer(**kwargs):
     # Restrict activations to be in the range (0,127)
