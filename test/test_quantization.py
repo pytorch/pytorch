@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import unittest
 import torch
 import torch.nn as nn
@@ -11,7 +9,7 @@ from torch.quantization import \
     QConfig_dynamic, default_weight_observer, dump_tensor,\
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
-    default_dynamic_qconfig, QuantWrapper, TensorObserver, MinMaxObserver, HistogramObserver
+    default_dynamic_qconfig, HistogramObserver, MinMaxObserver, TensorObserver, QuantWrapper
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
@@ -777,8 +775,8 @@ class ObserverTest(QuantizationTestCase):
         self.assertEqual(qparams[1].item(), ref_zero_point)
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
 
-    @given(obs=st.sampled_from((torch.quantization.default_observer()(), HistogramObserver(bins=10))))
-    def test_observer_scriptable(self, obs):
+    def test_observer_scriptable(self):
+        obs = torch.quantization.default_observer()()
         scripted = torch.jit.script(obs)
 
         x = torch.rand(3, 4)

@@ -1,8 +1,10 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import warnings
+import torch
+import torch.nn as nn
 from abc import ABCMeta, abstractmethod
 from functools import partial
+import warnings
 
 from torch._jit_internal import Optional, List
 import math
@@ -10,8 +12,7 @@ import torch
 import torch.nn as nn
 
 
-ABC = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
-
+ABC = ABCMeta(str('ABC'), (object,), {})  # compatible with Python 2 *and* 3:
 
 class ObserverBase(ABC, nn.Module):
     r"""Observer base Module
@@ -23,9 +24,7 @@ class ObserverBase(ABC, nn.Module):
     the collected statistics.
     """
 
-    def __init__(
-        self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False
-    ):
+    def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False):
         super(ObserverBase, self).__init__()
         self.dtype = dtype
         self.qscheme = qscheme
@@ -57,10 +56,8 @@ class ObserverBase(ABC, nn.Module):
         """
 
         if max_val is None or min_val is None:
-            warnings.warn(
-                "must run observer before calling calculate_qparams.\
-                                    Returning default scale and zero point "
-            )
+            warnings.warn("must run observer before calling calculate_qparams.\
+                                    Returning default scale and zero point ")
             return torch.tensor([1.0]), torch.tensor([0])
 
         assert min_val <= max_val, "min {} should be less than max {}".format(
@@ -109,10 +106,7 @@ class MinMaxObserver(ObserverBase):
     calculate_qparams will calculate scale and zero_point
     """
 
-    __annotations__ = {
-        "min_val": Optional[torch.Tensor],
-        "max_val": Optional[torch.Tensor],
-    }
+    __annotations__ = {'min_val' : Optional[torch.Tensor], 'max_val' : Optional[torch.Tensor]}
 
     def __init__(self, **kwargs):
         #  For x86 quantized kernels, we need to ensure that the vpmaddubsw instruction
@@ -125,14 +119,8 @@ class MinMaxObserver(ObserverBase):
         super(MinMaxObserver, self).__init__(**kwargs)
         self.min_val = None
         self.max_val = None
-        if (
-            self.qscheme == torch.per_tensor_symmetric
-            and self.reduce_range
-            and self.dtype == torch.quint8
-        ):
-            raise NotImplementedError(
-                "Cannot reduce range for symmetric quantization for quint8"
-            )
+        if self.qscheme == torch.per_tensor_symmetric and self.reduce_range and self.dtype == torch.quint8:
+            raise NotImplementedError("Cannot reduce range for symmetric quantization for quint8")
 
     def forward(self, x):
         min_val = self.min_val
@@ -381,62 +369,67 @@ class HistogramObserver(ObserverBase):
                 dst_histogram[dst_bin2] += src_bin_count - dst_bin_cnt
 
     def forward(self, x):
-        min_val = self.min_val
-        max_val = self.max_val
-        histogram = self.histogram
-        if min_val is None or max_val is None or histogram is None:
-            min_val = torch.min(x)
-            max_val = torch.max(x)
-            if self.use_fixed_width is True:
-                range = max_val - min_val
-                self.min_val = min_val - 0.5 * range
-                self.max_val = max_val + 0.5 * range
-                self.histogram = torch.histc(
-                    x, self.bins, min=min_val - 0.5 * range, max=max_val + 0.5 * range
-                )
-            else:
-                self.min_val = min_val
-                self.max_val = max_val
-                self.histogram = torch.histc(x, self.bins)
-        else:
-            if self.use_fixed_width is True:
-                if min_val < torch.min(x) or max_val > torch.max(x):
-                    warnings.warn("Incoming data is outside the min_val/max_val range.")
-                new_histogram = torch.histc(
-                    x, self.bins, min=min_val, max=max_val
-                )
-                self.histogram = new_histogram + histogram
+        with torch.no_grad():
+            min_val = self.min_val
+            max_val = self.max_val
+            histogram = self.histogram
+            if min_val is None or max_val is None or histogram is None:
+                min_val = torch.min(x)
+                max_val = torch.max(x)
+                if self.use_fixed_width is True:
+                    range = max_val - min_val
+                    self.min_val = min_val - 0.5 * range
+                    self.max_val = max_val + 0.5 * range
+                    self.histogram = torch.histc(
+                        x, self.bins, min=min_val - 0.5 * range, max=max_val + 0.5 * range
+                    )
+                else:
+                    self.min_val = min_val
+                    self.max_val = max_val
+                    self.histogram = torch.histc(x, self.bins, min=min_val, max=max_val)
             else:
                 new_min = torch.min(x)
                 new_max = torch.max(x)
-                new_histogram = torch.histc(x, self.bins)
-                # combine the existing histogram and new histogram into 1 histogram
-                combined_histogram = torch.zeros_like(self.histogram)
-                combined_min = torch.min(new_min, self.min_val)
-                combined_max = torch.max(new_max, self.max_val)
-                self._combine_histograms(
-                    combined_histogram,
-                    combined_min.item(),
-                    combined_max.item(),
-                    self.histogram,
-                    self.min_val.item(),
-                    self.max_val.item(),
-                )
-                self._combine_histograms(
-                    combined_histogram,
-                    combined_min.item(),
-                    combined_max.item(),
-                    new_histogram,
-                    new_min.item(),
-                    new_max.item(),
-                )
-                self.histogram = combined_histogram
-                self.min_val = combined_min
-                self.max_val = combined_max
+                if self.use_fixed_width is True:
+                    if min_val > new_min or max_val < new_max:
+                        warnings.warn("Incoming data is outside the min_val/max_val range.")
+                    new_histogram = torch.histc(
+                        x, self.bins, min=min_val, max=max_val
+                    )
+                    self.histogram = new_histogram + histogram
+                else:
+                    new_histogram = torch.histc(x, self.bins, min=new_min, max=new_max)
+                    # combine the existing histogram and new histogram into 1 histogram
+                    combined_histogram = torch.zeros_like(self.histogram)
+                    combined_min = torch.min(new_min, self.min_val)
+                    combined_max = torch.max(new_max, self.max_val)
+                    self._combine_histograms(
+                        combined_histogram,
+                        combined_min.item(),
+                        combined_max.item(),
+                        self.histogram,
+                        self.min_val.item(),
+                        self.max_val.item(),
+                    )
+                    self._combine_histograms(
+                        combined_histogram,
+                        combined_min.item(),
+                        combined_max.item(),
+                        new_histogram,
+                        new_min.item(),
+                        new_max.item(),
+                    )
+                    self.histogram = combined_histogram
+                    self.min_val = combined_min
+                    self.max_val = combined_max
 
     def calculate_qparams(self, norm_type="L2"):
         if self.histogram is None:
-            raise Exception("must run observer before calling calculate_qparams!")
+            warnings.warn(
+                "must run observer before calling calculate_qparams.\
+                                    Returning default scale and zero point "
+            )
+            return torch.tensor([1.0]), torch.tensor([0])
         assert self.bins == len(self.histogram), (
             "The number of bins in histogram should be equal to the number of bins "
             "supplied while making this observer"
@@ -475,7 +468,6 @@ class TensorObserver(ObserverBase):
 
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)
-
 
 def default_observer(**kwargs):
     # Restrict activations to be in the range (0,127)
