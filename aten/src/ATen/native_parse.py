@@ -414,6 +414,7 @@ def run(paths):
                 declaration['device_guard'] = func.get('device_guard', True)
                 declaration['named_guard'] = func.get('named_guard', True)
                 declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', False)
+                declaration['category_override'] = func.get('category_override', '')
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
                 declaration['python_module'] = func.get('python_module', '')

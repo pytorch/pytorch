@@ -28,9 +28,9 @@ Tensor empty_affine_quantized_cpu(
 }
 
 Tensor empty_per_channel_affine_quantized_cpu(
+    IntArrayRef size,
     const Tensor& scales,
     const Tensor& zero_points,
-    IntArrayRef size,
     IntArrayRef axis,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {

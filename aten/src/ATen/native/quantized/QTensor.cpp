@@ -142,10 +142,10 @@ Tensor per_channel_affine_qtensor_cpu(
     const Tensor& scales,
     const Tensor& zero_points,
     IntArrayRef axis) {
-  Tensor dst = at::_empty_per_channel_affine_quantized_like(
+  Tensor dst = at::_empty_per_channel_affine_quantized(
+      self.sizes(),
       scales,
       zero_points,
-      self.sizes(),
       axis,
       self.options().dtype(toQIntType(self.scalar_type())));
   Tensor self_contig = self.contiguous();
