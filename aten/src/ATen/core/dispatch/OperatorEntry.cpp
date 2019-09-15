@@ -20,7 +20,8 @@ namespace {
 OperatorEntry::OperatorEntry(FunctionSchema&& schema, OperatorOptions&& options)
 : schema_(std::move(schema))
 , dispatchTable_(schema_)
-, kernels_(make_left<ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>>, std::list<DispatchTableEntry>>())
+, kernels_()
+, catchAllKernels_()
 , options_(std::move(options)) {
 }
 
@@ -30,18 +31,16 @@ void OperatorEntry::prepareForDeregistration() {
       TORCH_INTERNAL_ASSERT(false, "Tried to deregister op schema for an operator that still has kernels registered. The operator schema is ", toString(schema_), ". Registered kernels for dispatch keys: ", dispatchTable.listAllDispatchKeys());
     }
   });
-  TORCH_INTERNAL_ASSERT(kernels_.is_left(), "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have a catch-all kernel. The operator schema is ", toString(schema_));
-  TORCH_INTERNAL_ASSERT(kernels_.left().size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have kernels for dispatch keys ", listAllDispatchKeys(kernels_.left()), ". The operator schema is ", toString(schema_));
+  TORCH_INTERNAL_ASSERT(kernels_.size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have kernels for dispatch keys ", listAllDispatchKeys(kernels_), ". The operator schema is ", toString(schema_));
+  TORCH_INTERNAL_ASSERT(catchAllKernels_.size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have catch-all kernel. The operator schema is ", toString(schema_));
 }
 
 RegistrationHandleRAII OperatorEntry::registerKernel(TensorTypeId dispatch_key, DispatchTableEntry kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
-  TORCH_CHECK(kernels_.is_left(), "Tried to register a kernel with dispatch key ", toString(dispatch_key)," for an operator which already has a catch-all kernel registered. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is ", toString(schema_));
-
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
-  auto& k = kernels_.left()[dispatch_key];
+  auto& k = kernels_[dispatch_key];
   k.push_front(kernel);
   std::list<DispatchTableEntry>::iterator inserted = k.begin();
   // update the dispatch table, i.e. re-establish the invariant
@@ -58,16 +57,10 @@ RegistrationHandleRAII OperatorEntry::registerKernel(TensorTypeId dispatch_key, 
 RegistrationHandleRAII OperatorEntry::registerCatchallKernel(DispatchTableEntry kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
-  if (kernels_.is_left()) {
-    TORCH_CHECK(0 == kernels_.left().size(), "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys ", listAllDispatchKeys(kernels_.left()), ". An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is ", toString(schema_));
-    kernels_ = make_right<ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>>, std::list<DispatchTableEntry>>();
-  }
-
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
-  auto& k = kernels_.right();
-  k.push_front(kernel);
-  std::list<DispatchTableEntry>::iterator inserted = k.begin();
+  catchAllKernels_.push_front(kernel);
+  std::list<DispatchTableEntry>::iterator inserted = catchAllKernels_.begin();
   // update the dispatch table, i.e. re-establish the invariant
   // that the dispatch table points to the newest kernel
   updateCatchallDispatchTable_();
@@ -82,16 +75,13 @@ RegistrationHandleRAII OperatorEntry::registerCatchallKernel(DispatchTableEntry 
 void OperatorEntry::deregisterKernel_(TensorTypeId dispatch_key, std::list<DispatchTableEntry>::iterator kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
-  TORCH_CHECK(kernels_.is_left(), "Tried deregister a kernel for dispatch key ", toString(dispatch_key), " for an operator that only has a catch-all kernel. The operator schema is ", toString(schema_));
-
-  auto& kernels = kernels_.left();
-  auto found = kernels.find(dispatch_key);
-  TORCH_INTERNAL_ASSERT(found != kernels.end(), "Tried to deregister a kernel for dispatch key ", toString(dispatch_key), " but there are no kernels registered for this dispatch key. The operator schema is ", toString(schema_));
+  auto found = kernels_.find(dispatch_key);
+  TORCH_INTERNAL_ASSERT(found != kernels_.end(), "Tried to deregister a kernel for dispatch key ", toString(dispatch_key), " but there are no kernels registered for this dispatch key. The operator schema is ", toString(schema_));
   auto& k = found->second;
   k.erase(kernel);
   if (k.empty()) {
     // the invariant says we don't want empty lists but instead remove the list from the map
-    kernels.erase(found);
+    kernels_.erase(found);
   }
 
   updateDispatchTable_(dispatch_key);
@@ -100,62 +90,17 @@ void OperatorEntry::deregisterKernel_(TensorTypeId dispatch_key, std::list<Dispa
 void OperatorEntry::deregisterCatchallKernel_(std::list<DispatchTableEntry>::iterator kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
-  TORCH_CHECK(kernels_.is_right(), "Tried to deregister a catch-all kernel for an operator that doesn't have a catch-all kernel registered. The operator schema is ", toString(schema_));
-
-  auto& k = kernels_.right();
-  k.erase(kernel);
-  if (k.empty()) {
-    // the invariant says that the empty state is represented with is_left()
-    kernels_ = make_left<ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>>, std::list<DispatchTableEntry>>();
-  }
+  catchAllKernels_.erase(kernel);
 
   updateCatchallDispatchTable_();
-}
-
-RegistrationHandleRAII OperatorEntry::registerUnboxedAutogradKernel(void* kernel_func) {
-  std::unique_lock<std::mutex> lock(unboxedAutogradKernelsMutex_);
-
-  TORCH_INTERNAL_ASSERT(kernel_func != nullptr);
-
-  unboxedAutogradKernels_.push_front(kernel_func);
-  std::list<void*>::iterator inserted = unboxedAutogradKernels_.begin();
-
-  updateCurrentUnboxedAutogradKernel_();
-
-  return RegistrationHandleRAII([this, inserted] {
-    // list iterators stay valid even if the list changes,
-    // so we can use the iterator to deregister the kernel from the list
-    deregisterUnboxedAutogradKernel_(inserted);
-  });
-}
-
-void OperatorEntry::deregisterUnboxedAutogradKernel_(std::list<void*>::iterator kernel) {
-  std::unique_lock<std::mutex> lock(unboxedAutogradKernelsMutex_);
-
-  unboxedAutogradKernels_.erase(kernel);
-
-  updateCurrentUnboxedAutogradKernel_();
-}
-
-void OperatorEntry::updateCurrentUnboxedAutogradKernel_() {
-  // precondition: unboxedAutogradKernelsMutex_ is locked
-
-  if (unboxedAutogradKernels_.empty()) {
-    currentUnboxedAutogradKernel_ = nullptr;
-  } else {
-    currentUnboxedAutogradKernel_ = unboxedAutogradKernels_.front();
-  }
 }
 
 void OperatorEntry::updateDispatchTable_(TensorTypeId dispatch_key) {
   // precondition: kernelsMutex_ is locked
 
-  TORCH_INTERNAL_ASSERT(kernels_.is_left(), "Can't update the dispatch table a dispatch key ", toString(dispatch_key), " because the operator only has catch-all kernels. The operator schema is ", toString(schema_));
+  auto k = kernels_.find(dispatch_key);
 
-  auto& kernels = kernels_.left();
-  auto k = kernels.find(dispatch_key);
-
-  if (k == kernels.end()) {
+  if (k == kernels_.end()) {
     dispatchTable_.write([&] (DispatchTable& dispatchTable) {
       dispatchTable.removeKernelIfExists(dispatch_key);
     });
@@ -169,13 +114,13 @@ void OperatorEntry::updateDispatchTable_(TensorTypeId dispatch_key) {
 void OperatorEntry::updateCatchallDispatchTable_() {
   // precondition: kernelsMutex_ is locked
 
-  if (kernels_.is_left()) {
+  if (catchAllKernels_.size() == 0) {
     dispatchTable_.write([&] (DispatchTable& dispatchTable) {
       dispatchTable.removeCatchallKernel();
     });
   } else {
     dispatchTable_.write([&] (DispatchTable& dispatchTable) {
-      dispatchTable.setCatchallKernel(kernels_.right().front());
+      dispatchTable.setCatchallKernel(catchAllKernels_.front());
     });
   }
 }
