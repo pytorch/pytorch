@@ -23,160 +23,116 @@ namespace native {
 template<class scalar_t>
 void magmaSolve(
     magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda,
-    magma_int_t* ipiv, scalar_t* dB, magma_int_t lddb, magma_int_t* info) {
-  AT_ERROR("solve only takes float or double Tensors");
-}
+    magma_int_t* ipiv, scalar_t* dB, magma_int_t lddb, magma_int_t* info);
 
 template<class scalar_t>
 void magmaSolveBatched(
     magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t** dipiv_array, scalar_t** dB_array, magma_int_t lddb,
-    magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
-  AT_ERROR("solve only takes float or double Tensors");
-}
+    magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
 void magmaLu(
     magma_int_t m, magma_int_t n, scalar_t* dA, magma_int_t ldda,
-    magma_int_t* ipiv, magma_int_t* info) {
-  AT_ERROR("lu only takes float or double Tensors");
-}
+    magma_int_t* ipiv, magma_int_t* info);
 
 template<class scalar_t>
 void magmaLuBatched(
     magma_int_t m, magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t** ipiv_array, magma_int_t* info_array, magma_int_t batchsize,
-    const MAGMAQueue& magma_queue) {
-  AT_ERROR("lu only takes float or double Tensors");
-}
+    const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
 void magmaLuNoPiv(
     magma_int_t m, magma_int_t n, scalar_t* dA, magma_int_t ldda,
-    magma_int_t* info) {
-  AT_ERROR("lu only takes float or double Tensors");
-}
+    magma_int_t* info);
 
 template<class scalar_t>
 void magmaLuNoPivBatched(
     magma_int_t m, magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  AT_ERROR("lu only takes float or double Tensors");
-}
+    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
-inline magma_int_t magmaGetriOptimalBlocksize(magma_int_t n) {
-  AT_ERROR("getri only takes float or double Tensors");
-}
+inline magma_int_t magmaGetriOptimalBlocksize(magma_int_t n);
 
 template<class scalar_t>
 void magmaGetri(
     magma_int_t n, scalar_t* dA, magma_int_t ldda, magma_int_t* ipiv, scalar_t* dwork,
-    magma_int_t lwork, magma_int_t* info) {
-  AT_ERROR("getri only takes float or double Tensors");
-}
+    magma_int_t lwork, magma_int_t* info);
 
 template<class scalar_t>
 void magmaGetriBatched(
     magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t** ipiv_array, scalar_t** dinvA_array, magma_int_t lddia,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  AT_ERROR("getri only takes float or double Tensors");
-}
+    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
 void magmaCholeskySolve(
     magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda,
-    scalar_t* dB, magma_int_t lddb, magma_int_t* info) {
-  AT_ERROR("cholesky_solve only takes float or double Tensors");
-}
+    scalar_t* dB, magma_int_t lddb, magma_int_t* info);
 
 template<class scalar_t>
 void magmaCholeskySolveBatched(
     magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda,
-    scalar_t** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  AT_ERROR("cholesky_solve only takes float or double Tensors");
-}
+    scalar_t** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
 void magmaCholesky(
     magma_uplo_t uplo, magma_int_t n, scalar_t* dA,
-    magma_int_t ldda, magma_int_t* info) {
-  AT_ERROR("cholesky only takes float or double Tensors");
-}
+    magma_int_t ldda, magma_int_t* info);
 
 template<class scalar_t>
 void magmaCholeskyBatched(
     magma_uplo_t uplo, magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  AT_ERROR("cholesky only takes float or double Tensors");
-}
+    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
 void magmaTriangularSolve(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
-    scalar_t* dA, magma_int_t ldda, scalar_t* dB, magma_int_t lddb) {
-  AT_ERROR("triangular_solve only takes float or double Tensors");
-}
+    scalar_t* dA, magma_int_t ldda, scalar_t* dB, magma_int_t lddb);
 
 template<class scalar_t>
 void magmaTriangularSolveBatched(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     scalar_t** dA_array, magma_int_t ldda, scalar_t** dB_array, magma_int_t lddb, magma_int_t batchsize,
-    const MAGMAQueue& magma_queue) {
-  AT_ERROR("triangular_solve only takes float or double Tensors");
-}
+    const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
-inline magma_int_t magmaGeqrfOptimalBlocksize(magma_int_t m, magma_int_t n) {
-  AT_ERROR("geqrf only takes float or double Tensors");
-}
+inline magma_int_t magmaGeqrfOptimalBlocksize(magma_int_t m, magma_int_t n);
 
 template<class scalar_t>
 void magmaGeqrf(
     magma_int_t m, magma_int_t n, scalar_t* dA, magma_int_t ldda,
-    scalar_t* tau, scalar_t* dT, magma_int_t* info, bool is_v2) {
-  AT_ERROR("geqrf only takes float or double Tensors");
-}
+    scalar_t* tau, scalar_t* dT, magma_int_t* info, bool is_v2);
 
 template<class scalar_t>
 void magmaOrgqr(
     magma_int_t m, magma_int_t n, magma_int_t k, scalar_t* dA,
-    magma_int_t ldda, scalar_t* tau, scalar_t* dT, magma_int_t nb, magma_int_t* info) {
-  AT_ERROR("orgqr only takes float or double Tensors");
-}
+    magma_int_t ldda, scalar_t* tau, scalar_t* dT, magma_int_t nb, magma_int_t* info);
 
 template<class scalar_t>
 void magmaSymeig(
     magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, scalar_t* dA, magma_int_t ldda,
     scalar_t* w, scalar_t* wA, magma_int_t ldwa, scalar_t* work, magma_int_t lwork,
-    magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
-  AT_ERROR("symeig only takes float or double Tensors");
-}
+    magma_int_t* iwork, magma_int_t liwork, magma_int_t* info);
 
 template<class scalar_t>
 void magmaSvd(
     magma_vec_t jobz, magma_int_t m, magma_int_t n, scalar_t* A,
     magma_int_t lda, scalar_t* s, scalar_t* U, magma_int_t ldu,
     scalar_t* VT, magma_int_t ldvt, scalar_t* work, magma_int_t lwork,
-    magma_int_t* iwork, magma_int_t* info) {
-  AT_ERROR("svd only takes float or double Tensors");
-}
+    magma_int_t* iwork, magma_int_t* info);
 
 template<class scalar_t>
 void magmaLuSolve(
     magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda, magma_int_t* ipiv,
-    scalar_t* dB, magma_int_t lddb, magma_int_t* info) {
-  AT_ERROR("lu_solve only takes float or double Tensors");
-}
+    scalar_t* dB, magma_int_t lddb, magma_int_t* info);
 
 template<class scalar_t>
 void magmaLuSolveBatched(
     magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
     scalar_t** dB_array, magma_int_t lddb, magma_int_t& info,
-    magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  AT_ERROR("lu_solve only takes float or double Tensors");
-}
+    magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
 template<>
 void magmaSolve<double>(
