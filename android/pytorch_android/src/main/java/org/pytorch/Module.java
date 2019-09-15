@@ -12,8 +12,8 @@ public class Module {
     return new Module(modelAbsolutePath);
   }
 
-  private Module(final String modelAbsolutePath) {
-    this.mNativePeer = new NativePeer(modelAbsolutePath);
+  private Module(final String moduleAbsolutePath) {
+    this.mNativePeer = new NativePeer(moduleAbsolutePath);
   }
 
   public IValue forward(IValue... inputs) {
