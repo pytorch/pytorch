@@ -2564,8 +2564,7 @@ class TestCuda(TestCase):
         torch.cuda.nvtx.mark("bar")
         torch.cuda.nvtx.range_pop()
 
-    def test_bincount_cuda(self):
-        _TestTorchMixin._test_bincount(self, device='cuda')
+    def test_bincount_compare(self):
         # ensure CUDA code coverage
         input_size = (5000,)
         w = torch.randn(input_size, device='cuda')
