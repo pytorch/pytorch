@@ -430,7 +430,6 @@ public:
     , legacyATenSchema_(c10::nullopt)
     , kernels()
     , aliasAnalysisKind_(c10::nullopt)
-    , unboxedAutogradKernel_(nullptr)
     {}
 
     // KernelRegistrationConfig accumulates all information from the config
