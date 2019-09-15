@@ -307,7 +307,6 @@
 - func: arange.out(Scalar end, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: arange.start_out(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: arange_cpu_out
     CUDA: arange_cuda_out
@@ -1079,7 +1078,6 @@
     CUDA: eye_out_cuda
 
 - func: eye.m_out(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
@@ -2005,7 +2003,6 @@
 - func: randint.generator_out(int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
 
 - func: randint.low_out(int low, int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
 
 - func: randint.low_generator_out(int low, int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
 
@@ -3005,7 +3002,6 @@
     SparseCUDA: resize_as_sparse_
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: pow_out
     CUDA: pow_out
@@ -4305,7 +4301,6 @@
     CUDA: legacy::cuda::_th_trace
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: ne_scalar_out_cpu
     CUDA: ne_scalar_out_cuda
@@ -4320,7 +4315,6 @@
     QuantizedCPU: ne_quantized_cpu
 
 - func: ne.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: ne_out_cpu
     CUDA: ne_out_cuda
@@ -4335,7 +4329,6 @@
     QuantizedCPU: ne_quantized_cpu
 
 - func: eq.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: eq_scalar_out_cpu
     CUDA: eq_scalar_out_cuda
@@ -4350,7 +4343,6 @@
     QuantizedCPU: eq_quantized_cpu
 
 - func: eq.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: eq_out_cpu
     CUDA: eq_out_cuda
@@ -4365,7 +4357,6 @@
     QuantizedCPU: eq_quantized_cpu
 
 - func: ge.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: ge_scalar_out_cpu
     CUDA: ge_scalar_out_cuda
@@ -4380,7 +4371,6 @@
     QuantizedCPU: ge_quantized_cpu
 
 - func: ge.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: ge_out_cpu
     CUDA: ge_out_cuda
@@ -4395,7 +4385,6 @@
     QuantizedCPU: ge_quantized_cpu
 
 - func: le.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: le_scalar_out_cpu
     CUDA: le_scalar_out_cuda
@@ -4410,7 +4399,6 @@
     QuantizedCPU: le_quantized_cpu
 
 - func: le.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: le_out_cpu
     CUDA: le_out_cuda
@@ -4425,7 +4413,6 @@
     QuantizedCPU: le_quantized_cpu
 
 - func: gt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: gt_scalar_out_cpu
     CUDA: gt_scalar_out_cuda
@@ -4440,7 +4427,6 @@
     QuantizedCPU: gt_quantized_cpu
 
 - func: gt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: gt_out_cpu
     CUDA: gt_out_cuda
@@ -4455,7 +4441,6 @@
     QuantizedCPU: gt_quantized_cpu
 
 - func: lt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: lt_scalar_out_cpu
     CUDA: lt_scalar_out_cuda
@@ -4470,7 +4455,6 @@
     QuantizedCPU: lt_quantized_cpu
 
 - func: lt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: lt_out_cpu
     CUDA: lt_out_cuda
@@ -4859,13 +4843,11 @@
   variants: method, function
 
 - func: lerp.Scalar_out(Tensor self, Tensor end, Scalar weight, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: lerp_cpu_scalar_out
     CUDA: lerp_cuda_scalar_out
 
 - func: lerp.Tensor_out(Tensor self, Tensor end, Tensor weight, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: lerp_cpu_tensor_out
     CUDA: lerp_cuda_tensor_out
@@ -4897,7 +4879,6 @@
     CUDA: _histc_cuda
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: legacy::cpu::_th_fmod_out
     CUDA: legacy::cuda::_th_fmod_out
@@ -4910,7 +4891,6 @@
     CUDA: legacy::cuda::_th_fmod
 
 - func: fmod.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: legacy::cpu::_th_fmod_out
     CUDA: legacy::cuda::_th_fmod_out
@@ -4923,7 +4903,6 @@
     CUDA: legacy::cuda::_th_fmod
 
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: legacy::cpu::_th_remainder_out
     CUDA: legacy::cuda::_th_remainder_out
@@ -4936,7 +4915,6 @@
     CUDA: legacy::cuda::_th_remainder
 
 - func: remainder.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: legacy::cpu::_th_remainder_out
     CUDA: legacy::cuda::_th_remainder_out
@@ -5059,7 +5037,6 @@
     QuantizedCPU: quantized_equal
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: pow_out
     CUDA: pow_out
@@ -5072,7 +5049,6 @@
     CUDA: pow
 
 - func: pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: True
   dispatch:
     CPU: pow_out
     CUDA: pow_out
@@ -5360,7 +5336,6 @@
   python_module: nn
 
 - func: multilabel_margin_loss_forward.output(Tensor self, Tensor target, int reduction, *, Tensor(a!) output, Tensor(b!) is_target) -> (Tensor(a!), Tensor(b!))
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_multilabel_margin_loss_forward_out
@@ -5638,7 +5613,6 @@
   python_module: nn
 
 - func: log_sigmoid_forward.output(Tensor self, *, Tensor(a!) output, Tensor(b!) buffer) -> (Tensor(a!), Tensor(b!))
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_log_sigmoid_forward_out
