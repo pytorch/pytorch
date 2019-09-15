@@ -2,7 +2,8 @@ import inspect
 from functools import wraps
 import unittest
 import torch
-from common_utils import TestCase
+from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
+    skipCUDANonDefaultStreamIf
 
 # Note: Generic Device-Type Testing
 #
@@ -109,7 +110,7 @@ class CUDATestBase(DeviceTypeTestBase):
     def setUpClass(cls):
         # has_magma shows up after cuda is initialized
         torch.ones(1).cuda()
-        cls.has_magma = torch.cuda.has_magma
+        cls.no_magma = not torch.cuda.has_magma
 
 
 # Adds available device-type-specific test base classes
@@ -189,7 +190,7 @@ class skipIf(object):
         @wraps(fn)
         def dep_fn(slf, device, *args, **kwargs):
             if self.device_type is None or self.device_type == slf.device_type:
-                if not self.dep or (isinstance(self.dep, str) and not getattr(slf, self.dep, False)):
+                if (isinstance(self.dep, str) and getattr(slf, self.dep, True)) or (isinstance(self.dep, bool) and self.dep):
                     raise unittest.SkipTest(self.reason)
 
             return fn(slf, device, *args, **kwargs)
@@ -212,9 +213,19 @@ class skipCUDAIf(skipIf):
 
 # Specifies LAPACK as a CPU dependency.
 def skipCPUIfNoLapack(fn):
-    return skipCPUIf(torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
+    return skipCPUIf(not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
+
+
+# Specifies MKL as a CPU dependency.
+def skipCPUIfNoMkl(fn):
+    return skipCPUIf(not TEST_MKL, "PyTorch is built without MKL support")(fn)
 
 
 # Specifies MAGMA as a CUDA dependency.
 def skipCUDAIfNoMagma(fn):
-    return skipCUDAIf('has_magma', "no MAGMA library detected")(fn)
+    return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
+
+
+# Skips this test when the CUDA device type is actually ROCm.
+def skipCUDAIfRocm(fn):
+    return skipCUDAIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")(fn)

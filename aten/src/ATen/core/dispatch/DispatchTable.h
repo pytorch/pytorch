@@ -117,7 +117,12 @@ class DispatchTable final {
       TensorTypeId dispatch_key,
       const DispatchTableEntry& kernel) {
     TORCH_INTERNAL_ASSERT(dispatch_key != TensorTypeId::UndefinedTensorId);
-    TORCH_CHECK(dispatch_strategy_.is_valid_, "Tried to register a kernel with dispatch key ", toString(dispatch_key), " for operator ", operator_name_, " that doesn't have tensor arguments.");
+    // The following assertion is disabled because we're codegenerating
+    // autograd kernels for operators without tensor arguments even though
+    // they are never called. These, however, register kernels for
+    // VariableTensorId.
+    // TODO Stop generating these kernels and re-enable this assertion here.
+    //TORCH_CHECK(dispatch_strategy_.is_valid_, "Tried to register a kernel with dispatch key ", toString(dispatch_key), " for operator ", operator_name_, " that doesn't have tensor arguments.");
     kernels_.set(dispatch_key, kernel, operator_name_);
   }
 
