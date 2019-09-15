@@ -19,6 +19,7 @@ using c10::RegisterOperators;
 using c10::OperatorKernel;
 using c10::Dispatcher;
 using c10::IValue;
+using c10::TensorTypeId;
 using at::Tensor;
 
 namespace {
@@ -619,37 +620,42 @@ TEST(OperatorRegistrationTest, whenRegisteringMismatchingKernelsInSameOpCall_the
   }, "Tried to register kernels for same operator that infer a different function schema");
 }
 
-int64_t increment_kernel(int64_t a) {
-  return a + 1;
+bool called_autograd = false;
+bool called_catchall = false;
+
+void catchall_kernel(Tensor a) {
+  called_catchall = true;
 }
 
-int64_t decrement_kernel(int64_t a) {
-  return a - 1;
+void autograd_kernel(Tensor a) {
+  called_autograd = true;
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutogradKernel) {
-  auto registrar = c10::RegisterOperators().op("_test::dummy(int dummy) -> int", c10::RegisterOperators::options()
-    .impl_unboxedAutogradKernel(&increment_kernel));
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+    .impl_unboxedOnlyKernel<decltype(autograd_kernel), &autograd_kernel>(TensorTypeId::VariableTensorId));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
-  int64_t result = c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, int64_t>(*op, 4);
-  EXPECT_EQ(5, result);
+
+  called_autograd = false;
+  c10::Dispatcher::singleton().lookup(*op, TensorTypeId::VariableTensorId).callUnboxed<void, Tensor>(dummyTensor(TensorTypeId::VariableTensorId));
+  EXPECT_TRUE(called_autograd);
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_thenCanCallAutogradKernel) {
-  auto registrar = c10::RegisterOperators().op("_test::dummy(int dummy) -> int", c10::RegisterOperators::options()
-    .catchAllKernel<decltype(decrement_kernel), &decrement_kernel>()
-    .impl_unboxedAutogradKernel(&increment_kernel));
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+    .impl_unboxedOnlyCatchAllKernel<decltype(catchall_kernel), &catchall_kernel>()
+    .impl_unboxedOnlyKernel<decltype(autograd_kernel), &autograd_kernel>(TensorTypeId::VariableTensorId));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
-  int64_t result = c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, int64_t>(*op, 4);
-  EXPECT_EQ(5, result);
-}
 
-// TODO Test cases that adding multiple autograd kernels, removing some, and so on works
-//      (similar to test cases above for regular kernels "_whenNewerAndThenOlderKernelDeletedAndOpCalled")
+  called_catchall = called_autograd = false;
+  c10::Dispatcher::singleton().lookup(*op, TensorTypeId::VariableTensorId).callUnboxed<void, Tensor>(dummyTensor(TensorTypeId::VariableTensorId));
+  EXPECT_FALSE(called_catchall);
+  EXPECT_TRUE(called_autograd);
+}
 
 /**
  * This is used to check that a given type works correctly when passed as input
