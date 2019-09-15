@@ -976,7 +976,7 @@ inline Tensor Tensor::flatten(int64_t start_dim, int64_t end_dim, Dimname out_di
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::flatten(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::flatten(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor");
+    static auto table = globalATenDispatch().getOpTable("aten::flatten.names1(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor");
     return table->getOp<Tensor (const Tensor &, int64_t, int64_t, Dimname)>(type_set())(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
 #endif
 }
@@ -986,7 +986,7 @@ inline Tensor Tensor::flatten(Dimname start_dim, Dimname end_dim, Dimname out_di
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::flatten(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::flatten(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor");
+    static auto table = globalATenDispatch().getOpTable("aten::flatten.names2(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor");
     return table->getOp<Tensor (const Tensor &, Dimname, Dimname, Dimname)>(type_set())(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
 #endif
 }
@@ -996,7 +996,7 @@ inline Tensor Tensor::flatten(DimnameList dims, Dimname out_dim) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::flatten(const_cast<Tensor&>(*this), dims, out_dim);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::flatten(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor");
+    static auto table = globalATenDispatch().getOpTable("aten::flatten.names3(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor");
     return table->getOp<Tensor (const Tensor &, DimnameList, Dimname)>(type_set())(const_cast<Tensor&>(*this), dims, out_dim);
 #endif
 }
