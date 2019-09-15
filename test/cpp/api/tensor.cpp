@@ -339,3 +339,10 @@ TEST(TensorTest, Backward_Grad_IsLeaf_OutputNr) {
   ASSERT_THROW(x2.output_nr(), c10::Error);
   ASSERT_THROW(y2.output_nr(), c10::Error);
 }
+
+TEST(TensorTest, BackwardCreatesOnesGrad) {
+  const auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  x.backward();
+  ASSERT_TRUE(torch::equal(x.grad(),
+              torch::ones_like(x)));
+}
