@@ -76,7 +76,7 @@ class RNNBase(torch.nn.Module):
                         #
                         #   packed_ih, packed_hh, b_ih, b_hh
                         packed_weight = torch.fbgemm_pack_gemm_matrix_fp16(
-                            qweight.clone().float())
+                            qweight)
 
                         params = [packed_weight, bias]
                         pos_names = ['packed', 'b']
@@ -96,12 +96,12 @@ class RNNBase(torch.nn.Module):
                         [gate_size], scale=1, zero_point=0, dtype=torch.qint32)
 
                 else:
-                    w_ih = torch.Tensor(gate_size, layer_input_size)
-                    w_hh = torch.Tensor(gate_size, hidden_size)
-                    b_ih = torch.Tensor(gate_size)
+                    w_ih = torch.Tensor(gate_size, layer_input_size).float()
+                    w_hh = torch.Tensor(gate_size, hidden_size).float()
+                    b_ih = torch.Tensor(gate_size).float()
                     # Second bias vector included for CuDNN compatibility. Only one
                     # bias vector is needed in standard definition.
-                    b_hh = torch.Tensor(gate_size)
+                    b_hh = torch.Tensor(gate_size).float()
 
                 suffix = '_reverse' if direction == 1 else ''
                 ih_params, ih_param_names = process_weights(
@@ -209,8 +209,8 @@ class RNNBase(torch.nn.Module):
         if dtype != torch.qint8 and dtype != torch.float16:
             raise RuntimeError('Unsupported dtype: {}'.format(dtype))
 
+        # When dtype = torch.float16, we don't need weight_observer
         if dtype == torch.qint8:
-            # When dtype = torch.float16, we don't need weight_observer
             if mod.qconfig is not None and mod.qconfig.weight() is not None:
                 weight_observer = mod.qconfig.weight()
             else:
@@ -269,7 +269,7 @@ class RNNBase(torch.nn.Module):
                         #
                         #   packed_ih, packed_hh, b_ih, b_hh
                         packed_weight = torch.fbgemm_pack_gemm_matrix_fp16(
-                            weight.clone().float())
+                            weight.float())
 
                         params = [packed_weight, bias]
                         pos_names = ['packed', 'b']
