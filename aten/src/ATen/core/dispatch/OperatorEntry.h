@@ -54,7 +54,7 @@ public:
 
 private:
   explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator, void* unboxed_kernel)
-  : kernel_(kernel), cache_(cache_creator ? cache_creator() : nullptr), unboxed_kernel_(unboxed_kernel) {}
+  : kernel_(kernel), cache_(cache_creator ? cache_creator() : c10::guts::make_unique<c10::KernelCache>()), unboxed_kernel_(unboxed_kernel) {}
   friend class impl::OperatorEntry;
 
   // All of these fields may be nullptr, but at least one of
@@ -120,14 +120,8 @@ private:
   // The dispatchTable stores the current kernel for each dispatch key
   LeftRight<DispatchTable> dispatchTable_;
 
-  // kernels_ is either:
-  //   left:  a kernel map listing mapping from a dispatch key to a list of all
-  //          kernels for that operator, or it is
-  //   right: a list of all catch-all kernels registered for this operator.
-  // An operator can only have either dispatched kernels or catch-all kernels,
-  // not both.
-  // In both cases, the list of kernels stores all registered kernels for the
-  // corresponding dispatch key (or for catch-all).
+  // kernels_ stores all registered kernels for the corresponding dispatch key
+  // and catchAllKernels_ stores the catch-all kernels.
   // If an operator library gets loaded that overwrites an already existing kernel,
   // both kernels will be in that list but only the newer one will be in
   // dispatchTable. If any of the kernels go away (say the library gets
@@ -139,15 +133,13 @@ private:
   // kernels is a larger data structure and accessed quite infrequently
   // while dispatchTable is accessed often and should be kept small to fit
   // into CPU caches.
-  // Invariants (assuming kernels_.is_left()):
-  //  - dispatchTable[dispatch_key] == kernels_.left()[dispatch_key].front()
+  // Invariants:
+  //  - dispatchTable[dispatch_key] == kernels_[dispatch_key].front()
   //  - dispatchTable[dispatch_key] does not exist if and only if
-  //    kernels_.left()[dispatch_key] does not exist
-  //  - If kernels_.left()[dispatch_key] exists, then it has elements.
+  //    kernels_[dispatch_key] does not exist
+  //  - If kernels_[dispatch_key] exists, then it has elements.
   //    It is never an empty list.
-  // Analogous invariants for kernels_.is_right().
-  // The empty state (i.e. no kernels registered) is represented as an empty
-  // map with kernels_.is_left().
+  // Analogous invariants for catchAllKernels_.
   //
   // Why do we do that?
   // -----
@@ -160,10 +152,8 @@ private:
   // re-ececuted and then only allow one kernel here, i.e. error if a kernel
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
-  c10::either<
-    ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>>, // dispatched kernels
-    std::list<DispatchTableEntry> // catch-all kernels
-  > kernels_;
+  ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>> kernels_;
+  std::list<DispatchTableEntry> catchAllKernels_;
 
   // unboxedAutogradKernels_ stores all autograd kernels registered for this op.
   // An autograd kernel has the same signature as the main op kernel and
