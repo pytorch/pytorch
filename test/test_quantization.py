@@ -778,10 +778,12 @@ class ObserverTest(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)))
     def test_per_channel_minmax_observer(self, qdtype, qscheme):
-        myobs = PerChannelMinMaxObserver(ch_axis=1, dtype=qdtype, qscheme=qscheme)
+        myobs = PerChannelMinMaxObserver(ch_axis=0, dtype=qdtype, qscheme=qscheme)
         x = torch.tensor([[1.0, 2.0, 2.0, 3.0, 4.0, 6.0], [-4.0, 5.0, 5.0, 6.0, 7.0, 8.0]])
         result = myobs(x)
         self.assertEqual(result, x)
+        print("min_vals = ", myobs.min_vals)
+        print("max_vals = ", myobs.max_vals)
         self.assertEqual(myobs.min_vals, [1.0, -4.0])
         self.assertEqual(myobs.max_vals, [6.0, 8.0])
         qparams = myobs.calculate_qparams()

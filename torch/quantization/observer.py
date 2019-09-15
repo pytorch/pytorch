@@ -210,14 +210,17 @@ class PerChannelMinMaxObserver(ObserverBase):
     def forward(self, x):
         min_vals = self.min_vals
         max_vals = self.max_vals
+        x_dim = x.size()
+
+        y = torch.reshape(x, (x_dim[self.ch_axis] , int(torch.numel(x) / x_dim[self.ch_axis]))).detach()
         if min_vals is None or max_vals is None:
-            min_vals = torch.min(x, self.ch_axis)[0]
-            max_vals = torch.max(x, self.ch_axis)[0]
+            min_vals = torch.min(y, 1)[0]
+            max_vals = torch.max(y, 1)[0]
         else:
-            min_vals = torch.min(torch.min(x, self.ch_axis)[0], min_vals)
-            max_vals = torch.max(torch.max(x, self.ch_axis)[0], max_vals)
-        self.min_vals = min_vals
-        self.max_vals = max_vals
+            min_vals = torch.min(torch.min(y, 1)[0], min_vals)
+            max_vals = torch.max(torch.max(y, 1)[0], max_vals)
+        self.min_vals = min_vals.detach()
+        self.max_vals = max_vals.detach()
         return x
 
     @torch.jit.export
