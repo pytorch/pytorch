@@ -96,7 +96,6 @@ public:
       TORCH_CHECK(!legacyATenSchema_.has_value(), "Tried to register operator ", schemaOrName," but specified schema multiple times. You can only specify the schema once per operator registration.");
 
       if (Options::op_is_still_on_aten_dispatcher_(schemaOrName.c_str())) {
-        TORCH_CHECK(unboxedAutogradKernel_ == nullptr, "For legacy aten ops, the schema() call must happen before any kernel() calls. Operator was ", schemaOrName);
         TORCH_CHECK(kernels.size() == 0, "For legacy aten ops, the schema() call must happen before any kernel() calls. Operator was ", schemaOrName);
         legacyATenSchema_ = schemaOrName;
       } else {
@@ -353,24 +352,6 @@ public:
       return std::move(*this);
     }
 
-    template<class FuncType>
-    Options&& impl_unboxedAutogradKernel(FuncType* kernel) && {
-      static_assert(guts::is_function_type<FuncType>::value, "Wrong argument type for impl_unboxedAutogradKernel");
-
-      // TODO Infer and check schema
-      TORCH_CHECK(kernel != nullptr, "Kernel function pointer cannot be nullptr");
-      TORCH_CHECK(unboxedAutogradKernel_ == nullptr, "You can only call impl_unboxedAutogradKernel() once per operator registration.");
-      if (legacyATenSchema_.has_value()) {
-        // TODO Remove this once all ops are moved to c10.
-        TORCH_INTERNAL_ASSERT(!schemaOrName_.has_value());
-        at::globalATenDispatch().registerOp<FuncType>(TensorTypeId::VariableTensorId, legacyATenSchema_->c_str(), kernel);
-        return std::move(*this);
-      } else {
-        unboxedAutogradKernel_ = reinterpret_cast<void*>(kernel);
-        return std::move(*this);
-      }
-    }
-
   private:
     static c10::OperatorName parse_operator_name_(const char* schema) {
       // TODO Remove this function once all aten ops are on c10
@@ -474,7 +455,6 @@ public:
 
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;
-    void* unboxedAutogradKernel_; // can be nullptr, not all kernels have this
     friend class RegisterOperators;
   };
 
@@ -599,8 +579,8 @@ private:
   static c10::FunctionSchema inferSchemaFromKernels_(const OperatorName& opNameStr, const Options& options);
   void checkNoDuplicateKernels_(const Options& options);
   void registerOp_(Options&& options);
-  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options, void* unboxedAutogradKernel);
-  void registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& options, void* unboxedAutogradKernel);
+  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options);
+  void registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& options);
   static OperatorOptions makeOperatorOptions_(const Options& options);
 
   class OperatorRegistrar;
