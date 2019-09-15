@@ -331,19 +331,32 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   const int64_t r_size = r1 * r2;
   const int64_t l1_size = r1 * m;
   const int64_t l2_size = r2 * m;
+  //current implementation supports only gradient that can be collapsed to 1D. However, to avoid checking this assumption,
+  //we call grad.contiguous() before backward, so stride is guaranteed to be 1
+  const int64_t gs = 1;
 
   Tensor buffer = (x1.dim() > 2) ? at::empty({batch, r2, r1, m}, result.options()) : at::empty({r2, r1, m}, result.options());
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist_cuda_backward", [&] {
     if (p == 1.0) {
-      cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block>>>(buffer.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(), grad.stride(-1), p, r1, r2, m, count, r_size, l1_size, l2_size);
+      cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block>>>(buffer.data_ptr<scalar_t>(),
+      grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(),
+      gs, p, r1, r2, m, count, r_size, l1_size, l2_size);
     } else if (p < 2.0) {
-      cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::lt_two><<<grid, block>>>(buffer.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(), grad.stride(-1), p, r1, r2, m, count, r_size, l1_size, l2_size);
+      cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::lt_two><<<grid, block>>>(buffer.data_ptr<scalar_t>(),
+      grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(),
+      gs, p, r1, r2, m, count, r_size, l1_size, l2_size);
     } else if (p == 2.0) {
-      cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<grid, block>>>(buffer.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(), grad.stride(-1), p, r1, r2, m, count, r_size, l1_size, l2_size);
+      cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::two><<<grid, block>>>(buffer.data_ptr<scalar_t>(),
+      grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(),
+      gs, p, r1, r2, m, count, r_size, l1_size, l2_size);
     } else if (std::isinf(p)) {
-      cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<grid, block>>>(buffer.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(), grad.stride(-1), p, r1, r2, m, count, r_size, l1_size, l2_size);
+      cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::inf><<<grid, block>>>(buffer.data_ptr<scalar_t>(),
+      grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(),
+      gs, p, r1, r2, m, count, r_size, l1_size, l2_size);
     } else {
-      cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<grid, block>>>(buffer.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(), grad.stride(-1), p, r1, r2, m, count, r_size, l1_size, l2_size);
+      cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<grid, block>>>(buffer.data_ptr<scalar_t>(),
+      grad.data_ptr<scalar_t>(), x1.data_ptr<scalar_t>(), x2.data_ptr<scalar_t>(), dist.data_ptr<scalar_t>(),
+      gs, p, r1, r2, m, count, r_size, l1_size, l2_size);
     }
   });
   AT_CUDA_CHECK(cudaGetLastError());
