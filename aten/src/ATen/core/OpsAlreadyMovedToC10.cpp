@@ -591,6 +591,9 @@ const std::unordered_set<c10::OperatorName>& aten_ops_not_moved_to_c10_yet() {
         {"aten::set_data", ""},
         {"aten::data", ""},
         {"aten::is_leaf", ""},
+        {"aten::output_nr", ""},
+        {"aten::version", ""},
+        {"aten::requires_grad_", ""},
     #ifdef BUILD_NAMEDTENSOR
         {"aten::names_", ""},
     #endif
