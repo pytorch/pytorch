@@ -8,7 +8,7 @@ from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_prope
 class NegativeBinomial(Distribution):
     r"""
     Creates a Negative Binomial distribution, i.e. distribution
-    of the number of successful independent identical Bernoulli trials
+    of the number of successful independent and identical Bernoulli trials
     before :attr:`total_count` failures are achieved. The probability
     of success of each Bernoulli trial is :attr:`probs`.
 
