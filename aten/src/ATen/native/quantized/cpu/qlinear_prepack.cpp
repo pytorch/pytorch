@@ -131,6 +131,9 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     TORCH_CHECK(
         weight.dim() == 2,
         "quantized::linear_prepack (qnnpack): Weight tensor rank should be == 2");
+    TORCH_CHECK(
+        weight.qscheme() == kPerTensorAffine,
+        "quantized::linear_prepack (qnnpack) only supports Per Tensor Quantization Scheme")
 
     int64_t rows_w = weight.size(0);
     int64_t cols_w = weight.size(1);
@@ -138,7 +141,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     if (bias_in.has_value()) {
       bias = bias_in.value();
     } else {
-      bias = at::empty(rows_w, at::kFloat);
+      bias = at::zeros(rows_w, at::kFloat);
       bias = at::quantize_linear(bias, 1.0, 0, kQInt32);
     }
     TORCH_CHECK(
@@ -171,7 +174,6 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     return cpp_custom_type_hack::create(std::move(wt_ptr), weight.options());
   }
 #endif
-#if defined(USE_FBGEMM) || defined(USE_PYTORCH_QNNPACK)
   at::Tensor operator()(at::Tensor weight, c10::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
 
@@ -190,20 +192,6 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
         toString(ctx.preferredQuantizedEngine()));
     return at::Tensor();
   }
-#else // USE_FBGEMM or USE_PYTORCH_QNNPACK
-  at::Tensor operator()(
-      at::Tensor /* weight */,
-      c10::optional<Tensor> /* bias */
-  ) {
-    // We make a strong guarantee that models using these operators will have
-    // the same numerics across different machines. Therefore, we do not provide
-    // a fallback path and rather fail loudly if we cannot run FBGEMM or
-    // QNNPACK.
-    TORCH_CHECK(
-        false,
-        "This PyTorch installation was not built with FBGEMM or QNNPACK operators");
-  }
-#endif // USE_FBGEMM or USE_PYTORCH_QNNPACK
 };
 
 static auto registry = c10::RegisterOperators().op(
