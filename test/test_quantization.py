@@ -491,11 +491,11 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         }
         model_int8 = quantize_dynamic(
             model=model, qconfig_dict=qconfig_dynamic_dict, mapping=default_dynamic_module_mapping,
-            dtype=torch.torch.qint8
+            dtype=torch.qint8
         )
         model_fp16 = quantize_dynamic(
             model=model, qconfig_dict=qconfig_dynamic_dict, mapping=default_dynamic_module_mapping,
-            dtype=torch.torch.float16
+            dtype=torch.float16
         )
         cell_int8 = model_int8.lstm
         cell_fp16 = model_fp16.lstm
@@ -546,6 +546,15 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         for out_val, ref_val in zip(out_script, ref_out):
             torch.testing.assert_allclose(out_val, ref_val)
 
+        # Test save/load
+        b = io.BytesIO()
+        torch.jit.save(cell_script, b)
+        b.seek(0)
+        loaded = torch.jit.load(b)
+        out_loaded, hid_loaded = loaded(x, hiddens)
+        for loaded_val, ref_val in zip(out_loaded, ref_out):
+            torch.testing.assert_allclose(loaded_val, ref_val)
+
         # Compare fp16 quantized to unquantized
         output_fp16, final_hiddens_fp16 = cell_fp16(x, hiddens)
 
@@ -553,15 +562,6 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         self.assertEqual(output_fp16, ref_out)
         for out, ref in zip(final_hiddens_fp16, ref_hid):
             torch.testing.assert_allclose(out, ref)
-
-#         # Test save/load
-#         b = io.BytesIO()
-#         torch.jit.save(cell_script, b)
-#         b.seek(0)
-#         loaded = torch.jit.load(b)
-#         out_loaded, hid_loaded = loaded(x, hiddens)
-#         for loaded_val, ref_val in zip(out_loaded, ref_out):
-#             torch.testing.assert_allclose(loaded_val, ref_val)
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),

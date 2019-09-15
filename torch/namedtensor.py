@@ -39,23 +39,26 @@ def _expand_single_glob(numel_pre_glob, numel_post_glob, names):
     return names[numel_pre_glob:len(names) - numel_post_glob]
 
 
+def _resolve_glob(names, tensor_names, fn_name):
+    glob_indices = [i for i, x in enumerate(names) if x == '*']
+    if len(glob_indices) >= 2:
+        raise RuntimeError('{}: More than one \'*\' found in names ('
+                           '{}). This function supports up to one \'*\'.'
+                           .format(fn_name, names))
+    if len(glob_indices) == 0:
+        return names
+    glob_idx = glob_indices[0]
+    globbed_names = _expand_single_glob(glob_idx, len(names) - glob_idx - 1, tensor_names)
+    return names[:glob_idx] + globbed_names + names[glob_idx + 1:]
+
+
 def _update_names_with_list(tensor, names, inplace):
     # Special case for tensor.renamed(None)
     if len(names) == 1 and names[0] is None:
         return tensor._update_names(None, inplace)
 
-    glob_indices = [i for i, x in enumerate(names) if x == '*']
-    if len(glob_indices) >= 2:
-        raise RuntimeError('{}: More than one \'*\' found in names ('
-                           '{}). This function supports up to one \'*\'.'
-                           .format(_namer_api_name(inplace), names))
-    elif len(glob_indices) == 1:
-        glob_idx = glob_indices[0]
-        globbed_names = _expand_single_glob(glob_idx, len(names) - glob_idx - 1, tensor.names)
-        return tensor._update_names(
-            names[:glob_idx] + globbed_names + names[glob_idx + 1:], inplace)
-    else:
-        return tensor._update_names(names, inplace)
+    return tensor._update_names(
+        _resolve_glob(names, tensor.names, _namer_api_name(inplace)), inplace)
 
 
 def _update_names_with_mapping(tensor, rename_map, inplace):
