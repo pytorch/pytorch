@@ -588,6 +588,20 @@ class TestQuantizedOps(TestCase):
             cat_q = q_cat_op(tensors_q, dim=ch_axis, scale=scale,
                              zero_point=zero_point)
 
+    """Tests quantize concatenation (both fused and not)."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=3,
+                                              min_side=1, max_side=2),
+                       qparams=hu.qparams()),
+           dim=st.integers(1, 2))
+    def test_mean(self, X, dim):
+        X, (scale, zero_point, torch_type) = X
+        qX = torch.quantize_linear(torch.tensor(X), scale, zero_point, torch_type)
+
+        Y = torch.mean(qX.dequantize(), dim)
+        qY = torch.mean(qX, dim)
+
+        self.assertEqual(Y, qY.dequantize())
+
     """Tests the correctness of the quantized equal op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()),

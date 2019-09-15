@@ -274,7 +274,7 @@ Tensor& prod_out(Tensor& result, const Tensor& self, Dimname dim,
 }
 #endif
 
-Tensor &mean_out(Tensor &result, const Tensor &self, IntArrayRef dim,
+Tensor &mean_out_cpu(Tensor &result, const Tensor &self, IntArrayRef dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
   ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
@@ -309,23 +309,23 @@ Tensor &mean_out(Tensor &result, const Tensor &self, IntArrayRef dim,
   return result;
 }
 
-Tensor mean(const Tensor &self, optional<ScalarType> dtype) {
-  return at::native::mean(self, IntArrayRef{}, false, dtype);
+Tensor mean_cpu(const Tensor &self, optional<ScalarType> dtype) {
+  return at::native::mean_cpu(self, IntArrayRef{}, false, dtype);
 }
 
-Tensor mean(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+Tensor mean_cpu(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
   Tensor result;
-  return at::native::mean_out(result, self, dim, keepdim, dtype);
+  return at::native::mean_out_cpu(result, self, dim, keepdim, dtype);
 }
 
 #ifdef BUILD_NAMEDTENSOR
-Tensor mean(const Tensor& self, DimnameList dim, bool keepdim, optional<ScalarType> dtype) {
-  return at::mean(self, dimnames_to_positions(self, dim), keepdim, dtype);
+Tensor mean_cpu(const Tensor& self, DimnameList dim, bool keepdim, optional<ScalarType> dtype) {
+  return at::mean_cpu(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor& mean_out(Tensor& result, const Tensor& self, DimnameList dim,
+Tensor& mean_out_cpu(Tensor& result, const Tensor& self, DimnameList dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
-  return at::mean_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
+  return at::mean_out_cpu(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 #endif
 

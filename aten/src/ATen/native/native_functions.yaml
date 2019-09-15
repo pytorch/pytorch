@@ -1574,20 +1574,33 @@
 - func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   named_guard: false
+  dispatch:
+    CPU: mean_cpu
+    QuantizedCPU: quantized_mean_cpu
 
 - func: mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   named_guard: false
+  dispatch:
+    CPU: mean_cpu
+    QuantizedCPU: quantized_mean_cpu
 
 - func: mean.out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   named_guard: false
+  dispatch:
+    CPU: mean_out_cpu
+    QuantizedCPU: quantized_mean_out_cpu
 
 - func: mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   named_guard: false
+  dispatch:
+    CPU: mean_cpu
 
 - func: mean.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   named_guard: false
+  dispatch:
+    CPU: mean_cpu
 
 - func: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: True
