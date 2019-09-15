@@ -876,7 +876,6 @@ graph(%x : Tensor,
         FileCheck().run(input_str, graph)
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("temoprarily disable the test case, it will pass in later PR")
     def test_insert_observers(self):
         class Observer(torch.nn.Module):
             def __init__(self):
@@ -933,7 +932,6 @@ graph(%x : Tensor,
                    .run(str(m._c._get_module("conv")._get_method('conv2d_forward').graph))
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("temoprarily disable the test case, it will pass in later PR")
     def test_insert_observers_child_qconfig(self):
         class Observer(torch.nn.Module):
             def __init__(self):
@@ -1004,8 +1002,6 @@ graph(%x : Tensor,
         check_observed(get_forward(m._c._get_module('sub')._get_module('linear')).graph)
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("temoprarily disable the test since \
-    I want to put the insert_quant_dequant changes in a separate PR")
     def test_insert_observers_skip_values(self):
         import torch.nn.functional as F
 
@@ -1067,7 +1063,6 @@ graph(%x : Tensor,
         test_module(M2, 'prim::CallMethod[name="forward"]', 0)
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("temoprarily disable the test")
     def test_insert_quant_dequant(self):
         class Observer(torch.nn.Module):
             def __init__(self):
@@ -1330,6 +1325,23 @@ graph(%input, %weight):
             graph = parse_ir(input_str)
             torch._C._jit_pass_fuse_linear(graph)
             FileCheck().run(input_str, graph)
+
+    @_tmp_donotuse_dont_inline_everything
+    def test_fold_quantize(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.weight = torch.nn.Parameter(torch.tensor([2], dtype=torch.float))
+
+            def forward(self, x):
+                return torch.quantize_linear(self.weight, 2.0, 0, torch.quint8)
+
+        m = torch.jit.script(M())
+        torch._C._jit_pass_fold_quantize(m._c, 'forward')
+        self.assertTrue(m._c._has_attribute('_quantized_weight'))
+        FileCheck().check_not('GetAttr[name="weight"]') \
+                   .check('GetAttr[name="_quantized_weight"]') \
+                   .run(m._c._get_method('forward').graph)
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -1649,6 +1661,17 @@ graph(%Ra, %Rb):
     # gradients are required and sizes are involved
     def test_trace_arange_with_grad(self):
         self.do_trace_arange(True)
+
+    # Test that a trace of torch.full(x.shape) doesn't store the shape as a constant
+    def test_trace_full_dynamic_shape(self):
+        def full_with_shape_like(x):
+            return torch.full(x.shape, 2)
+
+        x = torch.randn(3, 4)
+        ge = torch.jit.trace(full_with_shape_like, example_inputs=x)
+        y = torch.randn(2, 7)
+        self.assertEqual(ge(y).shape, y.shape)
+        self.assertEqual(ge(x).shape, x.shape)
 
     def test_trace_casts(self):
         casts = [

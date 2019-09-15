@@ -33,8 +33,7 @@
         - THStorage* source
         - long storage_offset
         - IntArrayRefSize size
-        - arg: IntArrayRef stride
-          default: {}
+        - IntArrayRef stride
 ]]
 [[
   name: _th_fill_
@@ -274,8 +273,7 @@
     - THTensor* self
     - THIndexTensor* index
     - THTensor* source
-    - arg: bool accumulate
-      default: "false"
+    - bool accumulate
 ]]
 [[
   name: _th_index_add_
@@ -1041,8 +1039,7 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - arg: bool keepdim
-          default: "false"
+        - bool keepdim
 ]]
 [[
   name: _th_max
@@ -1081,8 +1078,7 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - arg: bool keepdim
-          default: "false"
+        - bool keepdim
 ]]
 [[
   name: _th_mode
@@ -1098,9 +1094,7 @@
     - THTensor* self
     - arg: long dim
       wrap_dim: self
-      default: __last_dim
-    - arg: bool keepdim
-      default: "false"
+    - bool keepdim
 ]]
 [[
   name: _th_sort
@@ -1115,10 +1109,8 @@
       output: True
     - THTensor* self
     - arg: long dim
-      default: __last_dim
       wrap_dim: self
-    - arg: bool descending
-      default: "false"
+    - bool descending
 ]]
 [[
   name: _th_topk
@@ -1136,12 +1128,9 @@
     - THTensor* self
     - long k
     - arg: long dim
-      default: __last_dim
       wrap_dim: self
-    - arg: bool largest
-      default: "true"
-    - arg: bool sorted
-      default: "true"
+    - bool largest
+    - bool sorted
 ]]
 [[
   name: _th_abs
@@ -1551,7 +1540,6 @@
         - arg: bool unbiased
           if_true: 0
           if_false: 1
-          default: 0
     - cname: var
       return: argument 0
       scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
@@ -1564,9 +1552,7 @@
         - arg: bool unbiased
           if_true: 0
           if_false: 1
-          default: 0
-        - arg: bool keepdim
-          default: "false"
+        - bool keepdim
 ]]
 [[
   name: _th_std
@@ -1584,7 +1570,6 @@
         - arg: bool unbiased
           if_true: 0
           if_false: 1
-          default: 0
     - cname: std
       return: argument 0
       scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
@@ -1597,9 +1582,7 @@
         - arg: bool unbiased
           if_true: 0
           if_false: 1
-          default: 0
-        - arg: bool keepdim
-          default: "false"
+        - bool keepdim
 ]]
 [[
   name: _th_renorm
@@ -1655,8 +1638,7 @@
         - arg: THTensor* self
           broadcast: other fallback
         - THTensor* other
-        - arg: real p
-          default: AS_REAL(2)
+        - real p
 ]]
 [[
   name: _th_reciprocal
@@ -1690,12 +1672,9 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - arg: long bins
-      default: 100
-    - arg: real min
-      default: 0
-    - arg: real max
-      default: 0
+    - long bins
+    - real min
+    - real max
 ]]
 [[
   name: _th_zero_
@@ -1897,8 +1876,7 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - arg: long diagonal
-      default: 0
+    - long diagonal
   aten_custom_call: |
     if (self_->dim() == 0) {
       throw std::runtime_error("Input must be 1-d or 2-d");
@@ -1922,10 +1900,8 @@
         broadcast: mat1,mat2 dims:mat1.dim0,mat2.dim1
       - THTensor* mat1
       - THTensor* mat2
-      - arg: real beta
-        default: AS_REAL(1)
-      - arg: real alpha
-        default: AS_REAL(1)
+      - real beta
+      - real alpha
 ]]
 [[
   name: _th_addmm_
@@ -1939,10 +1915,8 @@
       - THTensor* self
       - THTensor* mat1
       - THTensor* mat2
-      - arg: real beta
-        default: AS_REAL(1)
-      - arg: real alpha
-        default: AS_REAL(1)
+      - real beta
+      - real alpha
 ]]
 [[
   name: _th_addmv
@@ -1957,10 +1931,8 @@
       broadcast: mat,vec dims:mat.dim0
     - THTensor* mat
     - THTensor* vec
-    - arg: real beta
-      default: AS_REAL(1)
-    - arg: real alpha
-      default: AS_REAL(1)
+    - real beta
+    - real alpha
 ]]
 [[
   name: _th_addmv_
@@ -1973,10 +1945,8 @@
     - THTensor* self
     - THTensor* mat
     - THTensor* vec
-    - arg: real beta
-      default: AS_REAL(1)
-    - arg: real alpha
-      default: AS_REAL(1)
+    - real beta
+    - real alpha
 ]]
 [[
   name: _th_addr
@@ -1992,10 +1962,8 @@
       broadcast: vec1,vec2 dims:vec1.dim0,vec2.dim0
     - THTensor* vec1
     - THTensor* vec2
-    - arg: real beta
-      default: AS_REAL(1)
-    - arg: real alpha
-      default: AS_REAL(1)
+    - real beta
+    - real alpha
 ]]
 [[
   name: _th_addr_
@@ -2008,10 +1976,8 @@
     - THTensor* self
     - THTensor* vec1
     - THTensor* vec2
-    - arg: real beta
-      default: AS_REAL(1)
-    - arg: real alpha
-      default: AS_REAL(1)
+    - real beta
+    - real alpha
 ]]
 [[
   name: _th_ger
@@ -2102,10 +2068,8 @@
       broadcast: batch1,batch2 dims:batch1.dim1,batch2.dim2
     - THTensor* batch1
     - THTensor* batch2
-    - arg: real beta
-      default: AS_REAL(1)
-    - arg: real alpha
-      default: AS_REAL(1)
+    - real beta
+    - real alpha
 ]]
 [[
   name: _th_addbmm_
@@ -2117,10 +2081,8 @@
     - THTensor* self
     - THTensor* batch1
     - THTensor* batch2
-    - arg: real beta
-      default: AS_REAL(1)
-    - arg: real alpha
-      default: AS_REAL(1)
+    - real beta
+    - real alpha
 ]]
 [[
   name: _th_baddbmm
@@ -2138,10 +2100,8 @@
       broadcast: batch1,batch2 dims:batch1.dim0,batch1.dim1,batch2.dim2
     - THTensor* batch1
     - THTensor* batch2
-    - arg: real beta
-      default: AS_REAL(1)
-    - arg: real alpha
-      default: AS_REAL(1)
+    - real beta
+    - real alpha
 ]]
 [[
   name: _th_gels
@@ -2184,7 +2144,6 @@
     - arg: bool eigenvectors
       if_true: V
       if_false: N
-      default: N
 ]]
 [[
   name: _th_potri
@@ -2206,7 +2165,6 @@
     - arg: bool upper
       if_true: U
       if_false: L
-      default: U
 ]]
 [[
   name: _th_geqrf
@@ -2266,11 +2224,9 @@
     - arg: bool left
       if_true: L
       if_false: R
-      default: L
     - arg: bool transpose
       if_true: T
       if_false: N
-      default: N
 ]]
 [[
   name: _th_random_
@@ -2283,21 +2239,18 @@
     - cname: random
       arguments:
         - THTensor* self
-        - arg: THGenerator* generator
-          default: nullptr
+        - THGenerator* generator
     - cname: cappedRandom
       arguments:
         - THTensor* self
         - int64_t to
-        - arg: THGenerator* generator
-          default: nullptr
+        - THGenerator* generator
     - cname: clampedRandom
       arguments:
         - THTensor* self
         - int64_t from
         - int64_t to
-        - arg: THGenerator* generator
-          default: nullptr
+        - THGenerator* generator
 ]]
 [[
   name: _th_multinomial_alias_setup
@@ -2334,8 +2287,7 @@
     - THTensor* q
     - THIndexTensor* J
     - long num_samples
-    - arg: THGenerator* generator
-      default: nullptr
+    - THGenerator* generator
 ]]
 [[
   name: _th_multinomial
@@ -2352,10 +2304,8 @@
       output: True
     - THTensor* self
     - long num_samples
-    - arg: bool replacement
-      default: "false"
-    - arg: THGenerator* generator
-      default: nullptr
+    - bool replacement
+    - THGenerator* generator
 ]]
 [[
   name: _th_uniform_
@@ -2368,12 +2318,9 @@
   return: self
   arguments:
     - THTensor* self
-    - arg: double from
-      default: 0
-    - arg: double to
-      default: 1
-    - arg: THGenerator* generator
-      default: nullptr
+    - double from
+    - double to
+    - THGenerator* generator
 ]]
 [[
   name: _th_normal
@@ -2391,26 +2338,22 @@
         - arg: THTensor* output
           output: True
         - THTensor* mean
-        - arg: double std
-          default: 1
-        - arg: THGenerator* generator
-          default: nullptr
+        - double std
+        - THGenerator* generator
     - cname: normal_stddevs
       arguments:
         - arg: THTensor* output
           output: True
         - arg: double mean
         - THTensor* std
-        - arg: THGenerator* generator
-          default: nullptr
+        - THGenerator* generator
     - cname: normal_means_stddevs
       arguments:
         - arg: THTensor* output
           output: True
         - THTensor* mean
         - THTensor* std
-        - arg: THGenerator* generator
-          default: nullptr
+        - THGenerator* generator
 ]]
 [[
   name: _th_normal_
@@ -2423,12 +2366,9 @@
   return: self
   arguments:
     - THTensor* self
-    - arg: double mean
-      default: 0
-    - arg: double std
-      default: 1
-    - arg: THGenerator* generator
-      default: nullptr
+    - double mean
+    - double std
+    - THGenerator* generator
 ]]
 [[
   name: _th_cauchy_
@@ -2441,12 +2381,9 @@
   return: self
   arguments:
     - THTensor* self
-    - arg: double median
-      default: 0
-    - arg: double sigma
-      default: 1
-    - arg: THGenerator* generator
-      default: nullptr
+    - double median
+    - double sigma
+    - THGenerator* generator
 ]]
 [[
   name: _th_log_normal_
@@ -2459,12 +2396,9 @@
   return: self
   arguments:
     - THTensor* self
-    - arg: double mean
-      default: 1
-    - arg: double std
-      default: 2
-    - arg: THGenerator* generator
-      default: nullptr
+    - double mean
+    - double std
+    - THGenerator* generator
 ]]
 [[
   name: _th_exponential_
@@ -2477,10 +2411,8 @@
   return: self
   arguments:
     - THTensor* self
-    - arg: double lambd
-      default: 1
-    - arg: THGenerator* generator
-      default: nullptr
+    - double lambd
+    - THGenerator* generator
 ]]
 [[
   name: _th_geometric_
@@ -2492,8 +2424,7 @@
   arguments:
     - THTensor* self
     - double p
-    - arg: THGenerator* generator
-      default: nullptr
+    - THGenerator* generator
 ]]
 
 [[
@@ -2521,6 +2452,5 @@
     - arg: THTensor* self
       output: True
     - TensorList tensors
-    - arg: int64_t dim
-      default: 0
+    - int64_t dim
 ]]
