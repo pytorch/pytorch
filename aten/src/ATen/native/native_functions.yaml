@@ -1394,6 +1394,23 @@
     CPU: linspace_cpu_out
     CUDA: linspace_cuda_out
 
+- func: lgamma(Tensor self) -> Tensor
+  named_guard: False
+  variants: function, method
+
+- func: lgamma_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
+  variants: function, method
+  dispatch:
+    CPU: _lgamma__cpu
+    CUDA: _lgamma__cuda
+
+- func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+  dispatch:
+    CPU: _lgamma_out_cpu
+    CUDA: _lgamma_out_cuda
+
 - func: log(Tensor self) -> Tensor
   use_c10_dispatcher: True
   named_guard: False
@@ -4003,13 +4020,6 @@
     CPU: legacy::cpu::_th_irshift_
     CUDA: legacy::cuda::_th_irshift_
 
-- func: lgamma_(Tensor(a!) self) -> Tensor(a!)
-  named_guard: False
-  variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_lgamma_
-    CUDA: legacy::cuda::_th_lgamma_
-
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: True
   variants: method
@@ -4699,20 +4709,6 @@
   dispatch:
     CPU: legacy::cpu::_th_multinomial_alias_draw
     CUDA: legacy::cuda::_th_multinomial_alias_draw
-
-- func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  named_guard: False
-  dispatch:
-    CPU: legacy::cpu::_th_lgamma_out
-    CUDA: legacy::cuda::_th_lgamma_out
-
-- func: lgamma(Tensor self) -> Tensor
-  use_c10_dispatcher: True
-  named_guard: False
-  variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_lgamma
-    CUDA: legacy::cuda::_th_lgamma
 
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False

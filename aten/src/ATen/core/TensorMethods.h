@@ -1239,6 +1239,28 @@ inline std::tuple<Tensor,Tensor> Tensor::kthvalue(int64_t k, int64_t dim, bool k
         .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool>(const_cast<Tensor&>(*this), k, dim, keepdim);
 #endif
 }
+inline Tensor Tensor::lgamma() const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::lgamma(const_cast<Tensor&>(*this));
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::lgamma(Tensor self) -> Tensor");
+    return table->getOp<Tensor (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+#endif
+}
+inline Tensor & Tensor::lgamma_() const {
+#ifdef USE_STATIC_DISPATCH
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::lgamma_(const_cast<Tensor&>(*this));
+            break;
+        default:
+            AT_ERROR("lgamma_ not implemented for ", at::toString(type_set()));
+    }
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::lgamma_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+#endif
+}
 inline Tensor Tensor::log() const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::log(const_cast<Tensor&>(*this));
@@ -3983,20 +4005,6 @@ inline Tensor & Tensor::__irshift__(const Tensor & other) const {
         .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
 #endif
 }
-inline Tensor & Tensor::lgamma_() const {
-#ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::lgamma_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("lgamma_ not implemented for ", at::toString(type_set()));
-    }
-#else
-    static auto table = globalATenDispatch().getOpTable("aten::lgamma_(Tensor(a!) self) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &)>(type_set())(const_cast<Tensor&>(*this));
-#endif
-}
 inline Tensor & Tensor::atan2_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::atan2_(const_cast<Tensor&>(*this), other);
@@ -4914,21 +4922,6 @@ inline Tensor Tensor::multinomial(int64_t num_samples, bool replacement, Generat
 #else
     static auto table = globalATenDispatch().getOpTable("aten::multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor");
     return table->getOp<Tensor (const Tensor &, int64_t, bool, Generator *)>(type_set())(const_cast<Tensor&>(*this), num_samples, replacement, generator);
-#endif
-}
-inline Tensor Tensor::lgamma() const {
-#ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::lgamma(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("lgamma not implemented for ", at::toString(type_set()));
-    }
-#else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::lgamma", ""}).value();
-    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::digamma() const {

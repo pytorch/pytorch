@@ -206,6 +206,9 @@ public:
   Vec256<T> frac() const {
     return *this - this->trunc();
   }
+  Vec256<T> lgamma() const {
+    return map(std::lgamma);
+  }
   Vec256<T> log() const {
     return map(std::log);
   }

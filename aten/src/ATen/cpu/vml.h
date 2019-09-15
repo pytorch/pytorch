@@ -97,6 +97,12 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
     });                                                                 \
   }
 
+// According to [Note SSE-AVX transitions], the bug affects math
+// functions pow, exp/exp2/exp10, log/log2/log10, sin/cos/sincos/tan,
+// asin/acos/atan/atan2, sinh/cosh/tanh, asinh/acosh/atanh. Then why
+// the math functions such as abs, ceil, etc that are not listed
+// above, use IMPLEMENT_VML_BUG?
+
 IMPLEMENT_VML_BUG(abs)
 IMPLEMENT_VML_BUG(acos)
 IMPLEMENT_VML_BUG(asin)
@@ -110,6 +116,7 @@ IMPLEMENT_VML_BUG(exp)
 IMPLEMENT_VML_BUG(expm1)
 IMPLEMENT_VML_BUG(floor)
 IMPLEMENT_VML(reciprocal)
+IMPLEMENT_VML(lgamma)
 IMPLEMENT_VML_BUG(log)
 IMPLEMENT_VML_BUG(log10)
 IMPLEMENT_VML_BUG(log1p)
@@ -174,6 +181,7 @@ IMPLEMENT_VML_MKL(erf, Erf)
 IMPLEMENT_VML_MKL(erfc, Erfc)
 IMPLEMENT_VML_MKL(exp, Exp)
 IMPLEMENT_VML_MKL(expm1, Expm1)
+// IMPLEMENT_VML_MKL(lgamma, LGamma)  // sleef lgamma appears to be 3x faster
 IMPLEMENT_VML_MKL(log, Ln)
 IMPLEMENT_VML_MKL(log10, Log10)
 IMPLEMENT_VML_MKL(log1p, Log1p)

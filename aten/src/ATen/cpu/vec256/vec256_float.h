@@ -123,6 +123,9 @@ public:
   Vec256<float> expm1() const {
     return Vec256<float>(Sleef_expm1f8_u10(values));
   }
+  Vec256<float> lgamma() const {
+    return Vec256<float>(Sleef_lgammaf8_u10(values));
+  }
   Vec256<float> log() const {
     return Vec256<float>(Sleef_logf8_u10(values));
   }

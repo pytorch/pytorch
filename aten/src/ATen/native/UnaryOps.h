@@ -31,6 +31,7 @@ DECLARE_DISPATCH(unary_fn, exp_stub);
 DECLARE_DISPATCH(unary_fn, expm1_stub);
 DECLARE_DISPATCH(unary_fn, floor_stub);
 DECLARE_DISPATCH(unary_fn, frac_stub);
+DECLARE_DISPATCH(unary_fn, lgamma_stub);
 DECLARE_DISPATCH(unary_fn, log_stub);
 DECLARE_DISPATCH(unary_fn, log10_stub);
 DECLARE_DISPATCH(unary_fn, log1p_stub);
@@ -56,7 +57,6 @@ DECLARE_DISPATCH(void(*)(Tensor&, const Tensor&, int64_t, bool, Generator *), mu
 
 // Missing unary functions
 // digamma
-// lgamma
 // erfinv
 // clone
 // contiguous

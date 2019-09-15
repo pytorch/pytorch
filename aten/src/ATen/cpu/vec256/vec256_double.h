@@ -115,6 +115,9 @@ public:
   Vec256<double> expm1() const {
     return Vec256<double>(Sleef_expm1d4_u10(values));
   }
+  Vec256<double> lgamma() const {
+    return Vec256<double>(Sleef_lgammad4_u10(values));
+  }
   Vec256<double> log() const {
     return Vec256<double>(Sleef_logd4_u10(values));
   }

@@ -522,6 +522,8 @@ class CAFFE2_API Tensor {
   bool is_same_size(const Tensor & other) const;
   bool is_signed() const;
   std::tuple<Tensor,Tensor> kthvalue(int64_t k, int64_t dim=-1, bool keepdim=false) const;
+  Tensor lgamma() const;
+  Tensor & lgamma_() const;
   Tensor log() const;
   Tensor & log_() const;
   Tensor log10() const;
@@ -794,7 +796,6 @@ class CAFFE2_API Tensor {
   Tensor __rshift__(const Tensor & other) const;
   Tensor & __irshift__(Scalar other) const;
   Tensor & __irshift__(const Tensor & other) const;
-  Tensor & lgamma_() const;
   Tensor & atan2_(const Tensor & other) const;
   Tensor & tril_(int64_t diagonal=0) const;
   Tensor & triu_(int64_t diagonal=0) const;
@@ -862,7 +863,6 @@ class CAFFE2_API Tensor {
   Tensor ormqr(const Tensor & input2, const Tensor & input3, bool left=true, bool transpose=false) const;
   Tensor lu_solve(const Tensor & LU_data, const Tensor & LU_pivots) const;
   Tensor multinomial(int64_t num_samples, bool replacement=false, Generator * generator=nullptr) const;
-  Tensor lgamma() const;
   Tensor digamma() const;
   Tensor polygamma(int64_t n) const;
   Tensor erfinv() const;
