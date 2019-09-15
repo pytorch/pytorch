@@ -108,22 +108,23 @@ TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenCallingOp_thenCalls
   EXPECT_TRUE(called);
 }
 
-TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenRegisteringDispatchedKernel_thenFails) {
-  bool called = false;
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called));
-  expectThrows<c10::Error>([&] {
-    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
-  }, "for an operator which already has a catch-all kernel registered");
-}
+// TODO Rewrite (since this is now allowed) and reenable
+// TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenRegisteringDispatchedKernel_thenFails) {
+//   bool called = false;
+//   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called));
+//   expectThrows<c10::Error>([&] {
+//     c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
+//   }, "for an operator which already has a catch-all kernel registered");
+// }
 
-TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenRegisteringDispatchedKernelInSameOpCall_thenFails) {
-  bool called = false;
-  expectThrows<c10::Error>([&] {
-    auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-      .catchAllKernel<MockKernel>(&called)
-      .kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
-  }, "for an operator which already has a catch-all kernel registered");
-}
+// TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenRegisteringDispatchedKernelInSameOpCall_thenFails) {
+//   bool called = false;
+//   expectThrows<c10::Error>([&] {
+//     auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+//       .catchAllKernel<MockKernel>(&called)
+//       .kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
+//   }, "for an operator which already has a catch-all kernel registered");
+// }
 
 TEST(OperatorRegistrationTest, givenOpWithDispatchedKernelOutOfScope_whenRegisteringCatchallKernelAndCallingOp_thenCallsCatchallKernel) {
   bool called = false;
@@ -140,22 +141,23 @@ TEST(OperatorRegistrationTest, givenOpWithDispatchedKernelOutOfScope_whenRegiste
   EXPECT_TRUE(called);
 }
 
-TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatchallKernel_thenFails) {
-  bool called = false;
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
-  expectThrows<c10::Error>([&] {
-    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called));
-  }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys CPUTensorId. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is _test::dummy");
-}
-
-TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatchallKernelInSameOpCall_thenFails) {
-  bool called = false;
-  expectThrows<c10::Error>([&] {
-    auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-      .kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called)
-      .catchAllKernel<MockKernel>(&called));
-  }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys CPUTensorId. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is _test::dummy");
-}
+// TODO Rewrite (since this is now allowed) and reenable
+// TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatchallKernel_thenFails) {
+//   bool called = false;
+//   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
+//   expectThrows<c10::Error>([&] {
+//     c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called));
+//   }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys CPUTensorId. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is _test::dummy");
+// }
+//
+// TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatchallKernelInSameOpCall_thenFails) {
+//   bool called = false;
+//   expectThrows<c10::Error>([&] {
+//     auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+//       .kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called)
+//       .catchAllKernel<MockKernel>(&called));
+//   }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys CPUTensorId. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is _test::dummy");
+// }
 
 TEST(OperatorRegistrationTest, givenOpWithCatchallKernelOutOfScope_whenRegisteringDispatchedKernelAndCallingOp_thenCallsCatchallKernel) {
   bool called = false;
