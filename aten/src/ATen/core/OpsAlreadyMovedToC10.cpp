@@ -269,7 +269,7 @@ const std::unordered_set<c10::OperatorName>& aten_ops_already_moved_to_c10() {
         {"aten::threshold", ""},
         {"aten::threshold_", ""},
         {"aten::threshold_backward", ""},
-        {"aten::transpose", ""},
+        {"aten::transpose", "int"},
         {"aten::_mkldnn_transpose", ""},
         {"aten::transpose_", ""},
         {"aten::_mkldnn_transpose_", ""},
@@ -999,7 +999,7 @@ const std::unordered_set<c10::OperatorName>& aten_ops_not_moved_to_c10_yet() {
         {"aten::tanh", "out"},
         {"aten::threshold", "out"},
     #ifdef BUILD_NAMEDTENSOR
-        {"aten::transpose", ""},
+        {"aten::transpose", "Dimname"},
     #endif
         {"aten::roll", ""},
         {"aten::trunc_", ""},

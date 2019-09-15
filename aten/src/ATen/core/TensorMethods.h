@@ -2370,7 +2370,7 @@ inline Tensor Tensor::transpose(int64_t dim0, int64_t dim1) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::transpose(const_cast<Tensor&>(*this), dim0, dim1);
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::transpose", ""}).value();
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::transpose", "int"}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
         .callUnboxed<Tensor, const Tensor &, int64_t, int64_t>(const_cast<Tensor&>(*this), dim0, dim1);
 #endif
@@ -2380,7 +2380,7 @@ inline Tensor Tensor::transpose(Dimname dim0, Dimname dim1) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::transpose(const_cast<Tensor&>(*this), dim0, dim1);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::transpose(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)");
+    static auto table = globalATenDispatch().getOpTable("aten::transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, Dimname, Dimname)>(type_set())(const_cast<Tensor&>(*this), dim0, dim1);
 #endif
 }

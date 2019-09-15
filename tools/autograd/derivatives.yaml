@@ -849,7 +849,7 @@
 - name: trace(Tensor self) -> Tensor
   self: trace_backward(grad, self.sizes())
 
-- name: transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
+- name: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   self: grad.transpose(dim0, dim1)
 
 - name: transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)

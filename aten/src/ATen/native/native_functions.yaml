@@ -2587,13 +2587,13 @@
   use_c10_dispatcher: True
   variants: function
 
-- func: transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
+- func: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   use_c10_dispatcher: True
   variants: function, method
   device_guard: False
   named_guard: False
 
-- func: transpose(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)
+- func: transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)
   variants: function, method
   device_guard: False
   named_guard: False
