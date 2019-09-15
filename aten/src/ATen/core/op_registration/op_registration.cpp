@@ -13,7 +13,7 @@ static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRA
 class RegisterOperators::OperatorRegistrar final {
 public:
   explicit OperatorRegistrar(FunctionSchema&& schema, OperatorOptions&& operatorOptions, c10::optional<TensorTypeId> dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction&& cache_creator, void* unboxed_kernel, void* unboxed_autograd_kernel)
-  : op_(Dispatcher::singleton().registerSchema(std::move(schema), std::move(operatorOptions))), kernel_registration_handle_(c10::nullopt) {
+  : op_(Dispatcher::singleton().registerSchema(std::move(schema), std::move(operatorOptions))), kernel_registration_handle_(c10::nullopt), unboxed_autograd_kernel_registration_handle_(c10::nullopt) {
     // cache creator can only be set if the kernel is also set
     TORCH_INTERNAL_ASSERT((kernel != nullptr || unboxed_kernel != nullptr) || !static_cast<bool>(cache_creator));
 
