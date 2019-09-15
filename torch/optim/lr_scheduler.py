@@ -462,6 +462,9 @@ class ReduceLROnPlateau(object):
         self.threshold = threshold
         self.threshold_mode = threshold_mode
 
+    def state_dict(self):
+        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
+
     def load_state_dict(self, state_dict):
         self.__dict__.update(state_dict)
         self._init_is_better(mode=self.mode, threshold=self.threshold, threshold_mode=self.threshold_mode)
