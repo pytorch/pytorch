@@ -333,6 +333,8 @@ TEST(TensorTest, AutogradMethods) {
   ASSERT_EQ(y.version(), 0);
   ASSERT_NO_THROW(x.requires_grad_(false));
   ASSERT_NO_THROW(y.requires_grad_(false));
+  ASSERT_NO_THROW(x.detach());
+  ASSERT_NO_THROW(y.detach());
 
   x = at::tensor({5}, at::TensorOptions().requires_grad(false));
   y = x * x;
@@ -346,6 +348,8 @@ TEST(TensorTest, AutogradMethods) {
   ASSERT_THROW(y.version(), c10::Error);
   ASSERT_THROW(x.requires_grad_(false), c10::Error);
   ASSERT_THROW(y.requires_grad_(false), c10::Error);
+  ASSERT_THROW(x.detach(), c10::Error);
+  ASSERT_THROW(y.detach(), c10::Error);
 }
 
 TEST(TensorTest, BackwardCreatesOnesGrad) {
