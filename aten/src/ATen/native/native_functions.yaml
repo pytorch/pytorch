@@ -1365,7 +1365,6 @@
   variants: function, method
 
 - func: kthvalue.values(Tensor self, int k, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  use_c10_dispatcher: True
   dispatch:
     CPU: kthvalue_out_cpu
     CUDA: kthvalue_out_cuda
@@ -1576,7 +1575,6 @@
   variants: function, method
 
 - func: max.dim_max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
-  use_c10_dispatcher: True
 
 - func: max_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   use_c10_dispatcher: True
@@ -1638,7 +1636,6 @@
   variants: function, method
 
 - func: median.dim_values(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  use_c10_dispatcher: True
 
 - func: median.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
@@ -1650,7 +1647,6 @@
   variants: function, method
 
 - func: min.dim_min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  use_c10_dispatcher: True
 
 - func: min_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   use_c10_dispatcher: True
@@ -1781,7 +1777,6 @@
   variants: function, method
 
 - func: mode.values(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  use_c10_dispatcher: True
 
 - func: mul.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: True
@@ -4589,7 +4584,6 @@
   variants: method, function
 
 - func: lstsq.X(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
-  use_c10_dispatcher: True
   dispatch:
     CPU: legacy::cpu::_th_gels_out
     CUDA: legacy::cuda::_th_gels_out
@@ -4602,7 +4596,6 @@
     CUDA: legacy::cuda::_th_gels
 
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
-  use_c10_dispatcher: True
 
 - func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
   use_c10_dispatcher: True
@@ -4616,7 +4609,6 @@
     CUDA: _triangular_solve_helper_cuda
 
 - func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
-  use_c10_dispatcher: True
 
 - func: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   use_c10_dispatcher: True
@@ -4630,7 +4622,6 @@
     CUDA: _symeig_helper_cuda
 
 - func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
-  use_c10_dispatcher: True
   dispatch:
     CPU: legacy::cpu::_th_eig_out
     CUDA: legacy::cuda::_th_eig_out
@@ -4643,7 +4634,6 @@
     CUDA: legacy::cuda::_th_eig
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
-  use_c10_dispatcher: True
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   use_c10_dispatcher: True
@@ -4687,7 +4677,6 @@
   variants: function, method
 
 - func: solve.solution(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) lu) -> (Tensor(a!) solution, Tensor(b!) LU)
-  use_c10_dispatcher: True
 
 - func: _solve_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
   use_c10_dispatcher: True
@@ -4709,7 +4698,6 @@
     CUDA: legacy::cuda::_th_potri
 
 - func: qr.Q(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
-  use_c10_dispatcher: True
 
 - func: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
   use_c10_dispatcher: True
@@ -4723,7 +4711,6 @@
     CUDA: _qr_helper_cuda
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
-  use_c10_dispatcher: True
   dispatch:
     CPU: legacy::cpu::_th_geqrf_out
     CUDA: legacy::cuda::_th_geqrf_out
@@ -5007,7 +4994,6 @@
     CUDA: median_cuda
 
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  use_c10_dispatcher: True
   dispatch:
     CPU: legacy::cpu::_th_sort_out
     CUDA: legacy::cuda::_th_sort_out
@@ -5025,7 +5011,6 @@
   variants: method, function
 
 - func: topk.values(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)
-  use_c10_dispatcher: True
   dispatch:
     CPU: topk_out_cpu
     CUDA: legacy::cuda::_th_topk_out
@@ -5228,7 +5213,6 @@
     CUDA: legacy::cuda::_th_mode
 
 - func: _mode.values(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
-  use_c10_dispatcher: True
   dispatch:
     CPU: legacy::cpu::_th_mode_out
     CUDA: legacy::cuda::_th_mode_out
@@ -5240,7 +5224,6 @@
     CUDA: legacy::cuda::_th_max
 
 - func: _max.max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_indices) -> (Tensor(a!), Tensor(b!))
-  use_c10_dispatcher: True
   dispatch:
     CPU: legacy::cpu::_th_max_out
     CUDA: legacy::cuda::_th_max_out
@@ -5252,7 +5235,6 @@
     CUDA: legacy::cuda::_th_min
 
 - func: _min.min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!), Tensor(b!))
-  use_c10_dispatcher: True
   dispatch:
     CPU: legacy::cpu::_th_min_out
     CUDA: legacy::cuda::_th_min_out
@@ -5297,7 +5279,6 @@
     CUDA: legacy::cuda::_thnn_mse_loss_forward
 
 - func: mse_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_mse_loss_backward_out
@@ -5324,7 +5305,6 @@
     CUDA: legacy::cuda::_thnn_l1_loss_forward
 
 - func: l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_l1_loss_backward_out
@@ -5382,7 +5362,6 @@
     CUDA: legacy::cuda::_thnn_multilabel_margin_loss_forward
 
 - func: multilabel_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_multilabel_margin_loss_backward_out
@@ -5469,7 +5448,6 @@
     CUDA: legacy::cuda::_thnn_smooth_l1_loss_forward
 
 - func: smooth_l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_smooth_l1_loss_backward_out
@@ -5496,7 +5474,6 @@
     CUDA: legacy::cuda::_thnn_soft_margin_loss_forward
 
 - func: soft_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_soft_margin_loss_backward_out
@@ -5523,7 +5500,6 @@
     CUDA: legacy::cuda::_thnn_elu_forward
 
 - func: elu_backward.grad_input(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_elu_backward_out
@@ -5557,7 +5533,6 @@
     CUDA: legacy::cuda::_thnn_glu_forward
 
 - func: glu_backward.grad_input(Tensor grad_output, Tensor self, int dim, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_glu_backward_out
@@ -5584,7 +5559,6 @@
     CUDA: legacy::cuda::_thnn_hardtanh_forward
 
 - func: hardtanh_backward.grad_input(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_hardtanh_backward_out
@@ -5618,7 +5592,6 @@
     CUDA: legacy::cuda::_thnn_leaky_relu_forward
 
 - func: leaky_relu_backward.grad_input(Tensor grad_output, Tensor self, Scalar negative_slope, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_leaky_relu_backward_out
@@ -5659,7 +5632,6 @@
     CUDA: legacy::cuda::_thnn_log_sigmoid_forward
 
 - func: log_sigmoid_backward.grad_input(Tensor grad_output, Tensor self, Tensor buffer, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_log_sigmoid_backward_out
@@ -5685,7 +5657,6 @@
     CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward
 
 - func: rrelu_with_noise_backward.grad_input(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_rrelu_with_noise_backward_out
@@ -5718,7 +5689,6 @@
     CUDA: legacy::cuda::_thnn_softplus_forward
 
 - func: softplus_backward.grad_input(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_softplus_backward_out
@@ -5745,7 +5715,6 @@
     CUDA: legacy::cuda::_thnn_softshrink_forward
 
 - func: softshrink_backward.grad_input(Tensor grad_output, Tensor self, Scalar lambd, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_softshrink_backward_out
@@ -5804,7 +5773,6 @@
     CUDA: adaptive_avg_pool3d_cuda
 
 - func: adaptive_avg_pool3d_backward.grad_input(Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: adaptive_avg_pool3d_backward_out_cpu
@@ -5833,7 +5801,6 @@
     CUDA: adaptive_max_pool2d_cuda
 
 - func: adaptive_max_pool2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: adaptive_max_pool2d_backward_out_cpu
@@ -5862,7 +5829,6 @@
     CUDA: adaptive_max_pool3d_cuda
 
 - func: adaptive_max_pool3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: adaptive_max_pool3d_backward_out_cpu
@@ -6406,7 +6372,6 @@
     CUDA: upsample_nearest3d_backward_cuda
 
 - func: sigmoid_backward.grad_input(Tensor grad_output, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_sigmoid_backward_out
@@ -6420,7 +6385,6 @@
     CUDA: legacy::cuda::_thnn_sigmoid_backward
 
 - func: tanh_backward.grad_input(Tensor grad_output, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_tanh_backward_out
