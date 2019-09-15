@@ -47,7 +47,6 @@
   variants: method
 
 - func: names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
-  use_c10_dispatcher: True
   variants: method
   named_guard: False
 
@@ -2193,7 +2192,6 @@
     CUDA: _rsqrt_out_cuda
 
 - func: select.Dimname(Tensor(a) self, Dimname dim, int index) -> Tensor(a)
-  use_c10_dispatcher: True
   variants: function, method
   device_guard: False
   named_guard: False
@@ -2288,7 +2286,6 @@
   named_guard: False
 
 - func: size.Dimname(Tensor self, Dimname dim) -> int
-  use_c10_dispatcher: True
   variants: function, method
   device_guard: False
   named_guard: False
@@ -2426,7 +2423,6 @@
   named_guard: False
 
 - func: stride.Dimname(Tensor self, Dimname dim) -> int
-  use_c10_dispatcher: True
   variants: function, method
   device_guard: False
   named_guard: False
