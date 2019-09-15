@@ -335,6 +335,8 @@ TEST(TensorTest, AutogradMethods) {
   ASSERT_NO_THROW(y.requires_grad_(false));
   ASSERT_NO_THROW(x.detach());
   ASSERT_NO_THROW(y.detach());
+  ASSERT_NO_THROW(x.detach_());
+  ASSERT_NO_THROW(y.detach_());
 
   x = at::tensor({5}, at::TensorOptions().requires_grad(false));
   y = x * x;
@@ -350,6 +352,8 @@ TEST(TensorTest, AutogradMethods) {
   ASSERT_THROW(y.requires_grad_(false), c10::Error);
   ASSERT_THROW(x.detach(), c10::Error);
   ASSERT_THROW(y.detach(), c10::Error);
+  ASSERT_THROW(x.detach_(), c10::Error);
+  ASSERT_THROW(y.detach_(), c10::Error);
 }
 
 TEST(TensorTest, BackwardCreatesOnesGrad) {
@@ -357,4 +361,20 @@ TEST(TensorTest, BackwardCreatesOnesGrad) {
   x.backward();
   ASSERT_TRUE(torch::equal(x.grad(),
               torch::ones_like(x)));
+}
+
+TEST(TensorTest, Detach) {
+  const auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  const auto y = x * x;
+  const auto y_detached = y.detach();
+  ASSERT_FALSE(y.is_leaf());
+  ASSERT_TRUE(y_detached.is_leaf());
+}
+
+TEST(TensorTest, Detach_) {
+  const auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  const auto y = x * x;
+  const auto y_detached = y.detach_();
+  ASSERT_TRUE(y.is_leaf());
+  ASSERT_TRUE(y_detached.is_leaf());
 }
