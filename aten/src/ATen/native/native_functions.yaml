@@ -3367,12 +3367,12 @@
   device_guard: False
   named_guard: False
 
-- func: unbind(Tensor(a) self, int dim=0) -> Tensor(a)[]
+- func: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: True
   variants: function, method
   named_guard: False
 
-- func: unbind(Tensor(a) self, Dimname dim) -> Tensor(a)[]
+- func: unbind.Dimname(Tensor(a) self, Dimname dim) -> Tensor(a)[]
   variants: function, method
   named_guard: False
 

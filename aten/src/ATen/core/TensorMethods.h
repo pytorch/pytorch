@@ -2961,7 +2961,7 @@ inline std::vector<Tensor> Tensor::unbind(int64_t dim) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::unbind(const_cast<Tensor&>(*this), dim);
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::unbind", ""}).value();
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::unbind", "int"}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
         .callUnboxed<std::vector<Tensor>, const Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
 #endif
@@ -2971,7 +2971,7 @@ inline std::vector<Tensor> Tensor::unbind(Dimname dim) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::unbind(const_cast<Tensor&>(*this), dim);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::unbind(Tensor(a) self, Dimname dim) -> Tensor(a)[]");
+    static auto table = globalATenDispatch().getOpTable("aten::unbind.Dimname(Tensor(a) self, Dimname dim) -> Tensor(a)[]");
     return table->getOp<std::vector<Tensor> (const Tensor &, Dimname)>(type_set())(const_cast<Tensor&>(*this), dim);
 #endif
 }

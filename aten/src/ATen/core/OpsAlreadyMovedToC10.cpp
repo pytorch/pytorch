@@ -345,7 +345,7 @@ const std::unordered_set<c10::OperatorName>& aten_ops_already_moved_to_c10() {
         {"aten::hspmm", ""},
         {"aten::copy_sparse_to_sparse_", ""},
         {"aten::numel", ""},
-        {"aten::unbind", ""},
+        {"aten::unbind", "int"},
         {"aten::to_sparse", "sparse_dim"},
         {"aten::to_sparse", ""},
         {"aten::to_mkldnn", ""},
@@ -1063,7 +1063,7 @@ const std::unordered_set<c10::OperatorName>& aten_ops_not_moved_to_c10_yet() {
         {"aten::_sparse_coo_tensor_with_dims_and_tensors", ""},
         {"aten::hspmm", "out"},
     #ifdef BUILD_NAMEDTENSOR
-        {"aten::unbind", ""},
+        {"aten::unbind", "Dimname"},
     #endif
         {"aten::mkldnn_reorder_conv2d_weight", ""},
         {"aten::quantize_linear", ""},
