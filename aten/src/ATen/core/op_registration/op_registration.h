@@ -425,7 +425,12 @@ public:
       );
     }
 
-    Options() = default;
+    Options()
+    : schemaOrName_(c10::nullopt)
+    , legacyATenSchema_(c10::nullopt)
+    , kernels()
+    , aliasAnalysisKind_(c10::nullopt)
+    {}
 
     // KernelRegistrationConfig accumulates all information from the config
     // parameters passed to a RegisterOperators::op() call into one object.

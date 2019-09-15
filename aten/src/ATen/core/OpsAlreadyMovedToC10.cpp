@@ -37,9 +37,6 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::_cast_Long", ""},
         {"aten::_cast_Short", ""},
         {"aten::_cast_Half", ""},
-    #ifdef BUILD_NAMEDTENSOR
-        {"aten::names_", ""},
-    #endif
         {"aten::_cudnn_ctc_loss", ""},
         {"aten::_cudnn_rnn_flatten_weight", ""},
         {"aten::_debug_has_internal_overlap", ""},
@@ -260,9 +257,6 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::hardshrink", ""},
         {"aten::hardshrink_backward", ""},
         {"aten::rsqrt", ""},
-    #ifdef BUILD_NAMEDTENSOR
-        {"aten::select", "Dimname"},
-    #endif
         {"aten::select", "int"},
         {"aten::selu", ""},
         {"aten::celu", ""},
@@ -272,9 +266,6 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::sinh", ""},
         {"aten::detach", ""},
         {"aten::size", "int"},
-    #ifdef BUILD_NAMEDTENSOR
-        {"aten::size", "Dimname"},
-    #endif
         {"aten::slice", "Tensor"},
         {"aten::slogdet", ""},
         {"aten::smm", ""},
@@ -288,9 +279,6 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::sspaddmm", ""},
         {"aten::stack", ""},
         {"aten::stride", "int"},
-    #ifdef BUILD_NAMEDTENSOR
-        {"aten::stride", "Dimname"},
-    #endif
         {"aten::sum_to_size", ""},
         {"aten::sqrt", ""},
         {"aten::std", ""},
@@ -302,7 +290,7 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::threshold", ""},
         {"aten::threshold_", ""},
         {"aten::threshold_backward", ""},
-        {"aten::transpose", ""},
+        {"aten::transpose", "int"},
         {"aten::_mkldnn_transpose", ""},
         {"aten::transpose_", ""},
         {"aten::_mkldnn_transpose_", ""},
@@ -378,7 +366,7 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::hspmm", ""},
         {"aten::copy_sparse_to_sparse_", ""},
         {"aten::numel", ""},
-        {"aten::unbind", ""},
+        {"aten::unbind", "int"},
         {"aten::to_sparse", "sparse_dim"},
         {"aten::to_sparse", ""},
         {"aten::to_mkldnn", ""},
@@ -623,6 +611,9 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::backward", ""},
         {"aten::set_data", ""},
         {"aten::data", ""},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::names_", ""},
+    #endif
     #ifdef BUILD_NAMEDTENSOR
         {"aten::renamed", ""},
     #endif
@@ -958,6 +949,9 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::relu_", ""},
         {"aten::rsqrt_", ""},
         {"aten::rsqrt", "out"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::select", "Dimname"},
+    #endif
         {"aten::selu_", ""},
         {"aten::sigmoid_", ""},
         {"aten::sigmoid", "out"},
@@ -966,6 +960,9 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::sinh_", ""},
         {"aten::sinh", "out"},
         {"aten::detach_", ""},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::size", "Dimname"},
+    #endif
         {"aten::softmax", ""},
     #ifdef BUILD_NAMEDTENSOR
         {"aten::softmax", ""},
@@ -981,6 +978,9 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::sspaddmm", "out"},
         {"aten::stack", "out"},
         {"aten::stft", ""},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::stride", "Dimname"},
+    #endif
         {"aten::sum", ""},
         {"aten::sum", "dim_IntList"},
     #ifdef BUILD_NAMEDTENSOR
@@ -1020,7 +1020,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::tanh", "out"},
         {"aten::threshold", "out"},
     #ifdef BUILD_NAMEDTENSOR
-        {"aten::transpose", ""},
+        {"aten::transpose", "Dimname"},
     #endif
         {"aten::roll", ""},
         {"aten::trunc_", ""},
@@ -1084,7 +1084,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::_sparse_coo_tensor_with_dims_and_tensors", ""},
         {"aten::hspmm", "out"},
     #ifdef BUILD_NAMEDTENSOR
-        {"aten::unbind", ""},
+        {"aten::unbind", "Dimname"},
     #endif
         {"aten::mkldnn_reorder_conv2d_weight", ""},
         {"aten::quantize_linear", ""},
