@@ -109,6 +109,10 @@ int64_t VariableType::version(const Tensor & self) {
   return as_variable_ref(self).current_version();
 }
 
+Tensor& VariableType::requires_grad_(Tensor& self, bool _requires_grad) {
+  return self.set_requires_grad(_requires_grad);;
+}
+
 // We don't have an outplace copy, so this can't be generated automatically
 Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;
