@@ -86,7 +86,7 @@ def probs_to_logits(probs, is_binary=False):
     return torch.log(ps_clamped)
 
 
-def continued_fraction(a, b, value, niters=2000, tol=3.0e-7):
+def continued_fraction(a, b, value, niters=2000, tol=3.0e-11):
     r"""
     Evaluates the continued fraction form of the Incomplete Beta Function,
     required for Beta CDF.
@@ -95,11 +95,11 @@ def continued_fraction(a, b, value, niters=2000, tol=3.0e-7):
     (http://www.aip.de/groups/soe/local/numres/bookcpdf/c6-4.pdf)
 
     Args:
-        a (Tensor): concentation1 of Beta distribution
-        b (Tensor): concentation0 of Beta distribution
-        value (Tensor): 
+        a (Tensor): concentration1 of Beta distribution
+        b (Tensor): concentration0 of Beta distribution
+        value (Tensor): value provided of Beta CDF function
+        niters (int): Maximum number of iterations to find convergence.
     """
-    #  Init values, these are updated iteratively.
     bm = az = am = 1.0
     qap = a + 1.0
     qam = a - 1.0
@@ -119,8 +119,7 @@ def continued_fraction(a, b, value, niters=2000, tol=3.0e-7):
         bm = bp / bpp
         az = app / bpp
         bz = 1.0
-        if abs(az - a_old) < (tol * abs(az)):
-            print(type(az))
+        if torch.where(abs(az - a_old) < (tol * abs(az))):
             return az
         elif em >= niters + 1:
             raise ValueError("Could not converge. Try more iterations")

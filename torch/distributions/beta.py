@@ -1,4 +1,3 @@
-import math
 from numbers import Number
 
 import torch
@@ -71,17 +70,15 @@ class Beta(ExponentialFamily):
         if self._validate_args:
             self._validate_sample(value)
 
-        if (value <= 0) or (value >= 1):
-            return torch.tensor([value])
         else:
             lbeta = torch.lgamma(self.concentration1 + self.concentration0) - torch.lgamma(self.concentration1) - \
-                    torch.lgamma(self.concentration0) + self.concentration1 * torch.log(value) + self.concentration0 * \
-                    torch.log(1.0 - value)
-            if torch.lt(value, (self.concentration1 + 1.0) / (self.concentration1 + self.concentration0 + 2.0)):
-                return math.exp(lbeta) * continued_fraction(self.concentration1, self.concentration0, value) / self.concentration1
+                torch.lgamma(self.concentration0) + self.concentration1 * torch.log(value) + self.concentration0 * \
+                torch.log(1.0 - value)
+            if torch.where(value < (self.concentration1 + 1.0) / (self.concentration1 + self.concentration0 + 2.0)):
+                return torch.exp(lbeta) * continued_fraction(self.concentration1, self.concentration0, value) / self.concentration1
             else:
-                return 1.0 - math.exp(lbeta) * continued_fraction(self.concentration0, self.concentration1, 1.0 - value) / \
-                        self.concentration0
+                return 1.0 - torch.exp(lbeta) * continued_fraction(self.concentration0, self.concentration1, 1.0 - value) / \
+                    self.concentration0
 
     @property
     def concentration1(self):
