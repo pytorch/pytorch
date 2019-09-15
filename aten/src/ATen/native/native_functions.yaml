@@ -1065,15 +1065,15 @@
   variants: function, method
   named_guard: False
 
-- func: flatten(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor
+- func: flatten.names1(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor
   variants: function, method
   named_guard: False
 
-- func: flatten(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor
+- func: flatten.names2(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor
   variants: function, method
   named_guard: False
 
-- func: flatten(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor
+- func: flatten.names3(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor
   variants: function, method
   named_guard: False
 
