@@ -96,7 +96,6 @@ public:
       TORCH_CHECK(!legacyATenSchema_.has_value(), "Tried to register operator ", schemaOrName," but specified schema multiple times. You can only specify the schema once per operator registration.");
 
       if (Options::op_is_still_on_aten_dispatcher_(schemaOrName.c_str())) {
-        TORCH_CHECK(unboxedAutogradKernel_ == nullptr, "For legacy aten ops, the schema() call must happen before any kernel() calls. Operator was ", schemaOrName);
         TORCH_CHECK(kernels.size() == 0, "For legacy aten ops, the schema() call must happen before any kernel() calls. Operator was ", schemaOrName);
         legacyATenSchema_ = schemaOrName;
       } else {
@@ -353,24 +352,6 @@ public:
       return std::move(*this);
     }
 
-    template<class FuncType>
-    Options&& impl_unboxedAutogradKernel(FuncType* kernel) && {
-      static_assert(guts::is_function_type<FuncType>::value, "Wrong argument type for impl_unboxedAutogradKernel");
-
-      // TODO Infer and check schema
-      TORCH_CHECK(kernel != nullptr, "Kernel function pointer cannot be nullptr");
-      TORCH_CHECK(unboxedAutogradKernel_ == nullptr, "You can only call impl_unboxedAutogradKernel() once per operator registration.");
-      if (legacyATenSchema_.has_value()) {
-        // TODO Remove this once all ops are moved to c10.
-        TORCH_INTERNAL_ASSERT(!schemaOrName_.has_value());
-        at::globalATenDispatch().registerOp<FuncType>(TensorTypeId::VariableTensorId, legacyATenSchema_->c_str(), kernel);
-        return std::move(*this);
-      } else {
-        unboxedAutogradKernel_ = reinterpret_cast<void*>(kernel);
-        return std::move(*this);
-      }
-    }
-
   private:
     static c10::OperatorName parse_operator_name_(const char* schema) {
       // TODO Remove this function once all aten ops are on c10
@@ -397,14 +378,6 @@ public:
     static bool op_is_still_on_aten_dispatcher_(const char* schema_string) {
       // TODO Remove this function once all aten ops are on c10
       const auto op_name = parse_operator_name_(schema_string);
-      if (at::aten_ops_already_moved_to_c10().count(op_name) != 0) {
-        // For now, even if an op is in aten_ops_already_moved_to_c10, it is still
-        // not actually moved to c10. It is still on globalATenDispatch.
-        // TODO This is be removed in a diff stacked on top, then this
-        // function will only return true iff the op is in
-        // aten_ops_not_moved_to_c10_yet
-        return true;
-      }
       return at::aten_ops_not_moved_to_c10_yet().count(op_name) != 0;
     }
 
@@ -432,13 +405,21 @@ public:
 
     template<class KernelFunctor, class... ConstructorParameters>
     Options&& kernelFunctorUnboxedOnly(c10::optional<TensorTypeId>&& dispatch_key, ConstructorParameters&&... constructorParameters) && {
+      // Setting cache_creator to nullptr so calling the kernel doesn't need to call it, which would be expensive.
+      // Since the dispatcher static_cast's cache objects into our functor type to call their operator(), this nullptr
+      // will cause it to create and static_cast an invalid cache object, which is technically illegal in the C++ standard,
+      // but it works as long as operator() does not access any functor members.
+      // Exception: Backend extensions use runtime function pointers and store these in the functor as members,
+      // so we need a cache if sizeof...(ConstructorParameters) != 0
+      auto cache_creator =
+        (sizeof...(ConstructorParameters) == 0)
+        ? KernelCacheCreatorFunction(nullptr)
+        : detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...);
+
       return std::move(*this).kernel(
         std::move(dispatch_key),
         nullptr,
-        // setting cache creator to nullptr so calling the kernel doesn't need to call it, which would be expensive
-        // This, however, only works if there are no constructor parameters (i.e. no runtime function pointer)
-        // Backend extensions use runtime function pointers, so we need a cache if sizeof...(ConstructorParameters) != 0
-        (sizeof...(ConstructorParameters) == 0) ? KernelCacheCreatorFunction(nullptr) : detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
+        std::move(cache_creator),
         reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
         detail::FunctionSchemaInferer<KernelFunctor>()()
       );
@@ -474,7 +455,6 @@ public:
 
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;
-    void* unboxedAutogradKernel_; // can be nullptr, not all kernels have this
     friend class RegisterOperators;
   };
 
@@ -599,8 +579,8 @@ private:
   static c10::FunctionSchema inferSchemaFromKernels_(const OperatorName& opNameStr, const Options& options);
   void checkNoDuplicateKernels_(const Options& options);
   void registerOp_(Options&& options);
-  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options, void* unboxedAutogradKernel);
-  void registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& options, void* unboxedAutogradKernel);
+  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options);
+  void registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& options);
   static OperatorOptions makeOperatorOptions_(const Options& options);
 
   class OperatorRegistrar;
