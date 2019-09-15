@@ -917,30 +917,6 @@ def create_generic(top_env, declarations):
 
         return broadcast_actuals
 
-    def emit_nn_body(option):
-        # type: (FunctionOption) -> Union[str, List[str]]
-        # Concrete definition on Type.cpp for NN functions. Delegates to the
-        # xxx_forward variant variant after creating any necessary buffers.
-        actuals = option['actuals']
-        base_name = option['name'][:-1] if option['inplace'] else option['name']
-        fwd_name = option['api_name'].replace(base_name, base_name + '_forward')
-
-        if len(option['buffers']) == 0:
-            return 'return {}({});'.format(fwd_name, ', '.join(actuals))
-
-        body = []  # type: List[str]
-        if option['api_name'].endswith('_out'):
-            # _out variants must create buffers and insert them in the
-            # arguments list between output and input arguments
-            for buffer in option['buffers']:
-                body.append('Tensor {} = at::empty({{0}}, this->options());'.format(buffer['name']))
-            actuals = [arg['name'] for arg in option['arguments'] if arg.get('output')]
-            actuals += [buffer['name'] for buffer in option['buffers']]
-            actuals += [arg['name'] for arg in option['arguments'] if not arg.get('output')]
-
-        body.append('return std::get<0>({}({}));'.format(fwd_name, ', '.join(actuals)))
-        return body
-
     def process_option(option):
         # type: (FunctionOption) -> None
         option['inplace'] = re.search(
