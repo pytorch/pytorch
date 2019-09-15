@@ -66,6 +66,22 @@ SmallVector<int64_t, 4> convOutputShape(
 template <bool ReluFused>
 class QConv2dInt8 final : public c10::OperatorKernel {
  public:
+  void conv_checks(
+      int64_t act_dims,
+      int64_t stride_dims,
+      int64_t padding_dims,
+      int64_t dilation_dims) {
+    TORCH_CHECK(
+        act_dims == 4,
+        "quanitzed::conv2d(): Expected activation tensor to have 4 dimensions.");
+    TORCH_CHECK(
+        stride_dims == 2, "quanitzed::conv2d(): Supports 2D convolution only");
+    TORCH_CHECK(
+        padding_dims == 2, "quanitzed::conv2d(): Supports 2D convolution only");
+    TORCH_CHECK(
+        dilation_dims == 2,
+        "quanitzed::conv2d(): Supports 2D convolution only");
+  }
 #ifdef USE_FBGEMM
   at::Tensor fbgemm_conv(
       Tensor act,
@@ -78,12 +94,9 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       int64_t output_zero_point) {
     TORCH_CHECK(
         fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
-    TORCH_CHECK(
-        act.ndimension() == 4,
-        "Activations are supposed to have 4 dimensions.");
-    TORCH_CHECK(stride.size() == 2, "2D convolution only");
-    TORCH_CHECK(padding.size() == 2, "2D convolution only");
-    TORCH_CHECK(dilation.size() == 2, "2D convolution only");
+    conv_checks(
+        act.ndimension(), stride.size(), padding.size(), dilation.size());
+
     TORCH_CHECK(
         (dilation[0] == 1 && dilation[1] == 1),
         "Currently dilation should be 1");
@@ -112,33 +125,14 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     int stride_w = stride[1];
     int kernel_h = kernel[0];
     int kernel_w = kernel[1];
-
-    TORCH_CHECK(
-        C == (packB->inputChannels()),
-        "[QConv2D] Given groups=",
-        groups,
-        ", weight of size ",
-        K,
-        ", ",
-        kernel_h,
-        ", ",
-        kernel_w,
-        ", ",
-        packB->inputChannels(),
-        ", expected input (NHWC) ",
-        N,
-        ", ",
-        H,
-        ", ",
-        W,
-        ", ",
-        C,
-        " to have ",
-        (packB->inputChannels() * groups),
-        " channels, but got ",
-        C,
-        " channels instead");
-
+    // clang-format off
+    TORCH_CHECK(C == (packB->inputChannels()),
+        "[QConv2D] Given groups=", groups, ", weight of size ",
+        K, ", ",  kernel_h, ", ", kernel_w, ", ", packB->inputChannels(),
+        ", expected input (NHWC) ", N, ", ", H, ", ", W, ", ", C,
+        " to have ", (packB->inputChannels() * groups),
+        " channels, but got ", C, " channels instead");
+    // clang-format on
     fbgemm::conv_param_t<> conv_p(
         N, // Batch size
         C, // Number of input channels
@@ -276,15 +270,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       int64_t groups,
       double output_scale,
       int64_t output_zero_point) {
-    TORCH_CHECK(
-        act.ndimension() == 4,
-        "quanitzed::conv2d (qnnpack): Expected activation tensor to be 4-dimensional");
-    TORCH_CHECK(stride.size() == 2, "qnnpack_conv2d(): 2D convolution only");
-    TORCH_CHECK(
-        padding.size() == 2,
-        "quanitzed::conv2d (qnnpack): Specify top/left padding only. \
-        bottom/right padding assumed to be equal to top/left");
-    TORCH_CHECK(dilation.size() == 2, "quanitzed::conv2d (qnnpack): 2D convolution only");
+    conv_checks(
+        act.ndimension(), stride.size(), padding.size(), dilation.size());
 
     PackedConvWeightsQnnp& pack_ptr =
         cpp_custom_type_hack::cast<PackedConvWeightsQnnp>(packed_weight);
@@ -367,12 +354,11 @@ class QConv2dInt8 final : public c10::OperatorKernel {
 
     TORCH_INTERNAL_ASSERT(
         runStatus == pytorch_qnnp_status_success,
-        "failed to run quanitzed::conv2d (qnnpack) operator");
+        "failed to run quantized::conv2d (qnnpack) operator");
 
     return output;
   }
 #endif
-#if defined(USE_FBGEMM) || defined(USE_PYTORCH_QNNPACK)
   Tensor operator()(
       Tensor act,
       Tensor packed_weight,
@@ -414,23 +400,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         toString(ctx.preferredQuantizedEngine()));
     return at::Tensor();
   }
-#else // USE_FBGEMM
-  Tensor operator()(
-      Tensor /* activation */,
-      Tensor /* packed_weight */,
-      torch::List<int64_t> /* stride */,
-      torch::List<int64_t> /* padding */,
-      torch::List<int64_t> /* dilation */,
-      torch::List<int64_t> /* output padding */,
-      int64_t /* groups */,
-      double /* output scale */,
-      int64_t /* output_zero_point */) {
-    TORCH_CHECK(
-        false,
-        "This PyTorch installation was not built "
-        "with FBGEMM or QNNPACK operators");
-  }
-#endif // USE_FBGEMM
 };
 
 static auto registry =

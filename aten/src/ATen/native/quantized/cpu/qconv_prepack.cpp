@@ -145,14 +145,20 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     TORCH_CHECK(
         weight.ndimension() == 4,
         "quantized::conv_prepack (qnnpack): Weights are expected to have 4 dimensions");
+    const auto qtype = weight.qscheme();
     TORCH_CHECK(
-        stride.size() == 2, "quantized::conv_prepack (qnnpack): 2D convolution only");
+        weight.qscheme() == kPerTensorAffine,
+        "quantized::conv_prepack (qnnpack): only supports Per Tensor Quantization Scheme")
+    TORCH_CHECK(
+        stride.size() == 2,
+        "quantized::conv_prepack (qnnpack): 2D convolution only");
     TORCH_CHECK(
         padding.size() == 2,
         "quantized::conv_prepack (qnnpack): Specify top/left padding only. \
        bottom/right padding assumed to be equal to top/left");
     TORCH_CHECK(
-        dilation.size() == 2, " quantized::conv_prepack (qnnpack): 2D convolution only");
+        dilation.size() == 2,
+        " quantized::conv_prepack (qnnpack): 2D convolution only");
 
     initQNNPACK();
 
@@ -200,21 +206,21 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 
     auto weight_contig = weight.contiguous();
     auto bias_contig = bias.contiguous();
-    auto wt_ptr = guts::make_unique<PackedConvWeightsQnnp>(
-        PackedConvWeightsQnnp{guts::make_unique<qnnpack::PrePackConvWeights>(
-                              conv_p,
-                              (uint8_t*)weight_contig.data_ptr<c10::quint8>(),
-                              (int32_t*)bias_contig.data_ptr<c10::qint32>()),
-                          weight_contig,
-                          bias_contig,
-                          {kernel_h, kernel_w},
-                          weight.q_scale(),
-                          weight.q_zero_point()});
+    auto wt_ptr =
+        guts::make_unique<PackedConvWeightsQnnp>(PackedConvWeightsQnnp{
+            guts::make_unique<qnnpack::PrePackConvWeights>(
+                conv_p,
+                (uint8_t*)weight_contig.data_ptr<c10::quint8>(),
+                (int32_t*)bias_contig.data_ptr<c10::qint32>()),
+            weight_contig,
+            bias_contig,
+            {kernel_h, kernel_w},
+            weight.q_scale(),
+            weight.q_zero_point()});
 
     return cpp_custom_type_hack::create(std::move(wt_ptr), weight.options());
   }
 #endif // USE_PYTORCH_QNNPACK
-#if defined(USE_FBGEMM) || defined(USE_PYTORCH_QNNPACK)
   Tensor operator()(
       Tensor weight,
       c10::optional<Tensor> bias,
@@ -240,19 +246,6 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         toString(ctx.preferredQuantizedEngine()));
     return at::Tensor();
   }
-#else // USE_FBGEMM or USE_PYTORCH_QNNPACK
-  Tensor operator()(
-      Tensor, /* weight */
-      c10::optional<Tensor>, /* bias */
-      torch::List<int64_t>, /* stride */
-      torch::List<int64_t>, /* padding */
-      torch::List<int64_t>, /* dilation */
-      int64_t /* groups */
-  ) {
-    TORCH_CHECK(
-        false, "This PyTorch installation was not built with FBGEMM or QNNPACK operators");
-  }
-#endif // USE_FBGEMM or USE_PYTORCH_QNNPACK
 };
 
 static auto registry = c10::RegisterOperators().op(

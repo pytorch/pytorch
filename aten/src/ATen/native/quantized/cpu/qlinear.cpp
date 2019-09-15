@@ -300,7 +300,6 @@ class QLinearInt8 final : public torch::OperatorKernel {
     return output;
   }
 #endif
-#if defined(USE_FBGEMM) || defined(USE_PYTORCH_QNNPACK)
   at::Tensor operator()(
       at::Tensor input,
       at::Tensor packed_weight,
@@ -325,21 +324,6 @@ class QLinearInt8 final : public torch::OperatorKernel {
         toString(ctx.preferredQuantizedEngine()));
     return at::Tensor();
   }
-#else // USE_FBGEMM or USE_PYTORCH_QNNPACK
-  at::Tensor operator()(
-      at::Tensor /* input */,
-      at::Tensor /* packed_weight */,
-      double /* output_scale */,
-      int64_t /* output_zero_point */) {
-    // We make a strong guarantee that models using these operators will have
-    // the same numerics across different machines. Therefore, we do not provide
-    // a fallback path and rather fail loudly if we cannot run FBGEMM or
-    // QNNPACK.
-    TORCH_CHECK(
-        false,
-        "This PyTorch installation was not built with FBGEMM or QNNPACK operators");
-  }
-#endif // USE_FBGEMM or USE_PYTORCH_QNNPACK
 };
 
 static auto registry =

@@ -77,7 +77,6 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
         pack_ptr.orig_weight, pack_ptr.bias);
   }
 #endif
-#if defined(USE_FBGEMM) || defined(USE_PYTORCH_QNNPACK)
   std::tuple<at::Tensor, c10::optional<at::Tensor>> operator()(
       Tensor packed_weights) {
     auto& ctx = at::globalContext();
@@ -98,18 +97,6 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
     return std::tuple<at::Tensor, c10::optional<Tensor>>(
         at::Tensor(), at::Tensor());
   }
-#else // USE_FBGEMM or USE_PYTORCH_QNNPACK
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> operator()(
-      Tensor /* weight */
-  ) {
-    // We make a strong guarantee that models using these operators will have
-    // the same numerics across different machines. Therefore, we do not provide
-    // a fallback path and rather fail loudly if we cannot run FBGEMM.
-    TORCH_CHECK(
-        false,
-        "This PyTorch installation was not built with FBGEMM or QNNPACK operators");
-  }
-#endif // USE_FBGEMM USE_PYTORCH_QNNPACK
 };
 
 static auto registry = c10::RegisterOperators().op(
