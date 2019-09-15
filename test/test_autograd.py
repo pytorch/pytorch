@@ -2565,6 +2565,24 @@ class TestAutograd(TestCase):
             run_test(upper, dims)
 
     @skipIfNoLapack
+    def test_cholesky_inverse(self):
+        def _test_with_size(upper, dims):
+            root = torch.randn(*dims).requires_grad_()
+
+            def func(root, upper):
+                if upper:
+                    A = root.triu()
+                else:
+                    A = root.tril()
+                return torch.cholesky_inverse(A, upper)
+
+            gradcheck(func, [root, upper])
+            gradgradcheck(func, [root, upper])
+
+        for upper, dims in product([True, False], [(3, 3), (5, 5)]):
+            _test_with_size(upper, dims)
+
+    @skipIfNoLapack
     def test_triangular_solve(self):
         def _test_with_size(A_dims, B_dims):
             A = torch.rand(*A_dims).requires_grad_()
