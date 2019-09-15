@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/NamedTensorUtils.h>
 
 namespace at {
 namespace native {
@@ -26,10 +27,12 @@ Tensor quantized_mean_cpu(const Tensor& self, IntArrayRef dim, bool keepdim, opt
 
 #ifdef BUILD_NAMEDTENSOR
 Tensor quantized_mean_cpu(const Tensor& self, DimnameList dim, bool keepdim, optional<ScalarType> dtype) {
+  return quantized_mean_cpu(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
 Tensor& quantized_mean_out_cpu(Tensor& result, const Tensor& self, DimnameList dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
+  return quantized_mean_out_cpu(result, self, dimnames_to_positions(self, dim), keepdim, out_dtype);
 }
 #endif
 
