@@ -23,6 +23,8 @@ class RRefContext {
   RRefContext(const RRefContext&) = delete;
   void operator=(const RRefContext&) = delete;
 
+  ~RRefContext();
+
   inline worker_id_t getWorkerId() const {
     return agent_->getWorkerInfo().id_;
   }
@@ -43,12 +45,6 @@ class RRefContext {
   std::shared_ptr<UserRRef<T>> createUserRRef(worker_id_t ownerId);
 
   template <typename T>
-  std::shared_ptr<UserRRef<T>> createUserRRef(
-      worker_id_t ownerId,
-      const RRefId& rrefId,
-      const ForkId& forkId);
-
-  template <typename T>
   std::shared_ptr<RRef> getOrCreateRRef(const RRefForkData& rfd);
 
   template <typename T>
@@ -65,13 +61,23 @@ class RRefContext {
   void finishUserRRef(const RRefId& rrefId, const ForkId& forkId);
 
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
-  void delForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
+  std::shared_ptr<RRef> delForkOfOwner(
+      const RRefId& rrefId,
+      const ForkId& forkId);
 
  private:
   RRefContext(std::shared_ptr<RpcAgent>);
 
+  template <typename T>
+  std::shared_ptr<UserRRef<T>> createUserRRef(
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      const ForkId& forkId);
+
   void addForkOfOwnerNoLock(const RRefId& rrefId, const ForkId& forkId);
-  void delForkOfOwnerNoLock(const RRefId& rrefId, const ForkId& forkId);
+  std::shared_ptr<RRef> delForkOfOwnerNoLock(
+      const RRefId& rrefId,
+      const ForkId& forkId);
 
   static std::unique_ptr<RRefContext> context_;
   static std::atomic<local_id_t> nextLocalId_;

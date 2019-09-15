@@ -33,6 +33,11 @@ void RRefContext::handleException(const Message& message) {
 RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
     : agent_(std::move(agent)) {}
 
+RRefContext::~RRefContext() {
+  AutoGIL ag;
+  owners_.clear();
+}
+
 template <typename T>
 std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(worker_id_t ownerId) {
   TORCH_CHECK(ownerId != getWorkerId(), "Cannot create UserRRef on owner.");
@@ -277,9 +282,11 @@ void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   addForkOfOwnerNoLock(rrefId, forkId);
 }
 
-void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
+std::shared_ptr<RRef> RRefContext::delForkOfOwner(
+    const RRefId& rrefId,
+    const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
-  delForkOfOwnerNoLock(rrefId, forkId);
+  return delForkOfOwnerNoLock(rrefId, forkId);
 }
 
 void RRefContext::addForkOfOwnerNoLock(
@@ -293,24 +300,32 @@ void RRefContext::addForkOfOwnerNoLock(
   rrefForks.insert(forkId);
 }
 
-void RRefContext::delForkOfOwnerNoLock(
+std::shared_ptr<RRef> RRefContext::delForkOfOwnerNoLock(
     const RRefId& rrefId,
     const ForkId& forkId) {
-  auto iter = forks_.find(rrefId);
+  auto rrefIter = forks_.find(rrefId);
   TORCH_INTERNAL_ASSERT(
-      iter != forks_.end(),
+      rrefIter != forks_.end(),
       "Inconsistent states, deleting a fork before the owner knows it.");
-  auto& rrefForks = iter->second;
+  auto& rrefForks = rrefIter->second;
+  auto forkIter = rrefForks.find(forkId);
   TORCH_INTERNAL_ASSERT(
-      rrefForks.find(forkId) != rrefForks.end(),
+      forkIter != rrefForks.end(),
       "Attempt to delete a non-exist fork ",
       forkId);
-  rrefForks.erase(rrefId);
 
+  rrefForks.erase(forkId);
+
+  std::shared_ptr<RRef> ret = nullptr;
   if (rrefForks.empty()) {
-    owners_.erase(rrefId);
-    forks_.erase(rrefId);
+    auto ownerIter = owners_.find(rrefId);
+    if (ownerIter != owners_.end()) {
+      ret = ownerIter->second;
+      owners_.erase(ownerIter);
+    }
+    forks_.erase(rrefIter);
   }
+  return ret;
 }
 
 } // namespace rpc
