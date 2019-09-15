@@ -218,7 +218,7 @@ def skipCPUIfNoLapack(fn):
 
 # Specifies MKL as a CPU dependency.
 def skipCPUIfNoMkl(fn):
-    return skipCPUIf(not TEST_MKL, "PyTorch is built without MKL support")
+    return skipCPUIf(not TEST_MKL, "PyTorch is built without MKL support")(fn)
 
 
 # Specifies MAGMA as a CUDA dependency.
