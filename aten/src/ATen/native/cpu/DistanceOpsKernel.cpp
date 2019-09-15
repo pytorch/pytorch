@@ -356,6 +356,7 @@ struct Dist {
     const int64_t l2_size = r2 * m;
     //current implementation supports only tensor that can be collapsed to 1D. However, to avoid checking if grad satisfies this assumption,
     //we call .contiguous() on grad before backward, thus stride is guaranteed to be 1
+    //don't use grad.stride(-1), because if last dimension is 1, stride can be bogus.
     const int64_t gs = 1;
 
     const scalar_t * const grad_start = grad.data_ptr<scalar_t>();

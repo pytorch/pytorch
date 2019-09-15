@@ -2480,12 +2480,14 @@ class TestAutograd(TestCase):
     # and it gives incorrect results on rocm platform
     @skipIfRocm
     def test_cdist(self):
-        def _test_cdist_for_size(sizes):
+        def _test_cdist_for_size(sizex, sizey=None):
+            if sizey is None:
+                sizey = sizex
             devices = torch.testing.get_all_device_types()
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                 for device in devices:
-                    x = torch.randn(sizes, device=device, dtype=torch.double)
-                    y = torch.randn(sizes, device=device, dtype=torch.double)
+                    x = torch.randn(sizex, device=device, dtype=torch.double)
+                    y = torch.randn(sizey, device=device, dtype=torch.double)
 
                     eps = 1e-6
                     # to avoid extremum
@@ -2507,6 +2509,7 @@ class TestAutograd(TestCase):
         _test_cdist_for_size((3, 5))
         _test_cdist_for_size((2, 3, 5))
         _test_cdist_for_size((1, 2, 3))
+        _test_cdist_for_size((1, 1), (S, 1))
 
     def test_var_mean_differentiable(self):
         dim = [2, 4]
