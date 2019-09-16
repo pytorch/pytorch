@@ -6415,11 +6415,12 @@ a")
             test(inp, typ, type_hint)
 
         # test optional isinstance check
-        with self.assertRaisesRegex(RuntimeError, "Optional isinstance check is not supported"):
-            @torch.jit.script
-            def opt_func(x):
-                # type: (Optional[int]) -> bool
-                return isinstance(x, int)
+        @torch.jit.script
+        def opt_func(x):
+            # type: (Optional[int]) -> bool
+            return isinstance(x, int)
+        self.assertTrue(opt_func(3))
+        self.assertFalse(opt_func(None))
 
     def test_dropout_eval(self):
         class ScriptedConv2d(torch.jit.ScriptModule):

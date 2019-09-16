@@ -361,6 +361,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeConservative(node);
     case prim::Print:
     case prim::Uninitialized:
+    case prim::isinstance:
       // These ops do nothing
       return;
     default:
@@ -1248,6 +1249,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::CallFunction,
       prim::CallMethod,
       aten::wait,
+      prim::isinstance,
   };
 
   // Operators that should not be used by alias analysis

@@ -1289,6 +1289,39 @@ RegisterOperators reg(
              return 0;
            };
          },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::isinstance,
+         [](const Node* node) {
+           std::vector<TypePtr> types = node->tys(attr::types);
+           bool is_list = false;
+           bool is_tuple = false;
+           for (const std::string& kind : node->ss(attr::kinds)) {
+             if (kind == "list") {
+               is_list = true;
+             } else if (kind == "tuple") {
+               is_tuple = true;
+             } else {
+               TORCH_INTERNAL_ASSERT(false, "unrecognized type kind ", kind);
+             }
+           }
+           return [types, is_list, is_tuple](Stack& stack) {
+             TypePtr ty = pop(stack).type();
+             if ((is_list && ty->kind() == ListType::Kind) ||
+                 (is_tuple && ty->kind() == TupleType::Kind)) {
+               push(stack, true);
+               return 0;
+             }
+             for (const TypePtr& to_check : types) {
+               if (ty->isSubtypeOf(to_check)) {
+                 push(stack, true);
+                 return 0;
+               }
+             }
+             push(stack, false);
+             return 0;
+           };
+         },
          aliasAnalysisSpecialCase())});
 
 RegisterOperators logging_operators(

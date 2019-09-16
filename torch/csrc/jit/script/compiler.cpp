@@ -145,9 +145,13 @@ struct CondValue {
       : value_(value),
         refinements_(std::move(refinements)),
         static_if_(static_if) {}
-  CondValue(Graph& g, const SourceRange& loc, bool static_value)
+  CondValue(
+      Graph& g,
+      const SourceRange& loc,
+      bool static_value,
+      RefinementSet refinements)
       : value_(g.insertConstant(static_value, loc)),
-        refinements_({}),
+        refinements_(std::move(refinements)),
         static_if_(static_value) {}
   Value* value() const {
     return value_;
@@ -1009,12 +1013,12 @@ struct to_ir {
         // MA, MM, MN, NM, NN, AM -> cannot prove anything statically
         bool its_is = expr.kind() == TK_IS;
         if (lhs_none == ALWAYS && rhs_none == ALWAYS) {
-          return CondValue(*graph, expr.range(), its_is);
+          return CondValue(*graph, expr.range(), its_is, {});
         } else if (
             (lhs_none == ALWAYS && rhs_none == NEVER) ||
             (lhs_none == NEVER && rhs_none == ALWAYS)) {
           // lhs_val/rhs_val with A/M: only emit never_none_branch
-          return CondValue(*graph, expr.range(), !its_is);
+          return CondValue(*graph, expr.range(), !its_is, {});
         } else {
           auto kind = getNodeKind(expr.kind(), expr.get()->trees().size());
           Value* cond_value = emitBuiltinCall(
@@ -1137,7 +1141,7 @@ struct to_ir {
           environment_stack->setVar(loc, r.identifier(), output);
         } break;
         case RefinementKind::IS_INSTANCE:
-          AT_ERROR("NYI: IS_INSTANCE refinement");
+          break; // AT_ERROR("NYI: IS_INSTANCE refinement");
       }
     }
   }
@@ -1444,6 +1448,40 @@ struct to_ir {
         TypePtr type = typeParser_.parseTypeFromExpr(classinfo);
         types.emplace_back(type);
       }
+      bool staticallyTrue(const TypePtr& actual_type) {
+        // is this isinstance check statically true?
+        if ((list_check && actual_type->kind() == ListType::Kind) ||
+            (tuple_check && actual_type->kind() == TupleType::Kind)) {
+          return true;
+        }
+        for (const TypePtr& typ : types) {
+          if (actual_type->isSubtypeOf(typ)) {
+            return true;
+          }
+        }
+        return false;
+      }
+      bool maybeOfKind(TypeKind kind, const TypePtr& actual_type) {
+        if (actual_type->kind() == AnyType::Kind) {
+          return true;
+        }
+        if (auto op = actual_type->cast<OptionalType>()) {
+          return op->kind() == kind;
+        }
+        return false;
+      }
+      bool staticallyFalse(const TypePtr& actual_type) {
+        if ((list_check && maybeOfKind(ListType::Kind, actual_type)) ||
+            (tuple_check && maybeOfKind(TupleType::Kind, actual_type))) {
+          return false;
+        }
+        for (const TypePtr& typ : types) {
+          if (typ->isSubtypeOf(actual_type)) {
+            return false;
+          }
+        }
+        return true;
+      }
       ScriptTypeParser typeParser_;
       bool list_check = false;
       bool tuple_check = false;
@@ -1452,22 +1490,27 @@ struct to_ir {
     GatheredTypes gathered(typeParser_);
     gathered.gather(classinfo);
     auto val = emitExpr(obj);
-    if (val->type()->kind() == OptionalType::Kind) {
-      throw ErrorReport(obj.range())
-          << "Optional isinstance check is not supported, "
-          << "consider use is/is not None instead";
+    RefinementSet refinement;
+    if (gathered.types.size() == 1 && obj.kind() == TK_VAR) {
+      std::string ident = Var(obj).name().name();
+      Refinement isinstance(
+          std::move(ident), RefinementKind::IS_INSTANCE, gathered.types.at(0));
+      refinement = RefinementSet({isinstance}, {});
     }
 
-    if ((gathered.list_check && val->type()->kind() == ListType::Kind) ||
-        (gathered.tuple_check && val->type()->kind() == TupleType::Kind)) {
-      return CondValue(*graph, obj.range(), true);
+    if (gathered.staticallyTrue(val->type())) {
+      return CondValue(*graph, obj.range(), true, std::move(refinement));
     }
-    for (const TypePtr& typ : gathered.types) {
-      if (val->type()->isSubtypeOf(typ)) {
-        return CondValue(*graph, obj.range(), true);
-      }
+    if (gathered.staticallyFalse(val->type())) {
+      return CondValue(*graph, obj.range(), false, std::move(refinement));
     }
-    return CondValue(*graph, obj.range(), false);
+    // check maybe true/false at runtime, need an actual op
+    Value* result =
+        graph
+            ->insertNode(graph->createIsInstance(
+                val, gathered.types, gathered.list_check, gathered.tuple_check))
+            ->output();
+    return CondValue(result, std::move(refinement), c10::nullopt);
   }
 
   void emitIf(const If& stmt) {
