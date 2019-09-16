@@ -2555,6 +2555,7 @@ class TestNN(NNTestCase):
         res_F = F.embedding(a, embeddings)
         self.assertEqual(res_old, res_F)
 
+    # test is flaky on ROCm CI
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types([torch.float, torch.half])
     @skipIfRocm
@@ -3336,7 +3337,6 @@ class TestNN(NNTestCase):
         self._test_InstanceNorm_general(nn.InstanceNorm3d, input, dtype=torch.float)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_InstanceNorm3d_general_cuda(self):
         b = random.randint(3, 5)
         c = random.randint(2, 5)
@@ -4007,7 +4007,6 @@ class TestNN(NNTestCase):
         self._test_batchnorm_grad()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_batchnorm_grad_cuda(self):
         self._test_batchnorm_grad("cuda")
         if TEST_CUDNN:
@@ -4211,7 +4210,6 @@ class TestNN(NNTestCase):
         _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_gather_cpu(self):
         self._test_gather(-1)
 
@@ -4287,7 +4285,6 @@ class TestNN(NNTestCase):
                 self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_data_parallel_buffers_requiring_grad(self):
         class TestModule(nn.Module):
             def __init__(self, t):
@@ -4310,7 +4307,6 @@ class TestNN(NNTestCase):
         torch.autograd.gradcheck(fn, (m.t_rg,))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_data_parallel_rnn(self):
 
         class TestModule(torch.nn.Module):
@@ -4771,7 +4767,6 @@ class TestNN(NNTestCase):
         self.assertEqual(out, l(i))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_data_parallel_function_deletion(self):
         # this test case is originated from #16532
         def gradient_penalty(net, x):
@@ -5992,6 +5987,14 @@ class TestNN(NNTestCase):
                 hx, cx = lstm(input, (hx, cx))
 
             (hx + cx).sum().backward()
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_pack_sequence_batch_sizes_throw(self):
+        with self.assertRaisesRegex(ValueError, r"batch_sizes should always be on CPU"):
+            m = nn.LSTM(3, 4, bidirectional=True, num_layers=2).to('cuda')
+            a = torch.rand(5, 3, device='cuda')
+            b = torch.tensor([1, 1, 1, 1, 1], device='cuda')
+            input = nn.utils.rnn.PackedSequence(a, b)
 
     def test_Transformer_cell(self):
         # this is just a smoke test; these modules are implemented through
@@ -9218,10 +9221,24 @@ class TestNN(NNTestCase):
         self.assertEqual(F.softmin(x, 1), F.softmax(-x, 1))
         self.assertEqual(F.softmin(x, 0), F.softmax(-x, 0))
 
-    def test_log_softmax(self):
-        x_small = torch.ones(1, 2, dtype=torch.float32)
+    @repeat_test_for_types([torch.float, torch.bfloat16])
+    def test_log_softmax(self, dtype=torch.float):
+        x_small = torch.ones(1, 2, dtype=dtype)
         x_big = x_small + 1e16
         self.assertEqual(F.log_softmax(x_small, -1), F.log_softmax(x_big, -1))
+
+    def test_log_softmax_cpu(self, dtype=torch.bfloat16):
+        inputf = torch.rand(32, 100, device="cpu", dtype=torch.float, requires_grad=True)
+        input = inputf.to(dtype).detach().requires_grad_(True)
+        outf = F.log_softmax(inputf, dim=-1)
+        out = F.log_softmax(input, dim=-1)
+        self.assertEqual(out.dtype, dtype)
+        self.assertEqual(out, outf, prec=0.1)
+
+        out.sum().backward()
+        outf.sum().backward()
+        self.assertEqual(input.grad.dtype, dtype)
+        self.assertEqual(input.grad, inputf.grad.to(dtype), prec=0.1)
 
     def test_adaptive_log_softmax(self):
         # args validation
@@ -9316,6 +9333,21 @@ class TestNN(NNTestCase):
         out = asfm.predict(x)
         self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
 
+    def test_cross_entropy_loss(self, dtype=torch.bfloat16):
+        loss_cpu = nn.CrossEntropyLoss().cpu()
+        inputf = torch.randn(15, 10, device="cpu", dtype=torch.float, requires_grad=True)
+        input = inputf.to(dtype).detach().requires_grad_(True)
+        target = torch.empty(15, dtype=torch.long).random_(10)
+
+        outf = loss_cpu(inputf, target)
+        out = loss_cpu(input, target)
+        self.assertEqual(out.dtype, dtype)
+        self.assertEqual(out, outf, prec=1e-1)
+
+        outf.backward()
+        out.backward()
+        self.assertEqual(input.grad.dtype, dtype)
+        self.assertEqual(input.grad, inputf.grad, prec=1e-1)
 
 class TestNNInit(TestCase):
     def setUp(self):
