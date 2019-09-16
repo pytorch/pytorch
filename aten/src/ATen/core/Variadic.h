@@ -61,7 +61,7 @@ struct IterArgs {
     self()(at::ArrayRef<T>{args});
   }
 
-  constexpr bool short_circuit() {
+  constexpr bool short_circuit() const {
     return false;
   }
 
