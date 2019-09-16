@@ -72,6 +72,16 @@ void parseMethods(const std::vector<IValue>& vals, mobile::Bytecode& bc) {
   }
 }
 
+void parseSlotNames(const std::vector<IValue>& vals,
+                    std::unordered_map<std::string, IValue>& name_table) {
+  for (const auto& val : vals) {
+    auto tval = val.toTuple()->elements();
+    TORCH_CHECK(tval.size() == 2,
+                "Slot name has qualified name: tuple format.");
+    name_table[tval[0].toString()->string()] = tval[1];
+  }
+}
+
 // The deserializer class which loads the bytecode package from bc files.
 class BytecodeDeserializer final {
  public:
@@ -84,16 +94,33 @@ class BytecodeDeserializer final {
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
+  // Key: qualified name, value: list of slot names in order
+  std::unordered_map<std::string, IValue> slot_name_table_;
 };
 
 BytecodeDeserializer::BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader)
     : compilation_unit_(std::make_shared<script::CompilationUnit>()), reader_(std::move(reader)) {}
 
 mobile::Bytecode BytecodeDeserializer::deserialize(c10::optional<at::Device> device) {
-  mobile::Bytecode bc;
   device_ = device;
-  auto vals = readArchive("bytecode").toTuple()->elements();
-  parseMethods(vals, bc);
+  // vals[0]: methods. vals[1]: slot_names
+  auto bvals = readArchive("bytecode").toTuple()->elements();
+  TORCH_CHECK(bvals.size() == 2,
+              "Bytecode has two components: methods and slot_names.");
+  auto mvals = bvals[0].toTuple()->elements();
+  TORCH_CHECK(mvals.size() == 2,
+              "Methods has \"methods\": tuple format.");
+  TORCH_CHECK(mvals[0].toString()->string() == "methods",
+              "Field of \"methods\" is expected.");
+  mobile::Bytecode bc;
+  parseMethods(mvals[1].toTuple()->elements(), bc);
+
+  auto svals = bvals[1].toTuple()->elements();
+  TORCH_CHECK(svals.size() == 2,
+              "Slot_names has \"slots_names\": tuple format.");
+  TORCH_CHECK(svals[0].toString()->string() == "slots_names",
+              "Field of \"slot_names\" is expected.");
+  parseSlotNames(svals[1].toTuple()->elements(), slot_name_table_);
   bc.set_object(readArchive("data").toObject());
   return bc;
 }
@@ -127,11 +154,15 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
         compilation_unit_, compilation_unit_->get_class(qn));
     auto dict = std::move(input).toGenericDict();
     size_t ndict = dict.size();
+    auto it = slot_name_table_.find(qn.qualifiedName());
+    TORCH_CHECK(it != slot_name_table_.end(),
+                "qn.qualifiedName() not found.");
+    auto slot_names = it->second.toTuple()->elements();
+    TORCH_CHECK(slot_names.size() == ndict,
+                "The size of slot_names does not match dict size.");
     auto obj = c10::ivalue::Object::create(type, ndict);
-    auto it = dict.begin();
     for (size_t i = 0; i < ndict; ++i) {
-      obj->setSlot(i, (*it).value());
-      ++it;
+      obj->setSlot(i, dict.at(slot_names[i].toString()->string()));
     }
     return obj;
   };

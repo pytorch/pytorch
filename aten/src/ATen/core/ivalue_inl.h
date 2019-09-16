@@ -647,7 +647,7 @@ template<class T> inline IValue::IValue(c10::List<T> v)
   static_assert(std::is_same<IValue, typename c10::List<T>::StorageT>::value, "Can only use this constructor for generic list types");
 }
 template<class T> inline IValue::IValue(std::vector<T> v)
-: IValue(c10::List<T>()) {
+: IValue(c10::impl::GenericList(c10::impl::deprecatedUntypedList())) {
   static_assert(std::is_same<IValue, typename c10::List<T>::StorageT>::value, "Can only use this constructor for generic list types");
   auto list = to<c10::List<T>>();
   list.reserve(v.size());

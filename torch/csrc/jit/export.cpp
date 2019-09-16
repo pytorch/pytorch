@@ -43,6 +43,23 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
   return func;
 };
+
+void CollectSlotNames(const c10::intrusive_ptr<c10::ivalue::Object>& obj,
+                      std::vector<IValue>& qn2attrnames) {
+  auto attrnames = obj->type()->attributeNames();
+  std::vector<IValue> names_val;
+  for (int i = 0; i < attrnames.size(); ++i) {
+    names_val.emplace_back(attrnames[i]);
+  }
+  auto tnames_val = c10::ivalue::Tuple::create(std::move(names_val));
+  qn2attrnames.emplace_back(c10::ivalue::Tuple::create(
+      {obj->name(), tnames_val}));
+  for (auto slot : obj->slots()) {
+    if (slot.isObject()) {
+      CollectSlotNames(slot.toObject(), qn2attrnames);
+    }
+  }
+}
 }
 
 class ScriptModuleSerializer;
@@ -698,8 +715,17 @@ class ScriptModuleSerializer {
       auto element = c10::ivalue::Tuple::create({named_ins, named_ops, named_consts, named_aggsize});
       elements.push_back(c10::ivalue::Tuple::create({func.name(), element}));
     }
-    auto telements = c10::ivalue::Tuple::create(elements);
-    writeArchive("bytecode", telements);
+    auto telements = c10::ivalue::Tuple::create(std::move(elements));
+    auto named_elements = c10::ivalue::Tuple::create({"methods", telements});
+    // A tuple of (qualfied_name, slot names) map.
+    // qualified_name is used to look up the slot names.
+    // slot names are used to keep the order of slots.
+    std::vector<IValue> qn2slots;
+    CollectSlotNames(module.module_object(), qn2slots);
+    auto tslots = c10::ivalue::Tuple::create(std::move(qn2slots));
+    auto nameVals = c10::ivalue::Tuple::create({"slots_names", tslots});
+    auto package = c10::ivalue::Tuple::create({named_elements, nameVals});
+    writeArchive("bytecode", package);
   }
 
   void convertNamedType(const c10::NamedTypePtr& class_type) {
