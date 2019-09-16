@@ -3161,9 +3161,8 @@ inline QScheme Tensor::qscheme() const {
             AT_ERROR("qscheme not implemented for ", at::toString(type_set()));
     }
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::qscheme", ""}).value();
-    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<QScheme, const Tensor &>(const_cast<Tensor&>(*this));
+    static auto table = globalATenDispatch().getOpTable("aten::qscheme(Tensor self) -> QScheme");
+    return table->getOp<QScheme (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
