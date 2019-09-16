@@ -12,20 +12,33 @@ namespace nn {
 
 /// Options for the `Embedding` module.
 struct TORCH_API EmbeddingOptions {
-  EmbeddingOptions(int64_t count, int64_t dimension);
-  /// The number of embeddings (number of rows in the table).
+  EmbeddingOptions(int64_t count, int64_t dimension, int64_t padding_idx, float max_norm,
+  float norm_type, bool scale_grad_by_freq, bool sparse, Tensor weight);
+  // The number of embeddings (number of rows in the table).
   TORCH_ARG(int64_t, count);
-  /// The size of each embedding vector (number of columns in the table).
+  // The size of each embedding vector (number of columns in the table).
   TORCH_ARG(int64_t, dimension);
+  // If given, pads the output with the embedding vector at :attr:`padding_idx (initialized to zeros) whenever it encounters the index.
+  TORCH_ARG(int64_t, padding_idx);
+  // If given, each embedding vector with norm larger than :attr:`max_norm` is renormalized to have norm :attr:`max_norm`.
+  TORCH_ARG(float, max_norm);
+  // The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``
+  TORCH_ARG(float, norm_type);
+  // If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``False``.
+  TORCH_ARG(bool, scale_grad_by_freq);
+  // If ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
+  TORCH_ARG(bool, sparse);
+  TORCH_ARG(Tensor, weight)=torch::empty({count_, dimension_});
 };
 
 /// Performs a lookup in a fixed size embedding table.
 class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
  public:
-  EmbeddingImpl(int64_t count, int64_t dimension)
-      : EmbeddingImpl(EmbeddingOptions(count, dimension)) {}
+  EmbeddingImpl(int64_t count, int64_t dimension, int64_t padding_idx=0, float max_norm=0,
+  float norm_type=2., bool scale_grad_by_freq=false, bool sparse=false, Tensor weight = torch::empty({0,0}))
+      : EmbeddingImpl(EmbeddingOptions(count, dimension, padding_idx, max_norm, norm_type,
+        scale_grad_by_freq, sparse, weight)) {}
   explicit EmbeddingImpl(EmbeddingOptions options);
-
   void reset() override;
 
   /// Pretty prints the `Embedding` module into the given `stream`.
