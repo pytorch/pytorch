@@ -104,10 +104,6 @@ if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
   export LANG=C.UTF-8
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *py2* ]]; then
-  pip install --user requests
-fi
-
 pip install --user pytest-sugar
 "$PYTHON" \
   -m pytest \

@@ -132,7 +132,7 @@ static void THNN_(SpatialConvolutionMM_updateOutput_frame)(
     THTensor_(zero)(output);
   }
 
-  THTensor_(addmm)(output2d, 1, output2d, 1, weight, finput);
+  THTensor_(addmm)(output2d, output2d, weight, finput, 1, 1);
 
   c10::raw::intrusive_ptr::decref(output2d);
 }
@@ -236,7 +236,7 @@ static void THNN_(SpatialConvolutionMM_updateGradInput_frame)(
     (THTensor_getStoragePtr(gradOutput), gradOutput->storage_offset(),
      gradOutput->size(0), -1,
      gradOutput->size(1)*gradOutput->size(2), -1);
-  THTensor_(addmm)(fgradInput, 0, fgradInput, 1, weight, gradOutput2d);
+  THTensor_(addmm)(fgradInput, fgradInput, weight, gradOutput2d, 0, 1);
   c10::raw::intrusive_ptr::decref(gradOutput2d);
 
   THTensor_(zero)(gradInput);
@@ -330,7 +330,7 @@ static void THNN_(SpatialConvolutionMM_accGradParameters_frame)(
   if (gradWeight) {
     THTensor *tfinput = THTensor_(new)();
     THTensor_(transpose)(tfinput, finput, 0, 1);
-    THTensor_(addmm)(gradWeight, 1, gradWeight, scale, gradOutput2d, tfinput);
+    THTensor_(addmm)(gradWeight, gradWeight, gradOutput2d, tfinput, 1, scale);
     c10::raw::intrusive_ptr::decref(tfinput);
   }
 
