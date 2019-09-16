@@ -26,12 +26,12 @@ Message ScriptRet::toMessage() {
       std::move(payload), std::move(tensor_table), MessageType::SCRIPT_RET);
 }
 
-ScriptRet ScriptRet::fromMessage(const Message& message) {
+std::unique_ptr<ScriptRet> ScriptRet::fromMessage(const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
   auto value =
       jit::unpickle(payload, payload_size, nullptr, &message.tensors());
-  return ScriptRet(std::move(value));
+  return std::unique_ptr<ScriptRet>(new ScriptRet(std::move(value)));
 }
 
 } // namespace rpc

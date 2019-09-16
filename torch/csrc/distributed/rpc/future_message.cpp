@@ -7,6 +7,7 @@ namespace rpc {
 const Message& FutureMessage::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
   finished_cv_.wait(lock, [this] { return completed_.load(); });
+
   return message_;
 }
 
@@ -26,13 +27,6 @@ void FutureMessage::markCompleted() {
   markCompleted(Message());
 }
 
-const Message& FutureMessage::message() {
-  std::unique_lock<std::mutex> lock(mutex_);
-  TORCH_CHECK(completed(), "Cannot retrieve message before completed.");
-
-  return message_;
-}
-
 bool FutureMessage::completed() const {
   return completed_;
 }
@@ -44,17 +38,17 @@ void FutureMessage::addCallback(const FutureMessage::Callback& callback) {
     callback(message_);
     return;
   }
-  callbacks.push_back(callback);
+  callbacks_.push_back(callback);
 }
 
 void FutureMessage::fireCallbacks() {
-  TORCH_CHECK(completed(), "Firing callbacks on incomplete FutureMessage.");
-  // There is no need to protect callbacks with the lock.
+  TORCH_CHECK(completed(), "Firing callbacks_ on incomplete FutureMessage.");
+  // There is no need to protect callbacks_ with the lock.
   // Once completed_ is set to true, no one can add new callback to the list.
-  for (auto& callback : callbacks) {
+  for (auto& callback : callbacks_) {
     callback(message_);
   }
-  callbacks.clear();
+  callbacks_.clear();
 }
 
 } // namespace rpc

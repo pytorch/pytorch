@@ -17,6 +17,8 @@ enum MessageType {
   RREF_FETCH_RET,
   RREF_USER_CREATE,
   RREF_USER_DELETE,
+  MESSAGE_WITH_AUTOGRAD_REQ,
+  MESSAGE_WITH_AUTOGRAD_RESP,
   SHUTDOWN,
   EXCEPTION,
   UNKNOWN
@@ -62,7 +64,11 @@ class TORCH_API Message final {
   Message& operator=(Message&& rhs) &;
   void swap(Message& rhs) noexcept;
 
+  // Destructively retrieves the payload.
+  std::vector<char>&& movePayload();
+
   const std::vector<char>& payload() const;
+  std::vector<torch::Tensor>& tensors();
   const std::vector<torch::Tensor>& tensors() const;
   const MessageType& type() const;
 

@@ -18,9 +18,9 @@ PythonRpcHandler& PythonRpcHandler::getInstance() {
 }
 
 std::vector<char> PythonRpcHandler::generatePythonUDFResult(
-    const Message& request) {
+    const std::vector<char>& pickledPayload) {
   AutoGIL ag;
-  auto pargs = py::bytes(request.payload().data(), request.payload().size());
+  auto pargs = py::bytes(pickledPayload.data(), pickledPayload.size());
   TORCH_CHECK(runUDFFunction_ != nullptr, "runUDFFunction_ is nullptr");
   py::bytes pres = runUDFFunction_(pargs);
   const auto& presStr = static_cast<std::string>(pres);
@@ -28,9 +28,10 @@ std::vector<char> PythonRpcHandler::generatePythonUDFResult(
   return payload;
 }
 
-py::object PythonRpcHandler::loadPythonUDFResult(const Message& message) {
+py::object PythonRpcHandler::loadPythonUDFResult(
+    const std::vector<char>& pickledPayload) {
   AutoGIL ag;
-  auto pargs = py::bytes(message.payload().data(), message.payload().size());
+  auto pargs = py::bytes(pickledPayload.data(), pickledPayload.size());
   TORCH_CHECK(loadResultFunction_ != nullptr, "loadResultFunction_ is nullptr");
   return loadResultFunction_(pargs);
 }

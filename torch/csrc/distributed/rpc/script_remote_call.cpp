@@ -22,7 +22,7 @@ const at::IValue& ScriptRemoteCall::retForkId() {
   return retForkId_;
 }
 
-Message ScriptRemoteCall::toMessage() const {
+Message ScriptRemoteCall::toMessage() {
   std::vector<IValue> ivalues;
   ScriptCall::toIValues(ivalues);
   ivalues.push_back(retRRefId_);
@@ -36,7 +36,8 @@ Message ScriptRemoteCall::toMessage() const {
       std::move(payload), std::move(tensor_table), MessageType::REMOTE_CALL);
 }
 
-ScriptRemoteCall ScriptRemoteCall::fromMessage(const Message& message) {
+std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
+    const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
 
@@ -51,8 +52,8 @@ ScriptRemoteCall ScriptRemoteCall::fromMessage(const Message& message) {
   values.pop_back();
 
   auto op = ScriptCall::fromIValues(values);
-  return ScriptRemoteCall(
-      op, std::move(values), std::move(retRRefId), std::move(retForkId));
+  return std::unique_ptr<ScriptRemoteCall>(new ScriptRemoteCall(
+      op, std::move(values), std::move(retRRefId), std::move(retForkId)));
 }
 
 } // namespace rpc

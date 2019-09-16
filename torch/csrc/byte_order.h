@@ -1,17 +1,18 @@
 #ifndef THP_BYTE_ORDER_H
 #define THP_BYTE_ORDER_H
 
-#include <cstdint>
-#include <cstddef>
 #include <THHalf.h>
 #include <c10/util/BFloat16.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <cstddef>
+#include <cstdint>
 
 enum THPByteOrder {
   THP_LITTLE_ENDIAN = 0,
   THP_BIG_ENDIAN = 1
 };
 
-THPByteOrder THP_nativeByteOrder();
+TORCH_API THPByteOrder THP_nativeByteOrder();
 
 void THP_decodeInt16Buffer(int16_t* dst, const uint8_t* src, THPByteOrder order, size_t len);
 void THP_decodeInt32Buffer(int32_t* dst, const uint8_t* src, THPByteOrder order, size_t len);

@@ -30,11 +30,26 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
               "_context_id",
               &DistAutogradContext::context_id,
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_recv_functions",
+              [](const DistAutogradContext& ctx) {
+                std::map<int64_t, py::object> funcs;
+                for (const auto& map_entry : ctx.recvFunctions()) {
+                  funcs.emplace(
+                      map_entry.first,
+                      py::reinterpret_steal<py::object>(
+                          torch::autograd::functionToPyObject(
+                              map_entry.second)));
+                }
+                return funcs;
+              })
           .def("_send_functions", [](const DistAutogradContext& ctx) {
-            std::vector<py::object> funcs;
-            for (const auto& sendFunction : ctx.sendFunctions()) {
-              funcs.push_back(py::reinterpret_steal<py::object>(
-                  torch::autograd::functionToPyObject(sendFunction)));
+            std::map<int64_t, py::object> funcs;
+            for (const auto& map_entry : ctx.sendFunctions()) {
+              funcs.emplace(
+                  map_entry.first,
+                  py::reinterpret_steal<py::object>(
+                      torch::autograd::functionToPyObject(map_entry.second)));
             }
             return funcs;
           });
@@ -48,6 +63,10 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
 
   module.def("_release_context", [](int64_t context_id) {
     return DistAutogradContainer::getInstance().releaseContext(context_id);
+  });
+
+  module.def("_get_max_id", []() {
+    return DistAutogradContainer::getInstance().getMaxId();
   });
 
   module.def(

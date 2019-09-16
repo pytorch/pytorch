@@ -109,8 +109,8 @@ class MultiProcessTestCase(TestCase):
                 try:
                     fn(self)
                 except Exception as e:
-                    logging.error('Caught exception: {}, exiting process with exit code: {}'
-                                  .format(e, MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
+                    logging.exception('Caught exception, exiting process with exit code: {}'
+                                      .format(MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
                     sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
         return wrapper
 
