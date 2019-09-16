@@ -11,6 +11,7 @@
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
 #include <c10/util/BFloat16.h>
+#include <ATen/native/cpu/zmath.h>
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
@@ -168,10 +169,17 @@ public:
     }
     return ret;
   }
+  Vec256<T> map(T (*f)(const T &)) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i != size(); i++) {
+      ret[i] = f(values[i]);
+    }
+    return ret;
+  }
   Vec256<T> abs() const {
     Vec256<T> ret;
     for (int64_t i = 0; i < size(); i++) {
-      ret[i] = values[i] < 0 ? -values[i] : values[i];
+      ret[i] = static_cast<T>(std::abs(values[i]));
     }
     return ret;
   }
@@ -225,7 +233,7 @@ public:
     return map(std::log2);
   }
   Vec256<T> ceil() const {
-    return map(std::ceil);
+      return map(at::native::ceil_impl);
   }
   Vec256<T> cos() const {
     return map(std::cos);
@@ -234,7 +242,7 @@ public:
     return map(std::cosh);
   }
   Vec256<T> floor() const {
-    return map(std::floor);
+      return map(at::native::floor_impl);
   }
   Vec256<T> neg() const {
     // NB: the trailing return type is needed because we need to coerce the
@@ -243,7 +251,7 @@ public:
     return map([](T x) -> T { return -x; });
   }
   Vec256<T> round() const {
-    return map(std::nearbyint);
+    return map(at::native::round_impl);
   }
   Vec256<T> sin() const {
     return map(std::sin);
@@ -258,7 +266,7 @@ public:
     return map(std::tanh);
   }
   Vec256<T> trunc() const {
-    return map(std::trunc);
+    return map(at::native::trunc_impl);
   }
   Vec256<T> sqrt() const {
     return map(std::sqrt);
@@ -267,7 +275,7 @@ public:
     return map([](T x) { return (T)(1) / x; });
   }
   Vec256<T> rsqrt() const {
-    return map([](T x) { return 1 / std::sqrt(x); });
+    return map([](T x) { return (T)1 / std::sqrt(x); });
   }
   Vec256<T> pow(const Vec256<T> &exp) const {
     Vec256<T> ret;

@@ -63,7 +63,7 @@ static void abs_kernel(TensorIterator& iter) {
 }
 
 static void real_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "real_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "real_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return real_impl(a); },
@@ -72,7 +72,7 @@ static void real_kernel(TensorIterator& iter) {
 }
 
 static void imag_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "imag_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "imag_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return imag_impl(a); },
@@ -314,6 +314,37 @@ static void rsqrt_kernel(TensorIterator& iter) {
 #define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                             \
   static void op##_kernel(TensorIterator& iter) {                             \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), op##_vml_cpu, [&]() {\
+      iter.serial_for_each(                                                   \
+          [&](char** data_, const int64_t* strides, int64_t n) {              \
+            scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);       \
+            scalar_t* in_data = reinterpret_cast<scalar_t*>(data_[1]);        \
+            int64_t out_stride = strides[0] / sizeof(scalar_t);               \
+            int64_t in_stride = strides[1] / sizeof(scalar_t);                \
+            if (out_stride == 1 && in_stride == 1) {                          \
+              vml::v##op(out_data, in_data, n);                               \
+            } else {                                                          \
+              static constexpr int64_t WIDTH = 131072 / sizeof(scalar_t);     \
+              for (int64_t i = 0; i < n; i += WIDTH) {                        \
+                scalar_t buffer[WIDTH];                                       \
+                int64_t width = WIDTH;                                        \
+                width = std::min(width, n - i);                               \
+                for (int64_t j = 0; j < width; j++)                           \
+                  buffer[j] = in_data[in_stride * (i + j)];                   \
+                vml::v##op(buffer, buffer, width);                            \
+                for (int64_t j = 0; j < width; j++)                           \
+                  out_data[out_stride * (i + j)] = buffer[j];                 \
+              }                                                               \
+            }                                                                 \
+          },                                                                  \
+          {0, iter.numel()});                                                 \
+    });                                                                       \
+  }                                                                           \
+  REGISTER_DISPATCH(op##_stub, &op##_kernel)
+
+#define IMPLEMENT_COMPLEX_KERNEL(dispatchtypes, op)                             \
+  static void op##_kernel(TensorIterator& iter) {                             \
+    TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), op##_vml_cpu, [&]() {\
       iter.serial_for_each(                                                   \
           [&](char** data_, const int64_t* strides, int64_t n) {              \
@@ -368,27 +399,27 @@ REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
 
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, asin)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, atan)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, ceil)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, cos)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, acos)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, asin)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, atan)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, ceil)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, cos)
 // IMPLEMENT_FLOAT_KERNEL(FLOATING, cosh)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erf)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erfc)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, exp)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, exp)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, expm1)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, floor)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, log)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, log10)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, floor)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, log)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, log10)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, log1p)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, log2)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, round)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, sin)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, round)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, sin)
 // IMPLEMENT_FLOAT_KERNEL(FLOATING, sinh)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, sqrt)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, tan)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, tanh)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, trunc)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, sqrt)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, tan)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, tanh)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, trunc)
 
 }} // namespace at::native
