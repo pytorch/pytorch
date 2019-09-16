@@ -138,7 +138,7 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the scalar addition."""
     @unittest.skip("temporarily disable until failures are fixed. " +
-        "See https://github.com/pytorch/pytorch/issues/26279")
+                   "See https://github.com/pytorch/pytorch/issues/26279")
     @no_deadline
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=st.floats(-1e6, 1e6, allow_nan=False),
