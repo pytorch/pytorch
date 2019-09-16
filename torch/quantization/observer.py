@@ -1,18 +1,17 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import torch
-import torch.nn as nn
+import math
+import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
-import warnings
 
-from torch._jit_internal import Optional, List
-import math
 import torch
 import torch.nn as nn
+from torch._jit_internal import List, Optional
 
 
-ABC = ABCMeta(str('ABC'), (object,), {})  # compatible with Python 2 *and* 3:
+ABC = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
+
 
 class ObserverBase(ABC, nn.Module):
     r"""Observer base Module
@@ -24,7 +23,9 @@ class ObserverBase(ABC, nn.Module):
     the collected statistics.
     """
 
-    def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False):
+    def __init__(
+        self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False
+    ):
         super(ObserverBase, self).__init__()
         self.dtype = dtype
         self.qscheme = qscheme
@@ -56,8 +57,10 @@ class ObserverBase(ABC, nn.Module):
         """
 
         if max_val is None or min_val is None:
-            warnings.warn("must run observer before calling calculate_qparams.\
-                                    Returning default scale and zero point ")
+            warnings.warn(
+                "must run observer before calling calculate_qparams.\
+                                    Returning default scale and zero point "
+            )
             return torch.tensor([1.0]), torch.tensor([0])
 
         assert min_val <= max_val, "min {} should be less than max {}".format(
@@ -106,7 +109,10 @@ class MinMaxObserver(ObserverBase):
     calculate_qparams will calculate scale and zero_point
     """
 
-    __annotations__ = {'min_val' : Optional[torch.Tensor], 'max_val' : Optional[torch.Tensor]}
+    __annotations__ = {
+        "min_val": Optional[torch.Tensor],
+        "max_val": Optional[torch.Tensor],
+    }
 
     def __init__(self, **kwargs):
         #  For x86 quantized kernels, we need to ensure that the vpmaddubsw instruction
@@ -119,8 +125,14 @@ class MinMaxObserver(ObserverBase):
         super(MinMaxObserver, self).__init__(**kwargs)
         self.min_val = None
         self.max_val = None
-        if self.qscheme == torch.per_tensor_symmetric and self.reduce_range and self.dtype == torch.quint8:
-            raise NotImplementedError("Cannot reduce range for symmetric quantization for quint8")
+        if (
+            self.qscheme == torch.per_tensor_symmetric
+            and self.reduce_range
+            and self.dtype == torch.quint8
+        ):
+            raise NotImplementedError(
+                "Cannot reduce range for symmetric quantization for quint8"
+            )
 
     def forward(self, x):
         min_val = self.min_val
@@ -182,35 +194,12 @@ class HistogramObserver(ObserverBase):
             ) / 3
         return density * norm
 
-    def _include_zero(self):
-        """
-        0 should be included in the histogram so that we can represent 0.0f
-        exactly in quantized domain.
-        """
-        bin_width = (self.max_val.item() - self.min_val.item()) / self.bins
-
-        # Pad histogram to include zero
-        if self.min_val > 0.0:
-            additional_nbins = math.ceil(self.min_val.item() / bin_width)
-            self.bins += additional_nbins
-            self.min_val -= additional_nbins * bin_width
-            self.histogram = torch.cat(
-                (torch.zeros(additional_nbins), self.histogram), dim=0
-            )
-        elif self.max_val < 0.0:
-            additional_nbins = math.ceil(-self.max_val.item() / bin_width)
-            self.bins += additional_nbins
-            self.max_val += additional_nbins * bin_width
-            self.histogram = torch.cat(
-                (self.histogram, torch.zeros(additional_nbins)), dim=0
-            )
-
     def _compute_quantization_error(self, next_start_bin, next_end_bin, norm_type):
         """
         Compute the quantization error if we use start_bin to end_bin as the
         min and max to do the quantization.
         """
-        dst_nbins = 2**torch.iinfo(self.dtype).bits
+        dst_nbins = 2 ** torch.iinfo(self.dtype).bits
         bin_width = (self.max_val.item() - self.min_val.item()) / self.bins
 
         norm = 0.0
@@ -264,7 +253,6 @@ class HistogramObserver(ObserverBase):
         caffe2/quantization/server/norm_minimization.cc
         """
         assert self.histogram.size()[0] == self.bins, "bins mistmatch"
-        self._include_zero()
         bin_width = (self.max_val - self.min_val) / self.bins
 
         # cumulative sum
@@ -303,9 +291,7 @@ class HistogramObserver(ObserverBase):
                 continue
 
             # calculate the quantization error using next_start_bin and next_end_bin
-            norm = self._compute_quantization_error(
-                next_start_bin, next_end_bin, "L2"
-            )
+            norm = self._compute_quantization_error(next_start_bin, next_end_bin, "L2")
 
             if norm > norm_min:
                 break
@@ -425,14 +411,11 @@ class HistogramObserver(ObserverBase):
         return self._calculate_qparams(new_min.item(), new_max.item())
 
 
-
 class TensorObserver(ObserverBase):
     r"""
     The module is mainly for debug and records the tensor values during runtime
     """
-    __annotations__ = {
-        "tensor_val": List[Optional[torch.Tensor]],
-    }
+    __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
     def __init__(self, **kwargs):
         super(TensorObserver, self).__init__(**kwargs)
@@ -454,13 +437,16 @@ class TensorObserver(ObserverBase):
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)
 
+
 def default_observer(**kwargs):
     # Restrict activations to be in the range (0,127)
     kwargs.setdefault("reduce_range", True)
     return observer(MinMaxObserver, **kwargs)
 
+
 def default_debug_observer(**kwargs):
     return observer(TensorObserver, **kwargs)
+
 
 def default_weight_observer(**kwargs):
     kwargs.setdefault("dtype", torch.qint8)
