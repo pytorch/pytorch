@@ -386,7 +386,7 @@
 - name: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   self: not_implemented("histc")
 
-- name: index(Tensor self, Tensor?[] indices) -> Tensor
+- name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(zeros_like(self), indices, grad)
   indices: TensorList()
 
@@ -849,7 +849,7 @@
 - name: trace(Tensor self) -> Tensor
   self: trace_backward(grad, self.sizes())
 
-- name: transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
+- name: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   self: grad.transpose(dim0, dim1)
 
 - name: transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
@@ -1504,7 +1504,7 @@
 - name: _fft_with_size(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, bool normalized, bool onesided, int[] output_sizes) -> Tensor
   self: fft_backward(self, grad, signal_ndim, complex_input, complex_output, inverse, checked_signal_sizes, normalized, onesided, output_sizes)
 
-- name: unbind(Tensor(a) self, int dim=0) -> Tensor(a)[]
+- name: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]
   self: unbind_backward(grads, dim)
 
 - name: stack(Tensor[] tensors, int dim=0) -> Tensor
