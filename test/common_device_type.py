@@ -211,6 +211,32 @@ class skipCUDAIf(skipIf):
         super(skipCUDAIf, self).__init__(dep, reason, device_type='cuda')
 
 
+class onlyOn(object):
+
+    def __init__(self, device_type):
+        self.device_type = device_type
+
+    def __call__(self, fn):
+
+        @wraps(fn)
+        def only_fn(slf, device, *args, **kwargs):
+            if self.device_type != slf.device_type:
+                reason = "Only runs on {0}".format(self.device_type)
+                raise unittest.SkipTest(reason)
+
+            return fn(slf, device, *args, **kwargs)
+
+        return only_fn
+
+
+def onlyCPU(fn):
+    return onlyOn('cpu')(fn)
+
+
+def onlyCUDA(fn):
+    return onlyOn('cuda')(fn)
+
+
 # Skips a test on CPU if LAPACK is not available.
 def skipCPUIfNoLapack(fn):
     return skipCPUIf(not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
