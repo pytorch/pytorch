@@ -140,7 +140,7 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::expm1", ""},
         {"aten::expand", ""},
         {"aten::expand_as", ""},
-        {"aten::flatten", ""},
+        {"aten::flatten", "using_ints"},
         {"aten::fill_", "Scalar"},
         {"aten::fill_", "Tensor"},
         {"aten::floor", ""},
@@ -751,13 +751,13 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::eye", "out"},
         {"aten::eye", "m_out"},
     #ifdef BUILD_NAMEDTENSOR
-        {"aten::flatten", ""},
+        {"aten::flatten", "named_out_dim"},
     #endif
     #ifdef BUILD_NAMEDTENSOR
-        {"aten::flatten", ""},
+        {"aten::flatten", "using_names"},
     #endif
     #ifdef BUILD_NAMEDTENSOR
-        {"aten::flatten", ""},
+        {"aten::flatten", "DimnameList"},
     #endif
         {"aten::floor_", ""},
         {"aten::floor", "out"},
