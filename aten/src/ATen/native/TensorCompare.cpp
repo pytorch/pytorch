@@ -8,6 +8,7 @@
 #include <ATen/native/cpu/TensorCompareKernel.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/NamedTensorUtils.h>
+#include <c10/core/EnableNamedTensor.h>
 
 namespace {
 template <typename scalar_t>

@@ -6,6 +6,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/NamedTensorUtils.h>
+#include <c10/core/EnableNamedTensor.h>
 
 namespace at {
 namespace native {

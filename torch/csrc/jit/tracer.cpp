@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/script/module.h>
 #include <ATen/core/Dict.h>
+#include <c10/core/EnableNamedTensor.h>
 
 #include <memory>
 #include <sstream>

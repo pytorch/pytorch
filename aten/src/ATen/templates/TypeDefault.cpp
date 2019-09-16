@@ -15,6 +15,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/core/ATenDispatch.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <c10/core/EnableNamedTensor.h>
 
 namespace at {
 

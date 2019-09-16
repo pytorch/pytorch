@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/NamedTensorUtils.h>
+#include <c10/core/EnableNamedTensor.h>
 
 
 void THCTensor_(maskedFill)(THCState* state,
