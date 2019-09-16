@@ -24,7 +24,7 @@ import torch.nn.init as init
 import torch.nn.utils.rnn as rnn_utils
 from torch.nn.utils import clip_grad_norm_, clip_grad_value_
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from torch.autograd import Variable, gradcheck
+from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
@@ -1917,7 +1917,7 @@ class TestNN(NNTestCase):
         grads = torch.arange(1., 101).view(10, 10), torch.ones(10).div(1000)
         for norm_type in [0.5, 1.5, 2, 4, 'inf']:
             for p, g in zip(l.parameters(), grads):
-                p._grad = Variable(g.clone().view_as(p.data))
+                p._grad = g.clone().view_as(p.data)
             norm_before = compute_norm(norm_type)
             norm = clip_grad_norm_(l.parameters(), max_norm, norm_type=norm_type)
             norm_after = compute_norm(norm_type)
@@ -1986,7 +1986,7 @@ class TestNN(NNTestCase):
         fc1 = nn.Linear(10, 20)
         model = nn.Sequential(conv1, fc1)
 
-        vec = Variable(torch.arange(0., 980))
+        vec = torch.arange(0., 980)
         vector_to_parameters(vec, model.parameters())
 
         sample = next(model.parameters())[0, 0, 0]
@@ -2353,7 +2353,7 @@ class TestNN(NNTestCase):
 
     def test_embedding_sparse_basic(self):
         embedding = nn.Embedding(10, 20, sparse=True)
-        input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
+        input = torch.tensor([[0, 2, 4, 5], [4, 3, 0, 9]], dtype=torch.long)
         embedding(input).sum().backward()
         self.assertTrue(embedding.weight.grad.is_sparse)
         self.assertEqual(embedding.weight.grad.shape, embedding.weight.shape)
@@ -2449,13 +2449,13 @@ class TestNN(NNTestCase):
 
     def test_embedding_padding_idx(self):
         embedding = nn.Embedding(10, 20, padding_idx=0)
-        input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
+        input = torch.tensor([[0, 2, 4, 5], [4, 3, 0, 9]], dtype=torch.long)
         output = embedding(input)
         self.assertEqual(output[0][0].sum(), 0)
         self.assertEqual(output[1][2].sum(), 0)
 
         embedding = nn.Embedding(10, 20, padding_idx=0, sparse=True)
-        input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
+        input = torch.tensor([[0, 2, 4, 5], [4, 3, 0, 9]], dtype=torch.long)
         output = embedding(input)
         self.assertEqual(output[0][0].sum(), 0)
         self.assertEqual(output[1][2].sum(), 0)
@@ -2463,13 +2463,13 @@ class TestNN(NNTestCase):
         # negative indexing check for padding_idx
         # padding_idx=-2, num_embeddings=10 ==> index 8 padded
         embedding = nn.Embedding(10, 20, padding_idx=-2)
-        input = Variable(torch.LongTensor([[0, 2, 8, 5], [4, 8, 0, 9]]))
+        input = torch.tensor([[0, 2, 8, 5], [4, 8, 0, 9]], dtype=torch.long)
         output = embedding(input)
         self.assertEqual(output[0][2].sum(), 0)
         self.assertEqual(output[1][1].sum(), 0)
 
         embedding = nn.Embedding(10, 20, padding_idx=-2, sparse=True)
-        input = Variable(torch.LongTensor([[0, 2, 8, 5], [4, 8, 0, 9]]))
+        input = torch.tensor([[0, 2, 8, 5], [4, 8, 0, 9]], dtype=torch.long)
         output = embedding(input)
         self.assertEqual(output[0][2].sum(), 0)
         self.assertEqual(output[1][1].sum(), 0)
@@ -2483,7 +2483,7 @@ class TestNN(NNTestCase):
         embedding = nn.Embedding(5, 2, padding_idx=padding_idx)
         for n in (1, 2):
             for other_indices in ([], [1, 3], [2]):
-                indices = torch.LongTensor(other_indices + [padding_idx] * n)
+                indices = torch.tensor(other_indices + [padding_idx] * n, dtype=torch.long)
                 pre = embedding.weight[padding_idx].clone()
                 embedding(indices).sum().backward()
                 after = (embedding.weight + embedding.weight.grad)[padding_idx]
@@ -2501,7 +2501,7 @@ class TestNN(NNTestCase):
 
     def test_embedding_max_norm(self):
         embedding = nn.Embedding(22, 5, max_norm=1.0)
-        input = Variable(torch.LongTensor([2, 8, 8, 6]))
+        input = torch.tensor([2, 8, 8, 6], dtype=torch.long)
         output = embedding(input)
         self.assertEqual(output[1], output[2])
         self.assertTrue(output.data.norm(p=2, dim=1).le(1).all())
@@ -2897,7 +2897,7 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pool3d_size_one_feature_dim(self):
         # Tests crazy strides for feature dim of size 1
-        x = Variable(torch.randn(7, 1, 5, 3, 2, device="cuda"))
+        x = torch.randn(7, 1, 5, 3, 2, device="cuda")
         strange_strides = [30, 1234, 6, 2, 1]
         y = x.as_strided(x.size(), strange_strides)
         x = x.cpu().as_strided(x.size(), strange_strides)
@@ -3271,7 +3271,7 @@ class TestNN(NNTestCase):
 
     def _test_InstanceNorm_cuda_half(self, cls, input):
         # THNN
-        input = Variable(input.cuda().half().random_(1, 10), requires_grad=True)
+        input = input.to(device='cuda', dtype=torch.half).random_(1, 10).requires_grad_(True)
         m = cls(input.size(1), affine=True, track_running_stats=True).to("cuda", torch.half)
         thnn_output = m(input)
         thnn_output.sum().backward()
@@ -3391,7 +3391,7 @@ class TestNN(NNTestCase):
             self.assertRaises(RuntimeError, lambda: ln(input))
 
     def _test_LayerNorm_cuda_half(self):
-        input = Variable(torch.empty(2, 3, 3, 2).to("cuda", torch.half).random_(1, 10), requires_grad=True)
+        input = torch.empty(2, 3, 3, 2, device="cuda", dtype=torch.half).random_(1, 10).requires_grad_(True)
         m = nn.LayerNorm([3, 2]).to("cuda", torch.half)
         output = m(input)
         output.sum().backward()
@@ -3454,7 +3454,6 @@ class TestNN(NNTestCase):
             self.assertRaises(RuntimeError, lambda: gn(input))
 
     def _test_GroupNorm_cuda_half(self):
-        input = Variable(torch.empty(2, 3, 3, 2).to("cuda", torch.half).random_(1, 10), requires_grad=True)
         input = torch.zeros(2, 4, 3, 2, requires_grad=True).cuda().half().random_(1, 10)
         m = nn.GroupNorm(2, 4).to("cuda", torch.half)
         output = m(input)
@@ -4220,10 +4219,10 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_different_len_dicts(self):
         inputs = (
-            {'a': Variable(torch.randn(1, 2).cuda(0), requires_grad=True)},
+            {'a': torch.randn(1, 2, requires_grad=True, device="cuda:0")},
             {
-                'b': Variable(torch.randn(1, 2).cuda(1), requires_grad=True),
-                'a': Variable(torch.randn(1, 2).cuda(1), requires_grad=True)
+                'b': torch.randn(1, 2, requires_grad=True, device="cuda:1"),
+                'a': torch.randn(1, 2, requires_grad=True, device="cuda:1"),
             }
         )
         with self.assertRaises(ValueError):
@@ -4262,7 +4261,7 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_replicate(self):
         module = nn.Linear(10, 5).float().cuda()
-        input = Variable(torch.randn(2, 10).float().cuda())
+        input = torch.randn(2, 10, dtype=torch.float, device="cuda")
         expected_output = module(input).data
         for devices in [(0, 1), [0, 1]]:
             replicas = dp.replicate(module, devices)
@@ -4445,7 +4444,7 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_small_back(self):
         l = nn.Linear(10, 5).float().cuda()
-        i = Variable(torch.randn(20, 10).float().cuda())
+        i = torch.randn(20, 10, dtype=torch.float, device="cuda")
         out = dp.data_parallel(l, i, (0, 1))
         self.assertEqual(out, l(i))
 
@@ -4540,7 +4539,7 @@ class TestNN(NNTestCase):
 
         gc.collect()
         model = nn.DataParallel(Model().cuda())
-        data = Variable(torch.randn(1).cuda())
+        data = torch.randn(1, device="cuda")
         model(data)
 
         refcycles = gc.collect()
@@ -4556,7 +4555,7 @@ class TestNN(NNTestCase):
                 return x
 
         l = Layer()
-        i = Variable(torch.randn(20, 10).float().cuda())
+        i = torch.randn(20, 10, dtype=torch.float, device="cuda")
         with torch.no_grad():
             dp.data_parallel(l, i, (0, 1))
         self.assertRaises(AssertionError, lambda: dp.data_parallel(l, i, (0, 1)))
@@ -4564,7 +4563,7 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel(self):
         l = nn.Linear(10, 5).float().cuda()
-        i = Variable(torch.randn(20, 10).float().cuda(1))
+        i = torch.randn(20, 10, dtype=torch.float, device="cuda:1")
         l.cuda(1)
         expected_out = l(i)
         loss = expected_out.sum()
@@ -4656,7 +4655,7 @@ class TestNN(NNTestCase):
             def forward(self, *input):
                 return fn(input)
 
-        i = Variable(torch.randn(20, 3).float().cuda(1))
+        i = torch.randn(20, 3, dtype=torch.float, device="cuda:1")
         input = (i.cos(), (i.sin(), i), i.sin())
         gpus = range(torch.cuda.device_count())
         output = dp.data_parallel(Net(), input, gpus)
@@ -5086,8 +5085,8 @@ class TestNN(NNTestCase):
         self.assertEqual(l.state_dict()['buf'], buf)
 
     def test_Conv2d_inconsistent_types(self):
-        inputs = Variable(torch.randn(4, 1, 7, 7).float())
-        weights = Variable(torch.randn(1, 1, 3, 3).double())
+        inputs = torch.randn(4, 1, 7, 7, dtype=torch.float)
+        weights = torch.randn(1, 1, 3, 3, dtype=torch.double)
         # inconsistent types should raise an exception
         self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
         # but it should work with the same type
@@ -5095,9 +5094,9 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_Conv2d_inconsistent_types_on_GPU_without_cudnn(self):
-        inputs = Variable(torch.randn(4, 1, 7, 7).float().cuda())
-        weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
-        bias = Variable(torch.randn(1).double().cuda())
+        inputs = torch.randn(4, 1, 7, 7, dtype=torch.float, device="cuda")
+        weights = torch.randn(1, 1, 3, 3, dtype=torch.double, device="cuda")
+        bias = torch.randn(1, dtype=torch.double, device="cuda")
 
         with torch.backends.cudnn.flags(enabled=False):
             # inconsistent types should raise an exception
@@ -5110,9 +5109,9 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_Conv2d_inconsistent_types_on_GPU_with_cudnn(self):
-        inputs = Variable(torch.randn(4, 1, 7, 7).float().cuda())
-        weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
-        bias = Variable(torch.randn(1).double().cuda())
+        inputs = torch.randn(4, 1, 7, 7, dtype=torch.float, device="cuda")
+        weights = torch.randn(1, 1, 3, 3, dtype=torch.double, device="cuda")
+        bias = torch.randn(1, dtype=torch.double, device="cuda")
 
         with torch.backends.cudnn.flags(enabled=True):
             # inconsistent types should raise an exception
@@ -5301,14 +5300,14 @@ class TestNN(NNTestCase):
         m1 = nn.Conv2d(2, 2, kernel_size=3).to(device, dtype)
         m1.weight.data.copy_(m.weight.data[:2])
         m1.bias.data.copy_(m.bias.data[:2])
-        i1 = Variable(i.data[:, :2].contiguous(), requires_grad=True)
+        i1 = i.data[:, :2].contiguous().requires_grad_(True)
         output1 = m1(i1)
         output1.backward(grad_output[:, :2].contiguous())
 
         m2 = nn.Conv2d(2, 2, kernel_size=3).to(device, dtype)
         m2.weight.data.copy_(m.weight.data[2:])
         m2.bias.data.copy_(m.bias.data[2:])
-        i2 = Variable(i.data[:, 2:].contiguous(), requires_grad=True)
+        i2 = i.data[:, 2:].contiguous().requires_grad_(True)
         output2 = m2(i2)
         output2.backward(grad_output[:, 2:].contiguous())
 
@@ -5338,13 +5337,13 @@ class TestNN(NNTestCase):
 
             m1 = nn.Conv2d(2, 2, kernel_size=3, bias=False).to(device, dtype)
             m1.weight.data.copy_(m.weight.data[:2])
-            i1 = Variable(i.data[:, :2].contiguous(), requires_grad=True)
+            i1 = i.data[:, :2].contiguous().requires_grad_(True)
             output1 = m1(i1)
             output1.backward(grad_output[:, :2].contiguous())
 
             m2 = nn.Conv2d(2, 2, kernel_size=3, bias=False).to(device, dtype)
             m2.weight.data.copy_(m.weight.data[2:])
-            i2 = Variable(i.data[:, 2:].contiguous(), requires_grad=True)
+            i2 = i.data[:, 2:].contiguous().requires_grad_(True)
             output2 = m2(i2)
             output2.backward(grad_output[:, 2:].contiguous())
 
@@ -5374,13 +5373,13 @@ class TestNN(NNTestCase):
 
             m1 = nn.Conv2d(2, 8, kernel_size=3, bias=False).to(device, dtype)
             m1.weight.data.copy_(m.weight.data[:8])
-            i1 = Variable(i.data[:, :2].contiguous(), requires_grad=True)
+            i1 = i.data[:, :2].contiguous().requires_grad_(True)
             output1 = m1(i1)
             output1.backward(grad_output[:, :8].contiguous())
 
             m2 = nn.Conv2d(2, 8, kernel_size=3, bias=False).to(device, dtype)
             m2.weight.data.copy_(m.weight.data[8:])
-            i2 = Variable(i.data[:, 2:].contiguous(), requires_grad=True)
+            i2 = i.data[:, 2:].contiguous().requires_grad_(True)
             output2 = m2(i2)
             output2.backward(grad_output[:, 8:].contiguous())
 
@@ -5446,7 +5445,7 @@ class TestNN(NNTestCase):
         for i in range(0, 4, 2):
             for j in range(0, 4, 2):
                 small_t[:, :, i, j] = 100
-        output_small, indices_small = m(Variable(small_t))
+        output_small, indices_small = m(small_t)
         for h in range(3, 10):
             for w in range(3, 10):
                 if 4 <= h <= 6 and 4 <= w <= 6:
@@ -5499,8 +5498,8 @@ class TestNN(NNTestCase):
             'poisson_nll_loss': lambda x, y: F.poisson_nll_loss(x, y),
         }
 
-        input = Variable(cast(torch.randn(3, 5)))
-        target = Variable(cast(torch.randn(5, 3)))
+        input = cast(torch.randn(3, 5))
+        target = cast(torch.randn(5, 3))
         for _name, fn in losses.items():
             self.assertRaises(Exception, lambda: fn(input, target))
 
@@ -6445,11 +6444,11 @@ class TestNN(NNTestCase):
         first_warn = True
         for rnn in rnns:
             rnn.cuda()
-            input = Variable(torch.randn(5, 4, 10).cuda(), requires_grad=True)
-            hx = Variable(torch.randn(1, 5, 20).cuda(), requires_grad=True)
+            input = torch.randn(5, 4, 10, requires_grad=True, device="cuda")
+            hx = torch.randn(1, 5, 20, requires_grad=True, device="cuda")
             all_vars = [input, hx] + list(rnn.parameters())
             if isinstance(rnn, nn.LSTM):
-                cx = Variable(torch.randn(1, 5, 20).cuda(), requires_grad=True)
+                cx = torch.randn(1, 5, 20, requires_grad=True, device="cuda")
                 all_vars[2:2] = [cx]
                 hx = (hx, cx)
 
@@ -6494,13 +6493,13 @@ class TestNN(NNTestCase):
         for rnn in rnns:
             rnn.bias_ih_l0_reverse = rnn.bias_ih_l0
             rnn.cuda()
-            input = Variable(torch.randn(5, 4, 10).cuda(), requires_grad=True)
-            hx = Variable(torch.randn(2, 5, 20).cuda(), requires_grad=True)
+            input = torch.randn(5, 4, 10, requires_grad=True, device="cuda")
+            hx = torch.randn(2, 5, 20, requires_grad=True, device="cuda")
             all_vars = [input, hx] + list(rnn.parameters())
             opt = torch.optim.SGD(rnn.parameters(), lr=0.1)
             opt.zero_grad()
             if isinstance(rnn, nn.LSTM):
-                cx = Variable(torch.randn(2, 5, 20).cuda(), requires_grad=True)
+                cx = torch.randn(2, 5, 20, requires_grad=True, device="cuda")
                 all_vars[2:2] = [cx]
                 hx = (hx, cx)
 
@@ -6548,16 +6547,16 @@ class TestNN(NNTestCase):
 
                     is_lstm = isinstance(rnn, nn.LSTM)
                     if is_lstm:
-                        hx = (Variable(hx_val.clone(), requires_grad=True),
-                              Variable(hx_val.clone().add(1), requires_grad=True))
-                        hx_cuda = (Variable(hx_val.clone().cuda(), requires_grad=True),
-                                   Variable(hx_val.clone().cuda().add(1), requires_grad=True))
+                        hx = (hx_val.clone().requires_grad_(True),
+                              hx_val.clone().add(1).requires_grad_(True))
+                        hx_cuda = (hx_val.clone().cuda().requires_grad_(True),
+                                   hx_val.clone().cuda().add(1).requires_grad_(True))
                     else:
-                        hx = Variable(hx_val.clone(), requires_grad=True)
-                        hx_cuda = Variable(hx_val.clone().cuda(), requires_grad=True)
+                        hx = hx_val.clone().requires_grad_(True)
+                        hx_cuda = hx_val.clone().cuda().requires_grad_(True)
 
-                    inp = Variable(input_val.clone(), requires_grad=True)
-                    inp_cu = Variable(input_val.clone().cuda(), requires_grad=True)
+                    inp = input_val.clone().requires_grad_(True)
+                    inp_cu = input_val.clone().cuda().requires_grad_(True)
                     output1, hy1 = rnn(inp, hx)
                     output2, hy2 = rnn_cuda(inp_cu, hx_cuda)
                     if is_lstm:
@@ -6915,16 +6914,16 @@ class TestNN(NNTestCase):
 
             if isinstance(input_val, rnn_utils.PackedSequence):
                 input = rnn_utils.PackedSequence(
-                    Variable(input_val.data.data, requires_grad=True), input_val.batch_sizes)
+                    input_val.data.data.requires_grad_(True), input_val.batch_sizes)
                 input_var = input.data
             else:
-                input = Variable(input_val.clone(), requires_grad=True)
+                input = input_val.clone().requires_grad_(True)
                 input_var = input
             if is_lstm:
-                hx = (Variable(hx_val.clone(), requires_grad=True),
-                      Variable(hx_val.add(1), requires_grad=True))
+                hx = (hx_val.clone().requires_grad_(True),
+                      hx_val.add(1).requires_grad_(True))
             else:
-                hx = Variable(hx_val.clone(), requires_grad=True)
+                hx = hx_val.clone().requires_grad_(True)
 
             if cuda:
                 rnn.cuda()
@@ -8648,7 +8647,7 @@ class TestNN(NNTestCase):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2, 2)
         with warnings.catch_warnings(record=True) as w:
-            out_t = m(Variable(in_t))
+            out_t = m(in_t)
         self.assertEqual(torch.ones(1, 1, 4, 4), out_t.data)
 
         input = torch.randn(1, 1, 2, 2, requires_grad=True)
@@ -8721,7 +8720,7 @@ class TestNN(NNTestCase):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2, 2, 2)
         with warnings.catch_warnings(record=True) as w:
-            out_t = m(Variable(in_t))
+            out_t = m(in_t)
         self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
 
         input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
@@ -9060,9 +9059,9 @@ class TestNN(NNTestCase):
     def test_cudnn_noncontiguous_weight(self):
         # Noncontiguous weights must be contiguous() before being
         # passed to cuDNN
-        input = Variable(torch.cuda.DoubleTensor([1, 1, 1]).view(1, 1, 3))
-        weights1 = Variable(torch.cuda.DoubleTensor([1]).expand(1, 1, 2))
-        weights2 = Variable(torch.cuda.DoubleTensor([1]).expand(1, 1, 2)).contiguous()
+        input = torch.tensor([1, 1, 1], dtype=torch.double, device="cuda").view(1, 1, 3)
+        weights1 = torch.tensor([1], dtype=torch.double, device="cuda").expand(1, 1, 2)
+        weights2 = torch.tensor([1], dtype=torch.double, device="cuda").expand(1, 1, 2).contiguous()
         self.assertEqual(F.conv1d(input, weights1, bias=None, stride=2, dilation=2),
                          F.conv1d(input, weights2, bias=None, stride=2, dilation=2))
 
