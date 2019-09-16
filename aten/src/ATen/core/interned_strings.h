@@ -116,6 +116,7 @@ namespace c10 {
   _(prim, CallFunction)              \
   _(prim, CallMethod)                \
   _(prim, LoopContinuation)          \
+  _(prim, annotate)          \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \

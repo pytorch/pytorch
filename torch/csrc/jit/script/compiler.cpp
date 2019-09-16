@@ -426,7 +426,7 @@ struct Environment {
     if (!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
           {"print", std::make_shared<PrintValue>()},
-          {"tuple", std::make_shared<TupleCallValue>()},
+          {"tuple", SpecialFormValue::create(prim::TupleConstruct)},
           {"float",
            makeMagic(
                "__float__",
@@ -443,8 +443,8 @@ struct Environment {
            makeMagic(
                "__str__",
                std::make_shared<CastValue>(StringType::get(), aten::str))},
-          {"getattr", std::make_shared<GetAttrValue>()},
-          {"isinstance", std::make_shared<IsInstanceValue>()},
+          {"getattr", SpecialFormValue::create(prim::GetAttr)},
+          {"isinstance", SpecialFormValue::create(prim::isinstance)},
           // todo(zach): remove when we can correctly export torch.full via ONNX
           // or we have implicit conversion that can convert numbers to tensors
           {"_to_tensor",
@@ -476,9 +476,9 @@ struct Environment {
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
-          {"range", std::make_shared<IterableValue>(prim::range)},
-          {"zip", std::make_shared<IterableValue>(prim::zip)},
-          {"enumerate", std::make_shared<IterableValue>(prim::enumerate)},
+          {"range", SpecialFormValue::create(prim::range)},
+          {"zip", SpecialFormValue::create(prim::zip)},
+          {"enumerate", SpecialFormValue::create(prim::enumerate)},
           {"rangelist",
            std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
           {"sorted",
@@ -2318,104 +2318,186 @@ struct to_ir {
   std::shared_ptr<SugaredValue> emitApplyExpr(Apply& apply, size_t n_binders) {
     auto sv = emitSugaredExpr(apply.callee(), 1);
     auto loc = apply.callee().range();
-    if (auto fork_value = dynamic_cast<ForkValue*>(sv.get())) {
-      auto& trees = apply.inputs().tree()->trees();
-      if (trees.size() < 1) {
-        throw ErrorReport(loc) << "Expected at least one argument to fork()";
-      }
-      auto forked = emitSugaredExpr(Expr(trees[0]), 1);
-      TreeList sliced_trees(trees.begin() + 1, trees.end());
-      auto inputs = getNamedValues(sliced_trees, true);
-      auto attributes = emitAttributes(apply.attributes());
-      return emitForkExpr(loc, forked, inputs, attributes);
-    } else if (auto annotate_value = dynamic_cast<AnnotateValue*>(sv.get())) {
-      checkApplyNumInputs(apply, 2);
-      TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
-      Value* expr = tryConvertToType(
-          apply.range(),
-          *graph,
-          type,
-          emitExpr(apply.inputs()[1], type),
-          /*allow_conversions=*/true);
+    if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
+      return emitApplySpecialForm(special_form->form(), apply);
+    }
+    auto inputs = getNamedValues(apply.inputs(), true);
+    auto attributes = emitAttributes(apply.attributes());
+    return sv->call(loc, method, inputs, attributes, n_binders);
+  }
 
-      std::stringstream why_not;
-      if (!expr->type()->isSubtypeOfExt(type, &why_not)) {
-        throw ErrorReport(apply.inputs())
-            << "expected an expression of type " << type->python_str()
-            << " but found " << expr->type()->python_str() << "\n"
-            << why_not.str();
+  // this function handles expressions that look like apply statements
+  // but have special evaluation rules for the arguments.
+  // when adding a new case, only add a special form if it cannot be expressed
+  // using the standard SugaredValue::call function, which enforces normal
+  // evaluation order.
+  std::shared_ptr<SugaredValue> emitApplySpecialForm(
+      Symbol form,
+      Apply& apply) {
+    switch (form) {
+      case prim::fork: {
+        auto& trees = apply.inputs().tree()->trees();
+        if (trees.size() < 1) {
+          throw ErrorReport(apply)
+              << "Expected at least one argument to fork()";
+        }
+        auto forked = emitSugaredExpr(Expr(trees[0]), 1);
+        TreeList sliced_trees(trees.begin() + 1, trees.end());
+        auto inputs = getNamedValues(sliced_trees, true);
+        auto attributes = emitAttributes(apply.attributes());
+        return emitForkExpr(apply.range(), forked, inputs, attributes);
       }
+      case prim::annotate: {
+        checkApplyNumInputs(apply, 2);
+        TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
+        Value* expr = tryConvertToType(
+            apply.range(),
+            *graph,
+            type,
+            emitExpr(apply.inputs()[1], type),
+            /*allow_conversions=*/true);
 
-      // None is a subtype of Optional[T], but we want to remember what T is,
-      // after annotation so that variables assigned to this None will still
-      // get the right type. To do this, we make a None constant that
-      // has the type Optional[T]
-      if (type->kind() == OptionalType::Kind &&
-          expr->type()->isSubtypeOf(NoneType::get())) {
-        Node* none = graph->createNone();
-        none->output()->setType(type);
-        graph->insertNode(none);
-        expr = none->output();
-      }
+        std::stringstream why_not;
+        if (!expr->type()->isSubtypeOfExt(type, &why_not)) {
+          throw ErrorReport(apply.inputs())
+              << "expected an expression of type " << type->python_str()
+              << " but found " << expr->type()->python_str() << "\n"
+              << why_not.str();
+        }
 
-      return std::make_shared<SimpleValue>(expr);
-    } else if (auto getattr = dynamic_cast<GetAttrValue*>(sv.get())) {
-      checkApplyNumInputs(apply, 2);
-      auto obj = emitSugaredExpr(apply.inputs()[0], 1);
-      auto selector = apply.inputs()[1];
-      if (selector.kind() != TK_STRINGLITERAL) {
-        throw ErrorReport(loc)
-            << "getattr's second argument must be a string literal";
-      }
-      const std::string& name = StringLiteral(selector).text();
-      return obj->attr(apply.range(), method, name);
-    } else if (
-        auto uninitialized_value =
-            dynamic_cast<UninitializedValue*>(sv.get())) {
-      checkApplyNumInputs(apply, 1);
-      TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
-      auto out = graph->insertNode(graph->createUninitialized(type))
-                     ->setSourceRange(loc);
-      return std::make_shared<SimpleValue>(out->output());
-    } else if (auto tuple_call = dynamic_cast<TupleCallValue*>(sv.get())) {
-      checkApplyNumInputs(apply, 1);
-      auto arg = emitSugaredExpr(apply.inputs()[0], 1);
-      auto inputs = arg->asTuple(apply.range(), method);
-      auto inp_values = fmap(inputs, [&](const SugaredValuePtr& sv) {
-        return sv->asValue(loc, method);
-      });
-      return std::make_shared<SimpleValue>(
-          graph->insertNode(graph->createTuple(inp_values))->output());
-    } else if (auto isinstance = dynamic_cast<IsInstanceValue*>(sv.get())) {
-      checkApplyNumInputs(apply, 2);
-      auto result = emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
-      return std::make_shared<SimpleValue>(result.value());
-    } else if (auto classNew = dynamic_cast<ClassNewMethod*>(sv.get())) {
-      if (apply.inputs().size() != 1) {
-        throw ErrorReport(loc) << "Only one argument to __new__ allowed";
-      }
-      auto arg = emitSugaredExpr(apply.inputs()[0], 1);
-      auto class_arg = dynamic_cast<ClassValue*>(arg.get());
-      if (!class_arg) {
-        throw ErrorReport(loc)
-            << "Expected class value as argument to __new__, got "
-            << arg->kind() << " instead";
-      }
-      if (class_arg->type_ != classNew->type_) {
-        throw ErrorReport(loc)
-            << "Argument to __new__() must match the class "
-            << "you are calling __new__() on. "
-            << "Got: " << class_arg->type_->python_str()
-            << ", expected: " << classNew->type_->python_str();
-      }
+        // None is a subtype of Optional[T], but we want to remember what T is,
+        // after annotation so that variables assigned to this None will still
+        // get the right type. To do this, we make a None constant that
+        // has the type Optional[T]
+        if (type->kind() == OptionalType::Kind &&
+            expr->type()->isSubtypeOf(NoneType::get())) {
+          Node* none = graph->createNone();
+          none->output()->setType(type);
+          graph->insertNode(none);
+          expr = none->output();
+        }
 
-      return classNew->createObject(apply.range(), method);
-    } else if (auto iterable = std::dynamic_pointer_cast<IterableValue>(sv)) {
-      return emitIterableTree(loc, apply.inputs(), iterable);
-    } else {
-      auto inputs = getNamedValues(apply.inputs(), true);
-      auto attributes = emitAttributes(apply.attributes());
-      return sv->call(loc, method, inputs, attributes, n_binders);
+        return std::make_shared<SimpleValue>(expr);
+      }
+      case prim::GetAttr: {
+        checkApplyNumInputs(apply, 2);
+        auto obj = emitSugaredExpr(apply.inputs()[0], 1);
+        auto selector = apply.inputs()[1];
+        if (selector.kind() != TK_STRINGLITERAL) {
+          throw ErrorReport(apply)
+              << "getattr's second argument must be a string literal";
+        }
+        const std::string& name = StringLiteral(selector).text();
+        return obj->attr(apply.range(), method, name);
+      }
+      case prim::Uninitialized: {
+        checkApplyNumInputs(apply, 1);
+        TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
+        auto out = graph->insertNode(graph->createUninitialized(type))
+                       ->setSourceRange(apply.range());
+        return std::make_shared<SimpleValue>(out->output());
+      }
+      case prim::TupleConstruct: {
+        checkApplyNumInputs(apply, 1);
+        auto arg = emitSugaredExpr(apply.inputs()[0], 1);
+        auto inputs = arg->asTuple(apply.range(), method);
+        auto inp_values = fmap(inputs, [&](const SugaredValuePtr& sv) {
+          return sv->asValue(apply.range(), method);
+        });
+        return std::make_shared<SimpleValue>(
+            graph->insertNode(graph->createTuple(inp_values))->output());
+      }
+      case prim::isinstance: {
+        checkApplyNumInputs(apply, 2);
+        auto result = emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+        return std::make_shared<SimpleValue>(result.value());
+      }
+      // This represents the "__new__" method on classes
+      // because it takes a ClassValue as input.
+      // So if we see:
+      //   Foo.__new__(Foo)
+      // Foo is a ClassValue, calling `attr("__new__")` will return a
+      // CreateObject special form.
+      case prim::CreateObject: {
+        if (apply.inputs().size() != 1) {
+          throw ErrorReport(apply) << "Only one argument to __new__ allowed";
+        }
+        auto arg = emitSugaredExpr(apply.inputs()[0], 1);
+        auto class_arg = dynamic_cast<ClassValue*>(arg.get());
+        if (!class_arg) {
+          throw ErrorReport(apply)
+              << "Expected class value as argument to __new__, got "
+              << arg->kind() << " instead";
+        }
+        auto createNode =
+            graph->insertNode(graph->createObject(class_arg->type_));
+        return std::make_shared<SimpleValue>(createNode->output());
+      }
+      // We construct the iterable tree here using the IterableTree
+      // SugaredValue, The tree consists of SimpleValue, RangeValue or
+      // IterableValue: For SimpleValues(List, Dict, etc) or RangeValue. We will
+      // make them as tree leaves since we could get the loop information from
+      // len() and get_item(). For IterableValue like zip(), enumerate(), we can
+      // model them as a combination of leaves, and we emit a IterableTree value
+      // to record the tree information
+      case prim::range: {
+        std::vector<Value*> input_vals =
+            getValues(apply.inputs(), /*maybe_unpack=*/true);
+        return std::make_shared<RangeValue>(apply.range(), method, input_vals);
+      }
+      case prim::enumerate: {
+        const SourceRange& loc = apply.range();
+        auto inputs = apply.inputs();
+        auto input_size = apply.inputs().size();
+        // enumerate(x) can be rewrite as subtrees:
+        // IterableTree(RangeValue(0, math.inf), SimpleValue(x))
+        Value* start_index = nullptr;
+        if (input_size == 0) {
+          throw ErrorReport(loc)
+              << "enumerate expected at least 1 arguments, got 0";
+        }
+
+        if (input_size == 2) {
+          start_index = emitSugaredExpr(inputs[1], 1)->asValue(loc, method);
+        }
+
+        if (input_size > 2) {
+          throw ErrorReport(loc)
+              << "enumerate expected at most 2 arguments, got " << input_size;
+        }
+        std::vector<Value*> range_inputs;
+        if (start_index != nullptr) {
+          range_inputs.emplace_back(start_index);
+        }
+        Value* end = materializeConstant(
+            std::numeric_limits<int64_t>::max(),
+            *graph,
+            loc,
+            integral_constants);
+        range_inputs.emplace_back(end);
+        SugaredValuePtr range_sv =
+            std::make_shared<RangeValue>(loc, method, range_inputs);
+        SugaredValuePtr expr_sv = emitSugaredExpr(inputs[0], 1);
+        return std::make_shared<IterableTree>(
+            std::vector<SugaredValuePtr>({range_sv, expr_sv}));
+      }
+      case prim::zip: {
+        // zip(x, y) can be rewrite as subtrees:
+        // IterableTree(IterableTree(x), IterableTree(y))
+        auto inputs = apply.inputs();
+        if (inputs.size() == 0) {
+          throw ErrorReport(apply)
+              << "zip expected at least 1 arguments, got 0";
+        }
+        auto iterable_tree = std::make_shared<IterableTree>();
+        for (Expr expr : inputs) {
+          auto expr_sv = emitSugaredExpr(expr, 1);
+          iterable_tree->addChild(expr_sv);
+        }
+        return iterable_tree;
+      }
+      default:
+        TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
     }
   }
 
@@ -2492,69 +2574,6 @@ struct to_ir {
     op(stack);
     AT_ASSERT(stack.size() == 1);
     return graph->insertConstant(stack[0], tree->range());
-  }
-
-
-  // We construct the iterable tree here using the IterableTree SugaredValue,
-  // The tree consists of SimpleValue, RangeValue or IterableValue:
-  // For SimpleValues(List, Dict, etc) or RangeValue. We will make them as tree
-  // leaves since we could get the loop information from len() and get_item().
-  // For IterableValue like zip(), enumerate(), we can model them as a
-  // combination of leaves, and we emit a IterableTree value to record the tree
-  // information
-  SugaredValuePtr emitIterableTree(
-      SourceRange& loc,
-      const List<Expr>& inputs,
-      const std::shared_ptr<IterableValue>& iterable) {
-    std::shared_ptr<IterableTree> iterable_tree = nullptr;
-    size_t input_size = inputs.size();
-
-    // Handling different iterable values
-    if (iterable->symbol_ == prim::range) {
-      std::vector<Value*> input_vals = getValues(inputs, /*maybe_unpack=*/true);
-      return std::make_shared<RangeValue>(loc, method, input_vals);
-    } else if (iterable->symbol_ == prim::enumerate) {
-      // enumerate(x) can be rewrite as subtrees:
-      // IterableTree(RangeValue(0, math.inf), SimpleValue(x))
-      Value* start_index = nullptr;
-      if (input_size == 0) {
-        throw ErrorReport(loc)
-            << "enumerate expected at least 1 arguments, got 0";
-      }
-
-      if (input_size == 2) {
-        start_index = emitSugaredExpr(inputs[1], 1)->asValue(loc, method);
-      }
-
-      if (input_size > 2) {
-        throw ErrorReport(loc)
-            << "enumerate expected at most 2 arguments, got " << input_size;
-      }
-      std::vector<Value*> range_inputs;
-      if (start_index != nullptr) {
-        range_inputs.emplace_back(start_index);
-      }
-      Value* end = materializeConstant(
-          std::numeric_limits<int64_t>::max(), *graph, loc, integral_constants);
-      range_inputs.emplace_back(end);
-      SugaredValuePtr range_sv =
-          std::make_shared<RangeValue>(loc, method, range_inputs);
-      SugaredValuePtr expr_sv = emitSugaredExpr(inputs[0], 1);
-      iterable_tree = std::make_shared<IterableTree>(
-          std::vector<SugaredValuePtr>({range_sv, expr_sv}));
-    } else if (iterable->symbol_ == prim::zip) {
-      // zip(x, y) can be rewrite as subtrees:
-      // IterableTree(IterableTree(x), IterableTree(y))
-      if (inputs.size() == 0) {
-        throw ErrorReport(loc) << "zip expected at least 1 arguments, got 0";
-      }
-      iterable_tree = std::make_shared<IterableTree>();
-      for (Expr expr : inputs) {
-        auto expr_sv = emitSugaredExpr(expr, 1);
-        iterable_tree->addChild(expr_sv);
-      }
-    }
-    return iterable_tree;
   }
 
   std::shared_ptr<SugaredValue> emitForkExpr(

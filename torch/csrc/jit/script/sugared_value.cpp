@@ -439,7 +439,7 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
   if (field != "__new__") {
     throw ErrorReport(loc) << "Tried to lookup unknown attribute on class";
   }
-  return std::make_shared<ClassNewMethod>(type_);
+  return SpecialFormValue::create(prim::CreateObject);
 }
 
 std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
