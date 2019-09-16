@@ -912,7 +912,6 @@ graph(%self, %scale, %zero_point, %dtype):
         "_quantized_weight",
         at::quantize_linear(float_weight, scale, zero_point, dtype));
   }
-  std::cout << "after register quantized weight" << std::endl;
 
   std::string replacement = R"(
 graph(%self, %scale, %zero_point, %dtype):
