@@ -227,7 +227,7 @@ bool Operator::matches(const Node* node) const {
   for (size_t i = 0; i < formals.size(); ++i) {
     auto formal = formals[i].type();
     const MatchTypeReturn matched_type = matchTypeVariables(
-        formal, actuals[i]->type(), type_env, /*allow_conversions*/ false);
+        formal, actuals[i]->type(), type_env);
     if (!matched_type.success()) {
       return false;
     }

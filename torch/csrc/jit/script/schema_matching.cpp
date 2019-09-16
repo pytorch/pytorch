@@ -131,7 +131,7 @@ static Value* tryMatchArgument(
 
   // Resolve VarType variables
   const MatchTypeReturn matched = matchTypeVariables(
-      arg.type(), value->type(), type_env, allow_conversions);
+      arg.type(), value->type(), type_env);
   if (!matched.success()) {
     if (failure_messages) {
       err() << "Could not match type " << value->type()->python_str() << " to "

@@ -1298,7 +1298,7 @@ struct MatchTypeReturn {
 // in the formal to still not be defined. In particular, None matches Optional[T]
 // but does not define the value of T.
 CAFFE2_API MatchTypeReturn
-matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env, bool allow_conversions);
+matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 
 // replace type variables appearing in `type` with the values in
 // `type_env`. Returns nullptr if a variable used in `type`
