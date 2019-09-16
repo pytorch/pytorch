@@ -70,6 +70,9 @@
 #include <THNN/generic/ClassNLLCriterion.c>
 #include <TH/THGenerateFloatTypes.h>
 
+#include <THNN/generic/ClassNLLCriterion.c>
+#include <TH/THGenerateBFloat16Type.h>
+
 #include <THNN/generic/ELU.c>
 #include <TH/THGenerateFloatTypes.h>
 
@@ -116,9 +119,6 @@
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/Tanh.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/TemporalRowConvolution.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/FeatureLPPooling.c>

@@ -165,7 +165,7 @@ static std::string getPadding(size_t cursor, const std::string& filename, size_t
   return buf;
 }
 
-bool PyTorchStreamReader::hasFile(const std::string& name) {
+bool PyTorchStreamReader::hasRecord(const std::string& name) {
   std::stringstream ss;
   ss << archive_name_ << "/" << name;
   mz_zip_reader_locate_file(ar_.get(), ss.str().c_str(), nullptr, 0);
@@ -177,7 +177,7 @@ bool PyTorchStreamReader::hasFile(const std::string& name) {
   return result;
 }
 
-size_t PyTorchStreamReader::getFileID(const std::string& name) {
+size_t PyTorchStreamReader::getRecordID(const std::string& name) {
   std::stringstream ss;
   ss << archive_name_ << "/" << name;
   size_t result = mz_zip_reader_locate_file(ar_.get(), ss.str().c_str(), nullptr, 0);
@@ -190,7 +190,7 @@ size_t PyTorchStreamReader::getFileID(const std::string& name) {
 
 // return dataptr, size
 std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string& name) {
-  size_t key = getFileID(name);
+  size_t key = getRecordID(name);
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
   valid("retrieving file meta-data");
@@ -208,7 +208,7 @@ static int64_t read_le_16(uint8_t* buf) {
 
 size_t PyTorchStreamReader::getRecordOffset(const std::string& name) {
   mz_zip_archive_file_stat stat;
-  mz_zip_reader_file_stat(ar_.get(), getFileID(name), &stat);
+  mz_zip_reader_file_stat(ar_.get(), getRecordID(name), &stat);
   valid("retriving file meta-data");
   uint8_t local_header[MZ_ZIP_LOCAL_DIR_HEADER_SIZE];
   in_->read(
@@ -274,13 +274,13 @@ PyTorchStreamWriter::PyTorchStreamWriter(
   writeRecord("version", version.str().c_str(), version.str().size());
 }
 
-void PyTorchStreamWriter::writeRecord(const std::string& name, const void* data, size_t size) {
+void PyTorchStreamWriter::writeRecord(const std::string& name, const void* data, size_t size, bool compress) {
   AT_ASSERT(!finalized_);
   std::stringstream ss;
   ss << archive_name_ << "/" << name;
   const std::string& full_name = ss.str();
   std::string padding = getPadding(ar_->m_archive_size, full_name, size);
-  uint32_t flags = 0;
+  uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
   mz_zip_writer_add_mem_ex_v2(
       ar_.get(),
       full_name.c_str(),

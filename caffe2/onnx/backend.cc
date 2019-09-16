@@ -366,7 +366,8 @@ Caffe2Backend::get_special_operators() const {
               {"RandomNormal", &Caffe2Backend::CreateRandomNormal},
               {"RandomNormalLike", &Caffe2Backend::CreateRandomNormal},
               {"Where", &Caffe2Backend::CreateWhereOp},
-              {"NonZero", &Caffe2Backend::CreateNonZeroOp}};
+              {"NonZero", &Caffe2Backend::CreateNonZeroOp},
+              {"Multinomial", &Caffe2Backend::CreateMultinomialOp}};
   return kSpecialOperators;
 }
 
@@ -618,6 +619,61 @@ Caffe2Ops Caffe2Backend::CreateNonZeroOp(
 
   auto* c2_transpose = ret.ops.Add();
   BuildOperator(c2_transpose, "Transpose", {nonzero_output}, {onnx_node->node.output(0)});
+  return ret;
+}
+
+Caffe2Ops Caffe2Backend::CreateMultinomialOp(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  // Fallback to ATen.
+  // ATen::Multinomial takes probabilities as input, ONNX Multinomial expects input to be log probabilities.
+  Caffe2Ops ret;
+  auto c2_exp_output = dummy_->NewDummyName();
+  auto* c2_exp = ret.ops.Add();
+  BuildOperator(c2_exp, "Exp", {onnx_node->node.input(0)}, {c2_exp_output});
+
+  auto* c2_multinomial = ret.ops.Add();
+  caffe2::Argument c2_arg_op;
+  c2_arg_op.set_name("operator");
+  c2_arg_op.set_s("multinomial");
+  // ONNX Multinomial only supports replacement=True.
+  caffe2::Argument c2_arg_rep;
+  c2_arg_rep.set_name("replacement");
+  c2_arg_rep.set_i(1);
+  auto& onnx_attributes = onnx_node->attributes;
+  caffe2::Argument c2_arg_num;
+  c2_arg_num.set_name("num_samples");
+  c2_arg_num.set_i(onnx_attributes.get<int64_t>("sample_size"));
+
+  // ONNX Multinomial has attribute dtype in {int64, int32}, which specifies output datatype.
+  // ATen::Multinomial output dtype is always int64.
+  auto onnx_dtype =
+    onnx_attributes.get<int64_t>("dtype", TensorProto::UNDEFINED);
+  if (onnx_dtype == ::ONNX_NAMESPACE::TensorProto::INT64) {
+    BuildOperator(
+        c2_multinomial,
+        "ATen",
+        {c2_exp_output},
+        {onnx_node->node.output(0)},
+        {c2_arg_op, c2_arg_rep, c2_arg_num});
+  } else if (onnx_dtype == ::ONNX_NAMESPACE::TensorProto::INT32) {
+    auto c2_multinomial_output = dummy_->NewDummyName();
+    BuildOperator(
+        c2_multinomial,
+        "ATen",
+        {c2_exp_output},
+        {c2_multinomial_output},
+        {c2_arg_op, c2_arg_rep, c2_arg_num});
+
+    auto* c2_cast = ret.ops.Add();
+    caffe2::Argument to;
+    to.set_name("to");
+    to.set_i(caffe2::TensorProto::INT32);
+    BuildOperator(c2_cast, "Cast", {c2_multinomial_output}, {onnx_node->node.output(0)}, {to});
+  } else {
+    CAFFE_THROW("ONNX does not support dtype other than int32/int64 in Multinomial, but get ", onnx_dtype);
+  }
+
   return ret;
 }
 

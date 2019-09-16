@@ -29,6 +29,7 @@ void onnxifi(
     size_t max_seq_size = 0);
 
 std::unordered_set<int> ParseNetPositionList(const std::string& str);
+std::unordered_set<std::string> ParseBlackListOps(const std::string& str);
 
 } // namespace glow
 } // namespace caffe2

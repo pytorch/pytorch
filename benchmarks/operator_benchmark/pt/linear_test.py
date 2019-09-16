@@ -13,7 +13,6 @@ import torch.nn as nn
 
 configs = op_bench.config_list(
     attrs=[
-        [1, 32, 10],
         [4, 256, 100],
         [16, 1024, 256],
     ],

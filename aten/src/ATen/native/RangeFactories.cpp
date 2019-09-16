@@ -24,7 +24,7 @@ Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
     AT_DISPATCH_FLOATING_TYPES(r.scalar_type(), "linspace_cpu", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t *data_ptr = r.data<scalar_t>();
+      scalar_t *data_ptr = r.data_ptr<scalar_t>();
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
       at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
         scalar_t is = static_cast<scalar_t>(p_begin);
@@ -58,7 +58,7 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
       scalar_t scalar_base = static_cast<scalar_t>(base);
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t *data_ptr = r.data<scalar_t>();
+      scalar_t *data_ptr = r.data_ptr<scalar_t>();
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
       at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
         scalar_t is = static_cast<scalar_t>(p_begin);
@@ -93,7 +93,7 @@ Tensor& range_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
       result.resize_({size});
     }
     Tensor r = result.is_contiguous() ? result : result.contiguous();
-    scalar_t *data_ptr = r.data<scalar_t>();
+    scalar_t *data_ptr = r.data_ptr<scalar_t>();
 
     at::parallel_for(0, size, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
       scalar_t is = p_begin;
@@ -147,7 +147,7 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
       result.resize_({size});
     }
     Tensor r = result.is_contiguous() ? result : result.contiguous();
-    scalar_t *data_ptr = r.data<scalar_t>();
+    scalar_t *data_ptr = r.data_ptr<scalar_t>();
 
     at::parallel_for(0, size, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
       scalar_t is = p_begin;

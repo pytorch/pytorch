@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/SortingUtils.h>
+#include <ATen/NamedTensorUtils.h>
 
 namespace at {
 namespace native {
@@ -30,17 +31,14 @@ namespace {
    Julien, November 12th 2013
 */
 
-constexpr int64_t MAX_LEVELS = 300;
-constexpr int64_t M_SMALL = 10; // Limit for small subfiles
-
 template <typename scalar_t, typename Comp, typename Fn>
 void quick_select_template(
     TensorAccessor<scalar_t, 1> arr,
     int64_t k,
     Comp gt_or_nan,
     Fn swap_fn) {
-  int64_t P, L, R, i, j, swap;
-  scalar_t rswap, piv;
+  int64_t P, L, R, i, j;
+  scalar_t piv;
   L = 0;
   R = arr.size(0) - 1;
 
@@ -129,8 +127,8 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
         [&](int64_t i, TensorList tl) {
           auto tmp_values = tl[0].accessor<scalar_t, 1>();
           auto tmp_indices = tl[1].accessor<int64_t, 1>();
-          scalar_t* mode_value = tl[2].data<scalar_t>();
-          int64_t* mode_index = tl[3].data<int64_t>();
+          scalar_t* mode_value = tl[2].data_ptr<scalar_t>();
+          int64_t* mode_index = tl[3].data_ptr<int64_t>();
           for (int64_t j = 0; j < tmp_indices.size(0); j++) {
             tmp_indices[j] = j;
           }
@@ -226,6 +224,26 @@ std::tuple<Tensor, Tensor> median(
   at::median_out(values, indices, self, dim, keepdim);
   return std::make_tuple(values, indices);
 }
+
+#ifdef BUILD_NAMEDTENSOR
+std::tuple<Tensor&, Tensor&> median_out(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    Dimname dim,
+    bool keepdim) {
+  TORCH_CHECK(false, "NYI: median with names");
+  return at::median_out(values, indices, self, dimname_to_position(self, dim), keepdim);
+}
+
+std::tuple<Tensor, Tensor> median(
+    const Tensor& self,
+    Dimname dim,
+    bool keepdim) {
+  TORCH_CHECK(false, "NYI: median with names");
+  return at::median(self, dimname_to_position(self, dim), keepdim);
+}
+#endif
 
 // this does not reduce to median with dim beause we don't want to copy twice
 Tensor median_cpu(const Tensor& self) {

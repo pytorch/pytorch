@@ -3,7 +3,6 @@ import functools
 import itertools
 
 import torch
-from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
@@ -69,8 +68,16 @@ class Module(object):
     _version = 1
 
     def __init__(self):
+        self.__construct()
+        # initialize self.training separately from the rest of the internal
+        # state, as it is managed differently by nn.Module and ScriptModule
+        self.training = True
+
+    def __construct(self):
+        """
+        Initializes internal Module state, shared by both nn.Module and ScriptModule.
+        """
         torch._C._log_api_usage_once("python.nn_module")
-        self._backend = thnn_backend
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
         self._backward_hooks = OrderedDict()
@@ -79,7 +86,6 @@ class Module(object):
         self._state_dict_hooks = OrderedDict()
         self._load_state_dict_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
-        self.training = True
 
     def forward(self, *input):
         r"""Defines the computation performed at every call.

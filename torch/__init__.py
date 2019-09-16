@@ -24,9 +24,9 @@ __all__ = [
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
-    'ShortStorage', 'CharStorage', 'ByteStorage',
+    'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-    'ShortTensor', 'CharTensor', 'ByteTensor', 'Tensor',
+    'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
 ]
 
 ################################################################################
@@ -133,7 +133,7 @@ def is_storage(obj):
 
 def set_default_tensor_type(t):
     r"""Sets the default ``torch.Tensor`` type to floating point tensor type
-    :attr:`t`. This type will also be used as default floating point type for
+    ``t``. This type will also be used as default floating point type for
     type inference in :func:`torch.tensor`.
 
     The default floating point tensor type is initially ``torch.FloatTensor``.
@@ -318,6 +318,7 @@ import torch.testing
 import torch.backends.cuda
 import torch.backends.mkl
 import torch.backends.openmp
+import torch.backends.quantized
 import torch.utils.data
 import torch.__config__
 import torch.__future__
@@ -336,6 +337,7 @@ def compiled_with_cxx11_abi():
 
 # Import the ops "namespace"
 from torch._ops import ops  # noqa: F401
+from torch._classes import classes  # noqa: F401
 
 # Import the quasi random sampler
 import torch.quasirandom

@@ -15,7 +15,7 @@ template <typename Index>
 bool GatherOp<CUDAContext>::DoRunWithType() {
   // Use shared implementation with BatchGather
   return gather_helper::gather_impl_cuda<Index>(
-      this, DATA, INDICES, 0, axis_, wrap_indices_);
+      this, DATA, INDICES, 0, axis_, wrap_indices_, match_outer_);
 }
 
 REGISTER_CUDA_OPERATOR(Gather, GatherOp<CUDAContext>);

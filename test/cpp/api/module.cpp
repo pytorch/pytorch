@@ -115,6 +115,17 @@ TEST_F(ModuleTest, ReplaceModule) {
   ASSERT_EQ(model->l1.get(), model->named_modules()["l1"]->as<Linear>());
 }
 
+TEST_F(ModuleTest, UnregisterModule) {
+  struct TestModel : public torch::nn::Module {};
+  TestModel model;
+  ASSERT_THROWS_WITH(
+      model.unregister_module("linear"),
+      "No Module with name `linear` is registered");
+  model.register_module("linear", torch::nn::Linear(3, 4));
+  model.unregister_module("linear");
+  ASSERT_TRUE(model.children().empty());
+}
+
 TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
   struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
@@ -655,8 +666,8 @@ TEST_F(ModuleTest, ParametersReturnsExpectedTensorsForFlatModel) {
   TestModule module(1);
   std::vector<torch::Tensor> parameters = module.parameters();
   ASSERT_EQ(parameters.size(), 2);
-  ASSERT_EQ(parameters[0].data<float>(), module.p1.data<float>());
-  ASSERT_EQ(parameters[1].data<float>(), module.p2.data<float>());
+  ASSERT_EQ(parameters[0].data_ptr<float>(), module.p1.data_ptr<float>());
+  ASSERT_EQ(parameters[1].data_ptr<float>(), module.p2.data_ptr<float>());
 }
 
 TEST_F(ModuleTest, NamedParametersReturnsExpectedTensorsForFlatModel) {
@@ -665,17 +676,17 @@ TEST_F(ModuleTest, NamedParametersReturnsExpectedTensorsForFlatModel) {
       module.named_parameters();
   ASSERT_EQ(parameters.size(), 2);
   ASSERT_EQ(parameters[0].key(), "p1");
-  ASSERT_EQ(parameters[0]->data<float>(), module.p1.data<float>());
+  ASSERT_EQ(parameters[0]->data_ptr<float>(), module.p1.data_ptr<float>());
   ASSERT_EQ(parameters[1].key(), "p2");
-  ASSERT_EQ(parameters[1]->data<float>(), module.p2.data<float>());
+  ASSERT_EQ(parameters[1]->data_ptr<float>(), module.p2.data_ptr<float>());
 }
 
 TEST_F(ModuleTest, BuffersReturnsExpectedTensorsForFlatModel) {
   TestModule module(1);
   std::vector<torch::Tensor> buffers = module.buffers();
   ASSERT_EQ(buffers.size(), 2);
-  ASSERT_EQ(buffers[0].data<float>(), module.b1.data<float>());
-  ASSERT_EQ(buffers[1].data<float>(), module.b2.data<float>());
+  ASSERT_EQ(buffers[0].data_ptr<float>(), module.b1.data_ptr<float>());
+  ASSERT_EQ(buffers[1].data_ptr<float>(), module.b2.data_ptr<float>());
 }
 
 TEST_F(ModuleTest, NamedBuffersReturnsExpectedTensorsForFlatModel) {
@@ -684,9 +695,9 @@ TEST_F(ModuleTest, NamedBuffersReturnsExpectedTensorsForFlatModel) {
       module.named_buffers();
   ASSERT_EQ(buffers.size(), 2);
   ASSERT_EQ(buffers[0].key(), "b1");
-  ASSERT_EQ(buffers[0]->data<float>(), module.b1.data<float>());
+  ASSERT_EQ(buffers[0]->data_ptr<float>(), module.b1.data_ptr<float>());
   ASSERT_EQ(buffers[1].key(), "b2");
-  ASSERT_EQ(buffers[1]->data<float>(), module.b2.data<float>());
+  ASSERT_EQ(buffers[1]->data_ptr<float>(), module.b2.data_ptr<float>());
 }
 
 struct TestContainer : torch::nn::Module {

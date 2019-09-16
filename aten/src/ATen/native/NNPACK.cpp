@@ -126,7 +126,7 @@ static inline void allocate_workspace() {
 }
 
 constexpr int input_batch_size_dim = 0;
-constexpr int input_channels_dim = 1;
+// constexpr int input_channels_dim = 1;
 constexpr int input_height_dim = 2;
 constexpr int input_width_dim = 3;
 constexpr int output_batch_size_dim = 0;
@@ -134,12 +134,12 @@ constexpr int output_channels_dim = 1;
 constexpr int output_height_dim = 2;
 constexpr int output_width_dim = 3;
 constexpr int weight_output_channels_dim = 0;
-constexpr int weight_input_channels_dim = 1;
-constexpr int weight_height_dim = 2;
-constexpr int weight_width_dim = 3;
+// constexpr int weight_input_channels_dim = 1;
+// constexpr int weight_height_dim = 2;
+// constexpr int weight_width_dim = 3;
 
 // Often written as 2 + max_dim (extra dims for batch size and channels)
-constexpr int max_dim = 3;
+// constexpr int max_dim = 3;
 
 std::vector<int64_t> conv_output_size(
     IntArrayRef input_size,

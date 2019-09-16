@@ -8,7 +8,7 @@
 namespace torch {
 namespace jit {
 
-struct SourceRangeUnpickler;
+class SourceRangeUnpickler;
 struct SourceRange;
 
 // Source represents a code segment. It keeps track of:
@@ -82,11 +82,11 @@ struct Source {
 
  private:
   void calc_line_start_offsets() {
+    line_starting_offsets_.push_back(0);
     size_t pos = 0;
-    do {
-      line_starting_offsets_.push_back(pos);
-      pos++;
-    } while ((pos = text_.find('\n', pos)) != std::string::npos);
+    while ((pos = text_.find('\n', pos)) != std::string::npos) {
+      line_starting_offsets_.push_back(++pos);
+    }
   }
   std::string text_;
   c10::optional<std::string> filename_;
@@ -151,7 +151,7 @@ struct CAFFE2_API SourceRange {
   bool operator!=(const SourceRange& rhs) const {
     return !(*this == rhs);
   }
-  
+
   c10::optional<SourceRange> findSourceRangeThatGenerated() const {
     if (!source_) {
       return c10::nullopt;

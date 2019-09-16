@@ -316,7 +316,12 @@ view of a storage and defines numeric operations on it.
    .. automethod:: log2_
    .. automethod:: log_normal_
    .. automethod:: logsumexp
+   .. automethod:: logical_not
+   .. automethod:: logical_not_
+   .. automethod:: logical_xor
+   .. automethod:: logical_xor_
    .. automethod:: long
+   .. automethod:: lstsq
    .. automethod:: lt
    .. automethod:: lt_
    .. automethod:: lu
@@ -367,9 +372,12 @@ view of a storage and defines numeric operations on it.
    .. automethod:: qscheme
    .. automethod:: q_scale
    .. automethod:: q_zero_point
+   .. automethod:: q_per_channel_scales
+   .. automethod:: q_per_channel_zero_points
    .. automethod:: random_
    .. automethod:: reciprocal
    .. automethod:: reciprocal_
+   .. automethod:: record_stream
    .. automethod:: register_hook
    .. automethod:: remainder
    .. automethod:: remainder_
@@ -468,9 +476,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: where
    .. automethod:: zero_
 
-.. class:: ByteTensor()
+.. class:: BoolTensor()
 
-   The following methods are unique to :class:`torch.ByteTensor`.
+   The following methods are unique to :class:`torch.BoolTensor`.
 
    .. automethod:: all
    .. automethod:: any

@@ -33,13 +33,11 @@ macro(enable_ubsan)
   endif()
 endmacro()
 
-if(NOT BUILD_ATEN_ONLY)
 # ---[ Custom Protobuf
-if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
   disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
   enable_ubsan()
-endif()
 endif()
 
 # For MSVC,
@@ -48,6 +46,8 @@ endif()
 if (MSVC)
   if(MSVC_Z7_OVERRIDE)
     foreach(flag_var
+        CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+        CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
         CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
         CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
       if(${flag_var} MATCHES "/Z[iI]")
@@ -107,7 +107,7 @@ else()
   set(AT_MKLDNN_ENABLED 0)
   set(AT_MKL_ENABLED 0)
 endif()
-set_property(CACHE BLAS PROPERTY STRINGS "Eigen;ATLAS;OpenBLAS;MKL;vecLib")
+set_property(CACHE BLAS PROPERTY STRINGS "Eigen;ATLAS;OpenBLAS;MKL;vecLib;FLAME")
 message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
 
 if(BLAS STREQUAL "Eigen")
@@ -185,6 +185,28 @@ set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
   CACHE PATH "Confu-style dependencies source directory")
 set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
   CACHE PATH "Confu-style dependencies binary directory")
+
+# ---[ pthreadpool
+# QNNPACK and NNPACK both depend on pthreadpool, but when building with libtorch
+# they should use the pthreadpool implementation under caffe2/utils/threadpool
+# instead of the default implementation. To avoid confusion, add pthreadpool
+# subdirectory explicitly with EXCLUDE_FROM_ALL property prior to QNNPACK/NNPACK
+# does so, which will prevent it from installing the default pthreadpool library.
+if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE AND (USE_QNNPACK OR USE_NNPACK))
+  if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+    set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+  endif()
+
+  IF(NOT TARGET pthreadpool)
+    SET(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
+    SET(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    ADD_SUBDIRECTORY(
+      "${PTHREADPOOL_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool"
+      EXCLUDE_FROM_ALL)
+  ENDIF()
+endif()
 
 # ---[ QNNPACK
 if(USE_QNNPACK)
@@ -499,10 +521,7 @@ endif()
 
 # ---[ NUMA
 if(USE_NUMA)
-  if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
-    message(WARNING "NUMA is currently only supported under Linux.")
-    caffe2_update_option(USE_NUMA OFF)
-  else()
+  if(LINUX)
     find_package(Numa)
     if(NUMA_FOUND)
       include_directories(SYSTEM ${Numa_INCLUDE_DIR})
@@ -511,6 +530,9 @@ if(USE_NUMA)
       message(WARNING "Not compiling with NUMA. Suppress this warning with -DUSE_NUMA=OFF")
       caffe2_update_option(USE_NUMA OFF)
     endif()
+  else()
+    message(WARNING "NUMA is currently only supported under Linux.")
+    caffe2_update_option(USE_NUMA OFF)
   endif()
 endif()
 
@@ -815,7 +837,7 @@ if(USE_CUDA)
       caffe2_update_option(USE_NVRTC OFF)
     endif()
     if(CAFFE2_USE_CUDNN)
-      IF(CUDNN_STATIC_LINKAGE)
+      IF(CUDNN_STATIC)
         LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
           caffe2::cudnn "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" "dl")
       ELSE()
@@ -872,6 +894,7 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-unused-command-line-argument)
     list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
+    list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
        list(APPEND HIP_CXX_FLAGS -g)
@@ -887,20 +910,19 @@ if(USE_ROCM)
     endforeach()
 
     set(Caffe2_HIP_INCLUDE
-      ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
-
+      ${thrust_INCLUDE_DIRS} ${hipcub_INCLUDE_DIRS} ${rocprim_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
     # This is needed for library added by hip_add_library (same for hip_add_executable)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
-      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${hipsparse_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
+      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB})
 
     # Note [rocblas & rocfft cmake bug]
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # TODO: There is a bug in rocblas's & rocfft's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
     # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
     list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
-      roc::rocblas roc::rocfft)
+      roc::rocblas roc::rocfft hip::hiprand roc::hipsparse)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
@@ -941,8 +963,8 @@ if(USE_CUDA)
 endif()
 
 if(USE_GLOO)
-  if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
-    message(WARNING "Gloo can only be used on Linux.")
+  if(MSVC)
+    message(WARNING "Gloo can not be used on Windows.")
     caffe2_update_option(USE_GLOO OFF)
   elseif(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(WARNING "Gloo can only be used on 64-bit systems.")
@@ -1035,8 +1057,7 @@ if (USE_ZSTD)
 endif()
 
 # ---[ Onnx
-if(NOT BUILD_ATEN_ONLY)
-if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
     set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
   endif()
@@ -1079,7 +1100,6 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
-endif()
 
 # --[ TensorRT integration with onnx-trt
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
@@ -1115,6 +1135,8 @@ if (NOT INTERN_BUILD_MOBILE)
   IF (MSVC)
     # we want to respect the standard, and we are bored of those **** .
     ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
+    # skip unwanted includes from windows.h
+    ADD_DEFINITIONS(-DWIN32_LEAN_AND_MEAN)
     LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
   ENDIF()
 
@@ -1264,11 +1286,14 @@ if (NOT INTERN_BUILD_MOBILE)
     SET(AT_CUDA_ENABLED 1)
   endif()
 
-  IF (NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)
-    MESSAGE(STATUS "CuDNN not found. Compiling without CuDNN support")
+  IF (NOT USE_CUDNN)
+    MESSAGE(STATUS "USE_CUDNN is set to 0. Compiling without cuDNN support")
+    set(AT_CUDNN_ENABLED 0)
+  ELSEIF (NOT CUDNN_FOUND)
+    MESSAGE(WARNING "CuDNN not found. Compiling without CuDNN support")
     set(AT_CUDNN_ENABLED 0)
   ELSE()
-    include_directories(SYSTEM ${CUDNN_INCLUDE_DIRS})
+    include_directories(SYSTEM ${CUDNN_INCLUDE_PATH})
     set(AT_CUDNN_ENABLED 1)
   ENDIF()
 

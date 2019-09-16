@@ -279,7 +279,7 @@ void Module::save(serialize::OutputArchive& archive) const {
   }
   for (const auto& child : children_) {
     if (child.value()->is_serializable()) {
-      serialize::OutputArchive child_archive;
+      serialize::OutputArchive child_archive(archive.compilation_unit());
       child.value()->save(child_archive);
       archive.write(child.key(), child_archive);
     }
@@ -328,6 +328,15 @@ Tensor& Module::register_buffer(std::string name, Tensor tensor) {
       name,
       "')");
   return buffers_.insert(std::move(name), std::move(tensor));
+}
+
+void Module::unregister_module(const std::string& name) {
+  TORCH_CHECK(
+      children_.contains(name),
+      "No Module with name `",
+      name,
+      "` is registered");
+  children_.erase(name);
 }
 
 void Module::pretty_print(std::ostream& stream) const {

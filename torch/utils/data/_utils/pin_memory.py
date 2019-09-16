@@ -12,6 +12,10 @@ from torch._utils import ExceptionWrapper
 
 
 def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
+    # This setting is thread local, and prevents the copy in pin_memory from
+    # consuming all CPU cores.
+    torch.set_num_threads(1)
+
     torch.cuda.set_device(device_id)
 
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
@@ -22,7 +26,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
         except queue.Empty:
             continue
         idx, data = r
-        if not isinstance(data, ExceptionWrapper):
+        if not done_event.is_set() and not isinstance(data, ExceptionWrapper):
             try:
                 data = pin_memory(data)
             except Exception:

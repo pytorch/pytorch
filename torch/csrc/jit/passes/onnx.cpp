@@ -55,8 +55,10 @@ void checkONNXCompatibility(const c10::FunctionSchema& schema) {
     }
     if (type->kind() == TypeKind::ListType) {
       const auto& elem_type = reinterpret_cast<ListType*>(type.get())->getElementType();
-      if (elem_type->isSubclass(TypeKind::TensorType)) {
-        AT_ASSERTM(!has_tensor_list, "ONNX export supports at most one TensorList as input.");
+      if (elem_type->isSubtypeOf(TensorType::get())) {
+        AT_ASSERTM(
+            !has_tensor_list,
+            "ONNX export supports at most one TensorList as input.");
         has_tensor_list = true;
       }
     }
@@ -92,9 +94,11 @@ void preprocessCaffe2Ops(Block* block) {
             AT_ASSERT(type->kind() != TypeKind::OptionalType);
           }
         }
-        if (type->isSubclass(TypeKind::TensorType)) {
+        if (type->isSubtypeOf(TensorType::get())) {
           it->addInput(origin_input);
-        } else if (type->kind() == TypeKind::BoolType || type->kind() == TypeKind::IntType) {
+        } else if (
+            type->kind() == TypeKind::BoolType ||
+            type->kind() == TypeKind::IntType) {
           const auto* constant_node = origin_input->node();
           AT_ASSERT(constant_node->kind() == prim::Constant);
           it->i_(Symbol::attr(arg.name()), constant_node->i(attr::value));
@@ -110,12 +114,14 @@ void preprocessCaffe2Ops(Block* block) {
           const auto& list_node = origin_input->node();
           AT_ASSERT(list_node->kind() == prim::ListConstruct);
           const auto& elem_type = reinterpret_cast<ListType*>(type.get())->getElementType();
-          if (elem_type->isSubclass(TypeKind::TensorType)) {
+          if (elem_type->isSubtypeOf(TensorType::get())) {
             const auto& tensor_list = origin_input->node()->inputs();
             for (const auto& t : tensor_list) {
               it->addInput(t);
             }
-          } else if (elem_type->kind() == TypeKind::IntType || elem_type->kind() == TypeKind::BoolType) {
+          } else if (
+              elem_type->kind() == TypeKind::IntType ||
+              elem_type->kind() == TypeKind::BoolType) {
             // TODO support list of ints and bools, needs c10 op for testing
             throw std::runtime_error("List[int] and List[bool] are not supported yet.");
           } else if (elem_type->kind() == TypeKind::FloatType) {
@@ -128,11 +134,13 @@ void preprocessCaffe2Ops(Block* block) {
             it->fs_(Symbol::attr(arg.name()), values);
           } else {
             throw std::runtime_error("Unhandled scalar arg: " + arg.name() +
-                ", type: " + c10::typeKindToString(elem_type->kind())); }
+                ", type: " + c10::typeKindToString(elem_type->kind()));
+          }
         } else {
           throw std::runtime_error("Unsupported input type of arg " +
               arg.name() + " in Caffe2 operator: " +
-              c10::typeKindToString(type->kind())); }
+              c10::typeKindToString(type->kind()));
+        }
       }
     }
   }

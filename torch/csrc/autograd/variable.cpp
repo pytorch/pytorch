@@ -6,7 +6,6 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -178,6 +177,25 @@ void Variable::rebase_history(Edge gradient_edge) {
   } else {
     set_gradient_edge(std::move(gradient_edge));
   }
+}
+
+void Variable::create_cpp_hook() {
+  auto &list = get_autograd_meta()->cpp_hooks_list;
+  list.reset(new hooks_list());
+  std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, output_nr()));
+  clear_hooks();
+  add_hook(std::make_shared<CppFunctionPreHook>(list, 0));
+  auto fn = grad_fn();
+  if (fn) {
+    fn->add_pre_hook(std::move(hook_ptr));
+  }
+}
+
+void Variable::remove_hook(unsigned pos) {
+  auto &list = get_autograd_meta()->cpp_hooks_list;
+  TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
+  // Hook will be ignored
+  (*list)[pos] = nullptr;
 }
 
 }} // namespace torch::autograd

@@ -23,7 +23,7 @@ void dim_apply(TensorList tensors, int64_t dim, Fn f) {
       for (auto ti : tensors) {
         int64_t i = it;
         Tensor nt = ti;
-        for (size_t d = 0; d < ndim; d++) {
+        for (int64_t d = 0; d < ndim; d++) {
           if (d != dim) {
             // this could be avoided for slower-changing dimensions if done
             // better
@@ -40,7 +40,7 @@ void dim_apply(TensorList tensors, int64_t dim, Fn f) {
 
 // ensure we get good values and indices for kthvalue, mode, median
 // this will always be with the reducing dim as 1-d
-static void _reduction_with_indices_allocate_or_resize_output(
+inline void _reduction_with_indices_allocate_or_resize_output(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
@@ -80,7 +80,7 @@ static void _reduction_with_indices_allocate_or_resize_output(
 }
 
 // ensure we get good values and indices for topk
-static void _allocate_or_resize_output_with_indices(
+inline void _allocate_or_resize_output_with_indices(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,

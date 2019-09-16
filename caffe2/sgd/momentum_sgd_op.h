@@ -147,7 +147,7 @@ class SparseMomentumSGDUpdateOp final : public Operator<Context> {
     const auto* gradIn = Input(GRAD).template data<T>();
     const auto* momentumIn = Input(MOMENTUM).template data<T>();
     const auto* lr = Input(LR).template data<T>();
-    const auto* paramIn = Input(PARAM).template data<T>();
+    // const auto* paramIn = Input(PARAM).template data<T>();
     const auto* indices = Input(INDICES).template data<SIndex>();
 
     auto* gradOut = Output(OUTPUT_GRAD)->template mutable_data<T>();

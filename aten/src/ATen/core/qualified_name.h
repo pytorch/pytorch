@@ -35,7 +35,7 @@ struct QualifiedName {
     cacheAccessors();
   }
 
-  /* implicit */ QualifiedName(const std::vector<std::string>& atoms) {
+  explicit QualifiedName(std::vector<std::string> atoms) {
     for (const auto& atom : atoms) {
       TORCH_CHECK(!atom.empty(), "Atom cannot be empty");
       TORCH_CHECK(

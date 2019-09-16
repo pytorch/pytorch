@@ -9,6 +9,8 @@
 #include <iostream>
 #include <vector>
 
+#include <torch/csrc/utils/hash.h>
+
 namespace torch {
 namespace jit {
 
@@ -39,11 +41,18 @@ struct ArgumentInfo {
   at::ScalarType type() const {
     return at::ScalarType(type_);
   }
-  operator TypePtr() const {
+  TypePtr toType() const {
     if (!defined())
       return TensorType::get();
-    return DimensionedTensorType::create(
-        type(), ConvertIntToCPUOrCUDA(device()), dim());
+    return TensorType::create(
+        type(),
+        ConvertIntToCPUOrCUDA(device()),
+        c10::VaryingShape(dim()),
+        c10::VaryingShape(dim()),
+        requires_grad());
+  }
+  operator TypePtr() const {
+    return toType();
   }
 
  private:
@@ -341,7 +350,7 @@ struct CompleteArgumentInfo {
   operator TypePtr() const {
     if (!defined())
       return TensorType::get();
-    return CompleteTensorType::create(
+    return TensorType::create(
         type(), ConvertIntToCPUOrCUDA(device()), sizes(), strides());
   }
 
@@ -418,10 +427,41 @@ inline CompleteArgumentInfo CompleteArgumentSpec::at(size_t i) const {
   return CompleteArgumentInfo(*this, i);
 }
 
+inline c10::optional<int8_t> convertOptional(
+    c10::optional<c10::ScalarType> const& from) {
+  return (from) ? c10::optional<int8_t>(static_cast<int8_t>(*from))
+                : c10::optional<int8_t>{};
+}
+
 } // namespace jit
 } // namespace torch
 
 namespace std {
+
+template <>
+struct hash<c10::VaryingShape> {
+  size_t operator()(const c10::VaryingShape& vs) const {
+    return torch::get_hash(
+        vs.size(),
+        vs.size() ? vs.sizes().value() : std::vector<c10::optional<int64_t>>());
+  }
+};
+
+template <>
+struct hash<c10::TensorType> {
+  size_t operator()(const c10::TensorType& ptt) const {
+    return torch::get_hash<
+        c10::optional<int8_t>,
+        c10::VaryingShape,
+        c10::VaryingShape,
+        c10::optional<bool>>(
+        torch::jit::convertOptional(ptt.scalarType()),
+        ptt.sizes(),
+        ptt.strides(),
+        ptt.requiresGrad());
+  }
+};
+
 template <>
 struct hash<torch::jit::ArgumentSpec> {
   size_t operator()(const torch::jit::ArgumentSpec& spec) const {

@@ -10,7 +10,8 @@ namespace {
 class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
-  at::Tensor operator()(at::Tensor packed_weight) {
+  std::tuple<at::Tensor, c10::optional<Tensor>> operator()(
+      at::Tensor packed_weight) {
     // Pull out the PackBMatrix instance from the owning tensor.
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedLinearWeight>(packed_weight);
@@ -19,24 +20,42 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
     int64_t N = static_cast<int64_t>(packB->numCols());
     int64_t K = static_cast<int64_t>(packB->numRows());
 
-    int32_t weight_zero_point_int32 = pack_ptr.w_zp;
+    Tensor weight_origin;
+    if (pack_ptr.q_scheme == kPerTensorAffine) {
+      weight_origin = _empty_affine_quantized(
+          {N, K},
+          at::device(kCPU).dtype(kQInt8),
+          pack_ptr.w_scale[0],
+          pack_ptr.w_zp[0]);
+    } else if (pack_ptr.q_scheme == kPerChannelAffine) {
+      auto scales = from_blob(
+          pack_ptr.w_scale.data(),
+          pack_ptr.w_scale.size(),
+          device(kCPU).dtype(kFloat));
+      auto zero_points = from_blob(
+          pack_ptr.w_zp.data(), pack_ptr.w_zp.size(), device(kCPU).dtype(kInt));
 
-    auto weight_origin = _empty_affine_quantized(
-        {N, K},
-        at::device(kCPU).dtype(kQInt8),
-        pack_ptr.w_scale,
-        weight_zero_point_int32);
+      weight_origin = _empty_per_channel_affine_quantized_like(
+          scales.toType(kDouble),
+          zero_points.toType(kLong),
+          {N, K},
+          {0}, // The output channel axis is 0
+          device(kCPU).dtype(kQInt8));
+    }
+
     int8_t* weight_ptr_int8 =
-        reinterpret_cast<int8_t*>(weight_origin.data<c10::qint8>());
+        reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
 
     // packB->printPackedMatrix("packedB inside fbgemm_unpack
     // (QLinearUnpackWeightInt8): ");
     packB->unpack(weight_ptr_int8);
 
-    return weight_origin;
+    return std::tuple<at::Tensor, c10::optional<Tensor>>(
+        weight_origin, pack_ptr.bias);
   }
 #else // USE_FBGEMM
-  at::Tensor operator()(at::Tensor /* weight */
+  std::tuple<at::Tensor, c10::optional<Tensor>> operator()(
+      at::Tensor /* weight */
   ) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
@@ -48,9 +67,9 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    "quantized::fbgemm_linear_unpack(Tensor W_prepack) -> Tensor W_origin",
+    "quantized::linear_unpack(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
     c10::RegisterOperators::options().kernel<QLinearUnpackWeightInt8>(
-        CPUTensorId()));
+        TensorTypeId::CPUTensorId));
 
 } // namespace
 } // namespace native

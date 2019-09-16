@@ -1,4 +1,5 @@
 #include <aten/src/ATen/Context.h>
+#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -9,7 +10,7 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
@@ -49,7 +50,7 @@ namespace jit {
 
 namespace {
 
-template<class T>
+template <class T>
 c10::List<T> make_result_list() {
   return c10::List<T>();
 }
@@ -65,6 +66,12 @@ Operation noop(const Node* n) {
 c10::OperatorOptions aliasAnalysisFromSchema() {
   c10::OperatorOptions result;
   result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return result;
+}
+
+c10::OperatorOptions aliasAnalysisConservative() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
   return result;
 }
 
@@ -86,7 +93,7 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
     throw std::runtime_error(
         "Cannot input a tensor of dimension other than 0 as a scalar argument");
   }
-  if (toInt && !isIntegralType(t.scalar_type())) {
+  if (toInt && !isIntegralType(t.scalar_type(), /*includeBool=*/false)) {
     std::stringstream ss;
     ss << "Cannot input a tensor of type " << t.scalar_type()
        << " as an integral argument";
@@ -568,6 +575,24 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::grad(Tensor a) -> Tensor(*)",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.grad());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::data(Tensor(a) a) -> Tensor(a)",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, autograd::Variable(a).variable_data());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::is_cuda(Tensor a) -> bool",
          [](Stack& stack) {
            at::Tensor a;
@@ -577,11 +602,29 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::is_sparse(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_sparse());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::is_mkldnn(Tensor a) -> bool",
          [](Stack& stack) {
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_mkldnn());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::is_quantized(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_quantized());
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -613,6 +656,80 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? keep_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor[]",
+         [](Stack& stack) {
+           bool allow_unused = pop(stack).toBool();
+           bool create_graph = pop(stack).toBool();
+           auto keep_graph = pop(stack).toOptional<bool>();
+           auto grad_outputs = pop(stack);
+           auto inputs = pop(stack).toTensorList();
+           auto outputs = pop(stack).toTensorList();
+           std::vector<torch::autograd::Variable> input_vars(
+               inputs.begin(), inputs.end());
+           std::vector<torch::autograd::Variable> output_vars(outputs.begin(), outputs.end());
+           std::vector<torch::autograd::Variable> gradients;
+
+           if (!grad_outputs.isNone()) {
+             for (const IValue& v : grad_outputs.toGenericListRef()) {
+               gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
+             }
+           }
+
+           auto res = torch::autograd::grad(
+               output_vars,
+               input_vars,
+               gradients,
+               keep_graph,
+               create_graph,
+               allow_unused);
+
+           std::vector<at::Tensor> res_tensors(res.begin(), res.end());
+           push(stack, c10::impl::toList<at::Tensor>(std::move(res_tensors)));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     // NB: backward op might write to every input tensors in the graph and it's
+     // much more expensive to analayze the leaves and sometimes it might retain
+     // the whole gradients in every tensor of the Autograd graph with
+     // create_graph=True so we use aliasAnalysisConservative for these two OPs
+     Operator(
+         "aten::backward(Tensor[](a!) tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         [](Stack& stack) {
+           bool create_graph = pop(stack).toBool();
+           auto retain_graph = pop(stack).toOptional<bool>();
+           auto grad_tensors = pop(stack);
+           auto tensors = pop(stack).toTensorList();
+           std::vector<torch::autograd::Variable> output_vars(
+               tensors.begin(), tensors.end());
+           std::vector<torch::autograd::Variable> gradients;
+
+           if (!grad_tensors.isNone()) {
+             for (const IValue& v : grad_tensors.toGenericListRef()) {
+               gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
+             }
+           }
+
+           torch::autograd::backward(
+               output_vars, gradients, retain_graph, create_graph);
+           return 0;
+         },
+         aliasAnalysisConservative()),
+     Operator(
+         "aten::backward(Tensor(a!) self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         [](Stack& stack) {
+           bool create_graph = pop(stack).toBool();
+           auto retain_graph = pop(stack).toOptional<bool>();
+           IValue gradient_ivalue = pop(stack);
+           at::Tensor gradient = gradient_ivalue.isNone()
+               ? at::Tensor()
+               : gradient_ivalue.toTensor();
+           at::Tensor self = pop(stack).toTensor();
+           bool keep_graph = retain_graph ? retain_graph.value() : create_graph;
+           self.backward(gradient, keep_graph, create_graph);
+           return 0;
+         },
+         aliasAnalysisConservative()),
+     Operator(
          "prim::AutogradZero() -> Tensor",
          [](const Node* node) {
            return [](Stack& stack) {
@@ -625,19 +742,14 @@ RegisterOperators reg(
          "aten::save(t item, str filename) -> ()",
          [](Stack& stack) {
            auto filename = pop(stack).toStringRef();
-           auto value = pop(stack);
+           auto ivalue = pop(stack);
 
            // Pickle the tensor
-           Pickler p;
-           p.torchSaveStart();
-           p.protocol();
-           p.pushIValue(value);
-           p.stop();
-           p.torchSaveStop();
+           auto data = pickle({ivalue});
 
            // Write file
            std::fstream output(filename, std::ios::out | std::ios::binary);
-           output.write(p.stack().data(), p.stack().size());
+           output.write(data.data(), data.size());
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -787,7 +899,7 @@ RegisterOperators reg(
              pop(stack, input, shape);
              shape = shape.contiguous();
              AT_ASSERT(shape.ndimension() == 1);
-             at::IntArrayRef shape_list(shape.data<int64_t>(), shape.size(0));
+             at::IntArrayRef shape_list(shape.data_ptr<int64_t>(), shape.size(0));
              push(stack, input.reshape(shape_list));
              return 0;
            };
@@ -1173,34 +1285,6 @@ RegisterOperators reg(
              auto userObj = c10::ivalue::Object::create(
                  c10::StrongTypePtr(cu, type), numAttrs);
              push(stack, std::move(userObj));
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::GetAttr,
-         [](const Node* node) {
-           const auto type = node->input()->type()->expect<ClassType>();
-           const auto& field = node->s(attr::name);
-           const auto slot = type->getAttributeSlot(field);
-           return [slot](Stack& stack) {
-             auto userObj = pop(stack).toObject();
-             auto value = userObj->getSlot(slot);
-             push(stack, std::move(value));
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::SetAttr,
-         [](const Node* node) {
-           const auto type = node->inputs().at(0)->type()->expect<ClassType>();
-           const auto& field = node->s(attr::name);
-           const auto slot = type->getAttributeSlot(field);
-           return [slot](Stack& stack) {
-             auto v = pop(stack);
-             auto userObj = pop(stack).toObject();
-             userObj->setSlot(slot, std::move(v));
              return 0;
            };
          },
@@ -1655,6 +1739,20 @@ int listList(Stack& stack) {
   return 0;
 }
 
+template <typename T>
+int listContains(Stack& stack) {
+  auto key = pop(stack).to<T>();
+  auto list = pop(stack).to<c10::List<T>>();
+  for (const T& item : list) {
+    if (item == key) {
+      push(stack, true);
+      return 0;
+    }
+  }
+  push(stack, false);
+  return 0;
+}
+
 template <class T>
 int listAdd(Stack& stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
@@ -1759,7 +1857,13 @@ int listSort(Stack& stack) {
   bool reverse = pop(stack).toBool();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
   std::sort(list.begin(), list.end(), [reverse](const T& a, const T& b) {
-    return (a < b) ^ reverse;
+    // FBCode errors without this check - "strict weak ordering"
+    // TODO: remove when possible, since it just slows down
+    // sorting and doesn't do anything useful
+    if (a == b) {
+      return false;
+    }
+    return (a < b) != reverse;
   });
   return 0;
 }
@@ -1772,7 +1876,11 @@ int listSort<at::Tensor>(Stack& stack) {
   std::sort(
       list.begin(),
       list.end(),
-      [reverse](const at::Tensor& a, const at::Tensor& b) {
+      [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
+        // "strict weak ordering" issue - see other sort
+        if (a.getIntrusivePtr() == b.getIntrusivePtr()) {
+          return false;
+        }
         return (a.lt(b).is_nonzero()) ^ reverse;
       });
   return 0;
@@ -1783,6 +1891,10 @@ int listCopyAndSort(Stack& stack) {
   c10::List<T> list = pop(stack).to<c10::List<T>>();
   auto list_copied = list.copy();
   std::sort(list_copied.begin(), list_copied.end(), [](const T& a, const T& b) {
+    // "strict weak ordering" issue - see other sort
+    if (a == b) {
+      return false;
+    }
     return a < b;
   });
   push(stack, list_copied);
@@ -1831,7 +1943,15 @@ int dictLen(Stack& stack) {
 
 template <unsigned int Index, typename Elem>
 c10::List<Elem> makeListForDictKeysOrValues(
+    const std::pair<c10::optional<TypePtr>, c10::optional<TypePtr>>& types,
     const std::vector<std::pair<IValue, IValue>>& order) {
+  TORCH_INTERNAL_ASSERT(
+      (!std::get<Index>(types).has_value())
+      || (*std::get<Index>(types) == getTypePtr<Elem>()),
+      "Type mismatch when trying to get a List of keys/values from Dict. ",
+      "Type in Dict is ", toString(*std::get<Index>(types)),
+      ". Type in List is ", toString(getTypePtr<Elem>()),
+      ". Index is ", c10::guts::to_string(Index));
   c10::List<Elem> values;
   values.reserve(order.size());
   for (const auto& item : order) {
@@ -1842,8 +1962,12 @@ c10::List<Elem> makeListForDictKeysOrValues(
 
 template <unsigned int Index>
 c10::impl::GenericList makeGenericListForDictKeysOrValues(
+    const std::pair<c10::optional<TypePtr>, c10::optional<TypePtr>>& types,
     const std::vector<std::pair<IValue, IValue>>& order) {
-  auto values = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto type = std::get<Index>(types);
+  auto values = type.has_value()
+    ? c10::impl::GenericList(*type)
+    : c10::impl::GenericList(c10::impl::deprecatedUntypedList());
   values.reserve(order.size());
   for (const auto& item : order) {
     values.push_back(std::get<Index>(item));
@@ -1855,17 +1979,19 @@ template <unsigned int Index>
 Operation dictKeysOrValues(const Node* n) {
   auto outputType = n->output()->type()->expect<ListType>();
   return [=](Stack& stack) -> int {
-    const auto& order = iterationOrder(pop(stack).toGenericDict());
+    auto dict = pop(stack).toGenericDict();
+    const auto& order = iterationOrder(dict);
+    const auto types = std::make_pair(dict._keyType(), dict._valueType());
     if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
-      push(stack, makeListForDictKeysOrValues<Index, at::Tensor>(order));
+      push(stack, makeListForDictKeysOrValues<Index, at::Tensor>(types, order));
     } else if (outputType->getElementType() == IntType::get()) {
-      push(stack, makeListForDictKeysOrValues<Index, int64_t>(order));
+      push(stack, makeListForDictKeysOrValues<Index, int64_t>(types, order));
     } else if (outputType->getElementType() == FloatType::get()) {
-      push(stack, makeListForDictKeysOrValues<Index, double>(order));
+      push(stack, makeListForDictKeysOrValues<Index, double>(types, order));
     } else if (outputType->getElementType() == BoolType::get()) {
-      push(stack, makeListForDictKeysOrValues<Index, bool>(order));
+      push(stack, makeListForDictKeysOrValues<Index, bool>(types, order));
     } else {
-      push(stack, makeGenericListForDictKeysOrValues<Index>(order));
+      push(stack, makeGenericListForDictKeysOrValues<Index>(types, order));
     }
     return 0;
   };
@@ -1933,18 +2059,19 @@ int dictPop(Stack& stack) {
   }
   auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(key);
-  if (value == dict.end()) {
+  auto iter = dict.find(key);
+  if (iter == dict.end()) {
     if (has_default) {
       push(stack, default_value);
     } else {
       AT_ERROR("KeyError: ", key);
     }
   } else {
+    // note: before erase
+    push(stack, iter->value());
     auto erase_count = dict.erase(key);
     TORCH_CHECK(
         erase_count == 1, "Expected to erase 1 item, found ", erase_count);
-    push(stack, value->value());
   }
   return 0;
 }
@@ -1989,7 +2116,11 @@ int dictUpdate(Stack& stack) {
 
 int dictItems(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  auto items = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto key_type = dict._keyType();
+  auto value_type = dict._valueType();
+  auto items = (key_type.has_value() && value_type.has_value())
+      ? c10::impl::GenericList(TupleType::create({*key_type, *value_type}))
+      : c10::impl::GenericList(c10::impl::deprecatedUntypedList());
   items.reserve(dict.size());
   for (const auto& item : iterationOrder(dict)) {
     items.emplace_back(c10::ivalue::Tuple::create({item.first, item.second}));
@@ -2258,6 +2389,21 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("bool", c10::List<bool>),
     CREATE_LIST_OPS("Tensor", c10::List<at::Tensor>),
     CREATE_LIST_OPS("t", c10::List<IValue>),
+
+    // `listContains<T>` is not implemented for non-primitive types
+    // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
+    Operator(
+        "aten::__contains__(int[] l, int item) -> bool",
+        listContains<int64_t>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::__contains__(float[] l, float item) -> bool",
+        listContains<double>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::__contains__(str[] l, str item) -> bool",
+        listContains<std::string>,
+        aliasAnalysisFromSchema()),
 #undef CREATE_LIST_OPS
     Operator(
         "aten::sort(int[](a!) self, bool reverse=False) -> ()",
@@ -2662,7 +2808,7 @@ RegisterOperators reg2({
           c10::List<int64_t> elems;
           elems.reserve(t.size(0));
           for (int i = 0; i < t.size(0); i++) {
-            elems.push_back(*t[i].data<int32_t>());
+            elems.push_back(*t[i].data_ptr<int32_t>());
           }
           push(stack, std::move(elems));
           return 0;
@@ -2760,6 +2906,7 @@ RegisterOperators reg2({
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("float"),
+    CREATE_DICT_OPS("Tensor"),
 #undef CREATE_DICT_OPS
 
     Operator(
@@ -2885,16 +3032,14 @@ Operation sort_op(
         g_list.begin(),
         g_list.end(),
         [lt_func, reverse, &sort_stack](IValue a, IValue b) -> bool {
-          // FBCode errors without this check - "strict weak ordering"
-          // TODO: remove when possible, since it just slows down
-          // sorting and doesn't do anything useful
+          // "strict weak ordering" issue - see other sort
           if (a.isSameIdentity(b)) {
             return false;
           }
           sort_stack.push_back(a);
           sort_stack.push_back(b);
           lt_func->run(sort_stack);
-          return pop(sort_stack).toBool() ^ reverse;
+          return pop(sort_stack).toBool() != reverse;
         });
     if (copy_return_list) {
       push(stack, g_list);

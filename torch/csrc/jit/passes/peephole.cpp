@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/ir_views.h>
-#include <torch/csrc/jit/symbolic_variable.h>
-
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
@@ -44,11 +43,16 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
             "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
             /*const_inputs=*/attr::size)) {
       // x.expand(x.size()) == x
-      if (auto input_type = node->namedInput(attr::self)
-                                ->type()
-                                ->cast<CompleteTensorType>()) {
+      if (auto input_type =
+              node->namedInput(attr::self)->type()->cast<TensorType>()) {
         auto expanded_sizes = node->get<c10::List<int64_t>>(attr::size);
-        if (!expanded_sizes.has_value() || c10::impl::toVector(*expanded_sizes) == input_type->sizes()) {
+        auto input_type_sizes = input_type->sizes().concrete_sizes();
+        if (expanded_sizes.has_value() && input_type_sizes &&
+            c10::impl::toVector(*expanded_sizes) == *input_type_sizes) {
+          GRAPH_UPDATE(
+              *node,
+              " (x.expand(x.size()) == x) is replaced with ",
+              node->namedInput(attr::self)->debugName());
           node->output()->replaceAllUsesWith(node->namedInput(attr::self));
         }
       }
@@ -56,15 +60,23 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       // x.t().t() == x
       Node* input_node = node->input()->node();
       if (input_node->matches("aten::t(Tensor self) -> Tensor")) {
+        GRAPH_UPDATE(
+            *node,
+            " (x.t().t() == x) is replaced with ",
+            input_node->input()->debugName());
         node->output()->replaceAllUsesWith(input_node->input());
       }
     } else if (node->matches(
                    "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
       // x.type_as(y) == x iff x.type() == y.type()
-      auto self_type = ProfiledTensorType::create(node->input(0)->type());
-      auto other_type = ProfiledTensorType::create(node->input(1)->type());
+      auto self_type = node->input(0)->type()->expect<TensorType>();
+      auto other_type = node->input(1)->type()->expect<TensorType>();
       if (mustBeEqual(self_type->scalarType(), other_type->scalarType()) &&
           mustBeEqual(self_type->device(), other_type->device())) {
+        GRAPH_UPDATE(
+            *node,
+            " (x.type_as(y) == x) is replaced with ",
+            node->input(0)->debugName());
         node->output()->replaceAllUsesWith(node->input(0));
       }
     } else if (
@@ -94,7 +106,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
           // type_as conditional on the tensor shape being a scalar, but that
           // might add overhead, and make analysis harder.
           auto add_mat_type =
-              ProfiledTensorType::create(node->input(1 - mm_side)->type());
+              node->input(1 - mm_side)->type()->expect<TensorType>();
           // if we don't have the rank, we can't tell if the bias is a scalar
           if (!add_mat_type->sizes().size()) {
             continue;
@@ -104,17 +116,18 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
                   "aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
             WithInsertPoint guard(node);
 
-            auto mm_node = node->input(mm_side)->node();
-            SymbolicVariable add_mat(node->input(1 - mm_side));
-            SymbolicVariable mat1(mm_node->input(0));
-            SymbolicVariable mat2(mm_node->input(1));
+            auto* graph = node->owningGraph();
+            auto* mm_node = node->input(mm_side)->node();
+            auto* add_mat = node->input(1 - mm_side);
+            auto* mat1 = mm_node->input(0);
+            auto* mat2 = mm_node->input(1);
 
-            auto mat1_type = ProfiledTensorType::create(mat1.value()->type());
-            auto mat_scalar_type = mat1_type->scalarType();
-            if (!mat_scalar_type) {
-              auto mat2_type = ProfiledTensorType::create(mat2.value()->type());
-              mat_scalar_type = mat2_type->scalarType();
+            // Attempts to find a matrix with a defined scalar type to type as
+            auto* type_as_mat = mat1;
+            if (!type_as_mat->type()->expect<TensorType>()->scalarType()) {
+              type_as_mat = mat2;
             }
+            auto mat_scalar_type = type_as_mat->type()->expect<TensorType>()->scalarType();
 
             // we can't use type_as if we don't know the target type (mm), the
             // bias needs to be coerced to
@@ -129,13 +142,36 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
             if (add_mat_type->sizes().size() &&
                 *add_mat_type->sizes().size() == 0 &&
                 !mustBeEqual(add_mat_type->scalarType(), mat_scalar_type)) {
-              add_mat = add_mat.type_as(mat1);
+              auto* type_as_node = graph->insertNode(graph->create(aten::type_as, 1));
+              type_as_node->addInput(add_mat);
+              type_as_node->addInput(type_as_mat);
+              add_mat = type_as_node->output();
+              if (add_mat_type->isComplete()) {
+                auto new_type = add_mat_type->withScalarType(mat_scalar_type)->contiguous();
+                add_mat->setType(new_type);
+              }
             }
 
-            SymbolicVariable addmm_value = add_mat.addmm(mat1, mat2);
+            auto* addmm_node = graph->insertNode(graph->create(aten::addmm, 1));
+            auto* cOne = graph->insertConstant(1);
+            addmm_node->addInput(add_mat);
+            addmm_node->addInput(mat1);
+            addmm_node->addInput(mat2);
+            addmm_node->addInput(cOne);
+            addmm_node->addInput(cOne);
+            auto* addmm_value = addmm_node->output();
 
             // Copy shape information from output node
-            ((Value*)addmm_value)->copyMetadata(node->output());
+            addmm_value->copyMetadata(node->output());
+            GRAPH_UPDATE(
+                "Fusing ",
+                mm_node->input(0)->debugName(),
+                ", ",
+                mm_node->input(1)->debugName(),
+                " and ",
+                node->input(1 - mm_side)->debugName(),
+                " into ",
+                addmm_value->debugName());
             node->output()->replaceAllUsesWith(addmm_value);
           }
         }
@@ -151,6 +187,10 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
             /*const_inputs=*/attr::other)) {
       // x * 1 == x / 1 == x
       if (node->get<at::Scalar>(attr::other)->toDouble() == 1) {
+        GRAPH_UPDATE(
+            *node,
+            " (x * 1 == x / 1 == x) is replaced with ",
+            node->input(0)->debugName());
         node->output()->replaceAllUsesWith(node->input(0));
       }
     } else if (
@@ -163,6 +203,10 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       // x + 0 == x - 0 == x
       if (node->get<at::Scalar>(attr::alpha)->toDouble() == 1 &&
           node->get<at::Scalar>(attr::other)->toDouble() == 0) {
+        GRAPH_UPDATE(
+            *node,
+            " (x + 0 == x - 0 == x) is replaced with ",
+            node->input(0)->debugName());
         node->output()->replaceAllUsesWith(node->input(0));
       }
     } else if (
@@ -170,12 +214,20 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
         node->kind() == prim::ImplicitTensorToNum) {
       Node* input_node = node->input()->node();
       if (input_node->kind() == prim::NumToTensor) {
+        GRAPH_UPDATE(
+            *node,
+            " (x.NumToTensor().ImplicitTensorToNum() == x.NumToTensor()) is replaced with ",
+            node->input()->debugName());
         node->output()->replaceAllUsesWith(input_node->input());
       }
     } else if (
         node->matches(
             "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")) {
       if (node->input(1)->mustBeNone()) {
+        GRAPH_UPDATE(
+            *node,
+            " (x._grad_sum_to_size(x, None) == x) is replaced with ",
+            node->input(0)->debugName());
         node->output()->replaceAllUsesWith(node->input(0));
       } else {
         auto uses = node->output()->uses();
@@ -183,6 +235,10 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
           if (u.user->matches(
                   "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)") &&
               u.user->input(1)->type()->isSubtypeOf(ListType::ofInts())) {
+            GRAPH_UPDATE(
+                *node,
+                " (x._grad_sum_to_size(y)._grad_sum_to_size(z) == x._grad_sum_to_size(z)) is replaced with ",
+                node->inputs().at(0)->debugName());
             u.user->replaceInput(0, node->inputs().at(0));
           }
         }
@@ -201,6 +257,11 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
         // if an if node's output equals its condition replace output with
         // condition
         if (true_val && !false_val) {
+          GRAPH_UPDATE(
+              "Replacing ",
+              n.outputs().at(i)->debugName(),
+              " (True or False) with ",
+              n.cond()->debugName());
           n.outputs().at(i)->replaceAllUsesWith(n.cond());
         }
       }
@@ -219,6 +280,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
           WithInsertPoint guard(node);
           auto output = node->owningGraph()->insertConstant(
               node->kind() == aten::__isnot__);
+          GRAPH_UPDATE("Folding ", *node, " to ", output->debugName());
           node->output()->replaceAllUsesWith(output);
         }
       }
@@ -228,37 +290,56 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       // we are unwrapping an input that can't be None, remove the unwrap
       auto input = node->input();
       if (input->mustNotBeNone()) {
+        GRAPH_UPDATE(
+            "Unwrapping ", *node, " as ", node->input(), " can't be optional");
         node->output()->replaceAllUsesWith(node->input());
       }
     } else if (node->matches("prim::dtype(Tensor a) -> int")) {
-      auto ptt = ProfiledTensorType::create(node->input()->type());
+      auto ptt = node->input()->type()->expect<TensorType>();
       if (ptt->scalarType()) {
         WithInsertPoint guard(node);
         auto output = node->owningGraph()->insertConstant(
             static_cast<int64_t>(*ptt->scalarType()));
+        GRAPH_UPDATE(
+            "Replacing ", *node, " with a type constant ", output->debugName());
         node->output()->replaceAllUsesWith(output);
       }
     } else if (node->matches("prim::device(Tensor a) -> Device")) {
-      auto ptt = ProfiledTensorType::create(node->input()->type());
+      auto ptt = node->input()->type()->expect<TensorType>();
       if (ptt->device()) {
         WithInsertPoint guard(node);
         auto output = node->owningGraph()->insertConstant(*ptt->device());
+        GRAPH_UPDATE(
+            "Replacing ",
+            *node,
+            " with a device constant ",
+            output->debugName());
         node->output()->replaceAllUsesWith(output);
       }
     } else if (node->matches("aten::dim(Tensor self) -> int")) {
-      auto ptt = ProfiledTensorType::create(node->input()->type());
+      auto ptt = node->input()->type()->expect<TensorType>();
       if (auto dim = ptt->sizes().size()) {
         WithInsertPoint guard(node);
         auto output =
             node->owningGraph()->insertConstant(static_cast<int64_t>(*dim));
+        GRAPH_UPDATE(
+            "Replacing ",
+            *node,
+            " with a \"dim\" constant ",
+            output->debugName());
         node->output()->replaceAllUsesWith(output);
       }
     } else if (node->matches("prim::is_cuda(Tensor a) -> bool")) {
-      auto ptt = ProfiledTensorType::create(node->input()->type());
+      auto ptt = node->input()->type()->expect<TensorType>();
       if (ptt->device()) {
         WithInsertPoint guard(node);
         auto output =
             node->owningGraph()->insertConstant((*ptt->device()).is_cuda());
+        GRAPH_UPDATE(
+            "Replacing ",
+            *node,
+            " with a is_cuda constant ",
+            output->debugName());
         node->output()->replaceAllUsesWith(output);
       }
     }
@@ -267,6 +348,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
 
 void PeepholeOptimize(Block* block, bool addmm_fusion_enabled) {
   PeepholeOptimizeImpl(block, addmm_fusion_enabled);
+  GRAPH_DUMP("After PeepholeOptimize: ", block->owningGraph());
   // Eliminate dead code created by any peephole passes we've just done
   EliminateDeadCode(block);
 }

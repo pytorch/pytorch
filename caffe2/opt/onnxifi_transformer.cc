@@ -187,11 +187,6 @@ void fillModelInfo(::ONNX_NAMESPACE::ModelProto* model) {
   opset_id->set_version(7);
 }
 
-std::unordered_set<string> toHashSet(
-    const ::google::protobuf::RepeatedPtrField<string>& strs) {
-  return std::unordered_set<string>(strs.begin(), strs.end());
-}
-
 int64_t getBlob1stDimSize(const ShapeInfo& shape_info) {
   if (shape_info.shape.dims_size() == 0) {
     return 0;

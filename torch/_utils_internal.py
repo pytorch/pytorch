@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import os
+import inspect
 
 # this arbitrary-looking assortment of functionality is provided here
 # to have a central place for overrideable behavior. The motivating
@@ -31,6 +32,24 @@ def prepare_multiprocessing_environment(path):
 
 def resolve_library_path(path):
     return os.path.realpath(path)
+
+
+def get_source_lines_and_file(obj):
+    """
+    Wrapper around inspect.getsourcelines and inspect.getsourcefile.
+
+    Returns: (sourcelines, file_lino, filename)
+    """
+    filename = None  # in case getsourcefile throws
+    try:
+        filename = inspect.getsourcefile(obj)
+        sourcelines, file_lineno = inspect.getsourcelines(obj)
+    except OSError as e:
+        raise OSError((
+            "Can't get source for {}. TorchScript requires source access in order to carry out compilation. " +
+            "Make sure original .py files are available. Original error: {}").format(filename, e))
+
+    return sourcelines, file_lineno, filename
 
 
 TEST_MASTER_ADDR = '127.0.0.1'

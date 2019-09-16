@@ -1,6 +1,7 @@
 import sys
 import torch
 import torch._C as _C
+from torch.namedtensor import _update_names, _check_serializing_named_tensor, _resolve_glob
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
@@ -36,6 +37,7 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
+        _check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         if self.is_quantized:
@@ -231,11 +233,6 @@ class Tensor(torch._C._TensorBase):
         self.register_hook(retain_grad_hook)
         self.retains_grad = True
 
-    def is_pinned(self):
-        r"""Returns true if this tensor resides in pinned memory"""
-        storage = self.storage()
-        return storage.is_pinned() if storage else False
-
     def is_shared(self):
         r"""Checks if tensor is in shared memory.
 
@@ -271,6 +268,12 @@ class Tensor(torch._C._TensorBase):
             return LU, pivots, infos
         else:
             return LU, pivots
+
+    def gels(self, A):
+        r"""See :func:`torch.lstsq`"""
+        warnings.warn("torch.gels is deprecated in favour of torch.lstsq and will be "
+                      "removed in the next release. Please use torch.lstsq instead.", stacklevel=2)
+        return super(Tensor, self).lstsq(A)
 
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
@@ -424,7 +427,11 @@ class Tensor(torch._C._TensorBase):
         """
         if isinstance(element, (torch.Tensor, Number)):
             return (element == self).any().item()
-        return NotImplemented
+
+        raise RuntimeError(
+            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a %s." %
+            type(element)
+        )
 
     @property
     def __cuda_array_interface__(self):
@@ -472,10 +479,36 @@ class Tensor(torch._C._TensorBase):
 
         itemsize = self.storage().element_size()
 
-        shape = self.shape
+        shape = tuple(self.shape)
         strides = tuple(s * itemsize for s in self.stride())
         data = (self.data_ptr(), False)  # read-only is false
 
-        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=0)
+        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=1)
+
+    def refine_names(self, *names):
+        names = _resolve_glob(names, self.names, 'refine_names')
+        return super(Tensor, self).refine_names(names)
+
+    def align_to(self, *names):
+        return super(Tensor, self).align_to(_resolve_glob(names, self.names, 'align_to'))
+
+    def names_(self, *names, **rename_map):
+        # Note [names_ / renamed API]
+        # The Python API for these is different from the C++ API. In Python:
+        # 1) tensor.renamed(*names) takes a vararglist of names
+        # 2) tensor.renamed(**rename_map) takes a map of names to rename.
+        # C++ is static, making it difficult to implement similar behavior.
+        return _update_names(self, names, rename_map, inplace=True)
+
+    def renamed(self, *names, **rename_map):
+        # See Note [names_ / renamed API]
+        return _update_names(self, names, rename_map, inplace=False)
+
+    def _update_names(self, names, inplace):
+        # See Note [names_ / renamed API]
+        if inplace:
+            return super(Tensor, self).names_(names)
+        else:
+            return super(Tensor, self).renamed(names)
 
     __module__ = 'torch'

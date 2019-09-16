@@ -89,8 +89,8 @@ TEST_F(ParallelTest, Replicate_MultiCUDA) {
   for (size_t i = 0; i < original_parameters.size(); ++i) {
     ASSERT_TRUE(replica1_parameters[i].allclose(original_parameters[i]));
     ASSERT_TRUE(
-        replica1_parameters[i].data<float>() !=
-        original_parameters[i].data<float>());
+        replica1_parameters[i].data_ptr<float>() !=
+        original_parameters[i].data_ptr<float>());
   }
 
   auto replica2_parameters = replicas[1]->parameters();
@@ -102,8 +102,8 @@ TEST_F(ParallelTest, Replicate_MultiCUDA) {
   for (size_t i = 0; i < original_parameters.size(); ++i) {
     ASSERT_TRUE(replica2_parameters[i].allclose(original_parameters[i]));
     ASSERT_TRUE(
-        replica2_parameters[i].data<float>() !=
-        original_parameters[i].data<float>());
+        replica2_parameters[i].data_ptr<float>() !=
+        original_parameters[i].data_ptr<float>());
   }
 }
 

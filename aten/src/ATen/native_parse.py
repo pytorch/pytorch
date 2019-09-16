@@ -388,9 +388,15 @@ def run(paths):
                 else:
                     raise Exception('Expected return declaration')
                 fn_name, arguments = func_decl.split('(', 1)
+                if '.' in fn_name:
+                    fn_name, overload_name = fn_name.split('.', 1)
+                else:
+                    overload_name = ''
                 assert arguments[-1] == ")", "Expecting closing ) for {}".format(func['func'])
                 arguments = arguments[:-1]  # Expect closing )
                 declaration['name'] = func.get('name', fn_name)
+                declaration['operator_name'] = func.get('name', fn_name)
+                declaration['overload_name'] = func.get('overload_name', overload_name)
                 declaration['inplace'] = re.search('(^__i|[^_]_$)', fn_name) is not None
                 return_arguments = parse_return_arguments(return_decl, declaration['inplace'], func)
                 arguments = parse_arguments(arguments, func.get('variants', []), declaration, return_arguments)
@@ -407,6 +413,7 @@ def run(paths):
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
                 declaration['named_guard'] = func.get('named_guard', True)
+                declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', False)
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
                 declaration['python_module'] = func.get('python_module', '')
