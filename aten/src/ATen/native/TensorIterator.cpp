@@ -89,7 +89,7 @@ static std::tuple<Device, ScalarType> compute_common_type_(at::ArrayRef<OperandI
   auto device = compute_device(operands);
   std::vector<Tensor> tensors;
   std::transform(std::begin(operands), std::end(operands), std::back_inserter(tensors),
-                  [](OperandInfo op) { return op.tensor; });
+                  [](const OperandInfo &op) { return op.tensor; });
   auto dtype = at::_result_type(tensors);
   auto result = std::make_tuple(device, dtype);
   TORCH_INTERNAL_ASSERT(dtype != ScalarType::Undefined);
