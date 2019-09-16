@@ -38,8 +38,6 @@ struct WorkerId {
         name_);
   }
 
-  WorkerId() : name_(""), id_(-1) {}
-
  bool operator==(const WorkerId& other) {
    return name_ == other.name_ && id_ == other.id_;
  }
