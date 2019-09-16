@@ -413,6 +413,7 @@ TEST(TensorTest, Detach) {
   const auto y_detached = y.detach();
   ASSERT_FALSE(y.is_leaf());
   ASSERT_TRUE(y_detached.is_leaf());
+  ASSERT_FALSE(y_detached.requires_grad());
 
   x = at::tensor({5}, at::TensorOptions().requires_grad(false));
   y = x * x;
@@ -421,12 +422,14 @@ TEST(TensorTest, Detach) {
   ASSERT_THROWS_WITH(y.detach(), message);
 }
 
-TEST(TensorTest, Detach_) {
+TEST(TensorTest, DetachInplace) {
   auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
   auto y = x * x;
   auto y_detached = y.detach_();
   ASSERT_TRUE(y.is_leaf());
+  ASSERT_FALSE(y.requires_grad());
   ASSERT_TRUE(y_detached.is_leaf());
+  ASSERT_FALSE(y_detached.requires_grad());
 
   x = at::tensor({5}, at::TensorOptions().requires_grad(false));
   y = x * x;
