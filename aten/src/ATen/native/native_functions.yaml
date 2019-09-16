@@ -47,6 +47,7 @@
   variants: method
 
 - func: names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
+  use_c10_dispatcher: True
   variants: method
   named_guard: False
 
@@ -1060,20 +1061,20 @@
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
 
-- func: flatten.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor
+- func: flatten(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor
   use_c10_dispatcher: True
   variants: function, method
   named_guard: False
 
-- func: flatten.named_out_dim(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor
+- func: flatten(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor
   variants: function, method
   named_guard: False
 
-- func: flatten.using_names(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor
+- func: flatten(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor
   variants: function, method
   named_guard: False
 
-- func: flatten.DimnameList(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor
+- func: flatten(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor
   variants: function, method
   named_guard: False
 
@@ -2192,6 +2193,7 @@
     CUDA: _rsqrt_out_cuda
 
 - func: select.Dimname(Tensor(a) self, Dimname dim, int index) -> Tensor(a)
+  use_c10_dispatcher: True
   variants: function, method
   device_guard: False
   named_guard: False
@@ -2286,6 +2288,7 @@
   named_guard: False
 
 - func: size.Dimname(Tensor self, Dimname dim) -> int
+  use_c10_dispatcher: True
   variants: function, method
   device_guard: False
   named_guard: False
@@ -2423,6 +2426,7 @@
   named_guard: False
 
 - func: stride.Dimname(Tensor self, Dimname dim) -> int
+  use_c10_dispatcher: True
   variants: function, method
   device_guard: False
   named_guard: False
@@ -2587,13 +2591,13 @@
   use_c10_dispatcher: True
   variants: function
 
-- func: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
+- func: transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   use_c10_dispatcher: True
   variants: function, method
   device_guard: False
   named_guard: False
 
-- func: transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)
+- func: transpose(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)
   variants: function, method
   device_guard: False
   named_guard: False
@@ -3367,12 +3371,12 @@
   device_guard: False
   named_guard: False
 
-- func: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]
+- func: unbind(Tensor(a) self, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: True
   variants: function, method
   named_guard: False
 
-- func: unbind.Dimname(Tensor(a) self, Dimname dim) -> Tensor(a)[]
+- func: unbind(Tensor(a) self, Dimname dim) -> Tensor(a)[]
   variants: function, method
   named_guard: False
 

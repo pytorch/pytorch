@@ -19,7 +19,6 @@ using c10::RegisterOperators;
 using c10::OperatorKernel;
 using c10::Dispatcher;
 using c10::IValue;
-using c10::TensorTypeId;
 using at::Tensor;
 
 namespace {
@@ -109,23 +108,22 @@ TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenCallingOp_thenCalls
   EXPECT_TRUE(called);
 }
 
-// TODO Rewrite (since this is now allowed) and reenable
-// TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenRegisteringDispatchedKernel_thenFails) {
-//   bool called = false;
-//   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called));
-//   expectThrows<c10::Error>([&] {
-//     c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
-//   }, "for an operator which already has a catch-all kernel registered");
-// }
+TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenRegisteringDispatchedKernel_thenFails) {
+  bool called = false;
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called));
+  expectThrows<c10::Error>([&] {
+    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
+  }, "for an operator which already has a catch-all kernel registered");
+}
 
-// TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenRegisteringDispatchedKernelInSameOpCall_thenFails) {
-//   bool called = false;
-//   expectThrows<c10::Error>([&] {
-//     auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-//       .catchAllKernel<MockKernel>(&called)
-//       .kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
-//   }, "for an operator which already has a catch-all kernel registered");
-// }
+TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenRegisteringDispatchedKernelInSameOpCall_thenFails) {
+  bool called = false;
+  expectThrows<c10::Error>([&] {
+    auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+      .catchAllKernel<MockKernel>(&called)
+      .kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
+  }, "for an operator which already has a catch-all kernel registered");
+}
 
 TEST(OperatorRegistrationTest, givenOpWithDispatchedKernelOutOfScope_whenRegisteringCatchallKernelAndCallingOp_thenCallsCatchallKernel) {
   bool called = false;
@@ -142,23 +140,22 @@ TEST(OperatorRegistrationTest, givenOpWithDispatchedKernelOutOfScope_whenRegiste
   EXPECT_TRUE(called);
 }
 
-// TODO Rewrite (since this is now allowed) and reenable
-// TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatchallKernel_thenFails) {
-//   bool called = false;
-//   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
-//   expectThrows<c10::Error>([&] {
-//     c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called));
-//   }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys CPUTensorId. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is _test::dummy");
-// }
-//
-// TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatchallKernelInSameOpCall_thenFails) {
-//   bool called = false;
-//   expectThrows<c10::Error>([&] {
-//     auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-//       .kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called)
-//       .catchAllKernel<MockKernel>(&called));
-//   }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys CPUTensorId. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is _test::dummy");
-// }
+TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatchallKernel_thenFails) {
+  bool called = false;
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
+  expectThrows<c10::Error>([&] {
+    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called));
+  }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys CPUTensorId. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is _test::dummy");
+}
+
+TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatchallKernelInSameOpCall_thenFails) {
+  bool called = false;
+  expectThrows<c10::Error>([&] {
+    auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+      .kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called)
+      .catchAllKernel<MockKernel>(&called));
+  }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys CPUTensorId. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is _test::dummy");
+}
 
 TEST(OperatorRegistrationTest, givenOpWithCatchallKernelOutOfScope_whenRegisteringDispatchedKernelAndCallingOp_thenCallsCatchallKernel) {
   bool called = false;
@@ -620,42 +617,37 @@ TEST(OperatorRegistrationTest, whenRegisteringMismatchingKernelsInSameOpCall_the
   }, "Tried to register kernels for same operator that infer a different function schema");
 }
 
-bool called_autograd = false;
-bool called_catchall = false;
-
-void catchall_kernel(Tensor a) {
-  called_catchall = true;
+int64_t increment_kernel(int64_t a) {
+  return a + 1;
 }
 
-void autograd_kernel(Tensor a) {
-  called_autograd = true;
+int64_t decrement_kernel(int64_t a) {
+  return a - 1;
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutogradKernel) {
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .impl_unboxedOnlyKernel<decltype(autograd_kernel), &autograd_kernel>(TensorTypeId::VariableTensorId));
+  auto registrar = c10::RegisterOperators().op("_test::dummy(int dummy) -> int", c10::RegisterOperators::options()
+    .impl_unboxedAutogradKernel(&increment_kernel));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
-
-  called_autograd = false;
-  c10::Dispatcher::singleton().lookup(*op, TensorTypeId::VariableTensorId).callUnboxed<void, Tensor>(dummyTensor(TensorTypeId::VariableTensorId));
-  EXPECT_TRUE(called_autograd);
+  int64_t result = c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, int64_t>(*op, 4);
+  EXPECT_EQ(5, result);
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_thenCanCallAutogradKernel) {
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .impl_unboxedOnlyCatchAllKernel<decltype(catchall_kernel), &catchall_kernel>()
-    .impl_unboxedOnlyKernel<decltype(autograd_kernel), &autograd_kernel>(TensorTypeId::VariableTensorId));
+  auto registrar = c10::RegisterOperators().op("_test::dummy(int dummy) -> int", c10::RegisterOperators::options()
+    .catchAllKernel<decltype(decrement_kernel), &decrement_kernel>()
+    .impl_unboxedAutogradKernel(&increment_kernel));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
-
-  called_catchall = called_autograd = false;
-  c10::Dispatcher::singleton().lookup(*op, TensorTypeId::VariableTensorId).callUnboxed<void, Tensor>(dummyTensor(TensorTypeId::VariableTensorId));
-  EXPECT_FALSE(called_catchall);
-  EXPECT_TRUE(called_autograd);
+  int64_t result = c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, int64_t>(*op, 4);
+  EXPECT_EQ(5, result);
 }
+
+// TODO Test cases that adding multiple autograd kernels, removing some, and so on works
+//      (similar to test cases above for regular kernels "_whenNewerAndThenOlderKernelDeletedAndOpCalled")
 
 /**
  * This is used to check that a given type works correctly when passed as input
