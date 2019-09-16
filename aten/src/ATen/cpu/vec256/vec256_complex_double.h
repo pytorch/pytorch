@@ -110,20 +110,23 @@ public:
     }
     return loadu(tmp);
   }
-  Vec256<std::complex<double>> abs() const {
-   auto real = _mm256_mul_pd(real_values, real_values);
-   auto imag = _mm256_mul_pd(imag_values, imag_values);
-   auto abs_2 = _mm256_add_pd(real, imag);
-   return Vec256<std::complex<double>>(_mm256_sqrt_pd(abs_2));
+  __m256d abs_() const {
+    auto real = _mm256_mul_pd(real_values, real_values);
+    auto imag = _mm256_mul_pd(imag_values, imag_values);
+    auto abs_2 = _mm256_add_pd(real, imag);
+    return _mm256_sqrt_pd(abs_2);
   }
-  Vec256<std::complex<double>> real() const {
-    return Vec256<std::complex<double>>(real_values);
+  Vec256<std::complex<double>> abs() const {
+   return Vec256<std::complex<double>>(abs_());
   }
   __m256d real_() const {return real_values;}
-  Vec256<std::complex<double>> imag() const {
-    return Vec256<std::complex<double>>(imag_values);
+  Vec256<std::complex<double>> real() const {
+    return Vec256<std::complex<double>>(real_());
   }
   __m256d imag_() const {return imag_values;}
+  Vec256<std::complex<double>> imag() const {
+    return Vec256<std::complex<double>>(imag_());
+  }
   Vec256<std::complex<double>> acos() const {
     return map(std::acos);
   }
@@ -135,6 +138,10 @@ public:
   }
   Vec256<std::complex<double>> atan2(const Vec256<std::complex<double>> &b) const {
     AT_ERROR("not supported for complex numbers");
+  }
+  __m256d angle_() const {return Sleef_atan2d4_u10(imag_values, real_values);}
+  Vec256<std::complex<double>> angle() const {
+    return Vec256<std::complex<double>>(angle_());
   }
   Vec256<std::complex<double>> erf() const {
     AT_ERROR("not supported for complex numbers");
@@ -251,7 +258,13 @@ template <> Vec256<std::complex<double>> inline operator*(const Vec256<std::comp
 }
 
 template <> Vec256<std::complex<double>> inline operator/(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) __ubsan_ignore_float_divide_by_zero__ {
-  AT_ERROR("not supported for complex numbers");
+  Vec256<std::complex<double>> abs = Vec256<std::complex<double>>(_mm256_div_pd(a.abs_(), b.abs_()));
+  Vec256<std::complex<double>> angle = Vec256<std::complex<double>>(_mm256_setzero_pd(), _mm256_sub_pd(a.angle_(), b.angle_()));
+  return abs*angle.exp();
+}
+
+template <> inline Vec256<std::complex<double>> fmadd(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b, const Vec256<std::complex<double>>& c) {
+  return a * b + c;
 }
 
 #endif
