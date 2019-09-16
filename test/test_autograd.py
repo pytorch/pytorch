@@ -34,6 +34,7 @@ from common_methods_invocations import (method_tests,
                                         exclude_tensor_method,
                                         mask_not_all_zeros,
                                         S)
+from common_device_type import instantiate_device_type_tests, skipCUDAIfRocm
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -2473,38 +2474,6 @@ class TestAutograd(TestCase):
                               lambda y, x: torch.trapz(y, x),
                               True, f_args_variable, f_args_tensor)
 
-    # skip this test if running on rocm, because in cdist
-    # we use __shfl_down_sync on CUDA for fast reduction
-    # and it gives incorrect results on rocm platform
-    @skipIfRocm
-    def test_cdist(self):
-        def _test_cdist_for_size(sizes):
-            devices = torch.testing.get_all_device_types()
-            for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
-                for device in devices:
-                    x = torch.randn(sizes, device=device, dtype=torch.double)
-                    y = torch.randn(sizes, device=device, dtype=torch.double)
-
-                    eps = 1e-6
-                    # to avoid extremum
-                    x = x - (((x - y) < eps).double() * 2 * eps)
-                    x.requires_grad = True
-                    y.requires_grad = True
-
-                    f_args_variable = (x, y)
-
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
-
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist", "cdist", f,
-                                          True, f_args_variable, f_args_tensor)
-
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
 
     def test_var_mean_differentiable(self):
         dim = [2, 4]
@@ -3878,6 +3847,43 @@ def add_test(
 
 for test in method_tests():
     add_test(*test)
+
+# Generic device type autograd tests.
+class TestAutogradDeviceType(TestCase):
+
+    # skip this test if running on rocm, because in cdist
+    # we use __shfl_down_sync on CUDA for fast reduction
+    # and it gives incorrect results on rocm platform
+    @skipCUDAIfRocm
+    def test_cdist(self, device):
+        def _test_cdist_for_size(sizes):
+            for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+                x = torch.randn(sizes, device=device, dtype=torch.double)
+                y = torch.randn(sizes, device=device, dtype=torch.double)
+
+                eps = 1e-6
+                # to avoid extremum
+                x = x - (((x - y) < eps).double() * 2 * eps)
+                x.requires_grad = True
+                y.requires_grad = True
+
+                f_args_variable = (x, y)
+
+                def f(a, b):
+                    return torch.cdist(a, b, p)
+
+                f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+                run_functional_checks(self, "test_cdist", "cdist", f,
+                                        True, f_args_variable, f_args_tensor)
+
+        _test_cdist_for_size((S, S))
+        _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
+
+
+instantiate_device_type_tests(TestAutogradDeviceType, globals())
 
 if __name__ == '__main__':
     run_tests()
