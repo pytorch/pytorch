@@ -156,10 +156,10 @@ class HistogramObserver(ObserverBase):
         "histogram": Optional[torch.Tensor],
     }
 
-    def __init__(self, bins=2048, use_fixed_width=False, **kwargs):
+    def __init__(self, bins=2048, **kwargs):
+        # bins: The number of bins used for histogram calculation.
         super(HistogramObserver, self).__init__(**kwargs)
         self.bins = bins
-        self.use_fixed_width = use_fixed_width
         self.histogram = None
         self.min_val = None
         self.max_val = None
@@ -210,7 +210,7 @@ class HistogramObserver(ObserverBase):
         Compute the quantization error if we use start_bin to end_bin as the
         min and max to do the quantization.
         """
-        dst_nbins = 2**torch.iinfo(torch.int8).bits
+        dst_nbins = 2**torch.iinfo(self.dtype).bits
         bin_width = (self.max_val.item() - self.min_val.item()) / self.bins
 
         norm = 0.0
@@ -256,7 +256,7 @@ class HistogramObserver(ObserverBase):
                 norm = norm + self._get_norm(delta_begin, delta_end, density, norm_type)
         return norm
 
-    def _non_linear_param_search(self, norm_type):
+    def _non_linear_param_search(self):
         """
         An approximation for L2 error minimization for selecting min/max.
         By selecting new min/max, we filter out outliers in input distribution.
@@ -304,7 +304,7 @@ class HistogramObserver(ObserverBase):
 
             # calculate the quantization error using next_start_bin and next_end_bin
             norm = self._compute_quantization_error(
-                next_start_bin, next_end_bin, norm_type
+                next_start_bin, next_end_bin, "L2"
             )
 
             if norm > norm_min:
@@ -376,54 +376,39 @@ class HistogramObserver(ObserverBase):
             if min_val is None or max_val is None or histogram is None:
                 min_val = torch.min(x)
                 max_val = torch.max(x)
-                if self.use_fixed_width is True:
-                    range = max_val - min_val
-                    self.min_val = min_val - 0.5 * range
-                    self.max_val = max_val + 0.5 * range
-                    self.histogram = torch.histc(
-                        x, self.bins, min=min_val - 0.5 * range, max=max_val + 0.5 * range
-                    )
-                else:
-                    self.min_val = min_val
-                    self.max_val = max_val
-                    self.histogram = torch.histc(x, self.bins, min=min_val, max=max_val)
+                self.min_val = min_val
+                self.max_val = max_val
+                self.histogram = torch.histc(x, self.bins, min=min_val, max=max_val)
             else:
                 new_min = torch.min(x)
                 new_max = torch.max(x)
-                if self.use_fixed_width is True:
-                    if min_val > new_min or max_val < new_max:
-                        warnings.warn("Incoming data is outside the min_val/max_val range.")
-                    new_histogram = torch.histc(
-                        x, self.bins, min=min_val, max=max_val
-                    )
-                    self.histogram = new_histogram + histogram
-                else:
-                    new_histogram = torch.histc(x, self.bins, min=new_min, max=new_max)
-                    # combine the existing histogram and new histogram into 1 histogram
-                    combined_histogram = torch.zeros_like(self.histogram)
-                    combined_min = torch.min(new_min, self.min_val)
-                    combined_max = torch.max(new_max, self.max_val)
-                    self._combine_histograms(
-                        combined_histogram,
-                        combined_min.item(),
-                        combined_max.item(),
-                        self.histogram,
-                        self.min_val.item(),
-                        self.max_val.item(),
-                    )
-                    self._combine_histograms(
-                        combined_histogram,
-                        combined_min.item(),
-                        combined_max.item(),
-                        new_histogram,
-                        new_min.item(),
-                        new_max.item(),
-                    )
-                    self.histogram = combined_histogram
-                    self.min_val = combined_min
-                    self.max_val = combined_max
+                new_histogram = torch.histc(x, self.bins, min=new_min, max=new_max)
+                # combine the existing histogram and new histogram into 1 histogram
+                combined_histogram = torch.zeros_like(self.histogram)
+                combined_min = torch.min(new_min, self.min_val)
+                combined_max = torch.max(new_max, self.max_val)
+                self._combine_histograms(
+                    combined_histogram,
+                    combined_min.item(),
+                    combined_max.item(),
+                    self.histogram,
+                    self.min_val.item(),
+                    self.max_val.item(),
+                )
+                self._combine_histograms(
+                    combined_histogram,
+                    combined_min.item(),
+                    combined_max.item(),
+                    new_histogram,
+                    new_min.item(),
+                    new_max.item(),
+                )
+                self.histogram = combined_histogram
+                self.min_val = combined_min
+                self.max_val = combined_max
+        return x
 
-    def calculate_qparams(self, norm_type="L2"):
+    def calculate_qparams(self):
         if self.histogram is None:
             warnings.warn(
                 "must run observer before calling calculate_qparams.\
@@ -435,7 +420,7 @@ class HistogramObserver(ObserverBase):
             "supplied while making this observer"
         )
 
-        new_min, new_max = self._non_linear_param_search(norm_type)
+        new_min, new_max = self._non_linear_param_search()
 
         return self._calculate_qparams(new_min.item(), new_max.item())
 
