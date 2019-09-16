@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <test/cpp/api/support.h>
 
 #include <torch/types.h>
 
@@ -320,24 +321,16 @@ TEST(TensorTest, Data) {
   ASSERT_THROW(tensor2.data(), c10::Error);
 }
 
-TEST(TensorTest, Backward_Grad_IsLeaf_OutputNr) {
-  const auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
-  const auto y = x * x;
+TEST(TensorTest, BackwardAndGrad) {
+  auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  auto y = x * x;
   y.backward();
   ASSERT_EQ(x.grad().item<float>(), 10.0);
-  ASSERT_TRUE(x.is_leaf());
-  ASSERT_FALSE(y.is_leaf());
-  ASSERT_EQ(x.output_nr(), 0);
-  ASSERT_EQ(y.output_nr(), 0);
 
-  const auto x2 = at::tensor({5}, at::TensorOptions().requires_grad(false));
-  const auto y2 = x2 * x2;
-  ASSERT_THROW(y2.backward(), c10::Error);
-  ASSERT_THROW(x2.grad(), c10::Error);
-  ASSERT_THROW(x2.is_leaf(), c10::Error);
-  ASSERT_THROW(y2.is_leaf(), c10::Error);
-  ASSERT_THROW(x2.output_nr(), c10::Error);
-  ASSERT_THROW(y2.output_nr(), c10::Error);
+  x = at::tensor({5});
+  y = x * x;
+  ASSERT_THROWS_WITH(y.backward(), "backward is not implemented for Tensor");
+  ASSERT_THROWS_WITH(x.grad(), "grad is not implemented for Tensor");
 }
 
 TEST(TensorTest, BackwardCreatesOnesGrad) {
@@ -345,4 +338,29 @@ TEST(TensorTest, BackwardCreatesOnesGrad) {
   x.backward();
   ASSERT_TRUE(torch::equal(x.grad(),
               torch::ones_like(x)));
+}
+
+TEST(TensorTest, Is_Leaf) {
+  auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  auto y = x * x;
+  ASSERT_TRUE(x.is_leaf());
+  ASSERT_FALSE(y.is_leaf());
+
+  x = at::tensor({5});
+  y = x * x;
+  ASSERT_THROWS_WITH(y.is_leaf(), "is_leaf is not implemented for Tensor");
+  ASSERT_THROWS_WITH(x.is_leaf(), "is_leaf is not implemented for Tensor");
+}
+
+TEST(TensorTest, Output_Nr) {
+  auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  auto y = x * x;
+  ASSERT_EQ(x.output_nr(), 0);
+  ASSERT_EQ(y.output_nr(), 0);
+
+  x = at::tensor({5});
+  y = x * x;
+  const auto message = "output_nr is not implemented for Tensor";
+  ASSERT_THROWS_WITH(y.output_nr(), message);
+  ASSERT_THROWS_WITH(x.output_nr(), message);
 }
