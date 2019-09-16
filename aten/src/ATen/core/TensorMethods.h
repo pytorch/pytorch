@@ -1798,13 +1798,7 @@ inline Tensor Tensor::round() const {
 }
 inline Tensor & Tensor::round_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::round_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("round_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::round_(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::round_(Tensor(a!) self) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &)>(type_set())(const_cast<Tensor&>(*this));
