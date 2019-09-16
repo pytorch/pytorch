@@ -321,7 +321,7 @@ TEST(TensorTest, Data) {
   ASSERT_THROW(tensor2.data(), c10::Error);
 }
 
-TEST(TensorTest, AutogradMethods) {
+TEST(TensorTest, Backward_Grad_IsLeaf_OutputNr_Version) {
   auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
   auto y = x * x;
   y.backward();
@@ -332,12 +332,6 @@ TEST(TensorTest, AutogradMethods) {
   ASSERT_EQ(y.output_nr(), 0);
   ASSERT_EQ(x.version(), 0);
   ASSERT_EQ(y.version(), 0);
-  ASSERT_NO_THROW(x.requires_grad_(false));
-  ASSERT_NO_THROW(y.requires_grad_(false));
-  ASSERT_NO_THROW(x.detach());
-  ASSERT_NO_THROW(y.detach());
-  ASSERT_NO_THROW(x.detach_());
-  ASSERT_NO_THROW(y.detach_());
 
   x = at::tensor({5}, at::TensorOptions().requires_grad(false));
   y = x * x;
@@ -349,12 +343,6 @@ TEST(TensorTest, AutogradMethods) {
   ASSERT_THROW(y.output_nr(), c10::Error);
   ASSERT_THROW(x.version(), c10::Error);
   ASSERT_THROW(y.version(), c10::Error);
-  ASSERT_THROW(x.requires_grad_(false), c10::Error);
-  ASSERT_THROW(y.requires_grad_(false), c10::Error);
-  ASSERT_THROW(x.detach(), c10::Error);
-  ASSERT_THROW(y.detach(), c10::Error);
-  ASSERT_THROW(x.detach_(), c10::Error);
-  ASSERT_THROW(y.detach_(), c10::Error);
 }
 
 TEST(TensorTest, BackwardCreatesOnesGrad) {
@@ -364,12 +352,21 @@ TEST(TensorTest, BackwardCreatesOnesGrad) {
               torch::ones_like(x)));
 }
 
+TEST(TensorTest, Version) {
+  const auto x = torch::ones(3);
+  ASSERT_EQ(x.version(), 0);
+  x.mul_(2);
+  ASSERT_EQ(x.version(), 1);
+  x.add_(1);
+  ASSERT_EQ(x.version(), 2);
+}
+
 TEST(TensorTest, Requires_grad_) {
   auto x = torch::tensor({5.0});
   x.requires_grad_(true);
   ASSERT_TRUE(x.requires_grad());
 
-  const auto y = x * x;
+  auto y = x * x;
   ASSERT_THROWS_WITH(y.requires_grad_(false),
     "you can only change requires_grad flags of leaf variables.");
 
@@ -379,20 +376,37 @@ TEST(TensorTest, Requires_grad_) {
   const auto int_tensor = torch::tensor({5}, at::TensorOptions().dtype(torch::kInt));
   ASSERT_THROWS_WITH(int_tensor.requires_grad_(true),
     "Only Tensors of floating point dtype can require gradients");
+
+  x = at::tensor({5}, at::TensorOptions().requires_grad(false));
+  y = x * x;
+  ASSERT_THROWS_WITH(x.requires_grad_(false),
+    "requires_grad_ is not implemented for Tensor");
+  ASSERT_THROWS_WITH(y.requires_grad_(false),
+    "requires_grad_ is not implemented for Tensor");
 }
 
 TEST(TensorTest, Detach) {
-  const auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
-  const auto y = x * x;
+  auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  auto y = x * x;
   const auto y_detached = y.detach();
   ASSERT_FALSE(y.is_leaf());
   ASSERT_TRUE(y_detached.is_leaf());
+
+  x = at::tensor({5}, at::TensorOptions().requires_grad(false));
+  y = x * x;
+  ASSERT_THROW(x.detach(), c10::Error);
+  ASSERT_THROW(y.detach(), c10::Error);
 }
 
 TEST(TensorTest, Detach_) {
-  const auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
-  const auto y = x * x;
-  const auto y_detached = y.detach_();
+  auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  auto y = x * x;
+  auto y_detached = y.detach_();
   ASSERT_TRUE(y.is_leaf());
   ASSERT_TRUE(y_detached.is_leaf());
+
+  x = at::tensor({5}, at::TensorOptions().requires_grad(false));
+  y = x * x;
+  ASSERT_THROW(x.detach_(), c10::Error);
+  ASSERT_THROW(y.detach_(), c10::Error);
 }
