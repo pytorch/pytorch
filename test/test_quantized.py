@@ -1303,7 +1303,15 @@ class TestQNNPackOps(TestCase):
             if use_relu:
                 Y_q_ref[Y_q_ref < Y_zp] = Y_zp
             # Assert equal
-            np.testing.assert_array_almost_equal(Y_q_ref, Y_q.int_repr().numpy(), decimal=4)
+            # Make sure the results match
+            # assert_array_almost_equal compares using the following formula:
+            #     abs(desired-actual) < 1.5 * 10**(-decimal)
+            # (https://docs.scipy.org/doc/numpy/reference/generated/numpy.testing.assert_almost_equal.html)
+
+            # We use decimal = 0 to ignore off-by-1 differences between reference and
+            # test. Off-by-1 differences arise due to the order of round and
+            # zero_point addition operation
+            np.testing.assert_array_almost_equal(Y_q_ref, Y_q.int_repr().numpy(), decimal=0)
 
             # Test both per-tensor and per-channel quantization
             # Reference quantized result from PyTorch Linear operator
@@ -1316,8 +1324,8 @@ class TestQNNPackOps(TestCase):
             Y_q_ref2 = torch.quantize_linear(
                 Y_fp32_ref, Y_scale, Y_zp, torch.quint8)
             # Assert equal
-            np.testing.assert_equal(
-                Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
+            np.testing.assert_array_almost_equal(
+                Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=0)
 
     """Tests the correctness of the quantized::linear_unpack (qnnpack) op."""
     @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,),
