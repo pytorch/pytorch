@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <test/cpp/api/support.h>
 
 #include <torch/types.h>
 
@@ -321,15 +322,15 @@ TEST(TensorTest, Data) {
 }
 
 TEST(TensorTest, BackwardAndGrad) {
-  const auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
-  const auto y = x * x;
+  auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  auto y = x * x;
   y.backward();
   ASSERT_EQ(x.grad().item<float>(), 10.0);
 
-  const auto x2 = at::tensor({5});
-  const auto y2 = x2 * x2;
-  ASSERT_THROW(y2.backward(), c10::Error);
-  ASSERT_THROW(x2.grad(), c10::Error);
+  x = at::tensor({5});
+  y = x * x;
+  ASSERT_THROWS_WITH(y.backward(), "backward is not implemented for Tensor");
+  ASSERT_THROWS_WITH(x.grad(), "grad is not implemented for Tensor");
 }
 
 TEST(TensorTest, BackwardCreatesOnesGrad) {
