@@ -298,7 +298,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
     _set_opset_version(opset_version)
     _set_operator_export_type(operator_export_type)
     val_keep_init_as_ip = True if keep_initializers_as_inputs is None else keep_initializers_as_inputs
-    if keep_initializers_as_inputs is None and operator_export_type is OperatorExportTypes.ONNX:	
+    if keep_initializers_as_inputs is None and operator_export_type is OperatorExportTypes.ONNX:
         val_keep_init_as_ip = False
     graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                     training, input_names,
@@ -336,7 +336,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         _set_opset_version(opset_version)
         _set_operator_export_type(operator_export_type)
         val_keep_init_as_ip = True if keep_initializers_as_inputs is None else keep_initializers_as_inputs
-        if keep_initializers_as_inputs is None and operator_export_type is OperatorExportTypes.ONNX:	
+        if keep_initializers_as_inputs is None and operator_export_type is OperatorExportTypes.ONNX:
             val_keep_init_as_ip = False
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                         training, input_names,
