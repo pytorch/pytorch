@@ -37,7 +37,6 @@ SKIP_PYTHON_BINDINGS = [
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
     'data', 'is_leaf', 'output_nr'
->>>>>>> 9860f62355... C++ API parity: at::Tensor::output_nr
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
