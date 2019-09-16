@@ -44,8 +44,8 @@ Tensor type_as(const Tensor& self, const Tensor& other) {
   return self.to(other.options());
 }
 
-bool _can_Cast(at::ScalarType from, at::ScalarType to) {
+bool can_cast(at::ScalarType from, at::ScalarType to) {
   return at::canCast(from, to);
-}  
+}
 
 }} // namespace at::native
