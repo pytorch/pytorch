@@ -340,7 +340,7 @@ TEST(TensorTest, BackwardCreatesOnesGrad) {
               torch::ones_like(x)));
 }
 
-TEST(TensorTest, Is_Leaf) {
+TEST(TensorTest, IsLeaf) {
   auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
   auto y = x * x;
   ASSERT_TRUE(x.is_leaf());
@@ -353,7 +353,7 @@ TEST(TensorTest, Is_Leaf) {
   ASSERT_THROWS_WITH(x.is_leaf(), message);
 }
 
-TEST(TensorTest, Output_Nr) {
+TEST(TensorTest, OutputNr) {
   auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
   auto y = x * x;
   ASSERT_EQ(x.output_nr(), 0);
@@ -383,7 +383,7 @@ TEST(TensorTest, Version) {
   ASSERT_THROWS_WITH(x.version(), message);
 }
 
-TEST(TensorTest, Requires_grad_) {
+TEST(TensorTest, RequiresGradInplace) {
   auto x = torch::tensor({5.0});
   x.requires_grad_(true);
   ASSERT_TRUE(x.requires_grad());
