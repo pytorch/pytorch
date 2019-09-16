@@ -274,22 +274,23 @@ class ChunkDataset(IterableDataset):
     (first level) and its content is shuffled (second level) before producing
     a batch or an example.
 
-    In this context, chunks could be files, contents of folder,
-    sections of large text file, etc. For better efficiency, chunks should have roughly
-    the same length. Consult ``ChunkDataReader`` for more details.
+    In this context, chunks could be files, contents of a folder,
+    sections of large text file, etc. In distributed training, to eliminate different workers reading
+    uneven amount of data, the chunks need to be roughly the same size.
+    Please consult ChunkDataReader for more details.
 
     ``ChunkDataset`` extends ``IterableDataset`` because the length of the dataset
     (or simply the size) is unknown. Only the number of chunks is known for the dataset.
 
-    In a distributed setup, each worker has an instance of ``ChunkDataset`` that uses
-    ``DistributedChunkSampler`` sampler to select chunksbased on their global worker rank.
+    In a distributed setup, each `DataLoader` worker has an instance of ``ChunkDataset`` that uses
+    ``DistributedChunkSampler`` sampler to select chunks based on their global worker rank.
     Once a chunk index has been selected, it is passed to ``ChunkDataReader`` that will load
-    data in ``ChunkDataset`` internal cache. Only then ``ChunkDataset`` returns batches.
+    data into the ``ChunkDataset`` internal cache. Only then ``ChunkDataset`` returns batches.
 
     Arguments:
         chunk_sampler (DistributedSampler or DistributedChunkSampler): Draw indices for chunks.
             Typically used to split data amongst dataloader workers (first level of sampling)
-        chunk_reader (ChunkDataReader): Specialized reader
+        chunk_reader (ChunkDataReader): Specialized reader for a given input type
         shuffle_cache (bool): Setting `True` trigger shuffling of the internal chunk cache
             (second level of sampling) (default: `True`)
     """

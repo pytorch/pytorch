@@ -70,20 +70,17 @@ class ChunkDataReader(object):
     r"""Reads a chunk of data given a chunk index.
 
     A chunk could be full file, section of a large file, folders, URLs, or any other
-    abstraction that allows data to be segmented roughtly the same size.
+    abstraction that allows data to be segmented roughly the same size.
 
-    As an example, chunking could be used in a scenario where MNIST dataset for training 
-    would be converted in CSV text files and equally splitted in several files,
-    e.g. 60 files with 1000 lines each.  In this case, each worker would read
-    a text file with all 1000 images.
+    As an example, chunking could be used in a scenario where a dataset is split between
+    several CSV files each containing complete records or examples. In this case,
+    each file could be a chunk. Similarly a large CSV file can be considered as a
+    collection of chunks by defining chunk boundary based on some physical size
+    (e.g. 32MB) and seeking to the first record in each chunk during reading.
 
     Another example would be chunks as individual folders, containing multiple audio files.
     In this scenario, each worker would have access to different folders, 
     where binary files would be read from the filesystem.
-
-    A chunk doesn necessarily need to rely in multiple files to split data laoding across workers.
-    It is possible to extract chunks from a single large dataset file, where each worker would
-    seek to specific positions to load data.
 
     The reading logic must be implemented inside `__call__` method
     """
@@ -105,16 +102,18 @@ class ChunkDataReader(object):
 class DistributedChunkSampler(Sampler):
     r"""This sampler introduces distributed sampling without padding and dataset dependency.
 
+    This sampler is very similar to the `DistributedSampler`, however avoid padding and
+    the dependency on the size of the dataset. With two levels of sampling, the
+    `DistributedChunkSampler` is used by the dataset and hence run by a dataloader worker.
+    To distinguish workers from the same node and distribute data among all participating workers,
+    each sampler needs to be configured with :attr:`global_worker_rank` using a worker initialization function.
+
     Python DataLoader uses multi-processing instead of
     multi-threading for parallelism, therefore, each worker
     is a separate process with an identical copy of sampler.
     Because of that, on a distributed environment, different processes
     could read the same portion of the dataset. This sampler uses strides,
     based on the global worker rank concept, to coordinate parallel reading of chunks of data.
-
-    Each instance of `DistributedChunkSampler` must be configured with a different
-    `global_worker_rank` (aka strides), so that chunk sampling happens in a round-robin
-    fashion on each worker, e.g. rank0, rank1, ..., rankN, rank0, rank1, ..., rankN, ...
 
     For example, assume 2 workers reading the same `ChunkDataset` dataset.
     Each worker process needs to configure their `DistributedChunkSampler`
@@ -125,16 +124,20 @@ class DistributedChunkSampler(Sampler):
     chunk indicies; ``RandomSampler`` will be used otherwise.
 
     Args:
-        num_replicas (int): Number of workers participating in the sampling.
-        global_worker_rank (int, optional): Current rank for the sampler, starting at 0.
-        Depending on the distributed scenario, :attr:`global_worker_rank` must be assigned differently:
-            If only `DataLoader` workers are being used:
-                `global_worker_rank`=`worker_id`
-            If at most one `DataLoader` worker is used with a distributed approach, including
-            `DistributedDataParallel`, `torch.distributed`, MPI or Horovod.
-                `global_worker_rank`=`rank`
-            Finally, if multiple DataLoader workers and a distributed approach is used:
-                `global_worker_rank`=`worker_id`+`rank`*`num_workers`.
+        num_replicas (int): Number of processes participating in the data reading.
+            This should be equal to the number of distributedprocesses * number of DataLoader workers.
+        global_worker_rank (int, optional): Current rank of the worker in a global index.
+            There are 3 ways :attr:`global_worker_rank` can be assigned:
+                1) If only `DataLoader` workers are being used:
+                    `global_worker_rank`=`worker_id`
+                    (must be assigned at DataLoader worker initialization function)
+                2) If a single `DataLoader` worker is used with a distributed approach
+                    (DistributedDataParallel`, `torch.distributed`, MPI or Horovod)
+                    `global_worker_rank`=`rank
+                    (must be assigned before the main trainning loop)
+                3) If both multiple DataLoader workers and a distributed approach are being used:
+                    `global_worker_rank`=`worker_id`+`rank`*`num_workers`
+                    (must be assigned at DataLoader worker initialization function)
         num_chunks (int, optional): Number of chunks participating in the sampling.
             (default: ``0``)
         shuffle (bool, optional): set to ``True`` to have the chunk indices reshuffled.
