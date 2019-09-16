@@ -2,10 +2,7 @@
     <<: *binary_linux_build_params
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
+    - should_run_job
     - run:
         <<: *binary_checkout
     - run:
@@ -59,17 +56,12 @@
         image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
+    - should_run_job
     # TODO: We shouldn't attach the workspace multiple times
     - attach_workspace:
         at: /home/circleci/project
-    - run:
-        <<: *should_run_job
-    - run:
-        <<: *setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_linux_system_environment
+    - setup_ci_environment
     - run:
         <<: *binary_checkout
     - run:
@@ -87,14 +79,9 @@
         image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
-    - run:
-        <<: *setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - should_run_job
+    - setup_linux_system_environment
+    - setup_ci_environment
     - attach_workspace:
         at: /home/circleci/project
     - run:
@@ -120,10 +107,8 @@
         at: ~/workspace
     - attach_workspace:
         at: /home/circleci/project
-    - run:
-        <<: *setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - setup_linux_system_environment
+    - setup_ci_environment
     - run:
         <<: *binary_checkout
     - run:
@@ -155,8 +140,7 @@
           <<: *binary_checkout
       - run:
           <<: *binary_populate_env
-      - run:
-          <<: *binary_macos_brew_update
+      - brew_update
       - run:
           <<: *binary_install_miniconda
       - run:
@@ -177,16 +161,12 @@
       xcode: "9.0"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
+    - should_run_job
     - run:
         <<: *binary_checkout
     - run:
         <<: *binary_populate_env
-    - run:
-        <<: *binary_macos_brew_update
+    - brew_update
     - run:
         <<: *binary_install_miniconda
 
@@ -218,16 +198,12 @@
       xcode: "9.0"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
+    - should_run_job
     - run:
         <<: *binary_checkout
     - run:
         <<: *binary_populate_env
-    - run:
-        <<: *binary_macos_brew_update
+    - brew_update
     - run:
         <<: *binary_install_miniconda
     - attach_workspace: # TODO - we can `cp` from ~/workspace
@@ -240,3 +216,42 @@
           cat "$script"
           source "$script"
 
+  binary_ios_build:
+    <<: *pytorch_ios_params
+    macos:
+      xcode: "10.2.1"
+    steps:
+    - attach_workspace:
+        at: ~/workspace
+    - should_run_job
+    - checkout
+    - run_brew_for_ios_build
+    - run:
+        name: Build
+        contxt: org-member
+        no_output_timeout: "1h"
+        command: |
+          script="/Users/distiller/project/.circleci/scripts/binary_ios_build.sh"
+          cat "$script"
+          source "$script"
+    - persist_to_workspace:
+        root: /Users/distiller/workspace/
+        paths: ios
+  
+  binary_ios_upload: 
+    <<: *pytorch_ios_params
+    macos:
+      xcode: "10.2.1"
+    steps:
+    - attach_workspace:
+        at: ~/workspace
+    - should_run_job
+    - checkout
+    - run_brew_for_ios_build
+    - run:
+        name: Upload
+        no_output_timeout: "1h"
+        command: |
+          script="/Users/distiller/project/.circleci/scripts/binary_ios_upload.sh"
+          cat "$script"
+          source "$script"
