@@ -12,7 +12,7 @@ std::tuple<Tensor, Tensor, Tensor> native_layer_norm_cpu(
     int64_t N,
     double eps)
 {
-  Tensor out = at::native::empty_like(input);
+  Tensor out = at::empty_like(input);
   Tensor mean = at::empty({M}, input.options());
   Tensor rstd = at::empty({M}, input.options());
   LayerNormKernel(kCPU, input, weight, bias, M, N, eps, &out, &mean, &rstd);
@@ -120,17 +120,25 @@ std::tuple<Tensor, Tensor, Tensor> infinitely_differentiable_native_layer_norm_b
   Tensor grad_input;
   Tensor grad_weight;
   Tensor grad_bias;
-  if (grad_input_mask[0] || grad_input_mask[1]) {
-    Tensor rstd_times_grad_out = rstd * grad_out;
-    if (grad_input_mask[0]) {
-      grad_input = weight.defined() ? rstd_times_grad_out * weight : rstd_times_grad_out;
+  const auto input_dim = input.dim();
+  const auto mean_dim = mean.dim();
+  if (grad_input_mask[0]) {
+    Tensor grad = weight.defined() ? grad_out * weight : grad_out;
+    Tensor undefined;
+    grad_input = std::get<0>(at::native_batch_norm_backward(
+      grad.reshape({1, M, N}), input.reshape({1, M, N}), /*weight=*/undefined, /*running_mean=*/undefined,
+      /*running_var=*/undefined, /*save_mean=*/mean.reshape({M}), /*save_invstd=*/rstd.reshape({M}),
+      /*training=*/false, eps, {true, false, false})).reshape_as(input);
+  }
+  if (grad_input_mask[1]) {
+    std::vector<int64_t> unsqueezed_sizes(input.dim(), 1);
+    for(auto i = 0; i < mean_dim; i++) {
+      unsqueezed_sizes[i] = mean.size(i);
     }
-    if (grad_input_mask[1]) {
-      grad_weight = (input - mean) * rstd_times_grad_out;
-    }
+    grad_weight = ((input - mean.reshape(unsqueezed_sizes)) * rstd.reshape(unsqueezed_sizes) * grad_out).flatten(0, mean_dim - 1).sum(0);
   }
   if (grad_input_mask[2]) {
-    grad_bias = grad_out.clone();
+    grad_bias = grad_out.flatten(0, mean_dim - 1).sum(0);
   }
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }

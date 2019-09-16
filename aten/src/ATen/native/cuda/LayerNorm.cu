@@ -56,7 +56,7 @@ void cuWelfordMuSigma2(
   const int i1,
   U& mu,
   U& sigma2,
-  U* buf) 
+  U* buf)
 {
   // Assumptions:
   // 1) blockDim.x == warpSize
@@ -73,11 +73,12 @@ void cuWelfordMuSigma2(
     // initialize with standard Welford algorithm
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
-    const T* lvals = vals + i1*N;
+    const T* lvals = vals + i1 * N;
     int l = 4 * thrx;
     for (; l + 3 < N; l += 4 * numx) {
       for (int k = 0; k < 4; ++k) {
         U curr = static_cast<U>(lvals[l + k]);
+        printf("i1=%ld, N=%ld, index=%ld, lvals[l + k]=%lf\n", long(i1), long(N), long(i1 * N + l + k), double(lvals[l + k]));
         cuWelfordOnlineSum<U>(curr, mu, sigma2, count);
       }
     }
@@ -103,7 +104,7 @@ void cuWelfordMuSigma2(
         if (threadIdx.x == 0 && threadIdx.y >= offset && threadIdx.y < 2 * offset) {
           const int wrt_y = threadIdx.y - offset;
           ubuf[2 * wrt_y] = mu;
-          ubuf[2 * wrt_y+1] = sigma2;
+          ubuf[2 * wrt_y + 1] = sigma2;
           ibuf[wrt_y] = count;
         }
         __syncthreads();
@@ -140,7 +141,7 @@ void cuWelfordMuSigma2(
   const int i1,
   float& mu,
   float& sigma2,
-  float* buf) 
+  float* buf)
 {
   // Assumptions:
   // 1) blockDim.x == warpSize
@@ -149,7 +150,7 @@ void cuWelfordMuSigma2(
   //
   // compute variance and mean over N
   float count = 0.0f;
-  mu= float(0);
+  mu = float(0);
   sigma2 = float(0);
   if (i1 < M) {
     // one warp normalizes one M index,
@@ -157,9 +158,9 @@ void cuWelfordMuSigma2(
     // initialize with standard Welford algorithm
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
-    const at::Half* lvals = vals + i1*N;
-    int l = 8*thrx;
-    if ((((size_t)lvals)&3) != 0) {
+    const at::Half* lvals = vals + i1 * N;
+    int l = 8 * thrx;
+    if ((((size_t)lvals) & 3) != 0) {
       // 16 bit alignment
       // first thread consumes first point
       if (thrx == 0) {
@@ -173,7 +174,7 @@ void cuWelfordMuSigma2(
       for (int k = 0; k < 8; k += 2) {
         float2 curr = __half22float2(*((__half2*)(lvals + l + k)));
         cuWelfordOnlineSum(curr.x, mu, sigma2, count);
-      cuWelfordOnlineSum(curr.y, mu, sigma2, count);
+        cuWelfordOnlineSum(curr.y, mu, sigma2, count);
       }
     }
     for (; l < N; ++l) {
@@ -193,7 +194,7 @@ void cuWelfordMuSigma2(
     if (blockDim.y > 1) {
       float* ubuf = (float*)buf;
       float* ibuf = (float*)(ubuf + blockDim.y);
-      for (int offset = blockDim.y/2; offset > 0; offset /= 2) {
+      for (int offset = blockDim.y / 2; offset > 0; offset /= 2) {
         // upper half of warps write to shared
         if (threadIdx.x == 0 && threadIdx.y >= offset && threadIdx.y < 2*offset) {
           const int wrt_y = threadIdx.y - offset;
@@ -228,13 +229,13 @@ void cuWelfordMuSigma2(
 }
 
 template<typename U> __device__ __host__ inline U rsqrt(U v) {
-  return U(1) / sqrt(v);
+  return U(1) / ::sqrt(v);
 }
 template<> __device__ __host__ inline float rsqrt(float v) {
-  return rsqrtf(v);
+  return ::rsqrtf(v);
 }
 template<> __device__ __host__ inline double rsqrt(double v) {
-  return rsqrt(v);
+  return ::rsqrt(v);
 }
 
 // This is the un-specialized struct.  Note that we prevent instantiation of this
@@ -285,13 +286,13 @@ void cuApplyLayerNorm(
   const U eps,
   const T* __restrict__ weight,
   const T* __restrict__ bias
-  ) 
+  )
 {
   // Assumptions:
   // 1) blockDim.x == warpSize
   // 2) Tensors are contiguous
   //
-  for (int i1=blockIdx.y; i1 < M; i1 += gridDim.y) {
+  for (int i1 = blockIdx.y; i1 < M; i1 += gridDim.y) {
     SharedMemory<U> shared;
     U* buf = shared.getPointer();
     U mu, sigma2;
@@ -299,6 +300,7 @@ void cuApplyLayerNorm(
     const T* lvals = vals + i1 * N;
     T* ovals = output_vals + i1 * N;
     U c_rstd = rsqrt(sigma2 + eps);
+    printf("i1=%ld, sigma2=%lf, c_rstd=%lf\n", long(i1), double(sigma2), double(c_rstd));
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
     if (weight != nullptr && bias != nullptr) {
@@ -343,7 +345,7 @@ void cuLoadWriteStridedInputs(
     for (int k = 0; k < blockDim.y; ++k) {
       int i2 = i2_off + k;
       int load_idx = i1 * N + i2;
-      int write_idx = thr_load_row_off * row_stride + thr_load_col_off+k;
+      int write_idx = thr_load_row_off * row_stride + thr_load_col_off + k;
       if (i2 < N) {
         U curr_input = static_cast<U>(input[load_idx]);
         U curr_grad_out = static_cast<U>(grad_out[load_idx]);
@@ -478,7 +480,7 @@ void cuComputeGradWeightBias(
 {
     // sum partial gradients for weight and bias
     SharedMemory<U> shared;
-    U* buf = shared.getPointer(); 
+    U* buf = shared.getPointer();
     int i2 = blockIdx.x * blockDim.x + threadIdx.x;
     if (i2 < N) {
       // each warp does sequential reductions until reduced part_size is num_warps
@@ -579,7 +581,7 @@ void cuComputeGradInput(
     // inter-warp reductions
     if (blockDim.y > 1) {
       SharedMemory<U> shared;
-      U* buf = shared.getPointer(); 
+      U* buf = shared.getPointer();
       for (int offset = blockDim.y/2;  offset > 0;  offset /= 2) {
         // upper half of warps write to shared
         if (threadIdx.y >= offset && threadIdx.y < 2 * offset) {
@@ -604,7 +606,7 @@ void cuComputeGradInput(
       if (threadIdx.y !=0) {
         sum_loss1 = buf[2 * threadIdx.x];
         sum_loss2 = buf[2 * threadIdx.x + 1];
-      } 
+      }
     }
     // all threads now have the two sums over l
     U fH = (U)N;
@@ -634,7 +636,7 @@ void cuComputeGradInput(
   }
 }
 
-template<typename T, typename U> 
+template<typename T, typename U>
 void HostApplyLayerNorm(
     T* output,
     U* mean,
@@ -651,10 +653,7 @@ void HostApplyLayerNorm(
     const dim3 threads(32, 4, 1);
     const uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
     const dim3 blocks(1, std::min((uint64_t)M, maxGridY), 1);
-    int nshared = 
-        threads.y > 1 ? 
-        threads.y * sizeof(U) + (threads.y / 2) * sizeof(U) : 
-        0;
+    int nshared = threads.y > 1 ? threads.y * sizeof(U) + (threads.y / 2) * sizeof(U) : 0;
     cuApplyLayerNorm<<<blocks, threads, nshared, stream>>>(
         output,
         mean,
@@ -665,7 +664,7 @@ void HostApplyLayerNorm(
         weight, bias);
 }
 
-template<typename T, typename U> 
+template<typename T, typename U>
 void HostLayerNormGradient(
     const T* grad_out,
     const U* mean,
@@ -732,7 +731,7 @@ void HostLayerNormGradient(
 }
 
 }  // namespace
-  
+
 std::tuple<Tensor, Tensor, Tensor> native_layer_norm_cuda(
   const Tensor& input,
   const Tensor& weight /* optional */,
@@ -758,7 +757,7 @@ std::tuple<Tensor, Tensor, Tensor> native_layer_norm_cuda(
         bias.defined() ? bias.data_ptr<scalar_t>() : nullptr
       );
     });
-    
+
   return std::make_tuple(output, mean, rstd);
 }
 
