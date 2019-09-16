@@ -33,13 +33,8 @@ Tensor AvgPool3dImpl::forward(const Tensor& input) {
   return F::avg_pool3d(input, options);
 }
 
-template struct AvgPoolOptions<1>;
 template class AvgPoolImpl<1, AvgPool1dImpl>;
-
-template struct AvgPoolOptions<2>;
 template class AvgPoolImpl<2, AvgPool2dImpl>;
-
-template struct AvgPoolOptions<3>;
 template class AvgPoolImpl<3, AvgPool3dImpl>;
 
 // ============================================================================

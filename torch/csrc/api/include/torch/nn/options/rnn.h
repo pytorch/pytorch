@@ -1,3 +1,9 @@
+#pragma once
+
+#include <torch/arg.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/types.h>
+
 namespace torch {
 namespace nn {
 
