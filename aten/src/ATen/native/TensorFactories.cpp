@@ -228,7 +228,11 @@ Tensor empty_like(
   }
 
 #ifdef BUILD_NAMEDTENSOR
-  return at::empty(self.sizes(), self.opt_names(), options, use_memory_format);
+  if (self.opt_names()) {
+    return at::empty(self.sizes(), self.opt_names(), options, use_memory_format);
+  } else {
+    return at::empty(self.sizes(), options, use_memory_format);
+  }
 #else
   return at::empty(self.sizes(), options, use_memory_format);
 #endif
