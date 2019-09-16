@@ -75,10 +75,20 @@ void round_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+// We manually overload trunc because std::trunc does not work with ROCm.
+template <typename scalar_t>
+__host__ __device__ static inline scalar_t trunc_wrapper(scalar_t a) {
+  return static_cast<scalar_t>(::truncf(static_cast<float>(a)));
+}
+
+__host__ __device__ static inline double trunc_wrapper(double a) {
+  return ::trunc(a);
+}
+
 void trunc_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "trunc_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return std::trunc(a);
+      return trunc_wrapper(a);
     });
   });
 }
