@@ -675,9 +675,9 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenFallbackKernelWithoutTens
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
-c10::optional<Tensor> called_arg2;
-c10::optional<int64_t> called_arg3;
-c10::optional<std::string> called_arg4;
+c10::optional<Tensor> called_arg2 = c10::nullopt;
+c10::optional<int64_t> called_arg3 = c10::nullopt;
+c10::optional<std::string> called_arg4 = c10::nullopt;
 
 struct KernelWithOptInputWithoutOutput final : OperatorKernel {
   void operator()(Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
