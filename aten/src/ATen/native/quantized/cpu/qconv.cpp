@@ -137,6 +137,9 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     at::Tensor bias;
     if (pack_ptr.bias.has_value()) {
       bias = pack_ptr.bias.value();
+      TORCH_CHECK(
+          bias.dtype() == at::kFloat,
+          "[QConv2D] The 'bias' tensor must have 'torch.float' dtype");
       bias = bias.contiguous();
       TORCH_CHECK(bias.dim() == 1, "bias should be a vector (1D Tensor)");
       TORCH_CHECK(
