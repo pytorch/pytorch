@@ -168,13 +168,13 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     const uint32_t kernel_w = weight.size(2);
     const size_t in_ch = weight.size(3) * groups;
 
-    Tensor bias;
+    Tensor bias_fp32;
     if (bias_in.has_value()) {
-      bias = bias_in.value();
+      bias_fp32 = bias_in.value();
     } else {
-      bias = at::empty(out_ch, at::kFloat);
-      bias = at::quantize_linear(bias, 1.0, 0, kQInt32);
+      bias_fp32 = at::zeros(out_ch, at::kFloat);
     }
+    auto bias = at::quantize_linear(bias_fp32, 1.0, 0, kQInt32);
     TORCH_CHECK(
         !bias.defined() || (bias.ndimension() == 1 && bias.size(0) == out_ch),
         "quantized::conv_prepack (qnnpack): expected bias to be 1-dimensional with ",
@@ -206,17 +206,30 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 
     auto weight_contig = weight.contiguous();
     auto bias_contig = bias.contiguous();
+    auto weight_zp = weight.q_zero_point() + 128;
+
+    int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
+    Tensor qnnp_weight = at::_empty_affine_quantized(
+        weight_contig.sizes(),
+        at::device(kCPU).dtype(kQUInt8),
+        weight.q_scale(),
+        weight_zp);
+    auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
+    for (int i = 0; i < weight_contig.numel(); ++i) {
+      qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
+    }
     auto wt_ptr =
         guts::make_unique<PackedConvWeightsQnnp>(PackedConvWeightsQnnp{
             guts::make_unique<qnnpack::PrePackConvWeights>(
                 conv_p,
-                (uint8_t*)weight_contig.data_ptr<c10::quint8>(),
+                (uint8_t*)qnnp_w_data,
                 (int32_t*)bias_contig.data_ptr<c10::qint32>()),
-            weight_contig,
-            bias_contig,
+            weight_contig, /* int8_t weight */
+            bias_fp32.contiguous(), /* fp32 bias */
+            0, /* input_scale */
             {kernel_h, kernel_w},
             weight.q_scale(),
-            weight.q_zero_point()});
+            weight_zp});
 
     return cpp_custom_type_hack::create(std::move(wt_ptr), weight.options());
   }

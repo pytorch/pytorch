@@ -1263,7 +1263,7 @@ class TestQNNPackOps(TestCase):
                 np.random.rand(output_channels, input_channels)
                 * (W_value_max - W_value_min)
                 + W_value_min
-            ).astype(np.uint8)
+            ).astype(np.int8)
 
             b_value_min = -10
             b_value_max = 10
@@ -1280,7 +1280,7 @@ class TestQNNPackOps(TestCase):
             W = torch.from_numpy(_dequantize(
                 W_q0, W_scales[0], W_zp)).to(dtype=torch.float)
             W_q = torch.quantize_linear(W, scale=W_scales[0], zero_point=(
-                W_zp), dtype=torch.quint8)
+                W_zp), dtype=torch.qint8)
             b = torch.from_numpy(_dequantize(
                 b_q0, X_scale * (W_scales[0].item()), 0)).to(dtype=torch.float)
             b_q = torch.quantize_linear(
@@ -1292,7 +1292,7 @@ class TestQNNPackOps(TestCase):
             Y_zp = 5
 
             # Weight prepacking operator for quantized Linear
-            W_prepack = qlinear_prepack(W_q, b_q)
+            W_prepack = qlinear_prepack(W_q, b)
 
             # Quantized Linear operator with prepacked weight
             Y_q = qlinear(X_q, W_prepack, Y_scale, Y_zp)
@@ -1321,7 +1321,7 @@ class TestQNNPackOps(TestCase):
 
     """Tests the correctness of the quantized::linear_unpack (qnnpack) op."""
     @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,),
-                       qparams=hu.qparams(dtypes=torch.quint8)))
+                       qparams=hu.qparams(dtypes=torch.qint8)))
     def test_qlinear_unpack(self, W):
         W, (W_scale, W_zp, torch_type) = W
 
@@ -1362,7 +1362,7 @@ class TestQNNPackOps(TestCase):
            X_scale=st.floats(1.2, 1.6),
            X_zp=st.integers(0, 4),
            W_scale=st.floats(0.2, 1.6),
-           W_zp=st.integers(2, 5),
+           W_zp=st.integers(-5, 5),
            Y_scale=st.floats(4.2, 5.6),
            Y_zp=st.integers(0, 4),
            use_relu=st.booleans())
@@ -1441,10 +1441,10 @@ class TestQNNPackOps(TestCase):
             W_RSCK = W.permute([0, 2, 3, 1]).contiguous()
 
             X_q = torch.quantize_linear(X_NHWC, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
-            W_q = torch.quantize_linear(W_RSCK, scale=W_scale, zero_point=W_zp, dtype=torch.quint8)
+            W_q = torch.quantize_linear(W_RSCK, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
             b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
 
-            W_pack = torch.ops.quantized.conv_prepack(W_q, b_q, stride, padding, dilation, groups)
+            W_pack = torch.ops.quantized.conv_prepack(W_q, b, stride, padding, dilation, groups)
             qconv = torch.ops.quantized.conv2d
             if use_relu:
                 qconv = torch.ops.quantized.conv2d_relu
@@ -1479,7 +1479,7 @@ class TestQNNPackOps(TestCase):
                               qparams=[hu.qparams(dtypes=torch.quint8,
                                                   zero_point_min=0,
                                                   zero_point_max=0),
-                                       hu.qparams(dtypes=torch.quint8,
+                                       hu.qparams(dtypes=torch.qint8,
                                                   zero_point_min=0,
                                                   zero_point_max=0),
                                        hu.qparams(dtypes=torch.qint32,
@@ -1510,10 +1510,10 @@ class TestQNNPackOps(TestCase):
             dilations = [1, 1]
             bias = torch.from_numpy(bias).to(torch.float)
             b_q = torch.quantize_linear(bias, scale=bias_scale, zero_point=bias_zero_point, dtype=bias_qtype)
-            W_packed = qconv_prepack(W_q, b_q, strides, paddings, dilations, groups)
+            W_packed = qconv_prepack(W_q, bias, strides, paddings, dilations, groups)
             # Unpack weights weight unpacking operator (Used for serialization)
             W_unpacked = qconv_unpack(W_packed)[0]
-            b_q = qconv_unpack(W_packed)[1]
+            bias = qconv_unpack(W_packed)[1]
 
             # Assert equal
             np.testing.assert_equal(W_q.int_repr().numpy(), W_unpacked.int_repr().numpy())

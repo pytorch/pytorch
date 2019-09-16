@@ -241,15 +241,61 @@ class QLinearInt8 final : public torch::OperatorKernel {
     auto packB = pack_ptr.w.get();
     auto kernel_zp = pack_ptr.w_zp;
     auto kernel_scale = pack_ptr.w_scale;
+    size_t rows_w = packB->getOutputChannels();
+    size_t cols_w = packB->getInputChannels();
+    auto input_scale = input_contig.q_scale();
+
+    if (input_contig.q_scale() != pack_ptr.input_scale) {
+      // Get the original weight and adjust it to uint8 from int8
+      auto weight_contig = pack_ptr.orig_weight;
+      auto bias_fp32 = pack_ptr.bias;
+      int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
+      Tensor qnnp_weight = at::_empty_affine_quantized(
+          weight_contig.sizes(),
+          at::device(kCPU).dtype(kQUInt8),
+          kernel_scale,
+          kernel_zp);
+      auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
+      for (int i = 0; i < weight_contig.numel(); ++i) {
+        qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
+      }
+      // Original bias was float, so we requantize it here.
+      auto bias = at::quantize_linear(
+          bias_fp32, kernel_scale * input_scale, 0, kQInt32);
+      auto bias_contig = bias.contiguous();
+      // Update the input scale to not pack again.
+      pack_ptr.input_scale = input_scale;
+      auto wt_ptr =
+          guts::make_unique<PackedLinearWeightsQnnp>(PackedLinearWeightsQnnp{
+              guts::make_unique<qnnpack::PackBMatrix>(
+                  cols_w /* input_channels */,
+                  rows_w /* output_channels */,
+                  kernel_zp,
+                  kernel_scale,
+                  (uint8_t*)qnnp_w_data,
+                  (int32_t*)bias_contig.data_ptr<c10::qint32>()),
+              weight_contig,
+              bias_fp32, /* fp32 bias */
+              input_scale, /* input_scale */
+              kernel_scale,
+              kernel_zp});
+      void* raw_ptr = wt_ptr.release();
+      at::DataPtr at_ptr(
+          raw_ptr,
+          raw_ptr,
+          caffe2::TypeMeta::Make<PackedLinearWeightsQnnp>().deleteFn(),
+          at::kCPU);
+      packed_weight.storage().set_data_ptr(std::move(at_ptr));
+      auto& pack_ptr_new =
+          cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(packed_weight);
+      packB = pack_ptr_new.w.get();
+    }
 
     size_t rows_input = 1;
     size_t cols_input = input_contig.size(input_contig.dim() - 1);
     for (size_t i = 0; i < input_contig.dim() - 1; ++i) {
       rows_input *= input_contig.size(i);
     }
-
-    size_t rows_w = packB->getOutputChannels();
-    size_t cols_w = packB->getInputChannels();
 
     TORCH_CHECK(
         cols_input == cols_w,

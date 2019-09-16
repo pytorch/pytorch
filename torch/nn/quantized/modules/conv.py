@@ -81,13 +81,14 @@ class Conv2d(torch.nn.Module):
                 self.kernel_size[1]],
             scale=1, zero_point=0, dtype=torch.qint8)
         self.weight_scale = 1.0
-        qbias = None
+        bias = None
         if bias:
-            qbias = torch._empty_affine_quantized([out_channels],
-                                                  scale=1.0, zero_point=0,
-                                                  dtype=torch.qint32)
+            #qbias = torch._empty_affine_quantized([out_channels],
+            #                                      scale=1.0, zero_point=0,
+            #                                      dtype=torch.qint32)
+            bias = torch.zeros([out_channels], dtype=torch.float)
 
-        self.set_weight_bias(qweight, qbias)
+        self.set_weight_bias(qweight, bias)
         self.scale = 1.0
         self.zero_point = 0
 
@@ -127,12 +128,12 @@ class Conv2d(torch.nn.Module):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
-        output = ops.quantized.conv2d(input.permute([0, 2, 3, 1]),
+        output = ops.quantized.conv2d(input,#.permute([0, 2, 3, 1]),
                                       self._packed_params,
                                       self.stride, self.padding,
                                       self.dilation, self.groups,
                                       self.scale, self.zero_point)
-        return output.permute([0, 3, 1, 2])
+        return output#.permute([0, 3, 1, 2])
 
     # ===== Serialization methods =====
     # The special consideration here is that we have to unpack the weights into their

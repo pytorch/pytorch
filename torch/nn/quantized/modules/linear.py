@@ -108,15 +108,16 @@ class Linear(torch.nn.Module):
         # deserialization modules
         self.in_features = in_features
         self.out_features = out_features
-        qbias = None
+        bias = None
         if bias_:
-            qbias = torch._empty_affine_quantized(
-                [out_features], scale=1, zero_point=0, dtype=torch.qint32)
+            #qbias = torch._empty_affine_quantized(
+            #    [out_features], scale=1, zero_point=0, dtype=torch.qint32)
+            bias = torch.zeros(out_features, dtype=torch.float)
 
         qweight = torch._empty_affine_quantized(
             [out_features, in_features], scale=1, zero_point=0, dtype=torch.qint8)
 
-        self.set_weight_bias(qweight, qbias)
+        self.set_weight_bias(qweight, bias)
         self.weight_scale = 1.0
         self.scale = 1.0
         self.zero_point = 0
