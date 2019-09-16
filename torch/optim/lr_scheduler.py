@@ -611,6 +611,7 @@ class CyclicLR(_LRScheduler):
             self.max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
 
         super(CyclicLR, self).__init__(optimizer, last_epoch)
+        self.base_lrs = base_lrs
 
     def _format_param(self, name, optimizer, param):
         """Return correctly formatted lr/momentum for each param group."""
