@@ -348,8 +348,9 @@ TEST(TensorTest, Is_Leaf) {
 
   x = at::tensor({5});
   y = x * x;
-  ASSERT_THROWS_WITH(y.is_leaf(), "is_leaf is not implemented for Tensor");
-  ASSERT_THROWS_WITH(x.is_leaf(), "is_leaf is not implemented for Tensor");
+  const auto message = "is_leaf is not implemented for Tensor";
+  ASSERT_THROWS_WITH(y.is_leaf(), message);
+  ASSERT_THROWS_WITH(x.is_leaf(), message);
 }
 
 TEST(TensorTest, Output_Nr) {
