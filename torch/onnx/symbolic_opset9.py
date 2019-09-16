@@ -771,12 +771,14 @@ def wrap_logical_op_with_negation(func):
 
 
 def eq(g, self, other):
-    return g.op("Equal", self, other)
+    other = sym_help._maybe_get_scalar(other)
+    return g.op("Equal", self, sym_help._if_scalar_type_as(g, other, self))
 
 
 @wrap_logical_op_with_negation
 def ne(g, self, other):
-    return g.op("Equal", self, other)
+    other = sym_help._maybe_get_scalar(other)
+    return g.op("Equal", self, sym_help._if_scalar_type_as(g, other, self))
 
 
 def gt(g, input, other):
