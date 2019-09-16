@@ -38,6 +38,12 @@ struct WorkerId {
         name_);
   }
 
+  WorkerId() : name_(""), id_(-1) {}
+
+ bool operator==(const WorkerId& other) {
+   return name_ == other.name_ && id_ == other.id_;
+ }
+
   static constexpr size_t MAX_NAME_LEN = 128;
 
   const std::string name_;
