@@ -394,8 +394,8 @@ TEST(TensorTest, Detach) {
 
   x = at::tensor({5}, at::TensorOptions().requires_grad(false));
   y = x * x;
-  ASSERT_THROW(x.detach(), c10::Error);
-  ASSERT_THROW(y.detach(), c10::Error);
+  ASSERT_THROWS_WITH(x.detach(), "detach is not implemented for Tensor");
+  ASSERT_THROWS_WITH(y.detach(), "detach is not implemented for Tensor");
 }
 
 TEST(TensorTest, Detach_) {
@@ -407,6 +407,6 @@ TEST(TensorTest, Detach_) {
 
   x = at::tensor({5}, at::TensorOptions().requires_grad(false));
   y = x * x;
-  ASSERT_THROW(x.detach_(), c10::Error);
-  ASSERT_THROW(y.detach_(), c10::Error);
+  ASSERT_THROWS_WITH(x.detach_(), "detach_ is not implemented for Tensor");
+  ASSERT_THROWS_WITH(y.detach_(), "detach_ is not implemented for Tensor");
 }
