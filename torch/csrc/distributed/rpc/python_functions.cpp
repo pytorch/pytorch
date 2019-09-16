@@ -104,14 +104,13 @@ std::shared_ptr<RRef> pyRemoteBuiltin(
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerId& dst,
-    const std::string& pickledPythonUDF) {
+    const std::string& pickledPythonUDF,
+    std::vector<torch::Tensor>& tensors) {
   std::vector<char> data(pickledPythonUDF.begin(), pickledPythonUDF.end());
-  std::vector<torch::Tensor> tensor_table;
 
   return agent.send(
       dst,
-      Message(
-          std::move(data), std::move(tensor_table), MessageType::PYTHON_CALL));
+      Message(std::move(data), std::move(tensors), MessageType::PYTHON_CALL));
 }
 
 } // namespace rpc
