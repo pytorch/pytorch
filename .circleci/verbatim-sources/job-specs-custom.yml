@@ -9,14 +9,9 @@
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
-    - run:
-        <<: *setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - should_run_job
+    - setup_linux_system_environment
+    - setup_ci_environment
     - run:
         name: Perf Test
         no_output_timeout: "1h"
@@ -48,14 +43,9 @@
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
-    - run:
-        <<: *setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - should_run_job
+    - setup_linux_system_environment
+    - setup_ci_environment
     - run:
         name: Doc Build and Push
         no_output_timeout: "1h"
@@ -98,14 +88,9 @@
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
-    - run:
-        <<: *setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - should_run_job
+    - setup_linux_system_environment
+    - setup_ci_environment
     - run:
         name: Doc Build and Push
         no_output_timeout: "1h"
@@ -146,26 +131,21 @@
       xcode: "9.0"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - attach_workspace:
-          at: ~/workspace
-      - run:
-          <<: *should_run_job
+      - should_run_job
       - checkout
-      - run:
-          <<: *macos_brew_update
+      - run_brew_for_macos_build
       - run:
           name: Build
           no_output_timeout: "1h"
           command: |
             set -e
-
             export IN_CIRCLECI=1
 
             # Install sccache
             sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
             sudo chmod +x /usr/local/bin/sccache
-
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
+
             # This IAM user allows write access to S3 bucket for sccache
             set +x
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
@@ -175,14 +155,14 @@
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
 
-            mkdir -p /Users/distiller/pytorch-ci-env/workspace
-
             # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
-            cp -a /Users/distiller/project/. /Users/distiller/pytorch-ci-env/workspace
+            cp -a ~/project ~/workspace
+
       - persist_to_workspace:
-          root: /Users/distiller/pytorch-ci-env
+          root: ~/workspace
           paths:
-            - "*"
+            - miniconda3
+            - project
 
   pytorch_macos_10_13_py3_test:
     environment:
@@ -192,12 +172,8 @@
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       # This workspace also carries binaries from the build job
-      - attach_workspace:
-          at: ~/workspace
-      - run:
-          <<: *should_run_job
-      - run:
-          <<: *macos_brew_update
+      - should_run_job
+      - run_brew_for_macos_build
       - run:
           name: Test
           no_output_timeout: "1h"
@@ -206,10 +182,7 @@
             export IN_CIRCLECI=1
 
             # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
-            # TODO: I'm not sure why we can't just run our job in
-            # ~/workspace and call it a day
-            # NB: Yes, you need workspace twice
-            cp -a ~/workspace/workspace/. /Users/distiller/project
+            cp -a ~/workspace/project/. ~/project
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
@@ -221,13 +194,9 @@
       xcode: "9.0"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - attach_workspace:
-          at: ~/workspace
-      - run:
-          <<: *should_run_job
+      - should_run_job
       - checkout
-      - run:
-          <<: *macos_brew_update
+      - run_brew_for_macos_build
       - run:
           name: Build
           no_output_timeout: "1h"
@@ -275,15 +244,10 @@
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - should_run_job
+    - setup_linux_system_environment
     - checkout
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: pytorch android gradle build
         no_output_timeout: "1h"
@@ -366,10 +330,7 @@
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
+    - should_run_job
     - run:
         name: filter out not PR runs
         no_output_timeout: "5m"
@@ -378,11 +339,9 @@
           if [ -z "${CIRCLE_PULL_REQUEST:-}" ]; then
             circleci step halt
           fi
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - checkout
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: pytorch android gradle build only x86_32 (for PR)
         no_output_timeout: "1h"
@@ -407,3 +366,54 @@
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
+
+  pytorch_ios_build:
+    <<: *pytorch_ios_params
+    macos:
+      xcode: "10.2.1"
+    steps:
+      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+      - should_run_job
+      - checkout
+      - run_brew_for_ios_build
+      - run:
+          name: Build
+          no_output_timeout: "1h"
+          command: |
+            set -e
+            export IN_CIRCLECI=1
+            WORKSPACE=/Users/distiller/workspace
+            PROJ_ROOT=/Users/distiller/project
+            export TCLLIBPATH="/usr/local/lib"
+
+            # Install conda
+            curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+            chmod +x ~/Downloads/conda.sh
+            /bin/bash ~/Downloads/conda.sh -b -p ~/anaconda
+            export PATH="~/anaconda/bin:${PATH}"
+            source ~/anaconda/bin/activate
+            # Install dependencies
+            conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests
+            # sync submodules
+            cd ${PROJ_ROOT}
+            git submodule sync
+            git submodule update --init --recursive
+            # export
+            export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+            # run build script
+            chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
+            CMAKE_ARGS=()
+            if [ -n "${IOS_ARCH:-}" ]; then
+              CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
+            fi
+            if [ -n "${IOS_PLATFORM:-}" ]; then
+              CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
+            fi
+            if [ -n "${USE_NNPACK:-}" ]; then
+              CMAKE_ARGS+=("-DUSE_NNPACK=${USE_NNPACK}")
+            fi
+            CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+            CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
+            CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+
+            unbuffer ${PROJ_ROOT}/scripts/build_ios.sh ${CMAKE_ARGS[@]} 2>&1 | ts
