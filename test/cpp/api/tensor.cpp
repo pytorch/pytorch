@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <test/cpp/api/support.h>
 
 #include <torch/types.h>
 
@@ -354,3 +355,21 @@ TEST(TensorTest, BackwardCreatesOnesGrad) {
   ASSERT_TRUE(torch::equal(x.grad(),
               torch::ones_like(x)));
 }
+
+TEST(TensorTest, Requires_grad_) {
+  auto x = torch::tensor({5.0});
+  x.requires_grad_(true);
+  ASSERT_TRUE(x.requires_grad());
+
+  const auto y = x * x;
+  ASSERT_THROWS_WITH(y.requires_grad_(false),
+    "you can only change requires_grad flags of leaf variables.");
+
+  x.requires_grad_(false);
+  ASSERT_FALSE(x.requires_grad());
+
+  const auto int_tensor = torch::tensor({5}, at::TensorOptions().dtype(torch::kInt));
+  ASSERT_THROWS_WITH(int_tensor.requires_grad_(true),
+    "Only Tensors of floating point dtype can require gradients");
+}
+
