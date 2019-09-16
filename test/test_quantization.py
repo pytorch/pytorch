@@ -777,7 +777,7 @@ class ObserverTest(QuantizationTestCase):
         self.assertEqual(qparams[1].item(), ref_zero_point)
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
 
-    @hypothesis.settings(deadline=timedelta(milliseconds=500))
+    @hypothesis.settings(timeout=timedelta(milliseconds=500))
     def test_observer_scriptable(self):
         obs = torch.quantization.default_observer()()
         scripted = torch.jit.script(obs)
