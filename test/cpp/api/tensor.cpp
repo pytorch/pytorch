@@ -340,7 +340,7 @@ TEST(TensorTest, BackwardCreatesOnesGrad) {
               torch::ones_like(x)));
 }
 
-TEST(TensorTest, Is_Leaf) {
+TEST(TensorTest, IsLeaf) {
   auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
   auto y = x * x;
   ASSERT_TRUE(x.is_leaf());
