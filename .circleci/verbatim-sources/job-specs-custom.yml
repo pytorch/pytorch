@@ -9,14 +9,9 @@
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
-    - run:
-        <<: *setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - should_run_job
+    - setup_linux_system_environment
+    - setup_ci_environment
     - run:
         name: Perf Test
         no_output_timeout: "1h"
@@ -48,14 +43,9 @@
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
-    - run:
-        <<: *setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - should_run_job
+    - setup_linux_system_environment
+    - setup_ci_environment
     - run:
         name: Doc Build and Push
         no_output_timeout: "1h"
@@ -98,14 +88,9 @@
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
-    - run:
-        <<: *setup_linux_system_environment
-    - run:
-        <<: *setup_ci_environment
+    - should_run_job
+    - setup_linux_system_environment
+    - setup_ci_environment
     - run:
         name: Doc Build and Push
         no_output_timeout: "1h"
@@ -146,13 +131,9 @@
       xcode: "9.0"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - attach_workspace:
-          at: ~/workspace
-      - run:
-          <<: *should_run_job
+      - should_run_job
       - checkout
-      - run:
-          <<: *macos_brew_update
+      - run_brew_for_macos_build
       - run:
           name: Build
           no_output_timeout: "1h"
@@ -191,12 +172,8 @@
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       # This workspace also carries binaries from the build job
-      - attach_workspace:
-          at: ~/workspace
-      - run:
-          <<: *should_run_job
-      - run:
-          <<: *macos_brew_update
+      - should_run_job
+      - run_brew_for_macos_build
       - run:
           name: Test
           no_output_timeout: "1h"
@@ -217,13 +194,9 @@
       xcode: "9.0"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - attach_workspace:
-          at: ~/workspace
-      - run:
-          <<: *should_run_job
+      - should_run_job
       - checkout
-      - run:
-          <<: *macos_brew_update
+      - run_brew_for_macos_build
       - run:
           name: Build
           no_output_timeout: "1h"
@@ -271,15 +244,10 @@
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - should_run_job
+    - setup_linux_system_environment
     - checkout
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: pytorch android gradle build
         no_output_timeout: "1h"
@@ -362,10 +330,7 @@
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
+    - should_run_job
     - run:
         name: filter out not PR runs
         no_output_timeout: "5m"
@@ -374,11 +339,9 @@
           if [ -z "${CIRCLE_PULL_REQUEST:-}" ]; then
             circleci step halt
           fi
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - checkout
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: pytorch android gradle build only x86_32 (for PR)
         no_output_timeout: "1h"
@@ -410,13 +373,9 @@
       xcode: "10.2.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - attach_workspace:
-          at: ~/workspace
-      - run:
-          <<: *should_run_job
+      - should_run_job
       - checkout
-      - run:
-          <<: *ios_brew_update
+      - run_brew_for_ios_build
       - run:
           name: Build
           no_output_timeout: "1h"
