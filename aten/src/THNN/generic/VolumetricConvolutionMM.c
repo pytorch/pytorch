@@ -214,7 +214,7 @@ static void THNN_(unfolded_copy_vol)(
 
 
       *dst = (h >= 0 && w >= 0 && d >= 0 && h < inputHeight && w < inputWidth && d < inputDepth) ?
-        input_data[nip*inputDHW+ d*inputHW + h*inputWidth + w] : 0;
+        input_data[nip*inputDHW+ d*inputHW + h*inputWidth + w] : scalar_t(0);
 
       count++;
       if (count < line_seg_len) {
