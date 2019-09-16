@@ -627,6 +627,9 @@ class _TestTorchMixin(torchtest):
                             lambda x: polygamma(n, x).item(),
                             self._digamma_input(test_poles=False))
 
+        with self.assertRaisesRegex(RuntimeError, r'polygamma\(n, x\) does not support negative n\.'):
+            torch.polygamma(-1, torch.tensor([1.0, 2.0]))
+
     def test_asin(self):
         self._test_math(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else nan)
 
