@@ -350,3 +350,12 @@ TEST(TensorTest, BackwardCreatesOnesGrad) {
   ASSERT_TRUE(torch::equal(x.grad(),
               torch::ones_like(x)));
 }
+
+TEST(TensorTest, Version) {
+  const auto x = torch::ones(3);
+  ASSERT_EQ(x.version(), 0);
+  x.mul_(2);
+  ASSERT_EQ(x.version(), 1);
+  x.add_(1);
+  ASSERT_EQ(x.version(), 2);
+}
