@@ -1530,6 +1530,12 @@ Node* Graph::createIsInstance(
   return n;
 }
 
+Node* Graph::createUncheckedCast(Value* v, TypePtr type) {
+  Node* n = create(prim::unchecked_cast, {v});
+  n->output()->setType(std::move(type));
+  return n;
+}
+
 Value* Graph::insertFunctionCall(
     Function* callee,
     const script::MatchedSchema& matched) {

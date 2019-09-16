@@ -1229,13 +1229,13 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
-     // This op can be removed in preprocessing before being run in the
-     // interpreter (but is currently not removed), even when it is removed it
-     // needs to remain a registered op so that constant prop can run.
+     // This op is no longer generated, but old models use it instead of
+     // unchecked_cast, so we keep it here so it gets handled correctly.
      Operator(
          "prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)",
          noop,
          aliasAnalysisFromSchema()),
+     Operator(prim::unchecked_cast, noop, aliasAnalysisSpecialCase()),
      Operator(
          prim::fork,
          [](const Node* node) {

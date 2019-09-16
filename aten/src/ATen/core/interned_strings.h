@@ -93,6 +93,7 @@ namespace c10 {
   _(prim, range)                     \
   _(prim, rangelist)                 \
   _(prim, isinstance)                \
+  _(prim, unchecked_cast)              \
   _(aten, _grad_sum_to_size)         \
   _(aten, _size_if_not_equal)        \
   _(aten, _ncf_unsqueeze)            \

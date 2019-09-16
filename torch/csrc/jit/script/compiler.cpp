@@ -61,6 +61,10 @@ struct Refinement {
   RefinementKind kind() const {
     return kind_;
   }
+  TypePtr typeArg() const {
+    TORCH_INTERNAL_ASSERT(kind() == RefinementKind::IS_INSTANCE);
+    return type_arg_;
+  }
 
  private:
   std::string identifier_;
@@ -1137,11 +1141,17 @@ struct to_ir {
         } break;
         case RefinementKind::OPTIONAL_PRESENT: {
           Value* v = environment_stack->getVar(r.identifier(), loc);
-          Value* output = graph->insert(prim::unchecked_unwrap_optional, {v});
-          environment_stack->setVar(loc, r.identifier(), output);
+          if (auto ot = v->type()->cast<OptionalType>()) {
+            Node* cast = graph->insertNode(
+                graph->createUncheckedCast(v, ot->getElementType()));
+            environment_stack->setVar(loc, r.identifier(), cast->output());
+          }
         } break;
         case RefinementKind::IS_INSTANCE:
-          break; // AT_ERROR("NYI: IS_INSTANCE refinement");
+          Value* v = environment_stack->getVar(r.identifier(), loc);
+          Node* cast =
+              graph->insertNode(graph->createUncheckedCast(v, r.typeArg()));
+          environment_stack->setVar(loc, r.identifier(), cast->output());
       }
     }
   }
@@ -2379,6 +2389,13 @@ struct to_ir {
 
         return std::make_shared<SimpleValue>(expr);
       }
+      case prim::unchecked_cast: {
+        checkApplyNumInputs(apply, 2);
+        TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
+        Value* v = emitExpr(apply.inputs()[1]);
+        Node* n = graph->insertNode(graph->createUncheckedCast(v, type));
+        return std::make_shared<SimpleValue>(n->output());
+      } break;
       case prim::GetAttr: {
         checkApplyNumInputs(apply, 2);
         auto obj = emitSugaredExpr(apply.inputs()[0], 1);
