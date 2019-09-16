@@ -91,7 +91,7 @@ def filter_unique_options(options, allow_kwarg, type_to_signature, remove_self):
     return unique
 
 
-def sort_by_number_of_options(declaration, reverse=True):
+def sort_by_number_of_args(declaration, reverse=True):
     def num_args(option):
         return len(option['arguments'])
     declaration['options'].sort(key=num_args, reverse=reverse)

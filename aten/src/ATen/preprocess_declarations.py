@@ -221,7 +221,7 @@ def run(declarations):
             type_to_signature=TYPE_FORMAL_GENERIC,
             remove_self=True)
 
-        common_with_cwrap.sort_by_number_of_options(declaration)
+        common_with_cwrap.sort_by_number_of_args(declaration)
 
         discover_zero_dim_tensor_operations(declaration)
 
