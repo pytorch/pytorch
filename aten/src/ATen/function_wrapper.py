@@ -112,16 +112,28 @@ ${return_type} ${Type}::${api_name}(${type_method_formals}) {
 }
 """)
 
-DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
+DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
   .impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
-BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
+BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
   .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
+DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .catchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
+BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .kernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
@@ -573,7 +585,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'device_guard': bool,
     'device_guard_declaration': str,
     'dispatch_scalar_type_declaration': str,
-    'use_c10_dispatcher': bool,
+    'use_c10_dispatcher': str,
     'with_gil': bool,
     'cpu_half': bool,
     'cpu_bfloat16': bool,
@@ -632,7 +644,7 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('name', str),
     ('operator_name', str),
     ('overload_name', str),
-    ('use_c10_dispatcher', bool),
+    ('use_c10_dispatcher', str),
     ('matches_jit_signature', bool),
     ('schema_string', str),
     ('method_prefix_derived', str),
@@ -1169,7 +1181,7 @@ def create_generic(top_env, declarations):
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, native_arguments=option['method_actuals'])
 
-            method_definition = (C10_TENSOR_METHOD_DEFINITION if option['use_c10_dispatcher'] else TENSOR_METHOD_DEFINITION)
+            method_definition = (C10_TENSOR_METHOD_DEFINITION if (option['use_c10_dispatcher'] != 'no') else TENSOR_METHOD_DEFINITION)
             return FunctionCode(
                 declaration=TENSOR_METHOD_DECLARATION.substitute(
                     option, static_dispatch_method_body=static_dispatch_method_body),
@@ -1210,7 +1222,7 @@ def create_generic(top_env, declarations):
                 fn_definition = FACTORY_DEFINITION.substitute(
                     option, static_dispatch_function_body=static_dispatch_function_body)
             else:
-                if not option['use_c10_dispatcher']:
+                if (option['use_c10_dispatcher'] == 'no'):
                     fn_definition = FUNCTION_DEFINITION.substitute(
                         option, static_dispatch_function_body=static_dispatch_function_body)
                 else:
@@ -1278,7 +1290,7 @@ def create_generic(top_env, declarations):
         if BUILD_NAMEDTENSOR or not is_named_tensor_only:
             top_env['registration_declarations'].append(
                 REGISTRATION_DECLARATION.substitute(option))
-        if option['use_c10_dispatcher']:
+        if (option['use_c10_dispatcher'] != 'no'):
             top_env['c10_ops_already_moved_from_aten_to_c10'].append(
                 check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
             )
@@ -1304,8 +1316,12 @@ def create_generic(top_env, declarations):
                 check_namedtensor_enabled(NATIVE_DISPATCH_DECLARATION.substitute(option)))
             top_env['type_method_definitions'].append(
                 check_namedtensor_enabled(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option)))
-            top_env['function_registrations'].append(
-                check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
+            if (option['use_c10_dispatcher'] == 'full'):
+                top_env['function_registrations'].append(
+                    check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
+            else:
+                top_env['function_registrations'].append(
+                    check_namedtensor_enabled(DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option)))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1785,8 +1801,12 @@ def create_derived(backend_type_env, declarations):
                     option['native_type_method_dispatch'] = native_dispatch
                     type_object_definitions.append(
                         NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
-                    function_registrations.append(
-                        BACKEND_FUNCTION_REGISTRATION.substitute(env))
+                    if (option['use_c10_dispatcher'] == 'full'):
+                        function_registrations.append(
+                            BACKEND_FUNCTION_REGISTRATION.substitute(env))
+                    else:
+                        function_registrations.append(
+                            BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:

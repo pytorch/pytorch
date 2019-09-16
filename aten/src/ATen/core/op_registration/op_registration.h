@@ -392,12 +392,43 @@ public:
       return std::move(*this);
     }
 
+    template<class KernelFunctor, class... ConstructorParameters>
+    KernelCacheCreatorFunction makeCacheCreator(ConstructorParameters&&... constructorParameters) {
+      // Setting cache_creator to nullptr so calling the kernel doesn't need to call it, which would be expensive.
+      // Since the dispatcher static_cast's cache objects into our functor type to call their operator(), this nullptr
+      // will cause it to create and static_cast an invalid cache object, which is technically illegal in the C++ standard,
+      // but it works as long as operator() does not access any functor members.
+      //
+      // This is only safe if the functor doesn't have any members, which is for example true
+      // for kernels defined as compile time function pointers (i.e. in the .kernel<decltype(func), &func>() API), but not true
+      // for kernels defined as run time function pointers (i.e. in the .kernel(&func) API).
+      // So we can only do this optimization if sizeof...(ConstructorParameters) == 0.
+
+      // TODO This optimization will break some kernels, namely ones that have a
+      // default constructor but use it to initialize some members they use later.
+      // Instead of looking at the number of constructor parameters, we should check that
+      // the class has no members and no virtual functions (except for the virtual destructor)
+      // which is basically what std::is_empty does except for the virtual destructor.
+      // We can't use std::is_empty because c10::KernelCache has a virtual destructor.
+      // Possible solution: Make c10::KernelCache entirely non-virtual and
+      // use a custom deleter when storing caches, then use std::is_empty.
+      // However, is that actually faster then or does the custom deleter break perf?
+      // Or let's just benchmark if maybe cache_creator isn't that bad and we don't
+      // need the optimization?
+
+      auto cache_creator = KernelCacheCreatorFunction(nullptr);
+      if (sizeof...(ConstructorParameters) != 0) {
+        cache_creator = detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...);
+      }
+      return cache_creator;
+    }
+
     template<class KernelFunctor, bool AllowDeprecatedTypes = false, class... ConstructorParameters>
     Options&& kernelFunctor(c10::optional<TensorTypeId>&& dispatch_key, ConstructorParameters&&... constructorParameters) && {
       return std::move(*this).kernel(
         std::move(dispatch_key),
         &detail::wrap_kernel_functor_boxed<KernelFunctor, AllowDeprecatedTypes>::call,
-        detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
+        makeCacheCreator<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...),
         reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
         detail::FunctionSchemaInferer<KernelFunctor>()()
       );
@@ -405,21 +436,10 @@ public:
 
     template<class KernelFunctor, class... ConstructorParameters>
     Options&& kernelFunctorUnboxedOnly(c10::optional<TensorTypeId>&& dispatch_key, ConstructorParameters&&... constructorParameters) && {
-      // Setting cache_creator to nullptr so calling the kernel doesn't need to call it, which would be expensive.
-      // Since the dispatcher static_cast's cache objects into our functor type to call their operator(), this nullptr
-      // will cause it to create and static_cast an invalid cache object, which is technically illegal in the C++ standard,
-      // but it works as long as operator() does not access any functor members.
-      // Exception: Backend extensions use runtime function pointers and store these in the functor as members,
-      // so we need a cache if sizeof...(ConstructorParameters) != 0
-      auto cache_creator =
-        (sizeof...(ConstructorParameters) == 0)
-        ? KernelCacheCreatorFunction(nullptr)
-        : detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...);
-
       return std::move(*this).kernel(
         std::move(dispatch_key),
         nullptr,
-        std::move(cache_creator),
+        makeCacheCreator<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...),
         reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
         detail::FunctionSchemaInferer<KernelFunctor>()()
       );
