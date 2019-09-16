@@ -110,39 +110,44 @@ class DistributedChunkSampler(Sampler):
     is a separate process with an identical copy of sampler.
     Because of that, on a distributed environment, different processes
     could read the same portion of the dataset. This sampler uses strides,
-    based on processes `rank`s, to coordinate parallel reading of chunks of data.
+    based on the global worker rank concept, to coordinate parallel reading of chunks of data.
 
-    Each instance of `DistributedChunkSampler` must be configured with different a `rank`
-    (aka strides), so that chunk sampling happens in a round-robin fashion on each worker:
-    rank0, rank1, ..., rankN, rank0, rank1, ..., rankN, ...
+    Each instance of `DistributedChunkSampler` must be configured with a different
+    `global_worker_rank` (aka strides), so that chunk sampling happens in a round-robin
+    fashion on each worker, e.g. rank0, rank1, ..., rankN, rank0, rank1, ..., rankN, ...
 
     For example, assume 2 workers reading the same `ChunkDataset` dataset.
     Each worker process needs to configure their `DistributedChunkSampler`
-    so that one of them reads all even batches (e.g. rank 0)
-    while the other process reads all odd batches (e.g. rank 1).
+    so that one of them reads all even batches (e.g. `global_worker_rank` 0)
+    while the other process reads all odd batches (e.g. `global_worker_rank` 1).
 
-    Similarly to `DataLoader`, either a custom :attr:`sampler` can be specified or
-    the number of chunks (:attr:`num_chunks`) and :attr:`shuffle` flag.
-    In the latter case, `SequentialSampler` is used when :attr:`shuffle` is ``False``
-    and `RandomSampler` otherwise.
+    If :attr:`shuffle` is ``False``, `SequentialSampler` will be used to select
+    chunk indicies; ``RandomSampler`` will be used otherwise.
 
     Args:
         num_replicas (int): Number of workers participating in the sampling.
-        rank (int, optional): Current rank for the sampler, starting at 0.
-            Typically set during worker initialization function on distributed setup.
+        global_worker_rank (int, optional): Current rank for the sampler, starting at 0.
+        Depending on the distributed scenario, :attr:`global_worker_rank` must be assigned differently:
+            If only `DataLoader` workers are being used:
+                `global_worker_rank`=`worker_id`
+            If at most one `DataLoader` worker is used with a distributed approach, including
+            `DistributedDataParallel`, `torch.distributed`, MPI or Horovod.
+                `global_worker_rank`=`rank`
+            Finally, if multiple DataLoader workers and a distributed approach is used:
+                `global_worker_rank`=`worker_id`+`rank`*`num_workers`.
         num_chunks (int, optional): Number of chunks participating in the sampling.
             (default: ``0``)
         shuffle (bool, optional): set to ``True`` to have the chunk indices reshuffled.
             (default: ``False``)
     """
 
-    def __init__(self, num_replicas, rank=0, num_chunks=0, shuffle=False):
+    def __init__(self, num_replicas, global_worker_rank=0, num_chunks=0, shuffle=False):
         super(DistributedChunkSampler, self).__init__(None)
-        assert rank >= 0, 'rank must be >= 0'
+        assert global_worker_rank >= 0, 'rank must be >= 0'
         assert num_replicas >= 0, 'num_replicas must be >= 0'
-        assert rank <= num_replicas, 'rank must be <= num_replicas'
+        assert global_worker_rank <= num_replicas, 'rank must be <= num_replicas'
         assert num_chunks >= num_replicas, 'num_chunks must be >= num_replicas'
-        self.rank = rank
+        self.global_worker_rank = global_worker_rank
         self.num_replicas = num_replicas
         self.num_chunks = num_chunks
         self.shuffle = shuffle
@@ -159,18 +164,18 @@ class DistributedChunkSampler(Sampler):
         indices = list(self.sampler)
 
         # Create a strided sublist
-        indices = indices[self.rank:self.num_chunks:self.num_replicas]
+        indices = indices[self.global_worker_rank:self.num_chunks:self.num_replicas]
         return iter(indices)
 
     def __len__(self):
         raise NotImplementedError
 
-    def set_rank(self, rank):
-        r"""Sets current rank
+    def set_global_worker_rank(self, global_worker_rank):
+        r"""Sets current global worker rank
 
         Typically used after new processes are spawned with a copy of this sampler
         to prevent sampling the same indices in different workers
         """
-        assert rank >= 0, 'rank must be >= 0'
-        assert rank == 0 or rank < self.num_replicas, 'rank must < num_replicas'
-        self.rank = rank
+        assert global_worker_rank >= 0, 'global_worker_rank must be >= 0'
+        assert global_worker_rank == 0 or global_worker_rank < self.num_replicas, 'global_worker_rank must < num_replicas'
+        self.global_worker_rank = global_worker_rank

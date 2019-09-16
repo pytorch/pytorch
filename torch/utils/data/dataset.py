@@ -282,7 +282,7 @@ class ChunkDataset(IterableDataset):
     (or simply the size) is unknown. Only the number of chunks is known for the dataset.
 
     In a distributed setup, each worker has an instance of ``ChunkDataset`` that uses
-    ``DistributedChunkSampler`` sampler to select chunksbased on their ID (aka `rank`).
+    ``DistributedChunkSampler`` sampler to select chunksbased on their global worker rank.
     Once a chunk index has been selected, it is passed to ``ChunkDataReader`` that will load
     data in ``ChunkDataset`` internal cache. Only then ``ChunkDataset`` returns batches.
 
@@ -367,7 +367,7 @@ class ChunkDataset(IterableDataset):
         worker_id = 0
         try:
             worker_id = get_worker_info().id
-            self.chunk_sampler.set_rank(worker_id)
+            self.chunk_sampler.set_global_worker_rank(worker_id)
         except Exception:
             pass
         self._chunk_sampler_iter = iter(self.chunk_sampler)
