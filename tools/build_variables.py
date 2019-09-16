@@ -197,6 +197,8 @@ def add_torch_libs():
         "torch/csrc/api/src/nn/modules/rnn.cpp",
         "torch/csrc/api/src/nn/modules/container/functional.cpp",
         "torch/csrc/api/src/nn/modules/container/named_any.cpp",
+        "torch/csrc/api/src/nn/options/conv.cpp",
+        "torch/csrc/api/src/nn/options/pooling.cpp",
         "torch/csrc/api/src/optim/adagrad.cpp",
         "torch/csrc/api/src/optim/adam.cpp",
         "torch/csrc/api/src/optim/lbfgs.cpp",

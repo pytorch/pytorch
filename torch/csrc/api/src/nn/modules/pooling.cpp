@@ -70,13 +70,8 @@ Tensor MaxPool3dImpl::forward(const Tensor& input) {
   return F::max_pool3d(input, options);
 }
 
-template struct MaxPoolOptions<1>;
 template class MaxPoolImpl<1, MaxPool1dImpl>;
-
-template struct MaxPoolOptions<2>;
 template class MaxPoolImpl<2, MaxPool2dImpl>;
-
-template struct MaxPoolOptions<3>;
 template class MaxPoolImpl<3, MaxPool3dImpl>;
 
 } // namespace nn
