@@ -905,62 +905,66 @@ class TestNN(NNTestCase):
         self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
 
     def test_no_grad(self):
-        module = nn.Conv2d(2, 5, kernel_size=3, padding=1)
-        input = torch.randn(1, 2, 10, 10)
-        x = input
-        y = input.clone()
+        for dtype in [torch.bfloat16, torch.float, torch.double]:
+            module = nn.Conv2d(2, 5, kernel_size=3, padding=1).to(dtype)
+            input = torch.randn(1, 2, 10, 10).to(dtype)
+            x = input
+            y = input.clone()
 
-        output = module(x)
-        self.assertTrue(output.requires_grad)
-        output.backward(torch.ones(1, 5, 10, 10))
+            output = module(x)
+            self.assertTrue(output.requires_grad)
+            output.backward(torch.ones(1, 5, 10, 10))
 
-        with torch.no_grad():
-            output2 = module(y)
-            self.assertFalse(output2.requires_grad)
-            self.assertRaises(RuntimeError, lambda: output2.backward(torch.ones(1, 5, 10, 10)))
+            with torch.no_grad():
+                output2 = module(y)
+                self.assertFalse(output2.requires_grad)
+                self.assertRaises(RuntimeError, lambda: output2.backward(torch.ones(1, 5, 10, 10)))
 
     def test_invalid_conv1d(self):
-        module = nn.Conv1d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True)
-        input = torch.randn(1, 3, 4)
-        with self.assertRaisesRegex(RuntimeError,
-                                    r'Calculated padded input size per channel: \(4\). ' +
-                                    r'Kernel size: \(10\). Kernel size can\'t be greater than actual input size'):
-            module(input)
+        for dtype in [torch.bfloat16, torch.float, torch.double]:
+            module = nn.Conv1d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True).to(dtype)
+            input = torch.randn(1, 3, 4).to(dtype)
+            with self.assertRaisesRegex(RuntimeError,
+                                        r'Calculated padded input size per channel: \(4\). ' +
+                                        r'Kernel size: \(10\). Kernel size can\'t be greater than actual input size'):
+                module(input)
 
-        # Negative stride check
-        module = nn.Conv1d(in_channels=3, out_channels=6, kernel_size=3, stride=-1, bias=True)
-        input = torch.randn(1, 3, 4)
-        with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
-            module(input)
+            # Negative stride check
+            module = nn.Conv1d(in_channels=3, out_channels=6, kernel_size=3, stride=-1, bias=True).to(dtype)
+            input = torch.randn(1, 3, 4).to(dtype)
+            with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
+                module(input)
 
     def test_invalid_conv2d(self):
-        module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2)
-        input = torch.empty(1, 1, 4, 4)
-        self.assertRaises(RuntimeError, lambda: module(input))
+        for dtype in [torch.bfloat16, torch.float, torch.double]:
+            module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2).to(dtype)
+            input = torch.empty(1, 1, 4, 4).to(dtype)
+            self.assertRaises(RuntimeError, lambda: module(input))
 
-        module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True)
-        input = torch.randn(1, 3, 1, 1)
-        with self.assertRaisesRegex(RuntimeError,
-                                    r'Calculated padded input size per channel: \(1 x 1\). ' +
-                                    r'Kernel size: \(10 x 10\). Kernel size can\'t be greater than actual input size'):
-            module(input)
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True)
+            input = torch.randn(1, 3, 1, 1)
+            with self.assertRaisesRegex(RuntimeError,
+                                        r'Calculated padded input size per channel: \(1 x 1\). ' +
+                                        r'Kernel size: \(10 x 10\). Kernel size can\'t be greater than actual input size'):
+                module(input)
 
-        # Negative stride check
-        module = nn.Conv2d(in_channels=3, out_channels=6, kernel_size=4, stride=-1, bias=True)
-        input = torch.randn(1, 3, 4, 4)
-        with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
-            module(input)
+            # Negative stride check
+            module = nn.Conv2d(in_channels=3, out_channels=6, kernel_size=4, stride=-1, bias=True).to(dtype)
+            input = torch.randn(1, 3, 4, 4).to(dtype)
+            with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
+                module(input)
 
     def test_invalid_conv3d(self):
-        module = torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2)
-        input = torch.empty(1, 1, 4, 4, 4)
-        self.assertRaises(RuntimeError, lambda: module(input))
+        for dtype in [torch.bfloat16, torch.float, torch.double]:
+            module = torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2).to(dtype)
+            input = torch.empty(1, 1, 4, 4, 4).to(dtype)
+            self.assertRaises(RuntimeError, lambda: module(input))
 
-        # Negative stride check
-        module = torch.nn.Conv3d(1, 1, kernel_size=3, stride=-2)
-        input = torch.empty(1, 1, 4, 4, 4)
-        with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
-            module(input)
+            # Negative stride check
+            module = torch.nn.Conv3d(1, 1, kernel_size=3, stride=-2)
+            input = torch.empty(1, 1, 4, 4, 4)
+            with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
+                module(input)
 
     def _test_dropout(self, cls, cuda, input):
         p = 0.2
@@ -3668,11 +3672,9 @@ class TestNN(NNTestCase):
         def _create_src_lengths_mask(batch_size, src_lengths):
             """
             Generate boolean mask to prevent attention beyond the end of source
-
             Inputs:
               batch_size : int
               src_lengths : [batch_size] of sentence lengths
-
             Outputs:
               [batch_size, max_src_len]
             """
@@ -5224,44 +5226,46 @@ class TestNN(NNTestCase):
         run_test(benchmark=True)
 
     def test_conv_modules_raise_error_on_incorrect_input_size(self):
-        modules = [nn.Conv1d(3, 8, 3), nn.ConvTranspose1d(3, 8, 3),
-                   nn.Conv2d(3, 8, 3), nn.ConvTranspose2d(3, 8, 3),
-                   nn.Conv3d(3, 8, 3), nn.ConvTranspose3d(3, 8, 3)]
+        for dtype in [torch.bfloat16, torch.double, torch.float]:
+            modules = [nn.Conv1d(3, 8, 3).to(dtype), nn.ConvTranspose1d(3, 8, 3).to(dtype),
+                       nn.Conv2d(3, 8, 3).to(dtype), nn.ConvTranspose2d(3, 8, 3).to(dtype),
+                       nn.Conv3d(3, 8, 3).to(dtype), nn.ConvTranspose3d(3, 8, 3).to(dtype)]
 
-        invalid_input_dims = [(2, 4), (2, 4),
-                              (3, 5), (3, 5),
-                              (4, 6), (4, 6)]
+            invalid_input_dims = [(2, 4), (2, 4),
+                                  (3, 5), (3, 5),
+                                  (4, 6), (4, 6)]
 
-        for invalid_dims, module in zip(invalid_input_dims, modules):
-            for dims in invalid_dims:
-                input = torch.empty(torch.Size((3, ) * dims))
-                self.assertRaises(RuntimeError, lambda: module(input))
+            for invalid_dims, module in zip(invalid_input_dims, modules):
+                for dims in invalid_dims:
+                    input = torch.empty(torch.Size((3, ) * dims))
+                    self.assertRaises(RuntimeError, lambda: module(input))
 
     def test_conv_shapecheck(self):
-        def test(should_raise, module, input_size):
-            input = torch.empty(3, *input_size)
+        def test(should_raise, module, input_size, dtype):
+            input = torch.empty(3, *input_size).to(dtype)
             if should_raise:
                 self.assertRaises(RuntimeError, lambda: module(input))
             else:
                 # just run it to ensure no exception raised.
                 module(input)
 
-        # Conv1d
-        test(True, nn.Conv1d(1, 1, 3), (1, 2))
-        test(True, nn.Conv1d(1, 1, 3, stride=2), (1, 2))
-        test(False, nn.Conv1d(1, 1, 2), (1, 2))
-        test(False, nn.Conv1d(1, 1, 2, stride=2), (1, 2))
-        test(False, nn.Conv1d(1, 1, 3, stride=2, padding=1), (1, 2))
+        for dtype in [torch.bfloat16, torch.float, torch.double]:
+            # Conv1d
+            test(True, nn.Conv1d(1, 1, 3).to(dtype), (1, 2), dtype)
+            test(True, nn.Conv1d(1, 1, 3, stride=2).to(dtype), (1, 2), dtype)
+            test(False, nn.Conv1d(1, 1, 2).to(dtype), (1, 2), dtype)
+            test(False, nn.Conv1d(1, 1, 2, stride=2).to(dtype), (1, 2), dtype)
+            test(False, nn.Conv1d(1, 1, 3, stride=2, padding=1).to(dtype), (1, 2), dtype)
 
-        # Conv2d
-        test(True, nn.Conv2d(1, 1, (3, 3)), (1, 2, 2))
-        test(False, nn.Conv2d(1, 1, (3, 3)), (1, 3, 3))
-        test(False, nn.Conv2d(1, 1, (3, 3), padding=1), (1, 2, 2))
+            # Conv2d
+            test(True, nn.Conv2d(1, 1, (3, 3)).to(dtype), (1, 2, 2), dtype)
+            test(False, nn.Conv2d(1, 1, (3, 3)).to(dtype), (1, 3, 3), dtype)
+            test(False, nn.Conv2d(1, 1, (3, 3), padding=1).to(dtype), (1, 2, 2), dtype)
 
-        # Conv3D
-        test(True, nn.Conv3d(1, 1, (3, 3, 3)), (1, 2, 2, 2))
-        test(False, nn.Conv3d(1, 1, (3, 3, 3)), (1, 3, 3, 3))
-        test(False, nn.Conv3d(1, 1, (3, 3, 3), padding=1), (1, 2, 2, 2))
+            # Conv3D
+            test(True, nn.Conv3d(1, 1, (3, 3, 3)).to(dtype), (1, 2, 2, 2), dtype)
+            test(False, nn.Conv3d(1, 1, (3, 3, 3)).to(dtype), (1, 3, 3, 3), dtype)
+            test(False, nn.Conv3d(1, 1, (3, 3, 3), padding=1).to(dtype), (1, 2, 2, 2), dtype)
 
     def test_ConvTranspose2d_output_size(self):
         m = nn.ConvTranspose2d(3, 4, 3, 3, 0, 2)
