@@ -12,6 +12,17 @@ int64_t DistAutogradContext::context_id() const {
   return context_id_;
 }
 
+std::vector<rpc::WorkerId> DistAutogradContext::getKnownWorkerIds() const {
+  return knownWorkerIDs_;
+};
+void DistAutogradContext::addKnownWorkerID(const rpc::WorkerId& workerId) {
+  std::lock_guard<std::mutex> guard(lock_);
+  if (std::find(knownWorkerIDs_.begin(), knownWorkerIDs_.end(), workerId) ==
+      knownWorkerIDs_.end()) {
+    knownWorkerIDs_.push_back(workerId);
+  }
+}
+
 void DistAutogradContext::addSendFunction(
     const std::shared_ptr<SendRpcBackward>& func,
     int64_t autograd_message_id) {

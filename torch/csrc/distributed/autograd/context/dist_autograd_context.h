@@ -2,6 +2,7 @@
 
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <cstdint>
 
 namespace torch {
@@ -40,8 +41,14 @@ class TORCH_API DistAutogradContext {
   DistAutogradContext(DistAutogradContext&&) = delete;
   DistAutogradContext& operator=(DistAutogradContext&&) = delete;
 
+  std::vector<rpc::WorkerId> getKnownWorkerIds() const;
+  void addKnownWorkerID(const rpc::WorkerId& workerId);
+
  private:
   const int64_t context_id_;
+
+  // Set of known workerIDs, used in cleaning up autograd context.
+  std::vector<rpc::WorkerId> knownWorkerIDs_;
 
   // Map from autograd_message_id to appropriate 'send' autograd function.
   std::unordered_map<int64_t, std::shared_ptr<SendRpcBackward>>
