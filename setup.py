@@ -825,6 +825,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/api/include/torch/nn/functional/*.h',
                 'include/torch/csrc/api/include/torch/nn/options/*.h',
                 'include/torch/csrc/api/include/torch/nn/modules/*.h',
+                'include/torch/csrc/api/include/torch/nn/modules/container/*.h',
                 'include/torch/csrc/api/include/torch/nn/parallel/*.h',
                 'include/torch/csrc/api/include/torch/optim/*.h',
                 'include/torch/csrc/api/include/torch/serialize/*.h',
