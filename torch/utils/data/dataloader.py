@@ -539,7 +539,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     # `pin_memory_thread_done_event`:
     #   A `threading.Event` for a similar purpose to that of
     #   `workers_done_event`, but is for the `pin_memory_thread`. The reason
-    #   that separate events are neede is that `pin_memory_thread` reads from
+    #   that separate events are needed is that `pin_memory_thread` reads from
     #   the output queue of the workers. But the workers, upon seeing that
     #   `workers_done_event` is set, only wants to see the final `None`, and is
     #   not required to flush all data in the output queue (e.g., it may call
