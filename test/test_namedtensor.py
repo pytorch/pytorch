@@ -964,6 +964,12 @@ class TestNamedTensor(TestCase):
             (create('N:2,C:3'), (create('2,3') > 0).renamed('N', 'C'), 3.14),
             expected_names=['N', 'C'])
 
+        # tensor value
+        self._test_name_inference(
+            Tensor.masked_fill,
+            (create('N:2,C:3'), (create('2,3') > 0).renamed('N', 'C'), create('')),
+            expected_names=['N', 'C'])
+
         # left broadcast
         self._test_name_inference(
             Tensor.masked_fill,
