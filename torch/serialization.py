@@ -1,5 +1,4 @@
 import difflib
-import inspect
 import os
 import io
 import shutil
@@ -12,6 +11,7 @@ import warnings
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
 from ._six import string_classes as _string_classes
+from torch._utils_internal import get_source_lines_and_file
 if sys.version_info[0] == 2:
     import cPickle as pickle
 else:
@@ -285,8 +285,8 @@ def _save(obj, f, pickle_module, pickle_protocol):
             serialized_container_types[obj] = True
             source_file = source = None
             try:
-                source_file = inspect.getsourcefile(obj)
-                source = inspect.getsource(obj)
+                source_lines, _, source_file = get_source_lines_and_file(obj)
+                source = ''.join(obj)
             except Exception:  # saving the source is optional, so we can ignore any errors
                 warnings.warn("Couldn't retrieve source code for container of "
                               "type " + obj.__name__ + ". It won't be checked "
@@ -449,7 +449,7 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
 
     def _check_container_source(container_type, source_file, original_source):
         try:
-            current_source = inspect.getsource(container_type)
+            current_source = ''.join(get_source_lines_and_file(container_type)[0])
         except Exception:  # saving the source is optional, so we can ignore any errors
             warnings.warn("Couldn't retrieve source code for container of "
                           "type " + container_type.__name__ + ". It won't be checked "

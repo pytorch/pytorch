@@ -9,6 +9,7 @@ import weakref
 import warnings
 import torch._C
 from torch._six import builtins
+from torch._utils_internal import get_source_lines_and_file
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
@@ -477,11 +478,11 @@ def _get_overloaded_methods(method, mod_class):
     if overloads is None:
         return None
 
-    method_line_no = inspect.getsourcelines(method)[1]
-    mod_class_fileno = inspect.getsourcelines(mod_class)[1]
-    mod_end_fileno = mod_class_fileno + len(inspect.getsourcelines(mod_class)[0])
+    method_line_no = get_source_lines_and_file(method)[1]
+    mod_class_fileno = get_source_lines_and_file(mod_class)[1]
+    mod_end_fileno = mod_class_fileno + len(get_source_lines_and_file(mod_class)[0])
     if not (method_line_no >= mod_class_fileno and method_line_no <= mod_end_fileno):
-        raise Exception("Overloads are not useable when a module is redaclared within the same file: " + str(method))
+        raise Exception("Overloads are not useable when a module is redeclared within the same file: " + str(method))
     return overloads
 
 try:
