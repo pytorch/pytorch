@@ -172,21 +172,20 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     }
     initQNNPACK();
 
-    auto wt_ptr = guts::make_unique<
-        PackedLinearWeightsQnnp>(PackedLinearWeightsQnnp{
-        guts::make_unique<qnnpack::PackBMatrix>(
-            cols_w /* input_channels */,
-            rows_w /* output_channels */,
-            weight_zp,
+    auto wt_ptr =
+        guts::make_unique<PackedLinearWeightsQnnp>(PackedLinearWeightsQnnp{
+            guts::make_unique<qnnpack::PackBMatrix>(
+                cols_w /* input_channels */,
+                rows_w /* output_channels */,
+                weight_zp,
+                weight.q_scale(),
+                (uint8_t*)qnnp_w_data,
+                (int32_t*)bias_contig.data_ptr<c10::qint32>()),
+            weight_contig, /* int8_t weight */
+            bias_fp32.contiguous(), /* fp32 bias */
+            0, /* input_scale */
             weight.q_scale(),
-            (uint8_t*)
-                qnnp_w_data,
-            (int32_t*)bias_contig.data_ptr<c10::qint32>()),
-        weight_contig, /* int8_t weight */
-        bias_fp32.contiguous(), /* fp32 bias */
-        0, /* input_scale */
-        weight.q_scale(),
-        weight_zp});
+            weight_zp});
     return cpp_custom_type_hack::create(std::move(wt_ptr), weight.options());
   }
 #endif
