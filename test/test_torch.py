@@ -12819,7 +12819,7 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
             ("reciprocal", doubles, True, True, 'cpu'),
             ("reciprocal", doubles, False, True, 'cuda'),
             ("round", doubles, True, True, 'cpu'),
-            ("round", doubles, False, True, 'cuda'),
+            ("round", doubles, True, True, 'cuda'),
             ("rsqrt", positives, True, True, 'cpu'),
             ("rsqrt", positives, False, True, 'cuda'),
             ("sin", doubles, True, True, 'cpu'),
