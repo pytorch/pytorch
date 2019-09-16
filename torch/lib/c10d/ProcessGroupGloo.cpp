@@ -255,6 +255,8 @@ void initializeStreamsEvents(
 
 #endif
 
+const auto kLoopbackAddress = "127.0.0.1";
+
 } // namespace
 
 ProcessGroupGloo::SendWork::SendWork(
@@ -327,11 +329,10 @@ bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
       continue;
     }
     rv = bind(fd, rp->ai_addr, rp->ai_addrlen);
+    close(fd);
     if (rv == -1) {
-      close(fd);
       continue;
     }
-    close(fd);
     break;
   }
   freeaddrinfo(result);
@@ -406,8 +407,12 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     return ::gloo::transport::tcp::CreateDevice(attr);
   }
 
-  // Otherwise, use the loopback interface.
-  return createDeviceForInterface("lo");
+  // Otherwise, use the loopback address.
+  TORCH_WARN_ONCE(
+      "Unable to resolve hostname to a (local) address. ",
+      "Using the loopback address as fallback. ",
+      "Manually set the network interface to bind to with GLOO_SOCKET_IFNAME.");
+  return createDeviceForHostname(kLoopbackAddress);
 }
 #endif
 
@@ -432,8 +437,12 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     return ::gloo::transport::uv::CreateDevice(attr);
   }
 
-  // Otherwise, use the loopback interface.
-  return createDeviceForInterface("lo0");
+  // Otherwise, use the loopback address.
+  TORCH_WARN_ONCE(
+      "Unable to resolve hostname to a (local) address. ",
+      "Using the loopback address as fallback. ",
+      "Manually set the network interface to bind to with GLOO_SOCKET_IFNAME.");
+  return createDeviceForHostname(kLoopbackAddress);
 }
 #endif
 
