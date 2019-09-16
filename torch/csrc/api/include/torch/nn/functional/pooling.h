@@ -6,7 +6,7 @@ namespace torch {
 namespace nn{
 namespace functional {
 
-inline Tensor avg_pool1d(const Tensor& input, AvgPool1dOptions options) {
+inline Tensor avg_pool1d(const Tensor& input, const AvgPool1dOptions& options) {
   return torch::avg_pool1d(
       input,
       options.kernel_size_,
@@ -16,7 +16,7 @@ inline Tensor avg_pool1d(const Tensor& input, AvgPool1dOptions options) {
       options.count_include_pad_);
 }
 
-inline Tensor avg_pool2d(const Tensor& input, AvgPool2dOptions options) {
+inline Tensor avg_pool2d(const Tensor& input, const AvgPool2dOptions& options) {
   return torch::avg_pool2d(
       input,
       options.kernel_size_,
@@ -27,7 +27,7 @@ inline Tensor avg_pool2d(const Tensor& input, AvgPool2dOptions options) {
       options.divisor_override_);
 }
 
-inline Tensor avg_pool3d(const Tensor& input, AvgPool3dOptions options) {
+inline Tensor avg_pool3d(const Tensor& input, const AvgPool3dOptions& options) {
   return torch::avg_pool3d(
       input,
       options.kernel_size_,
@@ -40,7 +40,7 @@ inline Tensor avg_pool3d(const Tensor& input, AvgPool3dOptions options) {
 
 // ============================================================================
 
-inline Tensor max_pool1d(const Tensor& input, MaxPool1dOptions options) {
+inline Tensor max_pool1d(const Tensor& input, const MaxPool1dOptions& options) {
    return torch::max_pool1d(
       input,
       options.kernel_size_,
@@ -50,7 +50,7 @@ inline Tensor max_pool1d(const Tensor& input, MaxPool1dOptions options) {
       options.ceil_mode_);
 }
 
-inline Tensor max_pool2d(const Tensor& input, MaxPool2dOptions options) {
+inline Tensor max_pool2d(const Tensor& input, const MaxPool2dOptions& options) {
   return torch::max_pool2d(
       input,
       options.kernel_size_,
@@ -60,7 +60,7 @@ inline Tensor max_pool2d(const Tensor& input, MaxPool2dOptions options) {
       options.ceil_mode_);
 }
 
-inline Tensor max_pool3d(const Tensor& input, MaxPool3dOptions options) {
+inline Tensor max_pool3d(const Tensor& input, const MaxPool3dOptions& options) {
   return torch::max_pool3d(
       input,
       options.kernel_size_,
