@@ -141,6 +141,7 @@ class TestQuantizedOps(TestCase):
                        elements=st.floats(-1e6, 1e6, allow_nan=False),
                        qparams=hu.qparams()),
            b=st.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
+    @no_deadline
     def test_qadd_scalar_relu(self, A, b):
         import copy
         add_scalar = torch.ops.quantized.add_scalar
