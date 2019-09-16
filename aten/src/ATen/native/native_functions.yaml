@@ -55,6 +55,9 @@
 - func: version(Tensor self) -> int
   variants: method
 
+- func: requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)
+  variants: method
+
 - func: names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
   named_guard: False

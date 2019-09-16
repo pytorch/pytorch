@@ -1,6 +1,7 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/utils/memory.h>
+#include <torch/csrc/autograd/utils/python_error_messages.h>
 
 using namespace at;
 using namespace torch::autograd::generated;
@@ -107,6 +108,15 @@ int64_t VariableType::output_nr(const Tensor & self) {
 
 int64_t VariableType::version(const Tensor & self) {
   return as_variable_ref(self).current_version();
+}
+
+Tensor& VariableType::requires_grad_(Tensor& self, bool _requires_grad) {
+  if (!self.is_leaf() && !_requires_grad) {
+    throw std::runtime_error(
+      autograd::utils::requires_grad_leaf_error(requires_grad)
+    );
+  }
+  return self.set_requires_grad(_requires_grad);
 }
 
 // We don't have an outplace copy, so this can't be generated automatically

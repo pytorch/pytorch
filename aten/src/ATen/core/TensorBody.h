@@ -398,6 +398,7 @@ class CAFFE2_API Tensor {
   bool is_leaf() const;
   int64_t output_nr() const;
   int64_t version() const;
+  Tensor & requires_grad_(bool _requires_grad=true) const;
   #ifdef BUILD_NAMEDTENSOR
   Tensor & names_(c10::optional<DimnameList> names) const;
   #endif
