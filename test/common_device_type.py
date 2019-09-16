@@ -223,7 +223,7 @@ def skipCPUIfNoMkl(fn):
 
 # Skips a test on CUDA if MAGMA is not available.
 def skipCUDAIfNoMagma(fn):
-    return skipCUDAIf('no_magma', "no MAGMA library detected")(fn)
+    return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
 
 
 # Skips a test on CUDA when using ROCm.

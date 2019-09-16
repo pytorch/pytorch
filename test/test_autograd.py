@@ -3860,7 +3860,6 @@ class TestAutogradDeviceType(TestCase):
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                 x = torch.randn(sizes, device=device, dtype=torch.double)
                 y = torch.randn(sizes, device=device, dtype=torch.double)
-
                 eps = 1e-6
                 # to avoid extremum
                 x = x - (((x - y) < eps).double() * 2 * eps)
@@ -3874,7 +3873,7 @@ class TestAutogradDeviceType(TestCase):
 
                 f_args_tensor = deepcopy(unpack_variables(f_args_variable))
                 run_functional_checks(self, "test_cdist", "cdist", f,
-                                        True, f_args_variable, f_args_tensor)
+                                      True, f_args_variable, f_args_tensor)
 
         _test_cdist_for_size((S, S))
         _test_cdist_for_size((S, S, S))
