@@ -1060,20 +1060,20 @@
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
 
-- func: flatten(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor
+- func: flatten.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor
   use_c10_dispatcher: True
   variants: function, method
   named_guard: False
 
-- func: flatten(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor
+- func: flatten.named_out_dim(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor
   variants: function, method
   named_guard: False
 
-- func: flatten(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor
+- func: flatten.using_names(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor
   variants: function, method
   named_guard: False
 
-- func: flatten(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor
+- func: flatten.DimnameList(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor
   variants: function, method
   named_guard: False
 
