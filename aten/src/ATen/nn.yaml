@@ -1,6 +1,6 @@
 # Loss functions
 
-- name: _thnn_binary_cross_entropy(Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean)
+- name: _thnn_binary_cross_entropy(Tensor self, Tensor target, Tensor? weight, int64_t reduction)
   cname: BCECriterion
   scalar_check:
     output: 'false'
@@ -15,19 +15,19 @@
     forward_scalar_types: ['Float', 'Double', 'Half']
     backward_scalar_types: ['Float', 'Double', 'Half']
 
-- name: _thnn_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
+- name: _thnn_l1_loss(Tensor self, Tensor target, int64_t reduction)
   cname: AbsCriterion
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_mse_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
+- name: _thnn_mse_loss(Tensor self, Tensor target, int64_t reduction)
   cname: MSECriterion
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor? weight={}, int64_t reduction=Reduction::Mean)
+- name: _thnn_multi_margin_loss(Tensor self, LongTensor target, Scalar p, Scalar margin, Tensor? weight, int64_t reduction)
   cname: MultiMarginCriterion
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0 || (reduction == Reduction::None && self_->dim() == 1)
@@ -39,7 +39,7 @@
     output: reduction != Reduction::None || self_->dim() == 0
     is_target: target_->dim() == 0
 
-- name: _thnn_nll_loss(Tensor self, LongTensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100)
+- name: _thnn_nll_loss(Tensor self, LongTensor target, Tensor? weight, int64_t reduction, int64_t ignore_index)
   cname: ClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
@@ -49,20 +49,20 @@
     forward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
     backward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
 
-- name: _thnn_nll_loss2d(Tensor self, LongTensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100)
+- name: _thnn_nll_loss2d(Tensor self, LongTensor target, Tensor? weight, int64_t reduction, int64_t ignore_index)
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
     total_weight: 'true'
 
-- name: _thnn_smooth_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
+- name: _thnn_smooth_l1_loss(Tensor self, Tensor target, int64_t reduction)
   cname: SmoothL1Criterion
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_soft_margin_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
+- name: _thnn_soft_margin_loss(Tensor self, Tensor target, int64_t reduction)
   cname: SoftMarginCriterion
   scalar_check:
     output: 'false'
@@ -70,14 +70,14 @@
 
 # Activation functions
 
-- name: _thnn_elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1)
+- name: _thnn_elu(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale)
   cname: ELU
   has_inplace: True
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_glu(Tensor self, int64_t dim=-1)
+- name: _thnn_glu(Tensor self, int64_t dim)
   cname: GatedLinear
   wrap_dim:
     dim: self
@@ -85,14 +85,14 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1)
+- name: _thnn_hardtanh(Tensor self, Scalar min_val, Scalar max_val)
   cname: HardTanh
   has_inplace: True
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_leaky_relu(Tensor self, Scalar negative_slope=0.01)
+- name: _thnn_leaky_relu(Tensor self, Scalar negative_slope)
   cname: LeakyReLU
   has_inplace: True
   scalar_check:
@@ -109,20 +109,20 @@
 
 # NOTE: we treat noise as an input (it's really a buffer) because the codegen
 # can't handle in-place functions that have buffers
-- name: _thnn_rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr)
+- name: _thnn_rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator* generator)
   cname: RReLU
   has_inplace: True
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_softplus(Tensor self, Scalar beta=1, Scalar threshold=20)
+- name: _thnn_softplus(Tensor self, Scalar beta, Scalar threshold)
   cname: SoftPlus
   scalar_check:
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_softshrink(Tensor self, Scalar lambd=0.5)
+- name: _thnn_softshrink(Tensor self, Scalar lambd)
   cname: SoftShrink
   scalar_check:
     output: 'false'
@@ -145,18 +145,18 @@
 
 # Convolutions
 
-- name: _thnn_conv2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0)
+- name: _thnn_conv2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias, IntArrayRef[2] stride, IntArrayRef[2] padding)
   cname: SpatialConvolutionMM
   buffers: [finput, fgrad_input]
   CPU:
     forward_scalar_types: ['Float', 'Double', 'Long']
     backward_scalar_types: ['Float', 'Double']
 
-- name: _thnn_conv_depthwise2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0, IntArrayRef[2] dilation=1)
+- name: _thnn_conv_depthwise2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias, IntArrayRef[2] stride, IntArrayRef[2] padding, IntArrayRef[2] dilation)
   cname: SpatialDepthwiseConvolution
   buffers: []
 
-- name: _thnn_conv3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias={}, IntArrayRef[3] stride=1, IntArrayRef[3] padding=0)
+- name: _thnn_conv3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias, IntArrayRef[3] stride, IntArrayRef[3] padding)
   cname: VolumetricConvolutionMM
   buffers: [finput, fgrad_input]
   CPU:
