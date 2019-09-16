@@ -73,14 +73,14 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       int64_t dilation_dims) {
     TORCH_CHECK(
         act_dims == 4,
-        "quanitzed::conv2d(): Expected activation tensor to have 4 dimensions.");
+        "quantized::conv2d(): Expected activation tensor to have 4 dimensions.");
     TORCH_CHECK(
-        stride_dims == 2, "quanitzed::conv2d(): Supports 2D convolution only");
+        stride_dims == 2, "quantized::conv2d(): Supports 2D convolution only");
     TORCH_CHECK(
-        padding_dims == 2, "quanitzed::conv2d(): Supports 2D convolution only");
+        padding_dims == 2, "quantized::conv2d(): Supports 2D convolution only");
     TORCH_CHECK(
         dilation_dims == 2,
-        "quanitzed::conv2d(): Supports 2D convolution only");
+        "quantized::conv2d(): Supports 2D convolution only");
   }
 #ifdef USE_FBGEMM
   at::Tensor fbgemm_conv(
@@ -324,11 +324,11 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     TORCH_CHECK(
         std::all_of(
             outShape.begin(), outShape.end(), [](int64_t i) { return i > 0; }),
-        "quanitzed::conv2d (qnnpack): each dimension of output tensor should be greater "
+        "quantized::conv2d (qnnpack): each dimension of output tensor should be greater "
         "than 0")
     TORCH_CHECK(
         (outShape[3] == out_ch),
-        "quanitzed::conv2d (qnnpack): Number of filters must be equal to number of "
+        "quantized::conv2d (qnnpack): Number of filters must be equal to number of "
         "output channels")
 
     // Allocate output Tensor and a buffer for QNNPACK to use

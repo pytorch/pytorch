@@ -498,7 +498,7 @@ PyObject *THPModule_setPreferredQuantizedEngine(PyObject *_unused, PyObject *arg
 
 PyObject *THPModule_preferredQuantizedEngine(PyObject *_unused)
 {
-  return THPQEngine_New(at::globalContext().preferredQuantizedEngine(), "");
+  return THPQEngine_New(at::globalContext().preferredQuantizedEngine(), toString(at::globalContext().preferredQuantizedEngine()));
 }
 
 static PyMethodDef TorchMethods[] = {
