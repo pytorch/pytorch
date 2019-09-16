@@ -133,7 +133,7 @@ def is_storage(obj):
 
 def set_default_tensor_type(t):
     r"""Sets the default ``torch.Tensor`` type to floating point tensor type
-    :attr:`t`. This type will also be used as default floating point type for
+    ``t``. This type will also be used as default floating point type for
     type inference in :func:`torch.tensor`.
 
     The default floating point tensor type is initially ``torch.FloatTensor``.
@@ -318,6 +318,7 @@ import torch.testing
 import torch.backends.cuda
 import torch.backends.mkl
 import torch.backends.openmp
+import torch.backends.quantized
 import torch.utils.data
 import torch.__config__
 import torch.__future__

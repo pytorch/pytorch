@@ -248,21 +248,31 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(GENERATED_CXX_TORCH
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
     "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp"
     "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
     "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
     )
 
+  if(NOT INTERN_DISABLE_AUTOGRAD)
+    list(APPEND GENERATED_CXX_TORCH
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
+    )
+  endif()
+
   set(GENERATED_H_TORCH
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
     )
+
+  if(NOT INTERN_DISABLE_AUTOGRAD)
+    list(APPEND GENERATED_H_TORCH
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
+    )
+  endif()
 
   set(GENERATED_CXX_PYTHON
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp"
@@ -293,6 +303,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
       --nn-path "aten/src"
+      $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${CMAKE_CURRENT_LIST_DIR}/../aten/src/THNN/generic/THNN.h"
@@ -352,7 +363,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/autograd/record_function.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
     ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
     ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
     ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
@@ -413,6 +423,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/check_alias_annotation.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/memory_dag.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/quantization.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/fuse_linear.cpp
     ${TORCH_SRC_DIR}/csrc/jit/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
@@ -447,6 +458,12 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
     )
+
+  if (NOT INTERN_DISABLE_AUTOGRAD)
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
+    )
+  endif()
 
   if (NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
@@ -509,12 +526,16 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/avgpool.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/dropout.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/embedding.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/fold.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/loss.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/maxpool.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/named_any.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
