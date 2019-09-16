@@ -5,11 +5,28 @@ set -ex
 install_ubuntu() {
     apt-get update
     apt-get install -y wget
-    apt-get install -y libopenblas-dev
+
+    # AMD's official BLAS library is BLIS (https://github.com/flame/blis) from UT Austin's FLAME group)
+    wget https://github.com/flame/blis/archive/0.6.0.tar.gz
+    tar xzf 0.6.0.tar.gz
+    pushd blis-0.6.0
+    ./configure --enable-blas --enable-shared --enable-static -t openmp x86_64
+    make -j
+    make install
+    popd
+
+    # we need an accompanying LAPACK
+    wget https://github.com/flame/libflame/archive/5.2.0.tar.gz
+    tar xzf 5.2.0.tar.gz
+    pushd libflame-5.2.0
+    ./configure --enable-dynamic-build --enable-lapack2flame --enable-max-arg-list-hack --enable-supermatrix --disable-ldim-alignment --enable-multithreading=openmp
+    make -j
+    make install
+    popd
 
     # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
-    apt-get install libc++1
-    apt-get install libc++abi1
+    apt-get install -y libc++1
+    apt-get install -y libc++abi1
 
     DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/debian
     # Add rocm repository
