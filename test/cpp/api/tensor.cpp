@@ -311,3 +311,11 @@ TEST(TensorTest, DataPtr) {
   ASSERT_EQ(tensor_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   ASSERT_EQ(tensor_not_copy.data_ptr(), tensor.data_ptr());
 }
+
+TEST(TensorTest, Data) {
+  const auto tensor = torch::empty({3, 3});
+  ASSERT_TRUE(torch::equal(tensor, tensor.data()));
+
+  const auto tensor2 = at::empty({3, 3});
+  ASSERT_THROW(tensor2.data(), c10::Error);
+}

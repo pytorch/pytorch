@@ -214,7 +214,7 @@ static void THNN_(unfolded_copy_vol)(
 
 
       *dst = (h >= 0 && w >= 0 && d >= 0 && h < inputHeight && w < inputWidth && d < inputDepth) ?
-        input_data[nip*inputDHW+ d*inputHW + h*inputWidth + w] : 0;
+        input_data[nip*inputDHW+ d*inputHW + h*inputWidth + w] : scalar_t(0);
 
       count++;
       if (count < line_seg_len) {
@@ -304,7 +304,7 @@ static void THNN_(VolumetricConvolutionMM_updateOutput_frame)(
     THTensor_(zero)(output);
   }
 
-  THTensor_(addmm)(output2d, 1, output2d, 1, weight, finput);
+  THTensor_(addmm)(output2d, output2d, weight, finput, 1, 1);
 
   c10::raw::intrusive_ptr::decref(output2d);
 }
@@ -544,7 +544,7 @@ static void THNN_(VolumetricConvolutionMM_updateGradInput_frame)(
     gradOutput->size(1)*gradOutput->size(2)*gradOutput->size(3), -1
   );
 
-  THTensor_(addmm)(fgradInput, 0, fgradInput, 1, weight, gradOutput2d);
+  THTensor_(addmm)(fgradInput, fgradInput, weight, gradOutput2d, 0, 1);
   c10::raw::intrusive_ptr::decref(gradOutput2d);
 
   THTensor_(zero)(gradInput);
@@ -650,7 +650,7 @@ static void THNN_(VolumetricConvolutionMM_accGradParameters_frame)(
   if (gradWeight){
     THTensor *tfinput = THTensor_(new)();
     THTensor_(transpose)(tfinput, finput, 0, 1);
-    THTensor_(addmm)(gradWeight, 1, gradWeight, scale, gradOutput2d, tfinput);
+    THTensor_(addmm)(gradWeight, gradWeight, gradOutput2d, tfinput, 1, scale);
     c10::raw::intrusive_ptr::decref(tfinput);
   }
 
