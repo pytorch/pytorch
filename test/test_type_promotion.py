@@ -238,20 +238,20 @@ class TestTypePromotion(TestCase):
     
 
     def test_can_cast(self):
-        self.assertTrue(torch._can_Cast(torch.int32, torch.int64))
-        self.assertTrue(torch._can_Cast(torch.int64, torch.int32))
-        self.assertTrue(torch._can_Cast(torch.int64, torch.float64))
-        self.assertFalse(torch._can_Cast(torch.float32, torch.int8))
-        self.assertFalse(torch._can_Cast(torch.float32, torch.int32))
-        self.assertFalse(torch._can_Cast(torch.float32, torch.int64))
+        self.assertTrue(torch.can_cast(torch.int32, torch.int64))
+        self.assertTrue(torch.can_cast(torch.int64, torch.int32))
+        self.assertTrue(torch.can_cast(torch.int64, torch.float64))
+        self.assertFalse(torch.can_cast(torch.float32, torch.int8))
+        self.assertFalse(torch.can_cast(torch.float32, torch.int32))
+        self.assertFalse(torch.can_cast(torch.float32, torch.int64))
 
-        self.assertTrue(torch._can_Cast(torch.bool, torch.float32))
-        self.assertTrue(torch._can_Cast(torch.bool, torch.bool))
-        self.assertTrue(torch._can_Cast(torch.bool, torch.int64))
+        self.assertTrue(torch.can_cast(torch.bool, torch.float32))
+        self.assertTrue(torch.can_cast(torch.bool, torch.bool))
+        self.assertTrue(torch.can_cast(torch.bool, torch.int64))
 
-        self.assertFalse(torch._can_Cast(torch.float32, torch.bool))
-        self.assertFalse(torch._can_Cast(torch.uint8, torch.bool))
-        self.assertFalse(torch._can_Cast(torch.int32, torch.bool))
+        self.assertFalse(torch.can_cast(torch.float32, torch.bool))
+        self.assertFalse(torch.can_cast(torch.uint8, torch.bool))
+        self.assertFalse(torch.can_cast(torch.int32, torch.bool))
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")

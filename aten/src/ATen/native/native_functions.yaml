@@ -25,11 +25,11 @@
 
 - func: _cast_Short(Tensor self, bool non_blocking=False) -> Tensor
   variants: function
-  
-- func: _can_Cast(ScalarType from, ScalarType to) -> bool
-  variants: function
 
 - func: _cast_Half(Tensor self, bool non_blocking=False) -> Tensor
+  variants: function
+
+- func: can_cast(ScalarType from, ScalarType to) -> bool
   variants: function
 
 - func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> void
