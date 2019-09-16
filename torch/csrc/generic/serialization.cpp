@@ -6,6 +6,15 @@
 #include <c10/cuda/CUDAGuard.h>
 #endif
 
+#if defined(__s390x__)
+// add any big endian arch here
+#include <endian.h>
+#define swap_on_big_endian_arch(s) do {s = __bswap_64(s);} while(0)
+#else
+// no-op
+#define swap_on_big_endian_arch(s) ((void)0)
+#endif
+
 template <class io>
 void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
 {
@@ -22,7 +31,9 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
   data = (scalar_t*)cpu_data.get();
   THCudaCheck(cudaMemcpy(data, THWStorage_(data)(LIBRARY_STATE self), size * sizeof(scalar_t), cudaMemcpyDeviceToHost));
 #endif
+  swap_on_big_endian_arch(size);
   doWrite(fd, &size, sizeof(int64_t));
+  swap_on_big_endian_arch(size);
   // fast track for bytes and little endian
   if (sizeof(scalar_t) == 1 || THP_nativeByteOrder() == THPByteOrder::THP_LITTLE_ENDIAN) {
     doWrite(fd, data, sizeof(scalar_t) * size);
@@ -68,6 +79,7 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
   scalar_t *data;
   int64_t size;
   doRead(file, &size, sizeof(int64_t));
+  swap_on_big_endian_arch(size);
   THWStoragePtr storage;
   if (_storage == nullptr) {
     storage = THWStorage_(newWithSize)(LIBRARY_STATE size);
