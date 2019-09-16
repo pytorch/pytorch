@@ -35,7 +35,8 @@ namespace jit {
   _(TAIL_CALL, "F") /* replace current frame with function F */             \
   _(INTERFACE_CALL, "CI") /* call method X on the first argument (of N) */  \
   _(GET_ATTR, "S") /* get attribute from slot X in an Object */             \
-  _(SET_ATTR, "S") /* set attribute to slot X in an Object */
+  _(SET_ATTR, "S") /* set attribute to slot X in an Object */               \
+  _(LIST_CONSTRUCT, "IT") /* construct X inputs to a list of type T */
 
 enum OpCode : uint8_t {
 #define DEFINE_OP(op, _) op,

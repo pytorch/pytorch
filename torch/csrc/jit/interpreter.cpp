@@ -51,6 +51,9 @@ namespace jit {
 //   indicating whether this is the last use of the value. The interpreter
 //   should generate a move rather than a copy in this case.
 
+template <typename dtype> // int64_t, bool, double
+void ListConstructFunc(int64_t num_inputs, Stack& stack);
+
 namespace {
 
 // insert Drop nodes to kill references for anything unused:
@@ -617,6 +620,24 @@ struct CodeImpl {
     insertInstruction(SET_ATTR, slot);
   }
 
+  // Teporary solution to unblock the bytecode development.
+  // TODO: remove the type specific
+  void emitListConstruct(Node* node) {
+    emitLoadInputs(node->inputs());
+    ListTypePtr lt = node->output()->type()->expect<ListType>();
+    int typeIndex = 0;
+    if (IntType::get() == lt->getElementType()) {
+      typeIndex = 1;
+    } else if (FloatType::get() == lt->getElementType()) {
+      typeIndex = 2;
+    } else if (lt->getElementType() == BoolType::get()) {
+      typeIndex = 3;
+    } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
+      typeIndex = 4;
+    }
+    insertInstruction(LIST_CONSTRUCT, node->inputs().size(), typeIndex);
+  }
+
   void insertBailoutBlocks() {
     for(const BailoutBlock& block : bailout_blocks_) {
       TORCH_INTERNAL_ASSERT(instructions_[block.jf_instruction_index].op == JF)
@@ -682,6 +703,9 @@ struct CodeImpl {
         break;
       case prim::SetAttr:
         emitSetAttr(node);
+        break;
+      case prim::ListConstruct:
+        emitListConstruct(node);
         break;
     }
   }
@@ -832,8 +856,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-        // std::cout << "RUNNING ";
-        // frames.back().function->dump(std::cout, af.pc);
+//         std::cout << "RUNNING ";
+//         frames.back().function->dump(std::cout, af.pc);
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:
@@ -873,6 +897,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case GET_ATTR: {
             auto userObj = pop(stack).toObject();
             auto value = userObj->getSlot(inst.X);
+            if (value.isObject()) {
+              auto obj = value.toObject();
+              std::cout << "obj : " << obj->name() << ", "
+                        << obj->slots().size() << " slots."
+                        << std::endl;
+            } else if (value.isTensor()) {
+              auto tensor = value.toTensor();
+              std::cout << "tensor with dim " << tensor.dim() << std::endl;
+            }
             push(stack, std::move(value));
             ++af.pc;
           } break;
@@ -880,6 +913,34 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto v = pop(stack);
             auto userObj = pop(stack).toObject();
             userObj->setSlot(inst.X, std::move(v));
+            ++af.pc;
+          } break;
+          case LIST_CONSTRUCT: {
+            if (inst.N == 1) {
+              ListConstructFunc<int64_t>(inst.X, stack);
+            } else if (inst.N == 2) {
+              ListConstructFunc<double>(inst.X, stack);
+            } else if (inst.N == 3) {
+              ListConstructFunc<bool>(inst.X, stack);
+            } else if (inst.N == 4) {
+              const size_t stack_size = stack.size();
+              c10::List<at::Tensor> vals;
+              vals.reserve(inst.X);
+              for (size_t i = stack_size - inst.X; i < stack_size; ++i) {
+                vals.emplace_back(std::move(stack[i]).toTensor());
+              }
+              drop(stack, inst.X);
+              push(stack, std::move(vals));
+            } else {
+              const size_t stack_size = stack.size();
+              auto vals = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+              vals.reserve(inst.X);
+              for (size_t i = stack_size - inst.X; i < stack_size; ++i) {
+                vals.emplace_back(std::move(stack[i]));
+              }
+              drop(stack, inst.X);
+              push(stack, std::move(vals));
+            }
             ++af.pc;
           } break;
           case JF:

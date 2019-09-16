@@ -33,6 +33,7 @@ class TORCH_API Bytecode {
   c10::IValue run_method(const std::string& method_name, Stack& stack);
   void append_method(const Method& method);
   void set_object(const c10::intrusive_ptr<c10::ivalue::Object>& object);
+  c10::intrusive_ptr<c10::ivalue::Object> Object() {return object_;}
  private:
   Method find_method(const std::string& name);
   c10::intrusive_ptr<c10::ivalue::Object> object_;
