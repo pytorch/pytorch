@@ -1360,17 +1360,17 @@ const std::vector<std::string> functions = {
         def AD_column_major(mat):
             return mat.stride(0)==1 and mat.stride(1) == mat.size(0)
 
-        def AD_mm_backward_self(grad, mat2, mat1):
+        def AD_mm_backward_mat1(grad, mat2, mat1):
             if AD_column_major(mat1):
                 return mat2.mm(grad.t()).t()
             else:
                 return grad.mm(mat2.t())
 
-        def AD_mm_backward_mat2(grad, self, mat2):
-            if self.is_sparse or not AD_column_major(mat2):
-                return self.t().mm(grad)
+        def AD_mm_backward_mat2(grad, mat1, mat2):
+            if mat1.is_sparse or not AD_column_major(mat2):
+                return mat1.t().mm(grad)
             else:
-                return grad.t().mm(self).t()
+                return grad.t().mm(mat1).t()
 
         def mm(self, mat2):
             def backward(grad_output):
@@ -1390,7 +1390,7 @@ const std::vector<std::string> functions = {
             self_size = torch._size_if_not_equal(self.size(), result.size())
             def backward(grad_output):
                 self_grad = (grad_output * beta)._grad_sum_to_size(self_size)
-                mat1_grad = AD_mm_backward_self(grad_output, mat2, mat1) * alpha
+                mat1_grad = AD_mm_backward_mat1(grad_output, mat2, mat1) * alpha
                 mat2_grad = AD_mm_backward_mat2(grad_output, mat1, mat2) * alpha
                 return self_grad, mat1_grad, mat2_grad, None, None
             return result, backward

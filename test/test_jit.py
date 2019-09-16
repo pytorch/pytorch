@@ -2302,21 +2302,26 @@ graph(%Ra, %Rb):
 
         # test second matrix column-major
         s = 10
-        a = torch.ones(s, s)
+        a = torch.ones(s, s).requires_grad_(True)
         b = torch.ones(s, s).t().detach().requires_grad_(True)
         out = torch.ones(s, s)
         gO = torch.ones(s, s)
-        h = b.register_hook(lambda x: self.assertTrue(x.stride(0) == 1 and x.stride(1) == s))
+        ha = a.register_hook(lambda x: self.assertTrue(x.stride(0) == s and x.stride(1) == 1))
+        hb = b.register_hook(lambda x: self.assertTrue(x.stride(0) == 1 and x.stride(1) == s))
         c = addmm_fn(a, b, out)
+        FileCheck().check("DifferentiableGraph_0").run(str(addmm_fn.graph_for(a, b, out)))
         c.backward(gO)
-        h.remove()
+        ha.remove()
+        hb.remove()
         # test first matrix column-major
-        b = b.t().detach().requires_grad_(False)
+        b = b.t().detach().requires_grad_(True)
         a = a.t().detach().requires_grad_(True)
-        h = a.register_hook(lambda x: self.assertTrue(x.stride(0) == 1 and x.stride(1) == s))
+        ha = a.register_hook(lambda x: self.assertTrue(x.stride(0) == 1 and x.stride(1) == s))
+        hb = b.register_hook(lambda x: self.assertTrue(x.stride(0) == s and x.stride(1) == 1))
         c = addmm_fn(a, b, out)
         c.backward(gO)
-        h.remove()
+        ha.remove()
+        hb.remove()
 
     def test_index_put(self):
         ten = torch.zeros(3, 3)
