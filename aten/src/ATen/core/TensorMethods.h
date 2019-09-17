@@ -10,6 +10,7 @@
 #include <ATen/core/ATenDispatch.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/NamedTensor.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
@@ -85,9 +86,8 @@ inline Tensor & Tensor::names_(c10::optional<DimnameList> names) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::names_(const_cast<Tensor&>(*this), names);
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::names_", ""}).value();
-    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &, c10::optional<DimnameList>>(const_cast<Tensor&>(*this), names);
+    static auto table = globalATenDispatch().getOpTable("aten::names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, c10::optional<DimnameList>)>(type_set())(const_cast<Tensor&>(*this), names);
 #endif
 }
 #endif
@@ -967,7 +967,7 @@ inline Tensor Tensor::flatten(int64_t start_dim, int64_t end_dim) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::flatten(const_cast<Tensor&>(*this), start_dim, end_dim);
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::flatten", ""}).value();
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::flatten", "using_ints"}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
         .callUnboxed<Tensor, const Tensor &, int64_t, int64_t>(const_cast<Tensor&>(*this), start_dim, end_dim);
 #endif
@@ -977,7 +977,7 @@ inline Tensor Tensor::flatten(int64_t start_dim, int64_t end_dim, Dimname out_di
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::flatten(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::flatten(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor");
+    static auto table = globalATenDispatch().getOpTable("aten::flatten.named_out_dim(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor");
     return table->getOp<Tensor (const Tensor &, int64_t, int64_t, Dimname)>(type_set())(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
 #endif
 }
@@ -987,7 +987,7 @@ inline Tensor Tensor::flatten(Dimname start_dim, Dimname end_dim, Dimname out_di
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::flatten(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::flatten(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor");
+    static auto table = globalATenDispatch().getOpTable("aten::flatten.using_names(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor");
     return table->getOp<Tensor (const Tensor &, Dimname, Dimname, Dimname)>(type_set())(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
 #endif
 }
@@ -997,7 +997,7 @@ inline Tensor Tensor::flatten(DimnameList dims, Dimname out_dim) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::flatten(const_cast<Tensor&>(*this), dims, out_dim);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::flatten(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor");
+    static auto table = globalATenDispatch().getOpTable("aten::flatten.DimnameList(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor");
     return table->getOp<Tensor (const Tensor &, DimnameList, Dimname)>(type_set())(const_cast<Tensor&>(*this), dims, out_dim);
 #endif
 }
@@ -1823,13 +1823,7 @@ inline Tensor Tensor::round() const {
 }
 inline Tensor & Tensor::round_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::round_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("round_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::round_(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::round_(Tensor(a!) self) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &)>(type_set())(const_cast<Tensor&>(*this));
@@ -1958,9 +1952,8 @@ inline Tensor Tensor::select(Dimname dim, int64_t index) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::select(const_cast<Tensor&>(*this), dim, index);
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::select", "Dimname"}).value();
-    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &, Dimname, int64_t>(const_cast<Tensor&>(*this), dim, index);
+    static auto table = globalATenDispatch().getOpTable("aten::select.Dimname(Tensor(a) self, Dimname dim, int index) -> Tensor(a)");
+    return table->getOp<Tensor (const Tensor &, Dimname, int64_t)>(type_set())(const_cast<Tensor&>(*this), dim, index);
 #endif
 }
 #endif
@@ -2079,9 +2072,8 @@ inline int64_t Tensor::size(Dimname dim) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::size(const_cast<Tensor&>(*this), dim);
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::size", "Dimname"}).value();
-    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<int64_t, const Tensor &, Dimname>(const_cast<Tensor&>(*this), dim);
+    static auto table = globalATenDispatch().getOpTable("aten::size.Dimname(Tensor self, Dimname dim) -> int");
+    return table->getOp<int64_t (const Tensor &, Dimname)>(type_set())(const_cast<Tensor&>(*this), dim);
 #endif
 }
 #endif
@@ -2214,9 +2206,8 @@ inline int64_t Tensor::stride(Dimname dim) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::stride(const_cast<Tensor&>(*this), dim);
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::stride", "Dimname"}).value();
-    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<int64_t, const Tensor &, Dimname>(const_cast<Tensor&>(*this), dim);
+    static auto table = globalATenDispatch().getOpTable("aten::stride.Dimname(Tensor self, Dimname dim) -> int");
+    return table->getOp<int64_t (const Tensor &, Dimname)>(type_set())(const_cast<Tensor&>(*this), dim);
 #endif
 }
 #endif
@@ -2398,7 +2389,7 @@ inline Tensor Tensor::transpose(int64_t dim0, int64_t dim1) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::transpose(const_cast<Tensor&>(*this), dim0, dim1);
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::transpose", ""}).value();
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::transpose", "int"}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
         .callUnboxed<Tensor, const Tensor &, int64_t, int64_t>(const_cast<Tensor&>(*this), dim0, dim1);
 #endif
@@ -2408,7 +2399,7 @@ inline Tensor Tensor::transpose(Dimname dim0, Dimname dim1) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::transpose(const_cast<Tensor&>(*this), dim0, dim1);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::transpose(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)");
+    static auto table = globalATenDispatch().getOpTable("aten::transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, Dimname, Dimname)>(type_set())(const_cast<Tensor&>(*this), dim0, dim1);
 #endif
 }
@@ -2989,7 +2980,7 @@ inline std::vector<Tensor> Tensor::unbind(int64_t dim) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::unbind(const_cast<Tensor&>(*this), dim);
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::unbind", ""}).value();
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::unbind", "int"}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
         .callUnboxed<std::vector<Tensor>, const Tensor &, int64_t>(const_cast<Tensor&>(*this), dim);
 #endif
@@ -2999,7 +2990,7 @@ inline std::vector<Tensor> Tensor::unbind(Dimname dim) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::unbind(const_cast<Tensor&>(*this), dim);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::unbind(Tensor(a) self, Dimname dim) -> Tensor(a)[]");
+    static auto table = globalATenDispatch().getOpTable("aten::unbind.Dimname(Tensor(a) self, Dimname dim) -> Tensor(a)[]");
     return table->getOp<std::vector<Tensor> (const Tensor &, Dimname)>(type_set())(const_cast<Tensor&>(*this), dim);
 #endif
 }
