@@ -9,6 +9,7 @@ from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType
 from textwrap import dedent
+from torch._utils_internal import get_source_lines_and_file
 
 
 PY35 = sys.version_info >= (3, 5)
@@ -46,7 +47,7 @@ def get_signature(fn):
 
     type_line, source = None, None
     try:
-        source = dedent(inspect.getsource(fn))
+        source = dedent(''.join(get_source_lines_and_file(fn)[0]))
         type_line = get_type_line(source)
     except TypeError:
         pass
@@ -63,7 +64,7 @@ def get_signature(fn):
 # a function takes.
 def get_num_params(fn, loc):
     try:
-        source = dedent(inspect.getsource(fn))
+        source = dedent(''.join(get_source_lines_and_file(fn)[0]))
     except (TypeError, IOError):
         return None
     if source is None:

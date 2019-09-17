@@ -56,8 +56,6 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   pip_install --user mypy || true
 fi
 
-pip_install --user requests
-
 # faulthandler become built-in since 3.3
 if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
   pip_install --user faulthandler
