@@ -51,6 +51,10 @@ TORCH_API std::vector<char> pickle(
     const IValue& ivalue,
     std::vector<at::Tensor>* tensor_table = nullptr);
 
+
+TORCH_API std::vector<char> pickle_save(const IValue& ivalue);
+
+
 /// `reader` is a function that takes in a size to read from some pickled
 /// binary. `reader` should remember where it last read, and return
 /// false if the read was not successful.

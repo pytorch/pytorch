@@ -17,7 +17,6 @@
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/logging.h>
-#include <torch/csrc/api/include/torch/serialize.h>
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
@@ -746,7 +745,7 @@ RegisterOperators reg(
            auto ivalue = pop(stack);
 
            // Pickle the tensor
-           auto data = torch::pickle_save(ivalue);
+           auto data = jit::pickle_save(ivalue);
 
            // Write file
            std::fstream output(filename, std::ios::out | std::ios::binary);
