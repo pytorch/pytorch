@@ -11,7 +11,7 @@ namespace {
 
 class QNNPACKRelu final : public torch::OperatorKernel {
  public:
-#ifdef USE_QNNPACK
+#ifdef USE_PYTORCH_QNNPACK
   Tensor operator()(Tensor input) {
     Tensor qy;
 
@@ -31,20 +31,20 @@ class QNNPACKRelu final : public torch::OperatorKernel {
       num_elems_x *= input_contig.size(i);
     }
 
-    qnnp_operator_t qnnpack_operator{nullptr};
+    pytorch_qnnp_operator_t qnnpack_operator{nullptr};
 
-    const qnnp_status createStatus = qnnp_create_clamp_nc_u8(
+    const pytorch_qnnp_status createStatus = pytorch_qnnp_create_clamp_nc_u8(
         num_elems_x /* channels */,
         zero_point /* output min */,
         std::numeric_limits<uint8_t>::max() /* output max */,
         0 /* flags */,
         &qnnpack_operator);
 
-    std::unique_ptr<qnnp_operator, QnnpackOperatorDeleter> qnnpack_uniq_ptr(
-        qnnpack_operator);
+    std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
+        qnnpack_uniq_ptr(qnnpack_operator);
 
     TORCH_INTERNAL_ASSERT(
-        createStatus == qnnp_status_success,
+        createStatus == pytorch_qnnp_status_success,
         "failed to create QNNPACK Relu operator");
     TORCH_INTERNAL_ASSERT(qnnpack_operator != nullptr);
 
@@ -56,7 +56,7 @@ class QNNPACKRelu final : public torch::OperatorKernel {
 
     size_t num_elems_y = volume / qy.size(0);
 
-    const qnnp_status setupStatus = qnnp_setup_clamp_nc_u8(
+    const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_clamp_nc_u8(
         qnnpack_operator, /* clamp */
         input_contig.size(0) /* batch size */,
         (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input data */,
@@ -64,16 +64,16 @@ class QNNPACKRelu final : public torch::OperatorKernel {
         (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
         num_elems_y /* output stride */);
     TORCH_INTERNAL_ASSERT(
-        setupStatus == qnnp_status_success,
+        setupStatus == pytorch_qnnp_status_success,
         "failed to setup QNNPACK Relu operator");
 
     pthreadpool_t threadpool = caffe2::mobile_threadpool();
 
-    const qnnp_status runStatus =
-        qnnp_run_operator(qnnpack_operator, threadpool);
+    const pytorch_qnnp_status runStatus =
+        pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
 
     TORCH_INTERNAL_ASSERT(
-        runStatus == qnnp_status_success,
+        runStatus == pytorch_qnnp_status_success,
         "failed to run QNNPACK Relu operator");
 
     return qy;

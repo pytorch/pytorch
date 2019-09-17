@@ -729,9 +729,9 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenFallbackKernelWithou
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
   bool called;
-  c10::optional<Tensor> called_arg2;
-  c10::optional<int64_t> called_arg3;
-  c10::optional<std::string> called_arg4;
+  c10::optional<Tensor> called_arg2 = c10::nullopt;
+  c10::optional<int64_t> called_arg3 = c10::nullopt;
+  c10::optional<std::string> called_arg4 = c10::nullopt;
 
   auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> ()",
@@ -768,9 +768,9 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalIn
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
   bool called;
-  c10::optional<Tensor> called_arg2;
-  c10::optional<int64_t> called_arg3;
-  c10::optional<std::string> called_arg4;
+  c10::optional<Tensor> called_arg2 = c10::nullopt;
+  c10::optional<int64_t> called_arg3 = c10::nullopt;
+  c10::optional<std::string> called_arg4 = c10::nullopt;
 
   auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> Tensor?",
@@ -810,9 +810,9 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalIn
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
   bool called;
-  c10::optional<Tensor> called_arg2;
-  c10::optional<int64_t> called_arg3;
-  c10::optional<std::string> called_arg4;
+  c10::optional<Tensor> called_arg2 = c10::nullopt;
+  c10::optional<int64_t> called_arg3 = c10::nullopt;
+  c10::optional<std::string> called_arg4 = c10::nullopt;
 
   auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> (Tensor?, int?, str?)",

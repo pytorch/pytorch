@@ -461,13 +461,13 @@ accreal THTensor_(trace)(THTensor *t)
 
 void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
 {
-  THArgCheck(THTensor_(nDimension)(t) == 1 || THTensor_(nDimension)(t) == 2, 1, "matrix or a vector expected");
+  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(t) == 1 || THTensor_(nDimensionLegacyNoScalars)(t) == 2, 1, "matrix or a vector expected");
 
-  if(THTensor_(nDimension)(t) == 1)
+  if(THTensor_(nDimensionLegacyNoScalars)(t) == 1)
   {
     scalar_t *t_data = t->data<scalar_t>();
-    int64_t t_stride_0 = THTensor_(stride)(t, 0);
-    int64_t t_size = THTensor_(size)(t, 0);
+    int64_t t_stride_0 = THTensor_strideLegacyNoScalars(t, 0);
+    int64_t t_size = THTensor_sizeLegacyNoScalars(t, 0);
     int64_t sz = t_size + (k >= 0 ? k : -k);
     scalar_t *r__data;
     int64_t r__stride_0;
@@ -1053,7 +1053,7 @@ LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_
 
 LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
-void THTensor_(std_single)(THTensor *r_, THTensor *t, int dimension, bool unbiased, int keepdim)
+void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
       dimension);
@@ -1078,12 +1078,12 @@ void THTensor_(std_single)(THTensor *r_, THTensor *t, int dimension, bool unbias
                          M2 += delta * delta2;
                        }
 
-                       if (!unbiased && t_size >= 2)
+                       if (biased && t_size >= 2)
                        {
                          *r__data = TH_MATH_NAME(sqrt)(M2 / t_size);
-                       } else if (unbiased && t_size >= 2) {
+                       } else if (!biased && t_size >= 2) {
                          *r__data = TH_MATH_NAME(sqrt)(M2 / (t_size - 1));
-                       } else if (!unbiased && t_size == 1) {
+                       } else if (biased && t_size == 1) {
                          *r__data = 0;
                        } else {
                          *r__data = NAN;
@@ -1094,7 +1094,7 @@ void THTensor_(std_single)(THTensor *r_, THTensor *t, int dimension, bool unbias
   }
 }
 
-void THTensor_(var_single)(THTensor *r_, THTensor *t, int dimension, bool unbiased, int keepdim)
+void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
       dimension);
@@ -1119,12 +1119,12 @@ void THTensor_(var_single)(THTensor *r_, THTensor *t, int dimension, bool unbias
                          M2 += delta * delta2;
                        }
 
-                       if (!unbiased && t_size >= 2)
+                       if (biased && t_size >= 2)
                        {
                          *r__data = M2 / t_size;
-                       } else if (unbiased && t_size >= 2) {
+                       } else if (!biased && t_size >= 2) {
                          *r__data = M2 / (t_size - 1);
-                       } else if (!unbiased && t_size == 1) {
+                       } else if (biased && t_size == 1) {
                          *r__data = 0;
                        } else {
                          *r__data = NAN;
@@ -1300,18 +1300,18 @@ accreal THTensor_(meanall)(THTensor *tensor)
   return THTensor_(sumall)(tensor)/THTensor_(nElement)(tensor);
 }
 
-accreal THTensor_(var_all)(THTensor *tensor, bool unbiased)
+accreal THTensor_(varall)(THTensor *tensor, int biased)
 {
   accreal mean = THTensor_(meanall)(tensor);
   accreal sum = 0;
   TH_TENSOR_APPLY(scalar_t, tensor, sum += (*tensor_data - mean)*(*tensor_data - mean););
-  sum /= std::max<int64_t>(0, THTensor_(nElement)(tensor) - (unbiased ? 1 : 0));
+  sum /= std::max<int64_t>(0, THTensor_(nElement)(tensor) - (biased ? 0 : 1));
   return sum;
 }
 
-accreal THTensor_(std_all)(THTensor *tensor, bool unbiased)
+accreal THTensor_(stdall)(THTensor *tensor, int biased)
 {
-  return sqrt(THTensor_(var_all)(tensor, unbiased));
+  return sqrt(THTensor_(varall)(tensor, biased));
 }
 
 void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue)
