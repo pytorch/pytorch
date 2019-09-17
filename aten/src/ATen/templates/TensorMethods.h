@@ -10,6 +10,7 @@
 #include <ATen/core/ATenDispatch.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/NamedTensor.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
