@@ -740,8 +740,10 @@ ENDIF()
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 
-  add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
-  
+  if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+  endif()
+
   if (BUILD_TEST AND NOT NO_API)
     add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
     add_subdirectory(${TORCH_ROOT}/test/cpp/dist_autograd ${CMAKE_BINARY_DIR}/dist_autograd)
