@@ -212,7 +212,11 @@ class PerChannelMinMaxObserver(ObserverBase):
         max_vals = self.max_vals
         x_dim = x.size()
 
-        y = torch.reshape(x, (x_dim[self.ch_axis] , int(torch.numel(x) / x_dim[self.ch_axis]))).detach()
+        new_axis_list = list(range(len(x_dim)))
+        new_axis_list[self.ch_axis] = 0
+        new_axis_list[0] = self.ch_axis
+        y = x.permute(tuple(new_axis_list))
+        y = torch.flatten(y, start_dim=1)
         if min_vals is None or max_vals is None:
             min_vals = torch.min(y, 1)[0]
             max_vals = torch.max(y, 1)[0]
