@@ -105,7 +105,7 @@ int64_t VariableType::output_nr(const Tensor & self) {
   return as_variable_ref(self).output_nr();
 }
 
-int64_t VariableType::version(const Tensor & self) {
+int64_t VariableType::_version(const Tensor & self) {
   return as_variable_ref(self).current_version();
 }
 

@@ -368,19 +368,19 @@ TEST(TensorTest, OutputNr) {
 
 TEST(TensorTest, Version) {
   auto x = torch::ones(3);
-  ASSERT_EQ(x.version(), 0);
+  ASSERT_EQ(x._version(), 0);
   x.mul_(2);
-  ASSERT_EQ(x.version(), 1);
+  ASSERT_EQ(x._version(), 1);
   x.add_(1);
-  ASSERT_EQ(x.version(), 2);
+  ASSERT_EQ(x._version(), 2);
 
   x = at::ones(3);
   const auto message = "version is not implemented for Tensor";
-  ASSERT_THROWS_WITH(x.version(), message);
+  ASSERT_THROWS_WITH(x._version(), message);
   x.mul_(2);
-  ASSERT_THROWS_WITH(x.version(), message);
+  ASSERT_THROWS_WITH(x._version(), message);
   x.add_(1);
-  ASSERT_THROWS_WITH(x.version(), message);
+  ASSERT_THROWS_WITH(x._version(), message);
 }
 
 TEST(TensorTest, Detach) {
