@@ -294,6 +294,67 @@ if(USE_QNNPACK)
   include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}/neon2sse")
 endif()
 
+# ---[ PYTORCH_QNNPACK
+if(USE_PYTORCH_QNNPACK)
+  if (IOS)
+    list(LENGTH IOS_ARCH IOS_ARCH_COUNT)
+    if (IOS_ARCH_COUNT GREATER 1)
+      message(WARNING
+        "Multi-architecture (${IOS_ARCH}) builds are not supported in QNNPACK. "
+        "Specify a single architecture in IOS_ARCH and re-configure, or "
+        "turn this warning off by USE_PYTORCH_QNNPACK=OFF.")
+      set(USE_PYTORCH_QNNPACK OFF)
+    endif()
+    if (NOT IOS_ARCH MATCHES "^(i386|x86_64|armv7.*|arm64.*)$")
+      message(WARNING
+        "Target architecture \"${IOS_ARCH}\" is not supported in QNNPACK. "
+        "Supported architectures are x86, x86-64, ARM, and ARM64. "
+        "Turn this warning off by USE_PYTORCH_QNNPACK=OFF.")
+      set(USE_PYTORCH_QNNPACK OFF)
+    endif()
+  else()
+    if (NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin)$"))
+      message(WARNING
+        "Target platform \"${CMAKE_SYSTEM_NAME}\" is not supported in QNNPACK. "
+        "Supported platforms are Android, iOS, Linux, and macOS. "
+        "Turn this warning off by USE_PYTORCH_QNNPACK=OFF.")
+      set(USE_PYTORCH_QNNPACK OFF)
+    endif()
+    if (NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64)$"))
+      message(WARNING
+        "Target architecture \"${CMAKE_SYSTEM_PROCESSOR}\" is not supported in QNNPACK. "
+        "Supported architectures are x86, x86-64, ARM, and ARM64. "
+        "Turn this warning off by USE_PYTORCH_QNNPACK=OFF.")
+      set(USE_PYTORCH_QNNPACK OFF)
+    endif()
+  endif()
+  if (USE_PYTORCH_QNNPACK)
+      if (NOT DEFINED PYTORCH_QNNPACK_SOURCE_DIR)
+        set(PYTORCH_QNNPACK_SOURCE_DIR "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/quantized/cpu/qnnpack" CACHE STRING "QNNPACK source directory")
+      endif()
+
+      if(NOT TARGET pytorch_qnnpack)
+        set(PYTORCH_QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
+        set(PYTORCH_QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
+        set(PYTORCH_QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
+        set(PYTORCH_QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
+        set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
+        set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+        set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
+        add_subdirectory(
+          "${PYTORCH_QNNPACK_SOURCE_DIR}"
+          "${CONFU_DEPENDENCIES_BINARY_DIR}/pytorch_qnnpack")
+        # We build static versions of QNNPACK and pthreadpool but link
+        # them into a shared library for Caffe2, so they need PIC.
+        set_property(TARGET pytorch_qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
+        set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
+        set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+      endif()
+
+      list(APPEND Caffe2_DEPENDENCY_LIBS pytorch_qnnpack)
+  endif()
+endif()
+
 # ---[ NNPACK
 if(USE_NNPACK)
   include(${CMAKE_CURRENT_LIST_DIR}/External/nnpack.cmake)

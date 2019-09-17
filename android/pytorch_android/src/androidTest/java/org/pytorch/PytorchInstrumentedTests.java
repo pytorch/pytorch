@@ -36,7 +36,7 @@ public class PytorchInstrumentedTests {
   public void testForwardNull() throws IOException {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     final IValue input =
-        IValue.tensor(Tensor.newTensor(new long[] {1}, Tensor.allocateByteBuffer(1)));
+        IValue.tensor(Tensor.newInt8Tensor(new long[] {1}, Tensor.allocateByteBuffer(1)));
     assertTrue(input.isTensor());
     final IValue output = module.forward(input);
     assertTrue(output.isNull());
@@ -103,7 +103,7 @@ public class PytorchInstrumentedTests {
     for (int i = 0; i < numElements; ++i) {
       inputTensorData[i] = i;
     }
-    final Tensor inputTensor = Tensor.newTensor(inputTensorShape, inputTensorData);
+    final Tensor inputTensor = Tensor.newFloat32Tensor(inputTensorShape, inputTensorData);
 
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     final IValue input = IValue.tensor(inputTensor);
@@ -231,15 +231,15 @@ public class PytorchInstrumentedTests {
       floats[i] = i / 1000.f;
     }
 
-    Tensor tensorBytes = Tensor.newTensor(shape, bytes);
-    assertTrue(tensorBytes.dtype() == Tensor.DTYPE_BYTE);
+    Tensor tensorBytes = Tensor.newInt8Tensor(shape, bytes);
+    assertTrue(tensorBytes.dtype() == Tensor.DTYPE_INT8);
     assertArrayEquals(bytes, tensorBytes.getDataAsByteArray());
 
-    Tensor tensorInts = Tensor.newTensor(shape, ints);
+    Tensor tensorInts = Tensor.newInt32Tensor(shape, ints);
     assertTrue(tensorInts.dtype() == Tensor.DTYPE_INT32);
     assertArrayEquals(ints, tensorInts.getDataAsIntArray());
 
-    Tensor tensorFloats = Tensor.newTensor(shape, floats);
+    Tensor tensorFloats = Tensor.newFloat32Tensor(shape, floats);
     assertTrue(tensorFloats.dtype() == Tensor.DTYPE_FLOAT32);
     float[] floatsOut = tensorFloats.getDataAsFloatArray();
     assertTrue(floatsOut.length == numel);
@@ -253,7 +253,7 @@ public class PytorchInstrumentedTests {
     long[] shape = new long[] {1, 3, 224, 224};
     final int numel = (int) Tensor.numel(shape);
     float[] floats = new float[numel];
-    Tensor tensorFloats = Tensor.newTensor(shape, floats);
+    Tensor tensorFloats = Tensor.newFloat32Tensor(shape, floats);
     assertTrue(tensorFloats.dtype() == Tensor.DTYPE_FLOAT32);
     tensorFloats.getDataAsByteArray();
   }

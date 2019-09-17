@@ -57,22 +57,23 @@ class QLinearInt8 final : public torch::OperatorKernel {
     int32_t input_zero_point_int32 = input.q_zero_point();
 
     std::vector<float> output_multiplier_float(1, 0.0);
+    std::vector<float> act_times_w_scale(1, 0.0);
     TORCH_CHECK(
         pack_ptr.w_scale.size() == pack_ptr.w_zp.size(),
         "Weight scales and zero points vectors should have the same size.");
-    // quantization scheme is PerTensorAffine if the number of scales is
-    // 1 and it's kPerChannelAffine if the number of scales is equal to
-    // N (output channels)
     if (pack_ptr.q_scheme == kPerTensorAffine) {
       // Process the per tensor quantization.
-      output_multiplier_float[0] = (input_scale_float * pack_ptr.w_scale[0]) /
-          static_cast<float>(output_scale);
+      act_times_w_scale[0] = (input_scale_float * pack_ptr.w_scale[0]);
+      output_multiplier_float[0] =
+          act_times_w_scale[0] / static_cast<float>(output_scale);
     } else if (pack_ptr.q_scheme == kPerChannelAffine) {
       // Process the per channel quantization.
       output_multiplier_float.resize(N, 0.0);
+      act_times_w_scale.resize(N, 1.0f);
       for (int i = 0; i < N; ++i) {
-        output_multiplier_float[i] = (input_scale_float * pack_ptr.w_scale[i]) /
-            static_cast<float>(output_scale);
+        act_times_w_scale[i] = (input_scale_float * pack_ptr.w_scale[i]);
+        output_multiplier_float[i] =
+            act_times_w_scale[i] / static_cast<float>(output_scale);
       }
     }
     int32_t output_zero_point_int32 = static_cast<int32_t>(output_zero_point);
@@ -106,40 +107,16 @@ class QLinearInt8 final : public torch::OperatorKernel {
     // This is the end of the pipeline, pass the resulting matrix through.
     fbgemm::DoNothing<> doNothingObj{};
 
-    const int32_t* bias_ptr = nullptr;
-    at::Tensor qbias;
+    const float* bias_ptr = nullptr;
+    at::Tensor bias;
     if (pack_ptr.bias.has_value()) {
-      at::Tensor bias = pack_ptr.bias.value();
-      // Temporary: Quantize bias
-      if (pack_ptr.q_scheme == kPerTensorAffine) {
-        qbias = at::quantize_linear(
-            at::dequantize(bias),
-            pack_ptr.w_scale[0] * input_scale_float,
-            0,
-            kQInt32);
-      } else if (pack_ptr.q_scheme == kPerChannelAffine) {
-        std::array<int64_t, 1> arr{0};
-        IntArrayRef axis(arr.data(), 1);
-        at::Tensor bias_scale = at::ones({N}, at::dtype(at::kDouble));
-        at::Tensor bias_zp = at::zeros({N}, at::dtype(at::kLong));
-        for (int i = 0; i < N; ++i) {
-          bias_scale.data_ptr<double>()[i] =
-              pack_ptr.w_scale[i] * input_scale_float;
-        }
-        qbias = quantize_linear_per_channel_cpu(
-            at::dequantize(bias), bias_scale, bias_zp, axis, kQInt32);
-      } else {
-        qbias = bias;
-        TORCH_CHECK(false, "Unsupported quantization scheme.")
-      }
-
-      TORCH_CHECK(qbias.dim() == 1, "bias should be a vector (1D Tensor)");
+      bias = pack_ptr.bias.value();
+      bias = bias.contiguous();
+      TORCH_CHECK(bias.dim() == 1, "bias should be a vector (1D Tensor)");
       TORCH_CHECK(
-          qbias.size(0) == N,
+          bias.size(0) == N,
           "bias should have N elements: " + std::to_string(N));
-      auto bias_contig = qbias.contiguous();
-      bias_ptr =
-          reinterpret_cast<int32_t*>(bias_contig.data_ptr<c10::qint32>());
+      bias_ptr = reinterpret_cast<float*>(bias.data_ptr<float>());
     }
 
     // The resulting matrix here is 2-D, let's view it with the original
@@ -165,16 +142,22 @@ class QLinearInt8 final : public torch::OperatorKernel {
       //  1) Add in row and column offsets to the rows and columns,
       //  respectively.
       //  2) Add in the bias term.
-      fbgemm::ReQuantizeOutput<ReluFused> outputProcObj(
-          /*nextop=*/doNothingObj,
-          /*C_multiplier=*/output_multiplier_float.data(),
-          /*C_zero_point=*/output_zero_point_int32,
-          /*Aq_zero_point=*/input_zero_point_int32,
-          /*Bq_zero_point=*/pack_ptr.w_zp.data(),
-          /*row_offsets=*/packA.getRowOffsetBuffer(),
-          /*col_offsets=*/col_offsets.data(),
-          /*bias=*/bias_ptr,
-          /*nCol=*/N);
+      fbgemm::ReQuantizeOutput<
+          ReluFused,
+          fbgemm::QuantizationGranularity::TENSOR,
+          float>
+          outputProcObj(
+              doNothingObj,
+              output_multiplier_float.data(),
+              output_zero_point_int32,
+              input_zero_point_int32,
+              pack_ptr.w_zp.data(),
+              packA.getRowOffsetBuffer(),
+              col_offsets.data(),
+              bias_ptr,
+              N, /* nCol */
+              1 /* groups */,
+              act_times_w_scale.data());
 
       // Do the GEMM
       fbgemm::fbgemmPacked(
@@ -196,17 +179,20 @@ class QLinearInt8 final : public torch::OperatorKernel {
       //  2) Add in the bias term.
       fbgemm::ReQuantizeOutput<
           ReluFused,
-          fbgemm::QuantizationGranularity::OUT_CHANNEL>
+          fbgemm::QuantizationGranularity::OUT_CHANNEL,
+          float>
           outputProcObj(
-              /*nextop=*/doNothingObj,
-              /*C_multiplier=*/output_multiplier_float.data(),
-              /*C_zero_point=*/output_zero_point_int32,
-              /*Aq_zero_point=*/input_zero_point_int32,
-              /*Bq_zero_point=*/pack_ptr.w_zp.data(),
-              /*row_offsets=*/packA.getRowOffsetBuffer(),
-              /*col_offsets=*/col_offsets.data(),
-              /*bias=*/bias_ptr,
-              /*nCol=*/N);
+              doNothingObj,
+              output_multiplier_float.data(),
+              output_zero_point_int32,
+              input_zero_point_int32,
+              pack_ptr.w_zp.data(),
+              packA.getRowOffsetBuffer(),
+              col_offsets.data(),
+              bias_ptr,
+              N, /*nCol=*/
+              1, /* groups*/
+              act_times_w_scale.data());
 
       // Do the GEMM
       fbgemm::fbgemmPacked(
