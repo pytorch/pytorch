@@ -68,7 +68,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
   Tensor operator()(
       Tensor act,
       Tensor packed_weight,
-      c10::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
@@ -112,6 +111,13 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     int kernel_h = kernel[0];
     int kernel_w = kernel[1];
 
+    TORCH_CHECK(C == (packB->inputChannels()),
+        "[QConv2D] Given groups=", groups, ", weight of size ",
+        K, ", ",  kernel_h, ", ", kernel_w, ", ", packB->inputChannels(),
+        ", expected input (NHWC) ", N, ", ", H, ", ", W, ", ", C,
+        " to have ", (packB->inputChannels() * groups),
+        " channels, but got ", C, " channels instead");
+
     fbgemm::conv_param_t<> conv_p(
         N, // Batch size
         C, // Number of input channels
@@ -124,36 +130,44 @@ class QConv2dInt8 final : public c10::OperatorKernel {
 
     fbgemm::DoNothing<> NoOpObj{};
 
-    const int32_t* bias_ptr = nullptr;
-    if (bias.has_value()) {
-      Tensor bias_vec = bias.value();
-      TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
-      TORCH_CHECK(
-          bias_vec.size(0) == K,
-          "bias should have K elements: " + std::to_string(K));
-      auto bias_contig = bias_vec.contiguous();
-      bias_ptr = reinterpret_cast<int32_t*>(bias_contig.data_ptr<c10::qint32>());
-    }
-
     float act_scale = act.q_scale();
     int32_t act_zero_point = act.q_zero_point();
 
+    const float* bias_ptr = nullptr;
+    at::Tensor bias;
+    if (pack_ptr.bias.has_value()) {
+      bias = pack_ptr.bias.value();
+      TORCH_CHECK(
+          bias.dtype() == at::kFloat,
+          "[QConv2D] The 'bias' tensor must have 'torch.float' dtype");
+      bias = bias.contiguous();
+      TORCH_CHECK(bias.dim() == 1, "bias should be a vector (1D Tensor)");
+      TORCH_CHECK(
+          bias.size(0) == K,
+          "bias should have K elements: " + std::to_string(K));
+      bias_ptr = bias.data_ptr<float>();
+    }
+
     std::vector<float> output_multiplier_float(1, 0.0);
+    std::vector<float> act_times_w_scale(1, 1.0);
     TORCH_CHECK(
         pack_ptr.w_scale.size() == pack_ptr.w_zp.size(),
         "Weight scales and zero points vectors should have the same size.");
-    // quantization scheme is PerTensorAffine if the number of scales is 1 and
-    // it's kPerChannelAffine if the number of scales is equal to K (output
-    // channels)
-    if (pack_ptr.w_scale.size() == 1) {
+
+    if (pack_ptr.q_scheme == kPerTensorAffine) {
+      act_times_w_scale[0] = (act_scale * pack_ptr.w_scale[0]);
       output_multiplier_float[0] =
-          (act_scale * pack_ptr.w_scale[0]) / static_cast<float>(output_scale);
-    } else if (pack_ptr.w_scale.size() == K) {
+          act_times_w_scale[0] / static_cast<float>(output_scale);
+    } else if (pack_ptr.q_scheme == kPerChannelAffine) {
       output_multiplier_float.resize(K, 0.0);
+      act_times_w_scale.resize(K, 1.0);
       for (int i = 0; i < K; ++i) {
-        output_multiplier_float[i] = (act_scale * pack_ptr.w_scale[i]) /
-            static_cast<float>(output_scale);
+        act_times_w_scale[i] = (act_scale * pack_ptr.w_scale[i]);
+        output_multiplier_float[i] =
+            act_times_w_scale[i] / static_cast<float>(output_scale);
       }
+    } else {
+      TORCH_CHECK(false, "[QConv2D] Unknown quantization scheme");
     }
 
     auto outShape =
@@ -168,17 +182,22 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
     if (pack_ptr.q_scheme == kPerTensorAffine) {
-      fbgemm::ReQuantizeOutput<ReluFused> outputProcObj(
-          NoOpObj,
-          output_multiplier_float.data(),
-          output_zero_point,
-          act_zero_point,
-          pack_ptr.w_zp.data(),
-          nullptr, /* row offset buffer */
-          col_offsets.data(),
-          bias_ptr,
-          K,
-          groups);
+      fbgemm::ReQuantizeOutput<
+          ReluFused,
+          fbgemm::QuantizationGranularity::TENSOR,
+          float>
+          outputProcObj(
+              NoOpObj,
+              output_multiplier_float.data(),
+              output_zero_point,
+              act_zero_point,
+              pack_ptr.w_zp.data(),
+              nullptr, /* row offset buffer */
+              col_offsets.data(),
+              bias_ptr,
+              K,
+              groups,
+              act_times_w_scale.data());
       fbgemm::fbgemmConv(
           conv_p,
           act_ptr,
@@ -192,7 +211,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     } else if (pack_ptr.q_scheme == kPerChannelAffine) {
       fbgemm::ReQuantizeOutput<
           ReluFused,
-          fbgemm::QuantizationGranularity::OUT_CHANNEL>
+          fbgemm::QuantizationGranularity::OUT_CHANNEL,
+          float>
           outputProcObj(
               NoOpObj,
               output_multiplier_float.data(),
@@ -203,14 +223,15 @@ class QConv2dInt8 final : public c10::OperatorKernel {
               col_offsets.data(),
               bias_ptr,
               K,
-              groups);
+              groups,
+              act_times_w_scale.data());
 
       fbgemm::fbgemmConv(
           conv_p,
           act_ptr,
           *packB,
-          reinterpret_cast<uint8_t*>(output.data<c10::quint8>()),
-          buffer.data<int32_t>(),
+          reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+          buffer.data_ptr<int32_t>(),
           outputProcObj,
           0 /* thread_id*/,
           1 /* num_threads */);
@@ -222,7 +243,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
   Tensor operator()(
       Tensor /* activation */,
       Tensor /* packed_weight */,
-      c10::optional<Tensor> /* bias */,
       torch::List<int64_t> /* stride */,
       torch::List<int64_t> /* padding */,
       torch::List<int64_t> /* dilation */,

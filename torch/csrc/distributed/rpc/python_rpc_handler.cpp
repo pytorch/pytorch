@@ -3,39 +3,37 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
-namespace {
-py::object runUDFFunction_ = py::none();
-py::object loadResultFunction_ = py::none();
-} // anonymous namespace
 
-namespace PythonRpcHandler {
-void init() {
+PythonRpcHandler::PythonRpcHandler() {
   AutoGIL ag;
-  py::module module =
+  py::object module =
       py::module::import("torch.distributed.internal_rpc_utils");
-  if (runUDFFunction_.is(py::none())) {
-    runUDFFunction_ = module.attr("run_python_udf_internal");
-  }
-  if (loadResultFunction_.is(py::none())) {
-    loadResultFunction_ = module.attr("load_python_udf_result_internal");
-  }
+  runUDFFunction_ = module.attr("run_python_udf_internal");
+  loadResultFunction_ = module.attr("load_python_udf_result_internal");
 }
 
-std::vector<char> generatePythonUDFResult(const Message& request) {
+PythonRpcHandler& PythonRpcHandler::getInstance() {
+  static PythonRpcHandler handler;
+  return handler;
+}
+
+std::vector<char> PythonRpcHandler::generatePythonUDFResult(
+    const Message& request) {
   AutoGIL ag;
   auto pargs = py::bytes(request.payload().data(), request.payload().size());
+  TORCH_CHECK(runUDFFunction_ != nullptr, "runUDFFunction_ is nullptr");
   py::bytes pres = runUDFFunction_(pargs);
   const auto& presStr = static_cast<std::string>(pres);
   std::vector<char> payload(presStr.begin(), presStr.end());
   return payload;
 }
 
-py::object loadPythonUDFResult(const Message& message) {
+py::object PythonRpcHandler::loadPythonUDFResult(const Message& message) {
   AutoGIL ag;
   auto pargs = py::bytes(message.payload().data(), message.payload().size());
+  TORCH_CHECK(loadResultFunction_ != nullptr, "loadResultFunction_ is nullptr");
   return loadResultFunction_(pargs);
 }
-} // namespace PythonRpcHandler
 
 } // namespace rpc
 } // namespace distributed
