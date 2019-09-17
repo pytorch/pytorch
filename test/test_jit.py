@@ -6294,7 +6294,7 @@ a")
             for inp, expect in zip(inputs, expected_shape):
                 code = tensor_template.format(tensor_op=op, input=inp)
                 scope = {}
-                #exec(code, globals(), scope)
+                exec(code, globals(), scope)
                 self.checkScript(code, ())
                 cu = torch.jit.CompilationUnit(code)
                 torch._C._jit_pass_complete_shape_analysis(cu.func.graph, (), False)
@@ -6378,7 +6378,7 @@ a")
                         continue
                     code = tensor_template.format(list_create=li, tensor_op=op, options=option)
                     scope = {}
-                    #exec(code, globals(), scope)
+                    exec(code, globals(), scope)
                     cu = torch.jit.CompilationUnit(code)
                     t1 = cu.func()
                     t2 = scope['func']()
@@ -7533,7 +7533,7 @@ a")
                     # print("testing {}".format(return_line))
                     code = template.format(return_line=return_line)
                     scope = {}
-                    #exec(code, globals(), scope)
+                    exec(code, globals(), scope)
                     cu = torch.jit.CompilationUnit(code)
                     graph = cu.func.graph
                     torch._C._jit_pass_complete_shape_analysis(graph, (), False)
@@ -7601,7 +7601,7 @@ a")
                     # print("testing {}".format(return_line))
                     code = template.format(first_arg, second_arg, op)
                     scope = {}
-                    #exec(code, globals(), scope)
+                    exec(code, globals(), scope)
                     non_jit_result = scope['func']()
 
                     cu = torch.jit.CompilationUnit(code)
