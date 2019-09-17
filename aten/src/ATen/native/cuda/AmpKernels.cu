@@ -14,7 +14,7 @@ namespace native {
 // These functions have no CPU variants, so there's no need to bother with a .cpp file in native/, and
 // also no need to impose the DECLARE/DEFINE/REGISTER_DISPATCH layer of indirection.
 
-Tensor & _amp_unscale_inf_check_cuda(const Tensor & scaled_grad,
+Tensor & _amp_unscale_inf_check_cuda(Tensor & scaled_grad,
                                      const Tensor & current_scale,
                                      const Tensor & found_inf)
 {
@@ -50,25 +50,25 @@ Tensor & _amp_unscale_inf_check_cuda(const Tensor & scaled_grad,
 
 
 // Update the scale factor Tensor on the device.
-__global__ void(float* current_scale,
-                float* found_inf,
-                float* new_scale,
-                float scale_growth_factor,
-                float scale_backoff_factor)
+__global__ void amp_update_scale_kernel(float* current_scale,
+                                        float* found_inf,
+                                        float* new_scale,
+                                        double scale_growth_factor,
+                                        double scale_backoff_factor)
 {
   // This kernel should only ever be launched with one thread anyway, but just in case
   if(threadIdx.x == 0 && blockIdx.x == 0)
     if(*found_inf)
       *new_scale = (*current_scale)*scale_backoff_factor;
-    else:
+    else
       *new_scale = (*current_scale)*scale_growth_factor;
 }
 
 
-Tensor _amp_update_scale_cuda(Tensor & current_scale,
-                              Tensor & found_inf,
-                              float scale_growth_factor,
-                              float scale_backoff_factor)
+Tensor _amp_update_scale_cuda(const Tensor & current_scale,
+                              const Tensor & found_inf,
+                              double scale_growth_factor,
+                              double scale_backoff_factor)
 {
   TORCH_CHECK(current_scale.is_cuda(), "current_scale must be a CUDA tensor.");
   TORCH_CHECK(found_inf.is_cuda(), "found_inf must be a CUDA tensor.");
@@ -81,6 +81,7 @@ Tensor _amp_update_scale_cuda(Tensor & current_scale,
 
   amp_update_scale_kernel<<<1,1>>>(current_scale.data_ptr<float>(),
                                    found_inf.data_ptr<float>(),
+                                   new_scale.data_ptr<float>(),
                                    scale_growth_factor,
                                    scale_backoff_factor);
 
