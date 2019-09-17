@@ -1,6 +1,7 @@
 #include <ATen/core/Dimname.h>
 #include <c10/util/Exception.h>
 #include <cctype>
+#include <ATen/core/EnableNamedTensor.h>
 
 #ifdef BUILD_NAMEDTENSOR
 namespace at {
