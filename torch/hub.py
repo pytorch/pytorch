@@ -12,7 +12,7 @@ import zipfile
 
 if sys.version_info[0] == 2:
     from urlparse import urlparse
-    import requests
+    from urllib2 import urlopen  # noqa f811
 else:
     from urllib.request import urlopen
     from urllib.parse import urlparse  # noqa: F401
@@ -95,10 +95,7 @@ def _download_archive_zip(url, filename):
     sys.stderr.write('Downloading: \"{}\" to {}\n'.format(url, filename))
     # We use a different API for python2 since urllib(2) doesn't recognize the CA
     # certificates in older Python
-    if sys.version_info[0] == 2:
-        response = requests.get(url, stream=True).raw
-    else:
-        response = urlopen(url)
+    response = urlopen(url)
     with open(filename, 'wb') as f:
         while True:
             data = response.read(READ_DATA_CHUNK)
@@ -376,22 +373,14 @@ def _download_url_to_file(url, dst, hash_prefix, progress):
     file_size = None
     # We use a different API for python2 since urllib(2) doesn't recognize the CA
     # certificates in older Python
-    if sys.version_info[0] == 2:
-        response = requests.get(url, stream=True)
-
-        content_length = response.headers['Content-Length']
-        file_size = content_length
-        u = response.raw
+    u = urlopen(url)
+    meta = u.info()
+    if hasattr(meta, 'getheaders'):
+        content_length = meta.getheaders("Content-Length")
     else:
-        u = urlopen(url)
-
-        meta = u.info()
-        if hasattr(meta, 'getheaders'):
-            content_length = meta.getheaders("Content-Length")
-        else:
-            content_length = meta.get_all("Content-Length")
-        if content_length is not None and len(content_length) > 0:
-            file_size = int(content_length[0])
+        content_length = meta.get_all("Content-Length")
+    if content_length is not None and len(content_length) > 0:
+        file_size = int(content_length[0])
 
     # We deliberately save it in a temp file and move it after
     # download is complete. This prevents a local working checkpoint

@@ -197,8 +197,8 @@ static void upsample_bilinear2d_out_cuda_template(
       input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.packed_accessor<scalar_t, 4>();
-        auto odata = output.packed_accessor<scalar_t, 4>();
+        auto idata = input.packed_accessor64<scalar_t, 4>();
+        auto odata = output.packed_accessor64<scalar_t, 4>();
 
         const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
             input_height, output_height, align_corners);
