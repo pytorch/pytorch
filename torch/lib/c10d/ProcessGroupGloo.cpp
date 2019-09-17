@@ -1,5 +1,7 @@
 #include <c10d/ProcessGroupGloo.hpp>
 
+#include <unistd.h>
+
 #include <gloo/allgather.h>
 #include <gloo/allreduce.h>
 #include <gloo/barrier.h>
@@ -19,9 +21,31 @@
 #include <c10/cuda/CUDAStream.h>
 #endif
 
+#include <gloo/config.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
+
+#if GLOO_HAVE_TRANSPORT_TCP
 #include <gloo/transport/tcp/device.h>
+#endif
+
+#if GLOO_HAVE_TRANSPORT_UV
+#include <gloo/transport/uv/device.h>
+#endif
+
+// On Linux, check that the tcp transport is available.
+#ifdef __linux__
+#if !GLOO_HAVE_TRANSPORT_TCP
+#error "Expected the tcp transport to be available on Linux."
+#endif
+#endif
+
+// On macOS, check that the uv transport is available.
+#ifdef __APPLE__
+#if !GLOO_HAVE_TRANSPORT_UV
+#error "Expected the uv transport to be available on macOS."
+#endif
+#endif
 
 #define GENERATE_ALL_TYPES(type, func, args...)        \
   switch (type) {                                      \
@@ -275,6 +299,71 @@ void ProcessGroupGloo::RecvWork::wait() {
 
 ProcessGroupGloo::Options::Options()
     : timeout(std::chrono::milliseconds(10 * 1000)), threads(2) {}
+
+#ifdef __linux__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDeviceForInterface(const std::string& interface) {
+  ::gloo::transport::tcp::attr attr;
+  attr.iface = interface;
+  return ::gloo::transport::tcp::CreateDevice(attr);
+}
+#endif
+
+#ifdef __APPLE__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDeviceForInterface(const std::string& interface) {
+  ::gloo::transport::uv::attr attr;
+  attr.iface = interface;
+  return ::gloo::transport::uv::CreateDevice(attr);
+}
+#endif
+
+#ifdef __linux__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDeviceForHostname(const std::string& hostname) {
+  ::gloo::transport::tcp::attr attr;
+
+  if (hostname.empty()) {
+    // Use the hostname to resolve the network address to
+    // use. Note: if the hostname does not resolve to an address (e.g.
+    // because of misconfigured /etc/hosts file), this will not work.
+    std::array<char, HOST_NAME_MAX> buffer{};
+    auto rv = gethostname(buffer.data(), buffer.size());
+    if (rv != 0) {
+      throw std::system_error(errno, std::system_category());
+    }
+    attr.hostname = buffer.data();
+  } else {
+    attr.hostname = hostname;
+  }
+
+  return ::gloo::transport::tcp::CreateDevice(attr);
+}
+#endif
+
+#ifdef __APPLE__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDeviceForHostname(const std::string& hostname) {
+  ::gloo::transport::uv::attr attr;
+
+  if (hostname.empty()) {
+    // Use the hostname to resolve the network address to
+    // use. Note: if the hostname does not resolve to an address (e.g.
+    // because of misconfigured /etc/hosts file), this will not work.
+    const auto hostNameMax = sysconf(_SC_HOST_NAME_MAX);
+    auto buffer = std::unique_ptr<char[]>(new char[hostNameMax]);
+    auto rv = gethostname(buffer.get(), hostNameMax);
+    if (rv != 0) {
+      throw std::system_error(errno, std::system_category());
+    }
+    attr.hostname = buffer.get();
+  } else {
+    attr.hostname = hostname;
+  }
+
+  return ::gloo::transport::uv::CreateDevice(attr);
+}
+#endif
 
 ProcessGroupGloo::ProcessGroupGloo(
     const std::shared_ptr<Store>& store,
@@ -644,7 +733,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Construct from an existing metadata tensor to facilitate structured
     // access to metadata from peers, after gathering it.
     explicit SparseTensorMetadata(at::Tensor metadata)
-        : metadata_(metadata), data_(metadata_.data_ptr<long>()) {
+        : metadata_(metadata), data_(metadata_.data_ptr<int64_t>()) {
       AT_ASSERT(metadata.scalar_type() == at::kLong);
       AT_ASSERT(metadata.dim() == 1);
       AT_ASSERT(metadata.size(0) == dim);
@@ -694,7 +783,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
    protected:
     at::Tensor metadata_;
-    long* data_;
+    int64_t* data_;
   };
 
   // Sparse allreduce is implemented with allgather on indices and values.
@@ -719,7 +808,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Sanity check dimensionality across ranks.
     {
       const auto expected = metadata[context->rank].sizes();
-      for (size_t i = 0; i < context->size; i++) {
+      for (auto i = 0; i < context->size; i++) {
         if (i == context->rank) {
           continue;
         }
@@ -733,11 +822,11 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     auto values = allgather_values(input, metadata);
 
     // Perform global reduction.
-    AT_ASSERT(indices.size() == context->size);
-    AT_ASSERT(values.size() == context->size);
+    AT_ASSERT(static_cast<int>(indices.size()) == context->size);
+    AT_ASSERT(static_cast<int>(values.size()) == context->size);
     auto output = at::sparse_coo_tensor(
         indices[0], values[0], input.sizes(), input.options());
-    for (size_t i = 1; i < context->size; i++) {
+    for (auto i = 1; i < context->size; i++) {
       output += at::sparse_coo_tensor(
           indices[i], values[i], input.sizes(), input.options());
     }
@@ -778,7 +867,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // Allgather metadata
     gloo::AllgatherOptions opts(context);
-    opts.setOutput(buffer.data_ptr<long>(), buffer.numel());
+    opts.setOutput(buffer.data_ptr<int64_t>(), buffer.numel());
     opts.setTag(tag);
     gloo::allgather(opts);
 
@@ -802,7 +891,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // Allgather indices.
     gloo::AllgatherOptions opts(context);
-    opts.setOutput(buffer.data_ptr<long>(), buffer.numel());
+    opts.setOutput(buffer.data_ptr<int64_t>(), buffer.numel());
     opts.setTag(tag);
     gloo::allgather(opts);
 

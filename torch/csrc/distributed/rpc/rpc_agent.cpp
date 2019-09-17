@@ -36,6 +36,6 @@ std::shared_ptr<FutureMessage> RpcAgent::send(
 
   return sendImpl(to, std::forward<Message>(message));
 }
-}
-}
-}
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

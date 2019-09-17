@@ -3,6 +3,8 @@
 #include <ATen/core/Dict.h>
 #include <iostream>
 #include <c10/macros/Macros.h>
+#include <ATen/core/Tensor.h>
+
 namespace c10 {
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {

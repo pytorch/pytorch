@@ -12,6 +12,11 @@ enum MessageType {
   SCRIPT_RET,
   PYTHON_CALL,
   PYTHON_RET,
+  REMOTE_CALL,
+  RREF_FETCH_CALL,
+  RREF_FETCH_RET,
+  RREF_USER_CREATE,
+  RREF_USER_DELETE,
   SHUTDOWN,
   EXCEPTION,
   UNKNOWN
@@ -38,17 +43,18 @@ enum MessageType {
 // implementation to determine how to serialize a message.
 class TORCH_API Message final {
  public:
-
   Message();
 
-  Message(std::vector<char>&& payload,
-          std::vector<torch::Tensor>&& tensors,
-          MessageType type);
+  Message(
+      std::vector<char>&& payload,
+      std::vector<torch::Tensor>&& tensors,
+      MessageType type);
 
-  Message(std::vector<char>&& payload,
-          std::vector<torch::Tensor>&& tensors,
-          MessageType type,
-          int64_t id);
+  Message(
+      std::vector<char>&& payload,
+      std::vector<torch::Tensor>&& tensors,
+      MessageType type,
+      int64_t id);
 
   Message(const Message& other);
   Message(Message&& other) noexcept;
@@ -61,6 +67,7 @@ class TORCH_API Message final {
   const MessageType& type() const;
 
   bool isRequest() const;
+  bool requiresResponse() const;
   bool isResponse() const;
   bool isShutdown() const;
 
@@ -77,6 +84,6 @@ class TORCH_API Message final {
   int64_t id_ = -1;
 };
 
-} // rpc
-} // distributed
-} // torch
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
