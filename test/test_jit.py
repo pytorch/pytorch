@@ -18471,7 +18471,7 @@ class TestList(JitTestCase):
             return max(li)
 
 
-        int_lists = [1], [2, 1, 2], [-3, 4, 2], [-2, -7, 1, 4], [2, 1, 0, 4]
+        int_lists = [1], [2, 1, 2], [-3, 4, 2], [-2, -7, 1, 4], [2, 1, 0, 4], []
 
         def check_list(fn, li):
             if len(li) == 0:
