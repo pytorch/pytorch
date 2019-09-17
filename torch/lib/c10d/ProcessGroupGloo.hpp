@@ -127,6 +127,19 @@ class ProcessGroupGloo : public ProcessGroup {
     int threads;
   };
 
+  // Helper functions to create a new device object.
+  // They are static functions on this class to keep them logically
+  // separate from the rest of the code base (e.g. torch/csrc/distributed).
+
+  // Create new device instance for specific interface.
+  static std::shared_ptr<::gloo::transport::Device> createDeviceForInterface(
+      const std::string& interface);
+
+  // Create new device instance for hostname or address.
+  // If specified argument is empty, it defaults to this machine's hostname.
+  static std::shared_ptr<::gloo::transport::Device> createDeviceForHostname(
+      const std::string& hostname);
+
   explicit ProcessGroupGloo(
       const std::shared_ptr<Store>& store,
       int rank,
