@@ -3,6 +3,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/Pool.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <ATen/native/quantized/cpu/quantized_ops.h>
 
 #include <algorithm>
 #include <cmath>
@@ -13,11 +14,13 @@ namespace at {
 namespace native {
 namespace {
 
-template <typename scalar_t, typename underlying_t>
+DEFINE_DISPATCH(qavg_pool2d_nhwc_stub);
+
+template <typename scalar_t>
 static void avg_pool2d_out_frame(
-          scalar_t *input_data,
-          scalar_t *output_data,
-          int64_t nbatch,
+          const Tensor& input,
+          Tensor& output,
+          int64_t b,
           int64_t nInputPlane,
           int64_t inputWidth,
           int64_t inputHeight,
@@ -35,106 +38,67 @@ static void avg_pool2d_out_frame(
   at::parallel_for(0, nInputPlane, 0, [&](int64_t start, int64_t end) {
     for (auto k = start; k < end; k++)
     {
-      int64_t p;
-      for(p = 0; p < nbatch; p++)
+      int64_t xx, yy;
+      /* For all output pixels... */
+      auto input_data = input.data_ptr<scalar_t>();
+      auto output_data = output.data_ptr<scalar_t>();
+      scalar_t *ptr_output = output_data + b*nInputPlane*outputWidth*outputHeight + k*outputWidth*outputHeight;
+      const scalar_t *ptr_input = input_data + b*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
+      auto minimum = std::numeric_limits<typename scalar_t::underlying>::lowest();
+      auto maximum = std::numeric_limits<typename scalar_t::underlying>::max();
+
+      for(yy = 0; yy < outputHeight; yy++)
       {
-        int64_t xx, yy;
-        /* For all output pixels... */
-        scalar_t *ptr_output = output_data + p*nInputPlane*outputWidth*outputHeight + k*outputWidth*outputHeight;
-        const scalar_t *ptr_input = input_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
-        int64_t i;
-        for(i = 0; i < outputWidth*outputHeight; i++)
-          (ptr_output+i)->val_ = 0;
-
-        for(yy = 0; yy < outputHeight; yy++)
+        for(xx = 0; xx < outputWidth; xx++)
         {
-          for(xx = 0; xx < outputWidth; xx++)
-          {
-            /* Compute the mean of the input image... */
-            int64_t hstart = yy * dH - padH;
-            int64_t wstart = xx * dW - padW;
-            int64_t hend = std::min(hstart + kH, inputHeight + padH);
-            int64_t wend = std::min(wstart + kW, inputWidth + padW);
-            int pool_size = (hend - hstart) * (wend - wstart);
-            hstart = std::max(hstart, (int64_t) 0);
-            wstart = std::max(wstart, (int64_t) 0);
-            hend = std::min(hend, inputHeight);
-            wend = std::min(wend, inputWidth);
+          /* Compute the mean of the input image... */
+          int64_t hstart = yy * dH - padH;
+          int64_t wstart = xx * dW - padW;
+          int64_t hend = std::min(hstart + kH, inputHeight + padH);
+          int64_t wend = std::min(wstart + kW, inputWidth + padW);
+          int64_t pool_size = (hend - hstart) * (wend - wstart);
+          hstart = std::max(hstart, (int64_t) 0);
+          wstart = std::max(wstart, (int64_t) 0);
+          hend = std::min(hend, inputHeight);
+          wend = std::min(wend, inputWidth);
 
-            int64_t sum = 0;
+          int sum_int = 0;
+          ptr_output->val_ = 0;
 
-            int divide_factor;
-            if (divisor_override.has_value()) {
-              divide_factor = divisor_override.value();
+          int64_t divide_factor;
+          int64_t size;
+          if (divisor_override.has_value()) {
+            divide_factor = divisor_override.value();
+            size = (hend - hstart) * (wend - wstart);
+          } else {
+            if(count_include_pad) {
+              divide_factor = pool_size;
             } else {
-              if(count_include_pad) {
-                divide_factor = pool_size;
-              } else {
-                divide_factor = (hend - hstart) * (wend - wstart);
-              }
+              divide_factor = (hend - hstart) * (wend - wstart);
             }
-
-            int64_t kx, ky;
-
-            for(ky = hstart; ky < hend; ky++)
-            {
-              for(kx = wstart; kx < wend; kx++)
-                sum += (ptr_input + ky*inputWidth + kx)->val_;
-            }
-            /* Update output */
-            ptr_output->val_ = static_cast<underlying_t>(std::nearbyint(sum/divide_factor));
-            ptr_output++;
+            size = divide_factor;
           }
+          int64_t kx, ky;
+          for(ky = hstart; ky < hend; ky++)
+          {
+            for(kx = wstart; kx < wend; kx++)
+              sum_int += (ptr_input + ky*inputWidth + kx)->val_;
+          }
+          float multiplier = input.q_scale() / output.q_scale() / divide_factor;
+
+          sum_int -= size * input.q_zero_point();
+          float sum = sum_int * 1.0;
+          /* Update output by requantizing the result */
+          ptr_output->val_ = static_cast<typename scalar_t::underlying>(std::min<int32_t>(
+              std::max<int32_t>(
+                std::nearbyint(sum * multiplier + output.q_zero_point()), minimum),
+              maximum
+              ));
+          ptr_output++;
         }
       }
     }
   });
-}
-
-void avg_pool2d_out_template(
-          Tensor &output,
-          const Tensor &input_,
-          int kW,
-          int kH,
-          int dW,
-          int dH,
-          int padW,
-          int padH,
-          bool count_include_pad,
-          c10::optional<int64_t> divisor_override)
-{
-  const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
-  const int64_t nInputPlane = input_.size(-3);
-  const int64_t inputHeight = input_.size(-2);
-  const int64_t inputWidth = input_.size(-1);
-
-  const int64_t outputHeight = output.size(-2);
-  const int64_t outputWidth = output.size(-1);
-
-
-
-  TORCH_CHECK(output.is_contiguous(), "avg_pool2d: output must be contiguous");
-
-  Tensor input = input_.contiguous();
-
-  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "avg_pool2d_out_frame", [&] {
-      scalar_t *input_data = input.data_ptr<scalar_t>();
-      scalar_t *output_data = output.data_ptr<scalar_t>();
-
-      avg_pool2d_out_frame<scalar_t, underlying_t>(
-        input_data,
-        output_data,
-        nbatch,
-        nInputPlane,
-        inputWidth, inputHeight,
-        outputWidth, outputHeight,
-        kW, kH,
-        dW, dH,
-        padW, padH,
-        count_include_pad,
-        divisor_override);
-    }
-  );
 }
 
 inline std::pair<int, int> get_kernel(IntArrayRef kernel_size) {
@@ -176,37 +140,126 @@ std::vector<int64_t> get_output_shape(const Tensor& input_, int kW, int kH, int 
   return {nbatch, nInputPlane, outputHeight, outputWidth};
 }
 
-} // namespace
+template <typename scalar_t>
+Tensor q_avg_pool2d(
+    const Tensor& input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    bool ceil_mode,
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override) {
 
-Tensor& quantized_avg_pool2d_out(
-  Tensor& output,
-  const Tensor& input,
-  IntArrayRef kernel_size,
-  IntArrayRef stride,
-  IntArrayRef padding,
-  bool ceil_mode,
-  bool count_include_pad,
-  c10::optional<int64_t> divisor_override) {
-  int kW, kH, dW, dH, padW, padH;
-  std::tie(kW, kH) = get_kernel(kernel_size);
-  std::tie(dW, dH) = get_stride(stride, kW, kH);
-  std::tie(padW, padH) = get_padding(padding);
+    int kW, kH, dW, dH, padW, padH;
+    std::tie(kW, kH) = get_kernel(kernel_size);
+    std::tie(dW, dH) = get_stride(stride, kW, kH);
+    std::tie(padW, padH) = get_padding(padding);
 
-  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
-    "divisor must be not zero");
+    const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
+    const int64_t nInputPlane = input.size(-3);
+    const int64_t inputHeight = input.size(-2);
+    const int64_t inputWidth = input.size(-1);
 
-  auto output_shape = get_output_shape(input, kW, kH, dW, dH, padW, padH, ceil_mode);
-  TORCH_CHECK(
-      output.is_quantized() && output.sizes() == output_shape,
-      "Output Tensor must be quantized and have a shape of ",
-      "{ ",
-      output_shape,
-      " }.");
+    TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
+      "divisor must be not zero");
 
-  avg_pool2d_out_template(output, input, kW, kH, dW, dH, padW, padH, count_include_pad, divisor_override);
-
-  return output;
+    auto output_shape = get_output_shape(input, kW, kH, dW, dH, padW, padH, ceil_mode);
+    const int64_t outputHeight = output_shape[output_shape.size() - 2];
+    const int64_t outputWidth = output_shape[output_shape.size() - 1];
+    if (input.is_contiguous(c10::MemoryFormat::ChannelsLast)) {
+      auto output = at::_empty_affine_quantized(
+          output_shape,
+          input.options(),
+          input.q_scale(),
+          input.q_zero_point(),
+          input.suggest_memory_format());
+      // fast path for channel last: qavg_pool_2d_nhwc_stub
+      if (output_shape.size() == 3) {
+        qavg_pool2d_nhwc_stub(
+            input.device().type(),
+            input,
+            output,
+            0,
+            nInputPlane,
+            inputWidth,
+            inputHeight,
+            outputWidth,
+            outputHeight,
+            kW,
+            kH,
+            dW,
+            dH,
+            padW,
+            padH,
+            count_include_pad,
+            divisor_override);
+      } else {
+        at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+          for (auto b = start; b < end; b++) {
+            qavg_pool2d_nhwc_stub(
+                input.device().type(),
+                input,
+                output,
+                b,
+                nInputPlane,
+                inputWidth,
+                inputHeight,
+                outputWidth,
+                outputHeight,
+                kW,
+                kH,
+                dW,
+                dH,
+                padW,
+                padH,
+                count_include_pad,
+                divisor_override);
+          }
+        });
+      }
+      return output;
+    } else {
+      auto output = at::_empty_affine_quantized(
+          output_shape,
+          input.options(),
+          input.q_scale(),
+          input.q_zero_point());
+      if (output_shape.size() == 3) {
+        avg_pool2d_out_frame<scalar_t>(
+          input,
+          output,
+          0,
+          nInputPlane,
+          inputWidth, inputHeight,
+          outputWidth, outputHeight,
+          kW, kH,
+          dW, dH,
+          padW, padH,
+          count_include_pad,
+          divisor_override);
+      } else {
+        at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+          for (auto b = start; b < end; b++) {
+            avg_pool2d_out_frame<scalar_t>(
+              input,
+              output,
+              b,
+              nInputPlane,
+              inputWidth, inputHeight,
+              outputWidth, outputHeight,
+              kW, kH,
+              dW, dH,
+              padW, padH,
+              count_include_pad,
+              divisor_override);
+          }
+        });
+      }
+      return output;
+    }
 }
+
+} // namespace
 
 Tensor quantized_avg_pool2d(
   const Tensor& input,
@@ -216,21 +269,10 @@ Tensor quantized_avg_pool2d(
   bool ceil_mode,
   bool count_include_pad,
   c10::optional<int64_t> divisor_override) {
-  int kW, kH, dW, dH, padW, padH;
-  std::tie(kW, kH) = get_kernel(kernel_size);
-  std::tie(dW, dH) = get_stride(stride, kW, kH);
-  std::tie(padW, padH) = get_padding(padding);
-
-  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
-    "divisor must be not zero");
-
-  auto output_shape = get_output_shape(input, kW, kH, dW, dH, padW, padH, ceil_mode);
-  // so far, we have no support of resize on qtensor, let's allocate aot
-  auto output = at::_empty_affine_quantized(
-            output_shape, input.options(), input.q_scale(), input.q_zero_point());
-
-  avg_pool2d_out_template(output, input, kW, kH, dW, dH, padW, padH, count_include_pad, divisor_override);
-
+  Tensor output;
+  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "quantized_avg_pool2d", [&]() {
+      output = q_avg_pool2d<scalar_t>(input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override);
+  });
   return output;
 }
 
