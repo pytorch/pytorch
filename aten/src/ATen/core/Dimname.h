@@ -9,38 +9,26 @@
 
 namespace at {
 
-enum class NameType: uint8_t { NORMAL, WILDCARD, TAGGED };
+enum class NameType: uint8_t { NORMAL, WILDCARD };
 
 struct CAFFE2_API Dimname {
   static Dimname fromSymbol(Symbol name);
   static Dimname wildcard();
 
   NameType type() const { return type_; }
-  Symbol full_name() const { return full_name_; }
-  Symbol untagged_name() const { return untagged_name_; }
-
-  bool can_refer_to(const Dimname& other) const;
+  Symbol symbol() const { return name_; }
 
   bool is_normal() const { return type_ == NameType::NORMAL; }
   bool is_wildcard() const { return type_ == NameType::WILDCARD; }
-  bool is_tagged() const { return type_ == NameType::TAGGED; }
 
  private:
   Dimname(Symbol name)
-    : untagged_name_(name), full_name_(name), type_(NameType::NORMAL) {}
-  Dimname(NameType type, Symbol full_name, Symbol untagged_name)
-    : untagged_name_(untagged_name), full_name_(full_name), type_(type) {}
+    : name_(name), type_(NameType::NORMAL) {}
+  Dimname(Symbol name, NameType type)
+    : name_(name), type_(type) {}
 
-  // [Dimname Terminology]
-  //
-  // For "C.in":
-  // - "C.in" is the "full name"
-  // - "C" is the "untagged name"
-  // - "in" is the "tag"
-  Symbol untagged_name_;
-  Symbol full_name_;
+  Symbol name_;
   NameType type_;
-  // Will need more fields for other special name types.
 };
 
 using DimnameList = c10::ArrayRef<Dimname>;
@@ -54,7 +42,7 @@ CAFFE2_API bool match(Dimname dimname, Dimname other);
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Dimname& dimname);
 
 inline bool operator==(const Dimname& lhs, const Dimname& rhs) {
-  return lhs.full_name() == rhs.full_name();
+  return lhs.symbol() == rhs.symbol();
 }
 
 inline bool operator!=(const Dimname& lhs, const Dimname& rhs) {

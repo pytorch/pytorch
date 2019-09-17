@@ -60,7 +60,6 @@ static std::vector<int64_t> aligned_size(
   ptrdiff_t dim = (ptrdiff_t)tensor_sizes.size() - 1;
   ptrdiff_t idx = (ptrdiff_t)aligned_names.size() - 1;
   for (; idx >= 0 && dim >= 0; --idx) {
-    TORCH_INTERNAL_ASSERT(!tensor_names[dim].is_tagged() && !aligned_names[idx].is_tagged(), "Tagged names NYI");
     if (tensor_names[dim] != aligned_names[idx]) {
       continue;
     }
