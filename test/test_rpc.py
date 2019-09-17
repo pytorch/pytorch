@@ -116,7 +116,6 @@ class RpcTest(MultiProcessTestCase):
 
     @_wrap_with_rpc
     def test_self_add(self):
-        import pdb ; pdb.set_trace()
         self_worker_id = dist.get_worker_id()
         self_worker_name = 'worker{}'.format(self.rank)
 
