@@ -12,7 +12,7 @@
 
 #include <qnnpack/q8avgpool.h>
 
-void q8avgpool_ukernel_up8x9__neon(
+void pytorch_q8avgpool_ukernel_up8x9__neon(
     size_t n,
     size_t ks,
     size_t kc,
