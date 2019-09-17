@@ -864,6 +864,17 @@ class TestONNXRuntime(unittest.TestCase):
         model = Log1p()
         self.run_test(model, x)
 
+    # TODO: remove the skip tag once ORT implementation is in place
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedOpsetVersion([11])
+    def test_round(self):
+        class Round(torch.nn.Module):
+            def forward(self, x):
+                return torch.round(x)
+
+        x = torch.tensor([0.9920, -1.0362, -1.5000, 3.5000], requires_grad=True)
+        self.run_test(Round(), x)
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)
