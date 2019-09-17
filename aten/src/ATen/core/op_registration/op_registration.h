@@ -151,7 +151,7 @@ public:
 
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedFunctor(std::make_shared<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
+        KernelFunction::makeFromUnboxedFunctor<false, KernelFunctor>(detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)),
         detail::FunctionSchemaInferer<KernelFunctor>()()
       );
     }
@@ -202,7 +202,7 @@ public:
 
       return std::move(*this).kernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedFunctor(std::make_shared<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
+        KernelFunction::makeFromUnboxedFunctor<false, KernelFunctor>(detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)),
         detail::FunctionSchemaInferer<KernelFunctor>()()
       );
     }

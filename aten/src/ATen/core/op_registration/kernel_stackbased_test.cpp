@@ -160,7 +160,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenC
   ASSERT_TRUE(op.has_value());
   expectThrows<c10::Error>(
     [&] {callOpUnboxed<int64_t, at::Tensor, int64_t>(*op, TensorTypeId::CPUTensorId, dummyTensor(TensorTypeId::CPUTensorId), 4);},
-    "Tried to call OpKernel::callUnboxed() for a kernel that doesn't have an unboxed version."
+    "Tried to call KernelFunction::callUnboxed() for a kernel that doesn't have an unboxed version. This isn't implemented yet."
   );
 }
 

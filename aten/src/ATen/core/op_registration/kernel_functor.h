@@ -271,9 +271,9 @@ namespace detail {
     explicit constexpr KernelFactory(Args... args)
     : constructor_parameters_(std::move(args)...) {}
 
-    std::unique_ptr<KernelCache> operator()() const {
+    std::shared_ptr<KernelFunctor> operator()() const {
       return guts::apply(
-        [] (const Args&... params) {return guts::make_unique<KernelFunctor>(params...); },
+        [] (const Args&... params) {return std::make_shared<KernelFunctor>(params...); },
         constructor_parameters_);
     }
 

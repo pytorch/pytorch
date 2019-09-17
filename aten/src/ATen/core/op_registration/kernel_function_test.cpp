@@ -642,7 +642,7 @@ void expectCannotCallConcatBoxed(TensorTypeId type_id) {
   ASSERT_TRUE(op.has_value());
   expectThrows<c10::Error>(
     [&] {callOp(*op, dummyTensor(type_id), "1", "2", 3);},
-    "Tried to call OpKernel::call() for a kernel that doesn't have an boxed version."
+    "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::callUnboxed()."
   );
 }
 
