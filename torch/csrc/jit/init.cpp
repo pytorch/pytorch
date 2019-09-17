@@ -167,9 +167,11 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_quant_fusion",
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
-      .def(
-          "_jit_pass_fuse_linear",
-          [](std::shared_ptr<Graph>& g) { return FuseLinear(g); })
+      .def("_jit_pass_fuse_linear", &FuseLinear)
+      .def("_jit_pass_fold_quantize",
+           [](script::Module& module, const std::string& method_name) {
+             FoldQuantizeCallIntoBuffer(module, method_name);
+           })
       .def(
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
@@ -433,6 +435,10 @@ void initJITBindings(PyObject* module) {
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(
           "returns", [](FunctionSchema& self) { return self.returns(); })
+      .def("is_backward_compatible_with",
+          [](const FunctionSchema& self, const FunctionSchema& old_schema) {
+            return self.isBackwardCompatibleWith(old_schema);
+          })
       .def("__eq__", [](const FunctionSchema& self,
             const FunctionSchema& other) {
           return self == other;
@@ -451,11 +457,11 @@ void initJITBindings(PyObject* module) {
             return (self.N()) ? py::cast(*self.N()) : py::none();
           })
       .def_property_readonly("default_value", [](Argument& self) -> py::object {
-        if (!self.default_value())
-          return py::none();
-        IValue v = *self.default_value();
-        return toPyObject(std::move(v));
-      });
+          if (!self.default_value())
+            return py::none();
+          IValue v = *self.default_value();
+          return toPyObject(std::move(v));
+        });
   m.def(
       "_jit_get_all_schemas", []() {
     const std::vector<std::shared_ptr<Operator>>& operations = getAllOperators();

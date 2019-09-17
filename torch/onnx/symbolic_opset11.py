@@ -69,3 +69,6 @@ def sort(g, self, dim, decending, out=None):
     end = g.op("Constant", value_t=torch.tensor(dim + 1, dtype=torch.int64))
     slice_ = sym_help._slice_helper(g, shape_, axes=axis, starts=start, ends=end, steps=None, dynamic_slice=True)
     return g.op("TopK", self, slice_, axis_i=dim, largest_i=decending, outputs=2)
+
+def round(g, self):
+    return g.op("Round", self)
