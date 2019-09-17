@@ -499,6 +499,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if (USE_ROCM)
     list(APPEND Caffe2_HIP_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
     )
