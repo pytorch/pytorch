@@ -12,32 +12,31 @@ namespace nn {
 
 /// Options for the `Embedding` module.
 struct TORCH_API EmbeddingOptions {
-  EmbeddingOptions(int64_t count, int64_t dimension, int64_t padding_idx, float max_norm,
-  float norm_type, bool scale_grad_by_freq, bool sparse, Tensor weight);
+  EmbeddingOptions(int64_t count, int64_t dimension);
   // The number of embeddings (number of rows in the table).
   TORCH_ARG(int64_t, count);
   // The size of each embedding vector (number of columns in the table).
   TORCH_ARG(int64_t, dimension);
   // If given, pads the output with the embedding vector at :attr:`padding_idx (initialized to zeros) whenever it encounters the index.
-  TORCH_ARG(int64_t, padding_idx);
+  TORCH_ARG(c10::optional<int64_t>, padding_idx)=c10::nullopt;
   // If given, each embedding vector with norm larger than :attr:`max_norm` is renormalized to have norm :attr:`max_norm`.
-  TORCH_ARG(float, max_norm);
+  TORCH_ARG(c10::optional<float>, max_norm)=c10::nullopt;
   // The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``
-  TORCH_ARG(float, norm_type);
+  TORCH_ARG(float, norm_type)=2.;
   // If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``False``.
-  TORCH_ARG(bool, scale_grad_by_freq);
+  TORCH_ARG(bool, scale_grad_by_freq)=false;
   // If ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
-  TORCH_ARG(bool, sparse);
-  TORCH_ARG(Tensor, weight)=torch::empty({count_, dimension_});
+  TORCH_ARG(bool, sparse)=false;
+  // The learnable weights of the module of shape (count, dimension) initialized from a normal distribution with mean=0, std=1.
+  TORCH_ARG(c10::optional<torch::Tensor>, weight) = c10::nullopt;
 };
 
 /// Performs a lookup in a fixed size embedding table.
 class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
  public:
-  EmbeddingImpl(int64_t count, int64_t dimension, int64_t padding_idx=0, float max_norm=0,
-  float norm_type=2., bool scale_grad_by_freq=false, bool sparse=false, Tensor weight = torch::empty({0,0}))
-      : EmbeddingImpl(EmbeddingOptions(count, dimension, padding_idx, max_norm, norm_type,
-        scale_grad_by_freq, sparse, weight)) {}
+  EmbeddingImpl(int64_t count, int64_t dimension, c10::optional<int64_t> padding_idx=c10::nullopt, c10::optional<float> max_norm=c10::nullopt,
+  float norm_type=2., bool scale_grad_by_freq=false, bool sparse=false, c10::optional<torch::Tensor> weight = c10::nullopt)
+     : EmbeddingImpl(EmbeddingOptions(count, dimension)) {}
   explicit EmbeddingImpl(EmbeddingOptions options);
   void reset() override;
 
@@ -53,7 +52,7 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
   EmbeddingOptions options;
 
   /// The embedding table.
-  Tensor weight;
+  //Tensor weight;
 };
 
 /// A `ModuleHolder` subclass for `EmbeddingImpl`.

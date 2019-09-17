@@ -11,37 +11,38 @@
 namespace torch {
 namespace nn {
 
-EmbeddingOptions::EmbeddingOptions(int64_t count, int64_t dimension, int64_t padding_idx=0, float max_norm=0,
-float norm_type=2., bool scale_grad_by_freq=false, bool sparse=false)
-    : count_(count), dimension_(dimension) {}
+EmbeddingOptions::EmbeddingOptions(int64_t count, int64_t dimension) : count_(count), dimension_(dimension) {}
 
-EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options) : options(options) {
-  if (options.padding_idx_ == 0){
-    if(options.padding_idx_ > 0){
-      assert((options.padding_idx_ < options.count_) && "Padding_idx must be within num_embeddings");
+EmbeddingImpl::EmbeddingImpl(int64_t count, int64_t dimension, c10::optional<int64_t> padding_idx, c10::optional<float> max_norm,
+float norm_type, bool scale_grad_by_freq, bool sparse, c10::optional<torch::Tensor> weight): EmbeddingImpl(EmbeddingOptions(count, dimension)){
+  if (padding_idx != c10::nullopt){
+    if(*padding_idx > 0){
+      assert((padding_idx < count) && "Padding_idx must be within num_embeddings");
     }
     else{
-      assert((options.padding_idx_ >= -options.count_) && "Padding_idx must be within num_embedding");
-      options.padding_idx_ += options.count_;
+      assert((padding_idx >= -count) && "Padding_idx must be within num_embedding");
+      *padding_idx = *padding_idx+count;
+      options.padding_idx_ = padding_idx;
     }
   }
-  //check weight and call reset accordingly
+  if(max_norm != c10::nullopt){
+    options.max_norm_ = max_norm;
+  }
+  options.norm_type_ = norm_type;
+  options.scale_grad_by_freq_ = scale_grad_by_freq;
 
-  // if (options.weight == )
-  //   // self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
-  //   // self.reset_parameters()
-  // else
-    // assert list(_weight.shape) == [num_embeddings, embedding_dim],
-    //   'Shape of weight does not match num_embeddings and embedding_dim'
-    //   self.weight = Parameter(_weight)
-  //reset();
+  if (!weight.has_value()){
+  // if (weight ==  c10::nullopt){
+    options.weight_ = torch::empty({count, dimension});
+    EmbeddingImpl::reset();
+  }
+  else{
+    assert((((*weight).size(0) == count) && ((*weight).size(1) == dimension)) && "Shape of weight does not match num_embeddings and embedding_dim");
+  }
 }
 
 void EmbeddingImpl::reset() {
-  weight = register_parameter(
-      "weight", torch::empty({options.count_, options.dimension_}));
-  NoGradGuard guard;
-  weight.normal_(0, 1);
+  (*(options.weight_)).Tensor::normal_(0, 1);
 }
 
 void EmbeddingImpl::pretty_print(std::ostream& stream) const {
@@ -50,33 +51,23 @@ void EmbeddingImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor EmbeddingImpl::forward(const Tensor& input) {
-  if(options.padding_idx_ !=0){
-    if(options.padding_idx_ > 0){
-      assert((options.padding_idx_ < options.weight_.size(0)) && "Padding_idx must be within num_embeddings");
+  if(options.padding_idx_ != c10::nullopt){
+    if(*options.padding_idx_ > 0){
+      assert((*options.padding_idx_ < (*options.weight_).size(0)) && "Padding_idx must be within num_embeddings");
     }
     else{
-      assert((options.padding_idx_ >= -options.weight_.size(0)) && "Padding_idx must be within num_embedding");
-      options.padding_idx_ += options.weight_.size(0);
+      assert((*options.padding_idx_ >= -(*options.weight_).size(0)) && "Padding_idx must be within num_embedding");
+      *options.padding_idx_ += (*options.weight_).size(0);
     }
   }
   else{
     options.padding_idx_ = -1;
   }
-  if(options.max_norm_ != 0){
 
+  if(options.max_norm_ != c10::nullopt){
+    input.contiguous();
   }
-  // if max_norm is not None:
-  //       # `embedding_renorm_` will call .contiguous() on input anyways, so we
-  //       # call it here and take advantage of the improved locality in the
-  //       # `embedding` call below too.
-  //       input = input.contiguous()
-  //       # XXX: equivalent to
-  //       # with torch.no_grad():
-  //       #   torch.nembedding_renorm_
-  //       # remove once script supports set_grad_enabled
-  //       _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
-  //   return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
-  return torch::embedding(weight, /*indices=*/input, options.padding_idx_, options.scale_grad_by_freq_, options.sparse_);
+  return torch::embedding(*options.weight_, /*indices=*/input, *options.padding_idx_, options.scale_grad_by_freq_, options.sparse_);
 }
 } // namespace nn
 } // namespace torch
