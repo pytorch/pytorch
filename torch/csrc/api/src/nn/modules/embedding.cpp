@@ -47,7 +47,23 @@ void EmbeddingImpl::reset() {
 
 void EmbeddingImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Embedding(count=" << options.count_
-         << ", dimension=" << options.dimension_ << ")";
+         << ", dimension=" << options.dimension_;
+  if(options.padding_idx_ != c10::nullopt){
+    stream << ",padding_idx=" << *options.padding_idx_;
+  }
+  if(options.max_norm_ != c10::nullopt){
+    stream << ",max_norm=" << *options.max_norm_;
+  }
+  if(options.norm_type_ != 2){
+    stream << ",norm_type=" << options.norm_type_;
+  }
+  if(options.scale_grad_by_freq_){
+    stream << ",scale_grad_by_freq=" << options.scale_grad_by_freq_;
+  }
+  if(options.sparse_){
+    stream << ",sparse=" << options.sparse_;
+  }
+  stream << ")";
 }
 
 Tensor EmbeddingImpl::forward(const Tensor& input) {
