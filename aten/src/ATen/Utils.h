@@ -109,9 +109,11 @@ static inline std::vector<TensorImpl*> checked_tensor_list_unwrap(ArrayRef<Tenso
 }
 
 template <size_t N>
-std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, int pos, ArrayRef<int64_t> def={}) {
+std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, int pos) {
   if (list.empty()) {
-    list = def;
+    // TODO: is this necessary?  We used to treat nullptr-vs-not in IntList differently
+    // with strides as a way of faking optional.
+    list = {};
   }
   auto res = std::array<int64_t, N>();
   if (list.size() == 1 && N > 1) {
