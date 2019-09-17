@@ -1,7 +1,7 @@
 import sys
 import torch
 import torch._C as _C
-from torch.namedtensor import _update_names, _check_serializing_named_tensor
+from torch.namedtensor import _update_names, _check_serializing_named_tensor, _resolve_glob
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
@@ -427,7 +427,11 @@ class Tensor(torch._C._TensorBase):
         """
         if isinstance(element, (torch.Tensor, Number)):
             return (element == self).any().item()
-        return NotImplemented
+
+        raise RuntimeError(
+            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a %s." %
+            type(element)
+        )
 
     @property
     def __cuda_array_interface__(self):
@@ -480,6 +484,13 @@ class Tensor(torch._C._TensorBase):
         data = (self.data_ptr(), False)  # read-only is false
 
         return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=1)
+
+    def refine_names(self, *names):
+        names = _resolve_glob(names, self.names, 'refine_names')
+        return super(Tensor, self).refine_names(names)
+
+    def align_to(self, *names):
+        return super(Tensor, self).align_to(_resolve_glob(names, self.names, 'align_to'))
 
     def names_(self, *names, **rename_map):
         # Note [names_ / renamed API]

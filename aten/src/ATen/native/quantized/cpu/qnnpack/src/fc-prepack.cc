@@ -28,7 +28,7 @@ PackBMatrix::PackBMatrix(
   input_channels_ = input_channels;
   output_channels_ = output_channels;
   packed_weights_ =
-      aligned_alloc(16, n_stride * (k_stride * sizeof(uint8_t) + sizeof(int32_t)));
+      malloc( n_stride * (k_stride * sizeof(uint8_t) + sizeof(int32_t)));
   if (packed_weights_ == NULL) {
     pytorch_qnnp_log_error(
         "failed to allocate %zu bytes for packed weights",
@@ -40,7 +40,7 @@ PackBMatrix::PackBMatrix(
       kernel_zero_point,
       n_stride * (k_stride * sizeof(uint8_t) + sizeof(int32_t)));
 
-  pack_q8gemm_wrq(
+  pytorch_pack_q8gemm_wrq(
       output_channels,
       input_channels,
       nr,
