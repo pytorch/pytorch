@@ -198,6 +198,12 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
 
 TEST(TensorTest, ContainsCorrectValuesForMultidimValuesVariable) {
   {
+    auto tensor = torch::tensor({});
+    ASSERT_EQ(tensor.sizes(), torch::IntArrayRef({0}));
+    ASSERT_EQ(tensor.numel(), 0);
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
     auto tensor = torch::tensor({{1, 2}, {3, 4}});
     ASSERT_EQ(tensor.dtype(), torch::kInt);
     ASSERT_EQ(tensor.sizes(), torch::IntArrayRef({2, 2}));
