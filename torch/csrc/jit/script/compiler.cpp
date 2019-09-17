@@ -983,13 +983,12 @@ struct to_ir {
       }
       case TK_NOT: {
         CondValue v = emitCondExpr(Expr(expr.tree()->trees()[0]));
-        Value* input = emitToBool(v.value());
         Value* result = emitBuiltinCall(
             expr.range(),
             *graph,
             aten::__not__,
             c10::nullopt,
-            {input},
+            {v.value()},
             {},
             /*required=*/true);
         c10::optional<bool> static_if;
@@ -1046,7 +1045,8 @@ struct to_ir {
         }
       } // fallthrough, other applies are handled in the default way
       default:
-        return CondValue(emitExpr(expr), RefinementSet({}), c10::nullopt);
+        return CondValue(
+            emitToBool(emitExpr(expr)), RefinementSet({}), c10::nullopt);
     }
   }
 
@@ -1158,7 +1158,7 @@ struct to_ir {
     c10::optional<CondValue> rhs;
     auto get_continue_expr = [&] {
       rhs = emitCondExpr(second_expr);
-      return emitToBool(rhs->value());
+      return rhs->value();
     };
 
     // if this is an OR, eval second expression if first expr is False
@@ -1188,7 +1188,7 @@ struct to_ir {
       std::function<Value*()> true_expr,
       std::function<Value*()> false_expr) {
     Node* n = graph->insertNode(create(prim::If, range, 0));
-    n->addInput(emitToBool(cond_value.value()));
+    n->addInput(cond_value.value());
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
 
@@ -1263,9 +1263,8 @@ struct to_ir {
       return;
     }
 
-    Value* cond_value_bool = emitToBool(cond_value.value());
     Node* n = graph->insertNode(create(prim::If, loc, 0));
-    n->addInput(cond_value_bool);
+    n->addInput(cond_value.value());
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
 
