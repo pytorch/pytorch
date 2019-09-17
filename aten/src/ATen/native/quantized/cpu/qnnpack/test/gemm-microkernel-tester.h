@@ -173,7 +173,7 @@ class GemmMicrokernelTester {
     return this->iterations_;
   }
 
-  void test(q8gemm_ukernel_function qgemm) const {
+  void test(pytorch_q8gemm_ukernel_function qgemm) const {
     ASSERT_LE(m(), mr());
     ASSERT_LE(n(), nr());
     ASSERT_GE(k(), kr());
@@ -203,7 +203,7 @@ class GemmMicrokernelTester {
 
       std::fill(packedW.begin(), packedW.end(), bZeroPoint());
 
-      pack_q8gemm_w(
+      pytorch_pack_q8gemm_w(
           n(),
           k(),
           nr(),
@@ -310,7 +310,7 @@ class GemmMicrokernelTester {
     }
   }
 
-  void test(q8conv_ukernel_function qconv) const {
+  void test(pytorch_q8conv_ukernel_function qconv) const {
     ASSERT_LE(m(), mr());
     ASSERT_LE(n(), nr());
     ASSERT_GE(k(), kr());
@@ -342,7 +342,7 @@ class GemmMicrokernelTester {
 
       std::fill(packedW.begin(), packedW.end(), bZeroPoint());
 
-      pack_q8conv_w(
+      pytorch_pack_q8conv_w(
           n(),
           ks(),
           k(),
@@ -480,7 +480,7 @@ class GemmMicrokernelTester {
       size_t stride,
       const int32_t multiplier,
       int32_t* row_sum,
-      q8sum_rows_ukernel_function q8sum_rows) {
+      pytorch_q8sum_rows_ukernel_function q8sum_rows) {
     const size_t block_size = 4;
     for (size_t block_start = 0; block_start < m; block_start += block_size) {
       q8sum_rows(
@@ -493,7 +493,7 @@ class GemmMicrokernelTester {
     }
   }
 
-  void test(q8gemm_xzp_ukernel_function qgemm) const {
+  void test(pytorch_q8gemm_xzp_ukernel_function qgemm) const {
     ASSERT_LE(m(), mr());
     ASSERT_LE(n(), nr());
     ASSERT_GE(k(), kr());
@@ -522,7 +522,7 @@ class GemmMicrokernelTester {
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
 
       std::fill(packedW.begin(), packedW.end(), 0);
-      pack_swizzle_q8gemm_b(
+      pytorch_pack_swizzle_q8gemm_b(
           n(),
           k(),
           np(),
@@ -630,7 +630,7 @@ class GemmMicrokernelTester {
     }
   }
 
-  void test(hgemm_ukernel_function hgemm) const {
+  void test(pytorch_hgemm_ukernel_function hgemm) const {
     ASSERT_LE(m(), mr());
     ASSERT_LE(n(), nr());
     ASSERT_GE(k(), kr());
@@ -665,7 +665,7 @@ class GemmMicrokernelTester {
       std::fill(cRef.begin(), cRef.end(), 0.0f);
 
       std::fill(packedW.begin(), packedW.end(), 0);
-      pack_hgemm_w(n(), k(), np(), kr(), b.data(), bias.data(), packedW.data());
+      pytorch_pack_hgemm_w(n(), k(), np(), kr(), b.data(), bias.data(), packedW.data());
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
@@ -748,7 +748,7 @@ class GemmMicrokernelTester {
     }
   }
 
-  void test(sgemm_ukernel_function sgemm) const {
+  void test(pytorch_sgemm_ukernel_function sgemm) const {
     ASSERT_LE(m(), mr());
     ASSERT_LE(n(), nr());
     ASSERT_GE(k(), kr());
@@ -775,7 +775,7 @@ class GemmMicrokernelTester {
       std::fill(cRef.begin(), cRef.end(), 0.0f);
 
       std::fill(packedW.begin(), packedW.end(), 0.0f);
-      pack_sgemm_w(n(), k(), np(), kr(), b.data(), bias.data(), packedW.data());
+      pytorch_pack_sgemm_w(n(), k(), np(), kr(), b.data(), bias.data(), packedW.data());
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
@@ -849,7 +849,7 @@ class GemmMicrokernelTester {
     }
   }
 
-  void test(sconv_ukernel_function sconv) const {
+  void test(pytorch_sconv_ukernel_function sconv) const {
     ASSERT_LE(m(), mr());
     ASSERT_LE(n(), nr());
     ASSERT_GE(k(), kr());
@@ -876,7 +876,7 @@ class GemmMicrokernelTester {
       std::fill(cRef.begin(), cRef.end(), 0.0f);
 
       std::fill(packedW.begin(), packedW.end(), 0.0f);
-      pack_sconv_w(
+      pytorch_pack_sconv_w(
           n(), ks(), k(), np(), kr(), b.data(), bias.data(), packedW.data());
 
       ASSERT_NE(
