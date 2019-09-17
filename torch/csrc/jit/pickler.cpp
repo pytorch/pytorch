@@ -2,6 +2,7 @@
 #include <ATen/core/Dict.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/pickler.h>
+#include <aten/src/ATen/quantized/Quantizer.h>
 #include <string>
 
 namespace torch {
@@ -403,8 +404,41 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::TUPLE);
 
   if (quantized) {
-    pushDouble(tensor.q_scale());
-    pushInt(tensor.q_zero_point());
+    push<PickleOpCode>(PickleOpCode::MARK);
+    pushGlobal("torch", toString(tensor.qscheme()));
+    // tuple of (qscheme, scale, zp) or (qscheme, scales, zps, axis)
+    switch (tensor.qscheme()) {
+      case at::kPerTensorAffine:
+        pushDouble(tensor.q_scale());
+        pushInt(tensor.q_zero_point());
+        break;
+      case at::kPerChannelAffine: {
+        const auto* quantizer = static_cast<at::PerChannelAffineQuantizer*>(
+            tensor.quantizer().get());
+        push<PickleOpCode>(PickleOpCode::MARK);
+        for (auto x : quantizer->scales()) {
+          pushDouble(x);
+        }
+        push<PickleOpCode>(PickleOpCode::TUPLE);
+        push<PickleOpCode>(PickleOpCode::MARK);
+        for (auto x : quantizer->zero_points()) {
+          pushInt(x);
+        }
+        push<PickleOpCode>(PickleOpCode::TUPLE);
+        push<PickleOpCode>(PickleOpCode::MARK);
+        for (auto x : quantizer->axis()) {
+          pushInt(x);
+        }
+        push<PickleOpCode>(PickleOpCode::TUPLE);
+      } break;
+      default:
+        TORCH_CHECK(
+            false,
+            "Unsupported tensor quantization type in serialization ",
+            toString(tensor.qscheme()));
+        break;
+    }
+    push<PickleOpCode>(PickleOpCode::TUPLE);
   }
 
   // requires_grad
@@ -812,18 +846,53 @@ PickleOpCode Unpickler::readInstruction() {
           int64_t storage_offset = elements.at(idx++).toInt();
           std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
           std::vector<int64_t> stride = tupleToIntList(elements.at(idx++));
-          double q_scale = 0.;
-          int64_t q_zero_point = 0;
+          at::Tensor result;
           if (quantized) {
-            q_scale = elements.at(idx++).toDouble();
-            q_zero_point = elements.at(idx++).toInt();
+            auto qparams_tuple = elements.at(idx++).toTuple();
+            const auto& qparams = qparams_tuple->elements();
+            auto qscheme = static_cast<at::QScheme>(qparams.at(0).toInt());
+            switch (qscheme) {
+              case at::kPerTensorAffine: {
+                double q_scale = qparams.at(1).toDouble();
+                int64_t q_zero_point = qparams.at(2).toInt();
+                result = at::_empty_affine_quantized(
+                    {0}, storage_tensor.options(), q_scale, q_zero_point);
+              } break;
+              case at::kPerChannelAffine: {
+                const auto& scales_tuple = qparams.at(1).toTuple()->elements();
+                auto scales =
+                    at::empty({scales_tuple.size()}, at::dtype<double>());
+                auto* scales_ptr = scales.data_ptr<double>();
+                for (int i = 0; i < (int)scales_tuple.size(); ++i) {
+                  scales_ptr[i] = scales_tuple[i].toDouble();
+                }
+                const auto& zero_points_tuple =
+                    qparams.at(2).toTuple()->elements();
+                auto zero_points =
+                    at::empty({zero_points_tuple.size()}, at::dtype<int64_t>());
+                auto* zero_points_ptr = zero_points.data_ptr<int64_t>();
+                for (int i = 0; i < (int)zero_points_tuple.size(); ++i) {
+                  zero_points_ptr[i] = zero_points_tuple[i].toInt();
+                }
+                std::vector<int64_t> axis;
+                for (const auto& x : qparams.at(3).toTuple()->elements()) {
+                  axis.push_back(x.toInt());
+                }
+                result = _empty_per_channel_affine_quantized(
+                    {0}, scales, zero_points, axis, storage_tensor.options());
+              } break;
+              default:
+                TORCH_CHECK(
+                    false,
+                    "Unsupported tensor quantization type in serialization ",
+                    toString(qscheme));
+                break;
+            }
+          } else {
+            result = at::empty({0}, storage_tensor.options());
           }
           bool requires_grad = elements.at(idx++).toBool();
           // elements[idx++] is empty backwards hooks
-          at::Tensor result = quantized
-              ? at::_empty_affine_quantized(
-                    {}, storage_tensor.options(), q_scale, q_zero_point)
-              : at::empty({0}, storage_tensor.options());
           at::TensorImpl* impl = result.unsafeGetTensorImpl();
           impl->set_storage(storage_tensor.storage());
           impl->set_storage_offset(storage_offset);
@@ -839,6 +908,11 @@ PickleOpCode Unpickler::readInstruction() {
           stack_.back() = IValue();
         });
       } else if (module_name == "torch") {
+        // Try manually resolve several global enums
+        // NOTE: this does not put a global into the global table,
+        // like the other branches here because no REDUCE or BUILD will
+        // be called on this value. Instead, we just put it on the stack
+        // and return early
         c10::optional<c10::ScalarType> scalar_type;
 #define CHECK_SCALAR(_, name)          \
   if (class_name == #name "Storage") { \
@@ -846,16 +920,22 @@ PickleOpCode Unpickler::readInstruction() {
   }
         AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CHECK_SCALAR)
 #undef CHECK_SCALAR
-        // NOTE: this does not put a global into the global table,
-        // like the other branches here because no REDUCE or BUILD will
-        // be called on this value. Instead, we just put it on the stack
-        // and return early
-        AT_ASSERT(
-            scalar_type.has_value(),
-            "class name not understood: torch.",
-            class_name);
-        stack_.emplace_back(int64_t(*scalar_type));
-        return opcode;
+        if (scalar_type.has_value()) {
+          stack_.emplace_back(int64_t(*scalar_type));
+          return opcode;
+        }
+
+        c10::optional<at::QScheme> qscheme;
+        for (int i = 0; i < at::COMPILE_TIME_NUM_QSCHEMES; ++i) {
+          if (class_name == toString(static_cast<at::QScheme>(i))) {
+            qscheme = static_cast<at::QScheme>(i);
+          }
+        }
+        if (qscheme.has_value()) {
+          stack_.emplace_back(int64_t(*qscheme));
+          return opcode;
+        }
+        TORCH_CHECK(false, "class name not understood: torch.", class_name);
       } else {
         AT_ASSERT(class_resolver_);
         at::StrongTypePtr type =

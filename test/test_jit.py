@@ -3244,10 +3244,15 @@ graph(%Ra, %Rb):
 
     def test_serialize_qtensor(self):
         class SimpleQTensor(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self, per_channel):
                 super(SimpleQTensor, self).__init__()
                 x = torch.rand(5, 5).float()
-                x_q = torch.quantize_linear(x, 0.2, 10, torch.quint8)
+                if not per_channel:
+                    x_q = torch.quantize_linear(x, 0.2, 10, torch.quint8)
+                else:
+                    s = torch.rand(5, dtype=torch.float64) + 0.1
+                    zp = torch.randint(5, 15, (5,))
+                    x_q = torch.quantize_linear_per_channel(x, s, zp, [1], torch.quint8)
 
                 self.register_buffer('x', x_q)
 
@@ -3255,12 +3260,13 @@ graph(%Ra, %Rb):
             def forward(self):
                 return self.x
 
-        model = SimpleQTensor()
-        buffer = io.BytesIO()
-        torch.jit.save(model, buffer)
-        buffer.seek(0)
-        model_loaded = torch.jit.load(buffer)
-        self.assertEqual(model_loaded(), model())
+        for per_channel in [False, True]:
+            model = SimpleQTensor(per_channel)
+            buffer = io.BytesIO()
+            torch.jit.save(model, buffer)
+            buffer.seek(0)
+            model_loaded = torch.jit.load(buffer)
+            self.assertEqual(model_loaded(), model())
 
 
 class TestFrontend(JitTestCase):
@@ -6288,7 +6294,7 @@ a")
             for inp, expect in zip(inputs, expected_shape):
                 code = tensor_template.format(tensor_op=op, input=inp)
                 scope = {}
-                exec(code, globals(), scope)
+                #exec(code, globals(), scope)
                 self.checkScript(code, ())
                 cu = torch.jit.CompilationUnit(code)
                 torch._C._jit_pass_complete_shape_analysis(cu.func.graph, (), False)
@@ -6372,7 +6378,7 @@ a")
                         continue
                     code = tensor_template.format(list_create=li, tensor_op=op, options=option)
                     scope = {}
-                    exec(code, globals(), scope)
+                    #exec(code, globals(), scope)
                     cu = torch.jit.CompilationUnit(code)
                     t1 = cu.func()
                     t2 = scope['func']()
@@ -7527,7 +7533,7 @@ a")
                     # print("testing {}".format(return_line))
                     code = template.format(return_line=return_line)
                     scope = {}
-                    exec(code, globals(), scope)
+                    #exec(code, globals(), scope)
                     cu = torch.jit.CompilationUnit(code)
                     graph = cu.func.graph
                     torch._C._jit_pass_complete_shape_analysis(graph, (), False)
@@ -7595,7 +7601,7 @@ a")
                     # print("testing {}".format(return_line))
                     code = template.format(first_arg, second_arg, op)
                     scope = {}
-                    exec(code, globals(), scope)
+                    #exec(code, globals(), scope)
                     non_jit_result = scope['func']()
 
                     cu = torch.jit.CompilationUnit(code)
