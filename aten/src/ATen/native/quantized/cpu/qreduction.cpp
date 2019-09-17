@@ -32,7 +32,7 @@ Tensor quantized_mean_cpu(const Tensor& self, DimnameList dim, bool keepdim, opt
 
 Tensor& quantized_mean_out_cpu(Tensor& result, const Tensor& self, DimnameList dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
-  return quantized_mean_out_cpu(result, self, dimnames_to_positions(self, dim), keepdim, out_dtype);
+  return quantized_mean_out_cpu(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 #endif
 
