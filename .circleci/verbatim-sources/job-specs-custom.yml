@@ -321,6 +321,42 @@
         path: ~/workspace/build_android_artifacts/artifacts.tgz
         destination: artifacts.tgz
 
+  pytorch_android_publish_snapshot:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-publish-snapshot
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:339"
+      PYTHON_VERSION: "3.6"
+    resource_class: large
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    - should_run_job
+    - setup_linux_system_environment
+    - checkout
+    - setup_ci_environment
+    - run:
+        name: pytorch android gradle build
+        no_output_timeout: "1h"
+        command: |
+          set -eux
+          docker_image_commit=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+
+          docker_image_libtorch_android_x86_32_gradle=${docker_image_commit}-android-x86_32-gradle
+
+          echo "docker_image_commit: "${docker_image_commit}
+          echo "docker_image_libtorch_android_x86_32_gradle: "${docker_image_libtorch_android_x86_32_gradle}
+
+          # x86_32
+          docker pull ${docker_image_libtorch_android_x86_32_gradle} >/dev/null
+          export id_x86_32=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32_gradle})
+
+          export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export SONATYPE_NEXUS_USERNAME=${SONATYPE_NEXUS_USERNAME}" && echo "export SONATYPE_NEXUS_PASSWORD=${SONATYPE_NEXUS_PASSWORD}" && echo "export ANDROID_SIGN_KEY=${ANDROID_SIGN_KEY}" && echo "export ANDROID_SIGN_PASS=${ANDROID_SIGN_PASS}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/publish_android_snapshot.sh") | docker exec -u jenkins -i "$id_x86_32" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          output_image=${docker_image_libtorch_android_x86_32_gradle}-publish-snapshot
+          docker commit "$id_x86_32" ${output_image}
+          docker push ${output_image}
+
   pytorch_android_gradle_build-x86_32:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-only-x86_32
@@ -360,7 +396,7 @@
           mkdir -p ~/workspace/build_android_x86_32_artifacts
           docker cp $id:/var/lib/jenkins/workspace/android/artifacts.tgz ~/workspace/build_android_x86_32_artifacts/
 
-          output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-gradle-x86_32
+          output_image=${docker_image_libtorch_android_x86_32}-gradle
           docker commit "$id" ${output_image}
           docker push ${output_image}
     - store_artifacts:
