@@ -250,10 +250,6 @@ Tensor& logical_xor_(Tensor& self, const Tensor& other) {
 Tensor& lt_out(Tensor& result, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(result.scalar_type() == kBool || result.scalar_type() == kByte,
       "The output tensor of lt must be a bool or byte tensor.");
-  if (result.dtype() == at::ScalarType::Byte) {
-    AT_WARN("torch.lt received 'out' parameter with dtype torch.uint8, this behavior is now deprecated," \
-            "please use 'out' parameter with dtype torch.bool instead.");
-  }
   auto iter = TensorIterator::comparison_op(result, self, other, true);
   lt_stub(iter.device_type(), iter);
   return result;
