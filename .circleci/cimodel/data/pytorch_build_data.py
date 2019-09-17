@@ -5,64 +5,64 @@ from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 
 CONFIG_TREE_DATA = [
     ("xenial", [
-        (None, [
-            XImportant("2.7.9"),
-            X("2.7"),
-            X("3.5"),
-            X("nightly"),
-        ]),
-        ("gcc", [
-            ("4.8", [X("3.6")]),
-            ("5.4", [
-                XImportant("3.6"),
-                ("3.6", [
-                    ("namedtensor", [XImportant(True)]),
-                ]),
-            ]),
-            ("7", [X("3.6")]),
-        ]),
-        ("clang", [
-            ("5", [
-                XImportant("3.6"),  # This is actually the ASAN build
-                ("3.6", [
-                    ("namedtensor", [XImportant(True)]),  # ASAN
-                ]),
-            ]),
-            ("7", [
-                ("3.6", [
-                    ("xla", [XImportant(True)]),
-                ]),
-            ]),
-        ]),
+        # (None, [
+        #     XImportant("2.7.9"),
+        #     X("2.7"),
+        #     X("3.5"),
+        #     X("nightly"),
+        # ]),
+        # ("gcc", [
+        #     ("4.8", [X("3.6")]),
+        #     ("5.4", [
+        #         XImportant("3.6"),
+        #         ("3.6", [
+        #             ("namedtensor", [XImportant(True)]),
+        #         ]),
+        #     ]),
+        #     ("7", [X("3.6")]),
+        # ]),
+        # ("clang", [
+        #     ("5", [
+        #         XImportant("3.6"),  # This is actually the ASAN build
+        #         ("3.6", [
+        #             ("namedtensor", [XImportant(True)]),  # ASAN
+        #         ]),
+        #     ]),
+        #     ("7", [
+        #         ("3.6", [
+        #             ("xla", [XImportant(True)]),
+        #         ]),
+        #     ]),
+        # ]),
         ("cuda", [
-            ("9", [
-                # Note there are magic strings here
-                # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L21
-                # and
-                # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L143
-                # and
-                # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L153
-                # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
-                X("2.7"),
-                XImportant("3.6"),
-                ("2.7", [
-                    ("namedtensor", [XImportant(True)]),
-                ]),
-            ]),
-            ("9.2", [X("3.6")]),
+            # ("9", [
+            #     # Note there are magic strings here
+            #     # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L21
+            #     # and
+            #     # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L143
+            #     # and
+            #     # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L153
+            #     # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
+            #     X("2.7"),
+            #     XImportant("3.6"),
+            #     ("2.7", [
+            #         ("namedtensor", [XImportant(True)]),
+            #     ]),
+            # ]),
+            # ("9.2", [X("3.6")]),
             ("10", [X("3.6")]),
             ("10.1", [X("3.6")]),
         ]),
-        ("android", [
-            ("r19c", [
-                ("3.6", [
-                    ("android_abi", [XImportant("x86_32")]),
-                    ("android_abi", [X("x86_64")]),
-                    ("android_abi", [X("arm-v7a")]),
-                    ("android_abi", [X("arm-v8a")]),
-                ])
-            ]),
-        ]),
+        # ("android", [
+        #     ("r19c", [
+        #         ("3.6", [
+        #             ("android_abi", [XImportant("x86_32")]),
+        #             ("android_abi", [X("x86_64")]),
+        #             ("android_abi", [X("arm-v7a")]),
+        #             ("android_abi", [X("arm-v8a")]),
+        #         ])
+        #     ]),
+        # ]),
     ]),
 ]
 
