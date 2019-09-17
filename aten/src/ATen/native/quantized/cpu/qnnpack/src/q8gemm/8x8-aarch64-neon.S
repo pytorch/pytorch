@@ -10,7 +10,7 @@
 #include <requantization/runtime-assembly.h>
 
 
-# void q8gemm_ukernel_8x8__aarch64_neon(
+# void pytorch_q8gemm_ukernel_8x8__aarch64_neon(
 #     size_t mr,
 #     size_t nr,
 #     size_t k,
@@ -20,7 +20,7 @@
 #     uint8_t*restrict c,
 #     size_t c_stride,
 #     const union pytorch_qnnp_conv_quantization_params quantization_params[restrict static 1])
-BEGIN_FUNCTION q8gemm_ukernel_8x8__aarch64_neon
+BEGIN_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
 
     STP d15, d14, [sp, -16]
     STP d13, d12, [sp, -32]
@@ -773,7 +773,7 @@ BEGIN_FUNCTION q8gemm_ukernel_8x8__aarch64_neon
 
     RET
 
-END_FUNCTION q8gemm_ukernel_8x8__aarch64_neon
+END_FUNCTION pytorch_q8gemm_ukernel_8x8__aarch64_neon
 
 #ifdef __ELF__
 .section ".note.GNU-stack","",%progbits
