@@ -2,9 +2,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <qnnpack_func.h>
 
 #include <algorithm>
 #include <string>
