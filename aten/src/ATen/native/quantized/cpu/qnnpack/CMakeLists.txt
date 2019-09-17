@@ -278,6 +278,8 @@ ENDIF()
 TARGET_INCLUDE_DIRECTORIES(pytorch_qnnpack PUBLIC include)
 TARGET_INCLUDE_DIRECTORIES(pytorch_qnnpack PUBLIC src)
 SET_TARGET_PROPERTIES(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/pytorch_qnnpack.h)
+SET_TARGET_PROPERTIES(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/conv_utils.h)
+SET_TARGET_PROPERTIES(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/qnnpack_func.h)
 
 # ---[ Configure clog
 IF(NOT TARGET clog)
