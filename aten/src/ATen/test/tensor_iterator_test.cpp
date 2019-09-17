@@ -95,7 +95,7 @@ TEST(TensorIteratorTest, ComparisonLoopBinary_##name) {                         
   auto in2 = random_tensor_for_type(k##name);                                              \
   Tensor out = at::empty({0}, in1.options().dtype(kBool));                                 \
   Tensor diff;                                                                             \
-  if (k##name == kByte) {                                                                  \
+  if (k##name == kByte || k##name == kBool) {                                                                  \
     diff = in2.to(kInt).sub(in1.to(kInt));                                                 \
   } else {                                                                                 \
     diff = in2.sub(in1);                                                                   \
@@ -109,7 +109,7 @@ TEST(TensorIteratorTest, ComparisonLoopBinary_##name) {                         
 AT_FORALL_SCALAR_TYPES(UNARY_TEST_ITER_FOR_TYPE)
 AT_FORALL_SCALAR_TYPES(BINARY_TEST_ITER_FOR_TYPE)
 AT_FORALL_SCALAR_TYPES(POINTWISE_TEST_ITER_FOR_TYPE)
-AT_FORALL_SCALAR_TYPES(COMPARISON_TEST_ITER_FOR_TYPE)
+AT_FORALL_SCALAR_TYPES_AND(Bool, COMPARISON_TEST_ITER_FOR_TYPE)
 
 TEST(TensorIteratorTest, SerialLoopSingleThread) {
   std::thread::id thread_id = std::this_thread::get_id();
