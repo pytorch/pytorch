@@ -117,7 +117,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
 
   # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
-  sh tools/amd_build/unwrap_clang.sh
+  bash tools/amd_build/unwrap_clang.sh
 
   exit 0
 fi

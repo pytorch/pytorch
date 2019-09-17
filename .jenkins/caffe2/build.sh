@@ -275,7 +275,7 @@ pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx
 
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
-  sh tools/amd_build/unwrap_clang.sh
+  bash tools/amd_build/unwrap_clang.sh
 fi
 
 report_compile_cache_stats

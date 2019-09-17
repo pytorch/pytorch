@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 shopt -s extglob
 
 ORIG_COMP=/opt/rocm/hcc/bin/clang-*_original
