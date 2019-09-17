@@ -23,7 +23,7 @@ from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
 from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 import io
 import copy
@@ -827,6 +827,7 @@ class QuantizationDebugTest(QuantizationTestCase):
         loaded = torch.jit.load(buf)
         self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
 
+    @settings(timeout=3600)
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())

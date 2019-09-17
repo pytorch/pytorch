@@ -79,6 +79,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_scatter.*'  # opset 11 is not supported yet
                      '|test_unique.*'  # opset 11 is not supported yet
                      '|test_gathernd.*'  # opset 11 is not supported yet
+                     '|test_sequence_.*'  # type sequence is not supported yet
                      '|test_.*negative_ax.*'  # negative axis is not supported yet
                      '|test_.*negative_ind.*'  # negative axis is not supported yet
                      ')')
