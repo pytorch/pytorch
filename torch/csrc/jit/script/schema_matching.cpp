@@ -239,14 +239,14 @@ static bool varargsCanBeUsedAsList(
   bool is_last_argument = arg_index + 1 == schema.arguments().size() ||
       schema.arguments()[arg_index + 1].kwarg_only();
 
-  // The formal must be an intlist
-  bool argument_is_intlist = *arg.type() == *ListType::ofInts();
+  // The formal must be a list
+  bool argument_is_list = arg.type()->kind() == TypeKind::ListType;
 
   // it must not be a broadcasting list like int[3],
   // otherwise a single int is a valid input
   bool arg_is_broadcasting_list = bool(arg.N());
 
-  return is_last_argument && argument_is_intlist & !arg_is_broadcasting_list;
+  return is_last_argument && argument_is_list & !arg_is_broadcasting_list;
 }
 
 c10::optional<MatchedSchema> tryMatchSchema(

@@ -10059,6 +10059,11 @@ a")
         self.assertEqual(r.dtype, torch.float)
         self.assertEqual(torch.zeros([1, 1, 2], dtype=torch.float), r)
 
+        def fn():
+            return torch.zeros((1, 2, 3))
+
+        self.checkScript(fn, ())
+
     def test_vararg_zeros(self):
         def foo():
             return torch.zeros(3, 4, 5, dtype=torch.int)
