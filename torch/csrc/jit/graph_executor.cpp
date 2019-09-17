@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/graph_executor.h>
 
+#include <aten/src/ATen/Context.h>
+
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -27,6 +29,7 @@
 #include <torch/csrc/jit/passes/lower_grad_of.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -707,6 +710,11 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
 
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
+
+  if (at::globalContext().qEngine() == at::kFBGEMM ||
+      at::globalContext().qEngine() == at::kQNNPACK) {
+    QuantFusion(graph);
+  }
 
   FuseGraph(graph);
 }
