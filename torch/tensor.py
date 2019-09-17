@@ -1,7 +1,7 @@
 import sys
 import torch
 import torch._C as _C
-from torch.namedtensor import _update_names, _check_serializing_named_tensor
+from torch.namedtensor import _update_names, _check_serializing_named_tensor, _resolve_glob
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
@@ -427,7 +427,11 @@ class Tensor(torch._C._TensorBase):
         """
         if isinstance(element, (torch.Tensor, Number)):
             return (element == self).any().item()
-        return NotImplemented
+
+        raise RuntimeError(
+            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a %s." %
+            type(element)
+        )
 
     @property
     def __cuda_array_interface__(self):
@@ -481,23 +485,30 @@ class Tensor(torch._C._TensorBase):
 
         return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=1)
 
+    def refine_names(self, *names):
+        names = _resolve_glob(names, self.names, 'refine_names')
+        return super(Tensor, self).refine_names(names)
+
+    def align_to(self, *names):
+        return super(Tensor, self).align_to(_resolve_glob(names, self.names, 'align_to'))
+
     def names_(self, *names, **rename_map):
-        # Note [names_ / view_names API]
+        # Note [names_ / renamed API]
         # The Python API for these is different from the C++ API. In Python:
-        # 1) tensor.view_names(*names) takes a vararglist of names
-        # 2) tensor.view_names(**rename_map) takes a map of names to rename.
+        # 1) tensor.renamed(*names) takes a vararglist of names
+        # 2) tensor.renamed(**rename_map) takes a map of names to rename.
         # C++ is static, making it difficult to implement similar behavior.
         return _update_names(self, names, rename_map, inplace=True)
 
-    def view_names(self, *names, **rename_map):
-        # See Note [names_ / view_names API]
+    def renamed(self, *names, **rename_map):
+        # See Note [names_ / renamed API]
         return _update_names(self, names, rename_map, inplace=False)
 
     def _update_names(self, names, inplace):
-        # See Note [names_ / view_names API]
+        # See Note [names_ / renamed API]
         if inplace:
             return super(Tensor, self).names_(names)
         else:
-            return super(Tensor, self).view_names(names)
+            return super(Tensor, self).renamed(names)
 
     __module__ = 'torch'

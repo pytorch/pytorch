@@ -1100,7 +1100,7 @@ struct Graph {
       bool is_list,
       bool is_tuple);
 
-  TORCH_API Node* createUncheckedCast(Value* v, TypePtr type);
+  TORCH_API Value* insertUncheckedCast(Value* v, TypePtr type);
 
   TORCH_API Value* insertFunctionCall(
       Function* callee,
@@ -1301,10 +1301,6 @@ struct ProfileOp : public Node {
 // python-aware bits need to be moved to the descendant classes.
 struct TORCH_API PythonOp : public Node {
   using Node::Node;
-
-  // should this Python function be skipped over when exported (i.e. for
-  // debugging functions that only run in Python)
-  bool ignore_on_export = false;
 
   virtual std::string name() const = 0;
   virtual void writeScalars(std::ostream& out) const = 0;

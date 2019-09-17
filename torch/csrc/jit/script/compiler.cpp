@@ -36,40 +36,18 @@ using TypeTable = std::unordered_map<std::string, TypePtr>;
 using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
-enum RefinementKind {
-  OPTIONAL_PRESENT, // the value, which has type optional[T] is present, and
-                    // should be refined to type T
-  OPTIONAL_NONE, // the value, which has type optional[T] is not present and
-                 // should have NoneType
-  IS_INSTANCE, // the value is an instance of type_arg_
-};
-
 struct Refinement {
-  Refinement(
-      std::string identifier,
-      RefinementKind kind,
-      TypePtr type_arg = nullptr)
-      : identifier_(std::move(identifier)), kind_(kind), type_arg_(type_arg) {}
-  bool operator==(const Refinement& rhs) const {
-    bool type_same =
-        (type_arg_ && rhs.type_arg_) ? *type_arg_ == *rhs.type_arg_ : false;
-    return type_same && identifier_ == rhs.identifier_ && kind_ == rhs.kind_;
-  }
+  Refinement(std::string identifier, TypePtr type)
+      : identifier_(std::move(identifier)), type_(type) {}
   const std::string& identifier() const {
     return identifier_;
   }
-  RefinementKind kind() const {
-    return kind_;
+  TypePtr type() const {
+    return type_;
   }
-  TypePtr typeArg() const {
-    TORCH_INTERNAL_ASSERT(kind() == RefinementKind::IS_INSTANCE);
-    return type_arg_;
-  }
-
  private:
   std::string identifier_;
-  RefinementKind kind_;
-  TypePtr type_arg_; // use for IS_INSTANCE to specify what refined type this is
+  TypePtr type_;
 };
 
 struct RefinementSet {
@@ -115,22 +93,34 @@ struct RefinementSet {
   }
 
  private:
+  static bool sameVar(const Refinement& a, const Refinement& b) {
+    return a.identifier() == b.identifier();
+  }
   static Refinements unionList(const Refinements& a, const Refinements& b) {
     Refinements result = a;
     for (const Refinement& r : b) {
-      auto it = std::find(a.begin(), a.end(), r);
-      if (it == a.end()) {
+      auto it =
+          std::find_if(result.begin(), result.end(), [&](const Refinement& e) {
+            return e.identifier() == r.identifier();
+          });
+      if (it == result.end()) {
         result.push_back(r);
+      } else if (*it->type() != *r.type()) {
+        // we only keep refinements when they exactly match one
+        // refinement type, for instance, we do not attempt to refine:
+        // isinstance(x, float) and isinstance(x, int)
+        result.erase(it);
       }
     }
     return result;
   }
-
   static Refinements intersectList(const Refinements& a, const Refinements& b) {
     Refinements result;
     for (const Refinement& r : a) {
-      auto it = std::find(b.begin(), b.end(), r);
-      if (it != b.end()) {
+      auto it = std::find_if(b.begin(), b.end(), [&](const Refinement& e) {
+        return e.identifier() == r.identifier();
+      });
+      if (it != b.end() && r.type() == it->type()) {
         result.push_back(r);
       }
     }
@@ -369,7 +359,7 @@ struct Environment {
             << value->kind() << " and " << name
             << " is not a first-class value.  Only reassignments to first-class values are allowed";
       }
-      
+
       auto parent_type = unshapedType(simple_parent->type());
       as_simple_value = tryConvertToType(
           loc,
@@ -945,10 +935,15 @@ struct to_ir {
     }
   }
 
-  RefinementSet findIsNoneRefinements(Expr lhs, Expr rhs, int tok) {
+  RefinementSet findIsNoneRefinements(
+      Expr lhs,
+      Value* lhs_value,
+      Expr rhs,
+      Value* rhs_value,
+      int tok) {
     if (rhs.kind() != TK_NONE && lhs.kind() == TK_NONE) {
       // make 'None is var' into 'var is None'
-      return findIsNoneRefinements(rhs, lhs, tok);
+      return findIsNoneRefinements(rhs, rhs_value, lhs, lhs_value, tok);
     }
     if (rhs.kind() != TK_NONE || lhs.kind() != TK_VAR) {
       return {};
@@ -967,7 +962,9 @@ struct to_ir {
     // and (2) only enable this OPTIONAL_NONE when loading newer
     // graphs because it is incompatible with older graphs.
     // Refinement none(name, RefinementKind::OPTIONAL_NONE);
-    Refinement present(name, RefinementKind::OPTIONAL_PRESENT);
+
+    Refinement present(
+        name, lhs_value->type()->expect<OptionalType>()->getElementType());
     if (tok == TK_IS) {
       return RefinementSet({}, {present});
     } else { // TK_ISNOT
@@ -1033,8 +1030,8 @@ struct to_ir {
               {lhs_val, rhs_val},
               {},
               /*required=*/true);
-          auto refinements = RefinementSet(
-              findIsNoneRefinements(cond_op.lhs(), cond_op.rhs(), expr.kind()));
+          auto refinements = RefinementSet(findIsNoneRefinements(
+              cond_op.lhs(), lhs_val, cond_op.rhs(), rhs_val, expr.kind()));
           return CondValue(cond_value, refinements, c10::nullopt);
         }
       } break;
@@ -1134,25 +1131,9 @@ struct to_ir {
   // Insert subtyping refinements
   void insertRefinements(const SourceRange& loc, const RefinementSet& ref) {
     for (const Refinement& r : ref.activeRefinements()) {
-      switch (r.kind()) {
-        case RefinementKind::OPTIONAL_NONE: {
-          Value* none = graph->insertConstant(IValue(), loc);
-          environment_stack->setVar(loc, r.identifier(), none);
-        } break;
-        case RefinementKind::OPTIONAL_PRESENT: {
-          Value* v = environment_stack->getVar(r.identifier(), loc);
-          if (auto ot = v->type()->cast<OptionalType>()) {
-            Node* cast = graph->insertNode(
-                graph->createUncheckedCast(v, ot->getElementType()));
-            environment_stack->setVar(loc, r.identifier(), cast->output());
-          }
-        } break;
-        case RefinementKind::IS_INSTANCE:
-          Value* v = environment_stack->getVar(r.identifier(), loc);
-          Node* cast =
-              graph->insertNode(graph->createUncheckedCast(v, r.typeArg()));
-          environment_stack->setVar(loc, r.identifier(), cast->output());
-      }
+      Value* v = environment_stack->getVar(r.identifier(), loc);
+      Value* new_v = graph->insertUncheckedCast(v, r.type());
+      environment_stack->setVar(loc, r.identifier(), new_v);
     }
   }
 
@@ -1476,7 +1457,7 @@ struct to_ir {
           return true;
         }
         if (auto op = actual_type->cast<OptionalType>()) {
-          return op->kind() == kind;
+          return op->getElementType()->kind() == kind;
         }
         return false;
       }
@@ -1504,7 +1485,7 @@ struct to_ir {
     if (gathered.types.size() == 1 && obj.kind() == TK_VAR) {
       std::string ident = Var(obj).name().name();
       Refinement isinstance(
-          std::move(ident), RefinementKind::IS_INSTANCE, gathered.types.at(0));
+          std::move(ident), gathered.types.at(0));
       refinement = RefinementSet({isinstance}, {});
     }
 
@@ -2393,8 +2374,12 @@ struct to_ir {
         checkApplyNumInputs(apply, 2);
         TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
         Value* v = emitExpr(apply.inputs()[1]);
-        Node* n = graph->insertNode(graph->createUncheckedCast(v, type));
-        return std::make_shared<SimpleValue>(n->output());
+        // avoid generating nested unchecked_casts because they are already
+        // inserted during serialization
+        if (v->node()->kind() != prim::unchecked_cast || *v->type() != *type) {
+          v = graph->insertUncheckedCast(v, type);
+        }
+        return std::make_shared<SimpleValue>(v);
       } break;
       case prim::GetAttr: {
         checkApplyNumInputs(apply, 2);

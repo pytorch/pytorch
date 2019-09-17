@@ -345,6 +345,12 @@ struct PythonPrintPass {
     if (use.user->kind() == prim::fork)
       return false;
 
+    // isinstance appearing in an if expression
+    // causes type refinement to occur, we dont
+    // want to since it has already been handled
+    if (v->node()->kind() == prim::isinstance)
+      return false;
+
     return true;
   }
 
@@ -969,22 +975,17 @@ struct PythonPrintPass {
     switch (node->kind()) {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
-        if (enforce_importable_ && !value->ignore_on_export) {
+        if (enforce_importable_) {
           throw script::ErrorReport(node->sourceRange())
               << "Could not export Python function call '" << value->name()
               << "'. Remove calls to Python functions before export. "
               << "Did you forget add @script or @script_method annotation? "
               << "If this is a nn.ModuleList, add it to __constants__";
         }
-
-        if (value->ignore_on_export) {
-          stmt << "ops.prim.IgnoredPythonOp";
-        } else {
-          std::stringstream scalars_stream;
-          stmt << "^" << value->name();
-          value->writeScalars(scalars_stream);
-          stmt << scalars_stream.str();
-        }
+        std::stringstream scalars_stream;
+        stmt << "^" << value->name();
+        value->writeScalars(scalars_stream);
+        stmt << scalars_stream.str();
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
       case prim::Uninitialized: {
