@@ -551,6 +551,17 @@ void Pickler::pushTuple(const IValue& ivalue) {
   }
 }
 
+// Pickled objects are stored in a form compatible with Python pickling.
+// In torchscript List[T]/Dict[K, V] are statically typed and contain
+// dynamic type tags allow T, K, and V to be recovered. But this info
+// is not stored in the Python pickling information. However, we
+// can recover this information from the static type of the top-level
+// object being unpickled, because we have a record of the type of the
+// objects it contains as attributes.
+// `IfPossible` - we can only do this recovery when we have an object as
+// the top-level unpickled thing (which is guarenteed for Modules, but
+// not for torch.load/torch,save). Otherwise we do not know the types
+// of the contained objects and cannot restore the tags.
 static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
   if (!root.isObject()) {
     return;
