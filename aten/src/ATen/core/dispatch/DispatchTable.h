@@ -208,9 +208,11 @@ private:
 
       TensorTypeSet ts;
       for (const auto& ivalue : torch::jit::last(*stack, num_args_)) {
-        if (ivalue.isTensor()) {
-          ts = ts | ivalue.toTensor().type_set();
-        } else if (ivalue.isTensorList()) {
+        if (C10_LIKELY(ivalue.isTensor())) {
+          // NB: Take care not to introduce a refcount bump (there's
+          // no safe toTensorRef method, alas)
+          ts = ts | ivalue.unsafeToTensorImpl()->type_set();
+        } else if (C10_UNLIKELY(ivalue.isTensorList())) {
           for (const auto& tensor : ivalue.toTensorListRef()) {
             ts = ts | tensor.type_set();
           }

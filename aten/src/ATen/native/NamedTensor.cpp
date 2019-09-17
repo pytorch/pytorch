@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #ifdef BUILD_NAMEDTENSOR
 namespace at { namespace native {
