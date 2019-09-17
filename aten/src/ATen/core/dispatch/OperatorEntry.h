@@ -54,12 +54,14 @@ public:
 
 private:
   explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator, void* unboxed_kernel)
-  : kernel_(kernel), cache_(cache_creator ? cache_creator() : nullptr), unboxed_kernel_(unboxed_kernel) {}
+  : kernel_(kernel), cache_(cache_creator ? cache_creator() : c10::guts::make_unique<c10::KernelCache>()), unboxed_kernel_(unboxed_kernel) {}
   friend class impl::OperatorEntry;
 
-  KernelFunction* kernel_; // can be nullptr, not all kernels have this
+  // All of these fields may be nullptr, but at least one of
+  // kernel_ or unboxed_kernel_ should be non-NULL
+  KernelFunction* kernel_;
   std::unique_ptr<c10::KernelCache> cache_;
-  void* unboxed_kernel_; // can be nullptr, not all kernels have this
+  void* unboxed_kernel_;
 };
 
 namespace impl {
@@ -93,16 +95,10 @@ public:
     });
   }
 
-  void* lookupUnboxedAutogradKernel() const {
-    return currentUnboxedAutogradKernel_;
-  }
-
   void prepareForDeregistration();
 
   RegistrationHandleRAII registerKernel(TensorTypeId dispatch_key, DispatchTableEntry kernel);
   RegistrationHandleRAII registerCatchallKernel(DispatchTableEntry kernel);
-
-  RegistrationHandleRAII registerUnboxedAutogradKernel(void* kernel_func);
 
   const OperatorOptions& options() {
     return options_;
@@ -111,21 +107,14 @@ public:
 private:
   void deregisterKernel_(TensorTypeId dispatch_key, std::list<DispatchTableEntry>::iterator kernel);
   void deregisterCatchallKernel_(std::list<DispatchTableEntry>::iterator kernel);
-  void deregisterUnboxedAutogradKernel_(std::list<void*>::iterator kernel);
 
   FunctionSchema schema_;
 
   // The dispatchTable stores the current kernel for each dispatch key
   LeftRight<DispatchTable> dispatchTable_;
 
-  // kernels_ is either:
-  //   left:  a kernel map listing mapping from a dispatch key to a list of all
-  //          kernels for that operator, or it is
-  //   right: a list of all catch-all kernels registered for this operator.
-  // An operator can only have either dispatched kernels or catch-all kernels,
-  // not both.
-  // In both cases, the list of kernels stores all registered kernels for the
-  // corresponding dispatch key (or for catch-all).
+  // kernels_ stores all registered kernels for the corresponding dispatch key
+  // and catchAllKernels_ stores the catch-all kernels.
   // If an operator library gets loaded that overwrites an already existing kernel,
   // both kernels will be in that list but only the newer one will be in
   // dispatchTable. If any of the kernels go away (say the library gets
@@ -137,15 +126,13 @@ private:
   // kernels is a larger data structure and accessed quite infrequently
   // while dispatchTable is accessed often and should be kept small to fit
   // into CPU caches.
-  // Invariants (assuming kernels_.is_left()):
-  //  - dispatchTable[dispatch_key] == kernels_.left()[dispatch_key].front()
+  // Invariants:
+  //  - dispatchTable[dispatch_key] == kernels_[dispatch_key].front()
   //  - dispatchTable[dispatch_key] does not exist if and only if
-  //    kernels_.left()[dispatch_key] does not exist
-  //  - If kernels_.left()[dispatch_key] exists, then it has elements.
+  //    kernels_[dispatch_key] does not exist
+  //  - If kernels_[dispatch_key] exists, then it has elements.
   //    It is never an empty list.
-  // Analogous invariants for kernels_.is_right().
-  // The empty state (i.e. no kernels registered) is represented as an empty
-  // map with kernels_.is_left().
+  // Analogous invariants for catchAllKernels_.
   //
   // Why do we do that?
   // -----
@@ -155,41 +142,21 @@ private:
   // function schema changed between the executions, but it works as long
   // as the function schema didn't change. A better solution would be to
   // unload the old extension library from the Jupyter cell when the cell is
-  // re-ececuted and then only allow one kernel here, i.e. error if a kernel
+  // re-executed and then only allow one kernel here, i.e. error if a kernel
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
-  c10::either<
-    ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>>, // dispatched kernels
-    std::list<DispatchTableEntry> // catch-all kernels
-  > kernels_;
-
-  // unboxedAutogradKernels_ stores all autograd kernels registered for this op.
-  // An autograd kernel has the same signature as the main op kernel and
-  // internally re-dispatches to call the actual kernel.
-  // Autograd kernels are unboxed currently. We are planning to move this
-  // towards a system where ops register autograd wrappers (i.e. functions that
-  // do some wrapping code and get a pointer to the actual kernel) instead of
-  // autograd functions.
-  // This is a list because, similar to kernels_, multiple libraries could
-  // be loaded that register autograd kernels for the same op. The list is
-  // ordered by registration time descendingly, i.e. newer registrations are
-  // before older registrations and the list head is the autograd kernel
-  // which is currently used.
-  // See the comment for kernels_ above for an explanation for why we do this.
-  std::list<void*> unboxedAutogradKernels_;
-  std::atomic<void*> currentUnboxedAutogradKernel_;
+  ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>> kernels_;
+  std::list<DispatchTableEntry> catchAllKernels_;
 
   // Some metadata about the operator
   OperatorOptions options_;
 
   std::mutex kernelsMutex_; // protects kernels_
-  std::mutex unboxedAutogradKernelsMutex_; // protects unboxedAutogradKernels_
 
   // This function re-establishes the invariant that dispatchTable
   // contains the front element from the kernels list for a given dispatch key.
   void updateDispatchTable_(TensorTypeId dispatch_key);
   void updateCatchallDispatchTable_();
-  void updateCurrentUnboxedAutogradKernel_();
 };
 
 }
