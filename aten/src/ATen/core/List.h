@@ -424,7 +424,8 @@ public:
   size_t use_count() const;
 
   TypePtr elementType() const;
-  
+
+  // See [unsafe set type] for why this exists.
   void unsafeSetElementType(TypePtr t);
 
 private:
