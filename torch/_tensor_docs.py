@@ -3285,14 +3285,14 @@ To get :attr:`grad` populated for non-leaf Tensors, you can use :func:`retain_gr
 
 Example::
 
-    >>> a = torch.rand(10, requires_grad=True)
+    >>> a = torch.rand(10).requires_grad_(True)
     >>> a.is_leaf
     True
-    >>> b = torch.rand(10, requires_grad=True).cuda()
+    >>> b = torch.rand(10).requires_grad_(True).cuda()
     >>> b.is_leaf
     False
     # b was created by the operation that cast a cpu Tensor into a cuda Tensor
-    >>> c = torch.rand(10, requires_grad=True) + 2
+    >>> c = torch.rand(10).requires_grad_(True) + 2
     >>> c.is_leaf
     False
     # c was created by the addition operation
@@ -3304,7 +3304,7 @@ Example::
     >>> e.is_leaf
     True
     # e requires gradients and has no operations creating it
-    >>> f = torch.rand(10, requires_grad=True, device="cuda")
+    >>> f = torch.rand(10, device="cuda").requires_grad_(True)
     >>> f.is_leaf
     True
     # f requires grad, has no operation creating it
