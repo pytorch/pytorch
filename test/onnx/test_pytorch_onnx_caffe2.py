@@ -937,20 +937,21 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         y = torch.ones(2, 3, dtype=torch.float32)
         self.run_model_test(ComparisonModel(), input=(x, y), train=False, batch_size=BATCH_SIZE)
 
+        # TODO: re-enable the two tests after https://github.com/pytorch/pytorch/issues/26328 is resolved.
         class MatMulModel(torch.nn.Module):
             def forward(self, x, y):
                 return torch.mm(x, y)
 
         x = torch.ones(3, 4)
         y = torch.ones(4, 5)
-        self.run_model_test(MatMulModel(), input=(x, y), train=False, batch_size=BATCH_SIZE)
+        # self.run_model_test(MatMulModel(), input=(x, y), train=False, batch_size=BATCH_SIZE)
 
         class AddMMModel(torch.nn.Module):
             def forward(self, x):
                 return torch.mm(x, x) + x
 
         x = torch.ones(3, 3)
-        self.run_model_test(AddMMModel(), input=x, train=False, batch_size=BATCH_SIZE)
+        # self.run_model_test(AddMMModel(), input=x, train=False, batch_size=BATCH_SIZE)
 
     # test for a pytorch optimization pass, see https://github.com/pytorch/pytorch/pull/7872
     def test_consecutive_transposes(self):
