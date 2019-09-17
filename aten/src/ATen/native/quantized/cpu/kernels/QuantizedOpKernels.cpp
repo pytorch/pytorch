@@ -8,6 +8,7 @@ namespace at {
 namespace native {
 namespace {
 
+using namespace vec256;
 // ****************** HEY YOU! YES YOU! Read this! ********************
 //
 // Please read the README.md in this directory before editing this file
@@ -179,7 +180,7 @@ void qmaxpool_2d_nhwc_kernel(const Tensor &qx,
                   accs[i] = vec256::maximum(accs[i], vals);
                 }
               }  // for x
-            }  // for y 
+            }  // for y
             for (int i = 0; i < 4; ++i) {
               accs[i].store(o_p + c + Vec256<scalar_t>::size() * i);
             }
@@ -196,7 +197,7 @@ void qmaxpool_2d_nhwc_kernel(const Tensor &qx,
                 auto vals = Vec256<scalar_t>::loadu(i_p + tcntr * iC + c);
                 acc = vec256::maximum(acc, vals);
               }  // for x
-            }  // for y 
+            }  // for y
             acc.store(o_p + c);
           }  // for c
 
@@ -218,7 +219,187 @@ void qmaxpool_2d_nhwc_kernel(const Tensor &qx,
       }  // for row
     }  // for b
   });
-} 
+}
+
+void qadaptive_avg_pool2d_nhwc_kernel(const Tensor &qx,
+                                      Tensor &qy,
+                                      int64_t b,
+                                      int64_t sizeD,
+                                      int64_t isizeH,
+                                      int64_t isizeW,
+                                      int64_t osizeH,
+                                      int64_t osizeW,
+                                      int64_t istrideB,
+                                      int64_t istrideD,
+                                      int64_t istrideH,
+                                      int64_t istrideW) {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "adaptive_avg_pool2d_nhwc", [&]() {
+    scalar_t *idata = static_cast<scalar_t*>(qx.data_ptr());
+    scalar_t *odata = static_cast<scalar_t*>(qy.data_ptr());
+    auto minimum = std::numeric_limits<scalar_t::underlying>::lowest();
+    auto maximum = std::numeric_limits<scalar_t::underlying>::max();
+    auto *i_p = reinterpret_cast<typename scalar_t::underlying*>(idata + b * istrideB);
+    for (int64_t oh = 0; oh < osizeH; oh++) {
+      int istartH = (int)std::floor((float)(oh * isizeH) / osizeH);
+      int iendH = (int)std::ceil((float)((oh + 1) * isizeH) / osizeH);
+      int kH = iendH - istartH;
+      float kHr = 1.0 / kH;
+      for (int64_t ow = 0; ow < osizeW; ow++) {
+        auto *o_p = reinterpret_cast<typename scalar_t::underlying*>(odata + b * osizeH * osizeW * sizeD + (oh * osizeW + ow) * sizeD);
+        int istartW = (int)std::floor((float)(ow * isizeW) / osizeW);
+        int iendW = (int)std::ceil((float)((ow + 1) * isizeW) / osizeW);;
+        int kW = iendW - istartW;
+        float kHWr = kHr / kW;
+        int size = kH * kW;
+        float multiplier = qx.q_scale() / qy.q_scale() / size;
+
+        int64_t c = 0;
+        // For int8 or uint8quantization, we implicitly use int32 as accumulation
+        // Or else, it will go to the slow path
+        // TODO: support 16bit, 32bit, and etc.
+        constexpr auto vec_width = Vec256<scalar_t>::size() / 4;
+        auto* internal_i_p = i_p + istartH * istrideH + istartW * istrideW;
+
+        // TODO: more vectorization with loop interleaving
+#ifdef __AVX2__
+        for (; c + vec_width <= sizeD && vec_width == 8; c += vec_width) {
+          int64_t tcntr = 0;
+          Vec256<int32_t> acc(-qx.q_zero_point() * size);
+          for (int64_t ih = 0; ih < kH; ih++) {
+            for (int64_t iw = 0; iw < kW; iw++) {
+              tcntr = ih * istrideH + iw * istrideW;
+              auto vals = vec256::convert_8(internal_i_p + tcntr + c * istrideD);
+              acc = acc + vals;
+            }
+          }
+          int32_t acc_int[vec_width];
+          float acc_fp[vec_width];
+          // TODO: get rid of the additional copy from vec256<int32> to int32
+          acc.store(acc_int);
+          vec256::convert(acc_int, acc_fp, vec_width);
+          vec256::QuantizeAvx2<scalar_t>(acc_fp, o_p + c, vec_width, multiplier, qy.q_zero_point());
+        }
+#endif
+        // remainer
+        for (; c < sizeD; ++c) {
+          int32_t acc_int32 = -qx.q_zero_point() * size;
+          int64_t tcntr = 0;
+          for (int64_t ih = 0; ih < kH; ih++) {
+            for (int64_t iw = 0; iw < kW; iw++) {
+              tcntr = ih * istrideH + iw * istrideW;
+              auto val = *(internal_i_p + tcntr + c * istrideD);
+              acc_int32 += val;
+            }
+          }
+          // clamp
+          o_p[c] = std::min<int32_t>(
+              std::max<int32_t>(
+                std::nearbyint(acc_int32 * multiplier + qy.q_zero_point()), minimum),
+              maximum);
+        } // c
+      } // oh
+    } // ow
+  });
+}
+
+void qavg_pool2d_nhwc_kernel(const Tensor &qx,
+                             Tensor &qy,
+                             int64_t b,
+                             int64_t nInputPlane,
+                             int64_t inputWidth,
+                             int64_t inputHeight,
+                             int64_t outputWidth,
+                             int64_t outputHeight,
+                             int kW,
+                             int kH,
+                             int dW,
+                             int dH,
+                             int padW,
+                             int padH,
+                             bool count_include_pad,
+                             c10::optional<int64_t> divisor_override) {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "avg_pool2d_nhwc", [&]() {
+    scalar_t *idata = static_cast<scalar_t*>(qx.data_ptr());
+    scalar_t *odata = static_cast<scalar_t*>(qy.data_ptr());
+    auto minimum = std::numeric_limits<scalar_t::underlying>::lowest();
+    auto maximum = std::numeric_limits<scalar_t::underlying>::max();
+    int64_t batch_size = nInputPlane*inputWidth*inputHeight;
+    auto *i_p = reinterpret_cast<typename scalar_t::underlying*>(idata + b * batch_size);
+
+    for(int64_t oh = 0; oh < outputHeight; oh++) {
+      for(int64_t ow = 0; ow < outputWidth; ow++) {
+        auto *o_p = reinterpret_cast<typename scalar_t::underlying*>(odata + b * nInputPlane * outputWidth * outputHeight + (oh * outputWidth + ow) * nInputPlane);
+        int64_t hstart = oh * dH - padH;
+        int64_t wstart = ow * dW - padW;
+        int64_t hend = std::min(hstart + kH, inputHeight + padH);
+        int64_t wend = std::min(wstart + kW, inputWidth + padW);
+        int64_t pool_size = (hend - hstart) * (wend - wstart);
+        hstart = std::max(hstart, (int64_t) 0);
+        wstart = std::max(wstart, (int64_t) 0);
+        hend = std::min(hend, inputHeight);
+        wend = std::min(wend, inputWidth);
+
+        int64_t size;
+        int64_t divide_factor;
+        if (divisor_override.has_value()) {
+          divide_factor = divisor_override.value();
+          size = (hend - hstart) * (wend - wstart);
+        } else {
+          if(count_include_pad) {
+            divide_factor = pool_size;
+          } else {
+            divide_factor = (hend - hstart) * (wend - wstart);
+          }
+          size = divide_factor;
+        }
+
+        int64_t c = 0;
+        // For int8 quantization, we implicitly use int32 as accumulation
+        // Or else, it will go to the slow path
+        // TODO: support 16bit, 32bit, and etc.
+        constexpr auto vec_width = Vec256<scalar_t>::size() / 4;
+        float multiplier = qx.q_scale() / qy.q_scale() / divide_factor;
+#ifdef __AVX3__
+        for (; c + vec_width <= nInputPlane && vec_width == 8; c += vec_width) {
+          int64_t tcntr = 0;
+          Vec256<int32_t> acc(-qx.q_zero_point() * size);
+          for (int64_t ih = hstart; ih < hend; ih++) {
+            for (int64_t iw = wstart; iw < wend; iw++) {
+              tcntr = ih * inputWidth + iw;
+              auto vals = vec256::convert_8(i_p + tcntr * nInputPlane + c);
+              acc = acc + vals;
+            }
+          }
+          int32_t acc_int[vec_width];
+          float acc_fp[vec_width];
+          // TODO: get rid of the additional copy from vec256<int32> to int32
+          acc.store(acc_int);
+          vec256::convert(acc_int, acc_fp, vec_width);
+          vec256::QuantizeAvx2<scalar_t>(acc_fp, o_p + c, vec_width, multiplier, qy.q_zero_point());
+        }
+#endif
+        // remainer
+        for (; c < nInputPlane; ++c) {
+          int32_t acc_int32 = -qx.q_zero_point() * size;
+          int64_t tcntr = 0;
+          for (int64_t ih = hstart; ih < hend; ih++) {
+            for (int64_t iw = wstart; iw < wend; iw++) {
+              tcntr = ih * inputWidth + iw;
+              auto val = *(i_p + tcntr * nInputPlane + c);
+              acc_int32 += val;
+            }
+          }
+          double acc_fp = acc_int32 * 1.0;
+          // clamp
+          o_p[c] = std::min<int32_t>(
+              std::max<int32_t>(
+                std::nearbyint(acc_fp * multiplier + qy.q_zero_point()), minimum),
+              maximum);
+        } // c
+      } // ow
+    } // oh
+  });
+}
 
 } // namespace
 
@@ -227,6 +408,8 @@ REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
 REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
 REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
+REGISTER_DISPATCH(qadaptive_avg_pool2d_nhwc_stub, &qadaptive_avg_pool2d_nhwc_kernel);
+REGISTER_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
 
 } // namespace native
 } // namespace at
