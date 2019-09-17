@@ -8,7 +8,6 @@ namespace at {
 namespace native {
 namespace {
 
-using namespace vec256;
 // ****************** HEY YOU! YES YOU! Read this! ********************
 //
 // Please read the README.md in this directory before editing this file
