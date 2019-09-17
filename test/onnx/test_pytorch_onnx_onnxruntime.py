@@ -808,21 +808,23 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.ones(2, 3, dtype=torch.float32)
         self.run_test(ComparisonModel(), (x, y))
 
+        # TODO: re-enable the two tests after https://github.com/pytorch/pytorch/issues/26328 is resolved.
         class MatMulModel(torch.nn.Module):
             def forward(self, x):
                 return (torch.mm(x, x) + x + torch.mm(x, x) + x)
 
         x = torch.ones(3, 3)
-        self.run_test(MatMulModel(), x)
+        # self.run_test(MatMulModel(), x)
 
         class AddMMModel(torch.nn.Module):
             def forward(self, x):
                 return torch.mm(x, x) + x
 
         x = torch.ones(3, 3)
-        self.run_test(AddMMModel(), x)
+        # self.run_test(AddMMModel(), x)
 
         class FullModel(torch.nn.Module):
+            # add is used for exporting full
             def forward(self, x):
                 return torch.full((3, 4), x)
         x = torch.tensor(12)
