@@ -43,7 +43,7 @@ import torch.backends.mkl
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
-torch.backends.cudnn.disable_global_flags()
+torch.backends.disable_global_flags()
 
 
 parser = argparse.ArgumentParser(add_help=False)
@@ -120,6 +120,7 @@ PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
 
 IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
@@ -458,6 +459,65 @@ class CudaMemoryLeakCheck():
                 if before != after:
                     warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
                         self.name, after - before, i), RuntimeWarning)
+
+#  "min_satisfying_examples" setting has been deprecated in hypythesis
+#  3.56.0 and removed in hypothesis 4.x
+try:
+    import hypothesis
+    if hypothesis.version.__version_info__ >= (3, 56, 0):
+        hypothesis.settings.register_profile(
+            "pytorch_ci",
+            hypothesis.settings(
+                derandomize=True,
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=100))
+        hypothesis.settings.register_profile(
+            "dev",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=10,
+                verbosity=hypothesis.Verbosity.verbose))
+        hypothesis.settings.register_profile(
+            "debug",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=1000,
+                verbosity=hypothesis.Verbosity.verbose))
+    else:
+        hypothesis.settings.register_profile(
+            "pytorch_ci",
+            hypothesis.settings(
+                derandomize=True,
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=100,
+                min_satisfying_examples=1))
+        hypothesis.settings.register_profile(
+            "dev",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=10,
+                min_satisfying_examples=1,
+                verbosity=hypothesis.Verbosity.verbose))
+        hypothesis.settings.register_profile(
+            "debug",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=1000,
+                min_satisfying_examples=1,
+                verbosity=hypothesis.Verbosity.verbose))
+
+    hypothesis.settings.load_profile(
+        "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
+                                                     'dev')
+    )
+except ImportError:
+    print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
 class TestCase(expecttest.TestCase):
     precision = 1e-5
@@ -1014,9 +1074,9 @@ def random_symmetric_psd_matrix(l, *batches):
     return torch.matmul(A, A.transpose(-2, -1))
 
 
-def random_symmetric_pd_matrix(l, *batches):
-    A = torch.randn(*(batches + (l, l)))
-    return torch.matmul(A, A.transpose(-2, -1)) + torch.eye(l) * 1e-5
+def random_symmetric_pd_matrix(matrix_size, *batch_dims):
+    A = torch.randn(*(batch_dims + (matrix_size, matrix_size)))
+    return torch.matmul(A, A.transpose(-2, -1)) + torch.eye(matrix_size) * 1e-5
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
@@ -1037,24 +1097,46 @@ def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     return A
 
 
-def random_fullrank_matrix_distinct_singular_value(l, *batches, **kwargs):
+def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims, **kwargs):
     silent = kwargs.get("silent", False)
     if silent and not torch._C.has_lapack:
-        return torch.ones(l, l)
+        return torch.ones(matrix_size, matrix_size)
 
-    if len(batches) == 0:
-        A = torch.randn(l, l)
-        u, _, v = A.svd()
-        s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
-        return u.mm(torch.diag(s)).mm(v.t())
-    else:
-        all_matrices = []
-        for _ in range(0, torch.prod(torch.as_tensor(batches)).item()):
-            A = torch.randn(l, l)
-            u, _, v = A.svd()
-            s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
-            all_matrices.append(u.mm(torch.diag(s)).mm(v.t()))
-        return torch.stack(all_matrices).reshape(*(batches + (l, l)))
+    A = torch.randn(batch_dims + (matrix_size, matrix_size))
+    u, _, v = A.svd()
+    s = torch.arange(1., matrix_size + 1).mul_(1.0 / (matrix_size + 1)).diag()
+    return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).matmul(v.transpose(-2, -1)))
+
+
+def lu_solve_test_helper(self, A_dims, b_dims, cast, pivot):
+    b = cast(torch.randn(*b_dims))
+    A = cast(random_fullrank_matrix_distinct_singular_value(*A_dims))
+    LU_data, LU_pivots, info = torch.lu(A, get_infos=True, pivot=pivot)
+    self.assertEqual(info, torch.zeros_like(info))
+    return b, A, LU_data, LU_pivots
+
+
+def cholesky_solve_test_helper(A_dims, b_dims, cast, upper):
+    b = cast(torch.randn(*b_dims))
+    A = cast(random_symmetric_pd_matrix(*A_dims))
+    L = torch.cholesky(A, upper=upper)
+    return b, A, L
+
+
+def triangular_solve_test_helper(A_dims, b_dims, cast, upper, unitriangular):
+    triangle_function = torch.triu if upper else torch.tril
+    b = cast(torch.randn(*b_dims))
+    A = cast(torch.randn(*A_dims))
+    A_triangular = triangle_function(A)
+    if unitriangular:
+        A_triangular.diagonal(dim1=-2, dim2=-1).fill_(1.)
+    return b, A_triangular
+
+
+def solve_test_helper(A_dims, b_dims, cast):
+    b = cast(torch.randn(*b_dims))
+    A = cast(random_fullrank_matrix_distinct_singular_value(*A_dims))
+    return b, A
 
 
 def brute_pdist(inp, p=2):

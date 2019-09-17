@@ -115,6 +115,17 @@ TEST_F(ModuleTest, ReplaceModule) {
   ASSERT_EQ(model->l1.get(), model->named_modules()["l1"]->as<Linear>());
 }
 
+TEST_F(ModuleTest, UnregisterModule) {
+  struct TestModel : public torch::nn::Module {};
+  TestModel model;
+  ASSERT_THROWS_WITH(
+      model.unregister_module("linear"),
+      "No Module with name `linear` is registered");
+  model.register_module("linear", torch::nn::Linear(3, 4));
+  model.unregister_module("linear");
+  ASSERT_TRUE(model.children().empty());
+}
+
 TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
   struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
