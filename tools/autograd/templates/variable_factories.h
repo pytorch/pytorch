@@ -43,8 +43,10 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
         scalar_(),
         init_list_(init_list),
         sizes_(),
-        scalar_type_(init_list.begin()->scalar_type_),
+        scalar_type_(),
         type_(ListInitTensorType::InitList) {
+      TORCH_CHECK(init_list.size() > 0, "Empty init-list is not supported");
+      scalar_type_ = init_list.begin()->scalar_type_;
       const ListInitTensor& first_elem = *(init_list.begin());
       for (const auto& elem : init_list) {
         TORCH_CHECK(elem.scalar_type_ == first_elem.scalar_type_,
