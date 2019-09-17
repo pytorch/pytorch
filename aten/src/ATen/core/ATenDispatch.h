@@ -71,6 +71,8 @@ namespace detail {
   }
 }
 
+using FallbackBoxedFunction = void(const char* schema, torch::jit::Stack*);
+
 // ATenOpTable stores the implementations for each backend, in addition to
 // an implementation for variables.
 class CAFFE2_API ATenOpTable {
@@ -79,30 +81,7 @@ class CAFFE2_API ATenOpTable {
     : schema_(std::move(schema)) {}
 
   template<class Result, class... Args>
-  Result callUnboxed(Args... args) const {
-    using FuncType = Result(Args...);
-    TensorTypeSet ts = detail::multi_dispatch_tensor_type_set(args...);
-    TensorTypeId tid = impl::dispatchTypeId(ts);
-
-    // You might think we can eliminate the second branch by maintaining a
-    // bitmask of registered operator keys, so we don't select dispatch ids
-    // which don't have implementations here.  But the net effect is that if you
-    // get a Variable CPUTensor, if there is no variable registration, you'll
-    // fall back to the CPU implementation.  Is this what you want?  Unlikely...
-
-    auto* unboxed_fn = reinterpret_cast<FuncType*>(function_table_[static_cast<int64_t>(tid)]);
-    if (C10_LIKELY(unboxed_fn != nullptr)) {
-      return (*unboxed_fn)(args...);
-    }
-
-    auto* unboxed_fallback_fn = reinterpret_cast<FuncType*>(function_table_[static_cast<int64_t>(TensorTypeId::UndefinedTensorId)]);
-    if (C10_LIKELY(unboxed_fallback_fn != nullptr)) {
-      return (*unboxed_fallback_fn)(args...);
-    }
-
-    reportError(tid);
-    TORCH_INTERNAL_ASSERT(0);
-  }
+  Result callUnboxed(Args... args) const;
 
  private:
   void registerOp(TensorTypeId tid, void* fn) {
@@ -140,11 +119,56 @@ class CAFFE2_API ATenDispatch {
     return &iter->second;
   }
 
+  const FallbackBoxedFunction* getFallbackBoxedOp(TensorTypeId tid) const {
+    return boxed_fallback_table_[static_cast<size_t>(tid)];
+  }
+
  private:
   std::unordered_map<std::string, ATenOpTable> op_tables_;
+  FallbackBoxedFunction* boxed_fallback_table_[static_cast<int64_t>(TensorTypeId::NumTensorIds)] = {nullptr};
   std::mutex mutex_;
 };
 
 CAFFE2_API ATenDispatch& globalATenDispatch();
+
+template<class Result, class... Args>
+Result ATenOpTable::callUnboxed(Args... args) const {
+  using FuncType = Result(Args...);
+  TensorTypeSet ts = detail::multi_dispatch_tensor_type_set(std::forward<Args>(args)...);
+  TensorTypeId tid = impl::dispatchTypeId(ts);
+
+  // You might think we can eliminate the second branch by maintaining a
+  // bitmask of registered operator keys, so we don't select dispatch ids
+  // which don't have implementations here.  But the net effect is that if you
+  // get a Variable CPUTensor, if there is no variable registration, you'll
+  // fall back to the CPU implementation.  Is this what you want?  Unlikely...
+
+  auto* unboxed_fn = reinterpret_cast<FuncType*>(function_table_[static_cast<int64_t>(tid)]);
+  if (C10_LIKELY(unboxed_fn != nullptr)) {
+    return (*unboxed_fn)(std::forward<Args>(args)...);
+  }
+
+  auto* unboxed_fallback_fn = reinterpret_cast<FuncType*>(function_table_[static_cast<int64_t>(TensorTypeId::UndefinedTensorId)]);
+  if (C10_LIKELY(unboxed_fallback_fn != nullptr)) {
+    return (*unboxed_fallback_fn)(std::forward<Args>(args)...);
+  }
+
+  auto* boxed_fallback_fn = globalATenDispatch().getFallbackBoxedOp(tid);
+  // Not /that/ likely, but certainly more likely than an error!
+  if (C10_LIKELY(boxed_fallback_fn != nullptr)) {
+    // TODO: this needs sfinae'ing
+    torch::jit::Stack stack;
+    bool ok = Boxer(&stack)(std::forward<Args>(args)...);
+    if (ok) {  // NB: ok is known at compile time
+      boxed_fallback_fn(schema_.c_str(), &stack);
+      TORCH_INTERNAL_ASSERT(0);
+      // return torch::jit::pop(stack).to<Return>();
+    }
+    // fallthrough
+  }
+
+  reportError(tid);
+  TORCH_INTERNAL_ASSERT(0);
+}
 
 } // namespace at
