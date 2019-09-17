@@ -39,6 +39,14 @@ void Context::setUserEnabledCuDNN(bool e) {
   enabled_cudnn = e;
 }
 
+bool Context::userEnabledMkldnn() const {
+  return enabled_mkldnn;
+}
+
+void Context::setUserEnabledMkldnn(bool e) {
+  enabled_mkldnn = e;
+}
+
 bool Context::deterministicCuDNN() const {
   return deterministic_cudnn;
 }
@@ -85,6 +93,14 @@ bool Context::hasLAPACK() const {
 #else
   return false;
 #endif
+}
+
+at::QEngine Context::preferredQuantizedEngine() const {
+  return quantized_engine;
+}
+
+void Context::setPreferredQuantizedEngine(at::QEngine e) {
+  quantized_engine = e;
 }
 
 bool Context::setFlushDenormal(bool on) {
