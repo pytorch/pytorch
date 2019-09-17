@@ -11,7 +11,7 @@ namespace {
 
 class QNNPACKAdd final : public torch::OperatorKernel {
  public:
-#ifdef USE_QNNPACK
+#ifdef USE_PYTORCH_QNNPACK
   Tensor operator()(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
     TORCH_CHECK(qa.ndimension() > 0, "qnnpack_add(): Got empty input tensor.");
     TORCH_CHECK(
@@ -38,11 +38,11 @@ class QNNPACKAdd final : public torch::OperatorKernel {
 
     initQNNPACK();
 
-    qnnp_operator_t qnnpack_operator{nullptr};
+    pytorch_qnnp_operator_t qnnpack_operator{nullptr};
 
     size_t num_elems = qa_contig.numel() / qa_contig.size(0);
 
-    const qnnp_status createStatus = qnnp_create_add_nc_q8(
+    const pytorch_qnnp_status createStatus = pytorch_qnnp_create_add_nc_q8(
         num_elems /* input size */,
         a_zero_point /* a zero_point */,
         a_scale /* a scale */,
@@ -56,14 +56,14 @@ class QNNPACKAdd final : public torch::OperatorKernel {
         &qnnpack_operator);
 
     TORCH_INTERNAL_ASSERT(
-        createStatus == qnnp_status_success,
+        createStatus == pytorch_qnnp_status_success,
         "failed to create QNNPACK Add operator");
     TORCH_INTERNAL_ASSERT(qnnpack_operator != nullptr);
 
-    std::unique_ptr<qnnp_operator, QnnpackOperatorDeleter> qnnpack_uniq_ptr(
-        qnnpack_operator);
+    std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
+        qnnpack_uniq_ptr(qnnpack_operator);
 
-    const qnnp_status setupStatus = qnnp_setup_add_nc_q8(
+    const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_add_nc_q8(
         qnnpack_operator /* add op */,
         qa_contig.size(0) /* batch size */,
         (uint8_t*)qa_contig.data_ptr<c10::quint8>() /* a data */,
@@ -73,15 +73,16 @@ class QNNPACKAdd final : public torch::OperatorKernel {
         (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
         num_elems /* sum stride */);
     TORCH_INTERNAL_ASSERT(
-        setupStatus == qnnp_status_success,
+        setupStatus == pytorch_qnnp_status_success,
         "failed to setup QNNPACK Add operator");
 
     pthreadpool_t threadpool = caffe2::mobile_threadpool();
-    const qnnp_status runStatus =
-        qnnp_run_operator(qnnpack_operator, threadpool);
+    const pytorch_qnnp_status runStatus =
+        pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
 
     TORCH_INTERNAL_ASSERT(
-        runStatus == qnnp_status_success, "failed to run QNNPACK Add operator");
+        runStatus == pytorch_qnnp_status_success,
+        "failed to run QNNPACK Add operator");
 
     return qy;
   }
