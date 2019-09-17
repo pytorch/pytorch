@@ -53,14 +53,15 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
           ", but got element of scalar type: ",
           elem.scalar_type_);
         TORCH_CHECK(elem.sizes_ == first_elem.sizes_,
-          "Expected all sub-tensors to have sizes: ",
+          "Expected all sub-lists to have sizes: ",
           first_elem.sizes_,
           " (e.g. ", first_elem, "), ",
-          "but got sub-tensor ",
+          "but got sub-list ",
           elem,
           " with sizes: ",
           elem.sizes_);
       }
+      sizes_.reserve(first_elem.sizes_.size() + 1);
       sizes_.push_back(init_list.size());
       sizes_.insert(sizes_.end(), first_elem.sizes_.begin(), first_elem.sizes_.end());
     }
@@ -119,7 +120,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
         } else if (elem.type_ == ListInitTensorType::InitList) {
           elem.fill_tensor(tensor[index]);
         } else {
-          AT_ERROR("Invalid ListInitTensor");
+          TORCH_INTERNAL_ASSERT(false, "Invalid ListInitTensor");
         }
         index++;
       }
