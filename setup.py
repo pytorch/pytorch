@@ -61,7 +61,7 @@
 #   BUILD_CAFFE2_OPS=0
 #     disable Caffe2 operators build
 #
-#   USE_GLOO_IBVERBS
+#   USE_IBVERBS
 #     toggle features related to distributed support
 #
 #   USE_OPENCV
@@ -185,6 +185,7 @@ from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.cuda import CUDA_HOME, CUDA_VERSION
+from tools.setup_helpers.cudnn import CUDNN_LIBRARY, CUDNN_INCLUDE_DIR
 
 try:
     FileNotFoundError
@@ -351,9 +352,6 @@ install_requires = []
 if sys.version_info <= (2, 7):
     install_requires += ['future']
 
-if sys.version_info[0] == 2:
-    install_requires += ['requests']
-
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
 Please install it via `conda install {module}` or `pip install {module}`
@@ -379,8 +377,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- NumPy not found')
         if cmake_cache_vars['USE_CUDNN']:
-            report('-- Detected cuDNN at ' +
-                   cmake_cache_vars['CUDNN_LIBRARY'] + ', ' + cmake_cache_vars['CUDNN_INCLUDE_DIR'])
+            report('-- Detected cuDNN at ' + CUDNN_LIBRARY + ', ' + CUDNN_INCLUDE_DIR)
         else:
             report('-- Not using cuDNN')
         if cmake_cache_vars['USE_CUDA']:
@@ -825,7 +822,10 @@ if __name__ == '__main__':
                 'include/torch/csrc/api/include/torch/detail/*.h',
                 'include/torch/csrc/api/include/torch/detail/ordered_dict.h',
                 'include/torch/csrc/api/include/torch/nn/*.h',
+                'include/torch/csrc/api/include/torch/nn/functional/*.h',
+                'include/torch/csrc/api/include/torch/nn/options/*.h',
                 'include/torch/csrc/api/include/torch/nn/modules/*.h',
+                'include/torch/csrc/api/include/torch/nn/modules/container/*.h',
                 'include/torch/csrc/api/include/torch/nn/parallel/*.h',
                 'include/torch/csrc/api/include/torch/optim/*.h',
                 'include/torch/csrc/api/include/torch/serialize/*.h',

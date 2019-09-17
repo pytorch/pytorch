@@ -23,12 +23,13 @@ struct WorkerId {
 
   WorkerId(std::string name, worker_id_t id) : name_(std::move(name)), id_(id) {
     bool validSize = name_.length() < MAX_NAME_LEN && name_.length() > 0;
-    bool validChar = std::find_if(name_.begin(), name_.end(), [](char c) {
-                       return !(std::isalnum(c) || c == '-' || c == '_');
-                     }) == name_.end();
+    bool validChar =
+        std::find_if(name_.begin(), name_.end(), [](char c) {
+          return !(std::isalnum(c) || c == '-' || c == '_' || c == ':');
+        }) == name_.end();
     TORCH_CHECK(
         validSize && validChar,
-        "Worker name must match ^[A-Za-z0-9-_]*$, "
+        "Worker name must match ^[A-Za-z0-9-_:]*$, "
         "and must be non-empty and shorter than ",
         MAX_NAME_LEN,
         " chars, "
