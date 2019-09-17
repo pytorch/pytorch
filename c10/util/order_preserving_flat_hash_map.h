@@ -1001,6 +1001,8 @@ private:
                 ++distance_from_desired;
                 if (distance_from_desired == max_lookups)
                 {
+                    // the displaced element gets put back into its correct position
+                    // we grow the hash table, and then try again to reinsert the new element
                     swap(to_insert, result.current->value);
                     grow();
                     return emplace(std::move(to_insert));

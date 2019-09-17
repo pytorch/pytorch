@@ -6,8 +6,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/order_preserving_flat_hash_map.h>
 #include <gtest/gtest.h>
-#include <ATen/Tensor.h>
-#include <ATen/test/test_assert.h>
 
 namespace {
 
