@@ -20,9 +20,7 @@ struct WorkerId {
         "RPC worker id ",
         id,
         " out of bound of int16_t.");
-  }
-
-  WorkerId() : name_(""), id_(-1) {}
+  }WorkerId() : name_(""), id_(-1) {}
 
   WorkerId(std::string name, worker_id_t id) : name_(std::move(name)), id_(id) {
     bool validSize = name_.length() < MAX_NAME_LEN && name_.length() > 0;
@@ -39,10 +37,6 @@ struct WorkerId {
         "but got ",
         name_);
   }
-
- bool operator==(const WorkerId& other) {
-   return name_ == other.name_ && id_ == other.id_;
- }
 
   static constexpr size_t MAX_NAME_LEN = 128;
 
