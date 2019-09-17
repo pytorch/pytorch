@@ -53,7 +53,13 @@ def default_collate(batch):
             numel = sum([x.numel() for x in batch])
             storage = elem.storage()._new_shared(numel)
             out = elem.new(storage)
-        return torch.stack(batch, 0, out=out)
+        else:
+            # Make sure output is channels last (channels last is hardcoded now, ideally we need to fix torch.stack as well as figure out if we call images as channel_last)
+            # Only works with 0 workers!!!
+            # out = torch.empty([len(batch)] + list(elem.shape), dtype=elem.dtype, device=elem.device, memory_format=torch.channels_last)
+            pass
+        result = torch.stack(batch, 0, out=out)
+        return result
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
             and elem_type.__name__ != 'string_':
         elem = batch[0]

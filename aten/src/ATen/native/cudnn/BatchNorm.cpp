@@ -213,10 +213,12 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
 
-  // std::cout << "idesc.desc() " << idesc.desc() << " " << input->strides()<< "\n";
-  // std::cout << "odesc.desc() " << odesc.desc() << " " << grad_output->strides() << "\n";
-  // std::cout << "idesc.desc() " << idesc.desc() << " " << grad_input_t.strides()<< "\n";
-  // std::cout << "wdesc.desc() " << wdesc.desc() << " " << weight->strides()<< "\n";
+  // std::cout << "input " << input->sizes() << " " << input->strides()<< "\n";
+  // std::cout << "grad_output " << grad_output->sizes() << " " << grad_output->strides()<< "\n";
+  // std::cout << "weight " << weight->sizes() << " " << weight->strides()<< "\n";
+  // std::cout << "grad_input_t " << grad_input_t.sizes() << " " << grad_input_t.strides()<< "\n";
+  // std::cout << "grad_weight_t " << grad_weight_t.sizes() << " " << grad_weight_t.strides()<< "\n";
+  // std::cout << "grad_bias_t " << grad_bias_t.sizes() << " " << grad_bias_t.strides()<< "\n";
 
   AT_CUDNN_CHECK(cudnnBatchNormalizationBackward(
     handle, mode, &one, &zero, &one, &zero,
@@ -232,7 +234,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
 
   // std::cout << grad_input_t << "\n";
 
-  AT_CUDA_CHECK(cudaDeviceSynchronize());
+  // AT_CUDA_CHECK(cudaDeviceSynchronize());
 
 
   // std::cout << "Finishing backward cudnn_batch_norm_backward\n";
