@@ -141,7 +141,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     ${static_dispatch_method_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${method_actuals});
+    return table->callUnboxed<${return_type}, ${formals_types}>(${method_actuals});
 #endif
 }
 """)
@@ -171,7 +171,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     ${static_dispatch_function_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${native_actuals});
+    return table->callUnboxed<${return_type}, ${formals_types}>(${native_actuals});
 #endif
 }
 """)
@@ -220,7 +220,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${native_actuals});
+    return table->callUnboxed<${return_type}, ${formals_types}>(${native_actuals});
 #endif
 }
 """)
