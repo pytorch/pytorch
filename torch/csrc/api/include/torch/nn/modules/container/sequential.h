@@ -3,7 +3,7 @@
 #include <torch/detail/static.h>
 #include <torch/nn/cloneable.h>
 #include <torch/nn/module.h>
-#include <torch/nn/modules/any.h>
+#include <torch/nn/modules/container/any.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
