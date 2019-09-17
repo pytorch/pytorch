@@ -55,13 +55,13 @@ public:
     Options& operator=(Options&&) noexcept = delete;
 
     // internal-only for registering stack based kernels
-    Options&& kernel(TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator) && {
-      return std::move(*this).kernel(dispatch_key, kernel_func, std::move(cache_creator), nullptr, nullptr);
+    Options&& kernel(TensorTypeId dispatch_key, BoxedKernelFunction* kernel_func) && {
+      return std::move(*this).kernel(dispatch_key, KernelFunction::makeFromBoxedFunction(kernel_func), nullptr);
     }
 
     // internal-only for registering stack based catch-all kernels
-    Options&& catchAllKernel(KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator) && {
-      return std::move(*this).kernel(c10::nullopt, kernel_func, std::move(cache_creator), nullptr, nullptr);
+    Options&& catchAllKernel(BoxedKernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator) && {
+      return std::move(*this).kernel(c10::nullopt, KernelFunction::makeFromBoxedFunction(kernel_func), nullptr);
     }
 
     // internal only for registering caffe2 ops
@@ -219,7 +219,7 @@ public:
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
     guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> kernel(TensorTypeId dispatch_key) && {
-      static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
       return std::move(*this).kernelFunctor<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(dispatch_key);
@@ -242,7 +242,7 @@ public:
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
     guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> catchAllKernel() && {
-      static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
       return std::move(*this).kernelFunctor<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
@@ -252,7 +252,7 @@ public:
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
     guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyKernel(TensorTypeId dispatch_key) && {
-      static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
       if (legacyATenSchema_.has_value()) {
@@ -269,7 +269,7 @@ public:
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
     guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyCatchAllKernel() && {
-      static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
       if (legacyATenSchema_.has_value()) {
@@ -381,12 +381,10 @@ public:
       return at::aten_op_is_not_moved_to_c10_yet(op_name);
     }
 
-    Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator, void* unboxed_kernel_func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
+    Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction&& func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
       KernelRegistrationConfig config;
       config.dispatch_key = dispatch_key;
-      config.kernel_func = kernel_func;
-      config.cache_creator_func = std::move(cache_creator);
-      config.unboxed_kernel_func = unboxed_kernel_func;
+      config.func = std::move(func);
       config.inferred_function_schema = std::move(inferred_function_schema);
       kernels.push_back(std::move(config));
       return std::move(*this);
@@ -396,31 +394,16 @@ public:
     Options&& kernelFunctor(c10::optional<TensorTypeId>&& dispatch_key, ConstructorParameters&&... constructorParameters) && {
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        &detail::wrap_kernel_functor_boxed<KernelFunctor, AllowDeprecatedTypes>::call,
-        detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
-        reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
+        KernelFunction::makeFromUnboxedFunctor<KernelFunctor>(std::make_shared<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
         detail::FunctionSchemaInferer<KernelFunctor>()()
       );
     }
 
     template<class KernelFunctor, class... ConstructorParameters>
     Options&& kernelFunctorUnboxedOnly(c10::optional<TensorTypeId>&& dispatch_key, ConstructorParameters&&... constructorParameters) && {
-      // Setting cache_creator to nullptr so calling the kernel doesn't need to call it, which would be expensive.
-      // Since the dispatcher static_cast's cache objects into our functor type to call their operator(), this nullptr
-      // will cause it to create and static_cast an invalid cache object, which is technically illegal in the C++ standard,
-      // but it works as long as operator() does not access any functor members.
-      // Exception: Backend extensions use runtime function pointers and store these in the functor as members,
-      // so we need a cache if sizeof...(ConstructorParameters) != 0
-      auto cache_creator =
-        (sizeof...(ConstructorParameters) == 0)
-        ? KernelCacheCreatorFunction(nullptr)
-        : detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...);
-
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        nullptr,
-        std::move(cache_creator),
-        reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
+        KernelFunction::makeFromUnboxedOnlyFunctor<KernelFunctor>(std::make_shared<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
         detail::FunctionSchemaInferer<KernelFunctor>()()
       );
     }
@@ -437,16 +420,15 @@ public:
     struct KernelRegistrationConfig final {
       KernelRegistrationConfig()
         : dispatch_key(c10::nullopt)
-        , kernel_func(nullptr)
-        , cache_creator_func(nullptr)
-        , unboxed_kernel_func(nullptr)
+        , func()
         , inferred_function_schema(nullptr)
       {}
 
       c10::optional<TensorTypeId> dispatch_key;
-      KernelFunction* kernel_func; // can be nullptr, not all kernels have this
-      KernelCacheCreatorFunction cache_creator_func;
-      void* unboxed_kernel_func; // can be nullptr, not all kernels have this
+      //BoxedKernelFunction* kernel_func; // can be nullptr, not all kernels have this
+      //KernelCacheCreatorFunction cache_creator_func;
+      //void* unboxed_kernel_func; // can be nullptr, not all kernels have this
+      KernelFunction func;
       std::unique_ptr<FunctionSchema> inferred_function_schema;
     };
 
@@ -535,8 +517,8 @@ public:
    * >         .kernel<my_kernel_cpu>());
    */
    template<class FuncType>
-   // enable_if: only enable it if FuncType is actually a function, but not a stack based KernelFunction.
-   guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value, RegisterOperators&&>
+   // enable_if: only enable it if FuncType is actually a function, but not a stack based BoxedKernelFunction.
+   guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, BoxedKernelFunction>::value, RegisterOperators&&>
    op(const std::string& schemaOrName, FuncType* func, Options&& options = RegisterOperators::options()) && {
      constexpr bool AllowLegacyTypes = true;
      return std::move(*this).op(std::move(options).schema(schemaOrName).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(c10::nullopt, func));

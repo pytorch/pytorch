@@ -37,9 +37,7 @@ using KernelCacheCreatorFunction = std::function<std::unique_ptr<c10::KernelCach
  * this same cache instance.
  */
 struct DispatchTableEntry final {
-  KernelFunction* kernel_func;  // can be nullptr, not all kernels have this
-  /*not-nullable*/ KernelCacheCreatorFunction cache_creator_func;
-  void* unboxed_kernel_func; // can be nullptr, not all kernels have this
+  KernelFunction kernel;
 };
 
 namespace detail {

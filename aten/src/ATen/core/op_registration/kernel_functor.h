@@ -4,6 +4,9 @@
 #include <ATen/core/ivalue.h>
 
 namespace c10 {
+
+using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
+
 /**
  * Inherit from OperatorKernel to implement a c10 kernel.
  *
