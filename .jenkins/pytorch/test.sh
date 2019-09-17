@@ -203,6 +203,18 @@ test_backward_compatibility() {
   assert_git_not_dirty
 }
 
+test_backward_compatibility() {
+  set -x
+  pushd test/backward_compatibility
+  python dump_all_function_schemas.py --filename new_schemas.txt
+  pip_uninstall torch
+  pip_install --pre torch torchvision -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+  python check_backward_compatibility.py --new-schemas new_schemas.txt
+  popd
+  set +x
+  assert_git_not_dirty
+}
+
 (cd test && python -c "import torch; print(torch.__config__.show())")
 (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 
