@@ -563,6 +563,23 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         for out, ref in zip(final_hiddens_fp16, ref_hid):
             torch.testing.assert_allclose(out, ref)
 
+        # TODO: TorchScript overloads don't work without this wrapper
+        cell_script_fp16 = torch.jit.script(ScriptWrapper(cell_fp16))
+        out_script, hid_script = cell_script_fp16(x, hiddens)
+        self.assertEqual(len(out_script), len(ref_out))
+        for out_val, ref_val in zip(out_script, ref_out):
+            torch.testing.assert_allclose(out_val, ref_val)
+
+        # Test save/load
+        b = io.BytesIO()
+        torch.jit.save(cell_script_fp16, b)
+        b.seek(0)
+        loaded = torch.jit.load(b)
+        out_loaded, hid_loaded = loaded(x, hiddens)
+        for loaded_val, ref_val in zip(out_loaded, ref_out):
+            torch.testing.assert_allclose(loaded_val, ref_val)
+
+
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
