@@ -359,7 +359,7 @@ void qavg_pool2d_nhwc_kernel(const Tensor &qx,
         // TODO: support 16bit, 32bit, and etc.
         constexpr auto vec_width = Vec256<scalar_t>::size() / 4;
         float multiplier = qx.q_scale() / qy.q_scale() / divide_factor;
-#ifdef __AVX3__
+#ifdef __AVX2__
         for (; c + vec_width <= nInputPlane && vec_width == 8; c += vec_width) {
           int64_t tcntr = 0;
           Vec256<int32_t> acc(-qx.q_zero_point() * size);
