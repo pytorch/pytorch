@@ -183,7 +183,7 @@ test_xla() {
 
   echo "Running C++ Tests"
   pushd test/cpp
-  ./run_tests.sh
+  CC=clang-7 CXX=clang++-7 ./run_tests.sh
   popd
   assert_git_not_dirty
 }
