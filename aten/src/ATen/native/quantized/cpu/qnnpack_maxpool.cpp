@@ -12,7 +12,7 @@ namespace {
 
 class QNNPACKMaxPool2D final : public torch::OperatorKernel {
  public:
-#ifdef USE_QNNPACK
+#ifdef USE_PYTORCH_QNNPACK
   Tensor operator()(
       Tensor input,
       const torch::List<int64_t>& kernel_size,
@@ -47,7 +47,7 @@ class QNNPACKMaxPool2D final : public torch::OperatorKernel {
     initQNNPACK();
     const auto scale = input_contig.q_scale();
     const auto zero_point = input_contig.q_zero_point();
-    qnnp_operator_t qnnpack_operator{nullptr};
+    pytorch_qnnp_operator_t qnnpack_operator{nullptr};
 
     int64_t padH = padding[0];
     int64_t padW = padding[1];
@@ -71,24 +71,25 @@ class QNNPACKMaxPool2D final : public torch::OperatorKernel {
     int64_t inW = input_contig.size(2);
     int64_t inC = input_contig.size(3);
 
-    const qnnp_status createStatus = qnnp_create_max_pooling2d_nhwc_u8(
-        padH /* input_padding_top */,
-        padW /* input_padding_right */,
-        padH /* input_padding_bottom */,
-        padW /* input_padding_left */,
-        kH /* pooling height */,
-        kW /* pooling width */,
-        strideH /* stride height */,
-        strideW /* stride width */,
-        dilationH /* dilation height */,
-        dilationW /* dilation width */,
-        inC /* input channels */,
-        std::numeric_limits<uint8_t>::min() /* output min */,
-        std::numeric_limits<uint8_t>::max() /* output max */,
-        0 /* flags */,
-        &qnnpack_operator);
+    const pytorch_qnnp_status createStatus =
+        pytorch_qnnp_create_max_pooling2d_nhwc_u8(
+            padH /* input_padding_top */,
+            padW /* input_padding_right */,
+            padH /* input_padding_bottom */,
+            padW /* input_padding_left */,
+            kH /* pooling height */,
+            kW /* pooling width */,
+            strideH /* stride height */,
+            strideW /* stride width */,
+            dilationH /* dilation height */,
+            dilationW /* dilation width */,
+            inC /* input channels */,
+            std::numeric_limits<uint8_t>::min() /* output min */,
+            std::numeric_limits<uint8_t>::max() /* output max */,
+            0 /* flags */,
+            &qnnpack_operator);
     TORCH_INTERNAL_ASSERT(
-        createStatus == qnnp_status_success,
+        createStatus == pytorch_qnnp_status_success,
         "failed to create QNNPACK MaxPool operator");
     TORCH_INTERNAL_ASSERT(qnnpack_operator != nullptr);
 
@@ -102,8 +103,8 @@ class QNNPACKMaxPool2D final : public torch::OperatorKernel {
         outH > 0 && outW > 0,
         "qnnpack_maxpool(): the resulting output Tensor size should be >= 0");
 
-    std::unique_ptr<qnnp_operator, QnnpackOperatorDeleter> qnnpack_uniq_ptr(
-        qnnpack_operator);
+    std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
+        qnnpack_uniq_ptr(qnnpack_operator);
 
     // NHWC output
     qy = at::_empty_affine_quantized(
@@ -112,25 +113,26 @@ class QNNPACKMaxPool2D final : public torch::OperatorKernel {
         scale,
         zero_point);
 
-    const qnnp_status setupStatus = qnnp_setup_max_pooling2d_nhwc_u8(
-        qnnpack_operator /* max pooling */,
-        batch_size /* batch size */,
-        inH /* input height */,
-        inW /* input width */,
-        (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input */,
-        inC /* input_pixel_stride */,
-        (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
-        outC /* output_pixel_stride */,
-        nullptr /* thread pool */);
+    const pytorch_qnnp_status setupStatus =
+        pytorch_qnnp_setup_max_pooling2d_nhwc_u8(
+            qnnpack_operator /* max pooling */,
+            batch_size /* batch size */,
+            inH /* input height */,
+            inW /* input width */,
+            (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input */,
+            inC /* input_pixel_stride */,
+            (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
+            outC /* output_pixel_stride */,
+            nullptr /* thread pool */);
     TORCH_INTERNAL_ASSERT(
-        setupStatus == qnnp_status_success,
+        setupStatus == pytorch_qnnp_status_success,
         "failed to setup QNNPACK MaxPool operator");
 
     pthreadpool_t threadpool = caffe2::mobile_threadpool();
-    const qnnp_status runStatus =
-        qnnp_run_operator(qnnpack_operator, threadpool);
+    const pytorch_qnnp_status runStatus =
+        pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
     TORCH_INTERNAL_ASSERT(
-        runStatus == qnnp_status_success,
+        runStatus == pytorch_qnnp_status_success,
         "failed to run QNNPACK MaxPool operator");
     return qy;
   }

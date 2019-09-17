@@ -65,9 +65,9 @@ static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
         cudaMemcpyDeviceToDevice,
         copy_stream));
   } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(0), "copy_", [&] {
+    AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, iter.dtype(0), "copy_", [&] {
       using dst_t = scalar_t;
-      AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(1), "copy_", [&] {
+      AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, iter.dtype(1), "copy_", [&] {
         copy_kernel_impl<dst_t, scalar_t>(iter);
       });
     });

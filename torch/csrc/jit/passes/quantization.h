@@ -84,6 +84,15 @@ TORCH_API script::Module InsertQuantDeQuant(
  * Right now this is a fusion for fbgemm backend and only works for quantized
  * conv op, we'll extend to more ops and more backends in the future.
  *
+ * Currently supported fusion:
+ * q(conv2d(dq(a), dq(w), dq(b))) --> to_nchw(fbgemm_conv2d(prepack(to_nhwc(a)),
+ *                                                          prepack(to_nhwc(w)),
+ *                                                          prepack(to_nhwc(b))))
+ *
+ * q(linear(dq(a), dq(w), dq(b))) --> to_nchw(fbgemm_linear(prepack(to_nhwc(a)),
+ *                                                          prepack(to_nhwc(w)),
+ *                                                          prepack(to_nhwc(b))))
+ *
  * \param graph the graph we want to apply fusion
  */
 TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
@@ -95,6 +104,17 @@ TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
  * used on modules in eval mode.
  */
 TORCH_API void FoldConvBatchNorm2d(const script::Module& module);
+
+/** \brief Fold quantize function call into module
+ *
+ *  For the graph in the specified method of module, if we find a quantize_linear
+ *  call on an attribute("weight") of the module, we'll quantize the attribute directly
+ *  and register a new buffer "_quantized_weight" on the module and remove the
+ *  quantize_linear call and replace the use of the quantized weight with
+ *  "_quantized_weight".
+ */
+TORCH_API void FoldQuantizeCallIntoBuffer(script::Module& module, const std::string& method_name);
+
 
 } // namespace jit
 } // namespace torch
