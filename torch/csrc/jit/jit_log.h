@@ -1,29 +1,55 @@
 #pragma once
+#include <memory>
 #include <string>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-// To enable logging please set(export) PYTORCH_JIT_LOG_LEVEL to
-// the ordinal value of one of the following logging levels: 1 for GRAPH_DUMP,
-// 2 for GRAPH_UPDATE, 3 for GRAPH_DEBUG.
-// * Use GRAPH_DUMP for dumping graphs after optimization passes
-// * Use GRAPH_UPDATE for reporting graph transformations (i.e. node deletion,
-//   constant folding, CSE)
-// * Use GRAPH_DEBUG to provide information useful for debugging
+// `TorchScript` offers a simple logging facility that can enabled by setting an
+// environment variable `PYTORCH_JIT_LOG_LEVEL`.
+
+// Logging is enabled on a per file basis. To enable logging in
+// `dead_code_elimination.cpp`, `PYTORCH_JIT_LOG_LEVEL` should be
+// set to `dead_code_elimination.cpp` or, simply, to `dead_code_elimination`
+// (i.e. `PYTORCH_JIT_LOG_LEVEL=dead_code_elimination`).
+
+// Multiple files can be logged by separating each file name with a colon `:` as
+// in the following example,
+// `PYTORCH_JIT_LOG_LEVEL=dead_code_elimination:guard_elimination`
+
+// There are 3 logging levels available for your use ordered by the detail level
+// from lowest to highest.
+
+// * `GRAPH_DUMP` should be used for printing entire graphs after optimization
+// passes
+// * `GRAPH_UPDATE` should be used for reporting graph transformations (i.e.
+// node deletion, constant folding, etc)
+// * `GRAPH_DEBUG` should be used for providing information useful for debugging
 //   the internals of a particular optimization pass or analysis
+
+// The current logging level is `GRAPH_UPDATE` meaning that both `GRAPH_DUMP`
+// and `GRAPH_UPDATE` will be enabled when
+// one specifies a file(s) in `PYTORCH_JIT_LOG_LEVEL`.
+
+// `GRAPH_DEBUG` can be enabled by prefixing a file name with an `>` as in
+// `>alias_analysis`.
+// `>>` and `>>>` are also valid and **currently** are equivalent to
+// `GRAPH_DEBUG` as there is no logging level that is
+// higher than `GRAPH_DEBUG`.
 
 namespace torch {
 namespace jit {
 
 struct Node;
+struct Graph;
 
 enum class JitLoggingLevels {
-  OFF,
-  GRAPH_DUMP,
+  GRAPH_DUMP = 0,
   GRAPH_UPDATE,
   GRAPH_DEBUG,
 };
 
 std::string debugValueOrDefault(const Node* n);
+
+std::string TORCH_API log_function(const std::shared_ptr<Graph> &graph);
 
 TORCH_API JitLoggingLevels jit_log_level();
 
@@ -38,14 +64,19 @@ TORCH_API std::string jit_log_prefix(
     int l,
     const std::string& in_str);
 
+TORCH_API bool is_enabled(const char *cfname, JitLoggingLevels level);
+
 TORCH_API std::ostream& operator<<(std::ostream& out, JitLoggingLevels level);
 
-#define JIT_LOG(level, ...)                                                   \
-  if (jit_log_level() != JitLoggingLevels::OFF && jit_log_level() >= level) { \
-    std::cerr << jit_log_prefix(                                              \
-        level, __FILE__, __LINE__, ::c10::str(__VA_ARGS__));                  \
+#define JIT_LOG(level, ...)                                                    \
+  if (is_enabled(__FILE__, level)) {                                           \
+    std::cerr << jit_log_prefix(level, __FILE__, __LINE__,                     \
+                                ::c10::str(__VA_ARGS__));                      \
   }
 
+// tries to reconstruct original python source
+#define SOURCE_DUMP(MSG, G)                                                    \
+  JIT_LOG(JitLoggingLevels::GRAPH_DUMP, MSG, "\n", log_function(G));
 // use GRAPH_DUMP for dumping graphs after optimization passes
 #define GRAPH_DUMP(MSG, G) \
   JIT_LOG(JitLoggingLevels::GRAPH_DUMP, MSG, "\n", (G)->toString());

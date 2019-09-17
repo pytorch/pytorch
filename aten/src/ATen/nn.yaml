@@ -45,6 +45,9 @@
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
     total_weight: 'true'
+  CPU:
+    forward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
+    backward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
 
 - name: _thnn_nll_loss2d(Tensor self, LongTensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100)
   cname: SpatialClassNLLCriterion
@@ -146,8 +149,8 @@
   cname: SpatialConvolutionMM
   buffers: [finput, fgrad_input]
   CPU:
-    forward_scalar_types: ['Float', 'Double', 'Long']
-    backward_scalar_types: ['Float', 'Double']
+    forward_scalar_types: ['Float', 'Double', 'Long', 'BFloat16']
+    backward_scalar_types: ['Float', 'Double', 'BFloat16']
 
 - name: _thnn_conv_depthwise2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0, IntArrayRef[2] dilation=1)
   cname: SpatialDepthwiseConvolution
@@ -157,5 +160,5 @@
   cname: VolumetricConvolutionMM
   buffers: [finput, fgrad_input]
   CPU:
-    forward_scalar_types: ['Float', 'Double', 'Long']
-    backward_scalar_types: ['Float', 'Double']
+    forward_scalar_types: ['Float', 'Double', 'Long', 'BFloat16']
+    backward_scalar_types: ['Float', 'Double', 'BFloat16']
