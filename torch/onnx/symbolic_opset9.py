@@ -1928,7 +1928,7 @@ def meshgrid(g, tensor_list):
     out = []
     for i, t in enumerate(tensors):
         shape_i = [g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))] * len(tensors)
-        shape_i[i] = g.op("Shape", t)
+        shape_i[i] = tensors_shape[i]
         t_reshaped = _reshape_from_tensor(g, t, g.op("Concat", *shape_i, axis_i=0))
         out.append(g.op("Expand", t_reshaped, out_shape))
     return g.op("prim::ListConstruct", *out)
