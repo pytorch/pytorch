@@ -140,7 +140,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
 
  public:
   // named tuples have additional type information, so we
-  // direclty create them tagged
+  // directly create them tagged
   static c10::intrusive_ptr<Tuple> createNamed(
       std::vector<IValue> elements_,
       std::shared_ptr<TupleType> type_) {
@@ -278,12 +278,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       std::ostream& out,
       const Future& v);
 
-  TypePtr type() {
-    if (!completed()) {
-      return type_;
-    } else {
-      return value().type();
-    }
+  TypePtr type() const {
+    return type_;
   }
 
  private:
