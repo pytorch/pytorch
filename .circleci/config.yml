@@ -251,6 +251,14 @@ binary_linux_build_params: &binary_linux_build_params
   docker:
     - image: << parameters.docker_image >>
 
+
+binary_linux_build_params_cuda101: &binary_linux_build_params_cuda101
+  <<: *binary_linux_build_params
+  environment:
+    BUILD_ENVIRONMENT: << parameters.build_environment >>
+    LIBTORCH_VARIANT: << parameters.libtorch_variant >>
+    ANACONDA_USER: pytorch
+
 binary_linux_test_upload_params: &binary_linux_test_upload_params
   parameters:
     build_environment:
@@ -634,8 +642,8 @@ jobs:
 
   binary_linux_build_cuda101:
     <<: *binary_linux_build
-    environment:
-      ANACONDA_USER: pytorch
+    <<: *binary_linux_build_params_cuda101
+
 
 
 
