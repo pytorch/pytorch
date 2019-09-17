@@ -77,12 +77,9 @@ void logical_xor_kernel_cuda(TensorIterator& iter) {
 }
 
 void lt_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "lt_cuda_result_", [&] {
-    using return_t = scalar_t;
-    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.input_dtype(), "lt_cpu", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> return_t {
-        return a < b;
-      });
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.input_dtype(), "lt_cpu", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+      return a < b;
     });
   });
 }

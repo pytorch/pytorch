@@ -7317,7 +7317,7 @@ class _TestTorchMixin(torchtest):
                     torch.ne(x, b, out=boolRes)
                     self.assertEqual(byteRes.bool(), boolRes)
 
-                    self.assertEquals(len(warningsCount), 5)
+                    self.assertEquals(len(warningsCount), 6)
 
             # Bool Tensor
             x = torch.tensor([True, False, True, False], device=device)
@@ -12168,6 +12168,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         ge = x >= y
         for idx in iter_indices(x):
             self.assertEqual(x[idx] >= y[idx], ge[idx] == 1)
+
+    def test_comparison_ops_with_type_promotion(self):
+        x = torch.tensor([1 << 5], dtype=torch.uint8, device=device)
+        y = torch.tensor([1 << 15], dtype=torch.int32, device=device)
+        result = torch.lt(x, y, out=x)
+        self.assertEqual(result, torch.tensor([True]))
 
     def test_bitwise_ops(self):
         x = torch.randn(5, 5).gt(0)
