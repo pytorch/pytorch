@@ -65,9 +65,10 @@ namespace detail {
     }
   };
 
+  // NB: No universal forwarding
   template <typename... Args>
-  TensorTypeSet multi_dispatch_tensor_type_set(Args&&... args) {
-    return MultiDispatchTensorTypeSet().apply(std::forward<Args>(args)...).ts;
+  TensorTypeSet multi_dispatch_tensor_type_set(Args... args) {
+    return MultiDispatchTensorTypeSet().apply(args...).ts;
   }
 }
 
@@ -80,6 +81,7 @@ class CAFFE2_API ATenOpTable {
   ATenOpTable(std::string schema)
     : schema_(std::move(schema)) {}
 
+  // NB: No universal forwarding
   template<class Result, class... Args>
   Result callUnboxed(Args... args) const;
 
@@ -134,7 +136,8 @@ CAFFE2_API ATenDispatch& globalATenDispatch();
 template<class Result, class... Args>
 Result ATenOpTable::callUnboxed(Args... args) const {
   using FuncType = Result(Args...);
-  TensorTypeSet ts = detail::multi_dispatch_tensor_type_set(std::forward<Args>(args)...);
+  // NB: No universal forwarding (takes const& only)
+  TensorTypeSet ts = detail::multi_dispatch_tensor_type_set(args...);
   TensorTypeId tid = impl::dispatchTypeId(ts);
 
   // You might think we can eliminate the second branch by maintaining a
