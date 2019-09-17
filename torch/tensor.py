@@ -1,7 +1,7 @@
 import sys
 import torch
 import torch._C as _C
-from torch._namedtensor_internals import update_names, check_serializing_named_tensor, resolve_glob
+from torch._namedtensor_internals import update_names, check_serializing_named_tensor, resolve_ellipsis
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
@@ -486,11 +486,11 @@ class Tensor(torch._C._TensorBase):
         return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=1)
 
     def refine_names(self, *names):
-        names = resolve_glob(names, self.names, 'refine_names')
+        names = resolve_ellipsis(names, self.names, 'refine_names')
         return super(Tensor, self).refine_names(names)
 
     def align_to(self, *names):
-        return super(Tensor, self).align_to(resolve_glob(names, self.names, 'align_to'))
+        return super(Tensor, self).align_to(resolve_ellipsis(names, self.names, 'align_to'))
 
     def names_(self, *names, **rename_map):
         # Note [names_ / renamed API]
