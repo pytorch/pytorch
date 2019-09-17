@@ -1519,14 +1519,12 @@
     - CUDA
   variants: function
   options:
-    - cname: varall
+    - cname: var_all
       return: accreal
       arguments:
         - THTensor* self
-        - arg: bool unbiased
-          if_true: 0
-          if_false: 1
-    - cname: var
+        - bool unbiased
+    - cname: var_single
       return: argument 0
       scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
@@ -1535,9 +1533,7 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - arg: bool unbiased
-          if_true: 0
-          if_false: 1
+        - bool unbiased
         - bool keepdim
 ]]
 [[
@@ -1549,14 +1545,12 @@
     - CUDA
   variants: function
   options:
-    - cname: stdall
+    - cname: std_all
       return: accreal
       arguments:
         - THTensor* self
-        - arg: bool unbiased
-          if_true: 0
-          if_false: 1
-    - cname: std
+        - bool unbiased
+    - cname: std_single
       return: argument 0
       scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
@@ -1565,9 +1559,7 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - arg: bool unbiased
-          if_true: 0
-          if_false: 1
+        - bool unbiased
         - bool keepdim
 ]]
 [[
