@@ -33,7 +33,6 @@ class PYBIND11_EXPORT PythonRpcHandler {
   PythonRpcHandler(PythonRpcHandler&&) = delete;
   PythonRpcHandler& operator=(PythonRpcHandler&&) = delete;
 
-  py::object module_;
   py::object runUDFFunction_;
   py::object loadResultFunction_;
 };

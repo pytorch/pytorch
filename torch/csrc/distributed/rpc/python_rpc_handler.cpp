@@ -6,10 +6,10 @@ namespace rpc {
 
 PythonRpcHandler::PythonRpcHandler() {
   AutoGIL ag;
-  py::object module_ =
+  py::object module =
       py::module::import("torch.distributed.internal_rpc_utils");
-  runUDFFunction_ = module_.attr("run_python_udf_internal");
-  loadResultFunction_ = module_.attr("load_python_udf_result_internal");
+  runUDFFunction_ = module.attr("run_python_udf_internal");
+  loadResultFunction_ = module.attr("load_python_udf_result_internal");
 }
 
 PythonRpcHandler& PythonRpcHandler::getInstance() {
