@@ -14,7 +14,6 @@ np_str_obj_array_pattern = re.compile(r'[SaUO]')
 
 def default_convert(data):
     r"""Converts each NumPy array data field into a tensor"""
-
     elem_type = type(data)
     if isinstance(data, torch.Tensor):
         return data
@@ -28,7 +27,7 @@ def default_convert(data):
     elif isinstance(data, container_abcs.Mapping):
         return {key: default_convert(data[key]) for key in data}
     elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
-        return elem_type(default_convert(d) for d in data)
+        return elem_type(*(default_convert(d) for d in data))
     elif isinstance(data, container_abcs.Sequence) and not isinstance(data, string_classes):
         return [default_convert(d) for d in data]
     else:
