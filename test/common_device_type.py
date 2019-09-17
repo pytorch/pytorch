@@ -83,18 +83,39 @@ device_type_test_bases = []
 class DeviceTypeTestBase(TestCase):
     device_type = "generic_device_type"
 
+    # Returns the dtypes the test has requested.
+    # Prefers device-specific dtype specifications over generic ones.
+    @classmethod
+    def _get_dtypes(cls, test):
+        if not hasattr(test, 'dtypes'):
+            return None
+        return test.dtypes.get(cls.device_type, test.dtypes.get('all', None))
+
     # Creates device-specific tests.
     @classmethod
     def instantiate_test(cls, test):
         test_name = test.__name__ + "_" + cls.device_type
 
-        assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
+        dtypes = cls._get_dtypes(test)
+        if dtypes is None:  # Test has no dtype variants
+            assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
 
-        @wraps(test)
-        def instantiated_test(self, test=test):
-            return test(self, cls.device_type)
+            @wraps(test)
+            def instantiated_test(self, test=test):
+                return test(self, cls.device_type)
 
-        setattr(cls, test_name, instantiated_test)
+            setattr(cls, test_name, instantiated_test)
+        else:  # Test has dtype variants
+            for dtype in dtypes:
+                dtype_str = str(dtype).split('.')[1]
+                dtype_test_name = test_name + "_" + dtype_str
+                assert not hasattr(cls, dtype_test_name), "Redefinition of test {0}".format(dtype_test_name)
+
+                @wraps(test)
+                def instantiated_test(self, test=test, dtype=dtype):
+                    return test(self, cls.device_type, dtype)
+
+                setattr(cls, dtype_test_name, instantiated_test)
 
 
 class CPUTestBase(DeviceTypeTestBase):
@@ -141,26 +162,40 @@ def instantiate_device_type_tests(generic_test_class, scope):
     generic_members = set(dir(generic_test_class)) - set(dir(empty_class))
     generic_tests = [x for x in generic_members if x.startswith('test')]
 
+    # TODO: remove
     # Checks that the generic test suite only has test members
     # Note: for Python2 compat.
     # Note: Nontest members can be inherited, so if you want to use a helper
     #   function you can put it in a base class.
-    generic_nontests = generic_members - set(generic_tests)
-    assert len(generic_nontests) == 0, "Generic device class has non-test members"
+    # generic_nontests = generic_members - set(generic_tests)
+    #assert len(generic_nontests) == 0, "Generic device class has non-test members"
 
     for base in device_type_test_bases:
         # Creates the device-specific test case
         class_name = generic_test_class.__name__ + base.device_type.upper()
         device_type_test_class = type(class_name, (base, empty_class), {})
 
-        for name in generic_tests:
-            # Attempts to acquire a function from the attribute
-            test = getattr(generic_test_class, name)
-            if hasattr(test, '__func__'):
-                test = test.__func__
-            assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
-            # Instantiates the device-specific tests
-            device_type_test_class.instantiate_test(test)
+        for name in generic_members:
+            if name in generic_tests:  # Instantiates test member
+
+                # Requires tests be a function for Python2 compat
+                # (In Python2 tests are type checked methods wrapping functions)
+                test = getattr(generic_test_class, name)
+                if hasattr(test, '__func__'):
+                    test = test.__func__
+                assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
+
+                # Instantiates the device-specific tests
+                device_type_test_class.instantiate_test(test)
+            else:  # Ports non-test member
+                assert not hasattr(device_type_test_class, name), "Redefinition of non-test member {0}".format(name)
+
+                # Unwraps to functions (when available) for Python2 compat
+                nontest = getattr(generic_test_class, name)
+                if hasattr(nontest, '__func__'):
+                    nontest = nontest.__func__
+
+                setattr(device_type_test_class, name, nontest)
 
         # Mimics defining the instantiated class in the caller's file
         # by setting its module to the given class's and adding
@@ -227,6 +262,52 @@ class onlyOn(object):
             return fn(slf, device, *args, **kwargs)
 
         return only_fn
+
+
+# Lists of Torch types
+DOCUMENTED_TENSOR_TYPES = [torch.float64, torch.float32, torch.float16,
+                           torch.int64, torch.int32, torch.int16, torch.int8,
+                           torch.uint8, torch.bool]
+
+# SCALAR_TYPES = DOCUMENTED_TENSOR_TYPES - half and bool
+SCALAR_TYPES = [torch.float64, torch.float32,
+                torch.int64, torch.int32, torch.int16, torch.int8,
+                torch.uint8]
+
+# Decorator that instantiates a variant of the test for each given dtype.
+# Notes:
+#   (1) Tests that accept the dtype argument MUST use this decorator.
+#   (2) Can be overriden using dtypesIfCPU or dtypesIfCUDA.
+#   (3) Prefer the existing decorators to defining the 'device_type' kwarg.
+class dtypes(object):
+
+    # Note: *args, **kwargs for Python2 compat.
+    # Python 3 allows (self, *args, device_type='all').
+    def __init__(self, *args, **kwargs):
+        assert all(arg in DOCUMENTED_TENSOR_TYPES for arg in args), "Unknown dtype in {0}".format(str(args))
+        self.args = args
+        self.device_type = kwargs.get('device_type', 'all')
+
+    def __call__(self, fn):
+        d = getattr(fn, 'dtypes', {})
+        assert self.device_type not in d, "dtypes redefinition for {0}".format(self.device_type)
+        d[self.device_type] = self.args
+        fn.dtypes = d
+        return fn
+
+
+# Overrides specified dtypes on the CPU.
+class dtypesIfCPU(dtypes):
+
+    def __init__(self, *args):
+        super(dtypesIfCPU, self).__init__(*args, device_type='cpu')
+
+
+# Overrides specified dtypes on CUDA.
+class dtypesIfCUDA(dtypes):
+
+    def __init__(self, *args):
+        super(dtypesIfCUDA, self).__init__(*args, device_type='cuda')
 
 
 def onlyCPU(fn):
