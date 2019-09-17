@@ -89,13 +89,16 @@ TEST(TensorIteratorTest, SerialLoopPointwise_##name) {                          
   ASSERT_ANY_THROW(out.equal(expected));                                                            \
 }
 
+// The alternative way to calculate a < b is (b - a).clamp(0).toBool()
+// To prevent an overflow in subtraction (b - a) for unsigned types(unit, bool)
+// we will convert in to int first
 #define COMPARISON_TEST_ITER_FOR_TYPE(ctype,name)                                          \
 TEST(TensorIteratorTest, ComparisonLoopBinary_##name) {                                    \
   auto in1 = random_tensor_for_type(k##name);                                              \
   auto in2 = random_tensor_for_type(k##name);                                              \
   Tensor out = at::empty({0}, in1.options().dtype(kBool));                                 \
   Tensor diff;                                                                             \
-  if (k##name == kByte || k##name == kBool) {                                                                  \
+  if (k##name == kByte || k##name == kBool) {                                              \
     diff = in2.to(kInt).sub(in1.to(kInt));                                                 \
   } else {                                                                                 \
     diff = in2.sub(in1);                                                                   \
