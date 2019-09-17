@@ -199,10 +199,10 @@ class DataLoader(object):
             drop_last = False
         elif batch_size is None:
             # no auto_collation
-            if shuffle or sampler is not None or drop_last:
+            if shuffle or drop_last:
                 raise ValueError('batch_size=None option disables auto-batching '
                                  'and is mutually exclusive with '
-                                 'shuffle, sampler, and drop_last')
+                                 'shuffle, and drop_last')
 
         if sampler is None:  # give default samplers
             if self._dataset_kind == _DatasetKind.Iterable:

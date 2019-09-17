@@ -14,8 +14,7 @@ from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, \
     ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, _LRScheduler, \
     CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
-from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    skipIfRocm
+from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -285,7 +284,6 @@ class TestOptim(TestCase):
             [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
         )
 
-    @skipIfRocm
     def test_adam(self):
         self._test_basic_cases(
             lambda weight, bias: optim.Adam([weight, bias], lr=1e-3)
@@ -401,7 +399,6 @@ class TestOptim(TestCase):
              lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
         )
 
-    @skipIfRocm
     def test_adamax(self):
         self._test_basic_cases(
             lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1)
@@ -426,7 +423,6 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
             optim.RMSprop(None, lr=1e-2, momentum=-1.0)
 
-    @skipIfRocm
     def test_asgd(self):
         self._test_basic_cases(
             lambda weight, bias: optim.ASGD([weight, bias], lr=1e-3, t0=100)
@@ -451,7 +447,6 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
             optim.Rprop(None, lr=1e-2, etas=(1.0, 0.5))
 
-    @skipIfRocm
     def test_lbfgs(self):
         self._test_basic_cases(
             lambda weight, bias: optim.LBFGS([weight, bias]),
@@ -1287,6 +1282,29 @@ class TestLRScheduler(TestCase):
                         momentum_target[batch_num], param_group['momentum'],
                         msg='Momentum is wrong in batch_num {}: expected {}, got {}'.format(
                             batch_num, momentum_target[batch_num], param_group['momentum']), delta=1e-5)
+
+    def test_cosine_then_cyclic(self):
+        # https://github.com/pytorch/pytorch/issues/21965
+
+        max_lr = 0.3
+        base_lr = 0.1
+        optim_lr = 0.5
+
+        model = torch.nn.Linear(2, 1)
+        optimizer = torch.optim.SGD(model.parameters(), lr=optim_lr)
+        lr_scheduler_1 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20, eta_min=0.1)
+        lr_scheduler_2 = torch.optim.lr_scheduler.CyclicLR(
+            optimizer, base_lr=base_lr, max_lr=max_lr, step_size_up=1, step_size_down=3
+        )
+
+        for i in range(40):
+            if i <= lr_scheduler_1.T_max:
+                lr_scheduler_1.step()
+            else:
+                lr_scheduler_2.step()
+            last_lr = optimizer.param_groups[0]["lr"]
+
+        self.assertLessEqual(last_lr, max_lr)
 
 if __name__ == '__main__':
     run_tests()
