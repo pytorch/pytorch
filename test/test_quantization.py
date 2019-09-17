@@ -857,8 +857,6 @@ class QuantizationDebugTest(QuantizationTestCase):
                 ref_scale = 0.0286274
                 ref_zero_point = -128 if qdtype is torch.qint8 else 0
 
-        print("ref scale = ", ref_scale)
-        print("qparams scale = ", qparams[0])
         self.assertEqual(qparams[1].item(), ref_zero_point)
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
 
