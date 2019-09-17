@@ -12173,8 +12173,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         for device in torch.testing.get_all_device_types():
             x = torch.tensor([1 << 5], dtype=torch.uint8, device=device)
             y = torch.tensor([1 << 15], dtype=torch.int32, device=device)
-            result = torch.lt(x, y, out=x)
-            self.assertEqual(result, torch.tensor([True]))
+            torch.lt(x, y, out=x)
+            self.assertEqual(x, torch.tensor([True]))
+
+            x = torch.tensor([1 << 5], dtype=torch.uint8, device=device)
+            torch.lt(y, x, out=x)
+            self.assertEqual(x, torch.tensor([False]))
 
     def test_bitwise_ops(self):
         x = torch.randn(5, 5).gt(0)
