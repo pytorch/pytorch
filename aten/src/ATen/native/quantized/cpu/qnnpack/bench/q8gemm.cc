@@ -98,7 +98,7 @@ class Q8GEMM : public benchmark::Fixture {
         kcStride() * ncStride() +
         ncStride() * sizeof(int32_t) / sizeof(uint8_t));
     std::fill(w_.begin(), w_.end(), 127);
-    pack_q8gemm_w(
+    pytorch_pack_q8gemm_w(
         nc(),
         kc(),
         nr(),
@@ -259,7 +259,7 @@ class Q8GEMM_XZP : public Q8GEMM {
     std::generate(b_.begin(), b_.end(), std::ref(s32rng));
     w_.resize(ncStride() * (kcStride() + sizeof(int32_t) / sizeof(uint8_t)));
     std::fill(w_.begin(), w_.end(), 127);
-    pack_swizzle_q8gemm_b(
+    pytorch_pack_swizzle_q8gemm_b(
         nc(),
         kc(),
         np(),
@@ -593,7 +593,7 @@ static void q8gemm_compute_row_sum(
     int32_t* row_sum) {
   const size_t block_size = 4;
   for (size_t block_start = 0; block_start < m; block_start += block_size) {
-    q8sumrows_ukernel_4x__neon(
+    pytorch_q8sumrows_ukernel_4x__neon(
         a + block_start * stride,
         std::min(block_size, m - block_start),
         k,
@@ -608,7 +608,7 @@ static void q8gemm_compute_row_sum(
 BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 4x8__aarch32_neon, 4, 8, 8, 1)
 (benchmark::State& state) {
   for (auto _ : state) {
-    q8gemm_ukernel_4x8__aarch32_neon(
+    pytorch_q8gemm_ukernel_4x8__aarch32_neon(
         mr(),
         nr(),
         kc(),
@@ -628,7 +628,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 4x8__aarch32_neon, 4, 8, 8, 1)
       const uint32_t mrr = min(mc() - m, mr());
       for (uint32_t n = 0; n < nc(); n += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        q8gemm_ukernel_4x8__aarch32_neon(
+        pytorch_q8gemm_ukernel_4x8__aarch32_neon(
             mrr,
             nrr,
             kc(),
@@ -654,7 +654,7 @@ BENCHMARK_TEMPLATE_F(Q8GEMM_XZP_L1, 4x8c2__aarch32_neon, 4, 8, 8, 2)
 (benchmark::State& state) {
   for (auto _ : state) {
     q8gemm_compute_row_sum(a(), mr(), kc(), kc(), -64, aRowSums());
-    q8gemm_xzp_ukernel_4x8c2__aarch32_neon(
+    pytorch_q8gemm_xzp_ukernel_4x8c2__aarch32_neon(
         mr(),
         nr(),
         kc(),
@@ -676,7 +676,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_XZP_Op, 4x8c2__aarch32_neon, 4, 8, 8, 2)
       const uint32_t mrr = min(mc() - m, mr());
       for (uint32_t n = 0; n < nc(); n += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        q8gemm_xzp_ukernel_4x8c2__aarch32_neon(
+        pytorch_q8gemm_xzp_ukernel_4x8c2__aarch32_neon(
             mrr,
             nrr,
             kc(),
@@ -705,7 +705,7 @@ BENCHMARK_REGISTER_F(Q8GEMM_XZP_Op, 4x8c2__aarch32_neon)->Apply(GemmArguments);
 BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 8x8__aarch64_neon, 8, 8, 8, 1)
 (benchmark::State& state) {
   for (auto _ : state) {
-    q8gemm_ukernel_8x8__aarch64_neon(
+    pytorch_q8gemm_ukernel_8x8__aarch64_neon(
         mr(),
         nr(),
         kc(),
@@ -725,7 +725,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 8x8__aarch64_neon, 8, 8, 8, 1)
       const uint32_t mrr = min(mc() - m, mr());
       for (uint32_t n = 0; n < nc(); n += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        q8gemm_ukernel_8x8__aarch64_neon(
+        pytorch_q8gemm_ukernel_8x8__aarch64_neon(
             mrr,
             nrr,
             kc(),
@@ -753,7 +753,7 @@ BENCHMARK_REGISTER_F(Q8GEMM_Op, 8x8__aarch64_neon)->Apply(GemmArguments);
 BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 4x8__neon, 4, 8, 8, 1)
 (benchmark::State& state) {
   for (auto _ : state) {
-    q8gemm_ukernel_4x8__neon(
+    pytorch_q8gemm_ukernel_4x8__neon(
         mr(),
         nr(),
         kc(),
@@ -769,7 +769,7 @@ BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 4x8__neon, 4, 8, 8, 1)
 BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 8x8__neon, 8, 8, 8, 1)
 (benchmark::State& state) {
   for (auto _ : state) {
-    q8gemm_ukernel_8x8__neon(
+    pytorch_q8gemm_ukernel_8x8__neon(
         mr(),
         nr(),
         kc(),
@@ -789,7 +789,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 4x8__neon, 4, 8, 8, 1)
       const uint32_t mrr = min(mc() - m, mr());
       for (uint32_t n = 0; n < nc(); n += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        q8gemm_ukernel_4x8__neon(
+        pytorch_q8gemm_ukernel_4x8__neon(
             mrr,
             nrr,
             kc(),
@@ -816,7 +816,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 8x8__neon, 8, 8, 8, 1)
       const uint32_t mrr = min(mc() - m, mr());
       for (uint32_t n = 0; n < nc(); n += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        q8gemm_ukernel_8x8__neon(
+        pytorch_q8gemm_ukernel_8x8__neon(
             mrr,
             nrr,
             kc(),
@@ -840,7 +840,7 @@ BENCHMARK_TEMPLATE_F(Q8GEMM_XZP_L1, 4x8c2_neon, 4, 8, 8, 2)
 (benchmark::State& state) {
   for (auto _ : state) {
     q8gemm_compute_row_sum(a(), mr(), kc(), kc(), -64, aRowSums());
-    q8gemm_xzp_ukernel_4x8c2__neon(
+    pytorch_q8gemm_xzp_ukernel_4x8c2__neon(
         mr(),
         nr(),
         kc(),
@@ -862,7 +862,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_XZP_Op, 4x8c2_neon, 4, 8, 8, 2)
       const uint32_t mrr = min(mc() - m, mr());
       for (uint32_t n = 0; n < nc(); n += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        q8gemm_xzp_ukernel_4x8c2__neon(
+        pytorch_q8gemm_xzp_ukernel_4x8c2__neon(
             mrr,
             nrr,
             kc(),
@@ -898,7 +898,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(
     const size_t block_size = 4;
     for (size_t block_start = 0; block_start < mc();
          block_start += block_size) {
-      q8sumrows_ukernel_4x__neon(
+      pytorch_q8sumrows_ukernel_4x__neon(
           a() + block_start * kc(),
           min(block_size, mc() - block_start),
           kc(),
@@ -924,7 +924,7 @@ BENCHMARK_REGISTER_F(COMPUTE_ROW_SUM_Op, compute_row_sum_neon)
 BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 2x4c8__sse2, 2, 4, 1, 8)
 (benchmark::State& state) {
   for (auto _ : state) {
-    q8gemm_ukernel_2x4c8__sse2(
+    pytorch_q8gemm_ukernel_2x4c8__sse2(
         mr(),
         nr(),
         kc(),
@@ -940,7 +940,7 @@ BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 2x4c8__sse2, 2, 4, 1, 8)
 BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 4x4c2__sse2, 4, 4, 4, 2)
 (benchmark::State& state) {
   for (auto _ : state) {
-    q8gemm_ukernel_4x4c2__sse2(
+    pytorch_q8gemm_ukernel_4x4c2__sse2(
         mr(),
         nr(),
         kc(),
@@ -960,7 +960,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 2x4c8__sse2, 2, 4, 1, 8)
       const uint32_t mrr = min(mc() - m, mr());
       for (uint32_t n = 0; n < nc(); n += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        q8gemm_ukernel_2x4c8__sse2(
+        pytorch_q8gemm_ukernel_2x4c8__sse2(
             mrr,
             nrr,
             kc(),
@@ -988,7 +988,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 4x4c2__sse2, 4, 4, 4, 2)
       const uint32_t mrr = min(mc() - m, mr());
       for (uint32_t n = 0; n < nc(); n += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        q8gemm_ukernel_4x4c2__sse2(
+        pytorch_q8gemm_ukernel_4x4c2__sse2(
             mrr,
             nrr,
             kc(),
