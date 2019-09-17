@@ -78,7 +78,7 @@ DistAutogradContext& DistAutogradContainer::getOrCreateContext(
   return context;
 }
 
-int64_t DistAutogradContainer::getWorkerID() {
+int64_t DistAutogradContainer::getWorkerID() const {
   return worker_id_;
 }
 

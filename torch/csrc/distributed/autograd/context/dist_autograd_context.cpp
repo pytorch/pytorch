@@ -12,15 +12,18 @@ int64_t DistAutogradContext::context_id() const {
   return context_id_;
 }
 
-std::vector<rpc::WorkerId> DistAutogradContext::getKnownWorkerIds() const {
+std::bitset<std::numeric_limits<rpc::worker_id_t>::max()> DistAutogradContext::
+    getKnownWorkerIds() const {
   return knownWorkerIDs_;
 };
 
 void DistAutogradContext::addKnownWorkerID(const rpc::WorkerId& workerId) {
   std::lock_guard<std::mutex> guard(lock_);
-  if (std::find(knownWorkerIDs_.begin(), knownWorkerIDs_.end(), workerId) ==
-      knownWorkerIDs_.end()) {
-    knownWorkerIDs_.push_back(workerId);
+
+  auto id = workerId.id_;
+
+  if (!knownWorkerIDs_.test(id)) {
+    knownWorkerIDs_.set(id);
   }
 }
 
