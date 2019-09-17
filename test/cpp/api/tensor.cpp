@@ -247,6 +247,29 @@ TEST(TensorTest, ContainsCorrectValuesForMultidimValuesVariable_CUDA) {
   }
 }
 
+TEST(TensorTest, PrettyPrintListInitTensor) {
+  {
+    ASSERT_EQ(
+      c10::str(torch::detail::ListInitTensor(1.1)),
+      "1.1");
+  }
+  {
+    ASSERT_EQ(
+      c10::str(torch::detail::ListInitTensor({1.1, 2.2})),
+      "{1.1, 2.2}");
+  }
+  {
+    ASSERT_EQ(
+      c10::str(torch::detail::ListInitTensor({{1, 2}, {3, 4}})),
+      "{{1, 2}, {3, 4}}");
+  }
+  {
+    ASSERT_EQ(
+      c10::str(torch::detail::ListInitTensor({{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}})),
+      "{{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}}");
+  }
+}
+
 TEST(TensorTest, ContainsCorrectValuesWhenConstructedFromVector) {
   std::vector<int> v = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
   auto tensor = at::tensor(v);

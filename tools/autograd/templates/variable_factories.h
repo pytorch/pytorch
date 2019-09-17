@@ -18,7 +18,9 @@
 using at::DimnameList;
 #endif
 
-namespace {
+namespace torch {
+
+namespace detail {
   enum class ListInitTensorType { Scalar, InitList };
 
   // We use `ListInitTensor` to support converting an arbitrarily nested braced-init-list
@@ -99,7 +101,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 
     void pretty_print_recursive(std::ostream& stream) const {
       if (type_ == ListInitTensorType::Scalar) {
-        AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, scalar_type_, "ListInitTensor_pretty_print_scalar", [&] {
+        AT_DISPATCH_ALL_TYPES_AND3(at::kBool, at::kHalf, at::kBFloat16, scalar_type_, "ListInitTensor_pretty_print_scalar", [&] {
           stream << const_cast<c10::Scalar&>(scalar_).to<scalar_t>();
         });
       } else if (type_ == ListInitTensorType::InitList) {
@@ -134,13 +136,11 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
     ListInitTensorType type_;
   };
 
-  std::ostream& operator<<(std::ostream& stream, const ListInitTensor& list_init_tensor) {
+  inline std::ostream& operator<<(std::ostream& stream, const ListInitTensor& list_init_tensor) {
     list_init_tensor.pretty_print_recursive(stream);
     return stream;
   }
-}
-
-namespace torch {
+} // namespace detail
 
 #define TENSOR(T, S)                                                       \
   inline at::Tensor tensor(                                                \
@@ -170,11 +170,11 @@ namespace torch {
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
 
-inline at::Tensor tensor(ListInitTensor list_init_tensor, const at::TensorOptions& options) {
+inline at::Tensor tensor(detail::ListInitTensor list_init_tensor, const at::TensorOptions& options) {
   return autograd::make_variable(list_init_tensor.to_tensor(options), options.requires_grad());
 }
 
-inline at::Tensor tensor(ListInitTensor list_init_tensor) {
+inline at::Tensor tensor(detail::ListInitTensor list_init_tensor) {
   return torch::tensor(list_init_tensor, at::dtype(list_init_tensor.scalar_type()));
 }
 
