@@ -47,7 +47,7 @@ void SubgraphRewriter::runOnGraph(
 
 void SubgraphRewriter::rewriteSinglePatternOnGraph(
     std::shared_ptr<Graph>& graph,
-    RewritePatternDescr pattern,
+    const RewritePatternDescr& pattern,
     const std::function<
         bool(const Match&, const std::unordered_map<std::string, Value*>&)>&
         filter) {
