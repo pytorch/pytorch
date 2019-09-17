@@ -1524,30 +1524,40 @@ workflows:
           build_environment: "manywheel 2.7m cu101 devtoolset7"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build_cuda10.1:
           name: binary_linux_manywheel_2_7mu_cu101_devtoolset7_build
           build_environment: "manywheel 2.7mu cu101 devtoolset7"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build_cuda10.1:
           name: binary_linux_manywheel_3_5m_cu101_devtoolset7_build
           build_environment: "manywheel 3.5m cu101 devtoolset7"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build_cuda10.1:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_build
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build_cuda10.1:
           name: binary_linux_manywheel_3_7m_cu101_devtoolset7_build
           build_environment: "manywheel 3.7m cu101 devtoolset7"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_conda_2_7_cpu_devtoolset7_build
@@ -1626,24 +1636,32 @@ workflows:
           build_environment: "conda 2.7 cu101 devtoolset7"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           docker_image: "soumith/conda-cuda"
       - binary_linux_build_cuda10.1:
           name: binary_linux_conda_3_5_cu101_devtoolset7_build
           build_environment: "conda 3.5 cu101 devtoolset7"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           docker_image: "soumith/conda-cuda"
       - binary_linux_build_cuda10.1:
           name: binary_linux_conda_3_6_cu101_devtoolset7_build
           build_environment: "conda 3.6 cu101 devtoolset7"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           docker_image: "soumith/conda-cuda"
       - binary_linux_build_cuda10.1:
           name: binary_linux_conda_3_7_cu101_devtoolset7_build
           build_environment: "conda 3.7 cu101 devtoolset7"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           docker_image: "soumith/conda-cuda"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps_build
@@ -1734,6 +1752,8 @@ workflows:
           build_environment: "libtorch 2.7m cu101 devtoolset7"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           libtorch_variant: "shared-with-deps"
           docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build_cuda10.1:
@@ -1741,6 +1761,8 @@ workflows:
           build_environment: "libtorch 2.7m cu101 devtoolset7"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           libtorch_variant: "shared-without-deps"
           docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build_cuda10.1:
@@ -1748,6 +1770,8 @@ workflows:
           build_environment: "libtorch 2.7m cu101 devtoolset7"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           libtorch_variant: "static-with-deps"
           docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build_cuda10.1:
@@ -1755,6 +1779,8 @@ workflows:
           build_environment: "libtorch 2.7m cu101 devtoolset7"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           libtorch_variant: "static-without-deps"
           docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
@@ -1846,6 +1872,8 @@ workflows:
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           libtorch_variant: "shared-with-deps"
           docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build_cuda10.1:
@@ -1853,6 +1881,8 @@ workflows:
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           libtorch_variant: "shared-without-deps"
           docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build_cuda10.1:
@@ -1860,6 +1890,8 @@ workflows:
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           libtorch_variant: "static-with-deps"
           docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build_cuda10.1:
@@ -1867,6 +1899,8 @@ workflows:
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
+          environment:
+            ANACONDA_USER: pytorch
           libtorch_variant: "static-without-deps"
           docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_mac_build:
