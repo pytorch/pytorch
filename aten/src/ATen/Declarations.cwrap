@@ -1469,20 +1469,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_round
-  cname: round
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_trunc
   cname: trunc
   types:
