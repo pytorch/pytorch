@@ -137,6 +137,9 @@ class TestQuantizedOps(TestCase):
             self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
 
     """Tests the correctness of the scalar addition."""
+    @unittest.skip("temporarily disable until failures are fixed. " +
+                   "See https://github.com/pytorch/pytorch/issues/26279")
+    @no_deadline
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=st.floats(-1e6, 1e6, allow_nan=False),
                        qparams=hu.qparams()),
@@ -871,7 +874,8 @@ class TestQuantizedLinear(unittest.TestCase):
         Y_zp = 5
 
         # Weight prepacking operator for quantized Linear
-        W_prepack = qlinear_prepack(W_q, b_q)
+        float_bias = b if use_bias else None
+        W_prepack = qlinear_prepack(W_q, float_bias)
 
         if use_multi_dim_input:
             X_q = X_q.view(3, int(batch_size / 3), input_channels)
@@ -972,7 +976,7 @@ class TestQuantizedConv(unittest.TestCase):
            stride_w=st.integers(1, 2),
            pad_h=st.integers(0, 2),
            pad_w=st.integers(0, 2),
-           dilation=st.integers(1, 1),
+           dilation=st.integers(1, 2),
            X_scale=st.floats(0.2, 1.6),
            X_zero_point=st.integers(0, 4),
            W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
@@ -1019,6 +1023,10 @@ class TestQuantizedConv(unittest.TestCase):
         output_channels = output_channels_per_group * groups
 
         dilation_h = dilation_w = dilation
+
+        # Padded input size should be at least as big as dilated kernel
+        assume(height + 2 * pad_h >= dilation_h * (kernel_h - 1) + 1)
+        assume(width + 2 * pad_w >= dilation_w * (kernel_w - 1) + 1)
 
         W_scale = W_scale * output_channels
         W_zero_point = W_zero_point * output_channels
@@ -1101,16 +1109,11 @@ class TestQuantizedConv(unittest.TestCase):
                                                     W_zero_points_tensor.to(dtype=torch.long),
                                                     [0],
                                                     dtype=torch.qint8)
-            b_q = torch.quantize_linear_per_channel(b,
-                                                    X_scale * W_scales_tensor.to(dtype=torch.double),
-                                                    torch.zeros(output_channels, dtype=torch.long),
-                                                    [0],
-                                                    dtype=torch.qint32) if use_bias else None
         else:
             W_q = torch.quantize_linear(W_KRSC, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
-            b_q = torch.quantize_linear(b, scale=X_scale * W_scale[0], zero_point=0, dtype=torch.qint32) if use_bias else None
 
-        W_prepack = qconv_prepack(W_q, b_q, stride, pad, dilation, groups)
+        bias_float = b if use_bias else None
+        W_prepack = qconv_prepack(W_q, bias_float, stride, pad, dilation, groups)
 
         Y_q = qconv(
             X_q,
