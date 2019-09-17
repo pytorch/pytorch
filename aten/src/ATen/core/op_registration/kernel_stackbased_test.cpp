@@ -15,10 +15,6 @@ using std::unique_ptr;
 
 namespace {
 
-std::unique_ptr<c10::KernelCache> noCache() {
-  return nullptr;
-}
-
 void errorKernel(Stack* stack, KernelCache* cache) {
   EXPECT_TRUE(false); // this kernel should never be called
 }
@@ -54,32 +50,32 @@ void expectCallsDecrement(TensorTypeId type_id) {
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &incrementKernel, &noCache));
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &incrementKernel));
   expectCallsIncrement(TensorTypeId::CPUTensorId);
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
-      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &incrementKernel, &noCache))
-      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CUDATensorId, &errorKernel, &noCache))
-      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &errorKernel, &noCache))
-      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CUDATensorId, &errorKernel, &noCache));
+      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &incrementKernel))
+      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CUDATensorId, &errorKernel))
+      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &errorKernel))
+      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CUDATensorId, &errorKernel));
   expectCallsIncrement(TensorTypeId::CPUTensorId);
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
-  auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &incrementKernel, &noCache));
-  auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CUDATensorId, &errorKernel, &noCache));
-  auto registrar3 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &errorKernel, &noCache));
-  auto registrar4 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CUDATensorId, &errorKernel, &noCache));
+  auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &incrementKernel));
+  auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CUDATensorId, &errorKernel));
+  auto registrar3 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &errorKernel));
+  auto registrar4 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CUDATensorId, &errorKernel));
   expectCallsIncrement(TensorTypeId::CPUTensorId);
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
   {
-    auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &incrementKernel, &noCache));
+    auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &incrementKernel));
     {
-      auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CUDATensorId, &decrementKernel, &noCache));
+      auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CUDATensorId, &decrementKernel));
 
       // assert that schema and cpu kernel are present
       expectCallsIncrement(TensorTypeId::CPUTensorId);
@@ -106,7 +102,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutAnyArg
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
   auto registrar = RegisterOperators()
-      .op("_test::no_tensor_args() -> ()", RegisterOperators::options().catchAllKernel(&kernelWithoutInputs, &noCache));
+      .op("_test::no_tensor_args() -> ()", RegisterOperators::options().catchAllKernel(&kernelWithoutInputs));
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_tensor_args", ""});
   ASSERT_TRUE(op.has_value());
@@ -125,7 +121,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutTensor
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
   auto registrar = RegisterOperators()
-      .op("_test::no_tensor_args(int arg) -> int", RegisterOperators::options().catchAllKernel(&kernelWithoutTensorInputs, &noCache));
+      .op("_test::no_tensor_args(int arg) -> int", RegisterOperators::options().catchAllKernel(&kernelWithoutTensorInputs));
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_tensor_args", ""});
   ASSERT_TRUE(op.has_value());
@@ -140,7 +136,7 @@ void kernelForSchemaInference(Stack* stack, KernelCache* cache) {
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenFailsBecauseItCannotInferFromStackBasedKernel) {
   expectThrows<c10::Error>([] {
-      RegisterOperators().op("_test::no_schema_specified", RegisterOperators::options().catchAllKernel(&kernelForSchemaInference, &noCache));
+      RegisterOperators().op("_test::no_schema_specified", RegisterOperators::options().catchAllKernel(&kernelForSchemaInference));
   }, "Cannot infer operator schema for this kind of kernel in registration of operator _test::no_schema_specified");
 }
 
@@ -158,34 +154,8 @@ void increment_sequence_kernel(Stack* stack, KernelCache* cache) {
   torch::jit::push(*stack, static_cast<Cache*>(cache)->last_value++);
 }
 
-TEST(OperatorRegistrationTest_StackBasedKernel, givenKernelWithCache_whenCalled_thenCacheIsHandledCorrectly) {
-  auto registrar = RegisterOperators().op("_test::increment_sequence(Tensor dummy) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &increment_sequence_kernel, &make_cache));
-
-  auto op = c10::Dispatcher::singleton().findSchema({"_test::increment_sequence", ""});
-  ASSERT_TRUE(op.has_value());
-
-  // expect first time calling returns a 4 (4 is the initial value in the cache)
-  auto stack = makeStack(dummyTensor(TensorTypeId::CPUTensorId));
-  auto kernel = c10::Dispatcher::singleton().lookup(*op, &stack);
-  kernel.callBoxed(&stack);
-  EXPECT_EQ(1, stack.size());
-  EXPECT_EQ(4, stack[0].toInt());
-
-  // expect second time calling returns a 5
-  stack = makeStack(dummyTensor(TensorTypeId::CPUTensorId));
-  kernel.callBoxed(&stack);
-  EXPECT_EQ(1, stack.size());
-  EXPECT_EQ(5, stack[0].toInt());
-
-  // expect third time calling returns a 6
-  stack = makeStack(dummyTensor(TensorTypeId::CPUTensorId));
-  kernel.callBoxed(&stack);
-  EXPECT_EQ(1, stack.size());
-  EXPECT_EQ(6, stack[0].toInt());
-}
-
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCannotBeCalledUnboxed) {
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &incrementKernel, &noCache));
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &incrementKernel));
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
   expectThrows<c10::Error>(

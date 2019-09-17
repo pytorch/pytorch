@@ -326,7 +326,7 @@ public:
     template<class Lambda>
     // enable_if: only enable it if Lambda is a functor (note: lambdas are functors)
     guts::enable_if_t<guts::is_functor<guts::decay_t<Lambda>>::value, Options&&> kernel(TensorTypeId dispatch_key, Lambda&& functor) && {
-      static_assert(!std::is_base_of<OperatorKernel, Lambda>::value, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
+      static_assert(!std::is_base_of<OperatorKernel, guts::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
 
       // We don't support stateful lambdas (i.e. lambdas with a capture), because their
       // behavior would be nonobvious. A functor kernel with cache gets a new instance of
@@ -363,7 +363,7 @@ public:
     template<class Lambda>
     // enable_if: only enable it if Lambda is a functor (note: lambdas are functors)
     guts::enable_if_t<guts::is_functor<guts::decay_t<Lambda>>::value, Options&&> catchAllKernel(Lambda&& lambda) && {
-      static_assert(!std::is_base_of<OperatorKernel, Lambda>::value, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
+      static_assert(!std::is_base_of<OperatorKernel, guts::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
 
       // We don't support stateful lambdas (i.e. lambdas with a capture), because their
       // behavior would be nonobvious.
@@ -537,7 +537,7 @@ public:
      constexpr bool AllowLegacyTypes = true;
      return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
        c10::nullopt,
-       KernelFunction::makeFromUnboxedRuntimeFunction<FuncType, AllowLegacyTypes>(func),
+       KernelFunction::makeFromUnboxedRuntimeFunction<AllowLegacyTypes>(func),
        // TODO Do schema inference without relying on WrapRuntimeKernelFunctor
        detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>()()
      ));

@@ -152,7 +152,7 @@ public:
     );
   }
 
-  template<class FuncType, bool AllowLegacyTypes = false>
+  template<bool AllowLegacyTypes = false, class FuncType>
   static KernelFunction makeFromUnboxedRuntimeFunction(FuncType* func) {
     static_assert(guts::is_function_type<FuncType>::value, ""); // TODO
     static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, ""); // TODO
@@ -163,10 +163,9 @@ public:
     );
   }
 
-  template<class Lambda, bool AllowLegacyTypes = false>
+  template<bool AllowLegacyTypes = false, class Lambda>
   static KernelFunction makeFromUnboxedLambda(Lambda&& lambda) {
-    static_assert(guts::is_functor<Lambda>::value, ""); // TODO
-    static_assert(guts::is_stateless_lambda<guts::decay_t<Lambda>>::value, ""); // TODO
+    static_assert(guts::is_functor<guts::decay_t<Lambda>>::value, ""); // TODO
 
     return makeFromUnboxedFunctor<AllowLegacyTypes>(
       std::make_shared<detail::WrapRuntimeKernelFunctor<guts::decay_t<Lambda>>>(std::forward<Lambda>(lambda))
@@ -177,7 +176,7 @@ private:
 
   template<class Return, class... Args>
   Return boxAndCallBoxedFunc_(Args... args) const {
-    TORCH_INTERNAL_ASSERT(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::callUnboxed() on an uninitizliaed KernelFunction.");
+    TORCH_INTERNAL_ASSERT(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::callUnboxed() on an uninitialized KernelFunction.");
 
     // TODO Reuse stack vector instead of allocating?
     std::vector<IValue> stack {std::forward<Args>(args)...};
