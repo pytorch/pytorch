@@ -111,9 +111,6 @@ if not args.out_of_place_only:
 
     # Make various replacements inside AMD_BUILD/torch directory
     ignore_files = [
-        # These files use nvrtc, hip doesn't have equivalent
-        "csrc/autograd/profiler.h",
-        "csrc/autograd/profiler.cpp",
         # These files are compatible with both cuda and hip
         "csrc/autograd/engine.cpp"
     ]
