@@ -219,6 +219,7 @@ namespace {
                           int sizeB, int sizeC,
                           int isizeH, int isizeW,
                           int osizeH, int osizeW,
+                          int kernel_stride_C, int kernel_size_C,
                           index_t istrideB, index_t istrideC,
                           index_t istrideH, index_t istrideW)
   {
@@ -231,18 +232,23 @@ namespace {
 
     // use shared memory to store temporary output value. This is simply to
     // reduce register usage.
-    for (index_t i = thread_id; i < sizeC*blockDim.y*blockDim.z; i+= block_size) {
+    for (index_t i = thread_id; i < kernel_size_C*blockDim.x*blockDim.y*blockDim.z; i+= block_size) {
       out_cached[i] = scalar_t(0.0);
     }
 
     __syncthreads();
 
+    // each CTA handles a portion of a single slice on batch dimension;
+    int batch_id = blockIdx.x % sizeB;
+    int channel_id = blockIdx.x / sizeB;
+
     // each CTA handles a single slice on batch dimension;
-    output = output + blockIdx.x * osizeH * osizeW * sizeC;
-    input = input + blockIdx.x * istrideB;
+    // We use gridDim.x to handle striding on C as well.
+    output = output + batch_id * osizeH * osizeW * sizeC;
+    input = input + batch_id * istrideB;
 
     // split out_cached and exclusively it assigned to each thread;
-    out_cached = &out_cached[(threadIdx.z * blockDim.y + threadIdx.y) * sizeC];
+    out_cached = &out_cached[(threadIdx.z * blockDim.y + threadIdx.y) * kernel_size_C * blockDim.x];
 
     // iterate on output H & W.
     // Each CTA handles a consecutive H & W section (TILE); Do NOT stride CTA on
@@ -268,20 +274,29 @@ namespace {
         // would not stall global memory read;
         for (index_t ih = istartH; ih < iendH; ih++) {
           for (index_t iw = istartW; iw < iendW; iw++) {
+            int cached_index = threadIdx.x;
             const scalar_t *ptr_input = input + ih*istrideH + iw*istrideW;
-            for(int c = threadIdx.x; c < sizeC; c+= blockDim.x) {
-              out_cached[c] += ptr_input[c*istrideC];
+            for (index_t c = threadIdx.x + channel_id*blockDim.x;
+                 c < sizeC;
+                 c += blockDim.x*kernel_stride_C) {
+              out_cached[cached_index] += ptr_input[c*istrideC];
+              cached_index += blockDim.x;
             }
           }
         }
         scalar_t *ptr_output = output + (oh * osizeW + ow) * sizeC;
+
+        int cached_index = threadIdx.x;
         // write accumulated output to global memory;
-        for(int c = threadIdx.x; c < sizeC; c+= blockDim.x) {
+        for (index_t c = threadIdx.x + channel_id*blockDim.x;
+             c < sizeC;
+             c += blockDim.x*kernel_stride_C) {
           // This causes numerical issueptr when unit test with NCHW kernel;
           // switch to could verify the correctness;
           // output[c] = out_cached[c] / (iendH-istartH) / (iendW-istartW);
-          ptr_output[c] = out_cached[c] * factor;
-          out_cached[c] = scalar_t(0.0);
+          ptr_output[c] = out_cached[cached_index] * factor;
+          out_cached[cached_index] = scalar_t(0.0);
+          cached_index += blockDim.x;
         }
         // no need to __syncthreads() since out_cached is not shared.
       }
@@ -300,6 +315,7 @@ namespace {
                           int sizeB, int sizeC,
                           int isizeH, int isizeW,
                           int osizeH, int osizeW,
+                          int kernel_stride_C, int kernel_size_C,
                           index_t ostrideB, index_t ostrideC,
                           index_t ostrideH, index_t ostrideW)
   {
@@ -338,20 +354,25 @@ namespace {
       r_kW_cached[i] = scalar_t(1.0) / (END_IND_INT(i, osizeW, isizeW) - START_IND_INT(i, osizeW, isizeW));
     }
 
+    // each CTA handles a portion of a single slice on batch dimension;
+    int batch_id = blockIdx.x % sizeB;
+    int channel_id = blockIdx.x / sizeB;
+
     // use shared memory to store temporary output value. This is simply to
     // reduce register usage.
-    for (index_t i = thread_id; i < sizeC*blockDim.y*blockDim.z; i+= block_size) {
+    for (index_t i = thread_id; i < kernel_size_C*blockDim.x*blockDim.y*blockDim.z; i+= block_size) {
       out_cached[i] = scalar_t(0.0);
     }
 
     __syncthreads();
 
-    // each CTA handles a single slice on batch dimension;
-    gradInput = gradInput + blockIdx.x * isizeH * isizeW * sizeC;
-    gradOutput = gradOutput + blockIdx.x * ostrideB;
+    // each CTA handles a portion of a single slice on batch dimension;
+    // We use gridDim.x to handle striding on C as well.
+    gradInput = gradInput + batch_id * isizeH * isizeW * sizeC;
+    gradOutput = gradOutput + batch_id * ostrideB;
 
     // split out_cached and exclusively it assigned to each thread;
-    out_cached = &out_cached[(threadIdx.z * blockDim.y + threadIdx.y) * sizeC];
+    out_cached = &out_cached[(threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x * kernel_size_C];
 
     // iterate on input H & W.
     // Each CTA handles a consecutive H & W section (TILE); Do NOT stride CTA on
@@ -375,16 +396,24 @@ namespace {
           for(index_t ow = ostartW_cached[iw]; ow < oendW_cached[iw]; ++ow) {
             scalar_t f = r_kW_cached[ow] * r_kH_cached[oh];
             const scalar_t* ptr_gradOutput = gradOutput + oh*ostrideH + ow*ostrideW;
-            for (index_t c = threadIdx.x; c < sizeC; c += blockDim.x) {
-              out_cached[c] += ptr_gradOutput[c*ostrideC] * f;
+            int cached_index = threadIdx.x;
+            for (index_t c = threadIdx.x + channel_id*blockDim.x;
+                 c < sizeC;
+                 c += blockDim.x*kernel_stride_C) {
+              out_cached[cached_index] += ptr_gradOutput[c*ostrideC] * f;
+              cached_index += blockDim.x;
             }
           }
         }
         scalar_t *ptr_gradInput = gradInput + (ih * isizeW + iw) * sizeC;
+        int cached_index = threadIdx.x;
         // write accumulated gradIput to global memory;
-        for (index_t c = threadIdx.x; c < sizeC; c += blockDim.x) {
-          ptr_gradInput[c] = out_cached[c];
-          out_cached[c] = scalar_t(0.0);
+        for (index_t c = threadIdx.x + channel_id*blockDim.x;
+             c < sizeC;
+             c += blockDim.x*kernel_stride_C) {
+          ptr_gradInput[c] = out_cached[cached_index];
+          out_cached[cached_index] = scalar_t(0.0);
+          cached_index += blockDim.x;
         }
         // no need to __syncthreads() since out_cached is not shared.
       }
@@ -455,7 +484,9 @@ namespace {
       block_x = std::min<int>(
           maxThreadsDim[0], std::min<int>(lastPow2(sizeC), max_threads / block_y / block_z));
       const dim3 block(block_x, block_y, block_z);
-      int grid_x = sizeB;
+      int kernel_stride_C = cuda::ATenCeilDiv(sizeC, block_x * 4);
+      int kernel_size_C = cuda::ATenCeilDiv(sizeC, block_x * kernel_stride_C);
+      int grid_x = sizeB*kernel_stride_C;
       int grid_y = cuda::ATenCeilDiv(osizeW, block_y*BLOCK_STRIDE);
       int grid_z = cuda::ATenCeilDiv(osizeH, block_z*BLOCK_STRIDE);
       const dim3 grid(grid_x, grid_y, grid_z);
@@ -467,10 +498,11 @@ namespace {
       AT_ASSERT(input_.numel() < std::numeric_limits<int32_t>::max());
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(
           input_.scalar_type(), "adaptive_avg_pool2d_nhwc_cuda", [&] {
-            adaptiveaveragepoolnhwc<int32_t><<<grid, block, sizeC * block_y * block_z * sizeof(scalar_t), at::cuda::getCurrentCUDAStream()>>> (
-              input_.data<scalar_t>(),
-              output.data<scalar_t>(),
+            adaptiveaveragepoolnhwc<int32_t><<<grid, block, kernel_size_C * block_x * block_y * block_z * sizeof(scalar_t), at::cuda::getCurrentCUDAStream()>>> (
+              input_.data_ptr<scalar_t>(),
+              output.data_ptr<scalar_t>(),
               sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
+              kernel_stride_C, kernel_size_C,
               istrideB, istrideC, istrideH, istrideW);
             }
         );
@@ -499,8 +531,8 @@ namespace {
       }
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(
           input_.scalar_type(), "adaptive_avg_pool2d_cuda", [&] {
-            scalar_t *input_data = input_.data<scalar_t>();
-            scalar_t *output_data = output.data<scalar_t>();
+            scalar_t *input_data = input_.data_ptr<scalar_t>();
+            scalar_t *output_data = output.data_ptr<scalar_t>();
 
             // cuda blocks & threads:
             int blocksH = std::max<int64_t>((int)(16L / sizeD), 1);
@@ -563,10 +595,10 @@ namespace {
       // Launch kernel on input tensor elements. Logic behind launch config:
       // input tensor size NCHW, strides NHWC;
       // Launch on:
-      // N -> grid.x
-      // H -> grid.z * block.z
-      // W -> grid.y * block.y
-      // C -> block.x
+      // N(C) -> grid.x (striding on C to reduce sh_mem usage)
+      // H    -> grid.z * block.z
+      // W    -> grid.y * block.y
+      // C    -> block.x
       // encourage larger block_y & block_z for better cache hit while maintain
       // reasonable block_x for coalesced memory access;
       int block_x = std::min<int>(
@@ -578,7 +610,9 @@ namespace {
       block_x = std::min<int>(
           maxThreadsDim[0], std::min<int>(lastPow2(sizeC), max_threads / block_y / block_z));
       const dim3 block(block_x, block_y, block_z);
-      int grid_x = sizeB;
+      int kernel_stride_C = cuda::ATenCeilDiv(sizeC, block_x * 4);
+      int kernel_size_C = cuda::ATenCeilDiv(sizeC, block_x * kernel_stride_C);
+      int grid_x = sizeB*kernel_stride_C;
       int grid_y = cuda::ATenCeilDiv(isizeW, block_y*BLOCK_STRIDE);
       int grid_z = cuda::ATenCeilDiv(isizeH, block_z*BLOCK_STRIDE);
       const dim3 grid(grid_x, grid_y, grid_z);
@@ -590,10 +624,11 @@ namespace {
       AT_ASSERT(input.numel() < std::numeric_limits<int32_t>::max());
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(
           input.scalar_type(), "adaptive_avg_pool2d_backward_nhwc_cuda", [&] {
-            adaptiveaveragegradinputnhwc<int32_t><<<grid, block, (sizeC * block_y * block_z + osizeH + osizeW) * sizeof(scalar_t) + 2 * isizeW * sizeof(int32_t), at::cuda::getCurrentCUDAStream()>>> (
-              gradInput.data<scalar_t>(),
-              gradOutput.data<scalar_t>(),
+            adaptiveaveragegradinputnhwc<int32_t><<<grid, block, (kernel_size_C * block_x * block_y * block_z + osizeH + osizeW) * sizeof(scalar_t) + 2 * isizeW * sizeof(int32_t), at::cuda::getCurrentCUDAStream()>>> (
+              gradInput.data_ptr<scalar_t>(),
+              gradOutput.data_ptr<scalar_t>(),
               sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
+              kernel_stride_C, kernel_size_C,
               ostrideB, ostrideC, ostrideH, ostrideW);
             }
         );
@@ -615,8 +650,8 @@ namespace {
         //bool atomic = (isizeW%osizeW != 0) || (isizeH%osizeH != 0);
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(
           input.scalar_type(), "adaptive_avg_pool2d_backward_cuda", [&] {
-            scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-            scalar_t *gradInput_data = gradInput.data<scalar_t>();
+            scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+            scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
 
             // cuda blocks & threads:
             int blocksH = std::max((int)(16L / sizeD), 1);
