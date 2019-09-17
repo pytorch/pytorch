@@ -31,6 +31,19 @@ inline StorageOrder StringToStorageOrder(const string& str) {
   }
 }
 
+inline int32_t GetDimFromOrderString(const std::string& str) {
+  auto order = StringToStorageOrder(str);
+  switch (order) {
+    case StorageOrder::NHWC:
+      return 3;
+    case StorageOrder::NCHW:
+      return 1;
+    default:
+      CAFFE_THROW("Unsupported storage order: ", str);
+      return -1;
+  }
+}
+
 inline constexpr char NameScopeSeparator() { return '/'; }
 
 // From TypeMeta to caffe2::DataType protobuffer enum.

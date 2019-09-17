@@ -10,9 +10,7 @@
 #include <numeric>
 #include <vector>
 #include <limits>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 namespace at {
 namespace native {
@@ -28,8 +26,13 @@ static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
   TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "Invalid argument passed to lu");
   auto n = self.size(-1);
   auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs).sum(-1, /*keepdim=*/false, /*dtype=*/self.scalar_type()).fmod_(2);
-  return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1),
-                                    lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1));
+  auto u_diagonal = lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+
+  // We have to manually set the diagonal to 0 due to an issue with MAGMA's getrf_batched routine
+  if (self.dim() > 2 && self.is_cuda()) {
+    u_diagonal.index_put_(infos.nonzero_numpy(), at::zeros({}, self.options()));
+  }
+  return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1), u_diagonal);
 }
 
 Tensor det(const Tensor& self) {
@@ -301,7 +304,7 @@ Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) 
   }
   namedinference::propagate_names(
       result,
-      std::move(namedinference::compute_bmm_outnames(result, batch1, batch2)),
+      namedinference::compute_bmm_outnames(result, batch1, batch2),
       /*validate_names=*/false);
 #endif
   return result;
