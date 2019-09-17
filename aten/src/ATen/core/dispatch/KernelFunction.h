@@ -9,12 +9,6 @@
 
 namespace c10 {
 
-/**
- * This is the basic ABI for any kernel call. Each kernel is registered as a
- * function pointer `KernelFunction*`, i.e. kernels are not allowed to be closures.
- */
-using BoxedKernelFunction = void(Stack*, KernelCache* cache);
-
 namespace detail {
 template<class Type>
 constexpr uint64_t hashType() {
