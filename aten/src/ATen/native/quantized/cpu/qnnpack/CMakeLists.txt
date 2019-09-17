@@ -289,7 +289,7 @@ IF(NOT TARGET clog)
   # We build static version of clog but a dynamic library may indirectly depend on it
   SET_PROPERTY(TARGET clog PROPERTY POSITION_INDEPENDENT_CODE ON)
 ENDIF()
-TARGET_LINK_LIBRARIES(pytorch_qnnpack PRIVATE clog)
+TARGET_LINK_LIBRARIES(pytorch_qnnpack PUBLIC clog)
 
 # ---[ Configure cpuinfo
 IF(NOT TARGET cpuinfo)
