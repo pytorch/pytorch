@@ -1,5 +1,5 @@
 #include <ATen/NamedTensorUtils.h>
-#include <c10/core/EnableNamedTensor.h>
+#include <ATen/core/EnableNamedTensor.h>
 #include <bitset>
 #include <sstream>
 

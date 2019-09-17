@@ -1,5 +1,5 @@
 #pragma once
-#include <c10/core/EnableNamedTensor.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/interned_strings.h>

@@ -1,5 +1,5 @@
 #include <ATen/core/OpsAlreadyMovedToC10.h>
-#include <c10/core/EnableNamedTensor.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <string>
 #include <cstring>

@@ -1,5 +1,5 @@
 #include <ATen/core/NamedTensor.h>
-#include <c10/core/EnableNamedTensor.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/Tensor.h>
