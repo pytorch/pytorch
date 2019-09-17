@@ -9,7 +9,7 @@ import torch.jit._recursive
 from torch._jit_internal import _qualified_name
 from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
-from torch.nn import Module, ModuleList, Sequential
+from torch.nn import Module, ModuleList, Sequential, ModuleDict
 from torch.serialization import validate_cuda_device
 from torch._six import PY2, PY37, with_metaclass, string_classes
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
@@ -32,7 +32,7 @@ from collections import OrderedDict, namedtuple
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method  # noqa: F401
-from torch._jit_internal import ignore, export  # noqa: F401
+from torch._jit_internal import ignore, export, unused  # noqa: F401
 
 if sys.version_info[0] > 2:
     import pathlib
@@ -1583,16 +1583,21 @@ if _enabled:
                 raise RuntimeError("attempting to re-assign constant '{}' in {}".format(attr, type(self).__name__))
 
             def conv_module_to_const(module_value):
-                if not isinstance(module_value, (ModuleList, Sequential)):
+                if not isinstance(module_value, (ModuleList, Sequential, ModuleDict)):
                     return module_value
-                for i in range(len(module_value)):
-                    module_value[i] = conv_module_to_const(module_value[i])
-                if isinstance(module_value, Sequential):
-                    return _ConstSequential(module_value)
+                if isinstance(module_value, ModuleDict):
+                    for key, val in module_value:
+                        module_value[key] = conv_module_to_const(val)
+                    return _ConstModuleDict(module_value)
                 else:
-                    return _ConstModuleList(module_value)
+                    for i in range(len(module_value)):
+                        module_value[i] = conv_module_to_const(module_value[i])
+                    if isinstance(module_value, Sequential):
+                        return _ConstSequential(module_value)
+                    else:
+                        return _ConstModuleList(module_value)
 
-            if isinstance(value, (ModuleList, Sequential)):
+            if isinstance(value, (ModuleList, Sequential, ModuleDict)):
                 # special case for list of modules. Modules need to be registered with their
                 # parent module. To do this, we create a ConstModuleList, which is itself a module, that
                 # contains each of these modules as submodules. The ConstModuleList then
@@ -1627,6 +1632,15 @@ if _enabled:
 
         def graph_for(self, *args, **kwargs):
             return self.forward.graph_for(*args, **kwargs)
+
+        def extra_repr(self):
+            return 'original_name={}'.format(self.original_name)
+
+        @property
+        def original_name(self):
+            if type(self) == self._c.name:
+                return ''
+            return self._c.name
 
 else:
     class ScriptModule(torch.nn.Module):
@@ -1757,6 +1771,48 @@ class _ConstModuleList(ScriptModule):
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
+class _ConstModuleDict(ScriptModule):
+    def __init__(self, modules):
+        super(_ConstModuleDict, self).__init__()
+
+        assert isinstance(modules, OrderedDict)
+
+        for key, module in modules.items():
+            if isinstance(module, torch.nn.Module):
+                module = torch.jit._recursive.recursive_script(module)
+            self.add_module(key, module)
+
+
+    def __getitem__(self, key):
+        return self._modules[key]
+
+    def __contains__(self, key):
+        return key in self._modules
+
+    def keys(self):
+        r"""Return an iterable of the ModuleDict keys.
+        """
+        return self._modules.keys()
+
+    def items(self):
+        r"""Return an iterable of the ModuleDict key/value pairs.
+        """
+        return self._modules.items()
+
+    def values(self):
+        r"""Return an iterable of the ModuleDict values.
+        """
+        return self._modules.values()
+
+    def __len__(self):
+        return len(self._modules)
+
+    def __iter__(self):
+        return iter(self._modules.values())
+
+    def forward(self):
+        raise NotImplementedError()
+
 
 class _ConstSequential(_ConstModuleList):
     __constants__ = ['mods']
@@ -1776,6 +1832,23 @@ class _ConstSequential(_ConstModuleList):
             return input
         """)
 
+def is_scripting():
+    r"""
+    Function that returns True when in compilation and False otherwise. This
+    is useful especially with the @unused decorator to leave code in your
+    model that is not yet TorchScript compatible.
+
+    @torch.jit.unused
+    def unsupported_linear_op(x):
+        return x
+
+    def linear(x):
+       if not torch.jit.is_scripting():
+          return torch.linear(x)
+       else:
+          return unsupported_linear_op(x)
+    """
+    return False
 
 def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"
@@ -1794,6 +1867,7 @@ _builtin_ops = [
     (_triple, "aten::_triple"),
     (_unwrap_optional, "aten::_unwrap_optional"),
     (_wait, 'aten::wait'),
+    (is_scripting, "aten::is_scripting"),
     (cudnn.is_acceptable, "aten::cudnn_is_acceptable"),
     (math.ceil, "aten::ceil"),
     (math.copysign, "aten::copysign"),
