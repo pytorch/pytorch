@@ -1469,20 +1469,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_round
-  cname: round
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_trunc
   cname: trunc
   types:
@@ -1533,12 +1519,14 @@
     - CUDA
   variants: function
   options:
-    - cname: var_all
+    - cname: varall
       return: accreal
       arguments:
         - THTensor* self
-        - bool unbiased
-    - cname: var_single
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
+    - cname: var
       return: argument 0
       scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
@@ -1547,7 +1535,9 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - bool unbiased
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
         - bool keepdim
 ]]
 [[
@@ -1559,12 +1549,14 @@
     - CUDA
   variants: function
   options:
-    - cname: std_all
+    - cname: stdall
       return: accreal
       arguments:
         - THTensor* self
-        - bool unbiased
-    - cname: std_single
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
+    - cname: std
       return: argument 0
       scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
@@ -1573,7 +1565,9 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - bool unbiased
+        - arg: bool unbiased
+          if_true: 0
+          if_false: 1
         - bool keepdim
 ]]
 [[
@@ -1860,7 +1854,6 @@
 ]]
 [[
   name: _th_diag
-  cname: diag
   variants:
     - function
   return: argument 0
@@ -1870,6 +1863,12 @@
       output: True
     - THTensor* self
     - long diagonal
+  aten_custom_call: |
+    if (self_->dim() == 0) {
+      throw std::runtime_error("Input must be 1-d or 2-d");
+    }
+    ${THTensor}_diag(${state,}result_, self_, diagonal);
+    result_->maybe_zero_dim(self_->dim() == 0);
 ]]
 [[
   name: _th_addmm
@@ -2125,7 +2124,9 @@
     - arg: THTensor* res2
       output: True
     - THTensor* self
-    - bool eigenvectors
+    - arg: bool eigenvectors
+      if_true: V
+      if_false: N
 ]]
 [[
   name: _th_potri
@@ -2144,7 +2145,9 @@
     - arg: THTensor* output
       output: True
     - THTensor* self
-    - bool upper
+    - arg: bool upper
+      if_true: U
+      if_false: L
 ]]
 [[
   name: _th_geqrf
@@ -2201,8 +2204,12 @@
     - THTensor* self
     - THTensor* input2
     - THTensor* input3
-    - bool left
-    - bool transpose
+    - arg: bool left
+      if_true: L
+      if_false: R
+    - arg: bool transpose
+      if_true: T
+      if_false: N
 ]]
 [[
   name: _th_random_

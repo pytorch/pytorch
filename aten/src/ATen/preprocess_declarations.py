@@ -177,10 +177,14 @@ def set_mode(option):
 
 
 def discover_zero_dim_tensor_operations(declaration):
+    def exclude(arg):
+        return arg.get('ignore_check')
+
     def signature(option, i=None, value=None):
         elements = [TYPE_FORMAL_GENERIC.get(arg['type'], arg['type'])
                     if i is None or j != i else value
-                    for j, arg in enumerate(option['arguments'])]
+                    for j, arg in enumerate(option['arguments'])
+                    if not exclude(arg)]
         return '#'.join(elements)
     signature_to_option = {signature(option): option
                            for option in declaration['options']}
@@ -192,7 +196,8 @@ def discover_zero_dim_tensor_operations(declaration):
                 if signature_of_tensor_version in signature_to_option:
                     tensor_version = \
                         signature_to_option[signature_of_tensor_version]
-                    names = [arg['name'] for arg in tensor_version['arguments']]
+                    names = [arg['name'] for arg in tensor_version['arguments']
+                             if not exclude(arg)]
                     tensor_version['zero_dim_dispatch_when_scalar'] = names[i]
                     # print("FOUND "+str(i)   )
                     # print("Scalar Version ===== ")

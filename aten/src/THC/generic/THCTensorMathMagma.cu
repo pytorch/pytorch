@@ -106,14 +106,13 @@ void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor
 #endif
 }
 
-void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a_, bool eigenvectors)
+void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a_, const char *jobvrs)
 {
 #ifdef USE_MAGMA
-  char jobvrs = eigenvectors ? 'V' : 'N';
   THArgCheck(a_->dim() == 2, 3, "A should be 2 dimensional");
   THArgCheck(a_->size(0) == a_->size(1), 3, "A should be square");
 
-  magma_vec_t jobvr = jobvrs == 'N' ? MagmaNoVec : MagmaVec;
+  magma_vec_t jobvr = jobvrs[0] == 'N' ? MagmaNoVec : MagmaVec;
   int64_t n = a_->size(0);
 
   scalar_t *a_data = th_magma_malloc_pinned<scalar_t>(n * n);
@@ -203,15 +202,14 @@ __global__ void THCTensor_(copyLowerSymmetric)(scalar_t *input, int n, int len)
   }
 }
 
-void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, bool upper)
+void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
 {
-  char uplo = upper ? 'U' : 'L';
 #ifdef USE_MAGMA
   THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be non-empty 2 dimensional");
   THArgCheck(a->size(0) == a->size(1), 2, "A should be square");
 
   int64_t n = a->size(0);
-  magma_uplo_t ul = uplo == 'U' ?  MagmaUpper : MagmaLower;
+  magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
 
   THCTensor *input = THCTensor_(newColumnMajor)(state, ra_, a);
   scalar_t *input_data = THCTensor_(data)(state, input);
@@ -232,7 +230,7 @@ void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, bool upper
   const int len = n*n;
   dim3 blocks(std::min(DIVUP(len, 128), 65535));
   dim3 threads(128);
-  if (uplo == 'U') {
+  if (uplo[0] == 'U') {
     THCTensor_(copyUpperSymmetric)<<<blocks, threads, 0, stream>>>(input_data, n, len);
   } else {
     THCTensor_(copyLowerSymmetric)<<<blocks, threads, 0, stream>>>(input_data, n, len);
