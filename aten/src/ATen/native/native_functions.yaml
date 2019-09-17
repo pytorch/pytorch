@@ -52,7 +52,7 @@
 - func: output_nr(Tensor self) -> int
   variants: method
 
-- func: version(Tensor self) -> int
+- func: _version(Tensor self) -> int
   variants: method
 
 - func: names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
