@@ -309,6 +309,7 @@ jobs:
           docker pull ${DOCKER_IMAGE} >/dev/null
           export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
+          # TODO We may want to move the rebase logic to a separate step after checkout
           # Rebase to master only if in xenial_py3_6_gcc5_4 case
           if [[ "${CIRCLE_BRANCH}" != "master" && "${BUILD_ENVIRONMENT}" == *"gcc5"* ]]; then
             echo "Merge master branch into $CIRCLE_BRANCH before build in environment $BUILD_ENVIRONMENT"
