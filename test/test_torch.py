@@ -12170,10 +12170,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(x[idx] >= y[idx], ge[idx] == 1)
 
     def test_comparison_ops_with_type_promotion(self):
-        x = torch.tensor([1 << 5], dtype=torch.uint8, device=device)
-        y = torch.tensor([1 << 15], dtype=torch.int32, device=device)
-        result = torch.lt(x, y, out=x)
-        self.assertEqual(result, torch.tensor([True]))
+        for device in torch.testing.get_all_device_types():
+            x = torch.tensor([1 << 5], dtype=torch.uint8, device=device)
+            y = torch.tensor([1 << 15], dtype=torch.int32, device=device)
+            result = torch.lt(x, y, out=x)
+            self.assertEqual(result, torch.tensor([True]))
 
     def test_bitwise_ops(self):
         x = torch.randn(5, 5).gt(0)

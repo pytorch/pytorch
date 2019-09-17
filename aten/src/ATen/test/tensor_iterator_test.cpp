@@ -45,9 +45,9 @@ TEST(TensorIteratorTest, MixedDevices) {
 
 Tensor random_tensor_for_type(at::ScalarType scalar_type) {
   if (at::isFloatingType(scalar_type)) {
-    return at::randn({5, 5}, kCPU);
+    return at::randn({5, 5}, kCPU).to(scalar_type);
   } else {
-    return at::randint(1, 10, {5, 5}, kCPU);
+    return at::randint(1, 10, {5, 5}, kCPU).to(scalar_type);
   }
 }
 
@@ -89,9 +89,27 @@ TEST(TensorIteratorTest, SerialLoopPointwise_##name) {                          
   ASSERT_ANY_THROW(out.equal(expected));                                                            \
 }
 
+#define COMPARISON_TEST_ITER_FOR_TYPE(ctype,name)                                          \
+TEST(TensorIteratorTest, ComparisonLoopBinary_##name) {                                    \
+  auto in1 = random_tensor_for_type(k##name);                                              \
+  auto in2 = random_tensor_for_type(k##name);                                              \
+  Tensor out = at::empty({0}, in1.options().dtype(kBool));                                 \
+  Tensor diff;                                                                             \
+  if (k##name == kByte) {                                                                  \
+    diff = in2.to(kInt).sub(in1.to(kInt));                                                 \
+  } else {                                                                                 \
+    diff = in2.sub(in1);                                                                   \
+  }                                                                                        \
+  auto expected = diff.clamp_min(0).to(kBool);                                             \
+  auto iter = TensorIterator::comparison_op(out, in1, in2, true);                          \
+  at::native::cpu_serial_kernel(iter, [=](ctype a, ctype b) -> bool { return a < b; });    \
+  EXPECT_TRUE(out.equal(expected));                                                        \
+}
+
 AT_FORALL_SCALAR_TYPES(UNARY_TEST_ITER_FOR_TYPE)
 AT_FORALL_SCALAR_TYPES(BINARY_TEST_ITER_FOR_TYPE)
 AT_FORALL_SCALAR_TYPES(POINTWISE_TEST_ITER_FOR_TYPE)
+AT_FORALL_SCALAR_TYPES(COMPARISON_TEST_ITER_FOR_TYPE)
 
 TEST(TensorIteratorTest, SerialLoopSingleThread) {
   std::thread::id thread_id = std::this_thread::get_id();
