@@ -6,6 +6,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   device_guard: False
   return: argument 0
   options:
@@ -44,6 +45,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   options:
     - arguments:
       - THTensor* self
@@ -62,6 +64,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   device_guard: False
   return: bool
   arguments:
@@ -73,6 +76,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: maskedFill
   variants: function
   return: self
@@ -94,6 +98,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: maskedFillBool
   variants: function
   return: self
@@ -115,6 +120,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: maskedCopy
   variants: function
   return: self
@@ -129,6 +135,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: maskedCopyBool
   variants: function
   return: self
@@ -144,6 +151,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -160,6 +168,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -177,6 +186,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -196,6 +206,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   arguments:
     - THTensor* self
 ]]
@@ -206,6 +217,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: self
@@ -318,6 +330,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   device_guard: False
   return: argument 0
   arguments:
@@ -611,6 +624,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -634,6 +648,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -657,6 +672,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   return: self
   variants: function
   options:
@@ -677,6 +693,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -700,6 +717,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -723,6 +741,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   return: self
   variants: function
   options:
@@ -743,6 +762,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -766,6 +786,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -789,6 +810,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   return: self
   variants: function
   options:
@@ -809,6 +831,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -832,6 +855,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -855,6 +879,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   return: self
   variants: function
   options:
@@ -875,6 +900,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -898,6 +924,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -921,6 +948,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   return: self
   variants: function
   options:
@@ -941,6 +969,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -964,6 +993,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -987,6 +1017,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   return: self
   variants: function
   options:
@@ -1519,14 +1550,12 @@
     - CUDA
   variants: function
   options:
-    - cname: varall
+    - cname: var_all
       return: accreal
       arguments:
         - THTensor* self
-        - arg: bool unbiased
-          if_true: 0
-          if_false: 1
-    - cname: var
+        - bool unbiased
+    - cname: var_single
       return: argument 0
       scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
@@ -1535,9 +1564,7 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - arg: bool unbiased
-          if_true: 0
-          if_false: 1
+        - bool unbiased
         - bool keepdim
 ]]
 [[
@@ -1549,14 +1576,12 @@
     - CUDA
   variants: function
   options:
-    - cname: stdall
+    - cname: std_all
       return: accreal
       arguments:
         - THTensor* self
-        - arg: bool unbiased
-          if_true: 0
-          if_false: 1
-    - cname: std
+        - bool unbiased
+    - cname: std_single
       return: argument 0
       scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
@@ -1565,9 +1590,7 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - arg: bool unbiased
-          if_true: 0
-          if_false: 1
+        - bool unbiased
         - bool keepdim
 ]]
 [[
@@ -1670,6 +1693,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   arguments:
@@ -2433,6 +2457,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   return: self
   arguments:
     - arg: THTensor* self

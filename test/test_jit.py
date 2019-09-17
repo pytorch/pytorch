@@ -86,7 +86,6 @@ if torch.cuda.is_available():
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY35 = sys.version_info >= (3, 5)
-WINDOWS = sys.platform == 'win32'
 
 
 def LSTMCellF(input, hx, cx, *params):
@@ -2023,7 +2022,6 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: JIT tests not yet supported on windows")
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
     @skipIfRocm
@@ -2033,7 +2031,6 @@ graph(%Ra, %Rb):
         torch._C._jit_run_cpp_tests(run_cuda=False)
         tests_setup.shutdown()
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @skipIfRocm
     def test_cpp_cuda(self):
@@ -2058,7 +2055,6 @@ graph(%Ra, %Rb):
             self.assertEqual(outputs, m(*inputs))
 
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_dropout_cuda(self):
         # Dropout AD is dispatched to _fused_dropout in CUDA case,
         # which is not included in TestJitGeneratedFunctional
@@ -2226,12 +2222,11 @@ graph(%Ra, %Rb):
     def test_ge_unoptimized(self):
         self.run_ge_tests(False, False)
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
     def test_ge_optimized(self):
         self.run_ge_tests(True, False)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_ge_cuda(self):
         self.run_ge_tests(True, True)
@@ -2322,7 +2317,6 @@ graph(%Ra, %Rb):
             self.assertGraphContains(fn.graph, kind='aten::einsum')
             self.assertEqual(fn(x, y), outer(x, y))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")
     def test_traced_module_cuda(self):
         class Model(nn.Module):
@@ -5062,7 +5056,7 @@ a")
         self.assertEqual(cu.test_integral_shape_inference(*inputs), outputs)
 
     @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
     def test_batchnorm_fuser_cpu(self):
         code = '''
@@ -5091,7 +5085,7 @@ a")
         FileCheck().check('sqrtf').run(code)
 
     @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
     def test_fuser_double_float_codegen(self):
         fns = ['log', 'log10', 'log1p', 'log2', 'lgamma', 'exp', 'expm1', 'erf',
@@ -5145,7 +5139,7 @@ a")
             test_dispatch(fn, lookup_c_equivalent_fn(fn) + 'f(', torch.float, binary=True)
 
     @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
     def test_fuser_double_literal_precision(self):
         code = '''
@@ -9285,7 +9279,6 @@ a")
         m = M()
         self.assertEqual(2, m.call_foo(torch.ones((), dtype=torch.int64)))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_trace_of_script(self):
         @torch.jit.script
         def foo(a, c):
@@ -16975,7 +16968,7 @@ def add_autograd_test(
             # We enable the CPU fuser during these checks for more consistent
             # behavior. Otherwise, we are going to have to analyze the graph to
             # see if producer values are Dimension
-            @enable_cpu_fuser_if(not (IS_SANDCASTLE or IS_WINDOWS))
+            @enable_cpu_fuser_if(not IS_SANDCASTLE)
             def check(name):
                 set_rng_seed(2)
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
@@ -17010,8 +17003,7 @@ def add_autograd_test(
                             check_against_reference(self, traced_fn,
                                                     fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
-                            # Fuser not supported on windows
-                            if IS_SANDCASTLE or IS_WINDOWS:
+                            if IS_SANDCASTLE:
                                 autodiff_nodes = autodiff_nodes + fusible_nodes
                                 fusible_nodes = []
                             self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
@@ -17022,8 +17014,7 @@ def add_autograd_test(
                                                     fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
 
-                            # Fuser not supported on windows
-                            if IS_SANDCASTLE or IS_WINDOWS:
+                            if IS_SANDCASTLE:
                                 autodiff_nodes = autodiff_nodes + fusible_nodes
                                 fusible_nodes = []
                             self.assertAutodiffNode(script_fn.last_graph,

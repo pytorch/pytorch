@@ -18,6 +18,7 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <cstddef>
 #include <functional>
