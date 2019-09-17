@@ -38,50 +38,7 @@ std::string ShowNode(NodeRef node) {
   }
 }
 
-void DumpGraph(NNGraph* g) {
-  auto nnprinter = [](typename NNGraph::NodeRef node) {
-    std::map<std::string, std::string> labelMap;
-    assert(node->data() && "Node doesn't have data, can't render it");
-    if (isa<NeuralNetOperator>(node->data())) {
-      auto* op = dyn_cast<NeuralNetOperator>(node->data().get());
-      const auto& op_def =
-          dyn_cast<Caffe2Annotation>(op->getAnnotation())->getOperatorDef();
-      int pos = -1;
-      for (const auto& arg : op_def.arg()) {
-        if (arg.name() == "net_pos") {
-          if (arg.has_i()) {
-            pos = arg.i();
-          }
-          break;
-        }
-      }
-      labelMap["label"] =
-          op->getName() + " (" + c10::to_string((unsigned long long)node) + ")";
-      auto* annotation = op->getAnnotation();
-      if (annotation && isa<Caffe2Annotation>(annotation)) {
-        auto device_annotation = dyn_cast<Caffe2Annotation>(annotation);
-        labelMap["label"] += "\\n[" + device_annotation->getDevice() +
-            ", pos=" + c10::to_string(pos) + "]";
-        auto hash = std::hash<std::string>{}(device_annotation->getDevice());
-        std::stringstream hex_stream;
-        hex_stream << std::hex << hash;
-        labelMap["color"] = "#" + hex_stream.str().substr(0, 6);
-        labelMap["fontcolor"] = labelMap["color"];
-      }
-      labelMap["shape"] = "box";
-    } else if (isa<Data>(node->data())) {
-      auto tensor = dyn_cast<NeuralNetData>(node->data().get());
-      labelMap["label"] = tensor->getName();
-      labelMap["label"] += "_" + c10::to_string(tensor->getVersion()) + " " +
-          c10::to_string((unsigned long long)node);
-    }
-    return labelMap;
-  };
 
-  std::ofstream out("dump.dot");
-  out << nom::converters::convertToDotString(g, nnprinter);
-  out.close();
-}
 
 struct VisitorContext {
   VisitorContext(std::function<bool(const caffe2::OperatorDef&)> func)
@@ -354,7 +311,50 @@ void PruneUnrefereredNodes(NNModule* nn) {
 }
 
 } // namespace
+void DumpGraph(NNGraph* g, const std::string& fname) {
+  auto nnprinter = [](typename NNGraph::NodeRef node) {
+    std::map<std::string, std::string> labelMap;
+    assert(node->data() && "Node doesn't have data, can't render it");
+    if (isa<NeuralNetOperator>(node->data())) {
+      auto* op = dyn_cast<NeuralNetOperator>(node->data().get());
+      const auto& op_def =
+          dyn_cast<Caffe2Annotation>(op->getAnnotation())->getOperatorDef();
+      int pos = -1;
+      for (const auto& arg : op_def.arg()) {
+        if (arg.name() == "net_pos") {
+          if (arg.has_i()) {
+            pos = arg.i();
+          }
+          break;
+        }
+      }
+      labelMap["label"] =
+          op->getName() + " (" + c10::to_string((unsigned long long)node) + ")";
+      auto* annotation = op->getAnnotation();
+      if (annotation && isa<Caffe2Annotation>(annotation)) {
+        auto device_annotation = dyn_cast<Caffe2Annotation>(annotation);
+        labelMap["label"] += "\\n[" + device_annotation->getDevice() +
+            ", pos=" + c10::to_string(pos) + "]";
+        auto hash = std::hash<std::string>{}(device_annotation->getDevice());
+        std::stringstream hex_stream;
+        hex_stream << std::hex << hash;
+        labelMap["color"] = "#" + hex_stream.str().substr(0, 6);
+        labelMap["fontcolor"] = labelMap["color"];
+      }
+      labelMap["shape"] = "box";
+    } else if (isa<Data>(node->data())) {
+      auto tensor = dyn_cast<NeuralNetData>(node->data().get());
+      labelMap["label"] = tensor->getName();
+      labelMap["label"] += "_" + c10::to_string(tensor->getVersion()) + " " +
+          c10::to_string((unsigned long long)node);
+    }
+    return labelMap;
+  };
 
+  std::ofstream out(fname.c_str());
+  out << nom::converters::convertToDotString(g, nnprinter);
+  out.close();
+}
 caffe2::NetDef OptimizeForBackend(
     caffe2::NetDef& net,
     std::function<bool(const caffe2::OperatorDef&)> supports,
@@ -433,7 +433,7 @@ caffe2::NetDef OptimizeForBackend(
   PruneUnrefereredNodes(&nn);
 
   if (debug) {
-    DumpGraph(&dfg);
+    DumpGraph(&dfg, "dump.dot");
   }
 
   auto new_net = convertToCaffe2Proto(nn);

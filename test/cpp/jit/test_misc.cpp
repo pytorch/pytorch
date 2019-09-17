@@ -1150,13 +1150,5 @@ void testProfiler() {
   checkShape(*tanh_n, eltwise);
 }
 
-void testInsertConstant() {
-  Graph g;
-  ASSERT_THROWS_WITH(
-      insertConstant(
-          g, IValue(), TensorType::get(), c10::nullopt, c10::nullopt),
-      "Expected OptionalType");
-}
-
 } // namespace jit
 } // namespace torch

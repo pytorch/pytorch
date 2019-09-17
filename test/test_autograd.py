@@ -21,7 +21,7 @@ from torch.autograd.profiler import (profile, format_time, EventList,
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm, slowTest,
-                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS)
+                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
@@ -200,9 +200,6 @@ class TestAutograd(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, 'expected shape'):
             input = torch.randn(5, 5, dtype=torch.float, requires_grad=True)
-            MyFunction.apply(input).sum().backward()
-        with self.assertRaisesRegex(RuntimeError, 'expected type'):
-            input = torch.randn(10, dtype=torch.double, requires_grad=True)
             MyFunction.apply(input).sum().backward()
 
     def test_accumulate_grad(self):
@@ -900,7 +897,10 @@ class TestAutograd(TestCase):
         for i in range(3):
             x.detach_()
             x.copy_(mu + i)
-            loss += (x * torch.tensor([float(i)])).sum()
+            ft = torch.tensor([float(i)])
+            multiplied = x * ft
+            s = multiplied.sum()
+            loss += s
         loss.backward()
 
     def test_no_grad(self):
@@ -1066,6 +1066,18 @@ class TestAutograd(TestCase):
         expected_grad = torch.Tensor(4, 4, 4).zero_()
         expected_grad[1].fill_(3)
         self.assertEqual(y.grad.data, expected_grad)
+
+    def test_index_backward_does_not_save_tensor(self):
+        # Example from https://github.com/pytorch/pytorch/issues/24853.
+        # if `index(tensor, indices)` saves `tensor` for backwards, then it will
+        # trigger a version check on `tensor` during the backward pass, which
+        # will cause the following code to error because `tensor` gets modified
+        # by the indexing line.
+        a = torch.tensor([1., 0, 0])
+        b = torch.zeros(3, requires_grad=True)
+        tensor = b + 0
+        tensor[a != 0] = tensor[a != 0]
+        tensor.backward(torch.zeros_like(tensor))
 
     def test_volatile_deprecated(self):
         v = torch.autograd.torch.randn(3, 3)
@@ -1912,7 +1924,6 @@ class TestAutograd(TestCase):
         torch.autograd.grad(y, x)  # should not error!
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    @skipIfRocm
     def test_unused_output_gpu(self):
         from torch.nn.parallel._functions import Broadcast
         x = Variable(torch.randn(5, 5).float().cuda(), requires_grad=True)
@@ -1941,7 +1952,6 @@ class TestAutograd(TestCase):
         self.assertEqual(device[0], 1)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    @skipIfRocm
     def test_inputbuffer_add_multigpu(self):
         input = torch.randn(1).cuda(0).requires_grad_()
         output = input.cuda(1) + input.cuda(1)
@@ -3542,6 +3552,7 @@ for shape in [(1,), ()]:
         s = TestCase.runWithPytorchAPIUsageStderr(code)
         self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
 
+    @unittest.skipIf(IS_MACOS, "Fails with SIGBUS on macOS; https://github.com/pytorch/pytorch/issues/25941")
     def test_deep_reentrant(self):
 
         class DeepReentrant(Function):

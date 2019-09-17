@@ -85,7 +85,28 @@ inline c10::optional<TypePtr> unifyOrInitializeType(
   return unifyTypes(accum, unify);
 }
 
-MatchTypeReturn tryToInferContainerType(py::handle input);
+struct InferredType {
+  InferredType(TypePtr type) : type_(std::move(type)) {}
+  InferredType(std::string reason)
+      : type_(nullptr), reason_(std::move(reason)) {}
+  TypePtr type() const {
+    TORCH_INTERNAL_ASSERT(type_);
+    return type_;
+  }
+  bool success() const {
+    return type_ != nullptr;
+  }
+  const std::string& reason() const {
+    TORCH_INTERNAL_ASSERT(!type_);
+    return reason_;
+  }
+
+ private:
+  TypePtr type_;
+  std::string reason_;
+};
+
+InferredType tryToInferContainerType(py::handle input);
 
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
@@ -93,41 +114,41 @@ MatchTypeReturn tryToInferContainerType(py::handle input);
 //   input is an empty container (list, dict)
 //   input is an list with element types that cannot be unified
 //   input is an dict with key or value types that cannot be unified
-inline MatchTypeReturn tryToInferType(py::handle input) {
+inline InferredType tryToInferType(py::handle input) {
   // Try tensor types
   if (THPVariable_Check(input.ptr())) {
     auto tensor = py::cast<at::Tensor>(input);
-    return MatchTypeReturn(TensorType::create(tensor));
+    return InferredType(TensorType::create(tensor));
   }
 
   if (input.is(py::none())) {
-    return MatchTypeReturn("Cannot infer type of a None value");
+    return InferredType("Cannot infer type of a None value");
   }
 
   // Try basic types first
   if (py::isinstance<py::bool_>(input)) {
-    return MatchTypeReturn(BoolType::get());
+    return InferredType(BoolType::get());
   } else if (py::isinstance<py::int_>(input)) {
-    return MatchTypeReturn(IntType::get());
+    return InferredType(IntType::get());
   } else if (py::isinstance<py::float_>(input)) {
-    return MatchTypeReturn(FloatType::get());
+    return InferredType(FloatType::get());
   } else if (py::isinstance<py::str>(input)) {
-    return MatchTypeReturn(StringType::get());
+    return InferredType(StringType::get());
   } else if (THPLayout_Check(input.ptr())) {
-    return MatchTypeReturn(IntType::get());
+    return InferredType(IntType::get());
   } else if (THPDevice_Check(input.ptr())) {
-    return MatchTypeReturn(DeviceObjType::get());
+    return InferredType(DeviceObjType::get());
   } else if (THPDtype_Check(input.ptr())) {
-    return MatchTypeReturn(IntType::get());
+    return InferredType(IntType::get());
   } else if (THPQScheme_Check(input.ptr())) {
-    return MatchTypeReturn(IntType::get());
+    return InferredType(IntType::get());
   }
 
   // Try container types
   return tryToInferContainerType(input);
 }
 
-inline MatchTypeReturn tryToInferContainerType(py::handle input) {
+inline InferredType tryToInferContainerType(py::handle input) {
   if (six::isTuple(input)) {
     py::tuple tuple = py::cast<py::tuple>(input);
     std::vector<TypePtr> element_types;
@@ -135,20 +156,20 @@ inline MatchTypeReturn tryToInferContainerType(py::handle input) {
 
     for (py::handle elem : tuple) {
       auto type_match = tryToInferType(elem);
-      if (type_match.type) {
-        element_types.push_back(*type_match.type);
+      if (type_match.success()) {
+        element_types.push_back(type_match.type());
       } else {
         // Forward error message along
-        return type_match.errMsg;
+        return type_match.reason();
       }
     }
-    return MatchTypeReturn(TupleType::create(element_types));
+    return InferredType(TupleType::create(element_types));
   } else if (PyDict_Check(input.ptr())) {
     // Check to make sure we can generate useful input/output types
     auto dict = py::cast<py::dict>(input);
     size_t len = py::len(dict);
     if (!len) {
-      return MatchTypeReturn("Dictionary inputs must have entries");
+      return InferredType("Dictionary inputs must have entries");
     }
 
     TypePtr key_type = nullptr;
@@ -157,67 +178,67 @@ inline MatchTypeReturn tryToInferContainerType(py::handle input) {
     for (auto entry : dict) {
       // Try to infer the key type and unify it with the existing one
       auto entry_key_type_match = tryToInferType(entry.first);
-      if (!entry_key_type_match.type) {
-        return entry_key_type_match.errMsg;
+      if (!entry_key_type_match.success()) {
+        return entry_key_type_match.reason();
       }
       auto unified_key =
-          unifyOrInitializeType(key_type, *entry_key_type_match.type);
+          unifyOrInitializeType(key_type, entry_key_type_match.type());
       if (!unified_key) {
-        return MatchTypeReturn(c10::str(
+        return InferredType(c10::str(
             "Dictionary inputs to traced functions must have consistent type. Found ",
             key_type->python_str(),
             " and ",
-            (*entry_key_type_match.type)->python_str()));
+            (entry_key_type_match.type())->python_str()));
       }
 
       // Try to infer the value type and unify it with the existing one
       auto entry_value_type_match = tryToInferType(entry.second);
-      if (!entry_value_type_match.type) {
-        return entry_value_type_match.errMsg;
+      if (!entry_value_type_match.success()) {
+        return entry_value_type_match.reason();
       }
       auto unified_value =
-          unifyOrInitializeType(value_type, *entry_value_type_match.type);
+          unifyOrInitializeType(value_type, entry_value_type_match.type());
       if (!unified_value) {
-        return MatchTypeReturn(c10::str(
+        return InferredType(c10::str(
             "Dictionary inputs to traced functions must have consistent type. Found ",
             value_type->python_str(),
             " and ",
-            (*entry_value_type_match.type)->python_str()));
+            (entry_value_type_match.type())->python_str()));
       }
 
       key_type = *unified_key;
       value_type = *unified_value;
     }
-    return MatchTypeReturn(DictType::create(key_type, value_type));
+    return InferredType(DictType::create(key_type, value_type));
   } else if (PyList_Check(input.ptr())) {
     auto list = py::cast<py::list>(input);
     size_t len = py::len(list);
     if (!len) {
-      return MatchTypeReturn("List trace inputs must have elements");
+      return InferredType("List trace inputs must have elements");
     }
 
     TypePtr element_type = nullptr;
     for (auto elem : list) {
       auto element_type_match = tryToInferType(elem);
-      if (!element_type_match.type) {
-        return MatchTypeReturn(c10::str(
+      if (!element_type_match.success()) {
+        return InferredType(c10::str(
             "Could not infer type of list element: ",
-            element_type_match.errMsg));
+            element_type_match.reason()));
       }
       auto unified_type =
-          unifyOrInitializeType(element_type, *element_type_match.type);
+          unifyOrInitializeType(element_type, element_type_match.type());
       if (!unified_type) {
-        return MatchTypeReturn(c10::str(
+        return InferredType(c10::str(
             "List inputs to traced functions must have consistent element type. Found ",
             element_type->python_str(),
             " and ",
-            (*element_type_match.type)->python_str()));
+            (element_type_match.type())->python_str()));
       }
       element_type = *unified_type;
     }
-    return MatchTypeReturn(ListType::create(element_type));
+    return InferredType(ListType::create(element_type));
   } else {
-    return MatchTypeReturn(c10::str(
+    return InferredType(c10::str(
         "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
         "are supported ",
         "as inputs or outputs of traced functions",
@@ -259,11 +280,11 @@ inline bool isTraceableType(TypePtr type) {
 
 inline TypedIValue toTraceableIValue(py::handle input) {
   auto match = tryToInferType(input);
-  if (!match.type) {
+  if (!match.success()) {
     AT_ERROR(
-        "Tracer cannot infer type of ", py::str(input), "\n:", match.errMsg);
+        "Tracer cannot infer type of ", py::str(input), "\n:", match.reason());
   }
-  auto type = *match.type;
+  auto type = match.type();
 
   if (isTraceableType(type)) {
     return TypedIValue(toIValue(input, type), type);

@@ -32,30 +32,33 @@ def _namer_api_name(inplace):
     if inplace:
         return 'names_'
     else:
-        return 'view_names'
+        return 'renamed'
 
 
 def _expand_single_glob(numel_pre_glob, numel_post_glob, names):
     return names[numel_pre_glob:len(names) - numel_post_glob]
 
 
-def _update_names_with_list(tensor, names, inplace):
-    # Special case for tensor.view_names(None)
-    if len(names) == 1 and names[0] is None:
-        return tensor._update_names(None, inplace)
-
+def _resolve_glob(names, tensor_names, fn_name):
     glob_indices = [i for i, x in enumerate(names) if x == '*']
     if len(glob_indices) >= 2:
         raise RuntimeError('{}: More than one \'*\' found in names ('
                            '{}). This function supports up to one \'*\'.'
-                           .format(_namer_api_name(inplace), names))
-    elif len(glob_indices) == 1:
-        glob_idx = glob_indices[0]
-        globbed_names = _expand_single_glob(glob_idx, len(names) - glob_idx - 1, tensor.names)
-        return tensor._update_names(
-            names[:glob_idx] + globbed_names + names[glob_idx + 1:], inplace)
-    else:
-        return tensor._update_names(names, inplace)
+                           .format(fn_name, names))
+    if len(glob_indices) == 0:
+        return names
+    glob_idx = glob_indices[0]
+    globbed_names = _expand_single_glob(glob_idx, len(names) - glob_idx - 1, tensor_names)
+    return names[:glob_idx] + globbed_names + names[glob_idx + 1:]
+
+
+def _update_names_with_list(tensor, names, inplace):
+    # Special case for tensor.renamed(None)
+    if len(names) == 1 and names[0] is None:
+        return tensor._update_names(None, inplace)
+
+    return tensor._update_names(
+        _resolve_glob(names, tensor.names, _namer_api_name(inplace)), inplace)
 
 
 def _update_names_with_mapping(tensor, rename_map, inplace):
@@ -75,7 +78,7 @@ def _update_names_with_mapping(tensor, rename_map, inplace):
 def _update_names(tensor, names, rename_map, inplace):
     """There are two usages:
 
-    tensor.view_names(*names) returns a view on tensor with named dims `names`.
+    tensor.renamed(*names) returns a view on tensor with named dims `names`.
     `names` must be of length `tensor.dim()`; otherwise, if '*' is in `names`,
     then it is expanded greedily to be equal to the corresponding names from
     `tensor.names`.
@@ -83,24 +86,24 @@ def _update_names(tensor, names, rename_map, inplace):
     For example,
     ```
     >>> x = torch.empty(2, 3, 5, 7, names=('N', 'C', 'H', 'W'))
-    >>> x.view_names('*', 'height', 'width').names
+    >>> x.renamed('*', 'height', 'width').names
     ('N', 'C', 'height', 'width')
 
-    >>> x.view_names('batch', '*', 'width').names
+    >>> x.renamed('batch', '*', 'width').names
     ('batch', 'C', 'H', 'width')
     ```
 
-    tensor.view_names(**rename_map) returns a view on tensor that has renamed dims
+    tensor.renamed(**rename_map) returns a view on tensor that has renamed dims
         as specified in the mapping `rename_map`.
 
     For example,
     ```
     >>> x = torch.empty(2, 3, 5, 7, names=('N', 'C', 'H', 'W'))
-    >>> x.view_names(W='width', H='height').names
+    >>> x.renamed(W='width', H='height').names
     ('N', 'C', 'height', 'width')
     ```
 
-    Finally, tensor.view_names has an in-place version called tensor.names_.
+    Finally, tensor.renamed has an in-place version called tensor.names_.
     """
     _assert_namedtensor_build(_namer_api_name(inplace))
 
@@ -112,7 +115,7 @@ def _update_names(tensor, names, rename_map, inplace):
                            'to name dims and tensor.{api_name}(**rename_map) to rename '
                            'dims.'.format(api_name=_namer_api_name(inplace)))
 
-    # Special case for tensor.view_names(*[]), which is valid for a 0 dim tensor.
+    # Special case for tensor.renamed(*[]), which is valid for a 0 dim tensor.
     if not has_names and not has_rename_pairs:
         return _update_names_with_list(tensor, names, inplace)
 
