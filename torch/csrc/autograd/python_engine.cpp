@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/utils/auto_gil.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #ifndef _WIN32
 #include <pthread.h>
