@@ -103,6 +103,7 @@ void Context::setQEngine(at::QEngine e) {
   switch (e) {
     case at::kNoQEngine:
       quantized_engine = e;
+      break;
     case at::kFBGEMM:
 #ifdef FBGEMM
       quantized_engine = e;
