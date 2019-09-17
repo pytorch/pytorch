@@ -207,7 +207,8 @@ void BlockToONNX(
         // Allow symbolic() to skip specifying the type of the return node.
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
-        outputs[i]->setType(old->type());
+        if (old->type()->kind() || !outputs[i]->type()->kind()):
+          outputs[i]->setType(old->type());
         // Copy over source location and scope information to all nodes
         // created by the symbolic
         outputs[i]->node()->setSourceRange(node->sourceRange());
