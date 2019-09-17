@@ -67,7 +67,7 @@ namespace detail {
 
   // NB: No universal forwarding
   template <typename... Args>
-  TensorTypeSet multi_dispatch_tensor_type_set(Args... args) {
+  TensorTypeSet multi_dispatch_tensor_type_set(const Args&... args) {
     return MultiDispatchTensorTypeSet().apply(args...).ts;
   }
 }
