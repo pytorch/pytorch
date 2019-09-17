@@ -3,14 +3,37 @@
 #include <string>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-// To enable logging please set(export) PYTORCH_JIT_LOG_LEVEL to
-// the ordinal value of one of the following logging levels: 1 for GRAPH_DUMP,
-// 2 for GRAPH_UPDATE, 3 for GRAPH_DEBUG.
-// * Use GRAPH_DUMP for dumping graphs after optimization passes
-// * Use GRAPH_UPDATE for reporting graph transformations (i.e. node deletion,
-//   constant folding, CSE)
-// * Use GRAPH_DEBUG to provide information useful for debugging
+// `TorchScript` offers a simple logging facility that can enabled by setting an
+// environment variable `PYTORCH_JIT_LOG_LEVEL`.
+
+// Logging is enabled on a per file basis. To enable logging in
+// `dead_code_elimination.cpp`, `PYTORCH_JIT_LOG_LEVEL` should be
+// set to `dead_code_elimination.cpp` or, simply, to `dead_code_elimination`
+// (i.e. `PYTORCH_JIT_LOG_LEVEL=dead_code_elimination`).
+
+// Multiple files can be logged by separating each file name with a colon `:` as
+// in the following example,
+// `PYTORCH_JIT_LOG_LEVEL=dead_code_elimination:guard_elimination`
+
+// There are 3 logging levels available for your use ordered by the detail level
+// from lowest to highest.
+
+// * `GRAPH_DUMP` should be used for printing entire graphs after optimization
+// passes
+// * `GRAPH_UPDATE` should be used for reporting graph transformations (i.e.
+// node deletion, constant folding, etc)
+// * `GRAPH_DEBUG` should be used for providing information useful for debugging
 //   the internals of a particular optimization pass or analysis
+
+// The current logging level is `GRAPH_UPDATE` meaning that both `GRAPH_DUMP`
+// and `GRAPH_UPDATE` will be enabled when
+// one specifies a file(s) in `PYTORCH_JIT_LOG_LEVEL`.
+
+// `GRAPH_DEBUG` can be enabled by prefixing a file name with an `>` as in
+// `>alias_analysis`.
+// `>>` and `>>>` are also valid and **currently** are equivalent to
+// `GRAPH_DEBUG` as there is no logging level that is
+// higher than `GRAPH_DEBUG`.
 
 namespace torch {
 namespace jit {

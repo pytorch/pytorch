@@ -876,7 +876,6 @@ graph(%x : Tensor,
         FileCheck().run(input_str, graph)
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("temoprarily disable the test case, it will pass in later PR")
     def test_insert_observers(self):
         class Observer(torch.nn.Module):
             def __init__(self):
@@ -933,7 +932,6 @@ graph(%x : Tensor,
                    .run(str(m._c._get_module("conv")._get_method('conv2d_forward').graph))
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("temoprarily disable the test case, it will pass in later PR")
     def test_insert_observers_child_qconfig(self):
         class Observer(torch.nn.Module):
             def __init__(self):
@@ -1004,8 +1002,6 @@ graph(%x : Tensor,
         check_observed(get_forward(m._c._get_module('sub')._get_module('linear')).graph)
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("temoprarily disable the test since \
-    I want to put the insert_quant_dequant changes in a separate PR")
     def test_insert_observers_skip_values(self):
         import torch.nn.functional as F
 
@@ -1067,7 +1063,6 @@ graph(%x : Tensor,
         test_module(M2, 'prim::CallMethod[name="forward"]', 0)
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("temoprarily disable the test")
     def test_insert_quant_dequant(self):
         class Observer(torch.nn.Module):
             def __init__(self):
@@ -1123,7 +1118,9 @@ graph(%x : Tensor,
                    .run(str(m._c._get_module('conv')._get_method('conv2d_forward').graph))
 
     def test_quant_fusion(self):
-        input_strs = ["""
+        input_strs = [
+            # aten::conv2d --> quantized::conv2d
+            """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
 %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
@@ -1152,9 +1149,10 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         # CHECK: aten::_dequantize_linear
         %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
         return (%r_dequant)""",
-                      """
+            # addmm -> quantized::linear
+            """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype):
+%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::int_repr
         %a_intrepr = aten::int_repr(%a_quant)
@@ -1170,18 +1168,79 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %b_intrepr = aten::int_repr(%b_quant)
         # CHECK-NOT: aten::_dequantize_linear
         %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
+        # CHECK: aten::t
         # CHECK: quantized::fbgemm_linear_prepack
         # CHECK: quantized::fbgemm_linear
-        # CHECK-NOT: aten::linear
-        %r = aten::linear(%a_dequant, %w_dequant, %b_dequant)
+        # CHECK-NOT: aten::addmm
+        %r = aten::addmm(%b_dequant, %a_dequant, %w_dequant, %4, %4)
         # CHECK-NOT: aten::quantize_linear
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
         # CHECK: aten::int_repr
         %r_intrepr = aten::int_repr(%r_quant)
         # CHECK: aten::_dequantize_linear
         %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_dequant)"""]
-        for input_str in input_strs:
+        return (%r_dequant)""",
+            # matmul(with bias) -> quantized::linear
+            """
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
+%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+        %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
+        # CHECK-NOT: aten::int_repr
+        %a_intrepr = aten::int_repr(%a_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %w_quant = aten::quantize_linear(%w, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::int_repr
+        %w_intrepr = aten::int_repr(%w_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::int_repr
+        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
+        %b_intrepr = aten::int_repr(%b_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
+        # CHECK: aten::t
+        # CHECK: quantized::fbgemm_linear_prepack
+        # CHECK: quantized::fbgemm_linear
+        # CHECK-NOT: aten::addmm
+        %output = aten::matmul(%a_dequant, %w_dequant)
+        %r = aten::add_(%output, %b_dequant, %4)
+        # CHECK-NOT: aten::quantize_linear
+        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        # CHECK: aten::int_repr
+        %r_intrepr = aten::int_repr(%r_quant)
+        # CHECK: aten::_dequantize_linear
+        %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_dequant)""",
+            # matmul(without bias) -> quantized::linear
+            """
+graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
+%r_scale, %r_zero_point, %r_dtype):
+        %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
+        # CHECK-NOT: aten::int_repr
+        %a_intrepr = aten::int_repr(%a_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %w_quant = aten::quantize_linear(%w, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::int_repr
+        %w_intrepr = aten::int_repr(%w_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK: aten::t
+        # CHECK: quantized::fbgemm_linear_prepack
+        # CHECK: prim::Constant()
+        # CHECK: quantized::fbgemm_linear
+        # CHECK-NOT: aten::matmul
+        %r = aten::matmul(%a_dequant, %w_dequant)
+        # CHECK-NOT: aten::quantize_linear
+        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        # CHECK: aten::int_repr
+        %r_intrepr = aten::int_repr(%r_quant)
+        # CHECK: aten::_dequantize_linear
+        %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_dequant)"""
+        ]
+        for input_str in input_strs[1:]:
             graph = parse_ir(input_str)
             torch._C._jit_pass_quant_fusion(graph)
             FileCheck().run(input_str, graph)
@@ -1330,6 +1389,23 @@ graph(%input, %weight):
             graph = parse_ir(input_str)
             torch._C._jit_pass_fuse_linear(graph)
             FileCheck().run(input_str, graph)
+
+    @_tmp_donotuse_dont_inline_everything
+    def test_fold_quantize(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.weight = torch.nn.Parameter(torch.tensor([2], dtype=torch.float))
+
+            def forward(self, x):
+                return torch.quantize_linear(self.weight, 2.0, 0, torch.quint8)
+
+        m = torch.jit.script(M())
+        torch._C._jit_pass_fold_quantize(m._c, 'forward')
+        self.assertTrue(m._c._has_attribute('_quantized_weight'))
+        FileCheck().check_not('GetAttr[name="weight"]') \
+                   .check('GetAttr[name="_quantized_weight"]') \
+                   .run(m._c._get_method('forward').graph)
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -1649,6 +1725,17 @@ graph(%Ra, %Rb):
     # gradients are required and sizes are involved
     def test_trace_arange_with_grad(self):
         self.do_trace_arange(True)
+
+    # Test that a trace of torch.full(x.shape) doesn't store the shape as a constant
+    def test_trace_full_dynamic_shape(self):
+        def full_with_shape_like(x):
+            return torch.full(x.shape, 2)
+
+        x = torch.randn(3, 4)
+        ge = torch.jit.trace(full_with_shape_like, example_inputs=x)
+        y = torch.randn(2, 7)
+        self.assertEqual(ge(y).shape, y.shape)
+        self.assertEqual(ge(x).shape, x.shape)
 
     def test_trace_casts(self):
         casts = [
