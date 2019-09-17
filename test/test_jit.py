@@ -17895,8 +17895,10 @@ class TestList(JitTestCase):
         args_right_float = [[2., 1., 1.], [1., 8., 8.], [], [1.], [], [1., 2.]]
         run_tests(jit_min_list_float, args_left_float, args_right_float)
 
-        args_left_bool = [[], [], [], [False], [True], [False, True], [True, True], [False, False, False], False, False, True]]
-        args_right_bool = [[], [False], [True], [True], [False], [True, True], [False, True], [False, False, True], [False, False, False]]
+        args_left_bool = [[], [], [], [False], [True], [False, True], [True, True],
+                          [False, False, False], [False, False, True]]
+        args_right_bool = [[], [False], [True], [True], [False], [True, True],
+                           [False, True], [False, False, True], [False, False, False]]
         run_tests(jit_min_list_bool, args_left_bool, args_right_bool)
 
         def jit_max_list(a, b):
