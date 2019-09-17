@@ -102,8 +102,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
     void pretty_print_recursive(std::ostream& stream) const {
       if (type_ == ListInitTensorType::Scalar) {
         AT_DISPATCH_ALL_TYPES_AND3(at::kBool, at::kHalf, at::kBFloat16, scalar_type_, "ListInitTensor_pretty_print_scalar", [&] {
-          // stream << const_cast<c10::Scalar&>(scalar_).to<scalar_t>();
-          stream << scalar_;
+          stream << const_cast<c10::Scalar&>(scalar_).to<scalar_t>();
         });
       } else if (type_ == ListInitTensorType::InitList) {
         stream << "{";
