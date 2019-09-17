@@ -143,7 +143,6 @@ struct C10_API NonVariableTypeMode {
   static void set_enabled(bool enabled);
 };
 
-#ifdef BUILD_NAMEDTENSOR
 struct C10_API NamedTensorMetaInterface {
   virtual ~NamedTensorMetaInterface() {};
   virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {
@@ -157,7 +156,6 @@ struct C10_API NamedTensorMetaInterface {
       "Not implemented: NamedTensorMetaInterface::slow_dim");
   };
 };
-#endif
 
 // NOTE [ Version Counter Sharing ]
 //
@@ -856,7 +854,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return std::move(autograd_meta_);
   }
 
-#ifdef BUILD_NAMEDTENSOR
   /**
    * Set the pointer to named tensor metadata.
    */
@@ -883,7 +880,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   c10::NamedTensorMetaInterface* named_tensor_meta() {
     return named_tensor_meta_.get();
   }
-#endif
 
 
   // NOTE [ TensorImpl Shallow-Copying ]
@@ -1554,11 +1550,9 @@ protected:
     dest_impl->reserved_ = src_impl->reserved_;
     dest_impl->set_version_counter(version_counter);
     dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-#ifdef BUILD_NAMEDTENSOR
     if (src_impl->named_tensor_meta_ != nullptr) {
       dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
     }
-#endif
   }
 
 protected:
@@ -1580,9 +1574,7 @@ private:
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
 protected:
-#ifdef BUILD_NAMEDTENSOR
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
-#endif
 
   c10::VariableVersion version_counter_;
 
@@ -1731,13 +1723,8 @@ protected:
 //    tensor type id
 //    miscellaneous bitfield
 //
-#ifdef BUILD_NAMEDTENSOR
-#define NWORDS 30
-#else
-#define NWORDS 29
-#endif
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * NWORDS,
+              sizeof(TensorImpl) == sizeof(int64_t) * 30,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 
