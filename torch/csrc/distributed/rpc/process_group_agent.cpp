@@ -195,8 +195,6 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::sendImpl(
       futures_[requestId] = future;
     }
     message.setId(requestId);
-  } else {
-    future->markCompleted();
   }
 
   // NB: cannot directly pass ``to`` to the ``SendWork``, because it might no
