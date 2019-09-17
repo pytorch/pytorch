@@ -1,3 +1,4 @@
+
 #include <gtest/gtest.h>
 #include <ATen/core/op_registration/test_helpers.h>
 
@@ -166,19 +167,19 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernelWithCache_whenCalled_
   // expect first time calling returns a 4 (4 is the initial value in the cache)
   auto stack = makeStack(dummyTensor(TensorTypeId::CPUTensorId));
   auto kernel = c10::Dispatcher::singleton().lookup(*op, &stack);
-  kernel.call(&stack);
+  kernel.callBoxed(&stack);
   EXPECT_EQ(1, stack.size());
   EXPECT_EQ(4, stack[0].toInt());
 
   // expect second time calling returns a 5
   stack = makeStack(dummyTensor(TensorTypeId::CPUTensorId));
-  kernel.call(&stack);
+  kernel.callBoxed(&stack);
   EXPECT_EQ(1, stack.size());
   EXPECT_EQ(5, stack[0].toInt());
 
   // expect third time calling returns a 6
   stack = makeStack(dummyTensor(TensorTypeId::CPUTensorId));
-  kernel.call(&stack);
+  kernel.callBoxed(&stack);
   EXPECT_EQ(1, stack.size());
   EXPECT_EQ(6, stack[0].toInt());
 }

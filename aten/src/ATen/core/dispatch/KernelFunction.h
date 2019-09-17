@@ -4,6 +4,8 @@
 #include <ATen/core/stack.h>
 #include <c10/util/TypeList.h>
 #include <ATen/core/op_registration/kernel_functor.h>
+#include <ATen/core/op_registration/kernel_function.h>
+#include <ATen/core/op_registration/kernel_lambda.h>
 
 namespace c10 {
 
@@ -102,20 +104,20 @@ public:
     );
   }
 
-  template<class KernelFunctor, bool AllowDeprecatedTypes = false>
+  template<bool AllowLegacyTypes = false, class KernelFunctor>
   static KernelFunction makeFromUnboxedFunctor(std::shared_ptr<KernelFunctor> kernelFunctor) {
     static_assert(guts::is_functor<KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor> but the argument is not a functor.");
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor>, but the functor doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     return KernelFunction(
       std::move(kernelFunctor),
-      &detail::wrap_kernel_functor_boxed<KernelFunctor, AllowDeprecatedTypes>::call,
+      &detail::wrap_kernel_functor_boxed<KernelFunctor, AllowLegacyTypes>::call,
       reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
       detail::hashFunctionSignature<KernelFunctor>()
     );
   }
 
-  template<class KernelFunctor, bool AllowDeprecatedTypes = false>
+  template<class KernelFunctor>
   static KernelFunction makeFromUnboxedOnlyFunctor(std::shared_ptr<KernelFunctor> kernelFunctor) {
     // TODO We want to get rid of kernels that have only an unboxed function pointer.
     //      All kernels should have a boxed pointer.
@@ -128,6 +130,52 @@ public:
       nullptr, // Don't create a boxed kernel for this
       reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
       detail::hashFunctionSignature<KernelFunctor>()
+    );
+  }
+
+  template<class FuncType, FuncType* func, bool AllowLegacyTypes = false>
+  static KernelFunction makeFromUnboxedFunction() {
+    static_assert(guts::is_function_type<FuncType>::value, ""); // TODO
+    static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, ""); // TODO
+    static_assert(func != nullptr, "Kernel function cannot be nullptr");
+
+    return makeFromUnboxedFunctor<AllowLegacyTypes>(
+      std::make_shared<typename detail::WrapKernelFunction<FuncType, func>::type>()
+    );
+  }
+
+  template<class FuncType, FuncType* func>
+  static KernelFunction makeFromUnboxedOnlyFunction() {
+    // TODO We want to get rid of kernels that have only an unboxed function pointer.
+    //      All kernels should have a boxed pointer.
+
+    static_assert(guts::is_function_type<FuncType>::value, ""); // TODO
+    static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, ""); // TODO
+    static_assert(func != nullptr, "Kernel function cannot be nullptr");
+
+    return makeFromUnboxedOnlyFunctor(
+      std::make_shared<typename detail::WrapKernelFunction<FuncType, func>::type>()
+    );
+  }
+
+  template<class FuncType, bool AllowLegacyTypes = false>
+  static KernelFunction makeFromUnboxedRuntimeFunction(FuncType* func) {
+    static_assert(guts::is_function_type<FuncType>::value, ""); // TODO
+    static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, ""); // TODO
+    TORCH_INTERNAL_ASSERT(func != nullptr, "Kernel function cannot be nullptr");
+
+    return makeFromUnboxedFunctor<AllowLegacyTypes>(
+      std::make_shared<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>(func)
+    );
+  }
+
+  template<class Lambda, bool AllowLegacyTypes = false>
+  static KernelFunction makeFromUnboxedLambda(Lambda&& lambda) {
+    static_assert(guts::is_functor<Lambda>::value, ""); // TODO
+    static_assert(guts::is_stateless_lambda<guts::decay_t<Lambda>>::value, ""); // TODO
+
+    return makeFromUnboxedFunctor<AllowLegacyTypes>(
+      std::make_shared<detail::WrapRuntimeKernelFunctor<guts::decay_t<Lambda>>>(std::forward<Lambda>(lambda))
     );
   }
 
