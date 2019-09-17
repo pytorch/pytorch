@@ -528,8 +528,14 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm) {
 
 TEST_F(ModulesTest, PrettyPrintEmbedding) {
   ASSERT_EQ(
-      c10::str(Embedding(10, 2)),
-      "torch::nn::Embedding(count=10, dimension=2)");
+      c10::str(Embedding(num_embeddings=10, embedding_dim=2)),
+      "torch::nn::Embedding(num_embeddings=10, embedding_dim=2)");
+  ASSERT_EQ(
+      c10::str(Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2)),
+      "torch::nn::Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2)");
+  ASSERT_EQ(
+      c10::str(Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true)),
+      "torch::nn::Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintNestedModel) {
@@ -548,6 +554,8 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
         : torch::nn::Module("TestModule"),
           fc(register_module("fc", torch::nn::Linear(4, 5))),
           table(register_module("table", torch::nn::Embedding(10, 2))),
+          table(register_module("table", torch::nn::Embedding(10, 2, padding_idx=3, max_norm=2))),
+          table(register_module("table", torch::nn::Embedding(10, 2, padding_idx=3, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true))),
           inner(register_module("inner", std::make_shared<InnerTestModule>())) {
     }
 
@@ -560,7 +568,9 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
       c10::str(TestModule{}),
       "TestModule(\n"
       "  (fc): torch::nn::Linear(in=4, out=5, with_bias=true)\n"
-      "  (table): torch::nn::Embedding(count=10, dimension=2)\n"
+      "  (table): torch::nn::Embedding(num_embeddings=10, embedding_dim=2)\n"
+      "  (table): torch::nn::Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2)"
+      "  (table): torch::nn::Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true)"
       "  (inner): InnerTestModule(\n"
       "    (fc): torch::nn::Linear(in=3, out=4, with_bias=true)\n"
       "    (table): torch::nn::Embedding(count=10, dimension=2)\n"
