@@ -11,7 +11,7 @@
 #include <qnnpack/common.h>
 #include <qnnpack/q8vadd.h>
 
-void q8vadd_ukernel__neon(
+void pytorch_q8vadd_ukernel__neon(
     size_t n,
     const uint8_t* a,
     const uint8_t* b,
