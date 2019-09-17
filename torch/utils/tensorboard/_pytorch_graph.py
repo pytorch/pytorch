@@ -151,6 +151,11 @@ class GraphPy(object):
                 self.unique_name_to_scoped_name[input_node_id] = node.scopeName + '/' + input_node_id
 
         for key, node in self.nodes_io.items():
+            if type(node) == NodeBase:
+                self.unique_name_to_scoped_name[key] = node.scope + '/' + node.debugName
+            if hasattr(node, 'input_or_output'):
+                self.unique_name_to_scoped_name[key] = node.input_or_output + '/' + node.debugName
+
             if hasattr(node, 'scope') and node.scope is not None:
                 self.unique_name_to_scoped_name[key] = node.scope + '/' + node.debugName
                 if node.scope == '' and self.shallowest_scope_name:

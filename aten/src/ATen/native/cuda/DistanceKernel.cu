@@ -5,18 +5,13 @@
 
 #include <ATen/native/Distance.h>
 
+#include <c10/macros/Macros.h>
 
 namespace at { namespace native {
 
 namespace {
 
 static const int forward_threads = 256;
-
-#ifdef __HIP_PLATFORM_HCC__
-static const int WARP_SIZE = 64;
-#else
-static const int WARP_SIZE = 32;
-#endif
 
 template <typename scalar_t>
 static __forceinline__ __device__ scalar_t device_sqrt(scalar_t val);

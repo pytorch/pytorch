@@ -178,6 +178,8 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
 
 int aten_to_numpy_dtype(const ScalarType scalar_type) {
   switch (scalar_type) {
+    case kComplexDouble: return NPY_COMPLEX128;
+    case kComplexFloat: return NPY_COMPLEX64;
     case kDouble: return NPY_DOUBLE;
     case kFloat: return NPY_FLOAT;
     case kHalf: return NPY_HALF;

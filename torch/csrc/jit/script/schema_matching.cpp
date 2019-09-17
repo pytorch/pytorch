@@ -86,19 +86,6 @@ Value* tryConvertToType(
     }
   }
 
-  if (value->type()->isSubtypeOf(NoneType::get()) &&
-      !concrete_type->isSubtypeOf(NoneType::get())) {
-    if (auto optional_type = concrete_type->cast<OptionalType>()) {
-      value =
-          graph.insertNode(graph.createNone(optional_type->getElementType()))
-              ->output();
-    } else {
-      // When try to convert None to non-optional concrete type, create a None
-      // node with the return value type of Optional[concrete_type]
-      value = graph.insertNode(graph.createNone(concrete_type))->output();
-    }
-  }
-
   // implicit conversions
   if (allow_conversions) {
     // Convert tensor to number
@@ -143,17 +130,25 @@ static Value* tryMatchArgument(
   }
 
   // Resolve VarType variables
-  const MatchTypeReturn matched_type =
+  const MatchTypeReturn matched =
       matchTypeVariables(arg.type(), value->type(), type_env);
-  if (!matched_type.type) {
+  if (!matched.success()) {
     if (failure_messages) {
       err() << "Could not match type " << value->type()->python_str() << " to "
             << arg.type()->python_str() << " in argument '" << arg.name()
-            << "': " << matched_type.errMsg << ".\n";
+            << "': " << matched.reason() << ".\n";
     }
     return nullptr;
   }
-  const auto concrete_type = *matched_type.type;
+  const auto concrete_type = tryEvalTypeVariables(arg.type(), type_env);
+  if (!concrete_type) {
+    if (failure_messages) {
+      err() << "Type variables in type " << arg.type()->python_str()
+            << " could not be inferred from actual type "
+            << value->type()->python_str();
+    }
+    return nullptr;
+  }
 
   // Check if the value can be matched to the arg through any implicit
   // conversions
@@ -391,7 +386,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
 
   const auto& returns = schema.returns();
   auto return_types = fmap(returns, [&](const Argument& r) {
-    return evalTypeVariables(r.type(), type_env);
+    TypePtr result = tryEvalTypeVariables(r.type(), type_env);
+    TORCH_INTERNAL_ASSERT(
+        result, r.type()->python_str(), " has unbound type variables.");
+    return result;
   });
   // Codegen does not support return of namedtuples with undefined field names.
   // Therefore, either all or none returns has field names.

@@ -60,7 +60,9 @@ TESTS = [
     'jit_fuser',
     'tensorboard',
     'namedtensor',
+    'type_promotion',
     'jit_disabled',
+    'function_schema',
 ]
 
 # skip < 3.6 b/c fstrings added in 3.6
@@ -80,11 +82,7 @@ ROCM_BLACKLIST = [
     'nccl',
 ]
 
-DISTRIBUTED_TESTS_CONFIG = {
-    'gloo': {
-        'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
-    },
-}
+DISTRIBUTED_TESTS_CONFIG = {}
 
 
 if dist.is_available():
@@ -96,7 +94,10 @@ if dist.is_available():
         DISTRIBUTED_TESTS_CONFIG['nccl'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
         }
-
+    if dist.is_gloo_available():
+        DISTRIBUTED_TESTS_CONFIG['gloo'] = {
+            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+        }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
 SIGNALS_TO_NAMES_DICT = {getattr(signal, n): n for n in dir(signal)
