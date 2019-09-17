@@ -162,6 +162,11 @@ int connect(
   // yet, or is listening but has its listen backlog exhausted.
   bool anyRefused = false;
   bool anyReset = false;
+
+  auto start = std::chrono::high_resolution_clock::now().time_since_epoch();
+  auto startMilliseconds =
+      std::chrono::duration_cast<std::chrono::milliseconds>(start).count();
+
   while (true) {
     try {
       SYSCHECK_ERR_RETURN_NEG1(
@@ -230,6 +235,23 @@ int connect(
       if (!nextAddr) {
         if (!wait || (!anyRefused && !anyReset)) {
           throw;
+        }
+
+        /*
+        if a timeout is specified, check time elapsed to see if we need to
+        timeout. A timeout is specified if timeout != kNoTimeout.
+        */
+        if (timeout != kNoTimeout) {
+          auto now =
+              std::chrono::high_resolution_clock::now().time_since_epoch();
+          auto nowMilliseconds =
+              std::chrono::duration_cast<std::chrono::milliseconds>(now)
+                  .count();
+
+          auto elapsedMilliseconds = nowMilliseconds - startMilliseconds;
+          if (elapsedMilliseconds > timeout.count()) {
+            throw std::runtime_error("Connecting to TCP store timed out.");
+          }
         }
         std::this_thread::sleep_for(std::chrono::seconds(1));
         anyRefused = false;
