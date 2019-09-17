@@ -108,13 +108,7 @@ static TensorIterator make_reduction(
 #ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
 #endif
-
-  // special case for type promotion in mixed precision, improves computational
-  // efficiency.
-  // not generalize this to common mismatched input/output types to avoid cross
-  // product of templated kernel launches.
-  if (self.scalar_type() == in_dtype ||
-      (self.is_cuda() && self.scalar_type() == kHalf && in_dtype == kFloat)) {
+  if (self.scalar_type() == in_dtype) {
     return TensorIterator::reduce_op(viewed_result, self);
   }
   return TensorIterator::reduce_op(viewed_result, self.to(in_dtype));
@@ -122,10 +116,16 @@ static TensorIterator make_reduction(
 
 static TensorIterator make_reduction(
     const char* name, Tensor& result, const Tensor& self, IntArrayRef dim,
-    bool keepdim, ScalarType dtype)
+    bool keepdim, ScalarType out_dtype)
 {
-  // Assuming in_dtype == out_dtype
-  return make_reduction(name, result, self, dim, keepdim, dtype, dtype);
+  // special case for type promotion in mixed precision, improves computational
+  // efficiency.
+  // not generalize this to common mismatched input/output types to avoid cross
+  // product of templated kernel launches.
+  const bool gpu_f16_to_f32 = (
+    self.is_cuda() && self.scalar_type() == kHalf && out_dtype == kFloat);
+  auto in_dtype = gpu_f16_to_f32 ? self.scalar_type() : out_dtype;
+  return make_reduction(name, result, self, dim, keepdim, in_dtype, out_dtype);
 }
 
 static TensorIterator make_reduction(
