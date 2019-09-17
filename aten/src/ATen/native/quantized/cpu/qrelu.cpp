@@ -51,7 +51,6 @@ Tensor qnnpack_relu(Tensor input) {
   TORCH_INTERNAL_ASSERT(
       createStatus == pytorch_qnnp_status_success,
       "failed to create QNNPACK Relu operator");
-  TORCH_INTERNAL_ASSERT(qnnpack_operator != nullptr);
 
   qy = at::_empty_affine_quantized(
       input_contig.sizes(),

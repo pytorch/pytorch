@@ -110,7 +110,6 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   TORCH_INTERNAL_ASSERT(
       createStatus == pytorch_qnnp_status_success,
       "failed to create QNNPACK Add operator");
-  TORCH_INTERNAL_ASSERT(qnnpack_operator != nullptr);
 
   std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
       qnnpack_uniq_ptr(qnnpack_operator);

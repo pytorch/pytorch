@@ -326,7 +326,6 @@ class QMaxPool2D_arr_args final : public torch::OperatorKernel {
      TORCH_INTERNAL_ASSERT(
          createStatus == pytorch_qnnp_status_success,
          "failed to create QNNPACK MaxPool operator");
-     TORCH_INTERNAL_ASSERT(qnnpack_operator != nullptr);
 
      int64_t outC = inC;
      int64_t outH =
