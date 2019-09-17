@@ -22,7 +22,7 @@ PyObject * THPDtype_New(at::ScalarType scalar_type, const std::string& name)
 
 PyObject *THPDtype_is_floating_point(THPDtype *self)
 {
-  if (at::isFloatingType(self->scalar_type)) {
+  if (at::isFloatingType(self->scalar_type) || at::isComplexType(self->scalar_type)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;

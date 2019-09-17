@@ -1,5 +1,10 @@
 #include <c10d/ProcessGroupGloo.hpp>
 
+#include <netdb.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
+
 #include <gloo/allgather.h>
 #include <gloo/allreduce.h>
 #include <gloo/barrier.h>
@@ -19,9 +24,31 @@
 #include <c10/cuda/CUDAStream.h>
 #endif
 
+#include <gloo/config.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
+
+#if GLOO_HAVE_TRANSPORT_TCP
 #include <gloo/transport/tcp/device.h>
+#endif
+
+#if GLOO_HAVE_TRANSPORT_UV
+#include <gloo/transport/uv/device.h>
+#endif
+
+// On Linux, check that the tcp transport is available.
+#ifdef __linux__
+#if !GLOO_HAVE_TRANSPORT_TCP
+#error "Expected the tcp transport to be available on Linux."
+#endif
+#endif
+
+// On macOS, check that the uv transport is available.
+#ifdef __APPLE__
+#if !GLOO_HAVE_TRANSPORT_UV
+#error "Expected the uv transport to be available on macOS."
+#endif
+#endif
 
 #define GENERATE_ALL_TYPES(type, func, args...)        \
   switch (type) {                                      \
@@ -228,6 +255,8 @@ void initializeStreamsEvents(
 
 #endif
 
+const auto kLoopbackAddress = "127.0.0.1";
+
 } // namespace
 
 ProcessGroupGloo::SendWork::SendWork(
@@ -275,6 +304,147 @@ void ProcessGroupGloo::RecvWork::wait() {
 
 ProcessGroupGloo::Options::Options()
     : timeout(std::chrono::milliseconds(10 * 1000)), threads(2) {}
+
+namespace {
+
+// Gloo assumes that this machine's hostname can always be resolved
+// to an address. If it doesn't it throws a runtime error saying
+// that it can't be resolved. Instead of catching it, we choose
+// to proactively check if an address can be resolved, so we can
+// gracefully fall back to an alternative if it doesn't.
+bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  struct addrinfo* result;
+  auto rv = getaddrinfo(hostname.c_str(), nullptr, &hints, &result);
+  if (rv < 0) {
+    return false;
+  }
+  struct addrinfo* rp;
+  for (rp = result; rp != nullptr; rp = rp->ai_next) {
+    auto fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+    if (fd == -1) {
+      continue;
+    }
+    rv = bind(fd, rp->ai_addr, rp->ai_addrlen);
+    close(fd);
+    if (rv == -1) {
+      continue;
+    }
+    break;
+  }
+  freeaddrinfo(result);
+  return rp != nullptr;
+}
+
+} // namespace
+
+#ifdef __linux__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDeviceForInterface(const std::string& interface) {
+  ::gloo::transport::tcp::attr attr;
+  attr.iface = interface;
+  return ::gloo::transport::tcp::CreateDevice(attr);
+}
+#endif
+
+#ifdef __APPLE__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDeviceForInterface(const std::string& interface) {
+  ::gloo::transport::uv::attr attr;
+  attr.iface = interface;
+  return ::gloo::transport::uv::CreateDevice(attr);
+}
+#endif
+
+#ifdef __linux__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDeviceForHostname(const std::string& hostname) {
+  ::gloo::transport::tcp::attr attr;
+  attr.hostname = hostname;
+  TORCH_CHECK(
+      doesHostnameResolveToUsableAddress(attr.hostname),
+      "Cannot resolve ",
+      hostname,
+      " to a (local) address");
+  return ::gloo::transport::tcp::CreateDevice(attr);
+}
+#endif
+
+#ifdef __APPLE__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDeviceForHostname(const std::string& hostname) {
+  ::gloo::transport::uv::attr attr;
+  attr.hostname = hostname;
+  TORCH_CHECK(
+      doesHostnameResolveToUsableAddress(attr.hostname),
+      "Cannot resolve ",
+      hostname,
+      " to a (local) address");
+  return ::gloo::transport::uv::CreateDevice(attr);
+}
+#endif
+
+#ifdef __linux__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDefaultDevice() {
+  ::gloo::transport::tcp::attr attr;
+
+  // Use the hostname to resolve the network address to
+  // use. Note: if the hostname does not resolve to an address (e.g.
+  // because of misconfigured /etc/hosts file), this will not work.
+  std::array<char, HOST_NAME_MAX> buffer{};
+  auto rv = gethostname(buffer.data(), buffer.size());
+  if (rv != 0) {
+    throw std::system_error(errno, std::system_category());
+  }
+  attr.hostname = buffer.data();
+
+  // Use this machine's hostname if it resolves to an address.
+  if (doesHostnameResolveToUsableAddress(attr.hostname)) {
+    return ::gloo::transport::tcp::CreateDevice(attr);
+  }
+
+  // Otherwise, use the loopback address.
+  TORCH_WARN_ONCE(
+      "Unable to resolve hostname to a (local) address. ",
+      "Using the loopback address as fallback. ",
+      "Manually set the network interface to bind to with GLOO_SOCKET_IFNAME.");
+  return createDeviceForHostname(kLoopbackAddress);
+}
+#endif
+
+#ifdef __APPLE__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDefaultDevice() {
+  ::gloo::transport::uv::attr attr;
+
+  // Use the hostname to resolve the network address to
+  // use. Note: if the hostname does not resolve to an address (e.g.
+  // because of misconfigured /etc/hosts file), this will not work.
+  const auto hostNameMax = sysconf(_SC_HOST_NAME_MAX);
+  auto buffer = std::unique_ptr<char[]>(new char[hostNameMax]);
+  auto rv = gethostname(buffer.get(), hostNameMax);
+  if (rv != 0) {
+    throw std::system_error(errno, std::system_category());
+  }
+  attr.hostname = buffer.get();
+
+  // Use this machine's hostname if it resolves to an address.
+  if (doesHostnameResolveToUsableAddress(attr.hostname)) {
+    return ::gloo::transport::uv::CreateDevice(attr);
+  }
+
+  // Otherwise, use the loopback address.
+  TORCH_WARN_ONCE(
+      "Unable to resolve hostname to a (local) address. ",
+      "Using the loopback address as fallback. ",
+      "Manually set the network interface to bind to with GLOO_SOCKET_IFNAME.");
+  return createDeviceForHostname(kLoopbackAddress);
+}
+#endif
 
 ProcessGroupGloo::ProcessGroupGloo(
     const std::shared_ptr<Store>& store,
@@ -644,7 +814,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Construct from an existing metadata tensor to facilitate structured
     // access to metadata from peers, after gathering it.
     explicit SparseTensorMetadata(at::Tensor metadata)
-        : metadata_(metadata), data_(metadata_.data_ptr<long>()) {
+        : metadata_(metadata), data_(metadata_.data_ptr<int64_t>()) {
       AT_ASSERT(metadata.scalar_type() == at::kLong);
       AT_ASSERT(metadata.dim() == 1);
       AT_ASSERT(metadata.size(0) == dim);
@@ -694,7 +864,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
    protected:
     at::Tensor metadata_;
-    long* data_;
+    int64_t* data_;
   };
 
   // Sparse allreduce is implemented with allgather on indices and values.
@@ -719,7 +889,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Sanity check dimensionality across ranks.
     {
       const auto expected = metadata[context->rank].sizes();
-      for (size_t i = 0; i < context->size; i++) {
+      for (auto i = 0; i < context->size; i++) {
         if (i == context->rank) {
           continue;
         }
@@ -733,11 +903,11 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     auto values = allgather_values(input, metadata);
 
     // Perform global reduction.
-    AT_ASSERT(indices.size() == context->size);
-    AT_ASSERT(values.size() == context->size);
+    AT_ASSERT(static_cast<int>(indices.size()) == context->size);
+    AT_ASSERT(static_cast<int>(values.size()) == context->size);
     auto output = at::sparse_coo_tensor(
         indices[0], values[0], input.sizes(), input.options());
-    for (size_t i = 1; i < context->size; i++) {
+    for (auto i = 1; i < context->size; i++) {
       output += at::sparse_coo_tensor(
           indices[i], values[i], input.sizes(), input.options());
     }
@@ -778,7 +948,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // Allgather metadata
     gloo::AllgatherOptions opts(context);
-    opts.setOutput(buffer.data_ptr<long>(), buffer.numel());
+    opts.setOutput(buffer.data_ptr<int64_t>(), buffer.numel());
     opts.setTag(tag);
     gloo::allgather(opts);
 
@@ -802,7 +972,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // Allgather indices.
     gloo::AllgatherOptions opts(context);
-    opts.setOutput(buffer.data_ptr<long>(), buffer.numel());
+    opts.setOutput(buffer.data_ptr<int64_t>(), buffer.numel());
     opts.setTag(tag);
     gloo::allgather(opts);
 
