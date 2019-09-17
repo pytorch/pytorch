@@ -585,7 +585,7 @@ jobs:
               sccache --show-stats
             fi
 
-  binary_linux_build:
+  binary_linux_build: &binary_linux_build
     <<: *binary_linux_build_params
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
@@ -632,6 +632,10 @@ jobs:
         root: /
         paths: final_pkgs
 
+  binary_linux_build_cuda10.1:
+    <<: *binary_linux_build
+    environment:
+      ANACONDA_USER: pytorch
     # This should really just be another step of the binary_linux_build job above.
     # This isn't possible right now b/c the build job uses the docker executor
     # (otherwise they'd be really really slow) but this one uses the macine
@@ -1515,31 +1519,31 @@ workflows:
           requires:
             - setup
           docker_image: "soumith/manylinux-cuda100"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_manywheel_2_7m_cu101_devtoolset7_build
           build_environment: "manywheel 2.7m cu101 devtoolset7"
           requires:
             - setup
           docker_image: "soumith/manylinux-cuda101"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_manywheel_2_7mu_cu101_devtoolset7_build
           build_environment: "manywheel 2.7mu cu101 devtoolset7"
           requires:
             - setup
           docker_image: "soumith/manylinux-cuda101"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_manywheel_3_5m_cu101_devtoolset7_build
           build_environment: "manywheel 3.5m cu101 devtoolset7"
           requires:
             - setup
           docker_image: "soumith/manylinux-cuda101"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_build
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
           docker_image: "soumith/manylinux-cuda101"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_manywheel_3_7m_cu101_devtoolset7_build
           build_environment: "manywheel 3.7m cu101 devtoolset7"
           requires:
@@ -1617,25 +1621,25 @@ workflows:
           requires:
             - setup
           docker_image: "soumith/conda-cuda"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_conda_2_7_cu101_devtoolset7_build
           build_environment: "conda 2.7 cu101 devtoolset7"
           requires:
             - setup
           docker_image: "soumith/conda-cuda"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_conda_3_5_cu101_devtoolset7_build
           build_environment: "conda 3.5 cu101 devtoolset7"
           requires:
             - setup
           docker_image: "soumith/conda-cuda"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_conda_3_6_cu101_devtoolset7_build
           build_environment: "conda 3.6 cu101 devtoolset7"
           requires:
             - setup
           docker_image: "soumith/conda-cuda"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_conda_3_7_cu101_devtoolset7_build
           build_environment: "conda 3.7 cu101 devtoolset7"
           requires:
@@ -1725,28 +1729,28 @@ workflows:
             - setup
           libtorch_variant: "static-without-deps"
           docker_image: "soumith/manylinux-cuda100"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_libtorch_2_7m_cu101_devtoolset7_shared-with-deps_build
           build_environment: "libtorch 2.7m cu101 devtoolset7"
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
           docker_image: "soumith/manylinux-cuda101"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_libtorch_2_7m_cu101_devtoolset7_shared-without-deps_build
           build_environment: "libtorch 2.7m cu101 devtoolset7"
           requires:
             - setup
           libtorch_variant: "shared-without-deps"
           docker_image: "soumith/manylinux-cuda101"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_libtorch_2_7m_cu101_devtoolset7_static-with-deps_build
           build_environment: "libtorch 2.7m cu101 devtoolset7"
           requires:
             - setup
           libtorch_variant: "static-with-deps"
           docker_image: "soumith/manylinux-cuda101"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_libtorch_2_7m_cu101_devtoolset7_static-without-deps_build
           build_environment: "libtorch 2.7m cu101 devtoolset7"
           requires:
@@ -1837,28 +1841,28 @@ workflows:
             - setup
           libtorch_variant: "static-without-deps"
           docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_shared-with-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
           docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_shared-without-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "shared-without-deps"
           docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_static-with-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "static-with-deps"
           docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
+      - binary_linux_build_cuda10.1:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_static-without-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
