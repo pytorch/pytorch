@@ -82,18 +82,20 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 }
 
 Tensor pinverse(const Tensor& self, double rcond) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
-           "pinverse(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() >= 2,
+           "pinverse(", self.type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
            "of floating types");
   if (self.numel() == 0) {
     // Match NumPy
-    return at::empty({self.size(1), self.size(0)}, self.options());
+    auto self_sizes = self.sizes().vec();
+    std::swap(self_sizes[self.dim() - 1], self_sizes[self.dim() - 2]);
+    return at::empty(self_sizes, self.options());
   }
   Tensor U, S, V;
   std::tie(U, S, V) = self.svd();
-  Tensor max_val = S[0];
+  Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);
   Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, self.options()));
-  return V.mm(S_pseudoinv.diag().mm(U.t()));
+  return at::matmul(V, at::matmul(S_pseudoinv.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1), U.transpose(-2, -1)));
 }
 
 static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
