@@ -31,8 +31,8 @@ public:
     // TODO We shouldn't return a reference to something inside the LeftRight.
     //      Change this API! Note: We probably also shouldn't copy the KernelFunction since that's a refcount bump.
     return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> const KernelFunction& {
-      const DispatchTableEntry& kernel = dispatchTable.lookup(stack);
-      return kernel.kernel;
+      const KernelFunction& kernel = dispatchTable.lookup(stack);
+      return kernel;
     });
   }
 
@@ -40,23 +40,23 @@ public:
     // TODO We shouldn't return a reference to something inside the LeftRight.
     //      Change this API! Note: We probably also shouldn't copy the KernelFunction since that's a refcount bump.
     return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> const KernelFunction& {
-      const DispatchTableEntry& kernel = dispatchTable.lookup(dispatchKey);
-      return kernel.kernel;
+      const KernelFunction& kernel = dispatchTable.lookup(dispatchKey);
+      return kernel;
     });
   }
 
   void prepareForDeregistration();
 
-  RegistrationHandleRAII registerKernel(TensorTypeId dispatch_key, DispatchTableEntry kernel);
-  RegistrationHandleRAII registerCatchallKernel(DispatchTableEntry kernel);
+  RegistrationHandleRAII registerKernel(TensorTypeId dispatch_key, KernelFunction kernel);
+  RegistrationHandleRAII registerCatchallKernel(KernelFunction kernel);
 
   const OperatorOptions& options() {
     return options_;
   }
 
 private:
-  void deregisterKernel_(TensorTypeId dispatch_key, std::list<DispatchTableEntry>::iterator kernel);
-  void deregisterCatchallKernel_(std::list<DispatchTableEntry>::iterator kernel);
+  void deregisterKernel_(TensorTypeId dispatch_key, std::list<KernelFunction>::iterator kernel);
+  void deregisterCatchallKernel_(std::list<KernelFunction>::iterator kernel);
 
   FunctionSchema schema_;
 
@@ -95,8 +95,8 @@ private:
   // re-ececuted and then only allow one kernel here, i.e. error if a kernel
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
-  ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>> kernels_;
-  std::list<DispatchTableEntry> catchAllKernels_;
+  ska::flat_hash_map<TensorTypeId, std::list<KernelFunction>> kernels_;
+  std::list<KernelFunction> catchAllKernels_;
 
   // Some metadata about the operator
   OperatorOptions options_;

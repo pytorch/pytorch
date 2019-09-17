@@ -511,7 +511,7 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallOutOfSc
 }
 
 bool called_stackbased_kernel = false;
-void stackBasedKernel(c10::Stack* stack, c10::KernelCache* cache) {
+void stackBasedKernel(c10::OperatorKernel* functor, c10::Stack* stack) {
   called_stackbased_kernel = true;
 }
 

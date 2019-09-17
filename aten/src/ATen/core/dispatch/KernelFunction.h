@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/dispatch/KernelCache.h>
 #include <ATen/core/stack.h>
 #include <c10/util/TypeList.h>
 #include <ATen/core/op_registration/kernel_functor.h>
@@ -47,7 +46,7 @@ constexpr uint64_t hashFunctionSignature() {
 
 class CAFFE2_API KernelFunction final {
 public:
-  using BoxedKernelFunction = void(Stack*, KernelCache*); // TODO Switch argument order, KernelCache first, and use OperatorKernel instead.
+  using BoxedKernelFunction = void(OperatorKernel*, Stack*);
 
   KernelFunction()
   : functorCreator_()
@@ -72,7 +71,7 @@ public:
       }
     }
 
-    (*boxed_kernel_func_)(stack, getFunctor_());
+    (*boxed_kernel_func_)(getFunctor_(), stack);
   }
 
   template<class Return, class... Args>
@@ -81,7 +80,7 @@ public:
       "Called KernelFunction::callUnboxed with wrong argument types");
 
     if (unboxed_kernel_func_ != nullptr) {
-      using ActualSignature = Return (c10::KernelCache*, Args...);
+      using ActualSignature = Return (OperatorKernel*, Args...);
       ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func_);
       return (*func)(getFunctor_(), std::forward<Args>(args)...);
     }
@@ -147,8 +146,8 @@ public:
 
   template<class FuncType, FuncType* func, bool AllowLegacyTypes = false>
   static KernelFunction makeFromUnboxedFunction() {
-    static_assert(guts::is_function_type<FuncType>::value, ""); // TODO
-    static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, ""); // TODO
+    static_assert(guts::is_function_type<FuncType>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with invalid template parameters. They must be <FuncType, *func_ptr>.");
+    static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
     static_assert(func != nullptr, "Kernel function cannot be nullptr");
 
     return makeFromUnboxedFunctor<AllowLegacyTypes>(
@@ -161,8 +160,8 @@ public:
     // TODO We want to get rid of kernels that have only an unboxed function pointer.
     //      All kernels should have a boxed pointer.
 
-    static_assert(guts::is_function_type<FuncType>::value, ""); // TODO
-    static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, ""); // TODO
+    static_assert(guts::is_function_type<FuncType>::value, "Tried to call KernelFunction::makeFromUnboxedOnlyFunction with invalid template parameters. They must be <FuncType, *func_ptr>.");
+    static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedOnlyFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
     static_assert(func != nullptr, "Kernel function cannot be nullptr");
 
     return makeFromUnboxedOnlyFunctor(
@@ -172,8 +171,8 @@ public:
 
   template<bool AllowLegacyTypes = false, class FuncType>
   static KernelFunction makeFromUnboxedRuntimeFunction(FuncType* func) {
-    static_assert(guts::is_function_type<FuncType>::value, ""); // TODO
-    static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, ""); // TODO
+    static_assert(guts::is_function_type<FuncType>::value, "Tried to call KernelFunction::makeFromUnboxedRuntimeFunction with a non-function type.");
+    static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedRuntimeFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
     TORCH_INTERNAL_ASSERT(func != nullptr, "Kernel function cannot be nullptr");
 
     return makeFromUnboxedFunctor<AllowLegacyTypes>(
@@ -183,7 +182,7 @@ public:
 
   template<bool AllowLegacyTypes = false, class Lambda>
   static KernelFunction makeFromUnboxedLambda(Lambda&& lambda) {
-    static_assert(guts::is_functor<guts::decay_t<Lambda>>::value, ""); // TODO
+    static_assert(guts::is_functor<guts::decay_t<Lambda>>::value, "Tried to call KernelFunction::makeFromUnboxedLambda with a non-lambda type.");
 
     return makeFromUnboxedFunctor<AllowLegacyTypes>(
       std::make_shared<detail::WrapRuntimeKernelFunctor<guts::decay_t<Lambda>>>(std::forward<Lambda>(lambda))
@@ -199,7 +198,7 @@ private:
     // TODO Reuse stack vector instead of allocating?
     std::vector<IValue> stack {std::forward<Args>(args)...};
 
-    (*boxed_kernel_func_)(&stack, getFunctor_());
+    (*boxed_kernel_func_)(getFunctor_(), &stack);
 
     TORCH_INTERNAL_ASSERT(stack.size() == 1, "A boxed kernel should only push one return to the stack");
     return std::move(stack[0]).to<Return>();

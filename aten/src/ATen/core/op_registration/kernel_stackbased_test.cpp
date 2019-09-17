@@ -8,24 +8,24 @@
 
 using c10::RegisterOperators;
 using c10::TensorTypeId;
-using c10::KernelCache;
 using c10::Stack;
 using c10::guts::make_unique;
+using c10::OperatorKernel;
 using std::unique_ptr;
 
 namespace {
 
-void errorKernel(Stack* stack, KernelCache* cache) {
+void errorKernel(OperatorKernel* functor, Stack* stack) {
   EXPECT_TRUE(false); // this kernel should never be called
 }
 
-void incrementKernel(Stack* stack, KernelCache* cache) {
+void incrementKernel(OperatorKernel* functor, Stack* stack) {
   int input = torch::jit::pop(*stack).toInt();
   torch::jit::pop(*stack); // pop the dummy tensor
   torch::jit::push(*stack, input + 1);
 }
 
-void decrementKernel(Stack* stack, KernelCache* cache) {
+void decrementKernel(OperatorKernel* functor, Stack* stack) {
   int input = torch::jit::pop(*stack).toInt();
   torch::jit::pop(*stack); // pop the dummy tensor
   torch::jit::push(*stack, input - 1);
@@ -93,7 +93,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistrationRuns
 
 bool called = false;
 
-void kernelWithoutInputs(Stack*, KernelCache*) {
+void kernelWithoutInputs(OperatorKernel*, Stack*) {
   called = true;
 }
 
@@ -112,7 +112,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutAnyArg
   EXPECT_TRUE(called);
 }
 
-void kernelWithoutTensorInputs(Stack* stack, KernelCache*) {
+void kernelWithoutTensorInputs(OperatorKernel*, Stack* stack) {
   stack->back() = stack->back().toInt() + 1;
 }
 
@@ -131,27 +131,13 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutTensor
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
-void kernelForSchemaInference(Stack* stack, KernelCache* cache) {
+void kernelForSchemaInference(OperatorKernel* functor, Stack* stack) {
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenFailsBecauseItCannotInferFromStackBasedKernel) {
   expectThrows<c10::Error>([] {
       RegisterOperators().op("_test::no_schema_specified", RegisterOperators::options().catchAllKernel(&kernelForSchemaInference));
   }, "Cannot infer operator schema for this kind of kernel in registration of operator _test::no_schema_specified");
-}
-
-struct Cache final : KernelCache {
-  int last_value = 4;
-};
-
-unique_ptr<KernelCache> make_cache() {
-  return make_unique<Cache>();
-}
-
-void increment_sequence_kernel(Stack* stack, KernelCache* cache) {
-  torch::jit::pop(*stack); // pop dummy tensor
-  EXPECT_EQ(0, stack->size());
-  torch::jit::push(*stack, static_cast<Cache*>(cache)->last_value++);
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCannotBeCalledUnboxed) {

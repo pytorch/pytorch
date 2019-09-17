@@ -87,8 +87,8 @@ inline void _call_caffe2_op_from_c10(
 
 template <const c10::FunctionSchema& (*Schema)(), class Caffe2Operator>
 void call_caffe2_op_from_c10(
-    c10::Stack* stack,
-    c10::KernelCache* cache) { // TODO Pass in correct cache type
+    c10::OperatorKernel* functor,
+    c10::Stack* stack) {
   _call_caffe2_op_from_c10(stack, Schema(), &_call_caffe2_op<Caffe2Operator>);
 }
 
