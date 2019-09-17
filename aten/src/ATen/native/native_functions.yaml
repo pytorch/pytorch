@@ -44,6 +44,7 @@
   variants: method
 
 - func: data(Tensor self) -> Tensor
+  use_c10_dispatcher: True
   variants: method
 
 - func: names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
@@ -59,10 +60,12 @@
   named_guard: False
 
 - func: align_as(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: True
   variants: method
   named_guard: False
 
 - func: align_tensors(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: True
   named_guard: False
 
 - func: refine_names(Tensor(a) self, DimnameList names) -> Tensor(a)
@@ -125,10 +128,12 @@
   use_c10_dispatcher: True
 
 - func: dropout(Tensor input, float p, bool train) -> Tensor
+  use_c10_dispatcher: True
   named_guard: False
   use_c10_dispatcher: True
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   use_c10_dispatcher: True
 
@@ -156,6 +161,7 @@
   named_guard: False
 
 - func: abs_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   variants: function, method
   named_guard: False
   dispatch:
@@ -174,6 +180,7 @@
   variants: function, method
 
 - func: acos_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -341,6 +348,7 @@
   variants: function, method
 
 - func: asin_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -359,6 +367,7 @@
   variants: function, method
 
 - func: atan_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -453,6 +462,7 @@
   variants: function, method
 
 - func: bitwise_not_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   variants: method
 
 - func: bitwise_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -461,9 +471,11 @@
     CUDA: bitwise_not_out
 
 - func: logical_not(Tensor self) -> Tensor
+  use_c10_dispatcher: True
   variants: function, method
 
 - func: logical_not_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   variants: method
 
 - func: logical_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -472,10 +484,12 @@
     CUDA: logical_not_out
 
 - func: logical_xor(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: True
   variants: function, method
   named_guard: False
 
 - func: logical_xor_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_c10_dispatcher: True
   variants: method
   named_guard: False
 
@@ -509,6 +523,7 @@
   device_guard: False
 
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
+  use_c10_dispatcher: True
   named_guard: False
   use_c10_dispatcher: True
 
@@ -527,6 +542,7 @@
   variants: function, method
 
 - func: ceil_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
 
@@ -662,6 +678,7 @@
   variants: function, method
 
 - func: cos_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -680,6 +697,7 @@
   variants: function, method
 
 - func: cosh_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -969,6 +987,7 @@
   variants: function, method
 
 - func: erf_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -987,6 +1006,7 @@
   variants: function, method
 
 - func: erfc_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -1005,6 +1025,7 @@
   variants: function, method
 
 - func: exp_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -1023,6 +1044,7 @@
   variants: function, method
 
 - func: expm1_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -1093,6 +1115,7 @@
   variants: function, method
 
 - func: floor_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -1111,6 +1134,7 @@
   variants: function, method
 
 - func: frac_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -1363,6 +1387,7 @@
     MkldnnCPU: mkldnn_linear
 
 - func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
+  use_c10_dispatcher: True
 
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
   use_c10_dispatcher: True
@@ -1374,6 +1399,7 @@
   use_c10_dispatcher: True
 
 - func: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+  use_c10_dispatcher: True
 
 - func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
   use_c10_dispatcher: True
@@ -1400,6 +1426,7 @@
   variants: function, method
 
 - func: log_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -1418,6 +1445,7 @@
   variants: function, method
 
 - func: log10_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -1436,6 +1464,7 @@
   variants: function, method
 
 - func: log1p_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -1458,6 +1487,7 @@
   variants: function, method
 
 - func: log2_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -2026,6 +2056,7 @@
   variants: function, method
 
 - func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -2044,6 +2075,7 @@
   variants: function, method
 
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
 
@@ -2096,6 +2128,7 @@
   variants: function, method
 
 - func: round_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
 
@@ -2120,6 +2153,7 @@
   named_guard: False
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -2176,6 +2210,7 @@
   variants: function, method
 
 - func: rsqrt_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -2203,6 +2238,7 @@
   use_c10_dispatcher: True
 
 - func: selu_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
 
 - func: celu(Tensor self, Scalar alpha=1.0) -> Tensor
   use_c10_dispatcher: True
@@ -2220,6 +2256,7 @@
     MkldnnCPU: mkldnn_sigmoid
 
 - func: sigmoid_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -2239,6 +2276,7 @@
   variants: function, method
 
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -2257,6 +2295,7 @@
   variants: function, method
 
 - func: sinh_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -2274,6 +2313,7 @@
   variants: function, method
 
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   variants: function, method
 
 - func: size.int(Tensor self, int dim) -> int
@@ -2382,6 +2422,7 @@
   device_guard: False
 
 - func: squeeze_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   variants: method
   device_guard: False
 
@@ -2453,6 +2494,7 @@
   variants: function, method
 
 - func: sqrt_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -2523,6 +2565,7 @@
   named_guard: False
 
 - func: t_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   device_guard: False
   variants: method
 
@@ -2532,6 +2575,7 @@
   variants: function, method
 
 - func: tan_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -2550,6 +2594,7 @@
   variants: function, method
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -2655,6 +2700,7 @@
   variants: function, method
 
 - func: trunc_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
   dispatch:
@@ -2964,6 +3010,7 @@
     SparseCUDA: pow_sparse_scalar
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: method, function
   dispatch:
@@ -3436,11 +3483,13 @@
     QuantizedCPU: q_zero_point_quant
 
 - func: q_per_channel_scales(Tensor self) -> Tensor
+  use_c10_dispatcher: True
   variants: function, method
   dispatch:
     QuantizedCPU: q_per_channel_scales_quant
 
 - func: q_per_channel_zero_points(Tensor self) -> Tensor
+  use_c10_dispatcher: True
   variants: function, method
   dispatch:
     QuantizedCPU: q_per_channel_zero_points_quant
@@ -3457,6 +3506,7 @@
     CPU: per_tensor_affine_qtensor_cpu
 
 - func: _per_channel_affine_qtensor(Tensor self, Tensor scale, Tensor zero_point, int[] axis) -> Tensor
+  use_c10_dispatcher: True
   dispatch:
     CPU: per_channel_affine_qtensor_cpu
 
@@ -3638,6 +3688,7 @@
     CUDA: legacy::cuda::_th_set_
 
 - func: set_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_set_
@@ -4001,6 +4052,7 @@
     CUDA: legacy::cuda::_th_irshift_
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: method
   dispatch:
@@ -4026,6 +4078,7 @@
     CUDA: triu_cuda_
 
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: method
 
@@ -4733,6 +4786,7 @@
   variants: method, function
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: method
 
@@ -4743,10 +4797,12 @@
     CUDA: erfinv_out
 
 - func: sign(Tensor self) -> Tensor
+  use_c10_dispatcher: True
   variants: function, method
   named_guard: False
 
 - func: sign_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   variants: method
   named_guard: False
 
