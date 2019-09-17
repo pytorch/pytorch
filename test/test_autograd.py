@@ -2545,6 +2545,27 @@ class TestAutograd(TestCase):
             run_test(upper, dims)
 
     @skipIfNoLapack
+    def test_cholesky_solve(self):
+        def _test_with_size(A_dims, B_dims, upper):
+            root = torch.rand(*A_dims).requires_grad_()
+            b = torch.rand(*B_dims).requires_grad_()
+
+            def func(root, b, upper):
+                if upper:
+                    A = root.triu()
+                else:
+                    A = root.tril()
+                return torch.cholesky_solve(b, A, upper)
+
+            gradcheck(func, [root, b, upper])
+            gradgradcheck(func, [root, b, upper])
+
+        for (a_size, b_size), upper in product([((3, 3), (3, 4)), ((3, 3), (3, 2)),
+                                                ((2, 3, 3), (2, 3, 4)), ((2, 3, 3), (2, 3, 2))],
+                                               [True, False]):
+            _test_with_size(a_size, b_size, upper)
+
+    @skipIfNoLapack
     def test_symeig(self):
         def func(root, upper):
             x = 0.5 * (root + root.transpose(-2, -1))

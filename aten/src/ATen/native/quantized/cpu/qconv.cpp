@@ -133,53 +133,41 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     float act_scale = act.q_scale();
     int32_t act_zero_point = act.q_zero_point();
 
-    const int32_t* bias_ptr = nullptr;
-    at::Tensor qbias;
+    const float* bias_ptr = nullptr;
+    at::Tensor bias;
     if (pack_ptr.bias.has_value()) {
-      at::Tensor bias = pack_ptr.bias.value();
-      // Temporary: Quantize bias
-      if (pack_ptr.q_scheme == kPerTensorAffine) {
-        qbias = at::quantize_linear(
-            at::dequantize(bias), pack_ptr.w_scale[0] * act_scale, 0, kQInt32);
-      } else if (pack_ptr.q_scheme == kPerChannelAffine) {
-        std::array<int64_t, 1> arr{0};
-        IntArrayRef axis(arr.data(), 1);
-        at::Tensor bias_scale = at::ones({K}, at::dtype(at::kDouble));
-        at::Tensor bias_zp = at::zeros({K}, at::dtype(at::kLong));
-        for (int i = 0; i < K; ++i) {
-          bias_scale.data_ptr<double>()[i] = pack_ptr.w_scale[i] * act_scale;
-        }
-        qbias = quantize_linear_per_channel_cpu(
-            at::dequantize(bias), bias_scale, bias_zp, axis, kQInt32);
-      } else {
-        qbias = bias;
-        TORCH_CHECK(false, "Unsupported quantization scheme.")
-      }
-      TORCH_CHECK(qbias.dim() == 1, "bias should be a vector (1D Tensor)");
+      bias = pack_ptr.bias.value();
       TORCH_CHECK(
-          qbias.size(0) == K,
+          bias.dtype() == at::kFloat,
+          "[QConv2D] The 'bias' tensor must have 'torch.float' dtype");
+      bias = bias.contiguous();
+      TORCH_CHECK(bias.dim() == 1, "bias should be a vector (1D Tensor)");
+      TORCH_CHECK(
+          bias.size(0) == K,
           "bias should have K elements: " + std::to_string(K));
-      auto bias_contig = qbias.contiguous();
-      bias_ptr =
-          reinterpret_cast<int32_t*>(bias_contig.data_ptr<c10::qint32>());
+      bias_ptr = bias.data_ptr<float>();
     }
 
     std::vector<float> output_multiplier_float(1, 0.0);
+    std::vector<float> act_times_w_scale(1, 1.0);
     TORCH_CHECK(
         pack_ptr.w_scale.size() == pack_ptr.w_zp.size(),
         "Weight scales and zero points vectors should have the same size.");
-    // quantization scheme is PerTensorAffine if the number of scales is 1 and
-    // it's kPerChannelAffine if the number of scales is equal to K (output
-    // channels)
-    if (pack_ptr.w_scale.size() == 1) {
+
+    if (pack_ptr.q_scheme == kPerTensorAffine) {
+      act_times_w_scale[0] = (act_scale * pack_ptr.w_scale[0]);
       output_multiplier_float[0] =
-          (act_scale * pack_ptr.w_scale[0]) / static_cast<float>(output_scale);
-    } else if (pack_ptr.w_scale.size() == K) {
+          act_times_w_scale[0] / static_cast<float>(output_scale);
+    } else if (pack_ptr.q_scheme == kPerChannelAffine) {
       output_multiplier_float.resize(K, 0.0);
+      act_times_w_scale.resize(K, 1.0);
       for (int i = 0; i < K; ++i) {
-        output_multiplier_float[i] = (act_scale * pack_ptr.w_scale[i]) /
-            static_cast<float>(output_scale);
+        act_times_w_scale[i] = (act_scale * pack_ptr.w_scale[i]);
+        output_multiplier_float[i] =
+            act_times_w_scale[i] / static_cast<float>(output_scale);
       }
+    } else {
+      TORCH_CHECK(false, "[QConv2D] Unknown quantization scheme");
     }
 
     auto outShape =
@@ -194,17 +182,22 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
     if (pack_ptr.q_scheme == kPerTensorAffine) {
-      fbgemm::ReQuantizeOutput<ReluFused> outputProcObj(
-          NoOpObj,
-          output_multiplier_float.data(),
-          output_zero_point,
-          act_zero_point,
-          pack_ptr.w_zp.data(),
-          nullptr, /* row offset buffer */
-          col_offsets.data(),
-          bias_ptr,
-          K,
-          groups);
+      fbgemm::ReQuantizeOutput<
+          ReluFused,
+          fbgemm::QuantizationGranularity::TENSOR,
+          float>
+          outputProcObj(
+              NoOpObj,
+              output_multiplier_float.data(),
+              output_zero_point,
+              act_zero_point,
+              pack_ptr.w_zp.data(),
+              nullptr, /* row offset buffer */
+              col_offsets.data(),
+              bias_ptr,
+              K,
+              groups,
+              act_times_w_scale.data());
       fbgemm::fbgemmConv(
           conv_p,
           act_ptr,
@@ -218,7 +211,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     } else if (pack_ptr.q_scheme == kPerChannelAffine) {
       fbgemm::ReQuantizeOutput<
           ReluFused,
-          fbgemm::QuantizationGranularity::OUT_CHANNEL>
+          fbgemm::QuantizationGranularity::OUT_CHANNEL,
+          float>
           outputProcObj(
               NoOpObj,
               output_multiplier_float.data(),
@@ -229,7 +223,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
               col_offsets.data(),
               bias_ptr,
               K,
-              groups);
+              groups,
+              act_times_w_scale.data());
 
       fbgemm::fbgemmConv(
           conv_p,
