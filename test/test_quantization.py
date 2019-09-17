@@ -827,35 +827,34 @@ class QuantizationDebugTest(QuantizationTestCase):
         loaded = torch.jit.load(buf)
         self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
 
-    @settings(timeout=3600)
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
     def test_histogram_observer(self, qdtype, qscheme, reduce_range):
-        myobs = HistogramObserver(bins=10, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
-        x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-        y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
+        myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        x = torch.tensor([2.0, 3.0, 4.0, 5.0])
+        y = torch.tensor([5.0, 6.0, 7.0, 8.0])
         myobs(x)
         myobs(y)
-        self.assertEqual(myobs.min_val, 1.0)
+        self.assertEqual(myobs.min_val, 2.0)
         self.assertEqual(myobs.max_val, 8.0)
-        self.assertEqual(myobs.histogram, [1., 2., 0., 1., 2., 2., 2., 1., 1., 1.])
+        self.assertEqual(myobs.histogram, [2., 3., 3.])
 
         qparams = myobs.calculate_qparams()
 
         if reduce_range:
             if qscheme == torch.per_tensor_symmetric:
-                ref_scale = 0.0572548 * 255 / 127
+                ref_scale = 0.0470588 * 255 / 127
                 ref_zero_point = 0 if qdtype is torch.qint8 else 128
             else:
-                ref_scale = 0.0286274 * 255 / 127
+                ref_scale = 0.0235294 * 255 / 127
                 ref_zero_point = -64 if qdtype is torch.qint8 else 0
         else:
             if qscheme == torch.per_tensor_symmetric:
-                ref_scale = 0.0572548
+                ref_scale = 0.0470588
                 ref_zero_point = 0 if qdtype is torch.qint8 else 128
             else:
-                ref_scale = 0.0286274
+                ref_scale = 0.0235294
                 ref_zero_point = -128 if qdtype is torch.qint8 else 0
 
         self.assertEqual(qparams[1].item(), ref_zero_point)
