@@ -383,7 +383,7 @@ CHECKED_CAST = {
     'TensorList': CodeTemplate(
             'checked_tensor_list_unwrap(${arg_name},"${arg_name}",${arg_pos}, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
-    'IntArrayRef': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos}${,default_init})')
+    'IntArrayRef': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos})')
 }
 
 CHECKED_USE = {
@@ -487,11 +487,8 @@ THFormal = TypedDict('THFormal', {
     'kwarg_only': bool,
     'is_nullable': bool,
     'default': str,
-    'default_init': str,
     'output': bool,
     'size': int,
-    'declared_type': str,
-    'ignore_check': bool,
     'allocate': bool,
     'mask': bool,
     'if_true': bool,
@@ -513,7 +510,6 @@ AtFormal = TypedDict('AtFormal', {
     'kwarg_only': bool,
     'is_nullable': bool,
     'default': str,
-    'default_init': str,
     'output': bool,
     'size': int,
 }, total=False)
@@ -774,7 +770,6 @@ def create_generic(top_env, declarations):
         if 'default' in argument:
             default = translate_default(argument, type_str, argument['default'])
             translated['default'] = default
-            translated['default_init'] = argument.get('default_init', default)
         if argument.get('output'):
             translated['output'] = True
         if argument.get('size'):
@@ -1624,14 +1619,11 @@ def create_derived(backend_type_env, declarations):
                             # the checked cast succeeds even if the Tensor is not
                             # defined
                             null_okay = 'true' if nullable_argument(arg) else 'false'
-                            default_init = []
-                            if 'default_init' in arg:
-                                default_init.append(arg['default_init'])
 
                             check_cast = CHECKED_CAST[arg['type']].substitute(
                                 case_env, arg_name=arg['name'], arg_pos=count,
                                 api_name=option['api_name'], null_okay=null_okay,
-                                default_init=default_init, size=arg.get('size'))
+                                size=arg.get('size'))
                             case_body.append("auto {}_ = {};".format(
                                 arg['name'], check_cast))
                         if drop_argument(arg, option):
