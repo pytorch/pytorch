@@ -739,12 +739,16 @@ class TestOperators(TestCase):
         x = torch.randint(3, (2, 3, 4, 5)).float()
         self.assertONNX(lambda x: torch.unique(x, dim=0, sorted=True, return_inverse=False, return_counts=True), x,
                         opset_version=11)
-
+        
     def test_meshgrid(self):
         x = torch.ones(3, requires_grad=True)
         y = torch.zeros(4, requires_grad=True)
         z = torch.ones(5, requires_grad=True)
         self.assertONNX(lambda x, y, z: torch.meshgrid(x, y, z), (x, y, z))
+
+    def test_round(self):
+        x = torch.tensor([0.9920, -1.0362, -1.5000, 2.5000], requires_grad=True)
+        self.assertONNX(lambda x: torch.round(x), x, opset_version=11)
 
 
 if __name__ == '__main__':
