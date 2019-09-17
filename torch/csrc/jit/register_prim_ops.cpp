@@ -1554,6 +1554,42 @@ int listRemove(Stack& stack) {
   return 0;
 }
 
+template <typename T>
+int listMin(Stack& stack) {
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  size_t list_size = list.size();
+  if (list_size == 0) {
+    throw std::runtime_error("min() arg is an empty sequence");
+  }
+
+  T min_elem = list[0];
+  for (size_t i = 1; i < list_size; ++i) {
+    T elem = list[i];
+    min_elem = elem < min_elem ? elem : min_elem;
+  }
+
+  stack.push_back(min_elem);
+  return 0;
+}
+
+template <typename T>
+int listMax(Stack& stack) {
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  size_t list_size = list.size();
+  if (list_size == 0) {
+    throw std::runtime_error("max() arg is an empty sequence");
+  }
+
+  T max_elem = list[0];
+  for (size_t i = 1; i < list_size; ++i) {
+    T elem = list[i];
+    max_elem = elem > max_elem ? elem : max_elem;
+  }
+
+  stack.push_back(max_elem);
+  return 0;
+}
+
 template <>
 int listRemove<at::Tensor>(Stack& stack) {
   at::Tensor elem = pop(stack).to<at::Tensor>();
@@ -2290,6 +2326,14 @@ RegisterOperators reg2({
           listReverse<value_type>,                                             \
           aliasAnalysisFromSchema()),                                          \
       Operator(                                                                \
+          "prim::min(" decl_type "[] self) -> " decl_type,                     \
+          listMin<value_type>,                                                 \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "prim::max(" decl_type "[] self) -> " decl_type,                     \
+          listMax<value_type>,                                                 \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
           "aten::extend(" decl_type "[](a!) self, " decl_type                  \
           " [] other) -> ()",                                                  \
           listExtend<value_type>,                                              \
@@ -2575,22 +2619,6 @@ RegisterOperators reg2({
     // the python builtin 'min' and 'torch.min'
     DEFINE_BINARY_OP(prim::min, a < b ? a : b),
     DEFINE_BINARY_OP(prim::max, a > b ? a : b),
-
-    Operator(
-        "prim::min(int[] x) -> int",
-        [](Stack& stack) {
-          c10::List<int64_t> int_list = pop(stack).toIntList();
-          int64_t min_element = std::numeric_limits<int64_t>::max();
-
-          for(int64_t ele: int_list) {
-            if(ele < min_element) {
-              min_element = ele;
-            }
-          }
-          push(stack, min_element);
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
 
     // Pass in two ops for handling int and float separately as % in C++ only
     // works for int The modulus calculation is different between C++ and Python
