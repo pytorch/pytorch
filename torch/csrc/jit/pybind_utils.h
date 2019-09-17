@@ -431,6 +431,8 @@ inline IValue toIValue(
             }
             return repeated;
           }
+        case TypeKind::BoolType:
+          return c10::impl::toList(py::cast<std::vector<bool>>(obj));
         case TypeKind::TensorType:
           return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
         default:
