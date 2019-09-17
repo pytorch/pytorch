@@ -976,7 +976,7 @@ class TestQuantizedConv(unittest.TestCase):
            stride_w=st.integers(1, 2),
            pad_h=st.integers(0, 2),
            pad_w=st.integers(0, 2),
-           dilation=st.integers(1, 1),
+           dilation=st.integers(1, 2),
            X_scale=st.floats(0.2, 1.6),
            X_zero_point=st.integers(0, 4),
            W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
@@ -1023,6 +1023,10 @@ class TestQuantizedConv(unittest.TestCase):
         output_channels = output_channels_per_group * groups
 
         dilation_h = dilation_w = dilation
+
+        # Padded input size should be at least as big as dilated kernel
+        assume(height + 2 * pad_h >= dilation_h * (kernel_h - 1) + 1)
+        assume(width + 2 * pad_w >= dilation_w * (kernel_w - 1) + 1)
 
         W_scale = W_scale * output_channels
         W_zero_point = W_zero_point * output_channels
