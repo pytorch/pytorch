@@ -13,7 +13,8 @@ using torch::distributed::rpc::Message;
 void addSendRpcBackward(
     DistAutogradContext& autogradContext,
     const torch::distributed::rpc::AutogradMetadata& autogradMetadata,
-    std::vector<torch::Tensor>& tensors, const rpc::WorkerId& dst) {
+    std::vector<torch::Tensor>& tensors,
+    const rpc::WorkerId& dst) {
   // Attach the appropriate autograd edges.
   if (torch::autograd::compute_requires_grad(tensors)) {
     auto grad_fn = std::make_shared<SendRpcBackward>();
@@ -33,9 +34,9 @@ void addSendRpcBackward(
   }
 
   // Record the workerID
-    if (dst.id_ != -1) {
-      autogradContext.addKnownWorkerID(dst);
-    }
+  if (dst.id_ != -1) {
+    autogradContext.addKnownWorkerID(dst);
+  }
 }
 
 DistAutogradContext* addRecvRpcBackward(

@@ -61,7 +61,7 @@ class TORCH_API DistAutogradContainer {
   int64_t getMaxId();
 
   // retrieves the worker ID for this autograd context
-  int64_t getWorkerID();
+  int64_t getWorkerID() const;
 
  private:
   DistAutogradContainer();
