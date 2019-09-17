@@ -96,10 +96,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     conv_checks(
         act.ndimension(), stride.size(), padding.size(), dilation.size());
 
-    TORCH_CHECK(
-        (dilation[0] == 1 && dilation[1] == 1),
-        "Currently dilation should be 1");
-
     // inputs are in NHWC format
     int N = act.size(0);
     int H = act.size(1);
