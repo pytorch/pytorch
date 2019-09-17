@@ -18,11 +18,11 @@
 extern "C" {
 #endif
 
-#define DECLARE_X8LUT_UKERNEL_FUNCTION(fn_name) \
+#define DECLARE_PYTORCH_X8LUT_UKERNEL_FUNCTION(fn_name) \
   PYTORCH_QNNP_INTERNAL void fn_name(           \
       size_t n, const uint8_t* x, const uint8_t* t, uint8_t* y);
 
-DECLARE_X8LUT_UKERNEL_FUNCTION(x8lut_ukernel__scalar)
+DECLARE_PYTORCH_X8LUT_UKERNEL_FUNCTION(pytorch_x8lut_ukernel__scalar)
 
 #ifdef __cplusplus
 } /* extern "C" */

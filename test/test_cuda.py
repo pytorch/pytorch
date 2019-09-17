@@ -2763,6 +2763,24 @@ class TestCuda(TestCase):
 
         self.assertEqual(x.grad, torch.ones_like(x) * 5)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_cuda_init_race(self):
+        # See https://github.com/pytorch/pytorch/issues/16559
+        import subprocess
+        subprocess.check_call([sys.executable, '-c', """\
+import torch
+import threading
+
+def worker(rank):
+    torch.tensor([1.]).cuda(rank)
+
+t1 = threading.Thread(target=worker, args=(0,))
+t2 = threading.Thread(target=worker, args=(1,))
+t1.start()
+t2.start()
+"""])
+
+
 def load_ignore_file():
     from os.path import join, dirname
     global ignores
