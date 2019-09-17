@@ -18473,6 +18473,52 @@ class TestList(JitTestCase):
         for l in [[], [1], [1, 2, 3]]:
             self.assertEqual(copy_list(l), l)
 
+    def test_min_max_single_list(self):
+        def min_intlist(li):
+            # type: (List[int]) -> int
+            return min(li)
+
+        def max_intlist(li):
+            # type: (List[int]) -> int
+            return max(li)
+
+        def min_boollist(li):
+            # type: (List[bool]) -> bool
+            return min(li)
+
+        def max_boollist(li):
+            # type: (List[bool]) -> bool
+            return max(li)
+
+        def min_floatlist(li):
+            # type: (List[float]) -> float
+            return min(li)
+
+        def max_floatlist(li):
+            # type: (List[float]) -> float
+            return max(li)
+
+
+        int_lists = [1], [2, 1, 2], [-3, 4, 2], [-2, -7, 1, 4], [2, 1, 0, 4], []
+
+        def check_list(fn, li):
+            if len(li) == 0:
+                self.checkScriptRaisesRegex(fn, (li,), Exception, "arg is an empty sequence")
+            else:
+                self.checkScript(fn, (li,))
+
+        for int_list in int_lists:
+            check_list(min_intlist, int_list)
+            check_list(max_intlist, int_list)
+
+            bool_li = list(map(lambda x: bool(x), int_list))
+            check_list(min_boollist, bool_li)
+            check_list(max_boollist, bool_li)
+
+            float_li = list(map(lambda x: float(x), int_list))
+            check_list(min_floatlist, float_li)
+            check_list(max_floatlist, float_li)
+
 
 class TestDict(JitTestCase):
     def dict(self):
