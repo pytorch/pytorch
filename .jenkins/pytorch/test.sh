@@ -142,7 +142,7 @@ test_libtorch() {
     echo "Testing libtorch"
     python test/cpp/jit/tests_setup.py setup
     CPP_BUILD="$PWD/../cpp-build"
-    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
       "$CPP_BUILD"/caffe2/build/bin/test_jit
     else
       "$CPP_BUILD"/caffe2/build/bin/test_jit "[cpu]"
