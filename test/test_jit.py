@@ -17858,6 +17858,66 @@ class TestList(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
             self.checkScript(reassign_nested, (), optimize=False)
 
+    def test_min_bool_list(self):
+        def jit_min_list(a, b):
+            # type: (List[bool], List[bool]) -> List[bool]
+            return min(a, b)
+
+        self.checkScript(jit_min_list, ([True, False], [False, True]))
+
+    def test_min_max_list(self):
+        def jit_min_list(a, b):
+            # type: (List[int], List[int]) -> List[int]
+            return min(a, b)
+
+        def jit_min_list_float(a, b):
+            # type: (List[float], List[float]) -> List[float]
+            return min(a, b)
+
+        def jit_min_list_bool(a, b):
+            # type: (List[bool], List[bool]) -> List[bool]
+            return min(a, b)
+
+        def run_tests(func, a, b):
+            for t in zip(a, b):
+                self.checkScript(func, t)
+
+        args_left_int = [[1, 8, 8], [2, 1, 1], [], [2], [1], [1, 2, 3]]
+        args_right_int = [[2, 1, 1], [1, 8, 8], [], [1], [], [1, 2]]
+        run_tests(jit_min_list, args_left_int, args_right_int)
+
+        args_left_float = [[1., 8., 8.], [2., 1., 1.], [], [2.], [1.], [1., 2., 3.]]
+        args_right_float = [[2., 1., 1.], [1., 8., 8.], [], [1.], [], [1., 2.]]
+        run_tests(jit_min_list_float, args_left_float, args_right_float)
+
+        args_left_bool = [[], [], [], [False], [True], [False, True], [True, True],
+                          [False, False, False], [False, False, True]]
+        args_right_bool = [[], [False], [True], [True], [False], [True, True],
+                           [False, True], [False, False, True], [False, False, False]]
+        run_tests(jit_min_list_bool, args_left_bool, args_right_bool)
+
+        def jit_max_list(a, b):
+            # type: (List[int], List[int]) -> List[int]
+            return max(a, b)
+
+        def jit_max_list_float(a, b):
+            # type: (List[float], List[float]) -> List[float]
+            return max(a, b)
+
+        def jit_max_list_bool(a, b):
+            # type: (List[bool], List[bool]) -> List[bool]
+            return max(a, b)
+
+        args_left_int = [[1, 8, 8], [8, 1, 1], [], [1], [], [1, 2]]
+        args_right_int = [[8, 1, 1], [1, 8, 8], [], [2], [1], [1, 2, 3]]
+        run_tests(jit_max_list, args_left_int, args_right_int)
+
+        args_left_float = [[1., 8., 8.], [8., 1., 1.], [], [1.], [], [1., 2.]]
+        args_right_float = [[8., 1., 1.], [1., 8., 8.], [], [2.], [1.], [1., 2., 3.]]
+        run_tests(jit_max_list_float, args_left_float, args_right_float)
+
+        run_tests(jit_max_list_bool, args_left_bool, args_right_bool)
+
     def test_list_gather(self):
         def index():
             a = [1, 2, 3]

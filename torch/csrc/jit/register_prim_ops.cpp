@@ -1490,6 +1490,42 @@ int listReverse(Stack& stack) {
   return 0;
 }
 
+template <typename T> int minList(Stack &stack) {
+  c10::List<T> a = pop(stack).to<c10::List<T>>();
+  c10::List<T> b = pop(stack).to<c10::List<T>>();
+
+  size_t min_size = std::min(a.size(), b.size());
+  for (size_t i = 0; i < min_size; i++) {
+    if (a[i] == b[i]) {
+      continue;
+    }
+
+    push(stack, a[i] < b[i] ? a : b);
+    return 0;
+  }
+
+  push(stack, b.size() < a.size() ? b : a);
+  return 0;
+}
+
+template <typename T> int maxList(Stack &stack) {
+  c10::List<T> a = pop(stack).to<c10::List<T>>();
+  c10::List<T> b = pop(stack).to<c10::List<T>>();
+
+  size_t min_size = std::min(a.size(), b.size());
+  for (size_t i = 0; i < min_size; i++) {
+    if (a[i] == b[i]) {
+      continue;
+    }
+
+    push(stack, a[i] > b[i] ? a : b);
+    return 0;
+  }
+
+  push(stack, b.size() > a.size() ? b : a);
+  return 0;
+}
+
 template <typename T>
 int listPop(Stack& stack) {
   int64_t idx = pop(stack).to<int64_t>();
@@ -2315,6 +2351,14 @@ RegisterOperators reg2({
       Operator(                                                                \
           "aten::__getitem__(" decl_type "[](a) list, int idx) -> " decl_type, \
           listSelect<value_type>,                                              \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "prim::min(" decl_type "[] l, " decl_type "[] r) -> " decl_type "[]",\
+          minList<value_type>,                                                 \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "prim::max(" decl_type "[] l, " decl_type "[] r) -> " decl_type "[]",\
+          maxList<value_type>,                                                 \
           aliasAnalysisFromSchema()),                                          \
       Operator(                                                                \
           "aten::append(" decl_type "[](a!) self, " decl_type                  \
