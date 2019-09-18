@@ -584,8 +584,13 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::data(Tensor(b) a) -> Tensor(b)",
-         noop,
+         "prim::data(Tensor(a) a) -> Tensor(a)",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, autograd::Variable(a).variable_data());
+           return 0;
+         },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::is_cuda(Tensor a) -> bool",
@@ -740,7 +745,7 @@ RegisterOperators reg(
            auto ivalue = pop(stack);
 
            // Pickle the tensor
-           auto data = pickle({ivalue});
+           auto data = jit::pickle_save(ivalue);
 
            // Write file
            std::fstream output(filename, std::ios::out | std::ios::binary);
@@ -1549,6 +1554,42 @@ int listRemove(Stack& stack) {
   return 0;
 }
 
+template <typename T>
+int listMin(Stack& stack) {
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  size_t list_size = list.size();
+  if (list_size == 0) {
+    throw std::runtime_error("min() arg is an empty sequence");
+  }
+
+  T min_elem = list[0];
+  for (size_t i = 1; i < list_size; ++i) {
+    T elem = list[i];
+    min_elem = elem < min_elem ? elem : min_elem;
+  }
+
+  stack.push_back(min_elem);
+  return 0;
+}
+
+template <typename T>
+int listMax(Stack& stack) {
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  size_t list_size = list.size();
+  if (list_size == 0) {
+    throw std::runtime_error("max() arg is an empty sequence");
+  }
+
+  T max_elem = list[0];
+  for (size_t i = 1; i < list_size; ++i) {
+    T elem = list[i];
+    max_elem = elem > max_elem ? elem : max_elem;
+  }
+
+  stack.push_back(max_elem);
+  return 0;
+}
+
 template <>
 int listRemove<at::Tensor>(Stack& stack) {
   at::Tensor elem = pop(stack).to<at::Tensor>();
@@ -1731,6 +1772,20 @@ template <typename T>
 int listList(Stack& stack) {
   c10::List<T> a = pop(stack).to<c10::List<T>>();
   push(stack, a.copy());
+  return 0;
+}
+
+template <typename T>
+int listContains(Stack& stack) {
+  auto key = pop(stack).to<T>();
+  auto list = pop(stack).to<c10::List<T>>();
+  for (const T& item : list) {
+    if (item == key) {
+      push(stack, true);
+      return 0;
+    }
+  }
+  push(stack, false);
   return 0;
 }
 
@@ -2271,6 +2326,14 @@ RegisterOperators reg2({
           listReverse<value_type>,                                             \
           aliasAnalysisFromSchema()),                                          \
       Operator(                                                                \
+          "prim::min(" decl_type "[] self) -> " decl_type,                     \
+          listMin<value_type>,                                                 \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "prim::max(" decl_type "[] self) -> " decl_type,                     \
+          listMax<value_type>,                                                 \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
           "aten::extend(" decl_type "[](a!) self, " decl_type                  \
           " [] other) -> ()",                                                  \
           listExtend<value_type>,                                              \
@@ -2370,6 +2433,21 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("bool", c10::List<bool>),
     CREATE_LIST_OPS("Tensor", c10::List<at::Tensor>),
     CREATE_LIST_OPS("t", c10::List<IValue>),
+
+    // `listContains<T>` is not implemented for non-primitive types
+    // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
+    Operator(
+        "aten::__contains__(int[] l, int item) -> bool",
+        listContains<int64_t>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::__contains__(float[] l, float item) -> bool",
+        listContains<double>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::__contains__(str[] l, str item) -> bool",
+        listContains<std::string>,
+        aliasAnalysisFromSchema()),
 #undef CREATE_LIST_OPS
     Operator(
         "aten::sort(int[](a!) self, bool reverse=False) -> ()",
@@ -2541,22 +2619,6 @@ RegisterOperators reg2({
     // the python builtin 'min' and 'torch.min'
     DEFINE_BINARY_OP(prim::min, a < b ? a : b),
     DEFINE_BINARY_OP(prim::max, a > b ? a : b),
-
-    Operator(
-        "prim::min(int[] x) -> int",
-        [](Stack& stack) {
-          c10::List<int64_t> int_list = pop(stack).toIntList();
-          int64_t min_element = std::numeric_limits<int64_t>::max();
-
-          for(int64_t ele: int_list) {
-            if(ele < min_element) {
-              min_element = ele;
-            }
-          }
-          push(stack, min_element);
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
 
     // Pass in two ops for handling int and float separately as % in C++ only
     // works for int The modulus calculation is different between C++ and Python

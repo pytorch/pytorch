@@ -330,6 +330,15 @@ Tensor& Module::register_buffer(std::string name, Tensor tensor) {
   return buffers_.insert(std::move(name), std::move(tensor));
 }
 
+void Module::unregister_module(const std::string& name) {
+  TORCH_CHECK(
+      children_.contains(name),
+      "No Module with name `",
+      name,
+      "` is registered");
+  children_.erase(name);
+}
+
 void Module::pretty_print(std::ostream& stream) const {
   stream << name();
 }

@@ -6,12 +6,12 @@ import torch.nn._intrinsic as nni
 import torch.nn._intrinsic.quantized as nniq
 import torch.nn._intrinsic.qat as nniqat
 from torch.quantization import \
-    QConfig_dynamic, default_weight_observer, \
+    QConfig_dynamic, default_weight_observer, dump_tensor,\
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
-    quantize_dynamic, default_qconfig, default_qat_qconfig, \
-    default_dynamic_qconfig, MinMaxObserver, QuantWrapper
+    quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
+    default_dynamic_qconfig, HistogramObserver, MinMaxObserver, TensorObserver, QuantWrapper
 
-from common_utils import run_tests, tempfile
+from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     SkipQuantModel, QuantStubModel, \
     ModelForFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
@@ -25,6 +25,7 @@ from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedMod
 
 from hypothesis import given
 from hypothesis import strategies as st
+from hypothesis_utils import no_deadline
 import io
 import copy
 
@@ -519,8 +520,34 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         torch.testing.assert_allclose(output_int8, ref_out)
         self.assertEqual(output_int8, ref_out)
-        for out, ref in zip(final_hiddens_int8, ref_hid):
-            torch.testing.assert_allclose(out, ref)
+        for out_val, ref_val in zip(final_hiddens_int8, ref_hid):
+            torch.testing.assert_allclose(out_val, ref_val)
+
+        class ScriptWrapper(torch.nn.Module):
+            def __init__(self, cell):
+                super(ScriptWrapper, self).__init__()
+                self.cell = cell
+
+            def forward(self, x, hiddens):
+                # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+                return self.cell(x, hiddens)
+
+        # TODO: TorchScript overloads don't work without this wrapper
+        cell_script = torch.jit.script(ScriptWrapper(cell_int8))
+        out_script, hid_script = cell_script(x, hiddens)
+        self.assertEqual(len(out_script), len(ref_out))
+        for out_val, ref_val in zip(out_script, ref_out):
+            torch.testing.assert_allclose(out_val, ref_val)
+
+        # Test save/load
+        b = io.BytesIO()
+        torch.jit.save(cell_script, b)
+        b.seek(0)
+        loaded = torch.jit.load(b)
+        out_loaded, hid_loaded = loaded(x, hiddens)
+        for loaded_val, ref_val in zip(out_loaded, ref_out):
+            torch.testing.assert_allclose(loaded_val, ref_val)
+
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
@@ -595,10 +622,10 @@ class ScriptabilityTest(QuantizationTestCase):
 
     def test_scriptability_serialization(self):
         # test serialization of quantized functional modules
-        with tempfile.TemporaryFile() as f:
-            torch.save(self.qmodel_under_test, f)
-            f.seek(0)
-            loaded = torch.load(f)
+        b = io.BytesIO()
+        torch.save(self.qmodel_under_test, b)
+        b.seek(0)
+        loaded = torch.load(b)
         self.assertEqual(self.qmodel_under_test.myadd.zero_point, loaded.myadd.zero_point)
         state_dict = self.qmodel_under_test.state_dict()
         self.assertTrue('myadd.zero_point' in state_dict.keys(),
@@ -764,6 +791,76 @@ class ObserverTest(QuantizationTestCase):
         buf.seek(0)
         loaded = torch.jit.load(buf)
         self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
+
+@unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
+                 'Quantization requires FBGEMM. FBGEMM does not play'
+                 ' well with UBSAN at the moment, so we skip the test if'
+                 ' we are in a UBSAN environment.')
+class QuantizationDebugTest(QuantizationTestCase):
+    def test_tensor_observer(self):
+        model = SingleLayerLinearModel()
+        model.qconfig = default_debug_qconfig
+        prepare(model)
+        # run the evaluation and dump all tensors
+        test_only_eval_fn(model, self.calib_data)
+        test_only_eval_fn(model, self.calib_data)
+        tensor_dict = {}
+        dump_tensor(model, tensor_dict)
+
+        # we can torch,save() and torch_load() in bento for further analysis
+        self.assertTrue('fc1.module.activation' in tensor_dict.keys(),
+                        'activation is not recorded in the dict')
+        self.assertEqual(len(tensor_dict['fc1.module.activation']), 2 * len(self.calib_data))
+
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
+    def test_tensor_observer_scriptable(self, qdtype, qscheme):
+        obs = TensorObserver(dtype=qdtype, qscheme=qscheme)
+        scripted = torch.jit.script(obs)
+
+        x = torch.rand(3, 4)
+        obs(x)
+        scripted(x)
+        self.assertTrue(torch.equal(obs.get_tensor_value()[0], scripted.get_tensor_value()[0]))
+        buf = io.BytesIO()
+        torch.jit.save(scripted, buf)
+        buf.seek(0)
+        loaded = torch.jit.load(buf)
+        self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
+
+    @no_deadline
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
+           reduce_range=st.booleans())
+    def test_histogram_observer(self, qdtype, qscheme, reduce_range):
+        myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        x = torch.tensor([2.0, 3.0, 4.0, 5.0])
+        y = torch.tensor([5.0, 6.0, 7.0, 8.0])
+        myobs(x)
+        myobs(y)
+        self.assertEqual(myobs.min_val, 2.0)
+        self.assertEqual(myobs.max_val, 8.0)
+        self.assertEqual(myobs.histogram, [2., 3., 3.])
+
+        qparams = myobs.calculate_qparams()
+
+        if reduce_range:
+            if qscheme == torch.per_tensor_symmetric:
+                ref_scale = 0.0470588 * 255 / 127
+                ref_zero_point = 0 if qdtype is torch.qint8 else 128
+            else:
+                ref_scale = 0.0235294 * 255 / 127
+                ref_zero_point = -64 if qdtype is torch.qint8 else 0
+        else:
+            if qscheme == torch.per_tensor_symmetric:
+                ref_scale = 0.0470588
+                ref_zero_point = 0 if qdtype is torch.qint8 else 128
+            else:
+                ref_scale = 0.0235294
+                ref_zero_point = -128 if qdtype is torch.qint8 else 0
+
+        self.assertEqual(qparams[1].item(), ref_zero_point)
+        self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
 
 if __name__ == '__main__':
     run_tests()
