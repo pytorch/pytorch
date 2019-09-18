@@ -105,12 +105,12 @@ void Context::setQEngine(at::QEngine e) {
       quantized_engine = e;
       break;
     case at::kFBGEMM:
-#ifdef FBGEMM
+#ifdef USE_FBGEMM
       quantized_engine = e;
       break;
 #endif
     case at::kQNNPACK:
-#ifdef QNNPACK
+#ifdef USE_PYTORCH_QNNPACK
       quantized_engine = e;
       break;
 #endif

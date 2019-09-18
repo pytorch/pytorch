@@ -126,7 +126,13 @@ class CAFFE2_API Context {
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
   bool enabled_mkldnn = true;
-  at::QEngine quantized_engine = at::kNoQEngine;
+  at::QEngine quantized_engine =
+#ifdef USE_PYTORCH_QNNPACK
+      at::kQNNPACK;
+#elif defined(USE_FBGEMM)
+      at::kFBGEMM;
+#else
+      at::kNoQEngine;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
 };
