@@ -87,9 +87,13 @@ using not_ok_to_box =
     std::is_same<optional<MemoryFormat>, T>
   >;
 
-template <class... Args>
+template <class Result, class... Args>
 using supports_boxed_fallback =
-  c10::guts::negation<c10::guts::disjunction<not_ok_to_box<guts::decay_t<Args>>...>>;
+  c10::guts::negation<c10::guts::disjunction<
+    std::is_lvalue_reference<Result>,
+    not_ok_to_box<Result>,
+    not_ok_to_box<guts::decay_t<Args>>...
+  >>;
 
 // ATenOpTable stores the implementations for each backend, in addition to
 // an implementation for variables.
@@ -158,6 +162,9 @@ template<
     std::nullptr_t
   > = nullptr>
 Result callBoxedFallback(const char* schema, const FallbackBoxedFunction* boxed_fallback_fn, Args&&... args) {
+  // This is dead because we test the SFINAE condition before calling
+  // boxed_fallback_fn.  A more functional way of writing this with
+  // optional<Result> return value works poorly when void is involved.
   TORCH_INTERNAL_ASSERT(0);
 }
 

@@ -72,6 +72,14 @@
   variants: method
   named_guard: False
 
+- func: unflatten(Tensor self, Dimname dim, int[] sizes, DimnameList names) -> Tensor
+  variants: method
+  named_guard: False
+
+- func: unflatten(Tensor self, int dim, int[] sizes, DimnameList names) -> Tensor
+  variants: method
+  named_guard: False
+
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   use_c10_dispatcher: True
   dispatch:
