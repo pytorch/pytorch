@@ -383,7 +383,7 @@ CHECKED_CAST = {
     'TensorList': CodeTemplate(
             'checked_tensor_list_unwrap(${arg_name},"${arg_name}",${arg_pos}, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
-    'IntArrayRef': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos}${,default_init})')
+    'IntArrayRef': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos})')
 }
 
 CHECKED_USE = {
@@ -487,15 +487,10 @@ THFormal = TypedDict('THFormal', {
     'kwarg_only': bool,
     'is_nullable': bool,
     'default': str,
-    'default_init': str,
     'output': bool,
     'size': int,
-    'declared_type': str,
-    'ignore_check': bool,
     'allocate': bool,
     'mask': bool,
-    'if_true': bool,
-    'if_false': bool,
     'wrap_dim': str,
     # Broadcast is originally a str but gets unwrapped to a List or Dict in-place
     'broadcast': Any,
@@ -513,7 +508,6 @@ AtFormal = TypedDict('AtFormal', {
     'kwarg_only': bool,
     'is_nullable': bool,
     'default': str,
-    'default_init': str,
     'output': bool,
     'size': int,
 }, total=False)
@@ -740,8 +734,6 @@ def create_generic(top_env, declarations):
         if default is None:
             # cause the default constructor for the object to run
             return '{}'
-        if 'if_true' in argument:
-            return argument['default'] == argument['if_true']
         for pattern, replacement in HEADER_CONSTANT_REPLACEMENTS:
             default = re.sub(pattern, replacement, str(default))
         if type_str in {'Scalar', 'int64_t', 'double'}:
@@ -775,7 +767,6 @@ def create_generic(top_env, declarations):
         if 'default' in argument:
             default = translate_default(argument, type_str, argument['default'])
             translated['default'] = default
-            translated['default_init'] = argument.get('default_init', default)
         if argument.get('output'):
             translated['output'] = True
         if argument.get('size'):
@@ -917,30 +908,6 @@ def create_generic(top_env, declarations):
             broadcast_actuals = [broadcast_arg['name'], broadcast_dims_init_list]
 
         return broadcast_actuals
-
-    def emit_nn_body(option):
-        # type: (FunctionOption) -> Union[str, List[str]]
-        # Concrete definition on Type.cpp for NN functions. Delegates to the
-        # xxx_forward variant variant after creating any necessary buffers.
-        actuals = option['actuals']
-        base_name = option['name'][:-1] if option['inplace'] else option['name']
-        fwd_name = option['api_name'].replace(base_name, base_name + '_forward')
-
-        if len(option['buffers']) == 0:
-            return 'return {}({});'.format(fwd_name, ', '.join(actuals))
-
-        body = []  # type: List[str]
-        if option['api_name'].endswith('_out'):
-            # _out variants must create buffers and insert them in the
-            # arguments list between output and input arguments
-            for buffer in option['buffers']:
-                body.append('Tensor {} = at::empty({{0}}, this->options());'.format(buffer['name']))
-            actuals = [arg['name'] for arg in option['arguments'] if arg.get('output')]
-            actuals += [buffer['name'] for buffer in option['buffers']]
-            actuals += [arg['name'] for arg in option['arguments'] if not arg.get('output')]
-
-        body.append('return std::get<0>({}({}));'.format(fwd_name, ', '.join(actuals)))
-        return body
 
     def process_option(option):
         # type: (FunctionOption) -> None
@@ -1408,10 +1375,6 @@ def create_derived(backend_type_env, declarations):
         # type: (THFormal) -> bool
         return argument.get('is_nullable', False)
 
-    def bool_option_is_string(argument):
-        # type: (THFormal) -> bool
-        return 'if_true' in argument and isinstance(argument['if_true'], string_type)
-
     def get_argument(env, argument, option):
         # type: (Environment, THFormal, FunctionOption) -> str
         if requires_checked_cast(argument):
@@ -1421,17 +1384,7 @@ def create_derived(backend_type_env, declarations):
                 checked_use = CHECKED_USE_NULLABLE.substitute(
                     env={}, arg_name=argument['name'], usage=checked_use)
             return checked_use
-        elif argument['type'] == 'bool' and 'if_true' in argument:
-            if bool_option_is_string(argument):
-                tpl = '({}) ? "{}" : "{}"'
-            else:
-                tpl = '({}) ? {} : {}'
-            return tpl.format(argument['name'],
-                              argument['if_true'], argument['if_false'])
         elif argument['type'] == 'CONSTANT':
-            # this is a bool that is actually a string...
-            if bool_option_is_string(argument):
-                return '"{}"'.format(argument['name'])
             v = str(argument.get('default', argument['name']))
             for pattern, replacement in CONSTANT_REPLACEMENTS:
                 v = re.sub(pattern, replacement, v)
@@ -1625,14 +1578,11 @@ def create_derived(backend_type_env, declarations):
                             # the checked cast succeeds even if the Tensor is not
                             # defined
                             null_okay = 'true' if nullable_argument(arg) else 'false'
-                            default_init = []
-                            if 'default_init' in arg:
-                                default_init.append(arg['default_init'])
 
                             check_cast = CHECKED_CAST[arg['type']].substitute(
                                 case_env, arg_name=arg['name'], arg_pos=count,
                                 api_name=option['api_name'], null_okay=null_okay,
-                                default_init=default_init, size=arg.get('size'))
+                                size=arg.get('size'))
                             case_body.append("auto {}_ = {};".format(
                                 arg['name'], check_cast))
                         if drop_argument(arg, option):

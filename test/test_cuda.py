@@ -2176,7 +2176,9 @@ class TestCuda(TestCase):
         return _TestTorchMixin._select_broadcastable_dims(dims_full)
 
     @skipIfRocm
-    def test_fft_ifft_rfft_irfft_plan_cache(self):
+    def test_fft_ifft_rfft_irfft(self):
+        _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
         @contextmanager
         def plan_cache_max_size(n, device=None):
             if device is None:
@@ -2244,8 +2246,15 @@ class TestCuda(TestCase):
                             self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
                         self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
-    # Tests two corner cases from older PyTorch (Issue #4858).
-    def test_multinomial_corner_cases(self):
+    # passes on ROCm w/ python 2.7, fails w/ python 3.6
+    @skipIfRocm
+    def test_stft(self):
+        _TestTorchMixin._test_stft(self, device=torch.device('cuda'))
+
+    def test_multinomial(self):
+        _TestTorchMixin._test_multinomial(self, torch.cuda.FloatTensor)
+
+        # Test two corner cases from older PyTorch (Issue #4858)
         freqs = torch.cuda.FloatTensor([
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             0.03178183361887932, 0.027680952101945877, 0.033176131546497345,
@@ -2542,7 +2551,7 @@ class TestCuda(TestCase):
         self.assertEqual(a, b.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    @unittest.skip("Spuriously failing")
+    @skipCUDANonDefaultStreamIf(True)
     def test_triangular_solve_batched(self):
         _TestTorchMixin._test_triangular_solve_batched(self, lambda t: t.cuda())
 
@@ -2564,7 +2573,8 @@ class TestCuda(TestCase):
         torch.cuda.nvtx.mark("bar")
         torch.cuda.nvtx.range_pop()
 
-    def test_bincount_compare(self):
+    def test_bincount_cuda(self):
+        _TestTorchMixin._test_bincount(self, device='cuda')
         # ensure CUDA code coverage
         input_size = (5000,)
         w = torch.randn(input_size, device='cuda')
@@ -2752,6 +2762,24 @@ class TestCuda(TestCase):
             model(x).sum().backward()
 
         self.assertEqual(x.grad, torch.ones_like(x) * 5)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_cuda_init_race(self):
+        # See https://github.com/pytorch/pytorch/issues/16559
+        import subprocess
+        subprocess.check_call([sys.executable, '-c', """\
+import torch
+import threading
+
+def worker(rank):
+    torch.tensor([1.]).cuda(rank)
+
+t1 = threading.Thread(target=worker, args=(0,))
+t2 = threading.Thread(target=worker, args=(1,))
+t1.start()
+t2.start()
+"""])
+
 
 def load_ignore_file():
     from os.path import join, dirname

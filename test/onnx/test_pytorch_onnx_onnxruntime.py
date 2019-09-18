@@ -45,7 +45,8 @@ def ort_test_with_input(ort_sess, input, output, rtol, atol):
 def run_model_test(self, model, batch_size=2, state_dict=None,
                    input=None, use_gpu=True, rtol=0.001, atol=1e-7,
                    example_outputs=None, do_constant_folding=True,
-                   dynamic_axes=None, test_with_inputs=None):
+                   dynamic_axes=None, test_with_inputs=None,
+                   input_names=None, output_names=None):
     model.eval()
 
     if input is None:
@@ -65,7 +66,8 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                           example_outputs=output,
                           do_constant_folding=do_constant_folding,
                           keep_initializers_as_inputs=self.keep_initializers_as_inputs,
-                          dynamic_axes=dynamic_axes)
+                          dynamic_axes=dynamic_axes,
+                          input_names=input_names, output_names=output_names)
 
 
         # compute onnxruntime output prediction
@@ -97,11 +99,13 @@ class TestONNXRuntime(unittest.TestCase):
         np.random.seed(seed=0)
 
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
-                 batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None):
+                 batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
+                 input_names=None, output_names=None):
         run_model_test(self, model, batch_size=batch_size,
                        input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
                        do_constant_folding=do_constant_folding,
-                       dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs)
+                       dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
+                       input_names=input_names, output_names=output_names)
 
     def run_word_language_model(self, model_name):
         ntokens = 50
@@ -304,16 +308,17 @@ class TestONNXRuntime(unittest.TestCase):
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
-                return torch.arange(x.shape[0]), \
+                return torch.arange(input.shape[0]), \
                     torch.arange(12), \
-                    torch.arange(start=x.shape[0], end=x.shape[0] + 5)
+                    torch.arange(start=input.shape[0], end=input.shape[0] + 5)
 
         x = torch.randn(5, 3, 2)
         y = torch.randn(8, 3, 2)
         self.run_test(ArangeModel(), x, test_with_inputs=[y],
-                      dynamic_axes={'input_1': [1],
-                                    'output_1': [0],
-                                    'output_2': [0]})
+                      input_names=['input_1'],
+                      output_names=['output_1', 'output_2', 'output_3'],
+                      dynamic_axes={'input_1': [0],
+                                    'output_1': [0]})
 
     def _test_index_generic(self, fn):
         class MyModel(torch.nn.Module):
@@ -863,6 +868,17 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.rand(2, 3, 4)
         model = Log1p()
         self.run_test(model, x)
+
+    # TODO: remove the skip tag once ORT implementation is in place
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedOpsetVersion([11])
+    def test_round(self):
+        class Round(torch.nn.Module):
+            def forward(self, x):
+                return torch.round(x)
+
+        x = torch.tensor([0.9920, -1.0362, -1.5000, 3.5000], requires_grad=True)
+        self.run_test(Round(), x)
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':

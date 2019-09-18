@@ -13,7 +13,7 @@
 //  dq: Design-time Quantization
 //  rq: Run-time Quantization
 
-static inline void pack_q8gemm_wdq(
+static inline void pytorch_pack_q8gemm_wdq(
     size_t nc,
     size_t kc,
     uint32_t nr,
@@ -59,7 +59,7 @@ static inline void pack_q8gemm_wdq(
   }
 }
 
-static inline void pack_q8gemm_wrq(
+static inline void pytorch_pack_q8gemm_wrq(
     const size_t nc,
     const size_t kc,
     const uint32_t nr,
@@ -99,7 +99,7 @@ static inline void pack_q8gemm_wrq(
   }
 }
 
-static inline void pack_q8conv_wdq(
+static inline void pytorch_pack_q8conv_wdq(
     size_t n,
     size_t ks,
     size_t kc,
@@ -148,7 +148,7 @@ static inline void pack_q8conv_wdq(
   }
 }
 
-static inline void pack_q8conv_wrq(
+static inline void pytorch_pack_q8conv_wrq(
     const size_t n,
     const size_t ks,
     const size_t kc,
@@ -191,7 +191,7 @@ static inline void pack_q8conv_wrq(
   }
 }
 
-static inline void pack_q8deconv_wdq(
+static inline void pytorch_pack_q8deconv_wdq(
     size_t n,
     size_t ks,
     size_t kc,
@@ -240,7 +240,7 @@ static inline void pack_q8deconv_wdq(
   }
 }
 
-static inline void pack_q8deconv_wrq(
+static inline void pytorch_pack_q8deconv_wrq(
     const size_t n,
     const size_t ks,
     const size_t kc,
@@ -283,7 +283,7 @@ static inline void pack_q8deconv_wrq(
   }
 }
 
-static inline void pack_q8dw_wdq(
+static inline void pytorch_pack_q8dw_wdq(
     size_t h,
     size_t w,
     size_t c,
@@ -321,7 +321,7 @@ static inline void pack_q8dw_wdq(
   }
 }
 
-static inline void pack_q8dw_wrq(
+static inline void pytorch_pack_q8dw_wrq(
     const size_t h,
     const size_t w,
     const size_t c,
@@ -356,7 +356,7 @@ static inline void pack_q8dw_wrq(
   }
 }
 
-static inline void pack_q8dw_w_dilation(
+static inline void pytorch_pack_q8dw_w_dilation(
     size_t h,
     size_t w,
     size_t c,
@@ -368,10 +368,10 @@ static inline void pack_q8dw_w_dilation(
     const uint8_t* k,
     const int32_t* b,
     void* packed_w,
-    bool pack_b) {
+    bool pytorch_pack_b) {
   for (size_t cr_block_start = 0; cr_block_start < c; cr_block_start += cr) {
     const size_t cr_block_size = min(c - cr_block_start, cr);
-    if (pack_b) {
+    if (pytorch_pack_b) {
       for (size_t cr_block_offset = 0; cr_block_offset < cr_block_size;
            cr_block_offset++) {
         *((int32_t*)packed_w) = b[cr_block_start + cr_block_offset];
@@ -395,7 +395,7 @@ static inline void pack_q8dw_w_dilation(
   }
 }
 
-static inline void pack_swizzle_q8gemm_bdq(
+static inline void pytorch_pack_swizzle_q8gemm_bdq(
     size_t n,
     size_t kc,
     uint32_t nr,
@@ -461,7 +461,7 @@ static inline void pack_swizzle_q8gemm_bdq(
   }
 }
 
-static inline void pack_swizzle_q8gemm_brq(
+static inline void pytorch_pack_swizzle_q8gemm_brq(
     const size_t n,
     const size_t kc,
     const uint32_t nr,
@@ -521,7 +521,7 @@ static inline void pack_swizzle_q8gemm_brq(
   }
 }
 
-static inline void pack_hgemm_w(
+static inline void pytorch_pack_hgemm_w(
     size_t nc,
     size_t kc,
     size_t nr,
@@ -553,7 +553,7 @@ static inline void pack_hgemm_w(
   }
 }
 
-static inline void pack_sgemm_w(
+static inline void pytorch_pack_sgemm_w(
     size_t nc,
     size_t kc,
     size_t nr,
@@ -585,7 +585,7 @@ static inline void pack_sgemm_w(
   }
 }
 
-static inline void pack_sconv_w(
+static inline void pytorch_pack_sconv_w(
     size_t n,
     size_t ks,
     size_t kc,
@@ -623,18 +623,18 @@ static inline void pack_sconv_w(
 
 #if PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
 
-#define pack_q8gemm_w pack_q8gemm_wrq
-#define pack_q8conv_w pack_q8conv_wrq
-#define pack_q8deconv_w pack_q8deconv_wrq
-#define pack_q8dw_w pack_q8dw_wrq
-#define pack_swizzle_q8gemm_b pack_swizzle_q8gemm_brq
+#define pytorch_pack_q8gemm_w pytorch_pack_q8gemm_wrq
+#define pytorch_pack_q8conv_w pytorch_pack_q8conv_wrq
+#define pytorch_pack_q8deconv_w pytorch_pack_q8deconv_wrq
+#define pytorch_pack_q8dw_w pytorch_pack_q8dw_wrq
+#define pytorch_pack_swizzle_q8gemm_b pytorch_pack_swizzle_q8gemm_brq
 
 #else
 
-#define pack_q8gemm_w pack_q8gemm_wdq
-#define pack_q8conv_w pack_q8conv_wdq
-#define pack_q8deconv_w pack_q8deconv_wdq
-#define pack_q8dw_w pack_q8dw_wdq
-#define pack_swizzle_q8gemm_b pack_swizzle_q8gemm_bdq
+#define pytorch_pack_q8gemm_w pytorch_pack_q8gemm_wdq
+#define pytorch_pack_q8conv_w pytorch_pack_q8conv_wdq
+#define pytorch_pack_q8deconv_w pytorch_pack_q8deconv_wdq
+#define pytorch_pack_q8dw_w pytorch_pack_q8dw_wdq
+#define pytorch_pack_swizzle_q8gemm_b pytorch_pack_swizzle_q8gemm_bdq
 
 #endif
