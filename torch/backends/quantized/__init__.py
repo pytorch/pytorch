@@ -21,7 +21,7 @@ class QuantizedEngine(types.ModuleType):
 
     def __getattr__(self, attr):
         return self.m.__getattribute__(attr)
-
+    # TODO: replace with strings(https://github.com/pytorch/pytorch/pull/26330/files#r324951460)
     engine = ContextProp(torch._C._get_qengine, torch._C._set_qengine)
 
 # This is the sys.modules replacement trick, see
