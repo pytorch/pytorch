@@ -9,9 +9,9 @@ namespace nn {
 
 /// Options for the `CosineSimilarity` module.
 struct TORCH_API CosineSimilarityOptions {
-  // Dimension where cosine similarity is computed. Default: 1
+  /// Dimension where cosine similarity is computed. Default: 1
   TORCH_ARG(int64_t, dim) = 1;
-  // Small value to avoid division by zero. Default: 1e-8
+  /// Small value to avoid division by zero. Default: 1e-8
   TORCH_ARG(double, eps) = 1e-8;
 };
 
