@@ -229,7 +229,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
     size_t cols_w = packB->getInputChannels();
     auto input_scale = input_contig.q_scale();
 
-    if (input_contig.q_scale() != pack_ptr.input_scale) {
+    if (!pack_ptr.input_scale.has_value()) {
       // Get the original weight and adjust it to uint8 from int8
       auto weight_contig = pack_ptr.orig_weight;
       auto bias_fp32 = pack_ptr.bias;
@@ -246,7 +246,6 @@ class QLinearInt8 final : public torch::OperatorKernel {
       // Original bias was float, so we requantize it here.
       auto bias = at::quantize_linear(
           bias_fp32, kernel_scale * input_scale, 0, kQInt32);
-      auto bias_contig = bias.contiguous();
       // Update the input scale to not pack again.
       pack_ptr.input_scale = input_scale;
       auto wt_ptr =
@@ -257,7 +256,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
                   kernel_zp,
                   kernel_scale,
                   (uint8_t*)qnnp_w_data,
-                  (int32_t*)bias_contig.data_ptr<c10::qint32>()),
+                  (int32_t*)bias.data_ptr<c10::qint32>()),
               weight_contig,
               bias_fp32, /* fp32 bias */
               input_scale, /* input_scale */

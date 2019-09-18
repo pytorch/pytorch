@@ -183,7 +183,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
                 (int32_t*)bias_contig.data_ptr<c10::qint32>()),
             weight_contig, /* int8_t weight */
             bias_fp32.contiguous(), /* fp32 bias */
-            0, /* input_scale */
+            c10::nullopt, /* input_scale */
             weight.q_scale(),
             weight_zp});
     return cpp_custom_type_hack::create(std::move(wt_ptr), weight.options());
