@@ -90,19 +90,13 @@ public:
    */
   RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction kernel);
 
-  /**
-   * Perform a dynamic dispatch and get the kernel for an operator.
-   */
-  // TODO We probably shouldn't return a reference into the LeftRight
-  const KernelFunction& lookup(const OperatorHandle& op, const Stack* stack) const;
+  template<class Return, class... Args>
+  Return callUnboxed(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const;
 
-  /**
-   * Perform a dynamic dispatch and get the kernel for an operator.
-   */
-  // TODO Remove lookup(TensorTypeId) and instead have a lookup based on
-  // the (unboxed?) arguments the operator is to be called with.
-  // TODO We probably shouldn't return a reference into the LeftRight
-  const KernelFunction& lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const;
+  template<class Return, class... Args>
+  Return callUnboxedOnly(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const;
+
+  void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
   /**
    * Add a listener that gets called whenever a new op is registered or an existing
@@ -168,14 +162,23 @@ private:
   RegistrationHandleRAII registrationHandle_;
 };
 
-inline const KernelFunction& Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
+template<class Return, class... Args>
+inline Return Dispatcher::callUnboxed(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.lookupKernel(stack);
+  // TODO Remove dispatchKey argument and instead infer dispatchKey from args...
+  return op.operatorIterator_->op.callUnboxed<Return, Args...>(std::move(dispatchKey), std::forward<Args>(args)...);
 }
 
-inline const KernelFunction& Dispatcher::lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const {
+template<class Return, class... Args>
+inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.lookupKernel(dispatchKey);
+  // TODO Remove dispatchKey argument and instead infer dispatchKey from args...
+  return op.operatorIterator_->op.callUnboxedOnly<Return, Args...>(std::move(dispatchKey), std::forward<Args>(args)...);
+}
+
+inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  return op.operatorIterator_->op.callBoxed(stack);
 }
 
 } // namespace c10
