@@ -443,9 +443,11 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-void Pickler::pushDict(const IValue& ivalue) {
+void Pickler::pushEmptyDict() {
   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
-
+}
+void Pickler::pushDict(const IValue& ivalue) {
+  pushEmptyDict();
   auto dict_items = iterationOrder(ivalue.toGenericDict());
   if (dict_items.size() == 0) {
     return;
