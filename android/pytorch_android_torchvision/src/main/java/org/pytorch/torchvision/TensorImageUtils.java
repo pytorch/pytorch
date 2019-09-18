@@ -40,7 +40,7 @@ public final class TensorImageUtils {
       floatArray[offset_b + i] = (b - NORM_MEAN_B) / NORM_STD_B;
     }
     final long shape[] = new long[] {1, 3, height, width};
-    return Tensor.newTensor(shape, floatArray);
+    return Tensor.newFloat32Tensor(shape, floatArray);
   }
 
   public static Tensor imageYUV420CenterCropToFloatTensorTorchVisionForm(
@@ -131,7 +131,7 @@ public final class TensorImageUtils {
       }
     }
     final long shape[] = new long[] {1, 3, tensorHeight, tensorHeight};
-    return Tensor.newTensor(shape, floatArray);
+    return Tensor.newFloat32Tensor(shape, floatArray);
   }
 
   private static final int clamp(int c, int min, int max) {
