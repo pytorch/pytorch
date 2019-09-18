@@ -2119,9 +2119,7 @@
     - arg: THTensor* res2
       output: True
     - THTensor* self
-    - arg: bool eigenvectors
-      if_true: V
-      if_false: N
+    - bool eigenvectors
 ]]
 [[
   name: _th_potri
@@ -2140,9 +2138,7 @@
     - arg: THTensor* output
       output: True
     - THTensor* self
-    - arg: bool upper
-      if_true: U
-      if_false: L
+    - bool upper
 ]]
 [[
   name: _th_geqrf
@@ -2199,12 +2195,8 @@
     - THTensor* self
     - THTensor* input2
     - THTensor* input3
-    - arg: bool left
-      if_true: L
-      if_false: R
-    - arg: bool transpose
-      if_true: T
-      if_false: N
+    - bool left
+    - bool transpose
 ]]
 [[
   name: _th_random_
