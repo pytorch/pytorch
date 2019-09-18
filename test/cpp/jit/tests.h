@@ -19,7 +19,6 @@ namespace jit {
   _(CustomOperatorAliasing)            \
   _(IValueKWargs)                      \
   _(CustomFusion)                      \
-  _(SchemaMatching)                    \
   _(Differentiate)                     \
   _(DifferentiateWithRequiresGrad)     \
   _(FromQualString)                    \
