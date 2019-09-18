@@ -106,12 +106,12 @@ Tensor refine_names(const Tensor& self, DimnameList names) {
     }
     if (out_name.is_wildcard()) {
       TORCH_CHECK(false,
-          "refine_names: cannot coerse Tensor", self_names, " to Tensor", names,
+          "refine_names: cannot coerce Tensor", self_names, " to Tensor", names,
           " because ", self_name, " is more specific than ", out_name, " at index ",
           idx);
     }
     TORCH_CHECK(false,
-        "refine_names: cannot coerse Tensor", self_names, " to Tensor", names,
+        "refine_names: cannot coerce Tensor", self_names, " to Tensor", names,
         " because ", self_name, " is different from ", out_name, " at index ",
         idx);
     TORCH_INTERNAL_ASSERT(false); // done handling errors
