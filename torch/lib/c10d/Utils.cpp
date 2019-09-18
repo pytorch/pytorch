@@ -162,9 +162,7 @@ int connect(
   // yet, or is listening but has its listen backlog exhausted.
   bool anyRefused = false;
   bool anyReset = false;
-
   const auto start = std::chrono::high_resolution_clock::now();
-
   while (true) {
     try {
       SYSCHECK_ERR_RETURN_NEG1(
@@ -193,7 +191,7 @@ int connect(
       const auto remaining =
           std::chrono::duration_cast<std::chrono::milliseconds>(timeout) -
           std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
-      const auto remainingMillis = std::max((long)0, remaining.count());
+      const auto remainingMillis = std::max(0, (int)remaining.count());
       int numReady = ::poll(&pfd, 1, remainingMillis);
       if (numReady < 0) {
         throw std::system_error(errno, std::system_category());
