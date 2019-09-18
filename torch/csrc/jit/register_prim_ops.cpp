@@ -51,12 +51,12 @@ namespace jit {
 namespace {
 
 template <class T>
-c10::List<T> make_result_list() {
+c10::List<T> make_result_list(const TypePtr& elemType) {
   return c10::List<T>();
 }
-template<>
-c10::impl::GenericList make_result_list<IValue>() {
-  return c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+template <>
+c10::impl::GenericList make_result_list<IValue>(const TypePtr& elemType) {
+  return c10::impl::GenericList(elemType);
 }
 
 Operation noop(const Node* n) {
@@ -1044,12 +1044,16 @@ RegisterOperators reg(
          [](const Node* node) {
            size_t num_inputs = node->inputs().size();
            auto type = node->output()->type()->expect<TupleType>();
+           bool named = type->name().has_value();
            return [=](Stack& stack) {
              std::vector<IValue> elems{
                  std::make_move_iterator(stack.end() - num_inputs),
                  std::make_move_iterator(stack.end())};
              drop(stack, num_inputs);
-             push(stack, c10::ivalue::Tuple::create(std::move(elems), type));
+             push(
+                 stack,
+                 named ? c10::ivalue::Tuple::createNamed(std::move(elems), type)
+                       : c10::ivalue::Tuple::create(std::move(elems)));
              return 0;
            };
          },
@@ -1830,7 +1834,7 @@ int listAdd(Stack& stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
   c10::List<T> a = pop(stack).to<c10::List<T>>();
 
-  c10::List<T> ret = make_result_list<T>();
+  c10::List<T> ret = make_result_list<T>(a.elementType());
 
   if (a.use_count() == 1) {
     ret = std::move(a);
@@ -1858,7 +1862,7 @@ int listMulIntLeft(Stack& stack) {
   int64_t n = pop(stack).to<int64_t>();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
 
-  c10::List<T> ret = make_result_list<T>();
+  c10::List<T> ret = make_result_list<T>(list.elementType());
   const auto size = list.size() * n;
   ret.reserve(size);
 
@@ -1877,7 +1881,7 @@ int listMulIntRight(Stack& stack) {
   c10::List<T> list = pop(stack).to<c10::List<T>>();
   int64_t n = pop(stack).to<int64_t>();
 
-  c10::List<T> ret = make_result_list<T>();
+  c10::List<T> ret = make_result_list<T>(list.elementType());
   const auto size = list.size() * n;
   ret.reserve(size);
 
@@ -1906,7 +1910,7 @@ int listSlice(Stack& stack) {
   const auto normalized_end =
       std::min(list_size, normalizeIndex(end, list_size));
 
-  c10::List<T> sliced_list = make_result_list<T>();
+  c10::List<T> sliced_list = make_result_list<T>(list.elementType());
   if (normalized_end <= normalized_start) {
     // early exit if the slice is trivially empty
     push(stack, std::move(sliced_list));
@@ -2034,12 +2038,10 @@ c10::List<Elem> makeListForDictKeysOrValues(
 
 template <unsigned int Index>
 c10::impl::GenericList makeGenericListForDictKeysOrValues(
-    const std::pair<c10::optional<TypePtr>, c10::optional<TypePtr>>& types,
+    const std::pair<TypePtr, TypePtr>& types,
     const std::vector<std::pair<IValue, IValue>>& order) {
   auto type = std::get<Index>(types);
-  auto values = type.has_value()
-    ? c10::impl::GenericList(*type)
-    : c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto values = c10::impl::GenericList(type);
   values.reserve(order.size());
   for (const auto& item : order) {
     values.push_back(std::get<Index>(item));
@@ -2053,7 +2055,7 @@ Operation dictKeysOrValues(const Node* n) {
   return [=](Stack& stack) -> int {
     auto dict = pop(stack).toGenericDict();
     const auto& order = iterationOrder(dict);
-    const auto types = std::make_pair(dict._keyType(), dict._valueType());
+    const auto types = std::make_pair(dict.keyType(), dict.valueType());
     if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
       push(stack, makeListForDictKeysOrValues<Index, at::Tensor>(types, order));
     } else if (outputType->getElementType() == IntType::get()) {
@@ -2188,11 +2190,10 @@ int dictUpdate(Stack& stack) {
 
 int dictItems(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  auto key_type = dict._keyType();
-  auto value_type = dict._valueType();
-  auto items = (key_type.has_value() && value_type.has_value())
-      ? c10::impl::GenericList(TupleType::create({*key_type, *value_type}))
-      : c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto key_type = dict.keyType();
+  auto value_type = dict.valueType();
+  auto items =
+      c10::impl::GenericList(TupleType::create({key_type, value_type}));
   items.reserve(dict.size());
   for (const auto& item : iterationOrder(dict)) {
     items.emplace_back(c10::ivalue::Tuple::create({item.first, item.second}));

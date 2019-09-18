@@ -505,7 +505,6 @@ void initJITBindings(PyObject* module) {
 
       Value* node_output;
       py::object py_func_output;
-      auto retval = c10::make_intrusive<c10::ivalue::Future>();
       // Insert new trace ops into the fork op's sub-block
       WithInsertPoint guard(body_block);
       IValue output_ivalue;
@@ -528,6 +527,9 @@ void initJITBindings(PyObject* module) {
         torch::jit::script::lambdaLiftFork(fork_node);
       }
 
+      auto retval =
+          c10::make_intrusive<c10::ivalue::Future>(output_ivalue.type());
+
       // Record the ivalue in the tracer
       jit::tracer::setValueTrace(retval, node_output);
 
@@ -536,8 +538,9 @@ void initJITBindings(PyObject* module) {
 
       return PythonFutureWrapper(retval);
     } else {
-      auto retval = c10::make_intrusive<c10::ivalue::Future>();
-      retval->markCompleted(toIValue(f(*args_tup)));
+      auto result = toIValue(f(*args_tup));
+      auto retval = c10::make_intrusive<c10::ivalue::Future>(result.type());
+      retval->markCompleted(std::move(result));
       return PythonFutureWrapper(retval);
     }
   });

@@ -443,9 +443,11 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-void Pickler::pushDict(const IValue& ivalue) {
+void Pickler::pushEmptyDict() {
   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
-
+}
+void Pickler::pushDict(const IValue& ivalue) {
+  pushEmptyDict();
   auto dict_items = iterationOrder(ivalue.toGenericDict());
   if (dict_items.size() == 0) {
     return;
@@ -610,8 +612,7 @@ PickleOpCode Unpickler::readInstruction() {
   auto opcode = readOpCode();
   switch (opcode) {
     case PickleOpCode::EMPTY_LIST: {
-      stack_.emplace_back(
-          c10::impl::GenericList(c10::impl::deprecatedUntypedList()));
+      stack_.emplace_back(c10::impl::GenericList(AnyType::get()));
     } break;
     case PickleOpCode::EMPTY_TUPLE: {
       if (empty_tuple_.isNone()) {
@@ -696,7 +697,8 @@ PickleOpCode Unpickler::readInstruction() {
         stack_.emplace_back(tuple);
     } break;
     case PickleOpCode::EMPTY_DICT:
-      stack_.emplace_back(c10::impl::GenericDict(c10::impl::deprecatedUntypedDict()));
+      stack_.emplace_back(
+          c10::impl::GenericDict(AnyType::get(), AnyType::get()));
       break;
     case PickleOpCode::APPENDS: {
       readList();

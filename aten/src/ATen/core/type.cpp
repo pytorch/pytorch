@@ -65,6 +65,11 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   return out;
 }
 
+AnyTypePtr AnyType::get() {
+  static auto value = AnyType::create();
+  return value;
+}
+
 TensorTypePtr TensorType::get() {
   static auto value = TensorType::create(
       {},
@@ -471,7 +476,7 @@ const char * typeKindToString(TypeKind kind) {
 }
 
 bool Type::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
-  if (*this == *rhs) {
+  if (rhs->kind() == TypeKind::AnyType || *this == *rhs) {
     return true;
   }
   if(auto rhs_ = rhs->cast<OptionalType>()) {
