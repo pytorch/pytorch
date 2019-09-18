@@ -11,14 +11,18 @@ namespace c10 {
 namespace detail {
 template<class Type>
 constexpr uint64_t hashType() {
-  // TODO Also consider modifiers like const/volatile/reference/rvalue_ref/...
-  return typeid(Type).hash_code();
+  return typeid(Type).hash_code()
+      + 1000 * std::is_lvalue_reference<Type>::value
+      + 5000 * std::is_rvalue_reference<Type>::value
+      + 10000 * std::is_const<guts::remove_reference_t<Type>>::value
+      + 15000 * std::is_volatile<guts::remove_reference_t<Type>>::value
+      ;
 }
 template<class TypeList> struct hashTypeList_ final {};
 template<class Head, class... Tail>
 struct hashTypeList_<guts::typelist::typelist<Head, Tail...>> final {
   static constexpr uint64_t call(uint64_t index) {
-    return index * hashType<Head>() + hashTypeList_<guts::typelist::typelist<Tail...>>::call(index + 1);
+    return 1000000 * index * hashType<Head>() + hashTypeList_<guts::typelist::typelist<Tail...>>::call(index + 1);
   }
 };
 template<>
@@ -33,17 +37,37 @@ constexpr uint64_t hashTypeList() {
   return hashTypeList_<TypeList>::call(1);
 }
 
+// Take a function signature and produce a hash value depending on its
+// argument and return types. For the same function signature and while
+// running the same executable, this will always produce the same hash.
+// A different compiler/OS might generate different hashes, so don't use
+// these for serialization, but they're good for error checking the casting
+// of void* function pointers into actual typed function pointers.
+// Note that there it is not perfect error checking, two different signatures
+// might have the same hash, but it is probably good enough.
 template<class FuncSignature>
 constexpr uint64_t hashFunctionSignature() {
+#ifdef __CUDACC__
+  // Disabling because the CUDA compiler complains.
+  // TODO Fix this
+  return 0;
+#else
   using func_traits = guts::infer_function_traits_t<FuncSignature>;
   return hashTypeList<
     guts::typelist::concat_t<
       guts::typelist::typelist<typename func_traits::return_type>,
       typename func_traits::parameter_types
     >>();
+#endif
 }
 }
 
+/**
+ * KernelFunction is similar to std::function but stores a kernel function.
+ * You can create a KernelFunction from a boxed or unboxed function/functor/lambda
+ * and call it in a boxed or unboxed way. If the way it was created doesn't
+ * match the way it was called, it will do boxing or unboxing as necessary.
+ */
 class CAFFE2_API KernelFunction final {
 public:
   using BoxedKernelFunction = void(OperatorKernel*, Stack*);
@@ -61,6 +85,24 @@ public:
     return boxed_kernel_func_ != nullptr || unboxed_kernel_func_ != nullptr;
   }
 
+  /**
+   * Call the function in a boxed way.
+   * If the kernel function was created with an unboxed function,
+   * this will call an unboxing wrapper which then calls into that
+   * unboxed function.
+   *
+   * Example:
+   *
+   * > void boxed_func(OperatorKernel*, Stack* stack) {...}
+   * > KernelFunction func = KernelFunction::makeFromBoxedFunction(&boxed_func);
+   * > Tensor result = func.callBoxed(stack);
+   *
+   * Or, with an unboxed implementation:
+   *
+   * > KernelFunction func = KernelFunction::makeFromUnboxedLambda(
+   * >      [] (Tensor a, bool b) -> Tensor {...});
+   * > Tensor result = func.callBoxed(stack);
+   */
   void callBoxed(Stack* stack) const {
     if (C10_UNLIKELY(boxed_kernel_func_ == nullptr)) {
       if (unboxed_kernel_func_ == nullptr) {
@@ -74,6 +116,57 @@ public:
     (*boxed_kernel_func_)(getFunctor_(), stack);
   }
 
+  /**
+   * Call the function in an unboxed way.
+   * As the "Only" in the name suggests, this only works for KernelFunctions
+   * that are backed by an unboxed kernel. If the KernelFunction was created
+   * in a boxed way, this will fail (also see KernelFunction::callUnboxed()).
+   *
+   * KernelFunction::callUnboxed() is generally better, since it will allow
+   * calling KernelFunctions that are backed by either boxed or unboxed
+   * kernels, but that one will not work for all types.
+   *
+   * Example:
+   *
+   * > KernelFunction func = KernelFunction::makeFromUnboxedLambda(
+   * >      [] (Tensor a, bool b) -> Tensor {...});
+   * > Tensor result = func.callUnboxedOnly<Tensor, Tensor, bool>(tensor1, true);
+   */
+  template<class Return, class... Args>
+  Return callUnboxedOnly(Args... args) const {
+    // TODO Remove this function once all kernels support a boxed variant
+
+    TORCH_INTERNAL_ASSERT(!signature_hash_.has_value() || (detail::hashFunctionSignature<Return (Args...)>() == *signature_hash_),
+      "Called KernelFunction::callUnboxed with wrong argument types");
+
+    if (unboxed_kernel_func_ != nullptr) {
+      using ActualSignature = Return (OperatorKernel*, Args...);
+      ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func_);
+      return (*func)(getFunctor_(), std::forward<Args>(args)...);
+    }
+
+    TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callUnboxedOnly() for a kernel that doesn't have an unboxed version.");
+  }
+
+  /**
+   * Call the function in an unboxed way.
+   * If the kernel function was created with a boxed function,
+   * this will box all inputs and then call into that boxed function.
+   *
+   * Note that this doesn't work for all types yet.
+   *
+   * Example:
+   *
+   * > KernelFunction func = KernelFunction::makeFromUnboxedLambda(
+   * >      [] (Tensor a, bool b) -> Tensor {...});
+   * > Tensor result = func.callUnboxed<Tensor, Tensor, bool>(tensor1, true);
+   *
+   * Or, with a boxed implementation:
+   *
+   * > void boxed_func(OperatorKernel*, Stack* stack) {...}
+   * > KernelFunction func = KernelFunction::makeFromBoxedFunction(&boxed_func);
+   * > Tensor result = func.callUnboxed<Tensor, Tensor, bool>(tensor1, true);
+   */
   template<class Return, class... Args>
   Return callUnboxed(Args... args) const {
     TORCH_INTERNAL_ASSERT(!signature_hash_.has_value() || (detail::hashFunctionSignature<Return (Args...)>() == *signature_hash_),
@@ -85,10 +178,17 @@ public:
       return (*func)(getFunctor_(), std::forward<Args>(args)...);
     }
 
-    TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callUnboxed() for a kernel that doesn't have an unboxed version. This isn't implemented yet.");
-    // TODO return boxAndCallBoxedFunc_<Return, Args...>(std::forward<Args>(args)...);
+    return boxAndCallBoxedFunc_<Return, Args...>(std::forward<Args>(args)...);
   }
 
+  /**
+   * Create a KernelFunction from a boxed function.
+   *
+   * Example:
+   *
+   * > void boxed_func(OperatorKernel*, Stack* stack) {...}
+   * > KernelFunction func = KernelFunction::makeFromBoxedFunction(&boxed_func);
+   */
   static KernelFunction makeFromBoxedFunction(BoxedKernelFunction* func) {
     return KernelFunction(
       nullptr,  // no functorCreator_, this can only be called in a boxed way.
@@ -99,6 +199,17 @@ public:
     );
   }
 
+  /**
+   * Create a KernelFunction from an unboxed functor.
+   *
+   * Example:
+   *
+   * > class MyFunctor final {
+   * >   public:
+   * >     Tensor operator()(Tensor a, Tensor b) {...}
+   * > };
+   * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor(std::make_shared<MyFunctor>());
+   */
   template<bool AllowLegacyTypes = false, class KernelFunctor>
   static KernelFunction makeFromUnboxedFunctor(std::shared_ptr<KernelFunctor> kernelFunctor) {
     static_assert(guts::is_functor<KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor> but the argument is not a functor.");
@@ -113,6 +224,26 @@ public:
     );
   }
 
+  /**
+   * Create a KernelFunction from an unboxed functor and delay functor creation
+   * until the first call to the KernelFunction. This is useful for functors
+   * that are registered at static initialization time but can't be created
+   * there yet. For example, some operator functors store Tensor members
+   * (we can't create Tensor objects at static initialization time because of SIOF)
+   * but these functors are registered as kernels at static initialization time.
+   * Using this method, we can delay functor instantiation until the operator
+   * is called for the first time.
+   *
+   * Example:
+   *
+   * > class MyFunctor final {
+   * >   public:
+   * >     Tensor operator()(Tensor a, Tensor b) {...}
+   * > };
+   * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor([] {
+   * >   return std::make_shared<MyFunctor>();
+   * > });
+   */
   template<bool AllowLegacyTypes = false, class KernelFunctor>
   static KernelFunction makeFromUnboxedFunctor(std::function<std::shared_ptr<KernelFunctor>()> kernelFunctorCreator) {
     static_assert(guts::is_functor<KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor> but the argument is not a functor.");
@@ -127,6 +258,24 @@ public:
     );
   }
 
+  /**
+   * Create a KernelFunction from an unboxed functor and prevent creation of an
+   * unboxing-wrapper. This means that you can only call this KernelFunction
+   * using KernelFunction::callUnboxedOnly(), not using KernelFunction::callBoxed()
+   * or KernelFunction::callUnboxed().
+   *
+   * This is necessary because our unboxing wrappers don't work for all types
+   * yet, so if you want to use one of these types as function arguments,
+   * you need to use makeFromUnboxedOnlyFunctor.
+   *
+   * Example:
+   *
+   * > class MyFunctor final {
+   * >   public:
+   * >     Tensor operator()(Tensor a, Tensor b) {...}
+   * > };
+   * > KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunctor(std::make_shared<MyFunctor>());
+   */
   template<class KernelFunctor>
   static KernelFunction makeFromUnboxedOnlyFunctor(std::shared_ptr<KernelFunctor> kernelFunctor) {
     // TODO We want to get rid of kernels that have only an unboxed function pointer.
@@ -144,6 +293,18 @@ public:
     );
   }
 
+  /**
+   * Create a KernelFunction from an unboxed function.
+   * This is usually better than KernelFunction::makeFromUnboxedRuntimeFunction
+   * because knowing the function pointer as a template argument (i.e. at
+   * compile time) allows the compiler to inline the function into its
+   * unboxing wrapper and yields better performance when calling the function.
+   *
+   * Example:
+   *
+   * > Tensor unboxed_func(Tensor a, Tensor b) {...}
+   * > KernelFunction func = KernelFunction::makeFromUnboxedFunction<decltype(unboxed_func), &unboxed_func>();
+   */
   template<class FuncType, FuncType* func, bool AllowLegacyTypes = false>
   static KernelFunction makeFromUnboxedFunction() {
     static_assert(guts::is_function_type<FuncType>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with invalid template parameters. They must be <FuncType, *func_ptr>.");
@@ -155,6 +316,21 @@ public:
     );
   }
 
+  /**
+   * Create a KernelFunction from an unboxed function and prevent creation of an
+   * unboxing-wrapper. This means that you can only call this KernelFunction
+   * using KernelFunction::callUnboxedOnly(), not using KernelFunction::callBoxed()
+   * or KernelFunction::callUnboxed().
+   *
+   * This is necessary because our unboxing wrappers don't work for all types
+   * yet, so if you want to use one of these types as function arguments,
+   * you need to use makeFromUnboxedOnlyFunctor.
+   *
+   * Example:
+   *
+   * > Tensor unboxed_func(Tensor a, Tensor b) {...}
+   * > KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction<decltype(unboxed_func), &unboxed_func>();
+   */
   template<class FuncType, FuncType* func>
   static KernelFunction makeFromUnboxedOnlyFunction() {
     // TODO We want to get rid of kernels that have only an unboxed function pointer.
@@ -169,6 +345,17 @@ public:
     );
   }
 
+  /**
+   * Create a KernelFunction from an unboxed function.
+   * KernelFunction::makeFromUnboxedFunction is usually a better choice than
+   * this if you know the function pointer at compile time, see doc comment
+   * there for an explanation.
+   *
+   * Example:
+   *
+   * > Tensor unboxed_func(Tensor a, Tensor b) {...}
+   * > KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&unboxed_func);
+   */
   template<bool AllowLegacyTypes = false, class FuncType>
   static KernelFunction makeFromUnboxedRuntimeFunction(FuncType* func) {
     static_assert(guts::is_function_type<FuncType>::value, "Tried to call KernelFunction::makeFromUnboxedRuntimeFunction with a non-function type.");
@@ -180,6 +367,14 @@ public:
     );
   }
 
+  /**
+   * Create a KernelFunction from an unboxed lambda.
+   *
+   * Example:
+   *
+   * > KernelFunction func = KernelFunction::makeFromUnboxedLambda(
+   * >      [] (Tensor a, bool b) -> Tensor {...});
+   */
   template<bool AllowLegacyTypes = false, class Lambda>
   static KernelFunction makeFromUnboxedLambda(Lambda&& lambda) {
     static_assert(guts::is_functor<guts::decay_t<Lambda>>::value, "Tried to call KernelFunction::makeFromUnboxedLambda with a non-lambda type.");

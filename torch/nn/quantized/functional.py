@@ -38,7 +38,7 @@ def linear(input, weight, bias=None, scale=None, zero_point=None):
     Args:
       input (Tensor): Quantized input of type `torch.quint8`
       weight (Tensor): Quantized weight of type `torch.qint8`
-      bias (Tensor): None or Quantized bias of type `torch.qint32`
+      bias (Tensor): None or fp32 bias of type `torch.float`
       scale (double): output scale. If None, derived from the input scale
       zero_point (long): output zero point. If None, derived from the input zero_point
 
@@ -77,7 +77,7 @@ def conv2d(input, weight, bias,
     Args:
         input: quantized input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
         weight: quantized filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
-        bias: **non-quantized** bias tensor of shape :math:`(\text{out\_channels})`. The tensor type must be `torch.int32`.
+        bias: **non-quantized** bias tensor of shape :math:`(\text{out\_channels})`. The tensor type must be `torch.float`.
         stride: the stride of the convolving kernel. Can be a single number or a
           tuple `(sH, sW)`. Default: 1
         padding: implicit paddings on both sides of the input. Can be a
@@ -103,8 +103,7 @@ def conv2d(input, weight, bias,
         >>>
         >>> q_filters = torch.quantize_linear(filters, scale, zero_point, dtype)
         >>> q_inputs = torch.quantize_linear(inputs, scale, zero_point, dtype)
-        >>> q_bias = torch.quantize_linear(bias, scale, zero_point, torch.quint8)
-        >>> qF.conv2d(q_inputs, q_filters, q_bias, scale, zero_point, padding=1)
+        >>> qF.conv2d(q_inputs, q_filters, bias, scale, zero_point, padding=1)
     """  # noqa: E501
     if padding_mode != 'zeros':
         raise NotImplementedError("Only zero-padding is supported!")
