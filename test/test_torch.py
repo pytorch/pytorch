@@ -34,7 +34,7 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
     skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf
 from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
-    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU,
+    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -12511,7 +12511,7 @@ class TestTorchDeviceType(TestCase):
         x.to(x, copy=True)
 
     @onlyCUDA
-    def test_tensor_factory_cuda_type_inference(self, device):
+    def test_tensor_factory_gpu_type_inference(self, device):
         saved_type = torch.Tensor().type()
         torch.set_default_tensor_type(torch.cuda.DoubleTensor)
         torch.set_default_dtype(torch.float32)
@@ -12523,7 +12523,7 @@ class TestTorchDeviceType(TestCase):
         torch.set_default_tensor_type(saved_type)
 
     @onlyCUDA
-    def test_tensor_factory_cuda_type(self, device):
+    def test_tensor_factory_gpu_type(self, device):
         saved_type = torch.Tensor().type()
         torch.set_default_tensor_type(torch.cuda.FloatTensor)
         x = torch.zeros((5, 5))
