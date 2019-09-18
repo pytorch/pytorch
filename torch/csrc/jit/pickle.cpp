@@ -93,6 +93,47 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
   return data;
 }
 
+IValue pickle_load(std::function<bool(char*, size_t)> reader) {
+  // Read the magic number
+  Unpickler(reader, nullptr, nullptr).parse_ivalue();
+
+  // Read the version number
+  Unpickler(reader, nullptr, nullptr).parse_ivalue();
+
+  // Read the system metadata number
+  Unpickler(reader, nullptr, nullptr).parse_ivalue();
+
+
+  Unpickler data_pickle(reader, nullptr, nullptr);
+  auto data = data_pickle.parse_ivalue();
+
+  auto storage_keys = Unpickler(reader, nullptr, nullptr)
+                          .parse_ivalue();
+
+  const auto& uninitialized_storages = data_pickle.uninitializedStorages();
+
+  for (const auto& key : storage_keys.to<c10::List<std::string>>()) {
+    auto item = uninitialized_storages.find(key);
+    TORCH_INTERNAL_ASSERT(item != uninitialized_storages.end());
+    const auto* storage_ptr = item->second;
+
+    int64_t numel;
+    reader(reinterpret_cast<char*>(&numel), sizeof(numel));
+    TORCH_CHECK(
+        storage_ptr->numel() == numel,
+        "Expected ",
+        storage_ptr->numel(),
+        " elements but found ",
+        numel);
+
+    size_t size = storage_ptr->numel() * storage_ptr->elementSize();
+    char* dest = reinterpret_cast<char*>(storage_ptr->data());
+    reader(dest, size);
+  }
+
+  return data;
+}
+
 IValue unpickle(
     std::function<bool(char*, size_t)> reader,
     ClassResolver class_resolver,

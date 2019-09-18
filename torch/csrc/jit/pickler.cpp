@@ -661,8 +661,12 @@ PickleOpCode Unpickler::readInstruction() {
     case PickleOpCode::LONG1: {
       // Only read LONG1s with 8 as the length
       uint8_t length = read<uint8_t>();
-      TORCH_CHECK(length == 8, "Expected length to be 8, got ", int(length));
-      stack_.emplace_back(int64_t(read<int64_t>()));
+      if (length == 8) {
+        stack_.emplace_back(int64_t(read<int64_t>()));
+      } else {
+        // This is mainly used for the serialization.py magic number
+        stack_.emplace_back(readBytes(length));
+      }
     } break;
     case PickleOpCode::BINUNICODE: {
       uint32_t length = read<uint32_t>();
@@ -891,15 +895,27 @@ PickleOpCode Unpickler::readInstruction() {
       if (device_) {
         device = *device_;
       }
-      at::DataPtr storage_ptr = read_record_(key);
       int64_t numel = args.at(4).toInt();
-      at::Storage storage(
-          at::CPU(type).typeMeta(),
-          numel,
-          std::move(storage_ptr),
-          /*allocator=*/nullptr,
-          /*resizable=*/false); // NB: we didn't set any allocator for the
-                                // tensor
+
+      bool read_tensors_later = read_record_ == nullptr;
+
+      at::Storage storage;
+      if (read_tensors_later) {
+        storage = at::Storage(
+            at::CPU(type).typeMeta(),
+            numel,
+            /*allocator=*/at::getCPUAllocator(),
+            /*resizable=*/false);
+      } else {
+        at::DataPtr storage_ptr = read_record_(key);
+        storage = at::Storage(
+            at::CPU(type).typeMeta(),
+            numel,
+            std::move(storage_ptr),
+            /*allocator=*/nullptr,
+            /*resizable=*/false); // NB: we didn't set any allocator for the
+                                  // tensor
+      }
       auto options = at::CPU(type).options();
       at::Tensor tensor;
       if (options.backend() == c10::Backend::QuantizedCPU) {
@@ -916,7 +932,11 @@ PickleOpCode Unpickler::readInstruction() {
             "supported devices include CPU and CUDA, however got ",
             at::DeviceTypeName(device.type(), false));
       }
-      stack_.push_back(std::move(tensor));
+      if (read_tensors_later) {
+        // Save a pointer to the storage so we can fill it in later
+        uninitialized_storages_[key] = &tensor.storage();
+      }
+      stack_.emplace_back(std::move(tensor));
     } break;
     default: {
       AT_ERROR(

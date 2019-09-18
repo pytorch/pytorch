@@ -19,6 +19,7 @@
 #include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/irparser.h"
+#include "torch/csrc/jit/pickle.h"
 #include "torch/csrc/jit/pass_manager.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/passes/bailout_graph.h"
@@ -490,6 +491,27 @@ void testEvalModeForLoadedModule() {
   AT_ASSERT(!module.get_module("dropout").is_training());
   module.train();
   AT_ASSERT(module.get_module("dropout").is_training());
+}
+
+void testSerializationInterop() {
+  if (isSandcastle())
+    return; // The module file to load is not generated in Sandcastle
+
+  std::ifstream input("ivalue.pt");
+  IValue ivalue = torch::jit::pickle_load([&](char* buffer, size_t len) {
+    if (!input.good()) {
+      return false;
+    }
+    input.read(buffer, len);
+    return input.good();
+  });
+
+  auto elements = ivalue.toTuple()->elements();
+  auto ones = torch::ones({2, 2});
+  ASSERT_TRUE(ones.equal(elements.at(0).toTensor()));
+
+  auto twos = torch::ones({3, 5}) * 2;
+  ASSERT_TRUE(twos.equal(elements.at(1).toTensor()));
 }
 
 // test a few features that are not directly used in schemas yet

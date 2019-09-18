@@ -243,7 +243,7 @@ class Unpickler {
         class_resolver_(std::move(class_resolver)) {}
 
   // tensors inside the pickle contain meta-data, the raw tensor
-  // dead is retrieved by calling `read_record`.
+  // data is retrieved by calling `read_record`.
   Unpickler(
       std::function<bool(char*, size_t)> reader,
       ClassResolver class_resolver,
@@ -256,6 +256,11 @@ class Unpickler {
         device_(std::move(device)) {}
 
   IValue parse_ivalue();
+
+  const std::unordered_map<std::string, const at::Storage*>&
+  uninitializedStorages() {
+    return uninitialized_storages_;
+  }
 
  private:
   // No arguments ensures that a template arugment must be specified
@@ -284,6 +289,10 @@ class Unpickler {
   std::function<bool(char*, size_t)> reader_;
 
   std::vector<IValue> stack_;
+
+  // If there is no `read_record_`, storages get put here so they can be filled
+  // in later
+  std::unordered_map<std::string, const at::Storage*> uninitialized_storages_;
 
   // globals are represented on the stack as IValue integer indices
   // into this list
