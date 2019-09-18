@@ -1243,8 +1243,9 @@ inline Tensor Tensor::lgamma() const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::lgamma(const_cast<Tensor&>(*this));
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::lgamma(Tensor self) -> Tensor");
-    return table->getOp<Tensor (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::lgamma", ""}).value();
+    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+        .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor & Tensor::lgamma_() const {
