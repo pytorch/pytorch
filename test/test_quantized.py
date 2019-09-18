@@ -1532,11 +1532,11 @@ class TestQNNPackOps(TestCase):
             np.testing.assert_equal(np.float32(W_q.q_scale()), np.float32(W_unpacked.q_scale()))
             np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
 
-    """Tests the correctness of the quantized::qnnpack_add op."""
+    """Tests the correctness of the quantized::add (qnnpack) op."""
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams(dtypes=torch.quint8,
                                           zero_point_min=0,
-                                          zero_point_max=0)),
+                                          zero_point_max=10)),
            scale_A=st.sampled_from([0.001, 0.057, 0.889, 12.3]),
            scale_B=st.sampled_from([0.008, 0.0821, 0.67, 7]),
            scale_C=st.sampled_from([0.003, 0.07821, 0.457, 7.34]),)
@@ -1554,7 +1554,6 @@ class TestQNNPackOps(TestCase):
             assume(scale_B // scale_C < 2**8)
 
             zero_point_C = 127
-
             qA = torch.quantize_linear(A, scale=scale_A, zero_point=zero_point_A,
                                        dtype=torch.quint8)
             qB = torch.quantize_linear(B, scale=scale_B, zero_point=zero_point_B,
