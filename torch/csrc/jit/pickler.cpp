@@ -524,12 +524,136 @@ void Pickler::pushTuple(const IValue& ivalue) {
   }
 }
 
+// Pickled objects are stored in a form compatible with Python pickling.
+// In torchscript List[T]/Dict[K, V] are statically typed and contain
+// dynamic type tags allow T, K, and V to be recovered. But this info
+// is not stored in the Python pickling information. However, we
+// can recover this information from the static type of the top-level
+// object being unpickled, because we have a record of the type of the
+// objects it contains as attributes.
+// `IfPossible` - we can only do this recovery when we have an object as
+// the top-level unpickled thing (which is guarenteed for Modules, but
+// not for torch.load/torch,save). Otherwise we do not know the types
+// of the contained objects and cannot restore the tags.
+static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
+  if (!root.isObject()) {
+    return;
+  }
+  struct Work {
+    TypePtr static_type;
+    IValue value;
+  };
+  std::vector<Work> to_process = {{root.type(), root}};
+  std::unordered_set<const void*> scanned;
+  while (!to_process.empty()) {
+    Work w = std::move(to_process.back());
+    to_process.pop_back();
+    // ensure we only scan each pointer value once, otherwise this
+    // can become exponential (and if we allow recursive data in the future,
+    // it would not terminiate).
+    if (w.value.isPtrType()) {
+      const void* key = w.value.internalToPointer();
+      auto it = scanned.find(key);
+      if (it != scanned.end()) {
+        continue;
+      }
+      scanned.emplace_hint(it, key);
+    }
+    switch (w.static_type->kind()) {
+      case TensorType::Kind:
+      case NumberType::Kind:
+      case FloatType::Kind:
+      case IntType::Kind:
+      case NoneType::Kind:
+      case GeneratorType::Kind:
+      case BoolType::Kind:
+      case VarType::Kind:
+      case CapsuleType::Kind:
+      case StringType::Kind:
+      case FunctionType::Kind:
+      case DeviceObjType::Kind:
+        // no op, there is nothing to tag
+        break;
+      case AnyType::Kind:
+        // if Any type does show up, we no longer have a way to precisely
+        // recover the type information since the w.value may be an untagged
+        // List/Dict. We should prevent objects being serialized from having the
+        // Any type and if we do allow it in functions limit it to non-heap
+        // locations.
+        TORCH_INTERNAL_ASSERT(
+            false, "AnyType should not show up in the static type of objects");
+      case TupleType::Kind: {
+        auto t = w.value.toTuple();
+        auto ttype = w.static_type->expect<TupleType>();
+        for (size_t i = 0; i < ttype->containedTypes().size(); ++i) {
+          Work elem = {ttype->containedTypes().at(i), t->elements().at(i)};
+          to_process.emplace_back(std::move(elem));
+        }
+      } break;
+      case FutureType::Kind: {
+        auto f = w.value.toFuture();
+        auto t = w.static_type->expect<FutureType>();
+        if (f->completed()) {
+          Work elem = {t->getElementType(), f->value()};
+          to_process.emplace_back(std::move(elem));
+        }
+      } break;
+      case OptionalType::Kind: {
+        if (!w.value.isNone()) {
+          auto t = w.static_type->expect<OptionalType>();
+          Work elem = {t->getElementType(), w.value};
+          to_process.emplace_back(std::move(elem));
+        }
+      } break;
+      case ListType::Kind: {
+        // specialized lists do not need their type refined, so we can exit
+        // early here
+        if (!w.value.isGenericList()) {
+          break;
+        }
+        auto elem_type = w.static_type->cast<ListType>()->getElementType();
+        auto lst = w.value.toGenericList();
+        lst.unsafeSetElementType(elem_type);
+        for (const IValue& item : lst) {
+          Work elem = {elem_type, item};
+          to_process.emplace_back(std::move(elem));
+        }
+      } break;
+      case DictType::Kind: {
+        auto dt = w.static_type->cast<DictType>();
+        auto d = w.value.toGenericDict();
+        d.unsafeSetKeyType(dt->getKeyType());
+        d.unsafeSetValueType(dt->getValueType());
+        for (const auto& item : d) {
+          Work kelem = {dt->getKeyType(), item.key()};
+          Work velem = {dt->getValueType(), item.value()};
+          to_process.emplace_back(std::move(kelem));
+          to_process.emplace_back(std::move(velem));
+        }
+      } break;
+      // in both cases the dynamic type is a class, and we are going to tag with
+      // the dynamic type
+      case InterfaceType::Kind:
+      case ClassType::Kind: {
+        auto obj = w.value.toObject();
+        auto typ = obj->type(); // note: intentionally using the dynamic type,
+                                // the static type is potentially less accurate
+        for (size_t i = 0; i < typ->numAttributes(); ++i) {
+          Work elem = {typ->getAttribute(i), obj->getSlot(i)};
+          to_process.emplace_back(std::move(elem));
+        }
+      };
+    }
+  }
+}
+
 IValue Unpickler::parse_ivalue() {
   run();
   TORCH_CHECK(
       stack_.size() == 1,
       "Unpickler expected 1 element on the stack, but found ",
       stack_.size());
+  restoreAccurateTypeTagsIfPossible(stack_[0]);
 
   return stack_[0];
 }

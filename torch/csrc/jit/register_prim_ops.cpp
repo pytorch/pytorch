@@ -1206,11 +1206,13 @@ RegisterOperators reg(
              throw std::runtime_error(
                  "DictConstruct must have an even number of inputs");
            }
-           TORCH_INTERNAL_ASSERT(node->outputs().size() == 1, "DictConstruct must have exactly one output");
+           TORCH_INTERNAL_ASSERT(
+               node->outputs().size() == 1,
+               "DictConstruct must have exactly one output");
            TypePtr output_type = node->outputs()[0]->type();
-           TORCH_INTERNAL_ASSERT(output_type->kind() == TypeKind::DictType, "DictConstruct output must be of Dict type.");
-           TypePtr key_type = static_cast<const DictType*>(output_type.get())->getKeyType();
-           TypePtr value_type = static_cast<const DictType*>(output_type.get())->getValueType();
+           auto dt = output_type->expect<DictType>();
+           TypePtr key_type = dt->getKeyType();
+           TypePtr value_type = dt->getValueType();
            return [=](Stack& stack) {
              auto vals = c10::impl::GenericDict(key_type, value_type);
              for (size_t i = 0; i < num_inputs; i += 2) {
