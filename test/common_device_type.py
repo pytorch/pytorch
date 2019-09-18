@@ -278,22 +278,6 @@ class onlyOn(object):
         return only_fn
 
 
-# Lists of Torch types
-DOCUMENTED_TENSOR_TYPES = [torch.float64, torch.float32, torch.float16,
-                           torch.int64, torch.int32, torch.int16, torch.int8,
-                           torch.uint8, torch.bool]
-
-# SCALAR_TYPES = DOCUMENTED_TENSOR_TYPES - half and bool
-# Note: derived from AT_FORALL_SCALAR_TYPES
-SCALAR_TYPES = [torch.float64, torch.float32,
-                torch.int64, torch.int32, torch.int16, torch.int8,
-                torch.uint8]
-
-QUANTIZED_TYPES = [torch.quint8, torch.qint8, torch.qint32]
-
-ALL_TYPES = [torch.bfloat16] + DOCUMENTED_TENSOR_TYPES + QUANTIZED_TYPES
-
-
 # Decorator that instantiates a variant of the test for each given dtype.
 # Notes:
 #   (1) Tests that accept the dtype argument MUST use this decorator.
@@ -306,7 +290,7 @@ class dtypes(object):
     # Python 3 allows (self, *args, device_type='all').
     def __init__(self, *args, **kwargs):
         assert args is not None and len(args) != 0, "No dtypes given"
-        assert all(arg in ALL_TYPES for arg in args), "Unknown dtype in {0}".format(str(args))
+        assert all(isinstance(arg, torch.dtype) for arg in args), "Unknown dtype in {0}".format(str(args))
         self.args = args
         self.device_type = kwargs.get('device_type', 'all')
 
