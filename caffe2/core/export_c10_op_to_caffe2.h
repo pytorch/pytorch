@@ -126,7 +126,7 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   void callKernel_() {
     AT_ASSERT(stack_.size() == op_.schema().arguments().size());
-    c10::Dispatcher::singleton().lookup(op_, &stack_).callBoxed(&stack_);
+    c10::Dispatcher::singleton().callBoxed(op_, &stack_);
   }
 
   void popOutputs_() {

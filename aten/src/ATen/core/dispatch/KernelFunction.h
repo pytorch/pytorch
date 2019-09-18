@@ -136,6 +136,10 @@ public:
    */
   template<class Return, class... Args>
   Return callUnboxedOnly(Args... args) const {
+    // note: Args above is intentionally not Args&&. We don't want perfect
+    // forwarding, which would require Args to be deduced, but instead we
+    // want callers to explicitly specify the Args.
+
     // TODO Remove this function once all kernels support a boxed variant
 
     TORCH_INTERNAL_ASSERT(!signature_hash_.has_value() || (detail::hashFunctionSignature<Return (Args...)>() == *signature_hash_),
@@ -171,6 +175,10 @@ public:
    */
   template<class Return, class... Args>
   Return callUnboxed(Args... args) const {
+    // note: Args above is intentionally not Args&&. We don't want perfect
+    // forwarding, which would require Args to be deduced, but instead we
+    // want callers to explicitly specify the Args.
+
     TORCH_INTERNAL_ASSERT(!signature_hash_.has_value() || (detail::hashFunctionSignature<Return (Args...)>() == *signature_hash_),
       "Called KernelFunction::callUnboxed with wrong argument types");
 
