@@ -741,14 +741,14 @@ void testRecordFunction() {
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
   auto t2 = invokeTestRecordFunction(t);
-  t2.backward();
+  t2.backward(torch::ones_like(t2));
   auto eager_inputs = traced_inputs;
   traced_inputs.clear();
 
   t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
   t2 = invokeTestRecordFunctionJIT(t);
-  t2.backward();
+  t2.backward(torch::ones_like(t2));
   auto jit_inputs = traced_inputs;
   traced_inputs.clear();
 
@@ -864,7 +864,7 @@ void testThreadLocalDebugInfo() {
     auto t = torch::randn({1, 2, 3}, at::kCPU);
     t.set_requires_grad(true);
     auto t2 = t.pow(2);
-    t2.backward();
+    t2.backward(torch::ones_like(t2));
   }
   autograd::profiler::popCallback();
 
