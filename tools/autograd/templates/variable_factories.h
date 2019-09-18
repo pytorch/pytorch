@@ -122,7 +122,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 
    private:
     void fill_tensor(at::Tensor tensor) const {
-      int index = 0;
+      size_t index = 0;
       for (const auto& elem : init_list_) {
         if (elem.type_ == ListInitTensorType::Scalar) {
           at::NoGradGuard guard;
