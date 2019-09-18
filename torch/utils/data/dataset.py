@@ -327,7 +327,6 @@ class ChunkDataset(IterableDataset):
 
         if (cache_size < self._min_cache):
             new_chunk = None
-
             # Try reading a new chunk
             # Ignore EOF here because there may be internal cache entries to be returned yet
             try:
@@ -369,21 +368,13 @@ class ChunkDataset(IterableDataset):
         worker_id = 0
         num_workers = 0
         try:
-            import os
+            # Calculate global worker rank based on DataLoader workers and distributed rank
             worker_id = get_worker_info().id
             num_workers = get_worker_info().num_workers
             global_worker_rank = worker_id + self.chunk_sampler.get_global_worker_rank() * num_workers
-            print('[PID {}] worker_id={}, num_workers={}, global_worker_rank={} --> {}'.format(os.getpid(),
-                                                                                               worker_id,
-                                                                                               num_workers,
-                                                                                               self.chunk_sampler.get_global_worker_rank(),
-                                                                                               global_worker_rank))
             self.chunk_sampler.set_global_worker_rank(global_worker_rank)
-        except AttributeError as e:
-            import os
-            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
-            message = template.format(type(e).__name__, e.args)
-            print('[PID {}] {}'.format(os.getpid(), message))
+        except AttributeError:
+            # Ignore when DataLoader workers are not used
             pass
         self._chunk_sampler_iter = iter(self.chunk_sampler)
 
