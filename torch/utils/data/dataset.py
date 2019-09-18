@@ -297,7 +297,8 @@ class ChunkDataset(IterableDataset):
 
     def __init__(self, chunk_sampler, chunk_reader, shuffle_cache=True):
         super(ChunkDataset, self).__init__()
-        assert isinstance(chunk_sampler, DistributedSampler) or isinstance(chunk_sampler, DistributedChunkSampler), 'sampler must be a `DistributedSampler` or `DistributedChunkSampler`'
+        assert isinstance(chunk_sampler, DistributedSampler) or isinstance(
+            chunk_sampler, DistributedChunkSampler), 'sampler must be a `DistributedSampler` or `DistributedChunkSampler`'
         assert callable(chunk_reader), 'chunk_reader must be `callable()` and return a container with data'
         assert isinstance(shuffle_cache, bool), 'shuffle_cache must be a `bool`'
 
@@ -366,10 +367,23 @@ class ChunkDataset(IterableDataset):
         during worker initialization process.
         """
         worker_id = 0
+        num_workers = 0
         try:
+            import os
             worker_id = get_worker_info().id
-            self.chunk_sampler.set_global_worker_rank(worker_id)
-        except Exception:
+            num_workers = get_worker_info().num_workers
+            global_worker_rank = worker_id + self.chunk_sampler.get_global_worker_rank() * num_workers
+            print('[PID {}] worker_id={}, num_workers={}, global_worker_rank={} --> {}'.format(os.getpid(),
+                                                                                               worker_id,
+                                                                                               num_workers,
+                                                                                               self.chunk_sampler.get_global_worker_rank(),
+                                                                                               global_worker_rank))
+            self.chunk_sampler.set_global_worker_rank(global_worker_rank)
+        except AttributeError as e:
+            import os
+            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
+            message = template.format(type(e).__name__, e.args)
+            print('[PID {}] {}'.format(os.getpid(), message))
             pass
         self._chunk_sampler_iter = iter(self.chunk_sampler)
 

@@ -133,7 +133,7 @@ class DistributedChunkSampler(Sampler):
                     (must be assigned at DataLoader worker initialization function)
                 2) If a single `DataLoader` worker is used with a distributed approach
                     (DistributedDataParallel`, `torch.distributed`, MPI or Horovod)
-                    `global_worker_rank`=`rank
+                    `global_worker_rank`=`rank`
                     (must be assigned before the main trainning loop)
                 3) If both multiple DataLoader workers and a distributed approach are being used:
                     `global_worker_rank`=`worker_id`+`rank`*`num_workers`
@@ -182,3 +182,6 @@ class DistributedChunkSampler(Sampler):
         assert global_worker_rank >= 0, 'global_worker_rank must be >= 0'
         assert global_worker_rank == 0 or global_worker_rank < self.num_replicas, 'global_worker_rank must < num_replicas'
         self.global_worker_rank = global_worker_rank
+
+    def get_global_worker_rank(self):
+        return self.global_worker_rank
