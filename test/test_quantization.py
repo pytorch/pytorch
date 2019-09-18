@@ -12,7 +12,6 @@ from torch.quantization import \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
     default_observer, default_weight_observer, \
     default_dynamic_qconfig, HistogramObserver, MinMaxObserver, TensorObserver, QuantWrapper
->>>>>>> [quant][graph] PyTorch Graph Mode Quantization API
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, \
