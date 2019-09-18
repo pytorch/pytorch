@@ -7,6 +7,7 @@ import string
 from textwrap import dedent
 from torch._six import PY2
 from torch._C._jit_tree_views import *
+from torch._utils_internal import get_source_lines_and_file
 
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
@@ -146,9 +147,8 @@ def get_jit_class_def(cls, self_name):
     method_defs = [get_jit_def(method[1],
                    self_name=self_name) for method in methods]
 
-    sourcelines, file_lineno = inspect.getsourcelines(cls)
+    sourcelines, file_lineno, filename = get_source_lines_and_file(cls)
     source = ''.join(sourcelines)
-    filename = inspect.getsourcefile(cls)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
@@ -157,9 +157,8 @@ def get_jit_class_def(cls, self_name):
 
 
 def get_jit_def(fn, self_name=None):
-    sourcelines, file_lineno = inspect.getsourcelines(fn)
+    sourcelines, file_lineno, filename = get_source_lines_and_file(fn)
     source = ''.join(sourcelines)
-    filename = inspect.getsourcefile(fn)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
