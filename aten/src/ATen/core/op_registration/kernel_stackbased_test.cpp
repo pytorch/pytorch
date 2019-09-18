@@ -40,6 +40,14 @@ void expectCallsIncrement(TensorTypeId type_id) {
   EXPECT_EQ(6, result[0].toInt());
 }
 
+void expectCallsIncrementUnboxed(TensorTypeId type_id) {
+  // assert that schema and cpu kernel are present
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
+  ASSERT_TRUE(op.has_value());
+  int64_t result = callOpUnboxed<int64_t, at::Tensor, int64_t>(*op, type_id, dummyTensor(type_id), 5);
+  EXPECT_EQ(6, result);
+}
+
 void expectCallsDecrement(TensorTypeId type_id) {
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
@@ -140,14 +148,9 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredWithou
   }, "Cannot infer operator schema for this kind of kernel in registration of operator _test::no_schema_specified");
 }
 
-TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCannotBeCalledUnboxed) {
+TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCanAlsoBeCalledUnboxed) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &incrementKernel));
-  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
-  ASSERT_TRUE(op.has_value());
-  expectThrows<c10::Error>(
-    [&] {callOpUnboxed<int64_t, at::Tensor, int64_t>(*op, TensorTypeId::CPUTensorId, dummyTensor(TensorTypeId::CPUTensorId), 4);},
-    "Tried to call KernelFunction::callUnboxed() for a kernel that doesn't have an unboxed version. This isn't implemented yet."
-  );
+  expectCallsIncrementUnboxed(TensorTypeId::CPUTensorId);
 }
 
 }

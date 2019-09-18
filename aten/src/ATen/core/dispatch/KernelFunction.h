@@ -60,6 +60,8 @@ constexpr uint64_t hashFunctionSignature() {
     >>();
 #endif
 }
+
+template<class Return, class... Args> struct boxAndCallBoxedFunc;
 }
 
 /**
@@ -178,7 +180,8 @@ public:
       return (*func)(getFunctor_(), std::forward<Args>(args)...);
     }
 
-    return boxAndCallBoxedFunc_<Return, Args...>(std::forward<Args>(args)...);
+    TORCH_INTERNAL_ASSERT(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::callUnboxed() on an uninitialized KernelFunction.");
+    return detail::boxAndCallBoxedFunc<Return, Args...>::call(boxed_kernel_func_, getFunctor_(), std::forward<Args>(args)...);
   }
 
   /**
@@ -386,19 +389,6 @@ public:
 
 private:
 
-  template<class Return, class... Args>
-  Return boxAndCallBoxedFunc_(Args... args) const {
-    TORCH_INTERNAL_ASSERT(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::callUnboxed() on an uninitialized KernelFunction.");
-
-    // TODO Reuse stack vector instead of allocating?
-    std::vector<IValue> stack {std::forward<Args>(args)...};
-
-    (*boxed_kernel_func_)(getFunctor_(), &stack);
-
-    TORCH_INTERNAL_ASSERT(stack.size() == 1, "A boxed kernel should only push one return to the stack");
-    return std::move(stack[0]).to<Return>();
-  }
-
   explicit KernelFunction(std::function<std::shared_ptr<OperatorKernel>()> functorCreator, std::shared_ptr<OperatorKernel> functor, BoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func, c10::optional<uint64_t> signature_hash)
   : functorCreator_(std::move(functorCreator))
   , functor_(std::move(functor))
@@ -440,4 +430,33 @@ private:
   c10::optional<uint64_t> signature_hash_;
 };
 
+namespace detail {
+template<class Return, class... Args>
+struct boxAndCallBoxedFunc final {
+  static Return call(KernelFunction::BoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, Args... args) {
+    // TODO Reuse stack vector instead of allocating?
+    std::vector<IValue> stack {std::forward<Args>(args)...};
+
+    (*boxed_kernel_func)(functor, &stack);
+
+    TORCH_INTERNAL_ASSERT(stack.size() == 1, "A boxed kernel should only push one return to the stack");
+    return std::move(stack[0]).to<Return>();
+  }
+};
+template<class... Args>
+struct boxAndCallBoxedFunc<void, Args...> final {
+  static void call(KernelFunction::BoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, Args... args) {
+    // TODO Reuse stack vector instead of allocating?
+    std::vector<IValue> stack {std::forward<Args>(args)...};
+
+    (*boxed_kernel_func)(functor, &stack);
+
+    TORCH_INTERNAL_ASSERT(stack.size() == 0, "A boxed kernel returned a value but when we called it with KernelFunction::callUnboxed, we expected it to return void.");
+  }
+};
 }
+
+}
+
+// TODO Test all KernelFunction::makeFromXXX() functions, each with callBoxed, callUnboxed and callUnboxedOnly. Make sure to test both, regular and void returns.
+// TODO Also test different variants of calling unboxed with wrong signatures
