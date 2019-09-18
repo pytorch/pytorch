@@ -910,7 +910,7 @@ graph(%x : Tensor,
                 activation=observer._c,
                 weight=observer._c)
         }
-        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict)
+        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
         assert len([x for x, _ in m._c._get_modules()
                     if x.startswith('observer_for_')]) == 0, \
             'Expected to have 0 observer submodules'
@@ -989,7 +989,8 @@ graph(%x : Tensor,
             'sub.linear': qconfig
         }
         torch._C._jit_pass_insert_observers(m._c, "forward",
-                                            qconfig_dict)
+                                            qconfig_dict,
+                                            True)
         # check m is not observed
         check_not_observed(get_forward(m._c).graph)
         # check conv.forward is observed
@@ -1045,7 +1046,7 @@ graph(%x : Tensor,
                     activation=observer._c,
                     weight=observer._c)
             }
-            torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict)
+            torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
             assert len([x for x, _ in m._c._get_modules()
                         if x.startswith('observer_for_')]) == num_observers, \
                 'Expected to have ' + str(num_observers) + ' observer submodules'
@@ -1091,7 +1092,7 @@ graph(%x : Tensor,
                 activation=observer._c,
                 weight=observer._c)
         }
-        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict)
+        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
         data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
         def get_forward(m):
@@ -1099,7 +1100,7 @@ graph(%x : Tensor,
         get_forward(m)(data)
         # right now the result will have extra observer modules
         # will fix later when we figure out how to remove modules
-        m._c = torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
+        torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
 
         get_forward(m)(data)
         FileCheck().check_not("aten::quantize_linear") \

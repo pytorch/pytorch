@@ -61,7 +61,8 @@ TORCH_API void InsertObservers(
     const std::string& method_name,
     const std::unordered_map<
         std::string,
-        std::tuple<script::Module, script::Module>>& qconfig_dict);
+        std::tuple<script::Module, script::Module>>& qconfig_dict,
+    bool inplace = false);
 
 /** \brief Insert quantize - int_repr - dequantize calls to the Tensors
  *  that are observed in insert_observers pass
@@ -76,7 +77,8 @@ TORCH_API void InsertObservers(
  */
 TORCH_API script::Module InsertQuantDeQuant(
     script::Module& module,
-    const std::string& method_name);
+    const std::string& method_name,
+    bool inplace = false);
 
 /** \brief Backend specific pass to fuse dequantize - op - quantize calls
  * as quantized_op calls.
