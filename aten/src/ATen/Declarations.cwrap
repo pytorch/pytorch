@@ -1467,20 +1467,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_round
-  cname: round
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_trunc
   cname: trunc
   types:
@@ -1531,14 +1517,12 @@
     - CUDA
   variants: function
   options:
-    - cname: varall
+    - cname: var_all
       return: accreal
       arguments:
         - THTensor* self
-        - arg: bool unbiased
-          if_true: 0
-          if_false: 1
-    - cname: var
+        - bool unbiased
+    - cname: var_single
       return: argument 0
       scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
@@ -1547,9 +1531,7 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - arg: bool unbiased
-          if_true: 0
-          if_false: 1
+        - bool unbiased
         - bool keepdim
 ]]
 [[
@@ -1561,14 +1543,12 @@
     - CUDA
   variants: function
   options:
-    - cname: stdall
+    - cname: std_all
       return: accreal
       arguments:
         - THTensor* self
-        - arg: bool unbiased
-          if_true: 0
-          if_false: 1
-    - cname: std
+        - bool unbiased
+    - cname: std_single
       return: argument 0
       scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
@@ -1577,9 +1557,7 @@
         - THTensor* self
         - arg: long dim
           wrap_dim: self
-        - arg: bool unbiased
-          if_true: 0
-          if_false: 1
+        - bool unbiased
         - bool keepdim
 ]]
 [[
@@ -2139,9 +2117,7 @@
     - arg: THTensor* res2
       output: True
     - THTensor* self
-    - arg: bool eigenvectors
-      if_true: V
-      if_false: N
+    - bool eigenvectors
 ]]
 [[
   name: _th_potri
@@ -2160,9 +2136,7 @@
     - arg: THTensor* output
       output: True
     - THTensor* self
-    - arg: bool upper
-      if_true: U
-      if_false: L
+    - bool upper
 ]]
 [[
   name: _th_geqrf
@@ -2219,12 +2193,8 @@
     - THTensor* self
     - THTensor* input2
     - THTensor* input3
-    - arg: bool left
-      if_true: L
-      if_false: R
-    - arg: bool transpose
-      if_true: T
-      if_false: N
+    - bool left
+    - bool transpose
 ]]
 [[
   name: _th_random_

@@ -1,7 +1,7 @@
 import sys
 import torch
 import torch._C as _C
-from torch.namedtensor import _update_names, _check_serializing_named_tensor, _resolve_glob
+from torch.namedtensor import _update_names, _check_serializing_named_tensor, _resolve_glob, _unzip_namedshape
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
@@ -491,6 +491,10 @@ class Tensor(torch._C._TensorBase):
 
     def align_to(self, *names):
         return super(Tensor, self).align_to(_resolve_glob(names, self.names, 'align_to'))
+
+    def unflatten(self, dim, namedshape):
+        names, sizes = _unzip_namedshape(namedshape)
+        return super(Tensor, self).unflatten(dim, sizes, names)
 
     def names_(self, *names, **rename_map):
         # Note [names_ / renamed API]
