@@ -68,6 +68,7 @@ libtorch_sources = [
     "torch/csrc/jit/export.cpp",
     "torch/csrc/jit/pass_manager.cpp",
     "torch/csrc/jit/pickler.cpp",
+    "torch/csrc/jit/unpickler.cpp",
     "torch/csrc/jit/graph_executor.cpp",
     "torch/csrc/jit/import.cpp",
     "torch/csrc/jit/import_legacy.cpp",
