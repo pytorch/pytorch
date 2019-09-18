@@ -79,7 +79,7 @@ inline Tensor Tensor::data() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::data", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -119,7 +119,7 @@ inline Tensor Tensor::align_as(const Tensor & other) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::align_as", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        .callUnboxedOnly<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
 #endif
 }
 #endif
@@ -154,7 +154,7 @@ inline Tensor & Tensor::abs_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::abs_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::acos() const {
@@ -178,7 +178,7 @@ inline Tensor & Tensor::acos_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::acos_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::add(const Tensor & other, Scalar alpha) const {
@@ -376,7 +376,7 @@ inline Tensor & Tensor::asin_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::asin_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::atan() const {
@@ -400,7 +400,7 @@ inline Tensor & Tensor::atan_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::atan_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::baddbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const {
@@ -506,7 +506,7 @@ inline Tensor & Tensor::bitwise_not_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bitwise_not_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::logical_not() const {
@@ -515,7 +515,7 @@ inline Tensor Tensor::logical_not() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::logical_not", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor & Tensor::logical_not_() const {
@@ -524,7 +524,7 @@ inline Tensor & Tensor::logical_not_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::logical_not_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::logical_xor(const Tensor & other) const {
@@ -533,7 +533,7 @@ inline Tensor Tensor::logical_xor(const Tensor & other) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::logical_xor", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        .callUnboxedOnly<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
 #endif
 }
 inline Tensor & Tensor::logical_xor_(const Tensor & other) const {
@@ -542,7 +542,7 @@ inline Tensor & Tensor::logical_xor_(const Tensor & other) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::logical_xor_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+        .callUnboxedOnly<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
 #endif
 }
 inline Tensor Tensor::bmm(const Tensor & mat2) const {
@@ -575,7 +575,7 @@ inline Tensor & Tensor::ceil_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::ceil_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline std::vector<Tensor> Tensor::chunk(int64_t chunks, int64_t dim) const {
@@ -697,7 +697,7 @@ inline Tensor & Tensor::cos_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::cos_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::cosh() const {
@@ -721,7 +721,7 @@ inline Tensor & Tensor::cosh_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::cosh_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::cumsum(int64_t dim, c10::optional<ScalarType> dtype) const {
@@ -888,7 +888,7 @@ inline Tensor & Tensor::erf_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::erf_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::erfc() const {
@@ -912,7 +912,7 @@ inline Tensor & Tensor::erfc_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::erfc_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::exp() const {
@@ -936,7 +936,7 @@ inline Tensor & Tensor::exp_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::exp_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::expm1() const {
@@ -960,7 +960,7 @@ inline Tensor & Tensor::expm1_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::expm1_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::expand(IntArrayRef size, bool implicit) const {
@@ -1059,7 +1059,7 @@ inline Tensor & Tensor::floor_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::floor_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::frac() const {
@@ -1083,7 +1083,7 @@ inline Tensor & Tensor::frac_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::frac_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::ger(const Tensor & vec2) const {
@@ -1281,7 +1281,7 @@ inline Tensor & Tensor::log_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::log_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::log10() const {
@@ -1305,7 +1305,7 @@ inline Tensor & Tensor::log10_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::log10_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::log1p() const {
@@ -1332,7 +1332,7 @@ inline Tensor & Tensor::log1p_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::log1p_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::log2() const {
@@ -1356,7 +1356,7 @@ inline Tensor & Tensor::log2_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::log2_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::logdet() const {
@@ -1392,7 +1392,7 @@ inline Tensor Tensor::logsumexp(IntArrayRef dim, bool keepdim) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::logsumexp", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &, IntArrayRef, bool>(const_cast<Tensor&>(*this), dim, keepdim);
+        .callUnboxedOnly<Tensor, const Tensor &, IntArrayRef, bool>(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -1438,7 +1438,7 @@ inline Tensor Tensor::max_values(IntArrayRef dim, bool keepdim) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::max_values", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &, IntArrayRef, bool>(const_cast<Tensor&>(*this), dim, keepdim);
+        .callUnboxedOnly<Tensor, const Tensor &, IntArrayRef, bool>(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -1521,7 +1521,7 @@ inline Tensor Tensor::min_values(IntArrayRef dim, bool keepdim) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::min_values", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &, IntArrayRef, bool>(const_cast<Tensor&>(*this), dim, keepdim);
+        .callUnboxedOnly<Tensor, const Tensor &, IntArrayRef, bool>(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -1751,7 +1751,7 @@ inline Tensor & Tensor::reciprocal_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::reciprocal_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::neg() const {
@@ -1769,7 +1769,7 @@ inline Tensor & Tensor::neg_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::neg_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::repeat(IntArrayRef repeats) const {
@@ -1832,7 +1832,7 @@ inline Tensor & Tensor::round_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::round_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::relu() const {
@@ -1868,7 +1868,7 @@ inline Tensor & Tensor::relu_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::relu_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::prelu(const Tensor & weight) const {
@@ -1952,7 +1952,7 @@ inline Tensor & Tensor::rsqrt_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::rsqrt_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -2001,7 +2001,7 @@ inline Tensor & Tensor::sigmoid_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::sigmoid_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::sin() const {
@@ -2025,7 +2025,7 @@ inline Tensor & Tensor::sin_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::sin_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::sinh() const {
@@ -2049,7 +2049,7 @@ inline Tensor & Tensor::sinh_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::sinh_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::detach() const {
@@ -2067,7 +2067,7 @@ inline Tensor & Tensor::detach_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::detach_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline int64_t Tensor::size(int64_t dim) const {
@@ -2176,7 +2176,7 @@ inline Tensor & Tensor::squeeze_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::squeeze_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor & Tensor::squeeze_(int64_t dim) const {
@@ -2280,7 +2280,7 @@ inline Tensor & Tensor::sqrt_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::sqrt_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::std(bool unbiased) const {
@@ -2298,7 +2298,7 @@ inline Tensor Tensor::std(IntArrayRef dim, bool unbiased, bool keepdim) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::std", "dim"}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &, IntArrayRef, bool, bool>(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
+        .callUnboxedOnly<Tensor, const Tensor &, IntArrayRef, bool, bool>(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -2352,7 +2352,7 @@ inline Tensor & Tensor::t_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::t_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::tan() const {
@@ -2376,7 +2376,7 @@ inline Tensor & Tensor::tan_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::tan_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::tanh() const {
@@ -2400,7 +2400,7 @@ inline Tensor & Tensor::tanh_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::tanh_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::transpose(int64_t dim0, int64_t dim1) const {
@@ -2458,7 +2458,7 @@ inline Tensor Tensor::roll(IntArrayRef shifts, IntArrayRef dims) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::roll", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &, IntArrayRef, IntArrayRef>(const_cast<Tensor&>(*this), shifts, dims);
+        .callUnboxedOnly<Tensor, const Tensor &, IntArrayRef, IntArrayRef>(const_cast<Tensor&>(*this), shifts, dims);
 #endif
 }
 inline Tensor Tensor::rot90(int64_t k, IntArrayRef dims) const {
@@ -2491,7 +2491,7 @@ inline Tensor & Tensor::trunc_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::trunc_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::type_as(const Tensor & other) const {
@@ -2536,7 +2536,7 @@ inline Tensor Tensor::var(IntArrayRef dim, bool unbiased, bool keepdim) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::var", "dim"}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &, IntArrayRef, bool, bool>(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
+        .callUnboxedOnly<Tensor, const Tensor &, IntArrayRef, bool, bool>(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -2598,7 +2598,7 @@ inline Tensor Tensor::norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdi
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::norm", "ScalarOpt_dim"}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &, c10::optional<Scalar>, IntArrayRef, bool>(const_cast<Tensor&>(*this), p, dim, keepdim);
+        .callUnboxedOnly<Tensor, const Tensor &, c10::optional<Scalar>, IntArrayRef, bool>(const_cast<Tensor&>(*this), p, dim, keepdim);
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -2693,7 +2693,7 @@ inline Tensor & Tensor::zero_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::zero_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::sub(const Tensor & other, Scalar alpha) const {
@@ -3120,7 +3120,7 @@ inline Tensor Tensor::q_per_channel_scales() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::q_per_channel_scales", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::q_per_channel_zero_points() const {
@@ -3135,7 +3135,7 @@ inline Tensor Tensor::q_per_channel_zero_points() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::q_per_channel_zero_points", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::int_repr() const {
@@ -3267,7 +3267,7 @@ inline Tensor & Tensor::set_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::set_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor & Tensor::set_quantizer_(ConstQuantizerPtr quantizer) const {
@@ -4040,7 +4040,7 @@ inline Tensor & Tensor::lgamma_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::lgamma_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor & Tensor::atan2_(const Tensor & other) const {
@@ -4088,7 +4088,7 @@ inline Tensor & Tensor::digamma_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::digamma_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor & Tensor::polygamma_(int64_t n) const {
@@ -5011,7 +5011,7 @@ inline Tensor & Tensor::erfinv_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::erfinv_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::sign() const {
@@ -5020,7 +5020,7 @@ inline Tensor Tensor::sign() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::sign", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor & Tensor::sign_() const {
@@ -5029,7 +5029,7 @@ inline Tensor & Tensor::sign_() const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::sign_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
+        .callUnboxedOnly<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::dist(const Tensor & other, Scalar p) const {
