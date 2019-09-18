@@ -42,15 +42,22 @@ class TORCH_API DistAutogradContext {
   DistAutogradContext(DistAutogradContext&&) = delete;
   DistAutogradContext& operator=(DistAutogradContext&&) = delete;
 
-  std::bitset<std::numeric_limits<rpc::worker_id_t>::max()> getKnownWorkerIds()
-      const;
+  static_assert(
+      std::numeric_limits<rpc::worker_id_t>::max() <=
+          std::numeric_limits<int16_t>::max(),
+      "Range of possible workerIDs exceeds int16_t limit. This could cause "
+      "memory issues at runtime. Consider changing known_worker_set_type from "
+      "std::bitset to std::unordered_map");
+  using known_worker_set_type =
+      std::bitset<std::numeric_limits<rpc::worker_id_t>::max()>;
+  known_worker_set_type getKnownWorkerIds() const;
   void addKnownWorkerID(const rpc::WorkerId& workerId);
 
  private:
   const int64_t context_id_;
 
   // Bitset containing known worker IDs, used in cleaning up autograd context.
-  std::bitset<std::numeric_limits<rpc::worker_id_t>::max()> knownWorkerIDs_;
+  known_worker_set_type knownWorkerIDs_;
 
   // Map from autograd_message_id to appropriate 'send' autograd function.
   std::unordered_map<int64_t, std::shared_ptr<SendRpcBackward>>
