@@ -163,9 +163,9 @@ int connect(
   bool anyRefused = false;
   bool anyReset = false;
 
-  auto start = std::chrono::high_resolution_clock::now().time_since_epoch();
-  auto startMilliseconds =
-      std::chrono::duration_cast<std::chrono::milliseconds>(start).count();
+  const auto start = std::chrono::high_resolution_clock::now();
+  // auto startMilliseconds =
+  //     std::chrono::duration_cast<std::chrono::milliseconds>(start).count();
 
   while (true) {
     try {
@@ -190,7 +190,13 @@ int connect(
       pfd.fd = socket;
       pfd.events = POLLOUT;
 
-      int numReady = ::poll(&pfd, 1, timeout.count());
+      // calculate remaining time and use that as timeout for poll()
+      const auto elapsed = std::chrono::high_resolution_clock::now() - start;
+      const auto remaining =
+          std::chrono::duration_cast<std::chrono::milliseconds>(timeout) -
+          std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
+      const auto remainingMillis = std::max((long)0, remaining.count());
+      int numReady = ::poll(&pfd, 1, remainingMillis);
       if (numReady < 0) {
         throw std::system_error(errno, std::system_category());
       } else if (numReady == 0) {
@@ -237,20 +243,13 @@ int connect(
           throw;
         }
 
-        /*
-        if a timeout is specified, check time elapsed to see if we need to
-        timeout. A timeout is specified if timeout != kNoTimeout.
-        */
+        // if a timeout is specified, check time elapsed to see if we need to
+        // timeout. A timeout is specified if timeout != kNoTimeout.
         if (timeout != kNoTimeout) {
-          auto now =
-              std::chrono::high_resolution_clock::now().time_since_epoch();
-          auto nowMilliseconds =
-              std::chrono::duration_cast<std::chrono::milliseconds>(now)
-                  .count();
-
-          auto elapsedMilliseconds = nowMilliseconds - startMilliseconds;
-          if (elapsedMilliseconds > timeout.count()) {
-            throw std::runtime_error("Connecting to TCP store timed out.");
+          const auto elapsed =
+              std::chrono::high_resolution_clock::now() - start;
+          if (elapsed > timeout) {
+            throw std::runtime_error("connect() timed out");
           }
         }
         std::this_thread::sleep_for(std::chrono::seconds(1));
