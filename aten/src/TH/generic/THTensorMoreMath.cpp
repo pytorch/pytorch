@@ -35,8 +35,7 @@
     TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb,                 \
                      *r__data = (*ta_data OP *tb_data) ? 1 : 0;);              \
   }
-
-TENSOR_IMPLEMENT_LOGICAL(lt,<)
+  
 TENSOR_IMPLEMENT_LOGICAL(gt,>)
 TENSOR_IMPLEMENT_LOGICAL(le,<=)
 TENSOR_IMPLEMENT_LOGICAL(ge,>=)
@@ -57,7 +56,6 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
                      *r__data = (*ta_data OP *tb_data) ? 1 : 0;);                         \
   }                                                                                       \
 
-TENSOR_IMPLEMENT_LOGICAL_BYTE(lt,<)
 TENSOR_IMPLEMENT_LOGICAL_BYTE(gt,>)
 TENSOR_IMPLEMENT_LOGICAL_BYTE(le,<=)
 TENSOR_IMPLEMENT_LOGICAL_BYTE(ge,>=)
