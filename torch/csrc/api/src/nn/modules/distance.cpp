@@ -6,7 +6,7 @@ namespace torch {
 namespace nn {
 
 CosineSimilarityImpl::CosineSimilarityImpl(CosineSimilarityOptions options)
-    : options(std::move(options)) {}
+    : options(options) {}
 
 void CosineSimilarityImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::CosineSimilarity()";
@@ -19,7 +19,7 @@ Tensor CosineSimilarityImpl::forward(const Tensor& x1, const Tensor& x2) {
 // ============================================================================
 
 PairwiseDistanceImpl::PairwiseDistanceImpl(PairwiseDistanceOptions options)
-    : options(std::move(options)) {}
+    : options(options) {}
 
 void PairwiseDistanceImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::PairwiseDistance()";
