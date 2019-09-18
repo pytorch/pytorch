@@ -47,6 +47,7 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
     #endif
         {"aten::_cudnn_ctc_loss", ""},
         {"aten::_cudnn_rnn_flatten_weight", ""},
+        {"aten::_cudnn_init_dropout_state", ""},
         {"aten::_debug_has_internal_overlap", ""},
         {"aten::_masked_scale", ""},
         {"aten::_sobol_engine_ff_", ""},
@@ -136,6 +137,8 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::cudnn_convolution_transpose_backward_weight", ""},
         {"aten::cudnn_grid_sampler", ""},
         {"aten::cudnn_grid_sampler_backward", ""},
+        {"aten::cumsum", ""},
+        {"aten::cumprod", ""},
         {"aten::ctc_loss", "IntList"},
         {"aten::ctc_loss", "Tensor"},
         {"aten::_ctc_loss", ""},
@@ -157,6 +160,7 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::embedding_renorm_", ""},
         {"aten::embedding_sparse_backward", ""},
         {"aten::_embedding_bag_per_sample_weights_backward", ""},
+        {"aten::empty", "memory_format"},
         {"aten::resize_", ""},
         {"aten::empty_like", ""},
         {"aten::erf", ""},
@@ -776,7 +780,6 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
     #endif
         {"aten::_cudnn_rnn", ""},
         {"aten::_cudnn_rnn_backward", ""},
-        {"aten::_cudnn_init_dropout_state", ""},
         {"aten::_fused_dropout", ""},
         {"aten::_sobol_engine_draw", ""},
         {"aten::abs", "out"},
@@ -844,9 +847,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::cudnn_batch_norm_backward", ""},
         {"aten::cudnn_convolution", ""},
         {"aten::cudnn_convolution_transpose", ""},
-        {"aten::cumsum", ""},
         {"aten::cumsum", "out"},
-        {"aten::cumprod", ""},
         {"aten::cumprod", "out"},
         {"aten::div", "out"},
         {"aten::dot", "out"},
@@ -858,7 +859,6 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
     #ifdef BUILD_NAMEDTENSOR
         {"aten::empty", "names"},
     #endif
-        {"aten::empty", "memory_format"},
         {"aten::new_empty", ""},
         {"aten::new_full", ""},
         {"aten::_empty_affine_quantized", ""},

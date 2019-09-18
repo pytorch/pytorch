@@ -7,7 +7,7 @@
 # TODO: remove when we have Type support in the IR
 - func: _cast_Byte(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: 'full'
-  variants: function
+  variants: functionf
 
 - func: _cast_Char(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: 'full'
@@ -99,6 +99,7 @@
     CUDA: _cudnn_rnn_backward
 
 - func: _cudnn_init_dropout_state(float dropout, bool train, int dropout_seed, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
   dispatch:
     CUDA: _cudnn_init_dropout_state
 
@@ -815,11 +816,13 @@
     CUDA: cudnn_grid_sampler_backward
 
 - func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
   variants: function, method
 
 - func: cumsum.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
   variants: function, method
 
 - func: cumprod.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
@@ -961,6 +964,7 @@
   device_guard: False
 
 - func: empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda

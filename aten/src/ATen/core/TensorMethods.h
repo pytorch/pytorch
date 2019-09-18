@@ -748,16 +748,18 @@ inline Tensor Tensor::cumsum(int64_t dim, c10::optional<ScalarType> dtype) const
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::cumsum(const_cast<Tensor&>(*this), dim, dtype);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(type_set())(const_cast<Tensor&>(*this), dim, dtype);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::cumsum", ""}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor, const Tensor &, int64_t, c10::optional<ScalarType>>(
+        op, impl::dispatchTypeId(type_set()), const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
 inline Tensor Tensor::cumprod(int64_t dim, c10::optional<ScalarType> dtype) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::cumprod(const_cast<Tensor&>(*this), dim, dtype);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(type_set())(const_cast<Tensor&>(*this), dim, dtype);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::cumprod", ""}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor, const Tensor &, int64_t, c10::optional<ScalarType>>(
+        op, impl::dispatchTypeId(type_set()), const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
 inline Tensor Tensor::det() const {
