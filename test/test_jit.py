@@ -1239,7 +1239,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
         %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
         return (%r_dequant)"""
         ]
-        for input_str in input_strs[1:]:
+        for input_str in input_strs:
             graph = parse_ir(input_str)
             torch._C._jit_pass_quant_fusion(graph)
             FileCheck().run(input_str, graph)
