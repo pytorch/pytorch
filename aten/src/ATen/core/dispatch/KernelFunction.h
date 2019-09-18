@@ -464,6 +464,3 @@ struct boxAndCallBoxedFunc<void, Args...> final {
 }
 
 }
-
-// TODO Test all KernelFunction::makeFromXXX() functions, each with callBoxed, callUnboxed and callUnboxedOnly. Make sure to test both, regular and void returns.
-// TODO Also test different variants of calling unboxed with wrong signatures

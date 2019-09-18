@@ -635,7 +635,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutograd
   ASSERT_TRUE(op.has_value());
 
   called_autograd = false;
-  c10::Dispatcher::singleton().lookup(*op, TensorTypeId::VariableTensorId).callUnboxed<void, Tensor>(dummyTensor(TensorTypeId::VariableTensorId));
+  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, TensorTypeId::VariableTensorId, dummyTensor(TensorTypeId::VariableTensorId));
   EXPECT_TRUE(called_autograd);
 }
 
@@ -648,7 +648,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_th
   ASSERT_TRUE(op.has_value());
 
   called_catchall = called_autograd = false;
-  c10::Dispatcher::singleton().lookup(*op, TensorTypeId::VariableTensorId).callUnboxed<void, Tensor>(dummyTensor(TensorTypeId::VariableTensorId));
+  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, TensorTypeId::VariableTensorId, dummyTensor(TensorTypeId::VariableTensorId));
   EXPECT_FALSE(called_catchall);
   EXPECT_TRUE(called_autograd);
 }
