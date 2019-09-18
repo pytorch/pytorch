@@ -879,6 +879,7 @@ graph(%x : Tensor,
         class Observer(torch.nn.Module):
             def __init__(self):
                 super(Observer, self).__init__()
+                self.dtype = torch.quint8
 
             def forward(self, x):
                 return x
@@ -935,6 +936,7 @@ graph(%x : Tensor,
         class Observer(torch.nn.Module):
             def __init__(self):
                 super(Observer, self).__init__()
+                self.dtype = torch.quint8
 
             def forward(self, x):
                 return x
@@ -1008,6 +1010,7 @@ graph(%x : Tensor,
         class Observer(torch.nn.Module):
             def __init__(self):
                 super(Observer, self).__init__()
+                self.dtype = torch.quint8
 
             def forward(self, x):
                 return x
@@ -1067,6 +1070,7 @@ graph(%x : Tensor,
         class Observer(torch.nn.Module):
             def __init__(self):
                 super(Observer, self).__init__()
+                self.dtype = torch.quint8
 
             def forward(self, x):
                 return x
