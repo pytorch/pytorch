@@ -937,7 +937,8 @@ graph(%self, %scale, %zero_point, %dtype):
   auto graph = method.graph();
   auto matches = findPatternMatches(pattern_graph, *graph);
   // Extra filter on scale/zero_point/dtype to make sure they are Constant
-  auto filter = [](const Match& match, const std::unordered_map<std::string, Value*>& vmap) {
+  auto filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
     auto scale_node = match_vmap.at(vmap.at("scale"))->node();
     auto zero_point_node = match_vmap.at(vmap.at("zero_point"))->node();
