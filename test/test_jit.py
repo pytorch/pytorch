@@ -1168,8 +1168,8 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         # CHECK-NOT: aten::_dequantize_linear
         %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
         # CHECK: aten::t
-        # CHECK: quantized::fbgemm_linear_prepack
-        # CHECK: quantized::fbgemm_linear
+        # CHECK: quantized::linear_prepack
+        # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
         %r = aten::addmm(%b_dequant, %a_dequant, %w_dequant, %4, %4)
         # CHECK-NOT: aten::quantize_linear
@@ -1199,8 +1199,8 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         # CHECK-NOT: aten::_dequantize_linear
         %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
         # CHECK: aten::t
-        # CHECK: quantized::fbgemm_linear_prepack
-        # CHECK: quantized::fbgemm_linear
+        # CHECK: quantized::linear_prepack
+        # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
         %output = aten::matmul(%a_dequant, %w_dequant)
         %r = aten::add_(%output, %b_dequant, %4)
@@ -1226,9 +1226,9 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
         # CHECK-NOT: aten::_dequantize_linear
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
         # CHECK: aten::t
-        # CHECK: quantized::fbgemm_linear_prepack
         # CHECK: prim::Constant()
-        # CHECK: quantized::fbgemm_linear
+        # CHECK: quantized::linear_prepack
+        # CHECK: quantized::linear
         # CHECK-NOT: aten::matmul
         %r = aten::matmul(%a_dequant, %w_dequant)
         # CHECK-NOT: aten::quantize_linear
