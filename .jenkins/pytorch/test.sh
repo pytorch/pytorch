@@ -175,8 +175,15 @@ test_xla() {
   export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
   export XRT_WORKERS="localservice:0;grpc://localhost:40934"
   pushd xla
-  python test/test_operations.py
+  echo "Running Python Tests"
+  ./test/run_tests.sh
+
+  echo "Running MNIST Test"
   python test/test_train_mnist.py --tidy
+
+  echo "Running C++ Tests"
+  pushd test/cpp
+  CC=clang-7 CXX=clang++-7 ./run_tests.sh
   popd
   assert_git_not_dirty
 }
