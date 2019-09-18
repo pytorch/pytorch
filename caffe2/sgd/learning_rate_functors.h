@@ -256,17 +256,94 @@ class CompositeLearningRate : public LearningRateFunctor<T> {
 template <typename T>
 class CyclicalLearningRate : public LearningRateFunctor<T> {
  public:
-  CyclicalLearningRate(const T base_lr, const T max_lr, const int stepsize)
-      : base_lr_(base_lr), max_lr_(max_lr), stepsize_(stepsize) {}
+  CyclicalLearningRate(
+      const T base_lr,
+      const T max_lr,
+      const int stepsize,
+      const T decay)
+      : base_lr_(base_lr),
+        max_lr_(max_lr),
+        stepsize_(stepsize),
+        decay_(decay) {}
   T operator()(const int64_t iter) const override {
-    int cycle = static_cast<int>((iter / (2 * stepsize_)) + 1);
+    int64_t cycle = static_cast<int>((iter / (2 * stepsize_)) + 1);
     T x = abs(static_cast<T>(iter) / stepsize_ - 2 * cycle + 1);
-    return (
-        1 + (T(max_lr_) / T(fabs(base_lr_)) - 1) * std::max(T(0.0), (1 - x)));
+    return 1 +
+        (T(abs(max_lr_)) / T(abs(base_lr_)) - 1) * std::max(T(0.0), (1 - x)) *
+        std::pow(decay_, static_cast<int>(iter / (2 * stepsize_)));
   }
   T base_lr_;
   T max_lr_;
   int stepsize_;
+  T decay_;
+};
+
+// constantThenLinearWarmup: first use a constant multiplier
+// and then ramp up to the global lr
+template <typename T>
+class ConstantThenLinearWarmupLearningRate : public LearningRateFunctor<T> {
+ public:
+  ConstantThenLinearWarmupLearningRate(
+      const T start_warmup_multiplier,
+      const int64_t constant_warmup_num_iter,
+      const int64_t linear_warmup_num_iter)
+      : constant_warmup_num_iter_(constant_warmup_num_iter),
+        linear_warmup_num_iter_(linear_warmup_num_iter),
+        constant_warmup_lr_(start_warmup_multiplier, constant_warmup_num_iter),
+        linear_warmup_lr_(start_warmup_multiplier, linear_warmup_num_iter) {}
+
+  T operator()(const int64_t iter) const override {
+    if (iter < constant_warmup_num_iter_) {
+      return constant_warmup_lr_(iter);
+    } else if (iter < constant_warmup_num_iter_ + linear_warmup_num_iter_) {
+      return linear_warmup_lr_(iter - constant_warmup_num_iter_);
+    } else {
+      return 1.0;
+    }
+  }
+  int64_t constant_warmup_num_iter_;
+  int64_t linear_warmup_num_iter_;
+  ConstantWarmupLearningRate<T> constant_warmup_lr_;
+  LinearWarmupLearningRate<T> linear_warmup_lr_;
+};
+
+// CompositeCyclicalLearningRate: first use a constant multiplier
+// and then ramp up to the global lr, and then use a cyclical learning rate
+template <typename T>
+class CompositeCyclicalLearningRate : public LearningRateFunctor<T> {
+ public:
+  CompositeCyclicalLearningRate(
+      const T base_lr,
+      const T start_warmup_multiplier,
+      const int64_t constant_warmup_num_iter,
+      const int64_t linear_warmup_num_iter,
+      const T cyclical_max_lr,
+      const int cyclical_step_size,
+      const T cyclical_decay)
+      : constant_warmup_num_iter_(constant_warmup_num_iter),
+        linear_warmup_num_iter_(linear_warmup_num_iter),
+        constant_then_linear_warmup_lr_(
+            start_warmup_multiplier,
+            constant_warmup_num_iter,
+            linear_warmup_num_iter),
+        cyclical_lr_(
+            base_lr,
+            cyclical_max_lr,
+            cyclical_step_size,
+            cyclical_decay) {}
+
+  T operator()(const int64_t iter) const override {
+    if (iter < constant_warmup_num_iter_ + linear_warmup_num_iter_) {
+      return constant_then_linear_warmup_lr_(iter);
+    }
+    return cyclical_lr_(
+        iter - constant_warmup_num_iter_ - linear_warmup_num_iter_);
+  }
+
+  int64_t constant_warmup_num_iter_;
+  int64_t linear_warmup_num_iter_;
+  ConstantThenLinearWarmupLearningRate<T> constant_then_linear_warmup_lr_;
+  CyclicalLearningRate<T> cyclical_lr_;
 };
 
 } // namespace caffe2

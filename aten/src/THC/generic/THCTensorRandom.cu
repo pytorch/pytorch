@@ -32,10 +32,10 @@ void THCTensor_(renormRows)(struct THCState* state,
 
 void THCTensor_(multinomial)(struct THCState *state,
                               THCudaLongTensor *self,
-                              at::Generator* gen_,
                               THCTensor *prob_dist,
                               int n_sample,
-                              int with_replacement)
+                              int with_replacement,
+                              at::Generator* gen_)
 {
   auto gen = at::get_generator_or_default<at::CUDAGenerator>(gen_, at::cuda::detail::getDefaultCUDAGenerator());
   int inputSize = THCTensor_(nDimensionLegacyAll)(state, prob_dist);
@@ -266,7 +266,7 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
   THCTensor_free(state, probs);
 }
 
-void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, at::Generator* gen_, THCTensor *_q, THCudaLongTensor *_J, int n_sample){
+void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCTensor *_q, THCudaLongTensor *_J, int n_sample, at::Generator* gen_){
   THArgCheck(_q->dim() == 1, 1,
              "expected 1-D probability table, got %d-D probability table instead",
              _q->dim());
