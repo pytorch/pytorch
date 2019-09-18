@@ -24,12 +24,13 @@ def tensor_reducer(obj):
     tensor_index = len(_thread_local_tensor_tables.send_tables) - 1
     return (_tensor_receiver, (tensor_index, ))
 
+_dispatch_table = copyreg.dispatch_table.copy()
+_dispatch_table[torch.Tensor] = tensor_reducer
 
 def serialize(obj):
     f = io.BytesIO()
     p = pickle.Pickler(f)
-    p.dispatch_table = copyreg.dispatch_table.copy()
-    p.dispatch_table[torch.Tensor] = tensor_reducer
+    p.dispatch_table = _dispatch_table
     global _thread_local_tensor_tables
     _thread_local_tensor_tables.send_tables = []
     p.dump(obj)
