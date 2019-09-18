@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from torch.nn import Module
 from .observer import default_observer
+from functools import partial
 
 class FakeQuantize(Module):
     ''' Simulate the quantize and dequantize operations in training time.
@@ -42,8 +43,22 @@ class FakeQuantize(Module):
     def forward(self, X):
         if self.enabled:
             self.observer(X)
-            self.scale, self.zero_point = self.calculate_qparams()
+            scale, zero_point = self.calculate_qparams()
+            self.scale, self.zero_point = float(scale), int(zero_point)
             X = torch.fake_quantize_per_tensor_affine(
-                X, self.scale.double(), self.zero_point.long(), self.quant_min,
+                X, self.scale, self.zero_point, self.quant_min,
                 self.quant_max)
         return X
+
+def fake_quant(fake_quant_cls, **kwargs):
+    return partial(fake_quant_cls, **kwargs)
+
+def default_fake_quant(**kwargs):
+    return fake_quant(FakeQuantize, **kwargs)
+
+def default_weight_fake_quant(**kwargs):
+    kwargs.setdefault('dtype', torch.qint8)
+    kwargs.setdefault('qscheme', torch.per_tensor_symmetric)
+    kwargs.setdefault('quant_min', -128)
+    kwargs.setdefault('quant_max', 127)
+    return fake_quant(FakeQuantize, **kwargs)

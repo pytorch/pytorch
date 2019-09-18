@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <test/cpp/api/support.h>
 
 #include <torch/types.h>
 
@@ -119,27 +120,27 @@ TEST(TensorTest, ToDoesNotCopyWhenOptionsAreAllTheSame) {
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(at::kFloat);
-    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+    ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   }
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(tensor.options());
-    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+    ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   }
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(tensor.dtype());
-    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+    ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   }
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(tensor.device());
-    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+    ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   }
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(tensor);
-    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+    ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   }
 }
 
@@ -303,4 +304,38 @@ TEST(TensorTest, Item_CUDA) {
     torch::Scalar scalar = tensor.item();
     ASSERT_EQ(scalar.to<int>(), 123);
   }
+}
+
+TEST(TensorTest, DataPtr) {
+  auto tensor = at::empty({3, 4}, at::kFloat);
+  auto tensor_not_copy = tensor.to(tensor.options());
+  ASSERT_EQ(tensor_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
+  ASSERT_EQ(tensor_not_copy.data_ptr(), tensor.data_ptr());
+}
+
+TEST(TensorTest, Data) {
+  const auto tensor = torch::empty({3, 3});
+  ASSERT_TRUE(torch::equal(tensor, tensor.data()));
+
+  const auto tensor2 = at::empty({3, 3});
+  ASSERT_THROW(tensor2.data(), c10::Error);
+}
+
+TEST(TensorTest, BackwardAndGrad) {
+  auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  auto y = x * x;
+  y.backward();
+  ASSERT_EQ(x.grad().item<float>(), 10.0);
+
+  x = at::tensor({5});
+  y = x * x;
+  ASSERT_THROWS_WITH(y.backward(), "backward is not implemented for Tensor");
+  ASSERT_THROWS_WITH(x.grad(), "grad is not implemented for Tensor");
+}
+
+TEST(TensorTest, BackwardCreatesOnesGrad) {
+  const auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  x.backward();
+  ASSERT_TRUE(torch::equal(x.grad(),
+              torch::ones_like(x)));
 }

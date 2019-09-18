@@ -12,6 +12,8 @@ tree are also possible. In both cases, the script allows filtering files via
 glob or regular expressions.
 """
 
+from __future__ import print_function
+
 import argparse
 import collections
 import fnmatch
@@ -124,6 +126,9 @@ def get_changed_lines(revision, filename):
     for chunk in re.finditer(CHUNK_PATTERN, output, re.MULTILINE):
         start = int(chunk.group(1))
         count = int(chunk.group(2) or 1)
+        # If count == 0, a chunk was removed and can be ignored.
+        if count == 0:
+            continue
         changed_lines.append([start, start + count])
 
     return {"name": filename, "lines": changed_lines}
@@ -288,7 +293,7 @@ def main():
     if options.diff:
         line_filters = [get_changed_lines(options.diff, f) for f in files]
 
-    print(run_clang_tidy(options, line_filters, files))
+    print(run_clang_tidy(options, line_filters, files), file=sys.stderr)
 
 
 if __name__ == "__main__":

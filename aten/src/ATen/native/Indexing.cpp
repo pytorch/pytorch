@@ -55,6 +55,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
 #include <functional>
@@ -201,31 +202,33 @@ static AdvancedIndex make_info(Tensor self, TensorList orig) {
   return AdvancedIndex(self, indices);
 }
 
-static std::unique_ptr<TensorIterator> make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
+static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
   if (!is_expandable_to(value.sizes(), info.src.sizes())) {
     AT_ERROR("shape mismatch: value tensor of shape ", value.sizes(),
              " cannot be broadcast to indexing result of shape ", info.src.sizes());
   }
-  auto builder = TensorIterator::Builder();
-  builder.dont_compute_common_dtype();
-  builder.dont_resize_outputs();
-  builder.add_output(info.src);
-  builder.add_input(value, info.src.device(), info.src.scalar_type());
+  auto iter = TensorIterator();
+  iter.dont_compute_common_dtype();
+  iter.dont_resize_outputs();
+  iter.add_output(info.src);
+  iter.add_input(value, info.src.device(), info.src.scalar_type());
   for (auto& index : info.indices) {
-    builder.add_input(index);
+    iter.add_input(index);
   }
-  return builder.build();
+  iter.build();
+  return iter;
 }
 
-static std::unique_ptr<TensorIterator> make_index_iterator(const AdvancedIndex& info) {
-  auto builder = TensorIterator::Builder();
-  builder.dont_compute_common_dtype();
-  builder.add_output(Tensor(), info.src.device(), info.src.scalar_type());
-  builder.add_input(info.src);
+static TensorIterator make_index_iterator(const AdvancedIndex& info) {
+  auto iter = TensorIterator();
+  iter.dont_compute_common_dtype();
+  iter.add_output(Tensor(), info.src.device(), info.src.scalar_type());
+  iter.add_input(info.src);
   for (auto& index : info.indices) {
-    builder.add_input(index);
+    iter.add_input(index);
   }
-  return builder.build();
+  iter.build();
+  return iter;
 }
 
 Tensor index(const Tensor & self, TensorList indices) {
@@ -235,8 +238,8 @@ Tensor index(const Tensor & self, TensorList indices) {
 
   auto info = make_info(self, indices);
   auto iter = make_index_iterator(info);
-  index_stub(iter->device_type(), *iter, info.indexed_sizes, info.indexed_strides);
-  return iter->output();
+  index_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides);
+  return iter.output();
 }
 
 Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
@@ -253,7 +256,7 @@ Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & valu
   }
   auto info = make_info(self, indices);
   auto iter = make_index_put_iterator(info, value);
-  index_put_stub(iter->device_type(), *iter, info.indexed_sizes, info.indexed_strides, accumulate);
+  index_put_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides, accumulate);
   return self;
 }
 
@@ -342,15 +345,39 @@ Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & s
 }
 
 Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
-  Tensor _mask, _self;
-  std::tie(_mask, _self) = expand_outplace(mask, self);
-  return _self.clone().masked_fill_(mask, source);
+  Tensor result;
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
+  {
+    NoNamesGuard guard;
+#endif
+    Tensor _mask, _self;
+    std::tie(_mask, _self) = expand_outplace(mask, self);
+    result = _self.clone();
+    result.masked_fill_(mask, source);
+#ifdef BUILD_NAMEDTENSOR
+  }
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
 
 Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & source) {
+  Tensor result;
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
+  {
+    NoNamesGuard guard;
+#endif
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
-  return _self.clone().masked_fill_(mask, source);
+  result = _self.clone();
+  result.masked_fill_(mask, source);
+#ifdef BUILD_NAMEDTENSOR
+  }
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
 
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){

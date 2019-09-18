@@ -150,8 +150,8 @@ static void upsample_nearest2d_out_cpu_template(
   AT_ASSERT(input_width > 0 && output_width > 0);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest2d", [&] {
-    auto* idata = input.data<scalar_t>();
-    auto* odata = output.data<scalar_t>();
+    auto* idata = input.data_ptr<scalar_t>();
+    auto* odata = output.data_ptr<scalar_t>();
 
     upsample_nearest2d_out_frame<scalar_t>(
         odata,
@@ -205,8 +205,8 @@ static void upsample_nearest2d_backward_out_cpu_template(
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad_output.scalar_type(), "upsample_nearest2d_backward", [&] {
-        scalar_t* idata = grad_input.data<scalar_t>();
-        scalar_t* odata = grad_output.data<scalar_t>();
+        scalar_t* idata = grad_input.data_ptr<scalar_t>();
+        scalar_t* odata = grad_output.data_ptr<scalar_t>();
 
         upsample_nearest2d_backward_out_frame<scalar_t>(
             odata,

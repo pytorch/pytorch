@@ -184,7 +184,7 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::RegisterOperators::options()                                \
               .kernel(                                                       \
-                  ::c10::CPUTensorId(),                                      \
+                  ::c10::TensorTypeId::CPUTensorId,                                      \
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
                       OperatorClass>,                                        \
@@ -197,7 +197,7 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::RegisterOperators::options()                                \
               .kernel(                                                       \
-                  ::c10::CUDATensorId(),                                     \
+                  ::c10::TensorTypeId::CUDATensorId,                                     \
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
                       OperatorClass>,                                        \
@@ -213,7 +213,7 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::RegisterOperators().options()                               \
               .kernel(                                                       \
-                  ::c10::HIPTensorId(),                                      \
+                  ::c10::TensorTypeId::HIPTensorId,                                      \
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
                       OperatorClass>,                                        \

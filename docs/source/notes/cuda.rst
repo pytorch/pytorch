@@ -69,10 +69,25 @@ between CPU and GPU or between two GPUs.  Hence, computation will proceed as if
 every operation was executed synchronously.
 
 You can force synchronous computation by setting environment variable
-`CUDA_LAUNCH_BLOCKING=1`.  This can be handy when an error occurs on the GPU.
+``CUDA_LAUNCH_BLOCKING=1``.  This can be handy when an error occurs on the GPU.
 (With asynchronous execution, such an error isn't reported until after the
 operation is actually executed, so the stack trace does not show where it was
 requested.)
+
+A consequence of the asynchronous computation is that time measurements without
+synchronizations are not accurate. To get precise measurements, one should either
+call :func:`torch.cuda.synchronize()` before measuring, or use :class:`torch.cuda.Event`
+to record times as following::
+
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    start_event.record()
+
+    # Run some things here
+
+    end_event.record()
+    torch.cuda.synchronize()  # Wait for the events to be recorded!
+    elapsed_time_ms = start_event.elapsed_time(end_event)
 
 As an exception, several functions such as :meth:`~torch.Tensor.to` and
 :meth:`~torch.Tensor.copy_` admit an explicit :attr:`non_blocking` argument,

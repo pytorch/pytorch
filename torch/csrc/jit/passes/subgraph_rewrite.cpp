@@ -81,7 +81,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     // new ones.
     WithInsertPoint insert_point(match.anchor);
     std::vector<Value*> new_outputs =
-        inlineCallTo(*graph, replacement_graph, inputs);
+        insertGraph(*graph, replacement_graph, inputs);
 
     // Record all planned rewritings
     AT_ASSERT(outputs.size() == new_outputs.size());

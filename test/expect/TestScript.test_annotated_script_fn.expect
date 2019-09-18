@@ -1,1 +1,1 @@
-foo(Tensor x, (Tensor, Tensor, Tensor) y, (Tensor, (Tensor, Tensor)) z) -> Tensor
+foo(Tensor x, (Tensor, Tensor, Tensor) y, (Tensor, (Tensor, Tensor)) z) -> (Tensor)

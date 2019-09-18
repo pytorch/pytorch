@@ -48,8 +48,8 @@ void GeluKernelMKLImpl(const Tensor& X, Tensor* Y);
   template <>                                                  \
   void GeluKernelMKLImpl<T>(const Tensor& X, Tensor* Y) {      \
     const int64_t N = X.numel();                               \
-    const T* X_data = X.data<T>();                             \
-    T* Y_data = Y->data<T>();                                  \
+    const T* X_data = X.data_ptr<T>();                             \
+    T* Y_data = Y->data_ptr<T>();                                  \
     CdfNormFunc(N, X_data, Y_data);                            \
     MulFunc(N, X_data, Y_data, Y_data);                        \
   }
@@ -69,8 +69,8 @@ void GeluKernelMKLImpl(const Tensor& X, Tensor* Y) {
 template <typename T>
 void GeluKernelImplInternal(const Tensor& X, Tensor* Y) {
   const int64_t N = X.numel();
-  const T* X_data = X.data<T>();
-  T* Y_data = Y->data<T>();
+  const T* X_data = X.data_ptr<T>();
+  T* Y_data = Y->data_ptr<T>();
   for (int64_t i = 0; i < N; ++i) {
     Y_data[i] = X_data[i] * M_SQRT1_2;
   }
@@ -108,10 +108,10 @@ void GeluBackwardKernelMKLImpl(const Tensor& dY, const Tensor& X, Tensor* dX);
     constexpr T kAlpha = M_2_SQRTPI * M_SQRT1_2 * T(0.5);                   \
     Tensor scratch = at::native::empty_like(X);                             \
     const int64_t N = X.numel();                                            \
-    const T* dY_data = dY.data<T>();                                        \
-    const T* X_data = X.data<T>();                                          \
-    T* dX_data = dX->data<T>();                                             \
-    T* scratch_data = scratch.data<T>();                                    \
+    const T* dY_data = dY.data_ptr<T>();                                        \
+    const T* X_data = X.data_ptr<T>();                                          \
+    T* dX_data = dX->data_ptr<T>();                                             \
+    T* scratch_data = scratch.data_ptr<T>();                                    \
     CdfNormFunc(N, X_data, scratch_data);                                   \
     for (int64_t i = 0; i < N; ++i) {                                       \
       dX_data[i] = -T(0.5) * X_data[i] * X_data[i];                         \
@@ -143,10 +143,10 @@ void GeluBackwardKernelImplInternal(
   constexpr T kAlpha = M_2_SQRTPI * M_SQRT1_2 * T(0.5);
   Tensor scratch = at::native::empty_like(X);
   const int64_t N = X.numel();
-  const T* dY_data = dY.data<T>();
-  const T* X_data = X.data<T>();
-  T* dX_data = dX->data<T>();
-  T* scratch_data = scratch.data<T>();
+  const T* dY_data = dY.data_ptr<T>();
+  const T* X_data = X.data_ptr<T>();
+  T* dX_data = dX->data_ptr<T>();
+  T* scratch_data = scratch.data_ptr<T>();
   for (int64_t i = 0; i < N; ++i) {
     scratch_data[i] = X_data[i] * M_SQRT1_2;
     dX_data[i] = -T(0.5) * X_data[i] * X_data[i];
@@ -175,11 +175,41 @@ void GeluBackwardKernelImpl(const Tensor& dY, const Tensor& X, Tensor* dX) {
   }
 }
 
+void hardshrink_cpu_kernel(TensorIterator& iter, Scalar lambd) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_cpu", [&] {
+    auto lambd_val = lambd.to<scalar_t>();
+    cpu_kernel_vec(iter,
+      [=](scalar_t self_val) {
+        return (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0) : self_val;
+      },
+      [=](Vec256<scalar_t> self_val) {
+        return ((self_val < -lambd_val) | (self_val > lambd_val)) & self_val;
+      }
+    );
+  });
+}
+
+void hardshrink_backward_cpu_kernel(TensorIterator& iter, Scalar lambd) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&] {
+    auto lambd_val = lambd.to<scalar_t>();
+    cpu_kernel_vec(iter,
+      [=](scalar_t grad_val, scalar_t self_val) {
+        return (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0) : grad_val;
+      },
+      [=](Vec256<scalar_t> grad_val, Vec256<scalar_t> self_val) {
+        return ((self_val < -lambd_val) | (self_val > lambd_val)) & grad_val;
+      }
+    );
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
 REGISTER_DISPATCH(GeluKernel, &GeluKernelImpl);
 REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardKernelImpl);
+REGISTER_DISPATCH(hardshrink_cpu_stub, &hardshrink_cpu_kernel);
+REGISTER_DISPATCH(hardshrink_backward_cpu_stub, &hardshrink_backward_cpu_kernel);
 
 } // namespace native
 } // namespace at

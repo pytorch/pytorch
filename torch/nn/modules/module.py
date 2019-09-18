@@ -3,7 +3,6 @@ import functools
 import itertools
 
 import torch
-from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
@@ -69,8 +68,16 @@ class Module(object):
     _version = 1
 
     def __init__(self):
+        self.__construct()
+        # initialize self.training separately from the rest of the internal
+        # state, as it is managed differently by nn.Module and ScriptModule
+        self.training = True
+
+    def __construct(self):
+        """
+        Initializes internal Module state, shared by both nn.Module and ScriptModule.
+        """
         torch._C._log_api_usage_once("python.nn_module")
-        self._backend = thnn_backend
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
         self._backward_hooks = OrderedDict()
@@ -79,7 +86,6 @@ class Module(object):
         self._state_dict_hooks = OrderedDict()
         self._load_state_dict_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
-        self.training = True
 
     def forward(self, *input):
         r"""Defines the computation performed at every call.
@@ -200,8 +206,8 @@ class Module(object):
             module._apply(fn)
 
         def compute_should_use_set_data(tensor, tensor_applied):
-            if torch._has_same_tensorimpl_type(tensor, tensor_applied):
-                # If the new tensor has the same TensorImpl type as the existing tensor,
+            if torch._has_compatible_shallow_copy_type(tensor, tensor_applied):
+                # If the new tensor has compatible tensor type as the existing tensor,
                 # the current behavior is to change the tensor in-place using `.data =`,
                 # and the future behavior is to overwrite the existing tensor. However,
                 # changing the current behavior is a BC-breaking change, and we want it

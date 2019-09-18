@@ -53,11 +53,7 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   pip_install --user tb-nightly
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
-
-  # Temporarily skip mypy-0.720, with that our type hints checks failed with
-  # ```torch/__init__.pyi:1307: error: Name 'pstrf' already defined (possibly by an import)```
-  # https://circleci.com/api/v1.1/project/github/pytorch/pytorch/2185641/output/105/0?file=true
-  pip_install --user mypy!=0.720 || true
+  pip_install --user mypy || true
 fi
 
 # faulthandler become built-in since 3.3
@@ -96,10 +92,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export PYTORCH_TEST_WITH_ROCM=1
-fi
-
 if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
@@ -112,7 +104,7 @@ test_python_nn() {
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude nn --verbose
+  time python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods quantizer
   assert_git_not_dirty
 }
 
@@ -142,7 +134,7 @@ test_aten() {
 }
 
 test_torchvision() {
-  pip_install --user git+https://github.com/pytorch/vision.git@487c9bf4b7750e779fac31c35d930381baa60a4a
+  pip_install --user git+https://github.com/pytorch/vision.git@2b73a4846773a670632b29fb2fc2ac57df7bce5d
 }
 
 test_libtorch() {
@@ -170,6 +162,7 @@ test_custom_script_ops() {
     cp -a "$CUSTOM_OP_BUILD" build
     # Run tests Python-side and export a script module.
     python test_custom_ops.py -v
+    python test_custom_classes.py -v
     python model.py --export-script-module=model.pt
     # Run tests C++-side and load the exported script module.
     build/test_custom_ops ./model.pt
@@ -182,8 +175,15 @@ test_xla() {
   export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
   export XRT_WORKERS="localservice:0;grpc://localhost:40934"
   pushd xla
-  python test/test_operations.py
+  echo "Running Python Tests"
+  ./test/run_tests.sh
+
+  echo "Running MNIST Test"
   python test/test_train_mnist.py --tidy
+
+  echo "Running C++ Tests"
+  pushd test/cpp
+  CC=clang-7 CXX=clang++-7 ./run_tests.sh
   popd
   assert_git_not_dirty
 }
@@ -191,13 +191,13 @@ test_xla() {
 (cd test && python -c "import torch; print(torch.__config__.show())")
 (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 
-if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   test_torchvision
   test_xla
-elif [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
   test_torchvision
   test_python_nn
-elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   test_python_all_except_nn
   test_aten
   test_libtorch

@@ -5,6 +5,7 @@
 #include <ATen/ATen.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/core/MemoryFormat.h>
+#include <ATen/core/EnableNamedTensor.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/jit/ir.h>
@@ -19,7 +20,7 @@ using at::DimnameList;
 
 namespace torch {
 
-#define TENSOR(T, S, _1)                                                   \
+#define TENSOR(T, S)                                                       \
   inline at::Tensor tensor(                                                \
       at::ArrayRef<T> values, const at::TensorOptions& options) {          \
     at::Tensor result = ([&]() {                                           \
@@ -44,7 +45,7 @@ namespace torch {
   inline at::Tensor tensor(T value) {                                      \
     return torch::tensor(at::ArrayRef<T>(value));                          \
   }
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
 
 /// A generic deleter function.

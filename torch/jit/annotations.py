@@ -5,10 +5,11 @@ import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional
+    is_optional, _qualified_name
 from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType, BoolType, OptionalType
+    ListType, StringType, DictType, BoolType, OptionalType, ClassType
 from textwrap import dedent
+from torch._utils_internal import get_source_lines_and_file
 
 
 PY35 = sys.version_info >= (3, 5)
@@ -46,7 +47,7 @@ def get_signature(fn):
 
     type_line, source = None, None
     try:
-        source = dedent(inspect.getsource(fn))
+        source = dedent(''.join(get_source_lines_and_file(fn)[0]))
         type_line = get_type_line(source)
     except TypeError:
         pass
@@ -61,18 +62,19 @@ def get_signature(fn):
 # This is essentially a weaker form of get_signature(), where we don't care if
 # we have the types, we just care that we can figure out how many parameters
 # a function takes.
-def get_num_params(fn):
+def get_num_params(fn, loc):
     try:
-        source = dedent(inspect.getsource(fn))
+        source = dedent(''.join(get_source_lines_and_file(fn)[0]))
     except (TypeError, IOError):
         return None
     if source is None:
         return None
     py_ast = ast.parse(source)
     if len(py_ast.body) == 1 and isinstance(py_ast.body[0], ast.ClassDef):
-        raise RuntimeError("cannot instantiate class object ({}) inside jit.script".format(py_ast.body[0].name))
+        raise torch.jit.frontend.FrontendError(
+            loc, "Cannot instantiate class '{}' in a script function".format(py_ast.body[0].name))
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-        raise RuntimeError("expected a single top-level function")
+        raise torch.jit.frontend.FrontendError(loc, "Expected a single top-level function")
     py_def = py_ast.body[0]
     if py_def.args.vararg is not None:
         return None
@@ -95,7 +97,7 @@ def parse_type_line(type_line):
     arg_ann_str, ret_ann_str = split_type_line(type_line)
 
     try:
-        arg_ann = eval(arg_ann_str, _eval_env)
+        arg_ann = eval(arg_ann_str, _eval_env)  # noqa: P204
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the argument list of a type annotation: {}".format(str(e)))
 
@@ -103,7 +105,7 @@ def parse_type_line(type_line):
         arg_ann = (arg_ann,)
 
     try:
-        ret_ann = eval(ret_ann_str, _eval_env)
+        ret_ann = eval(ret_ann_str, _eval_env)  # noqa: P204
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the return type of a type annotation: {}".format(str(e)))
 
@@ -119,7 +121,6 @@ def get_type_line(source):
     lines = [(line_num, line) for line_num, line in enumerate(lines)]
     type_lines = list(filter(lambda line: type_comment in line[1], lines))
     lines_with_type = list(filter(lambda line: 'type' in line[1], lines))
-
 
     if len(type_lines) == 0:
         type_pattern = re.compile('#[\t ]*type[\t ]*:')
@@ -223,6 +224,8 @@ def ann_to_type(ann):
         return StringType.get()
     elif ann is bool:
         return BoolType.get()
+    elif hasattr(ann, "__torch_script_class__"):
+        return ClassType(_qualified_name(ann))
     raise ValueError("Unknown type annotation: '{}'".format(ann))
 
 

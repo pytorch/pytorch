@@ -12,7 +12,7 @@ namespace native {
 
 Tensor& fill_out(Tensor& self, Scalar value) {
   auto iter = TensorIterator::nullary_op(self);
-  fill_stub(iter->device_type(), *iter, value);
+  fill_stub(iter.device_type(), iter, value);
   return self;
 }
 

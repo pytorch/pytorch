@@ -430,7 +430,6 @@ THRefcountedMapAllocator::THRefcountedMapAllocator(WithFd, const char *filename,
 }
 
 void THRefcountedMapAllocator::initializeAlloc() {
-  char *data = ((char*)base_ptr_) + TH_ALLOC_ALIGNMENT;
   THMapInfo *map_info = (THMapInfo*)base_ptr_;
 
 #ifdef _WIN32

@@ -19,31 +19,17 @@ install_ubuntu() {
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
                    rocm-dev \
-                   rocm-libs \
                    rocm-utils \
                    rocfft \
                    miopen-hip \
-                   miopengemm \
                    rocblas \
-                   rocm-profiler \
-                   cxlactivitylogger \
-                   rocsparse \
                    hipsparse \
                    rocrand \
-                   hip-thrust \
-                   rccl
-
-    # HIP has a bug that drops DEBUG symbols in generated MakeFiles.
-    # https://github.com/ROCm-Developer-Tools/HIP/pull/588
-    if [[ -f /opt/rocm/hip/cmake/FindHIP.cmake ]]; then
-        sudo sed -i 's/set(_hip_build_configuration "${CMAKE_BUILD_TYPE}")/string(TOUPPER _hip_build_configuration "${CMAKE_BUILD_TYPE}")/' /opt/rocm/hip/cmake/FindHIP.cmake
-    fi
-
-    # there is a case-sensitivity issue in the cmake files of some ROCm libraries. Fix this here until the fix is released
-    sed -i 's/find_dependency(hip)/find_dependency(HIP)/g' /opt/rocm/rocsparse/lib/cmake/rocsparse/rocsparse-config.cmake
-    sed -i 's/find_dependency(hip)/find_dependency(HIP)/g' /opt/rocm/rocfft/lib/cmake/rocfft/rocfft-config.cmake
-    sed -i 's/find_dependency(hip)/find_dependency(HIP)/g' /opt/rocm/miopen/lib/cmake/miopen/miopen-config.cmake
-    sed -i 's/find_dependency(hip)/find_dependency(HIP)/g' /opt/rocm/rocblas/lib/cmake/rocblas/rocblas-config.cmake
+                   hipcub \
+                   rocthrust \
+                   rccl \
+                   rocprofiler-dev \
+                   roctracer-dev
 }
 
 install_centos() {
@@ -65,19 +51,17 @@ install_centos() {
 
   yum install -y \
                    rocm-dev \
-                   rocm-libs \
                    rocm-utils \
                    rocfft \
                    miopen-hip \
-                   miopengemm \
                    rocblas \
-                   rocm-profiler \
-                   cxlactivitylogger \
-                   rocsparse \
                    hipsparse \
                    rocrand \
                    rccl \
-                   hip-thrust
+                   hipcub \
+                   rocthrust \
+                   rocprofiler-dev \
+                   roctracer-dev
 }
  
 # Install Python packages depending on the base OS

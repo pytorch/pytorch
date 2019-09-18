@@ -93,6 +93,8 @@ def _git_archive_link(repo_owner, repo_name, branch):
 
 def _download_archive_zip(url, filename):
     sys.stderr.write('Downloading: \"{}\" to {}\n'.format(url, filename))
+    # We use a different API for python2 since urllib(2) doesn't recognize the CA
+    # certificates in older Python
     response = urlopen(url)
     with open(filename, 'wb') as f:
         while True:
@@ -369,6 +371,8 @@ def load(github, model, *args, **kwargs):
 
 def _download_url_to_file(url, dst, hash_prefix, progress):
     file_size = None
+    # We use a different API for python2 since urllib(2) doesn't recognize the CA
+    # certificates in older Python
     u = urlopen(url)
     meta = u.info()
     if hasattr(meta, 'getheaders'):
@@ -378,7 +382,12 @@ def _download_url_to_file(url, dst, hash_prefix, progress):
     if content_length is not None and len(content_length) > 0:
         file_size = int(content_length[0])
 
-    f = tempfile.NamedTemporaryFile(delete=False)
+    # We deliberately save it in a temp file and move it after
+    # download is complete. This prevents a local working checkpoint
+    # being overriden by a broken download.
+    dst_dir = os.path.dirname(dst)
+    f = tempfile.NamedTemporaryFile(delete=False, dir=dst_dir)
+
     try:
         if hash_prefix is not None:
             sha256 = hashlib.sha256()

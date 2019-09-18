@@ -1,9 +1,6 @@
 # this code should be common among cwrap and ATen preprocessing
 # for now, I have put it in one place but right now is copied out of cwrap
 
-from copy import deepcopy
-from itertools import product
-
 
 def parse_arguments(args):
     new_args = []
@@ -56,7 +53,7 @@ def set_declaration_defaults(declaration):
 
 def filter_unique_options(options, allow_kwarg, type_to_signature, remove_self):
     def exclude_arg(arg):
-        return arg.get('ignore_check') or arg['type'] == 'CONSTANT'
+        return arg['type'] == 'CONSTANT'
 
     def exclude_arg_with_self_check(arg):
         return exclude_arg(arg) or (remove_self and arg['name'] == 'self')
@@ -94,47 +91,10 @@ def filter_unique_options(options, allow_kwarg, type_to_signature, remove_self):
     return unique
 
 
-def enumerate_options_due_to_default(declaration,
-                                     allow_kwarg=True, type_to_signature=None, remove_self=True):
-
-    if type_to_signature is None:
-        type_to_signature = []
-
-    # Checks to see if an argument with a default keyword is a Tensor that
-    # by default can be NULL. In this case, instead of generating another
-    # option that excludes this argument, we will instead generate a single
-    # function call that allows for the Tensor to be NULL
-    def is_nullable_tensor_arg(arg):
-        return arg['type'] == 'THTensor*' and arg['default'] == 'nullptr'
-
-    # TODO(zach): in cwrap this is shared among all declarations
-    # but seems to assume that all declarations will have the same
-    new_options = []
-    for option in declaration['options']:
-        optional_args = []
-        for i, arg in enumerate(option['arguments']):
-            if 'default' in arg:
-                optional_args.append(i)
-        for permutation in product((True, False), repeat=len(optional_args)):
-            option_copy = deepcopy(option)
-            option_copy['has_full_argument_list'] = sum(permutation) == len(optional_args)
-            for i, bit in zip(optional_args, permutation):
-                arg = option_copy['arguments'][i]
-                # PyYAML interprets NULL as None...
-                arg['default'] = 'NULL' if arg['default'] is None else arg['default']
-                if not bit:
-                    arg['declared_type'] = arg['type']
-                    arg['type'] = 'CONSTANT'
-                    arg['ignore_check'] = True
-            new_options.append(option_copy)
-    declaration['options'] = filter_unique_options(new_options,
-                                                   allow_kwarg, type_to_signature, remove_self)
-
-
-def sort_by_number_of_options(declaration, reverse=True):
-    def num_checked_args(option):
-        return sum(map(lambda a: not a.get('ignore_check', False), option['arguments']))
-    declaration['options'].sort(key=num_checked_args, reverse=reverse)
+def sort_by_number_of_args(declaration, reverse=True):
+    def num_args(option):
+        return len(option['arguments'])
+    declaration['options'].sort(key=num_args, reverse=reverse)
 
 
 class Function(object):

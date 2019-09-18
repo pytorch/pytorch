@@ -435,6 +435,10 @@ public:
   // TODO Test use_count
   size_t use_count() const;
 
+  // private API for now because the return type will change to TypePtr
+  // instead of optional<TypePtr> once types are mandatory.
+  optional<TypePtr> _elementType() const;
+
 private:
   explicit List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);
   friend struct IValue;

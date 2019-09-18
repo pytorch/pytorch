@@ -40,8 +40,8 @@ __global__ void MaxPoolForward(const int nthreads, const scalar_t* bottom_data,
       hstart += dilation_h;
     while(wstart < 0)
       wstart += dilation_w;
-    accscalar_t maxval = THCNumerics<accscalar_t>::min();
-    int maxidx = -1;
+    accscalar_t maxval = at::numeric_limits<accscalar_t>::lower_bound(); // -Infinity
+    int maxidx = hstart * width + wstart;
     bottom_data += (n * channels + c) * height * width;
     for (int h = hstart; h < hend; h += dilation_h) {
       for (int w = wstart; w < wend; w += dilation_w) {
@@ -147,26 +147,31 @@ void max_pool2d_with_indices_out_cuda_template(
                   {output_arg, indices_arg, input_arg});
 
   // #20866, #22032: Guarantee this for the official C++ API?
-  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
-              (stride.empty() || stride.size() == 2) &&
-              (padding.size() == 1 || padding.size() == 2) &&
-              (dilation.size() == 1 || dilation.size() == 2),
-    "max_pool2d_with_indices: internal error: all IntArrayRef sizes must be 2");
-
-  TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input");
-
+  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
+    "max_pool2d: kernel_size must either be a single int, or a tuple of two ints")
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
+  // NB: stride default is not expressible as an integer constant, so we accept
+  // empty stride for this case
+  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
+    "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);
+  const int dW = stride.empty() ? kW :
+                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
 
+  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
+    "max_pool2d: padding must be either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
+  TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
+    "max_pool2d: dilation must be either a single int, or a tuple of two ints");
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
+
+  TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
+    "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
   const int64_t nInputPlane = input_.size(-3);
@@ -197,9 +202,9 @@ void max_pool2d_with_indices_out_cuda_template(
     [&] {
       using accscalar_t = acc_type<scalar_t, true>;
 
-      scalar_t *output_data = output.data<scalar_t>();
-      scalar_t *input_data = input.data<scalar_t>();
-      int64_t *indices_data = indices.data<int64_t>();
+      scalar_t *output_data = output.data_ptr<scalar_t>();
+      scalar_t *input_data = input.data_ptr<scalar_t>();
+      int64_t *indices_data = indices.data_ptr<int64_t>();
 
       MaxPoolForward<scalar_t, scalar_t>
         <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -237,26 +242,31 @@ void max_pool2d_with_indices_backward_out_cuda_template(
                   {gradInput_arg, gradOutput_arg, input_arg, indices_arg});
 
   // #20866, #22032: Guarantee this for the official C++ API?
-  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
-              (stride.empty() || stride.size() == 2) &&
-              (padding.size() == 1 || padding.size() == 2) &&
-              (dilation.size() == 1 || dilation.size() == 2),
-    "max_pool2d_with_indices: internal error: all IntArrayRef sizes must be 2");
-
-  TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input");
-
+  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
+    "max_pool2d: kernel_size must either be a single int, or a tuple of two ints")
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
+  // NB: stride default is not expressible as an integer constant, so we accept
+  // empty stride for this case
+  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
+    "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);
+  const int dW = stride.empty() ? kW :
+                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
 
+  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
+    "max_pool2d: padding must be either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
+  TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
+    "max_pool2d: dilation must be either a single int, or a tuple of two ints");
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
+
+  TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
+    "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   const Tensor input = input_.contiguous();
 
@@ -299,9 +309,9 @@ void max_pool2d_with_indices_backward_out_cuda_template(
     [&] {
       using accscalar_t = acc_type<scalar_t, true>;
 
-      scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-      scalar_t *gradInput_data = gradInput.data<scalar_t>();
-      int64_t *indices_data = indices.data<int64_t>();
+      scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+      scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+      int64_t *indices_data = indices.data_ptr<int64_t>();
 
       MaxPoolBackward<scalar_t, accscalar_t>
         <<<grid, BACKWARD_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(

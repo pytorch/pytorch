@@ -7,19 +7,20 @@ __all__ = ['get_rng_state', 'get_rng_state_all',
            'seed', 'seed_all', 'initial_seed']
 
 
-def get_rng_state(device=torch.device('cuda')):
-    r"""Returns the random number generator state of the current
-    GPU as a ByteTensor.
+def get_rng_state(device='cuda'):
+    r"""Returns the random number generator state of the specified GPU as a ByteTensor.
 
     Args:
         device (torch.device or int, optional): The device to return the RNG state of.
-            Default: ``torch.device('cuda')`` (i.e., the current CUDA device).
+            Default: ``'cuda'`` (i.e., ``torch.device('cuda')``, the current CUDA device).
 
     .. warning::
         This function eagerly initializes CUDA.
     """
     _lazy_init()
-    if isinstance(device, int):
+    if isinstance(device, str):
+        device = torch.device(device)
+    elif isinstance(device, int):
         device = torch.device('cuda', device)
     idx = device.index
     if idx is None:
@@ -37,16 +38,18 @@ def get_rng_state_all():
     return results
 
 
-def set_rng_state(new_state, device=torch.device('cuda')):
-    r"""Sets the random number generator state of the current GPU.
+def set_rng_state(new_state, device='cuda'):
+    r"""Sets the random number generator state of the specified GPU.
 
     Args:
         new_state (torch.ByteTensor): The desired state
         device (torch.device or int, optional): The device to set the RNG state.
-            Default: ``torch.device('cuda')`` (i.e., the current CUDA device).
+            Default: ``'cuda'`` (i.e., ``torch.device('cuda')``, the current CUDA device).
     """
     new_state_copy = new_state.clone()
-    if isinstance(device, int):
+    if isinstance(device, str):
+        device = torch.device(device)
+    elif isinstance(device, int):
         device = torch.device('cuda', device)
 
     def cb():

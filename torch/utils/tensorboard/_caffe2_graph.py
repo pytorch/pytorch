@@ -708,7 +708,7 @@ def _operators_to_graph_def(
         # Show a cleaner, easier-to-interpret version of the model graph
         blobs = input_blobs
 
-    for blob in blobs:
+    for blob in sorted(blobs):
         current_graph.node.extend([_blob_to_node(producing_ops, {}, blob)])
 
     return current_graph
