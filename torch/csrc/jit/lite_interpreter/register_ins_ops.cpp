@@ -110,9 +110,9 @@ static auto registry0 = torch::RegisterOperators().op(
 ).op(
   "aten::t",
   torch::RegisterOperators::options().kernel<decltype(at::t), &at::t>(c10::TensorTypeId::CPUTensorId)
-).op(
-  "aten::size.int",
-  torch::RegisterOperators::options().kernel<decltype(at::size), &at::size>(c10::TensorTypeId::CPUTensorId)
+//).op(
+//  "aten::size.int",
+//  torch::RegisterOperators::options().kernel<decltype(at::size), &at::size>(c10::TensorTypeId::CPUTensorId)
 ).op(
   "aten::addmm",
   torch::RegisterOperators::options().kernel<decltype(at::addmm), &at::addmm>(c10::TensorTypeId::CPUTensorId)

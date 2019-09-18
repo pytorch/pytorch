@@ -1,20 +1,9 @@
 #pragma once
 
-#include <string>
-#include <vector>
-
-#include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
-#include <c10/util/ArrayRef.h>
-#include <torch/csrc/utils/disallow_copy.h>
-
 #include "pickler.h"
 
 namespace torch {
 namespace jit {
-
-using ObjCallback =
-    std::function<IValue(const c10::QualifiedName&, IValue)>;
 
 // [unpickler refactor] there is some cruft around PickleOpCode::BUILD,
 // PickleOpCode::NEWOBJ, and the last_opcode_ member below that should be deleted at
@@ -27,23 +16,22 @@ class Unpickler {
   // tensors inside the pickle are references to the tensor_table
   Unpickler(
       std::function<bool(char*, size_t)> reader,
-      ObjCallback obj_callback,
+      ClassResolver class_resolver,
       const std::vector<at::Tensor>* tensor_table)
       : reader_(reader),
         tensor_table_(tensor_table),
-        obj_callback_(obj_callback) {}
+        class_resolver_(std::move(class_resolver)) {}
 
   // tensors inside the pickle contain meta-data, the raw tensor
   // dead is retrieved by calling `read_record`.
   Unpickler(
       std::function<bool(char*, size_t)> reader,
-      ObjCallback obj_callback,
+      ClassResolver class_resolver,
       std::function<at::DataPtr(const std::string&)> read_record,
-      c10::optional<at::Device> device,
-      bool data_only = false)
+      c10::optional<at::Device> device)
       : reader_(reader),
         tensor_table_(nullptr),
-        obj_callback_(obj_callback),
+        class_resolver_(std::move(class_resolver)),
         read_record_(std::move(read_record)),
         device_(std::move(device)) {}
 
@@ -85,7 +73,7 @@ class Unpickler {
   const std::vector<at::Tensor>* tensor_table_;
 
   // optionally nullptr, needs to be present for creating classes
-  ObjCallback obj_callback_;
+  ClassResolver class_resolver_;
   IValue empty_tuple_;
 
   std::function<at::DataPtr(const std::string&)> read_record_;

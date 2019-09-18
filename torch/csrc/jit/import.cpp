@@ -132,13 +132,18 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
     }
   };
 
+  auto class_resolver = [&](const c10::QualifiedName& qn) {
+    importCallback(qn.prefix());
+    return c10::StrongTypePtr(
+        compilation_unit_, compilation_unit_->get_class(qn));
+  };
   auto read_record = [&](const std::string& name) {
     std::stringstream ss;
     ss << archive_name << "/" << name;
     return std::get<0>(reader_->getRecord(ss.str()));
   };
   Unpickler unpickler(
-      reader, std::move(obj_callback), std::move(read_record), device_);
+      reader, std::move(class_resolver), std::move(read_record), device_);
   return unpickler.parse_ivalue();
 }
 
