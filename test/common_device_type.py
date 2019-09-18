@@ -10,13 +10,22 @@ from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
 # [WRITING TESTS]
 #
 # Write your test class as usual except:
-#   (1) Only define test methods in the test class itself. Helper methods
-#       and non-methods must be inherited. This limitation is for Python2
-#       compatibility.
-#   (2) Each test method should have the signature
-#           testX(self, device)
-#       The device argument will be a string like 'cpu' or 'cuda.'
-#   (3) Prefer using test decorators defined in this file to others.
+#   (1) Each test method should have one of two signatures:
+#
+#           (1a) testX(self, device)
+#
+#           (1b) @dtypes(<list of dtypes>)
+#                testX(self, device, dtype)
+#
+#       Note in the latter case the dtypes decorator with a nonempty list of
+#       valid dtypes is not optional.
+#
+#       When the test is called it will be given a device, like 'cpu' or
+#       'cuda,' and a dtype from the list specified in @dtypes. If
+#       device-specific dtypes are specified using @dtypesIfCPU or
+#       @dtypesIfCUDA then those devices will only see the dtypes specified
+#       for them.
+#   (2) Prefer using test decorators defined in this file to others.
 #       For example, using the @skipIfNoLapack decorator instead of the
 #       @skipCPUIfNoLapack will cause the test to not run on CUDA if
 #       LAPACK is not available, which is wrong. If you need to use a decorator
@@ -29,12 +38,20 @@ from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
 # After defining your test class call instantiate_device_type_tests on it
 # and pass in globals() for the second argument. This will instantiate
 # discoverable device-specific test classes from your generic class. It will
-# also hide the tests in your generic class so they're not run directly.
+# also hide the tests in your generic class so they're not run.
 #
-# For each generic testX, a new test textX_<device_type>  will be created.
-# These tests will be put in classes named GenericTestClassName<DEVICE_TYPE>.
-# For example, test_diagonal in TestTorchDeviceType becomes test_diagonal_cpu
-# in TestTorchDeviceTypeCPU and test_diagonal_cuda in TestTorchDeviceTypeCUDA.
+# If you device-generic test class is TestClass then new classes with names
+# TestClass<DEVICE_TYPE> will be created for each available device type.
+# TestClassCPU and TestClassCUDA, for example. Tests in these classes also
+# have the device type and dtype, if provided, appended to their original
+# name. testX, for instance, becomes testX_<device_type> or
+# testX_<device_type>_<dtype>.
+#
+# More concretely, TestTorchDeviceType becomes TestTorchDeviceTypeCPU,
+# TestTorchDeviceTypeCUDA, ... test_diagonal in TestTorchDeviceType becomes
+# test_diagonal_cpu, test_diagonal_cuda, ... test_erfinv, which accepts a dtype,
+# becomes test_erfinv_cpu_float, test_erfinv_cpu_double, test_erfinv_cuda_half,
+# ...
 #
 # In short, if you write a test signature like
 #   def textX(self, device)
@@ -47,13 +64,18 @@ from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
 # These tests can be run directly like normal tests:
 # "python test_torch.py TestTorchDeviceTypeCPU.test_diagonal_cpu"
 #
-# Collections of tests can be run using pytest filtering. For example,
+# All the tests for a particular device type can be run using the class, and
+# other collections of tests can be run using pytest filtering, like
+#
 # "pytest test_torch.py -k 'test_diag'"
-# will run test_diag on every available device.
+#
+# which will run test_diag on every available device.
+#
 # To specify particular device types the 'and' keyword can be used:
-# "pytest test_torch.py -k 'test_diag and cpu'"
-# pytest filtering also makes it easy to run all tests on a particular device
-# type.
+#
+# "pytest test_torch.py -k 'test_erfinv and cpu'"
+#
+# will run test_erfinv on all cpu dtypes.
 #
 # [ADDING A DEVICE TYPE]
 #
@@ -162,16 +184,8 @@ def instantiate_device_type_tests(generic_test_class, scope):
     generic_members = set(dir(generic_test_class)) - set(dir(empty_class))
     generic_tests = [x for x in generic_members if x.startswith('test')]
 
-    # TODO: remove
-    # Checks that the generic test suite only has test members
-    # Note: for Python2 compat.
-    # Note: Nontest members can be inherited, so if you want to use a helper
-    #   function you can put it in a base class.
-    # generic_nontests = generic_members - set(generic_tests)
-    #assert len(generic_nontests) == 0, "Generic device class has non-test members"
-
+    # Creates device-specific test cases
     for base in device_type_test_bases:
-        # Creates the device-specific test case
         class_name = generic_test_class.__name__ + base.device_type.upper()
         device_type_test_class = type(class_name, (base, empty_class), {})
 
@@ -270,21 +284,29 @@ DOCUMENTED_TENSOR_TYPES = [torch.float64, torch.float32, torch.float16,
                            torch.uint8, torch.bool]
 
 # SCALAR_TYPES = DOCUMENTED_TENSOR_TYPES - half and bool
+# Note: derived from AT_FORALL_SCALAR_TYPES
 SCALAR_TYPES = [torch.float64, torch.float32,
                 torch.int64, torch.int32, torch.int16, torch.int8,
                 torch.uint8]
 
+QUANTIZED_TYPES = [torch.quint8, torch.qint8, torch.qint32]
+
+ALL_TYPES = [torch.bfloat16] + DOCUMENTED_TENSOR_TYPES + QUANTIZED_TYPES
+
+
 # Decorator that instantiates a variant of the test for each given dtype.
 # Notes:
 #   (1) Tests that accept the dtype argument MUST use this decorator.
-#   (2) Can be overriden using dtypesIfCPU or dtypesIfCUDA.
+#   (2) Can be overriden for the CPU or CUDA, respectively, using dtypesIfCPU
+#       or dtypesIfCUDA.
 #   (3) Prefer the existing decorators to defining the 'device_type' kwarg.
 class dtypes(object):
 
     # Note: *args, **kwargs for Python2 compat.
     # Python 3 allows (self, *args, device_type='all').
     def __init__(self, *args, **kwargs):
-        assert all(arg in DOCUMENTED_TENSOR_TYPES for arg in args), "Unknown dtype in {0}".format(str(args))
+        assert args is not None and len(args) != 0, "No dtypes given"
+        assert all(arg in ALL_TYPES for arg in args), "Unknown dtype in {0}".format(str(args))
         self.args = args
         self.device_type = kwargs.get('device_type', 'all')
 

@@ -7835,9 +7835,9 @@ def add_neg_dim_tests():
         assert not hasattr(_TestTorchMixin, test_name), "Duplicated test name: " + test_name
         setattr(_TestTorchMixin, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
 
-# Helpers for device-generic tests.
-# Must be in a different, inherited class for Python2 compat.
-class GenericDeviceTypeHelpers(object):
+
+# Device-generic tests. Instantiated below and not run directly.
+class TestTorchDeviceType(TestCase):
     def check_internal_mem_overlap(self, inplace_op, num_inputs, device,
                                    expected_failure=False):
         if isinstance(inplace_op, str):
@@ -7948,8 +7948,6 @@ class GenericDeviceTypeHelpers(object):
             self.assertEqual(actual, expected, allow_inf=True)
             self.assertEqual(actual2, expected, allow_inf=True)
 
-# Device-generic tests. Instantiated below and not run directly.
-class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
     def _select_broadcastable_dims(self, dims_full=None):
         # select full dimensionality
         if dims_full is None:
