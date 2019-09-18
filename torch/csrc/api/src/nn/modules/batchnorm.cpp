@@ -12,7 +12,6 @@
 
 namespace torch {
 namespace nn {
-BatchNormOptions::BatchNormOptions(int64_t features) : features_(features) {}
 
 BatchNormImpl::BatchNormImpl(BatchNormOptions options) : options(options) {
   reset();

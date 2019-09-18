@@ -32,6 +32,29 @@ PicklerClass getClass(const std::string& str) {
   AT_ERROR("Unknown class name for unpickler: ", str);
 }
 
+static void postSetStateValidate(const IValue& v) {
+  auto obj = v.toObject();
+  const auto& objType = obj->type();
+  for (size_t i = 0; i < objType->numAttributes(); i++) {
+    const auto& attrType = objType->getAttribute(i);
+    const auto& attrName = objType->getAttributeName(i);
+    const auto& slot = obj->getSlot(i);
+    // const auto attrType = objType->getAttribute(i);
+    // Verify that all the non-optional attributes have been initialized
+    // TODO: Issue #20497
+    if (attrType->kind() != TypeKind::OptionalType) {
+      TORCH_CHECK(
+          !slot.isNone(),
+          "The field '",
+          attrName,
+          "' was left unitialized after __setstate__, but expected a ",
+          "value of type '",
+          attrType->python_str(),
+          "'");
+    }
+  }
+}
+
 IValue Unpickler::parse_ivalue() {
   run();
   TORCH_CHECK(
@@ -194,16 +217,16 @@ PickleOpCode Unpickler::readInstruction() {
       stack_.emplace_back(tuple);
     } break;
     case PickleOpCode::TUPLE1: {
-        auto tuple = c10::ivalue::Tuple::create(pop(stack_, 1));
-        stack_.emplace_back(tuple);
+      auto tuple = c10::ivalue::Tuple::create(pop(stack_, 1));
+      stack_.emplace_back(tuple);
     } break;
     case PickleOpCode::TUPLE2: {
-        auto tuple = c10::ivalue::Tuple::create(pop(stack_, 2));
-        stack_.emplace_back(tuple);
+      auto tuple = c10::ivalue::Tuple::create(pop(stack_, 2));
+      stack_.emplace_back(tuple);
     } break;
     case PickleOpCode::TUPLE3: {
-        auto tuple = c10::ivalue::Tuple::create(pop(stack_, 3));
-        stack_.emplace_back(tuple);
+      auto tuple = c10::ivalue::Tuple::create(pop(stack_, 3));
+      stack_.emplace_back(tuple);
     } break;
     case PickleOpCode::EMPTY_DICT:
       stack_.emplace_back(c10::impl::GenericDict(c10::impl::deprecatedUntypedDict()));
@@ -241,6 +264,9 @@ PickleOpCode Unpickler::readInstruction() {
           stack_.pop_back();
           switch (pickler_class) {
             case PicklerClass::TENSOR:
+              TORCH_INTERNAL_ASSERT(
+                  tensor_table_,
+                  "Pickler tried to write a tensor but had no tensor table to write to");
               stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
               break;
             case PicklerClass::INTLIST:
@@ -260,7 +286,7 @@ PickleOpCode Unpickler::readInstruction() {
             case PicklerClass::TENSOR:
               TORCH_CHECK(
                   tensor_table_,
-                  "Found a tensor table reference but Pickler"
+                  "Found a tensor table reference but Unpickler"
                   " has no tensor table\n");
               stack_.emplace_back(tensor_table_->at(data.toInt()));
               break;
@@ -338,14 +364,35 @@ PickleOpCode Unpickler::readInstruction() {
         stack_.emplace_back(int64_t(*scalar_type));
         return opcode;
       } else {
-        AT_ASSERT(obj_callback_);
-        auto qn = c10::QualifiedName(module_name, class_name);
-        globals_.emplace_back([this, qn] {
-          auto input = std::move(stack_.back());
-          stack_.pop_back();
-          auto output = obj_callback_(qn, input);
-          stack_.emplace_back(std::move(output));
-        });
+        AT_ASSERT(class_resolver_);
+        at::StrongTypePtr type =
+            class_resolver_(c10::QualifiedName(module_name, class_name));
+        auto cls = type.type_->expect<at::ClassType>();
+        size_t n = cls->numAttributes();
+        if (checkHasValidSetGetState(type.type_)) {
+          globals_.emplace_back([this, type, n] {
+            auto arg = std::move(stack_.back());
+            stack_.pop_back();
+            auto obj = c10::ivalue::Object::create(type, n);
+            // XXX: Do not optimize __setstate__, so that we don't try to
+            // specialize the class before it is initialized.
+            setGraphExecutorOptimize(false);
+            (*type.type_->getMethod("__setstate__"))({obj, arg});
+            setGraphExecutorOptimize(true);
+            postSetStateValidate(obj);
+            stack_.emplace_back(std::move(obj));
+          });
+        } else {
+          globals_.emplace_back([this, type, cls, n] {
+            auto dict = std::move(stack_.back()).toGenericDict();
+            stack_.pop_back();
+            auto obj = c10::ivalue::Object::create(type, n);
+            for (size_t i = 0; i < n; ++i) {
+              obj->setSlot(i, dict.at(cls->getAttributeName(i)));
+            }
+            stack_.emplace_back(std::move(obj));
+          });
+        }
       }
       stack_.emplace_back(int64_t(globals_.size() - 1));
     } break;
@@ -385,7 +432,7 @@ PickleOpCode Unpickler::readInstruction() {
           std::move(storage_ptr),
           /*allocator=*/nullptr,
           /*resizable=*/false); // NB: we didn't set any allocator for the
-                                // tensor
+          // tensor
       auto options = at::CPU(type).options();
       at::Tensor tensor;
       if (options.backend() == c10::Backend::QuantizedCPU) {
