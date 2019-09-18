@@ -2,7 +2,7 @@
 # ATTENTION! This test will most probably fail if you install TensorRT 6.0.1 only.
 # That's because it's shipped with older version of ONNX parser not supporting some
 # required features. To make it work please use new version: https://github.com/onnx/onnx-tensorrt
-# Just clone it and do something like the following:
+# Just clone it and do something like this:
 #
 # ~/pt/third_party/onnx-tensorrt$ mkdir build/
 # ~/pt/third_party/onnx-tensorrt$ cd build/
@@ -10,6 +10,7 @@
 # ~/pt/third_party/onnx-tensorrt/build$ make
 # ~/pt/third_party/onnx-tensorrt/build$ sudo cp libnvonnxparser.so.6.0.1 /usr/lib/x86_64-linux-gnu
 #
+# This note is valid for 6.0.1 release only. September 18th, 2019.
 ###################################################################################################
 
 import os
@@ -155,7 +156,7 @@ class Test_PT_ONNX_TRT(unittest.TestCase):
             self.fail("Model {} is not yet supported".format(model_name))
 
         shape = (1,) + input_shape
-        dummy_input  = (torch.randn(shape),) # torch.randn(shape), torch.randn(shape)) #.cuda()
+        dummy_input  = (torch.randn(shape),)
         onnx_name = model_name + ".onnx"
 
         torch.onnx.export(model,
@@ -183,14 +184,10 @@ class Test_PT_ONNX_TRT(unittest.TestCase):
 
                     amax = np.argmax(h_output)
                     pred = self.labels[amax]
-                    if "_".join(pred.split()) in os.path.splitext(os.path.basename(test_case))[0]:
-                        pass
-                        # print("Correctly recognized " + test_case + " as " + pred)
-                    else:
+                    if "_".join(pred.split()) not in\
+                            os.path.splitext(os.path.basename(test_case))[0]:
                         err_count = err_count + 1
-                        # print("Incorrectly recognized " + test_case + " as " + pred)
                 self.assertLessEqual(err_count, 1, "Too many recognition errors")
-
 
     def test_alexnet(self):
         self._test_model("alexnet", (3, 227, 227))
