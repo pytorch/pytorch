@@ -489,12 +489,8 @@ THFormal = TypedDict('THFormal', {
     'default': str,
     'output': bool,
     'size': int,
-    'declared_type': str,
-    'ignore_check': bool,
     'allocate': bool,
     'mask': bool,
-    'if_true': bool,
-    'if_false': bool,
     'wrap_dim': str,
     # Broadcast is originally a str but gets unwrapped to a List or Dict in-place
     'broadcast': Any,
@@ -666,9 +662,9 @@ def device_guard(option, dispatch_options, dispatch_tensor):
 
 
 def named_guard(option, tensors, tensorlists):
-    if not option.get('named_guard', True) or (len(tensors) + len(tensorlists) == 0):
+    if option.get('supports_named_tensor', False) or (len(tensors) + len(tensorlists) == 0):
         return ''
-    # Override: named_guard = True for _th_ functions. This is because:
+    # Override: supports_named_tensor = False for _th_ functions. This is because:
     # There is always some at:: function that calls the _th_ function.
     if option['name'].startswith('_th_'):
         return ''
@@ -679,7 +675,10 @@ def named_guard(option, tensors, tensorlists):
         named_conditions.append('at::has_names({})'.format(tensorlist))
     return ("""\
 if ({named_conditions}) {{
-    AT_ERROR("{op}: no named inference rule implemented.");
+    AT_ERROR(
+        "{op} is not yet supported with named tensors. Please drop names via "
+        "`tensor = tensor.renamed(None)`, call the op with an unnamed tensor, "
+        "and set names on the result of the operation.");
 }}""".format(named_conditions=' || '.join(named_conditions), op=option['name']))
 
 
@@ -737,8 +736,6 @@ def create_generic(top_env, declarations):
         if default is None:
             # cause the default constructor for the object to run
             return '{}'
-        if 'if_true' in argument:
-            return argument['default'] == argument['if_true']
         for pattern, replacement in HEADER_CONSTANT_REPLACEMENTS:
             default = re.sub(pattern, replacement, str(default))
         if type_str in {'Scalar', 'int64_t', 'double'}:
@@ -913,30 +910,6 @@ def create_generic(top_env, declarations):
             broadcast_actuals = [broadcast_arg['name'], broadcast_dims_init_list]
 
         return broadcast_actuals
-
-    def emit_nn_body(option):
-        # type: (FunctionOption) -> Union[str, List[str]]
-        # Concrete definition on Type.cpp for NN functions. Delegates to the
-        # xxx_forward variant variant after creating any necessary buffers.
-        actuals = option['actuals']
-        base_name = option['name'][:-1] if option['inplace'] else option['name']
-        fwd_name = option['api_name'].replace(base_name, base_name + '_forward')
-
-        if len(option['buffers']) == 0:
-            return 'return {}({});'.format(fwd_name, ', '.join(actuals))
-
-        body = []  # type: List[str]
-        if option['api_name'].endswith('_out'):
-            # _out variants must create buffers and insert them in the
-            # arguments list between output and input arguments
-            for buffer in option['buffers']:
-                body.append('Tensor {} = at::empty({{0}}, this->options());'.format(buffer['name']))
-            actuals = [arg['name'] for arg in option['arguments'] if arg.get('output')]
-            actuals += [buffer['name'] for buffer in option['buffers']]
-            actuals += [arg['name'] for arg in option['arguments'] if not arg.get('output')]
-
-        body.append('return std::get<0>({}({}));'.format(fwd_name, ', '.join(actuals)))
-        return body
 
     def process_option(option):
         # type: (FunctionOption) -> None
@@ -1404,10 +1377,6 @@ def create_derived(backend_type_env, declarations):
         # type: (THFormal) -> bool
         return argument.get('is_nullable', False)
 
-    def bool_option_is_string(argument):
-        # type: (THFormal) -> bool
-        return 'if_true' in argument and isinstance(argument['if_true'], string_type)
-
     def get_argument(env, argument, option):
         # type: (Environment, THFormal, FunctionOption) -> str
         if requires_checked_cast(argument):
@@ -1417,17 +1386,7 @@ def create_derived(backend_type_env, declarations):
                 checked_use = CHECKED_USE_NULLABLE.substitute(
                     env={}, arg_name=argument['name'], usage=checked_use)
             return checked_use
-        elif argument['type'] == 'bool' and 'if_true' in argument:
-            if bool_option_is_string(argument):
-                tpl = '({}) ? "{}" : "{}"'
-            else:
-                tpl = '({}) ? {} : {}'
-            return tpl.format(argument['name'],
-                              argument['if_true'], argument['if_false'])
         elif argument['type'] == 'CONSTANT':
-            # this is a bool that is actually a string...
-            if bool_option_is_string(argument):
-                return '"{}"'.format(argument['name'])
             v = str(argument.get('default', argument['name']))
             for pattern, replacement in CONSTANT_REPLACEMENTS:
                 v = re.sub(pattern, replacement, v)
