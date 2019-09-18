@@ -5,7 +5,6 @@ from abc import ABCMeta, abstractmethod
 from functools import partial
 
 from torch._jit_internal import Optional, List
-import numpy as np
 import torch
 import torch.nn as nn
 
