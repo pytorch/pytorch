@@ -52,7 +52,7 @@ Message processRequestBlocking(Message&& request) {
       try {
         std::vector<torch::Tensor> tensorTable;
         auto payload = PythonRpcHandler::getInstance().generatePythonUDFResult(
-            request, &tensorTable);
+            request, tensorTable);
         return Message(
             std::move(payload),
             std::move(tensorTable),

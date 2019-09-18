@@ -26,6 +26,17 @@ def my_function(a, b, c):
 # it is used to test python user defined function with tensor args over rpc
 def my_tensor_function(a, b):
     return a + b
+# it is used to test python user defined function with args that contain
+# tensors over rpc
+# a: list, b: my_class, c: dict
+def my_complex_tensor_function(list_input, my_class_input, dict_input):
+    res = my_class_input.a
+    for t in list_input:
+        res += t
+    for k, v in dict_input.items():
+        res += v
+    return res
+
 
 # it is used to test python user defined function over rpc
 def no_result():
@@ -353,10 +364,40 @@ class RpcTest(MultiProcessTestCase):
         ret = dist.rpc("worker{}".format(dst_rank),
                        my_tensor_function,
                        args=(torch.ones(n, n), torch.ones(n, n)))
-        self.assertEqual(ret, torch.ones(n, n) + torch.ones(n, n))
+        self.assertEqual(ret,
+                         my_tensor_function(torch.ones(n, n),
+                                            torch.ones(n, n)))
 
-    # TODO, add more unit tests for list, tuple, dict and user defined class
-    # that have tensors, add unit tests for multiple async calls
+    @_wrap_with_rpc
+    def test_py_tensors_multi_async_call(self):
+        futs = []
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        for i in range(10):
+            fut = dist.rpc("worker{}".format(dst_rank),
+                           my_tensor_function,
+                           args=(torch.ones(i, i), torch.ones(i, i)),
+                           async_call=True)
+            futs.append(fut)
+
+        j = 0
+        for fut in futs:
+            self.assertEqual(fut.wait(),
+                             my_tensor_function(torch.ones(j, j),
+                                                torch.ones(j, j)))
+            j += 1
+
+    @_wrap_with_rpc
+    def test_py_tensors_in_container(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        a = [torch.ones(n, n), torch.ones(n, n)]
+        b = my_class(torch.ones(n, n))
+        c = {"foo": torch.ones(n, n), "bar": torch.ones(n, n)}
+        ret = dist.rpc("worker{}".format(dst_rank),
+                       my_complex_tensor_function,
+                       args=(a, b, c))
+        self.assertEqual(ret, my_complex_tensor_function(a, b, c))
 
     @_wrap_with_rpc
     def test_py_function_exception(self):
