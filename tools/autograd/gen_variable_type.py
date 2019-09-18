@@ -350,9 +350,13 @@ def format_trace_op_name(declaration):
 
     return SELECT.substitute(select_params)
 
+def isTensorOption(args):
+        return any(arg['type'] == 'const TensorOptions &' for arg in args)
+
 def collapseTraceTO(args):
     a = any(arg['type'] == 'c10::optional<at::ScalarType>' for arg in args) and any(arg['type'] == 'c10::optional<at::Layout>' for arg in args) and any(arg['type'] == 'c10::optional<at::Device>' for arg in args) and any(arg['type'] == 'c10::optional<bool>' for arg in args)
     b = any(arg['type'] == 'at::ScalarType' for arg in args) and any(arg['type'] == 'at::Layout' for arg in args) and any(arg['type'] == 'at::Device' for arg in args) and any(arg['type'] == 'bool' for arg in args)
+    
     if a or b:
         index = 0
         for i in range(len(args)):
@@ -382,20 +386,16 @@ def collapseTraceTO(args):
 
 def collapseTO2(args):
     a = 'ScalarType dtype' in args and 'Layout layout' in args and 'Device device' in args and 'bool pin_memory' in args
-    b = 'at::ScalarType dtype' in args and 'at::Layout layout' in args and 'at::Device device' in args and 'bool pin_memory' in args
     c = 'c10::optional<ScalarType> dtype' in args and 'c10::optional<Layout> layout' in args and 'c10::optional<Device> device' in args and 'c10::optional<bool> pin_memory' in args
 
     index = -1
     if a:
         index = args.index('ScalarType dtype')
 
-    if b:
-        index = args.index('at::ScalarType dtype')
-
     if c:
         index = args.index('c10::optional<ScalarType> dtype')
 
-    if a or b or c:
+    if a or c:
         args.pop(index + 3)
         args.pop(index + 2)
         args.pop(index + 1)
@@ -589,24 +589,6 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
     else:
         write(out, 'VariableType%s.cpp' % suffix, VARIABLE_TYPE_CPP, env)
 
-
-def collapseTO(args):
-    a = any(arg['type'] == 'c10::optional<at::ScalarType>' for arg in args) and any(arg['type'] == 'c10::optional<at::Layout>' for arg in args) and any(arg['type'] == 'c10::optional<at::Device>' for arg in args) and any(arg['type'] == 'c10::optional<bool>' for arg in args)
-    b = any(arg['type'] == 'at::ScalarType' for arg in args) and any(arg['type'] == 'at::Layout' for arg in args) and any(arg['type'] == 'at::Device' for arg in args) and any(arg['type'] == 'bool' for arg in args)
-    if a or b:
-        index = 0
-        for i in range(len(args)):
-            if args[i]['type'] == 'c10::optional<at::ScalarType>' or args[i]['type'] == 'at::ScalarType':
-                break
-            index += 1
-
-        args.insert(index + 4, {"annotation" : "None", "dynamic_type": "TensorOptions", "is_nullable": "False", "kwarg_only": "True", "name": "options", "type": "const TensorOptions &", "simple_type": "TensorOptions"})
-        args.pop(index + 3)
-        args.pop(index + 2)
-        args.pop(index + 1)
-        args.pop(index)
-    return args
-
 def emit_body(declaration):
     strategy = dispatch_strategy(declaration)
     arguments = declaration['arguments']
@@ -645,8 +627,6 @@ def emit_body(declaration):
 
     for inp in inputs:
         inp['type'] = fix_c10_type(inp['type'])
-
-    inputs = collapseTO(inputs)
 
     differentiable_inputs = list(filter(is_differentiable, inputs))
 
@@ -1014,7 +994,6 @@ def emit_body(declaration):
     combined = nested_dict(env, declaration)
 
     body = []
-    foo = declaration['name'] == 'randn_like'
 
     if base_name not in DONT_PROFILE:
         input_names = record_function_input_names()
@@ -1030,12 +1009,7 @@ def emit_body(declaration):
     pre_record_trace, post_record_trace = format_trace(declaration)
 
     decl = declaration
-    a = any(arg['type'] == 'c10::optional<ScalarType>' for arg in decl['arguments']) and any(arg['type'] == 'c10::optional<Layout>' for arg in decl['arguments']) and any(arg['type'] == 'c10::optional<Device>' for arg in decl['arguments']) and any(arg['type'] == 'c10::optional<bool>' for arg in decl['arguments'])
-    a1 = any(arg['type'] == 'c10::optional<at::ScalarType>' for arg in decl['arguments']) and any(arg['type'] == 'c10::optional<at::Layout>' for arg in decl['arguments']) and any(arg['type'] == 'c10::optional<at::Device>' for arg in decl['arguments']) and any(arg['type'] == 'c10::optional<bool>' for arg in decl['arguments'])
-    b = any(arg['type'] == 'ScalarType' for arg in decl['arguments']) and any(arg['type'] == 'Layout' for arg in decl['arguments']) and any(arg['type'] == 'Device' for arg in decl['arguments']) and any(arg['type'] == 'bool' for arg in decl['arguments'])
-    b1 = any(arg['type'] == 'at::ScalarType' for arg in decl['arguments']) and any(arg['type'] == 'at::Layout' for arg in decl['arguments']) and any(arg['type'] == 'at::Device' for arg in decl['arguments']) and any(arg['type'] == 'bool' for arg in decl['arguments'])
-    c1 = any(arg['type'] == 'const TensorOptions &' for arg in decl['arguments'])
-    is_tensor_option = a or b or a1 or b1 or c1
+    is_tensor_option = isTensorOption(decl['arguments'])
 
     body.append(pre_record_trace)
     body.append(emit_call(env, is_tensor_option))
@@ -1057,8 +1031,6 @@ def emit_body(declaration):
 def unpack_args(env, declaration):
     def requires_unpack(arg):
         return 'Tensor' in arg['dynamic_type']
-
-    foo = declaration['name'] == 'randn_like'
 
     body = []
     unpacked_args = []
