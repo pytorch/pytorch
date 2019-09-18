@@ -15,6 +15,10 @@ if(NOT CMAKE_VERSION VERSION_LESS 3.15.0)
   cmake_policy(SET CMP0092 NEW)
 endif()
 
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.10)
+  set(FIND_CUDA_MODULE_DEPRECATED ON)
+endif()
+
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
@@ -576,7 +580,9 @@ endif()
 if (USE_CUDA OR USE_ROCM)
   # TODO: check if we should include other cuda dependency libraries
   # to the interface as well.
-
+  if(${FIND_CUDA_MODULE_DEPRECATED})
+    enable_language(CUDA)
+  endif()
 endif()
 
 # Note(jiayq): when building static libraries, all PRIVATE dependencies
