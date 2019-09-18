@@ -184,13 +184,13 @@ test_xla() {
 (cd test && python -c "import torch; print(torch.__config__.show())")
 (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 
-if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   test_torchvision
   test_xla
-elif [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
   test_torchvision
   test_python_nn
-elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   test_python_all_except_nn
   test_aten
   test_libtorch
