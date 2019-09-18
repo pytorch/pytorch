@@ -1,4 +1,5 @@
 import unittest
+import math
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
@@ -830,7 +831,7 @@ class ObserverTest(QuantizationTestCase):
 
         if reduce_range:
             ref_scales = [s * 255 / 127 for s in ref_scales]
-            ref_zero_points = [z / 2 for z in ref_zero_points]
+            ref_zero_points = [math.floor(z / 2) for z in ref_zero_points]
 
         print(qdtype, ", ", qscheme, ", ", ch_axis, ", ", reduce_range)
         print("qparams = ", qparams)
