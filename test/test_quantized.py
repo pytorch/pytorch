@@ -1534,13 +1534,12 @@ class TestQNNPackOps(TestCase):
 
     """Tests the correctness of the quantized::add (qnnpack) op."""
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       qparams=hu.qparams(dtypes=torch.quint8,
-                                          zero_point_min=0,
-                                          zero_point_max=10)),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
+           zero_point=st.sampled_from([0, 2, 5, 15, 127]),
            scale_A=st.sampled_from([0.001, 0.057, 0.889, 12.3]),
            scale_B=st.sampled_from([0.008, 0.0821, 0.67, 7]),
            scale_C=st.sampled_from([0.003, 0.07821, 0.457, 7.34]),)
-    def test_qnnpack_add(self, A, scale_A, scale_B, scale_C):
+    def test_qnnpack_add(self, A, zero_point, scale_A, scale_B, scale_C):
         with enable_mobile_quantized_engine():
             A_temp = A
             A, (scale_a, zero_point_A, torch_type) = A_temp
@@ -1554,9 +1553,9 @@ class TestQNNPackOps(TestCase):
             assume(scale_B // scale_C < 2**8)
 
             zero_point_C = 127
-            qA = torch.quantize_linear(A, scale=scale_A, zero_point=zero_point_A,
+            qA = torch.quantize_linear(A, scale=scale_A, zero_point=zero_point,
                                        dtype=torch.quint8)
-            qB = torch.quantize_linear(B, scale=scale_B, zero_point=zero_point_B,
+            qB = torch.quantize_linear(B, scale=scale_B, zero_point=zero_point,
                                        dtype=torch.quint8)
 
             # Add ground truth
@@ -1578,9 +1577,7 @@ class TestQNNPackOps(TestCase):
 
     """Tests the correctness of quantized::qnnpack_maxpool2d op."""
     @given(A=hu.tensor(shapes=hu.array_shapes(4, 4, 3, 5),
-                       qparams=hu.qparams(dtypes=torch.quint8,
-                                          zero_point_min=0,
-                                          zero_point_max=0)),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
            kernel=st.sampled_from([2, 4]),
            stride=st.sampled_from([1, 2]),
            padding=st.sampled_from([1, 2]))
