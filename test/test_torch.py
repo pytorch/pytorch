@@ -248,6 +248,7 @@ class _TestTorchMixin(torchtest):
                        'has_names',  # BUILD_NAMEDTENSOR only
                        'rename',  # BUILD_NAMEDTENSOR only
                        'refine_names',  # BUILD_NAMEDTENSOR only
+                       'unflatten',  # BUILD_NAMEDTENSOR only
                        )
         test_namespace(torch.nn)
         test_namespace(torch.nn.functional, 'assert_int_or_pair', 'feature_alpha_dropout')

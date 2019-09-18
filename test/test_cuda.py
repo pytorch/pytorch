@@ -2551,7 +2551,7 @@ class TestCuda(TestCase):
         self.assertEqual(a, b.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    @unittest.skip("Spuriously failing")
+    @skipCUDANonDefaultStreamIf(True)
     def test_triangular_solve_batched(self):
         _TestTorchMixin._test_triangular_solve_batched(self, lambda t: t.cuda())
 
