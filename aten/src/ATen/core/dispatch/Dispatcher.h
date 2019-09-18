@@ -78,7 +78,7 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func, void* unboxed_kernel_func);
+  RegistrationHandleRAII registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction kernel);
 
   /**
    * Register a fallback kernel for an operator.
@@ -88,19 +88,21 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func, void* unboxed_kernel_func);
+  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction kernel);
 
   /**
    * Perform a dynamic dispatch and get the kernel for an operator.
    */
-  OpKernel lookup(const OperatorHandle& op, const Stack* stack) const;
+  // TODO We probably shouldn't return a reference into the LeftRight
+  const KernelFunction& lookup(const OperatorHandle& op, const Stack* stack) const;
 
   /**
    * Perform a dynamic dispatch and get the kernel for an operator.
    */
   // TODO Remove lookup(TensorTypeId) and instead have a lookup based on
   // the (unboxed?) arguments the operator is to be called with.
-  OpKernel lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const;
+  // TODO We probably shouldn't return a reference into the LeftRight
+  const KernelFunction& lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const;
 
   /**
    * Add a listener that gets called whenever a new op is registered or an existing
@@ -166,12 +168,12 @@ private:
   RegistrationHandleRAII registrationHandle_;
 };
 
-inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
+inline const KernelFunction& Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   return op.operatorIterator_->op.lookupKernel(stack);
 }
 
-inline OpKernel Dispatcher::lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const {
+inline const KernelFunction& Dispatcher::lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   return op.operatorIterator_->op.lookupKernel(dispatchKey);
 }

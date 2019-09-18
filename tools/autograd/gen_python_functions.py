@@ -118,7 +118,7 @@ inline ${simple_return_type} ${dispatch_name}(${formal_args}) {
 """)
 
 PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
-{"${name}", (PyCFunction)${pycname}, ${flags}, NULL},""")
+{"${name}", (PyCFunction)${pycfunc_voidcast}${pycname}, ${flags}, NULL},""")
 
 PY_RETURN_NAMEDTUPLE_DEF = CodeTemplate("""\
 static PyStructSequence_Field fields${namedtuple_type_index}[] = {
@@ -692,6 +692,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             'name': name,
             'dispatch_name': 'dispatch_{}'.format(name),
             'pycname': 'THPVariable_{}'.format(name),
+            'pycfunc_voidcast': '',
             'signatures': [],
             'max_args': max(len(o['arguments']) + len(o['python_binding_arguments']) for o in declarations),
             'unpack_self': [],
@@ -735,6 +736,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         else:
             tmpl = PY_VARIABLE_METHOD_VARARGS
             env['flags'] = 'METH_VARARGS | METH_KEYWORDS'
+            env['pycfunc_voidcast'] = '(void(*)(void))'
 
         if not is_module and not has_self:
             env['flags'] += ' | METH_STATIC'
