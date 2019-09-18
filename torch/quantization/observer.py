@@ -73,7 +73,6 @@ class ObserverBase(ABC, nn.Module):
         scales = torch.ones(min_vals.size())
         zero_points = torch.ones(min_vals.size())
         for i in range(len(scales)):
-            # scales[i], zero_points[i] = self._calculate_qparams(
             qparam = self._calculate_qparams(
                 min_vals[i], max_vals[i]
             )
