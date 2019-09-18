@@ -4,7 +4,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
-#include <ATen/core/op_registration/test_helpers.h>
+#include <ATen/core/boxing/test_helpers.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
 #include <torch/csrc/jit/script/function_schema_parser.h>
