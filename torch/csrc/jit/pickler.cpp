@@ -415,21 +415,9 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
       case at::kPerChannelAffine: {
         const auto* quantizer = static_cast<at::PerChannelAffineQuantizer*>(
             tensor.quantizer().get());
-        push<PickleOpCode>(PickleOpCode::MARK);
-        for (auto x : quantizer->scales()) {
-          pushDouble(x);
-        }
-        push<PickleOpCode>(PickleOpCode::TUPLE);
-        push<PickleOpCode>(PickleOpCode::MARK);
-        for (auto x : quantizer->zero_points()) {
-          pushInt(x);
-        }
-        push<PickleOpCode>(PickleOpCode::TUPLE);
-        push<PickleOpCode>(PickleOpCode::MARK);
-        for (auto x : quantizer->axis()) {
-          pushInt(x);
-        }
-        push<PickleOpCode>(PickleOpCode::TUPLE);
+        pushIValue(c10::List<double>(quantizer->scales()));
+        pushIValue(c10::List<int64_t>(quantizer->zero_points()));
+        pushIValue(c10::List<int64_t>(quantizer->axis()));
       } break;
       default:
         TORCH_CHECK(
@@ -859,27 +847,20 @@ PickleOpCode Unpickler::readInstruction() {
                     {0}, storage_tensor.options(), q_scale, q_zero_point);
               } break;
               case at::kPerChannelAffine: {
-                const auto& scales_tuple = qparams.at(1).toTuple()->elements();
-                auto scales =
-                    at::empty({scales_tuple.size()}, at::dtype<double>());
-                auto* scales_ptr = scales.data_ptr<double>();
-                for (int i = 0; i < (int)scales_tuple.size(); ++i) {
-                  scales_ptr[i] = scales_tuple[i].toDouble();
-                }
-                const auto& zero_points_tuple =
-                    qparams.at(2).toTuple()->elements();
-                auto zero_points =
-                    at::empty({zero_points_tuple.size()}, at::dtype<int64_t>());
-                auto* zero_points_ptr = zero_points.data_ptr<int64_t>();
-                for (int i = 0; i < (int)zero_points_tuple.size(); ++i) {
-                  zero_points_ptr[i] = zero_points_tuple[i].toInt();
-                }
-                std::vector<int64_t> axis;
-                for (const auto& x : qparams.at(3).toTuple()->elements()) {
-                  axis.push_back(x.toInt());
-                }
+                const auto& scales_list = qparams.at(1).toDoubleList();
+                std::vector<double> scales(
+                    scales_list.begin(), scales_list.end());
+                const auto& zero_points_list = qparams.at(2).toIntList();
+                std::vector<int64_t> zero_points(
+                    zero_points_list.begin(), zero_points_list.end());
+                const auto& axis_list = qparams.at(3).toIntList();
+                std::vector<int64_t> axis(axis_list.begin(), axis_list.end());
                 result = _empty_per_channel_affine_quantized(
-                    {0}, scales, zero_points, axis, storage_tensor.options());
+                    {0},
+                    at::tensor(scales),
+                    at::tensor(zero_points),
+                    axis,
+                    storage_tensor.options());
               } break;
               default:
                 TORCH_CHECK(

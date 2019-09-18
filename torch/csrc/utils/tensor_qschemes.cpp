@@ -13,16 +13,6 @@ namespace torch {
 namespace utils {
 
 static PyObject* thp_qscheme_array[at::COMPILE_TIME_NUM_QSCHEMES];
-#define _ADD_QSCHEME(qscheme)                                             \
-  {                                                                       \
-    PyObject* qscheme_obj = THPQScheme_New(qscheme, toString(qscheme));   \
-    thp_qscheme_array[static_cast<int>(qscheme)] = qscheme_obj;           \
-    Py_INCREF(qscheme_obj);                                               \
-    if (PyModule_AddObject(                                               \
-            torch_module, toString(qscheme).c_str(), qscheme_obj) != 0) { \
-      throw python_error();                                               \
-    }                                                                     \
-  }
 
 void initializeQSchemes() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
@@ -30,10 +20,16 @@ void initializeQSchemes() {
     throw python_error();
   }
 
-  _ADD_QSCHEME(at::kPerTensorAffine);
-  _ADD_QSCHEME(at::kPerChannelAffine);
-  _ADD_QSCHEME(at::kPerTensorSymmetric);
-  _ADD_QSCHEME(at::kPerChannelSymmetric);
+  for (int i = 0; i < at::COMPILE_TIME_NUM_QSCHEMES; ++i) {
+    auto qscheme = static_cast<at::QScheme>(i);
+    PyObject* qscheme_obj = THPQScheme_New(qscheme, toString(qscheme));
+    thp_qscheme_array[static_cast<int>(qscheme)] = qscheme_obj;
+    Py_INCREF(qscheme_obj);
+    if (PyModule_AddObject(
+            torch_module, toString(qscheme).c_str(), qscheme_obj) != 0) {
+      throw python_error();
+    }
+  }
 }
 
 PyObject* getTHPQScheme(at::QScheme qscheme) {
