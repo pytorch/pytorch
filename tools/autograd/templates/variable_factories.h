@@ -91,12 +91,18 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
     }
 
     at::Tensor to_tensor(const at::TensorOptions& options) const {
+      // NOTE: Here we explicitly choose to initialize the tensor on CPU first,
+      // fill each element of the tensor, and then move the tensor to the desired
+      // device. For CUDA device, this approach only involves 1 CUDA kernel launch,
+      // and is much faster than initializing the tensor on CUDA first and then
+      // filling each element of it (which involves `N` CUDA kernel launches where
+      // `N` is the number of the elements in the tensor).
       at::Tensor tensor = ([&]() {
         at::AutoNonVariableTypeMode non_var_type_mode(true);
-        return at::empty(sizes_, at::TensorOptions(options).is_variable(false));
+        return at::empty(sizes_, at::TensorOptions(options).device(at::kCPU).is_variable(false));
       })();
       fill_tensor(tensor);
-      return tensor;
+      return tensor.to(options.device());
     }
 
     void pretty_print_recursive(std::ostream& stream) const {
