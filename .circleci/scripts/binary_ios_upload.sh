@@ -17,11 +17,11 @@ cd ${ZIP_DIR}/install/lib
 target_libs=(libc10.a libclog.a libcpuinfo.a libqnnpack.a libtorch.a)
 for lib in ${target_libs[*]}
 do
-    libs=(${ARTIFACTS_DIR}/x86_64/lib/${lib} ${ARTIFACTS_DIR}/arm64/lib/${lib} ${ARTIFACTS_DIR}/armv7s/lib/${lib} )
+    libs=(${ARTIFACTS_DIR}/x86_64/lib/${lib} ${ARTIFACTS_DIR}/arm64/lib/${lib})
     lipo -create "${libs[@]}" -o ${ZIP_DIR}/install/lib/${lib}
 done
-# for nnpack, we only support arm64/armv7s build
-lipo -create ${ARTIFACTS_DIR}/arm64/lib/libnnpack.a ${ARTIFACTS_DIR}/armv7s/lib/libnnpack.a -o ${ZIP_DIR}/install/lib/libnnpack.a
+# for nnpack, we only support arm64 build
+cp ${ARTIFACTS_DIR}/arm64/lib/libnnpack.a ./
 lipo -i ${ZIP_DIR}/install/lib/*.a
 # copy the umbrella header and license
 cp ${PROJ_ROOT}/ios/LibTorch.h ${ZIP_DIR}/src/
