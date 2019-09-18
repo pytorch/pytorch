@@ -12,7 +12,6 @@
 #include <memory>
 #include <mutex>
 #include <ATen/core/interned_strings.h>
-#include <ATen/core/Boxer.h>
 #include <ATen/core/stack.h>
 
 // TODO: Rewrite this comment
@@ -74,6 +73,24 @@ namespace detail {
 
 using FallbackBoxedFunction = void(const char* schema, torch::jit::Stack*);
 
+// Assume T is decayed
+template <typename T>
+using not_ok_to_box =
+  c10::guts::disjunction<
+    c10::guts::negation<std::is_constructible<IValue, T>>,
+    // some constructors are templated (and therefore pass
+    // is_constructible), but do not actually work with all
+    // template arguments, so we must blacklist them explicitly
+    // TODO: The correct fix is to sfinae based on is_constructible of T
+    std::is_same<optional<ArrayRef<Dimname>>, T>,
+    std::is_same<optional<ScalarType>, T>,
+    std::is_same<optional<MemoryFormat>, T>
+  >;
+
+template <class... Args>
+using supports_boxed_fallback =
+  c10::guts::negation<c10::guts::disjunction<not_ok_to_box<guts::decay_t<Args>>...>>;
+
 // ATenOpTable stores the implementations for each backend, in addition to
 // an implementation for variables.
 class CAFFE2_API ATenOpTable {
@@ -86,6 +103,7 @@ class CAFFE2_API ATenOpTable {
   Result callUnboxed(Args... args) const;
 
  private:
+
   void registerOp(TensorTypeId tid, void* fn) {
     TORCH_CHECK(function_table_[static_cast<int64_t>(tid)] == nullptr,
         "Attempting to register function for schema ", schema_,
@@ -133,6 +151,30 @@ class CAFFE2_API ATenDispatch {
 
 CAFFE2_API ATenDispatch& globalATenDispatch();
 
+template<
+  class Result, class... Args,
+  typename c10::guts::enable_if_t<
+    !supports_boxed_fallback<Result, Args...>::value,
+    std::nullptr_t
+  > = nullptr>
+Result callBoxedFallback(const char* schema, const FallbackBoxedFunction* boxed_fallback_fn, Args&&... args) {
+  TORCH_INTERNAL_ASSERT(0);
+}
+
+template<
+  class Result, class... Args,
+  typename c10::guts::enable_if_t<
+    supports_boxed_fallback<Result, Args...>::value,
+    std::nullptr_t
+  > = nullptr>
+Result callBoxedFallback(const char* schema, const FallbackBoxedFunction* boxed_fallback_fn, Args&&... args) {
+  torch::jit::Stack stack;
+  torch::jit::push(stack, std::forward<Args>(args)...);
+  boxed_fallback_fn(schema, &stack);
+  return torch::jit::pop(stack).to<Result>();
+}
+
+// NB: No universal forwarding
 template<class Result, class... Args>
 Result ATenOpTable::callUnboxed(Args... args) const {
   using FuncType = Result(Args...);
@@ -156,18 +198,18 @@ Result ATenOpTable::callUnboxed(Args... args) const {
     return (*unboxed_fallback_fn)(std::forward<Args>(args)...);
   }
 
-  auto* boxed_fallback_fn = globalATenDispatch().getFallbackBoxedOp(tid);
-  // Not /that/ likely, but certainly more likely than an error!
-  if (C10_LIKELY(boxed_fallback_fn != nullptr)) {
-    // TODO: this needs sfinae'ing
-    torch::jit::Stack stack;
-    bool ok = Boxer(&stack)(std::forward<Args>(args)...);
-    if (ok) {  // NB: ok is known at compile time
-      boxed_fallback_fn(schema_.c_str(), &stack);
-      TORCH_INTERNAL_ASSERT(0);
-      // return torch::jit::pop(stack).to<Return>();
+  // We need to do a if statement on box fallback support AS WELL
+  // as SFINAE.
+  //    - If statement: because some functions return void, and so
+  //    we cannot easily call a helper function and the conditionally
+  //    return.
+  //    - SFINAE: our template gadget doesn't work on all types,
+  //    we must not typecheck code if it does not work
+  if (supports_boxed_fallback<Result, Args...>::value) {
+    auto* boxed_fallback_fn = globalATenDispatch().getFallbackBoxedOp(tid);
+    if (boxed_fallback_fn) {
+      return callBoxedFallback<Result, Args...>(schema_.c_str(), boxed_fallback_fn, std::forward<Args>(args)...);
     }
-    // fallthrough
   }
 
   reportError(tid);
