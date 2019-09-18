@@ -170,11 +170,11 @@ def instantiate_device_type_tests(generic_test_class, scope):
         scope[class_name] = device_type_test_class
 
 
-# Decorator that specifies a test dependency.
+# Decorator that skips a test if the given condition is true.
 # Notes:
-#   (1) Dependencies stack. Multiple dependencies are all evaluated.
-#   (2) Dependencies can either be bools or strings. If a string the
-#       test base must have defined the corresponding attribute to be True
+#   (1) Skip conditions stack.
+#   (2) Skip conditions can be bools or strings. If a string the
+#       test base must have defined the corresponding attribute to be False
 #       for the test to run. If you want to use a string argument you should
 #       probably define a new decorator instead (see below).
 #   (3) Prefer the existing decorators to defining the 'device_type' kwarg.
@@ -197,35 +197,61 @@ class skipIf(object):
         return dep_fn
 
 
-# Specifies a CPU dependency.
+# Skips a test on CPU if the condition is true.
 class skipCPUIf(skipIf):
 
     def __init__(self, dep, reason):
         super(skipCPUIf, self).__init__(dep, reason, device_type='cpu')
 
 
-# Specifies a CUDA dependency.
+# Skips a test on CUDA if the condition is true.
 class skipCUDAIf(skipIf):
 
     def __init__(self, dep, reason):
         super(skipCUDAIf, self).__init__(dep, reason, device_type='cuda')
 
 
-# Specifies LAPACK as a CPU dependency.
+class onlyOn(object):
+
+    def __init__(self, device_type):
+        self.device_type = device_type
+
+    def __call__(self, fn):
+
+        @wraps(fn)
+        def only_fn(slf, device, *args, **kwargs):
+            if self.device_type != slf.device_type:
+                reason = "Only runs on {0}".format(self.device_type)
+                raise unittest.SkipTest(reason)
+
+            return fn(slf, device, *args, **kwargs)
+
+        return only_fn
+
+
+def onlyCPU(fn):
+    return onlyOn('cpu')(fn)
+
+
+def onlyCUDA(fn):
+    return onlyOn('cuda')(fn)
+
+
+# Skips a test on CPU if LAPACK is not available.
 def skipCPUIfNoLapack(fn):
     return skipCPUIf(not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
 
 
-# Specifies MKL as a CPU dependency.
+# Skips a test on CPU if MKL is not available.
 def skipCPUIfNoMkl(fn):
     return skipCPUIf(not TEST_MKL, "PyTorch is built without MKL support")(fn)
 
 
-# Specifies MAGMA as a CUDA dependency.
+# Skips a test on CUDA if MAGMA is not available.
 def skipCUDAIfNoMagma(fn):
     return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
 
 
-# Skips this test when the CUDA device type is actually ROCm.
+# Skips a test on CUDA when using ROCm.
 def skipCUDAIfRocm(fn):
     return skipCUDAIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")(fn)
