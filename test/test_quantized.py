@@ -11,7 +11,8 @@ from hypothesis import strategies as st
 import hypothesis_utils as hu
 from hypothesis_utils import no_deadline
 
-from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
+from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC, \
+    TEST_WITH_QNNPACK
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     enable_mobile_quantized_engine
 
@@ -1211,6 +1212,7 @@ class TestQuantizedConv(unittest.TestCase):
             np.testing.assert_equal(np.float32(W_q.q_scale()), np.float32(W_unpacked.q_scale()))
             np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
 
+@unittest.skipIf(not TEST_WITH_QNNPACK, "This Pytorch Build has not been built with QNNPACK")
 @unittest.skipIf(IS_WINDOWS, "QNNPACK has not been built for Windows")
 @unittest.skipIf(IS_PPC, "QNNPACK is not currently supported on ppc64le")
 @unittest.skipIf(TEST_WITH_UBSAN,
