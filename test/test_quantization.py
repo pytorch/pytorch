@@ -797,7 +797,7 @@ class ObserverTest(QuantizationTestCase):
                 ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
             else:
                 ref_scales = [0.023529411764706, 0.047058823529412]
-                ref_zero_points = [-128,  -43] if qdtype is torch.qint8 else [0, 85]
+                ref_zero_points = [-128, -43] if qdtype is torch.qint8 else [0, 85]
         elif ch_axis == 1:
             self.assertEqual(myobs.min_vals, [-4.0, 3.0])
             self.assertEqual(myobs.max_vals, [5.0, 8.0])
