@@ -663,12 +663,6 @@ jobs:
             source /env
             if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' ]]; then
               source "/builder/update_compiler.sh"
-              yum remove -y devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran devtoolset-7-binutils
-              yum install -y devtoolset-8-gcc devtoolset-8-gcc-c++ devtoolset-8-gcc-gfortran devtoolset-8-binutils
-              export PATH=/opt/rh/devtoolset-8/root/usr/bin:$PATH
-              export LD_LIBRARY_PATH=/opt/rh/devtoolset-8/root/usr/lib64:/opt/rh/devtoolset-8/root/usr/lib:$LD_LIBRARY_PATH
-
-
               # Env variables are not persisted into the next step
               echo "export PATH=$PATH" >> /env
               echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> /env
