@@ -3,8 +3,6 @@
 #include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/ivalue.h>
 
-// TODO Move kernel_XXX.h files to ATen/core/dispatch because they're now used from ATen/core/dispatch/KernelFunction.h
-
 namespace c10 {
 
 using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
