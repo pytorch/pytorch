@@ -635,6 +635,7 @@ struct CodeImpl {
     } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
       typeIndex = 4;
     }
+//    TORCH_CHECK(typeIndex == 1, "LIST_CONSTRUCT type is not integer.");
     insertInstruction(LIST_CONSTRUCT, node->inputs().size(), typeIndex);
   }
 
@@ -856,8 +857,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-//         std::cout << "RUNNING ";
-//         frames.back().function->dump(std::cout, af.pc);
+        std::cout << "RUNNING ";
+        frames.back().function->dump(std::cout, af.pc);
+        for (auto val : stack) {
+          if (val.isTensor()) {
+            std::cout << val.toTensor().sizes();
+          } else {
+            std::cout << val << std::endl;
+          }
+        }
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:

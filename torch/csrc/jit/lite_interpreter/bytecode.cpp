@@ -1,10 +1,12 @@
 #include "bytecode.h"
 #include <aten/src/ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/jit/script/jit_exception.h>
+#include <iostream>
 
 namespace torch {
 namespace jit {
 
+std::ostream& operator<<(std::ostream& out, Instruction inst);
 template <typename dtype> // int64_t, bool, double
 void ListConstructFunc(int64_t num_inputs, Stack& stack) {
   auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
@@ -49,8 +51,17 @@ IValue& Method::reg(size_t reg) {
 bool Method::run(Stack& stack) {
   size_t pc = 0;
   while (true) {
-    // std::cout << "RUNNING ";
-    // frames.back().function->dump(std::cout, pc);
+    std::cout << "RUNNING " << pc << " " << instructions_[pc];
+    std::cout << std::endl;
+    for (auto val : stack) {
+      if (val.isTensor()) {
+        std::cout << val.toTensor().sizes() << std::endl;
+      } else {
+        std::cout << val << std::endl;
+      }
+    }
+    if (pc == 125)
+      int debugint = 0;
     Instruction inst = instructions_[pc];
     switch (inst.op) {
       case OP: {

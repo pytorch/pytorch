@@ -9,6 +9,10 @@ using torch::jit::peek;
 using torch::jit::drop;
 using torch::jit::pack;
 
+inline std::unique_ptr<c10::KernelCache> noCache() {
+  return nullptr;
+}
+
 at::Tensor optional_to_tensor(c10::optional<at::Tensor> v) {
   return v.has_value() ? *v : at::Tensor();
 }
@@ -29,13 +33,19 @@ static auto registry0 = torch::RegisterOperators().op(
     return at::add(a, b, c);
   })
 ).op(
+  "aten::add_.Tensor",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](at::Tensor a, at::Tensor b, at::Scalar c) ->at::Tensor {
+  return at::add(a, b, c);
+})
+).op(
   "aten::adaptive_avg_pool2d",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
   [](at::Tensor a, std::vector<int64_t> b) ->at::Tensor {
     return at::adaptive_avg_pool2d(a, b);
   })
 ).op(
-  "aten::mm_Tensor_Tensor__Tensor",
+  "aten::mm",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
   [](at::Tensor a, at::Tensor b) ->at::Tensor {
     return at::mm(a, b);
@@ -92,10 +102,16 @@ static auto registry0 = torch::RegisterOperators().op(
   "aten::relu",
   torch::RegisterOperators::options().kernel<decltype(at::relu), &at::relu>(c10::TensorTypeId::CPUTensorId)
 ).op(
+  "aten::relu_",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](at::Tensor a) ->at::Tensor {
+  return at::relu_(a);
+  })
+).op(
   "aten::t",
   torch::RegisterOperators::options().kernel<decltype(at::t), &at::t>(c10::TensorTypeId::CPUTensorId)
 ).op(
-  "aten::size",
+  "aten::size.int",
   torch::RegisterOperators::options().kernel<decltype(at::size), &at::size>(c10::TensorTypeId::CPUTensorId)
 ).op(
   "aten::addmm",
@@ -121,8 +137,65 @@ static auto registry0 = torch::RegisterOperators().op(
 ).op(
   "aten::log_softmax",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](at::Tensor a, int64_t b) ->at::Tensor {
-  return at::log_softmax(a, b);
+  [](at::Tensor a, int64_t b, c10::optional<int64_t> c) ->at::Tensor {
+  if (c.has_value()) {
+    return at::log_softmax(a, b, static_cast<c10::ScalarType>(c.value()));
+  } else {
+    return at::log_softmax(a, b);
+  }
   })
+).op(
+  "aten::Int",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](at::Tensor a) ->int64_t {
+    return a.item<int64_t>();
+  })
+).op(
+  "prim::NumToTensor",
+  torch::RegisterOperators::options().catchAllKernel(
+  [](at::Scalar s) ->at::Tensor {
+    return at::scalar_to_tensor(s);
+  })
+).op(
+"aten::embedding",
+torch::RegisterOperators::options().kernel<decltype(at::embedding), &at::embedding>(c10::TensorTypeId::CPUTensorId)
+).op(
+  "aten::dropout",
+  torch::RegisterOperators::options().kernel<decltype(at::dropout), &at::dropout>(c10::TensorTypeId::CPUTensorId)
+//).op(
+//  "aten::device",
+//  torch::RegisterOperators::options().catchAllKernel(
+//    [](std::string s) ->c10::Device {
+//      return c10::Device(s);
+//})
+//).op(
+//  "aten::zeros",
+//  torch::RegisterOperators::options().catchAllKernel(
+//    [](c10::IntArrayRef size, c10::optional<int64_t> type,
+//       c10::optional<c10::Layout> layout, c10::optional<c10::Device> device,
+//       c10::optional<bool> pin_memory) ->at::Tensor {
+////    auto dtype = type.has_value() ? c10::optional<c10::ScalarType>(static_cast<c10::ScalarType>(type.value()))
+////                                  : c10::optional<c10::ScalarType>(c10::ScalarType::Undefined);
+//auto dtype = c10::optional<c10::ScalarType>(c10::ScalarType::Int);
+//    const auto options = c10::TensorOptions()
+//                             .dtype(dtype)
+//                             .layout(layout)
+//                             .device(device)
+//                             .pinned_memory(pin_memory);
+//    return at::zeros(size, options);
+//})
+//).op(
+//"aten::zeros",
+//torch::RegisterOperators::options().catchAllKernel(
+//    [](Stack* stack, c10::KernelCache* cache) {
+//      const auto options = c10::TensorOptions()
+//                               .dtype((std::move(peek(*stack, 1, 5))).toOptional<c10::ScalarType>())
+//                               .layout((std::move(peek(*stack, 2, 5))).toOptional<c10::Layout>())
+//                               .device((std::move(peek(*stack, 3, 5))).toOptional<c10::Device>())
+//                               .pinned_memory((std::move(peek(*stack, 4, 5))).toOptional<bool>());
+//      auto result_ = at::zeros_like((std::move(peek(*stack, 0, 5))).toTensor(), options);
+//      drop(*stack, 5);
+//      pack(*stack, std::move(result_));
+//    }, &noCache)
 );
 

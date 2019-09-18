@@ -26,15 +26,17 @@ void printSlots(const c10::intrusive_ptr<c10::ivalue::Object>& obj) {
 }
 
 void testLiteInterpreter() {
-  auto m = load("/Users/myuan/data/lenet/Lenet_trace.pt");
   std::vector<torch::jit::IValue> inputs;
-  inputs.push_back(torch::ones({1, 1, 30, 30}));
-  at::Tensor outputref = m.forward(inputs).toTensor();
-  std::cout << outputref;
+  auto m = load("/Users/myuan/data/pytext/model_traced.pt");
+  inputs.push_back(torch::ones({1, 3, 224, 224}));
+//  auto m = load("/Users/myuan/data/lenet/Lenet_trace.pt");
+//  inputs.push_back(torch::ones({1, 1, 30, 30}));
+//  at::Tensor outputref = m.forward(inputs).toTensor();
+//  std::cout << outputref.slice(/*dim=*/1, /*start=*/0, /*end=*/5);
 
   std::stringstream ss;
   m.save_for_mobile(ss);
-  IValue res;
+  at::Tensor res;
   auto bc = load_bytecode(ss);
 
   std::cout << "ref slots: \n";
@@ -43,12 +45,11 @@ void testLiteInterpreter() {
   std::cout << "bytecode slots: \n";
   printSlots(bc.Object());
 
-  for (int i = 0; i < 3; ++i) {
+  for (int i = 0; i < 1; ++i) {
     auto bcinputs = inputs;
-    res = bc.run_method("forward", bcinputs);
+    res = bc.run_method("forward", bcinputs).toTensor();
   }
-  std::cout << res.toTensor();
-//  m.save_for_mobile("/Users/myuan/data/lenet/Lenet_trace.zip");
+  std::cout << res.slice(/*dim=*/1, /*start=*/0, /*end=*/5);
 //  script::Module m("m");
 //  m.register_parameter("foo", torch::ones({}), false);
 //  // TODO: support default param val, which was pushed in
