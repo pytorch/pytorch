@@ -164,8 +164,6 @@ int connect(
   bool anyReset = false;
 
   const auto start = std::chrono::high_resolution_clock::now();
-  // auto startMilliseconds =
-  //     std::chrono::duration_cast<std::chrono::milliseconds>(start).count();
 
   while (true) {
     try {
