@@ -13,7 +13,7 @@ inline std::vector<c10::IValue> callOp(
     Args... args) {
   auto stack = makeStack(std::forward<Args>(args)...);
   auto kernel = c10::Dispatcher::singleton().lookup(op, &stack);
-  kernel.call(&stack);
+  kernel.callBoxed(&stack);
   return stack;
 }
 
