@@ -280,9 +280,13 @@ size_t List<T>::use_count() const {
   return impl_.use_count();
 }
 
-template<class T>
+template <class T>
 TypePtr List<T>::elementType() const {
   return impl_->elementType;
 }
 
+template <class T>
+void List<T>::unsafeSetElementType(TypePtr t) {
+  impl_->elementType = std::move(t);
+}
 }

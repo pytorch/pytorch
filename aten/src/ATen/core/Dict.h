@@ -343,6 +343,18 @@ public:
   // instead of optional<TypePtr> once types are mandatory.
   TypePtr keyType() const;
   TypePtr valueType() const;
+
+  // [unsafe set type]
+  // These functions mutate the tagged type of this dictionary in place.
+  // There is no checking that the members of the dictionary are instances
+  // of the new types, nor is there a check that other IValues which
+  // hold references to this dictionary have the right static type.
+  // This functionality is used only in the unpickler, where at
+  // creation type the real type of the dictionary is unknown, but
+  // then later recovered from the static type information of the
+  // unpickled object.
+  void unsafeSetKeyType(TypePtr t);
+  void unsafeSetValueType(TypePtr t);
 };
 
 namespace impl {
