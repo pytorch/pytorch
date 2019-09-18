@@ -196,11 +196,6 @@ class PerChannelMinMaxObserver(ObserverBase):
     scales and zero_points for each channel
     """
 
-    __annotations__ = {
-        "min_vals": Optional[torch.Tensor],
-        "max_vals": Optional[torch.Tensor],
-    }
-
     def __init__(self, ch_axis=0, **kwargs):
         super(PerChannelMinMaxObserver, self).__init__(**kwargs)
         self.ch_axis = ch_axis
@@ -208,30 +203,29 @@ class PerChannelMinMaxObserver(ObserverBase):
         self.max_vals = None
 
     def forward(self, x):
-        min_vals = self.min_vals
-        max_vals = self.max_vals
-        x_dim = x.size()
+        with torch.no_grad():
+            min_vals = self.min_vals
+            max_vals = self.max_vals
+            x_dim = x.size()
 
-        new_axis_list = list(range(len(x_dim)))
-        new_axis_list[self.ch_axis] = 0
-        new_axis_list[0] = self.ch_axis
-        y = x.permute(tuple(new_axis_list))
-        y = torch.flatten(y, start_dim=1)
-        if min_vals is None or max_vals is None:
-            min_vals = torch.min(y, 1)[0]
-            max_vals = torch.max(y, 1)[0]
-        else:
-            min_vals = torch.min(torch.min(y, 1)[0], min_vals)
-            max_vals = torch.max(torch.max(y, 1)[0], max_vals)
-        self.min_vals = min_vals.detach()
-        self.max_vals = max_vals.detach()
-        return x
+            new_axis_list = list(range(len(x_dim)))
+            new_axis_list[self.ch_axis] = 0
+            new_axis_list[0] = self.ch_axis
+            y = x.permute(tuple(new_axis_list))
+            y = torch.flatten(y, start_dim=1)
+            if min_vals is None or max_vals is None:
+                min_vals = torch.min(y, 1)[0]
+                max_vals = torch.max(y, 1)[0]
+            else:
+                min_vals = torch.min(torch.min(y, 1)[0], min_vals)
+                max_vals = torch.max(torch.max(y, 1)[0], max_vals)
+            self.min_vals = min_vals
+            self.max_vals = max_vals
+            return x
 
-    @torch.jit.export
     def calculate_qparams(self):
         return self._calculate_per_channel_qparams(self.min_vals, self.max_vals)
 
-    @torch.jit.export
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
 

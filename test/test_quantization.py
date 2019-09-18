@@ -777,9 +777,9 @@ class ObserverTest(QuantizationTestCase):
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
-           ch_axis=st.sampled_from((0, 1, 2, 3)))
-    def test_per_channel_minmax_observer(self, qdtype, qscheme, ch_axis):
-        myobs = PerChannelMinMaxObserver(ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
+           ch_axis=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
+    def test_per_channel_minmax_observer(self, qdtype, qscheme, ch_axis, reduce_range):
+        myobs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
         x = torch.tensor([[[[1.0, 2.0], [2.0, 2.5]], [[3.0, 4.0], [4.5, 6.0]]], [[[-4.0, -3.0], [5.0, 5.0]], [[6.0, 3.0], [7.0, 8.0]]]])
         result = myobs(x)
         self.assertEqual(result, x)
@@ -820,27 +820,13 @@ class ObserverTest(QuantizationTestCase):
             else:
                 ref_scales = [0.04313726, 0.04313726]
                 ref_zero_points = [-35, -58] if qdtype is torch.qint8 else [93, 70]
+
+        if reduce_range:
+            ref_scales = [s * 255 / 127 for s in ref_scales]
+            ref_zero_points = [z / 2 for z in ref_zero_points]
+
         self.assertTrue(torch.allclose(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype)))
         self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
-
-    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
-           ch_axis=st.sampled_from((0, 1, 2, 3)))
-    def test_per_channel_minmax_observer_scriptable(self, qdtype, qscheme, ch_axis):
-        obs = PerChannelMinMaxObserver(ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
-        scripted = torch.jit.script(obs)
-
-        x = torch.rand(3, 4, 5, 6)
-        obs(x)
-        scripted(x)
-
-        self.assertEqual(obs.calculate_qparams(), scripted.calculate_qparams())
-
-        buf = io.BytesIO()
-        torch.jit.save(scripted, buf)
-        buf.seek(0)
-        loaded = torch.jit.load(buf)
-        self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
 
     def test_observer_scriptable(self):
         obs = torch.quantization.default_observer()()
