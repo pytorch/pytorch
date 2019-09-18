@@ -1,4 +1,5 @@
 import torch
+from torch._six import PY2
 from collections import OrderedDict
 
 """
@@ -47,21 +48,28 @@ def namer_api_name(inplace):
         return 'renamed'
 
 
-def expand_single_glob(numel_pre_glob, numel_post_glob, names):
+def is_ellipsis(item):
+    if PY2:
+        return item == '...'
+    else:
+        return item == Ellipsis or item == '...'
+
+
+def expand_single_ellipsis(numel_pre_glob, numel_post_glob, names):
     return names[numel_pre_glob:len(names) - numel_post_glob]
 
 
-def resolve_glob(names, tensor_names, fn_name):
-    glob_indices = [i for i, x in enumerate(names) if x == '*']
-    if len(glob_indices) >= 2:
-        raise RuntimeError('{}: More than one \'*\' found in names ('
-                           '{}). This function supports up to one \'*\'.'
+def resolve_ellipsis(names, tensor_names, fn_name):
+    ellipsis_indices = [i for i, name in enumerate(names) if is_ellipsis(name)]
+    if len(ellipsis_indices) >= 2:
+        raise RuntimeError('{}: More than one Ellipsis (\'...\') found in names ('
+                           '{}). This function supports up to one Ellipsis.'
                            .format(fn_name, names))
-    if len(glob_indices) == 0:
+    if len(ellipsis_indices) == 0:
         return names
-    glob_idx = glob_indices[0]
-    globbed_names = expand_single_glob(glob_idx, len(names) - glob_idx - 1, tensor_names)
-    return names[:glob_idx] + globbed_names + names[glob_idx + 1:]
+    ellipsis_idx = ellipsis_indices[0]
+    globbed_names = expand_single_ellipsis(ellipsis_idx, len(names) - ellipsis_idx - 1, tensor_names)
+    return names[:ellipsis_idx] + globbed_names + names[ellipsis_idx + 1:]
 
 
 def update_names_with_list(tensor, names, inplace):
@@ -70,7 +78,7 @@ def update_names_with_list(tensor, names, inplace):
         return tensor._update_names(None, inplace)
 
     return tensor._update_names(
-        resolve_glob(names, tensor.names, namer_api_name(inplace)), inplace)
+        resolve_ellipsis(names, tensor.names, namer_api_name(inplace)), inplace)
 
 
 def update_names_with_mapping(tensor, rename_map, inplace):
