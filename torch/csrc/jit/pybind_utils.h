@@ -17,6 +17,7 @@
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
@@ -432,6 +433,8 @@ inline IValue toIValue(
             }
             return repeated;
           }
+        case TypeKind::BoolType:
+          return c10::impl::toList(py::cast<std::vector<bool>>(obj));
         case TypeKind::TensorType:
           return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
         default:

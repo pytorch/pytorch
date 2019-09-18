@@ -1,8 +1,12 @@
 #include <c10d/ProcessGroupGloo.hpp>
 
+#include <netdb.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <gloo/allgather.h>
+#include <gloo/allgatherv.h>
 #include <gloo/allreduce.h>
 #include <gloo/barrier.h>
 #include <gloo/broadcast.h>
@@ -147,6 +151,11 @@ void setOutput(O& opts, at::Tensor& tensor) {
   opts.setOutput(getDataPointer<T>(tensor), tensor.numel());
 }
 
+template <typename T, typename O>
+void setOutput(O& opts, at::Tensor& tensor, std::vector<size_t>& counts) {
+  opts.setOutput(getDataPointer<T>(tensor), counts);
+}
+
 #ifdef USE_CUDA
 
 at::Tensor pinnedLike(at::Tensor& tensor) {
@@ -252,6 +261,8 @@ void initializeStreamsEvents(
 
 #endif
 
+const auto kLoopbackAddress = "127.0.0.1";
+
 } // namespace
 
 ProcessGroupGloo::SendWork::SendWork(
@@ -300,6 +311,42 @@ void ProcessGroupGloo::RecvWork::wait() {
 ProcessGroupGloo::Options::Options()
     : timeout(std::chrono::milliseconds(10 * 1000)), threads(2) {}
 
+namespace {
+
+// Gloo assumes that this machine's hostname can always be resolved
+// to an address. If it doesn't it throws a runtime error saying
+// that it can't be resolved. Instead of catching it, we choose
+// to proactively check if an address can be resolved, so we can
+// gracefully fall back to an alternative if it doesn't.
+bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  struct addrinfo* result;
+  auto rv = getaddrinfo(hostname.c_str(), nullptr, &hints, &result);
+  if (rv < 0) {
+    return false;
+  }
+  struct addrinfo* rp;
+  for (rp = result; rp != nullptr; rp = rp->ai_next) {
+    auto fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+    if (fd == -1) {
+      continue;
+    }
+    rv = bind(fd, rp->ai_addr, rp->ai_addrlen);
+    close(fd);
+    if (rv == -1) {
+      continue;
+    }
+    break;
+  }
+  freeaddrinfo(result);
+  return rp != nullptr;
+}
+
+} // namespace
+
 #ifdef __linux__
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDeviceForInterface(const std::string& interface) {
@@ -322,21 +369,12 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDeviceForHostname(const std::string& hostname) {
   ::gloo::transport::tcp::attr attr;
-
-  if (hostname.empty()) {
-    // Use the hostname to resolve the network address to
-    // use. Note: if the hostname does not resolve to an address (e.g.
-    // because of misconfigured /etc/hosts file), this will not work.
-    std::array<char, HOST_NAME_MAX> buffer{};
-    auto rv = gethostname(buffer.data(), buffer.size());
-    if (rv != 0) {
-      throw std::system_error(errno, std::system_category());
-    }
-    attr.hostname = buffer.data();
-  } else {
-    attr.hostname = hostname;
-  }
-
+  attr.hostname = hostname;
+  TORCH_CHECK(
+      doesHostnameResolveToUsableAddress(attr.hostname),
+      "Cannot resolve ",
+      hostname,
+      " to a (local) address");
   return ::gloo::transport::tcp::CreateDevice(attr);
 }
 #endif
@@ -345,23 +383,72 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDeviceForHostname(const std::string& hostname) {
   ::gloo::transport::uv::attr attr;
+  attr.hostname = hostname;
+  TORCH_CHECK(
+      doesHostnameResolveToUsableAddress(attr.hostname),
+      "Cannot resolve ",
+      hostname,
+      " to a (local) address");
+  return ::gloo::transport::uv::CreateDevice(attr);
+}
+#endif
 
-  if (hostname.empty()) {
-    // Use the hostname to resolve the network address to
-    // use. Note: if the hostname does not resolve to an address (e.g.
-    // because of misconfigured /etc/hosts file), this will not work.
-    const auto hostNameMax = sysconf(_SC_HOST_NAME_MAX);
-    auto buffer = std::unique_ptr<char[]>(new char[hostNameMax]);
-    auto rv = gethostname(buffer.get(), hostNameMax);
-    if (rv != 0) {
-      throw std::system_error(errno, std::system_category());
-    }
-    attr.hostname = buffer.get();
-  } else {
-    attr.hostname = hostname;
+#ifdef __linux__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDefaultDevice() {
+  ::gloo::transport::tcp::attr attr;
+
+  // Use the hostname to resolve the network address to
+  // use. Note: if the hostname does not resolve to an address (e.g.
+  // because of misconfigured /etc/hosts file), this will not work.
+  std::array<char, HOST_NAME_MAX> buffer{};
+  auto rv = gethostname(buffer.data(), buffer.size());
+  if (rv != 0) {
+    throw std::system_error(errno, std::system_category());
+  }
+  attr.hostname = buffer.data();
+
+  // Use this machine's hostname if it resolves to an address.
+  if (doesHostnameResolveToUsableAddress(attr.hostname)) {
+    return ::gloo::transport::tcp::CreateDevice(attr);
   }
 
-  return ::gloo::transport::uv::CreateDevice(attr);
+  // Otherwise, use the loopback address.
+  TORCH_WARN_ONCE(
+      "Unable to resolve hostname to a (local) address. ",
+      "Using the loopback address as fallback. ",
+      "Manually set the network interface to bind to with GLOO_SOCKET_IFNAME.");
+  return createDeviceForHostname(kLoopbackAddress);
+}
+#endif
+
+#ifdef __APPLE__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDefaultDevice() {
+  ::gloo::transport::uv::attr attr;
+
+  // Use the hostname to resolve the network address to
+  // use. Note: if the hostname does not resolve to an address (e.g.
+  // because of misconfigured /etc/hosts file), this will not work.
+  const auto hostNameMax = sysconf(_SC_HOST_NAME_MAX);
+  auto buffer = std::unique_ptr<char[]>(new char[hostNameMax]);
+  auto rv = gethostname(buffer.get(), hostNameMax);
+  if (rv != 0) {
+    throw std::system_error(errno, std::system_category());
+  }
+  attr.hostname = buffer.get();
+
+  // Use this machine's hostname if it resolves to an address.
+  if (doesHostnameResolveToUsableAddress(attr.hostname)) {
+    return ::gloo::transport::uv::CreateDevice(attr);
+  }
+
+  // Otherwise, use the loopback address.
+  TORCH_WARN_ONCE(
+      "Unable to resolve hostname to a (local) address. ",
+      "Using the loopback address as fallback. ",
+      "Manually set the network interface to bind to with GLOO_SOCKET_IFNAME.");
+  return createDeviceForHostname(kLoopbackAddress);
 }
 #endif
 
@@ -877,29 +964,38 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
   std::vector<at::Tensor> allgather_indices(
       const at::Tensor& tensor,
       const std::vector<SparseTensorMetadata>& metadata) {
-    auto max_nnz = metadata[0].nnz();
-    for (size_t i = 1; i < metadata.size(); i++) {
-      max_nnz = std::max(max_nnz, metadata[i].nnz());
+    const auto sparseDim = tensor.sparse_dim();
+
+    std::vector<size_t> counts(context->size);
+    int64_t totalSize = 0;
+    for (size_t i = 0; i < metadata.size(); i++) {
+      counts[i] = metadata[i].nnz() * sparseDim;
+      totalSize += counts[i];
     }
 
-    // There are #sparse_dim() 1-dimensional tensors with nnz elems per rank.
-    auto buffer =
-        at::empty({context->size, tensor.sparse_dim(), max_nnz}, at::kLong);
-    buffer.select(0, context->rank)
-        .narrow(1, 0, tensor._nnz())
-        .copy_(tensor.indices());
+    auto output = at::empty({totalSize}, at::kLong);
 
-    // Allgather indices.
-    gloo::AllgatherOptions opts(context);
-    opts.setOutput(buffer.data_ptr<int64_t>(), buffer.numel());
+    // tensors copied from cuda may not be contiguous, get a contiguous
+    // tensor before use its data_ptr
+    auto input = tensor.indices().contiguous();
+
+    // Allgatherv indices.
+    gloo::AllgathervOptions opts(context);
+    opts.setInput(input.data_ptr<int64_t>(), input.numel());
+    opts.setOutput(output.data_ptr<int64_t>(), counts);
     opts.setTag(tag);
-    gloo::allgather(opts);
+    gloo::allgatherv(opts);
 
     // Compile indices tensor per rank.
     std::vector<at::Tensor> indices;
     indices.reserve(metadata.size());
+    size_t offset = 0;
     for (size_t i = 0; i < metadata.size(); i++) {
-      indices.push_back(buffer.select(0, i).narrow(1, 0, metadata[i].nnz()));
+      const auto nnz = metadata[i].nnz();
+      const auto numel = sparseDim * nnz;
+      indices.push_back(
+          output.narrow(0, offset, numel).reshape({sparseDim, nnz}));
+      offset += numel;
     }
 
     return indices;
@@ -908,34 +1004,47 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
   std::vector<at::Tensor> allgather_values(
       const at::Tensor& tensor,
       const std::vector<SparseTensorMetadata>& metadata) {
-    auto max_nnz = metadata[0].nnz();
-    for (size_t i = 1; i < metadata.size(); i++) {
-      max_nnz = std::max(max_nnz, metadata[i].nnz());
+    // There are nnz #dense_dim()-dimensional tensors per rank.
+    const auto valueShape = tensor.sizes().slice(tensor.sparse_dim());
+    size_t denseNumel = 1;
+    for (auto dim : valueShape) {
+      denseNumel *= dim;
     }
 
-    // There are nnz #dense_dim()-dimensional tensors per rank.
-    const auto value_shape = tensor.sizes().slice(tensor.sparse_dim());
-    auto buffer_shape = std::vector<int64_t>({context->size, max_nnz});
-    std::copy(
-        value_shape.begin(),
-        value_shape.end(),
-        std::back_inserter(buffer_shape));
-    auto buffer = at::empty(buffer_shape, tensor.scalar_type());
-    buffer.select(0, context->rank)
-        .narrow(0, 0, tensor._nnz())
-        .copy_(tensor.values());
+    std::vector<size_t> counts(context->size);
+    int64_t totalSize = 0;
+    for (size_t i = 0; i < metadata.size(); i++) {
+      counts[i] = metadata[i].nnz() * denseNumel;
+      totalSize += counts[i];
+    }
 
-    // Allgather values.
-    gloo::AllgatherOptions opts(context);
-    GENERATE_ALL_TYPES(tensor.scalar_type(), setOutput, opts, buffer);
+    auto output = at::empty({totalSize}, tensor.scalar_type());
+
+    // Allgatherv indices.
+    gloo::AllgathervOptions opts(context);
+    // tensors copied from cuda may not be contiguous, get a contiguous
+    // tensor before use its data_ptr
+    at::Tensor valueTensor = tensor.values().contiguous();
+    GENERATE_ALL_TYPES(valueTensor.scalar_type(), setInput, opts, valueTensor);
+    GENERATE_ALL_TYPES(
+        valueTensor.scalar_type(), setOutput, opts, output, counts);
     opts.setTag(tag);
-    gloo::allgather(opts);
+    gloo::allgatherv(opts);
 
     // Compile values tensor per rank.
     std::vector<at::Tensor> values;
     values.reserve(metadata.size());
+    size_t offset = 0;
     for (size_t i = 0; i < metadata.size(); i++) {
-      values.push_back(buffer.select(0, i).narrow(0, 0, metadata[i].nnz()));
+      const auto nnz = metadata[i].nnz();
+      const auto numel = denseNumel * nnz;
+      auto tensorShape = std::vector<int64_t>({(int64_t)nnz});
+      std::copy(
+          valueShape.begin(),
+          valueShape.end(),
+          std::back_inserter(tensorShape));
+      values.push_back(output.narrow(0, offset, numel).reshape(tensorShape));
+      offset += numel;
     }
 
     return values;
