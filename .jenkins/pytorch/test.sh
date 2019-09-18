@@ -175,8 +175,15 @@ test_xla() {
   export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
   export XRT_WORKERS="localservice:0;grpc://localhost:40934"
   pushd xla
-  python test/test_operations.py
+  echo "Running Python Tests"
+  ./test/run_tests.sh
+
+  echo "Running MNIST Test"
   python test/test_train_mnist.py --tidy
+
+  echo "Running C++ Tests"
+  pushd test/cpp
+  CC=clang-7 CXX=clang++-7 ./run_tests.sh
   popd
   assert_git_not_dirty
 }
@@ -184,13 +191,13 @@ test_xla() {
 (cd test && python -c "import torch; print(torch.__config__.show())")
 (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 
-if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   test_torchvision
   test_xla
-elif [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
   test_torchvision
   test_python_nn
-elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   test_python_all_except_nn
   test_aten
   test_libtorch
