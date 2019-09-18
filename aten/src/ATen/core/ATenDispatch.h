@@ -136,6 +136,12 @@ class CAFFE2_API ATenDispatch {
     return *this;
   }
 
+  ATenDispatch& registerFallbackBoxedOp(TensorTypeId id, FallbackBoxedFunction* fn) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    boxed_fallback_table_[static_cast<size_t>(id)] = fn;
+    return *this;
+  }
+
   const ATenOpTable* getOpTable(const char* schema) const {
     auto iter = op_tables_.find(schema);
     TORCH_CHECK(iter != op_tables_.end(),
