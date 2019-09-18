@@ -108,6 +108,7 @@ class CAFFE2_API Context {
   void setDeterministicCuDNN(bool);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
+  std::vector<at::QEngine> supportedQEngines() const;
 
  private:
   void initCUDAIfNeeded(DeviceType p) {
@@ -127,10 +128,10 @@ class CAFFE2_API Context {
   bool benchmark_cudnn = false;
   bool enabled_mkldnn = true;
   at::QEngine quantized_engine =
-#ifdef USE_PYTORCH_QNNPACK
-      at::kQNNPACK;
-#elif defined(USE_FBGEMM)
+#ifdef USE_FBGEMM
       at::kFBGEMM;
+#elif defined(USE_PYTORCH_QNNPACK)
+      at::kQNNPACK;
 #else
       at::kNoQEngine;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
