@@ -499,7 +499,7 @@ PyObject *THPModule_setQEngine(PyObject *_unused, PyObject *arg)
 
 PyObject *THPModule_qEngine(PyObject *_unused)
 {
-  return THPQEngine_New(at::globalContext().qEngine(), toString(at::globalContext().qEngine());
+  return THPQEngine_New(at::globalContext().qEngine(), toString(at::globalContext().qEngine()));
 }
 
 static PyMethodDef TorchMethods[] = {

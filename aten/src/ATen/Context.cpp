@@ -95,14 +95,12 @@ bool Context::hasLAPACK() const {
 #endif
 }
 
-std::vector<at::QEngine> Context
-
 at::QEngine Context::qEngine() const {
   return quantized_engine;
 }
 
 void Context::setQEngine(at::QEngine e) {
-  auto& qengines = supportedQEngines();
+  const auto& qengines = supportedQEngines();
   if (std::find(qengines.begin(), qengines.end(), e) != qengines.end()) {
     quantized_engine = e;
     return;

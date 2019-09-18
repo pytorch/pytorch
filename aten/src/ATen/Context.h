@@ -134,6 +134,7 @@ class CAFFE2_API Context {
       at::kQNNPACK;
 #else
       at::kNoQEngine;
+#endif
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
 };
