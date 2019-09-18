@@ -10,7 +10,7 @@ graph {
       t {
         dims: 1
         data_type: 1
-        raw_data: "\000\000\000\000"
+        raw_data: "\000\000\200?"
       }
       type: TENSOR
     }
