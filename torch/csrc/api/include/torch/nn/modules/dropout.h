@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/nn/cloneable.h>
+#include <torch/nn/options/dropout.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
@@ -11,15 +12,6 @@
 
 namespace torch {
 namespace nn {
-
-/// Options for `Dropout` and `FeatureDropout`.
-struct TORCH_API DropoutOptions {
-  /* implicit */ DropoutOptions(double rate = 0.5);
-  /// The probability with which a particular component of the input is set to
-  /// zero.
-  /// Changes to this parameter at runtime are effective.
-  TORCH_ARG(double, rate);
-};
 
 namespace detail {
 template <typename Derived>
