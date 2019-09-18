@@ -4071,21 +4071,6 @@ inline Tensor & Tensor::__irshift__(const Tensor & other) const {
         .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
 #endif
 }
-inline Tensor & Tensor::lgamma_() const {
-#ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::lgamma_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("lgamma_ not implemented for ", at::toString(type_set()));
-    }
-#else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::lgamma_", ""}).value();
-    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
-#endif
-}
 inline Tensor & Tensor::atan2_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::atan2_(const_cast<Tensor&>(*this), other);
