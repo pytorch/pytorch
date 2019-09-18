@@ -12,7 +12,6 @@
 #include <memory>
 #include <mutex>
 #include <ATen/core/interned_strings.h>
-#include <ATen/core/Boxer.h>
 #include <ATen/core/stack.h>
 
 // TODO: Rewrite this comment
