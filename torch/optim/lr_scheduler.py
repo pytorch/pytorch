@@ -6,7 +6,6 @@ import warnings
 import weakref
 from collections import Counter
 from bisect import bisect_right
-from torch._six import inf
 
 from .optimizer import Optimizer
 
