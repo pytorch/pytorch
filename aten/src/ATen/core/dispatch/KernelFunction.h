@@ -47,17 +47,16 @@ constexpr uint64_t hashTypeList() {
 // might have the same hash, but it is probably good enough.
 template<class FuncSignature>
 constexpr uint64_t hashFunctionSignature() {
-#ifdef __CUDACC__
-  // Disabling because the CUDA compiler complains.
-  // TODO Fix this
-  return 0;
-#else
+#if 0 // Disabling because the CUDA compiler complains.
   using func_traits = guts::infer_function_traits_t<FuncSignature>;
   return hashTypeList<
     guts::typelist::concat_t<
       guts::typelist::typelist<typename func_traits::return_type>,
       typename func_traits::parameter_types
     >>();
+#else
+  // TODO Fix this
+  return 0;
 #endif
 }
 
@@ -143,7 +142,7 @@ public:
     // TODO Remove this function once all kernels support a boxed variant
 
     TORCH_INTERNAL_ASSERT(!signature_hash_.has_value() || (detail::hashFunctionSignature<Return (Args...)>() == *signature_hash_),
-      "Called KernelFunction::callUnboxed with wrong argument types");
+      "Called KernelFunction::callUnboxedOnly with wrong argument types");
 
     if (unboxed_kernel_func_ != nullptr) {
       using ActualSignature = Return (OperatorKernel*, Args...);
