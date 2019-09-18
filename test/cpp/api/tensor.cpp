@@ -196,7 +196,7 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 }
 
-TEST(TensorTest, ContainsCorrectValuesForMultidimValuesVariable) {
+TEST(TensorTest, MultidimTensorCtor) {
   {
     auto tensor = torch::tensor({{1, 2}, {3, 4}});
     ASSERT_EQ(tensor.dtype(), torch::kInt);
@@ -232,7 +232,7 @@ TEST(TensorTest, ContainsCorrectValuesForMultidimValuesVariable) {
   }
 }
 
-TEST(TensorTest, ContainsCorrectValuesForMultidimValuesVariable_CUDA) {
+TEST(TensorTest, MultidimTensorCtor_CUDA) {
   {
     auto tensor = torch::tensor(
       {{{{{{{{1.0, 2.0, 3.0}}}}}, {{{{{4.0, 5.0, 6.0}}}}}, {{{{{7.0, 8.0, 9.0}}}}}}}},
