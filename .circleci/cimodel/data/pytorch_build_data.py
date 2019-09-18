@@ -13,7 +13,7 @@ CONFIG_TREE_DATA = [
         ]),
         ("gcc", [
             ("4.8", [X("3.6")]),
-            ("5.4", [
+            ("5.4", [  # All this subtree rebases to master and then build
                 XImportant("3.6"),
                 ("3.6", [
                     ("namedtensor", [XImportant(True)]),

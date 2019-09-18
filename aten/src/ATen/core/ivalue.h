@@ -187,7 +187,7 @@ struct CAFFE2_API IValue final {
     return payload.as_double;
   }
 
-  IValue(ScalarType t) : tag(Tag::ScalarType) {
+  IValue(ScalarType t) : tag(Tag::ScalarType), is_intrusive_ptr(false) {
     payload.as_int = static_cast<std::underlying_type<ScalarType>::type>(t);
   }
 
@@ -366,9 +366,14 @@ struct CAFFE2_API IValue final {
     return c10::Device(payload.as_device.type, payload.as_device.index);
   }
 
+  bool isScalarType() const {
+    return IValue().tag == Tag::ScalarType;
+  }
+
   // ScalarType
   at::ScalarType toScalarType() const {
-    return static_cast<at::ScalarType>(toInt());
+    TORCH_CHECK(isScalarType(), "ivalue not a ScalarType");
+    return static_cast<at::ScalarType>(payload.as_int);
   }
 
   // Layout
