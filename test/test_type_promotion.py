@@ -218,6 +218,20 @@ class TestTypePromotion(TestCase):
         # this seems like odd behavior but ints also create float tensors, numpy doesn't have this function.
         self.assertEqual(torch.scalar_tensor(False, device=self.device), torch.tensor(0., device=self.device))
 
+    def test_comparison_ops_with_type_promotion(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.tensor([1 << 5], dtype=torch.uint8, device=device)
+            y = torch.tensor([1 << 15], dtype=torch.int32, device=device)
+            torch.lt(x, y, out=x)
+            self.assertEqual(x, torch.tensor([True]))
+
+            x = torch.tensor([1 << 5], dtype=torch.uint8, device=device)
+            torch.lt(y, x, out=x)
+            self.assertEqual(x, torch.tensor([False]))
+
+            x = torch.Tensor([0]).int() < 0.5
+            self.assertEqual(x, torch.tensor([True]))
+
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):
     def setUp(self):
