@@ -414,6 +414,7 @@ def run(paths):
                 declaration['device_guard'] = func.get('device_guard', True)
                 declaration['supports_named_tensor'] = func.get('supports_named_tensor', False)
                 declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', 'no')
+                assert declaration['use_c10_dispatcher'] in ['no', 'unboxed_only', 'full']
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
                 declaration['python_module'] = func.get('python_module', '')
