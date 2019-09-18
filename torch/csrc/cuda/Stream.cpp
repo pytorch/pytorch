@@ -50,19 +50,19 @@ static void THCPStream_dealloc(THCPStream *self) {
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static PyObject * THCPStream_get_device(THCPStream *self) {
+static PyObject * THCPStream_get_device(THCPStream *self, void *unused) {
   HANDLE_TH_ERRORS
   return THPDevice_New(self->cuda_stream.device());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPStream_get_cuda_stream(THCPStream *self) {
+static PyObject * THCPStream_get_cuda_stream(THCPStream *self, void *unused) {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(self->cuda_stream.stream());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPStream_get_priority(THCPStream *self) {
+static PyObject * THCPStream_get_priority(THCPStream *self, void *unused) {
   HANDLE_TH_ERRORS
   return PyLong_FromLong(self->cuda_stream.priority());
   END_HANDLE_TH_ERRORS
@@ -77,13 +77,13 @@ static PyObject * THCPStream_priority_range() {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPStream_query(THCPStream *self) {
+static PyObject * THCPStream_query(THCPStream *self, PyObject *noargs) {
   HANDLE_TH_ERRORS
   return PyBool_FromLong(self->cuda_stream.query());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPStream_synchronize(THCPStream *self) {
+static PyObject * THCPStream_synchronize(THCPStream *self, PyObject *noargs) {
   HANDLE_TH_ERRORS
   with_no_gil([&] { self->cuda_stream.synchronize(); });
   Py_RETURN_NONE;
@@ -115,7 +115,7 @@ static PyMethodDef THCPStream_methods[] = {
   {(char*)"synchronize",
     (PyCFunction)THCPStream_synchronize, METH_NOARGS, nullptr},
   {(char*)"priority_range",
-    (PyCFunction)THCPStream_priority_range, METH_STATIC | METH_NOARGS, nullptr},
+    (PyCFunction)(void(*)(void))THCPStream_priority_range, METH_STATIC | METH_NOARGS, nullptr},
   {(char*)"__eq__", (PyCFunction)THCPStream_eq, METH_O, nullptr},
   {nullptr}
 };

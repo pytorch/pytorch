@@ -111,7 +111,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_nc_q8(
       kernel_zero_point,
       n_stride * (k_stride * sizeof(uint8_t) + sizeof(int32_t)));
 
-  pack_q8gemm_w(
+  pytorch_pack_q8gemm_w(
       output_channels,
       input_channels,
       nr,
