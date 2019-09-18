@@ -52,15 +52,6 @@ def load_normalized_test_case(input_shape, test_image, pagelocked_buffer, normal
     np.copyto(pagelocked_buffer, normalize_image(Image.open(test_image)))
     return test_image
 
-def get_io_names(onnx_model):
-    input_names: List[str]=[]
-    output_names: List[str]=[]
-    for i in range(len(onnx_model.graph.input)):
-        input_names.append(onnx_model.graph.input[i].name)
-    for i in range(len(onnx_model.graph.output)):
-        output_names.append(onnx_model.graph.output[i].name)
-    return (input_names, output_names)
-
 class Test_PT_ONNX_TRT(unittest.TestCase):
     def __enter__(self):
         return self
