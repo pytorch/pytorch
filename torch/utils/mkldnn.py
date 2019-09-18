@@ -138,7 +138,7 @@ MKLDNN_GRU = 3
 
 class MkldnnLSTM(torch.jit.ScriptModule):
     __constants__ = ['input_size', 'hidden_size', 'bias',
-        'mode', 'num_layers', 'bidirectional', 'batch_first']
+                     'mode', 'num_layers', 'bidirectional', 'batch_first']
 
     def __init__(self, dense_module):
         super(MkldnnLSTM, self).__init__()
@@ -154,7 +154,8 @@ class MkldnnLSTM(torch.jit.ScriptModule):
         self.bidirectional = dense_module.bidirectional
         self.batch_first = dense_module.batch_first
 
-        self.register_buffer('flatten_weight',
+        self.register_buffer(
+            'flatten_weight',
             torch._C._nn._mkldnn_rnn_flatten_weight(
                 dense_module._flat_weights,
                 self.bias,
@@ -179,8 +180,8 @@ class MkldnnLSTM(torch.jit.ScriptModule):
             batch_size = input.size(1)
             num_directions = 2 if self.bidirectional else 1
             zeros = torch.zeros(self.num_layers * num_directions,
-                batch_size, self.hidden_size,
-                dtype=input.dtype, device=input.device)
+                                batch_size, self.hidden_size,
+                                dtype=input.dtype, device=input.device)
             hx = (zeros, zeros)
 
         hx, cx = hx
@@ -211,7 +212,7 @@ class MkldnnLSTM(torch.jit.ScriptModule):
 
 class MkldnnGRU(torch.jit.ScriptModule):
     __constants__ = ['input_size', 'hidden_size', 'bias',
-        'mode', 'num_layers', 'bidirectional', 'batch_first']
+                     'mode', 'num_layers', 'bidirectional', 'batch_first']
 
     def __init__(self, dense_module):
         super(MkldnnGRU, self).__init__()
@@ -227,7 +228,8 @@ class MkldnnGRU(torch.jit.ScriptModule):
         self.bidirectional = dense_module.bidirectional
         self.batch_first = dense_module.batch_first
 
-        self.register_buffer('flatten_weight',
+        self.register_buffer(
+            'flatten_weight',
             torch._C._nn._mkldnn_rnn_flatten_weight(
                 dense_module._flat_weights,
                 self.bias,
@@ -252,8 +254,8 @@ class MkldnnGRU(torch.jit.ScriptModule):
             batch_size = input.size(1)
             num_directions = 2 if self.bidirectional else 1
             hx = torch.zeros(self.num_layers * num_directions,
-                batch_size, self.hidden_size,
-                dtype=input.dtype, device=input.device)
+                             batch_size, self.hidden_size,
+                             dtype=input.dtype, device=input.device)
 
         input_mkldnn = input if input.is_mkldnn else input.to_mkldnn()
         hx_mkldnn = hx if hx.is_mkldnn else hx.to_mkldnn()
