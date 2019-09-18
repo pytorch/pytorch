@@ -425,6 +425,9 @@ public:
 
   TypePtr elementType() const;
 
+  // See [unsafe set type] for why this exists.
+  void unsafeSetElementType(TypePtr t);
+
 private:
   explicit List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);
   friend struct IValue;
