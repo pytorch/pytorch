@@ -94,56 +94,6 @@ void Pickler::stop() {
   push<PickleOpCode>(PickleOpCode::STOP);
 }
 
-void Pickler::torchSaveStop() {
-  // Add the binary data for all the tensors to be included in the same binary
-  // TODO: The pickler should be refactored to stream out to a stream directly
-  // instead of staging in the stack_ array
-  // As another pickle program in the same binary archive, add a list of
-  // keys for each tensor (see torch/serialization.py)
-  protocol();
-  push<PickleOpCode>(PickleOpCode::MARK);
-  for (size_t i = 0; i < tensor_data_.size(); ++i) {
-    std::string key = std::to_string(i);
-    push<PickleOpCode>(PickleOpCode::BINUNICODE);
-    push<uint32_t>(key.size());
-    pushBytes(key);
-  }
-
-  push<PickleOpCode>(PickleOpCode::TUPLE);
-  stop();
-
-  // Now dump the tensor binary data
-  for (const auto& data : tensor_data_) {
-    // first dump size
-    push<size_t>(data.numel());
-    writer_(data.data(), data.sizeInBytes());
-  }
-}
-
-void Pickler::torchSaveStart() {
-  // Output data to match torch.save, see torch/serialization.py for details
-  // Magic number (0x1950a86a20f9469cfc6c)
-  protocol();
-  push<PickleOpCode>(PickleOpCode::LONG1);
-  // LONG1 size
-  pushBytes("\x0a");
-  // LONG1 data
-  pushBytes("\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19");
-  stop();
-
-  // Protocol Version (1001)
-  protocol();
-  push<PickleOpCode>(PickleOpCode::BININT2);
-  pushBytes("\xe9\x03");
-  stop();
-
-  // sys_info, this isn't actually used in de-serialization so we can leave this
-  // one empty
-  protocol();
-  push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
-  stop();
-}
-
 // unmemoized version called by pushIValue
 void Pickler::pushIValueImpl(const IValue& ivalue) {
   if (ivalue.isTensor()) {
@@ -332,6 +282,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   push<PickleOpCode>(PickleOpCode::TUPLE);
   push<PickleOpCode>(PickleOpCode::BINPERSID);
 
+  // TODO: Skip this if not writing tensors
   memoized_storage_map_[addr] = pushNextBinPut();
   tensor_data_.push_back(getWriteableTensorData(tensor));
 }
@@ -426,19 +377,6 @@ void Pickler::pushClass(PicklerClass cls) {
   pushGlobal("torch.jit._pickle", getClassName(cls));
 }
 
-void Pickler::pushTensorReference(const IValue& ivalue) {
-  pushClass(PicklerClass::TENSOR);
-  tensor_table_->push_back(ivalue.toTensor());
-  int64_t tensor_id = tensor_table_->size() - 1;
-  // Reduce arguments are spread (e.g. `*args`) before calling the global,
-  // so wrap in a tuple
-  push<PickleOpCode>(PickleOpCode::MARK);
-  pushIValue(tensor_id);
-  push<PickleOpCode>(PickleOpCode::TUPLE);
-
-  push<PickleOpCode>(PickleOpCode::REDUCE);
-}
-
 void Pickler::pushSpecializedList(
     const IValue& ivalue,
     PicklerClass cls,
@@ -476,13 +414,46 @@ void Pickler::pushDouble(double value) {
   }
 }
 
+void Pickler::pushLong(const std::string& data) {
+  uint64_t size = data.size();
+
+  if (size <= std::numeric_limits<uint8_t>::max()) {
+    push<PickleOpCode>(PickleOpCode::LONG1);
+    push<uint8_t>(size);
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        data.size() > std::numeric_limits<uint32_t>::max(),
+        "Cannot pickle a long with a size larger than 4 bytes")
+    push<PickleOpCode>(PickleOpCode::LONG4);
+    push<uint64_t>(size);
+  }
+  pushBytes(data);
+}
+
+void Pickler::pushTensorReference(const IValue& ivalue) {
+  pushClass(PicklerClass::TENSOR);
+  tensor_table_->push_back(ivalue.toTensor());
+  int64_t tensor_id = tensor_table_->size() - 1;
+  // Reduce arguments are spread (e.g. `*args`) before calling the global,
+  // so wrap in a tuple
+  push<PickleOpCode>(PickleOpCode::MARK);
+  pushIValue(tensor_id);
+  push<PickleOpCode>(PickleOpCode::TUPLE);
+
+  push<PickleOpCode>(PickleOpCode::REDUCE);
+}
+
 void Pickler::pushDict(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
+
+  auto dict_items = iterationOrder(ivalue.toGenericDict());
+  if (dict_items.size() == 0) {
+    return;
+  }
 
   push<PickleOpCode>(PickleOpCode::MARK);
 
   // Sort the dict for deterministic keys
-  auto dict_items = iterationOrder(ivalue.toGenericDict());
   for (const auto& pair : dict_items) {
     pushIValue(pair.first);
     pushIValue(pair.second);
@@ -760,6 +731,9 @@ PickleOpCode Unpickler::readInstruction() {
           stack_.pop_back();
           switch (pickler_class) {
             case PicklerClass::TENSOR:
+              TORCH_INTERNAL_ASSERT(
+                  tensor_table_,
+                  "Pickler tried to write a tensor but had no tensor table to write to");
               stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
               break;
             case PicklerClass::INTLIST:
@@ -779,7 +753,7 @@ PickleOpCode Unpickler::readInstruction() {
             case PicklerClass::TENSOR:
               TORCH_CHECK(
                   tensor_table_,
-                  "Found a tensor table reference but Pickler"
+                  "Found a tensor table reference but Unpickler"
                   " has no tensor table\n");
               stack_.emplace_back(tensor_table_->at(data.toInt()));
               break;
