@@ -6,6 +6,7 @@ import io
 import pickle
 import traceback
 import threading
+import sys
 
 import torch
 
@@ -24,8 +25,9 @@ def tensor_reducer(obj):
     tensor_index = len(_thread_local_tensor_tables.send_tables) - 1
     return (_tensor_receiver, (tensor_index, ))
 
-_dispatch_table = copyreg.dispatch_table.copy()
-_dispatch_table[torch.Tensor] = tensor_reducer
+if sys.version_info >= (3, 0):
+    _dispatch_table = copyreg.dispatch_table.copy()
+    _dispatch_table[torch.Tensor] = tensor_reducer
 
 def serialize(obj):
     f = io.BytesIO()
