@@ -449,6 +449,32 @@ TEST_F(ModulesTest, L1Loss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, CosineSimilarity) {
+  CosineSimilarity cos(CosineSimilarityOptions().dim(1));
+  auto input1 = torch::randn({5, 3}, torch::requires_grad());
+  auto input2 = torch::randn({5, 3}, torch::requires_grad());
+  auto output = cos->forward(input1, input2);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.ndimension(), 1);
+  ASSERT_EQ(output.size(0), 5);
+  ASSERT_EQ(input1.sizes(), input1.grad().sizes());
+}
+
+TEST_F(ModulesTest, PairwiseDistance) {
+  PairwiseDistance dist(PairwiseDistanceOptions(1));
+  auto input1 = torch::randn({6, 4}, torch::requires_grad());
+  auto input2 = torch::randn({6, 4}, torch::requires_grad());
+  auto output = dist->forward(input1, input2);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.ndimension(), 1);
+  ASSERT_EQ(output.size(0), 6);
+  ASSERT_EQ(input1.sizes(), input1.grad().sizes());
+}
+
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in=3, out=4, with_bias=true)");
@@ -530,6 +556,14 @@ TEST_F(ModulesTest, PrettyPrintEmbedding) {
   ASSERT_EQ(
       c10::str(Embedding(10, 2)),
       "torch::nn::Embedding(count=10, dimension=2)");
+}
+
+TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
+  ASSERT_EQ(c10::str(CosineSimilarity()), "torch::nn::CosineSimilarity()");
+}
+
+TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {
+  ASSERT_EQ(c10::str(PairwiseDistance()), "torch::nn::PairwiseDistance()");
 }
 
 TEST_F(ModulesTest, PrettyPrintNestedModel) {

@@ -148,8 +148,14 @@ module_metadata_map = {
     'AlphaDropout': TorchNNModuleMetadata(),
     'Embedding': TorchNNModuleMetadata(),
     'EmbeddingBag': TorchNNModuleMetadata(),
-    'CosineSimilarity': TorchNNModuleMetadata(),
-    'PairwiseDistance': TorchNNModuleMetadata(),
+    'CosineSimilarity': TorchNNModuleMetadata(
+        cpp_default_constructor_args="()",
+        num_attrs_recursive=2,
+    ),
+    'PairwiseDistance': TorchNNModuleMetadata(
+        cpp_default_constructor_args="()",
+        num_attrs_recursive=3,
+    ),
     'L1Loss': TorchNNModuleMetadata(
         cpp_default_constructor_args="()",
         num_attrs_recursive=1,
