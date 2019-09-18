@@ -768,6 +768,12 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
     #ifdef BUILD_NAMEDTENSOR
         {"aten::refine_names", ""},
     #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::unflatten", ""},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::unflatten", ""},
+    #endif
         {"aten::_cudnn_rnn", ""},
         {"aten::_cudnn_rnn_backward", ""},
         {"aten::_cudnn_init_dropout_state", ""},
