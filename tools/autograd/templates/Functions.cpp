@@ -2269,6 +2269,96 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
 }
 
+std::tuple<Tensor, Tensor, Tensor> infinitely_differentiable_native_layer_norm_backward(
+    Tensor grad_out,
+    const Tensor& grad_mean,
+    const Tensor& grad_rstd,
+    const Tensor& input,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const Tensor& weight,
+    int64_t M,
+    int64_t N,
+    double eps,
+    std::array<bool, 3> grad_input_mask)
+{
+  Tensor grad_input;
+  Tensor grad_weight;
+  Tensor grad_bias;
+
+  Tensor flattened_input = input.reshape({M, N});
+  Tensor flattened_weight;
+  if (weight.defined()) {
+    flattened_weight = weight.reshape({N});
+  }
+
+  // Common subexpressions
+  Tensor input_minus_mean_times_grad_out;
+  if (grad_out.defined()) {
+    grad_out = grad_out.reshape({M, N});
+    input_minus_mean_times_grad_out = (flattened_input - mean.unsqueeze(1)) * grad_out;
+  }
+
+  if (grad_input_mask[0]) {
+    // Let's say
+    // out, mean, rstd = layernorm(input, weight, bias) = (input - mean) * rstd * weight + bias := f(input, mean, rstd, weight, bias)
+    // y = g(out, mean, rstd)
+    //
+    // then
+    //
+    // dy/dinput = dg/dout * dout/dinput + dg/dmean * dmean/dinput + dg/drstd * drstd/dinput
+    //           = grad_out * dout/dinput + grad_mean * dmean/dinput + grad_rstd * drstd/dinput
+    //
+    // where
+    //
+    // dout/dinput = dlayernorm/dinput = df/dinput + df/dmean * dmean/dinput + df/drstd * drstd/dinput
+    //
+    // where
+    // df/dinput = rstd * weight
+    // df/dmean = - rstd * weight
+    // df/drstd = (input - mean) * weight
+    //
+    // then we have
+    //
+    // dy/dinput = grad_out * rstd * weight + (grad_mean - grad_out * rstd * weight) * dmean/dinput + (grad_rstd + grad_out * (input - mean) * weight) * drst/dinput
+    //           = (unchanged)........................................................................................................................ * drst/dvar * dvar/dinput
+    //          := part1                    + part2                                                 + part3
+
+    Tensor var = ((1 / rstd).pow(2) - eps).clamp_min(0);
+
+    if (grad_out.defined()) {
+      // Common subexpressions
+      Tensor grad_out_times_rstd = grad_out * rstd.unsqueeze(1);
+
+      // Compute part1
+      Tensor part1 = weight.defined() ? grad_out_times_rstd * flattened_weight : grad_out_times_rstd;
+
+      // Compute part2 + part3
+      Tensor real_grad_mean = grad_mean.defined() ? grad_mean - part1.sum(1) : -part1.sum(1);
+      Tensor real_grad_var = (weight.defined() ? input_minus_mean_times_grad_out * flattened_weight : input_minus_mean_times_grad_out).sum(1);
+      if (grad_rstd.defined()) {
+        real_grad_var += grad_rstd;
+      }
+      real_grad_var *= -0.5 * rstd.pow(3);
+      Tensor part2_plus_part3 = var_std_mean_backward({real_grad_var, real_grad_mean}, flattened_input, var, mean, {1}, false, false, false);
+      grad_input = (part1 + part2_plus_part3).reshape_as(input);
+    } else {
+      Tensor grad_var;
+      if (grad_rstd.defined()) {
+        grad_var = -0.5 * rstd.pow(3) * grad_rstd;
+      }
+      grad_input = var_std_mean_backward({grad_var, grad_mean}, flattened_input, var, mean, {1}, false, false, false).reshape_as(input);
+    }
+  }
+  if (grad_input_mask[1] && grad_out.defined()) {
+    grad_weight = (input_minus_mean_times_grad_out * rstd.unsqueeze(1)).sum(0).reshape_as(weight);
+  }
+  if (grad_input_mask[2] && grad_out.defined()) {
+    grad_bias = grad_out.sum(0).reshape_as(weight);
+  }
+  return std::make_tuple(grad_input, grad_weight, grad_bias);
+}
+
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
                                                        IntArrayRef expand1, IntArrayRef expand2, IntArrayRef expand3,
                                                        IntArrayRef sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask) {

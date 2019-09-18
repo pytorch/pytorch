@@ -8,6 +8,7 @@ std::tuple<Tensor, Tensor, Tensor> native_layer_norm_cpu(
     const Tensor& input,
     const Tensor& weight /* optional */,
     const Tensor& bias /* optional */,
+    int64_t normalized_ndim,
     int64_t M,
     int64_t N,
     double eps)
@@ -20,10 +21,10 @@ std::tuple<Tensor, Tensor, Tensor> native_layer_norm_cpu(
 }
 
 std::tuple<Tensor, Tensor, Tensor> non_differentiable_native_layer_norm_backward_cpu(
-    const Tensor& grad_out,
     const Tensor& input,
     const Tensor& mean,
     const Tensor& rstd,
+    const Tensor& grad_out,
     const Tensor& weight,
     int64_t M,
     int64_t N,
@@ -103,44 +104,7 @@ Tensor layer_norm(
       1LL,
       std::multiplies<int64_t>());
 
-  return std::get<0>(at::native_layer_norm(input.contiguous(), weight.contiguous(), bias.contiguous(), M, N, eps));
-}
-
-std::tuple<Tensor, Tensor, Tensor> infinitely_differentiable_native_layer_norm_backward(
-    const Tensor& grad_out,
-    const Tensor& input,
-    const Tensor& mean,
-    const Tensor& rstd,
-    const Tensor& weight,
-    int64_t M,
-    int64_t N,
-    double eps,
-    std::array<bool, 3> grad_input_mask)
-{
-  Tensor grad_input;
-  Tensor grad_weight;
-  Tensor grad_bias;
-  const auto input_dim = input.dim();
-  const auto mean_dim = mean.dim();
-  if (grad_input_mask[0]) {
-    Tensor grad = weight.defined() ? grad_out * weight : grad_out;
-    Tensor undefined;
-    grad_input = std::get<0>(at::native_batch_norm_backward(
-      grad.reshape({1, M, N}), input.reshape({1, M, N}), /*weight=*/undefined, /*running_mean=*/undefined,
-      /*running_var=*/undefined, /*save_mean=*/mean.reshape({M}), /*save_invstd=*/rstd.reshape({M}),
-      /*training=*/false, eps, {true, false, false})).reshape_as(input);
-  }
-  if (grad_input_mask[1]) {
-    std::vector<int64_t> unsqueezed_sizes(input.dim(), 1);
-    for(auto i = 0; i < mean_dim; i++) {
-      unsqueezed_sizes[i] = mean.size(i);
-    }
-    grad_weight = ((input - mean.reshape(unsqueezed_sizes)) * rstd.reshape(unsqueezed_sizes) * grad_out).flatten(0, mean_dim - 1).sum(0);
-  }
-  if (grad_input_mask[2]) {
-    grad_bias = grad_out.flatten(0, mean_dim - 1).sum(0);
-  }
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
+  return std::get<0>(at::native_layer_norm(input.contiguous(), weight.contiguous(), bias.contiguous(), normalized_ndim, M, N, eps));
 }
 
 DEFINE_DISPATCH(LayerNormKernel);

@@ -912,7 +912,6 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::layer_norm", ""},
         {"aten::native_layer_norm", ""},
         {"aten::non_differentiable_native_layer_norm_backward", ""},
-        {"aten::infinitely_differentiable_native_layer_norm_backward", ""},
         {"aten::linear", ""},
         {"aten::mkldnn_linear", ""},
         {"aten::linspace", ""},

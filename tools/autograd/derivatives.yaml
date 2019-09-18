@@ -584,8 +584,8 @@
   save_mean: not_implemented("native_batch_norm_backward save_mean")
   save_invstd: not_implemented("native_batch_norm_backward save_invstd")
 
-- name: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)
-  input, weight, bias: "GradMode::is_enabled() ? infinitely_differentiable_native_layer_norm_backward(grad, input, result1, result2, weight, M, N, eps, grad_input_mask) : non_differentiable_native_layer_norm_backward(grad.contiguous(), input, result1, result2, weight, M, N, eps, grad_input_mask)"
+- name: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int normalized_ndim, int M, int N, float eps) -> (Tensor, Tensor, Tensor)
+  input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_layer_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, M, N, eps, grad_input_mask) : non_differentiable_native_layer_norm_backward(input, result1, result2, grads[0].contiguous(), weight, M, N, eps, grad_input_mask)"
 
 - name: ne_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)

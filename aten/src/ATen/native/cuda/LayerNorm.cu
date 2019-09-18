@@ -78,7 +78,6 @@ void cuWelfordMuSigma2(
     for (; l + 3 < N; l += 4 * numx) {
       for (int k = 0; k < 4; ++k) {
         U curr = static_cast<U>(lvals[l + k]);
-        printf("i1=%ld, N=%ld, index=%ld, lvals[l + k]=%lf\n", long(i1), long(N), long(i1 * N + l + k), double(lvals[l + k]));
         cuWelfordOnlineSum<U>(curr, mu, sigma2, count);
       }
     }
@@ -300,7 +299,6 @@ void cuApplyLayerNorm(
     const T* lvals = vals + i1 * N;
     T* ovals = output_vals + i1 * N;
     U c_rstd = rsqrt(sigma2 + eps);
-    printf("i1=%ld, sigma2=%lf, c_rstd=%lf\n", long(i1), double(sigma2), double(c_rstd));
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
     if (weight != nullptr && bias != nullptr) {
@@ -346,7 +344,7 @@ void cuLoadWriteStridedInputs(
       int i2 = i2_off + k;
       int load_idx = i1 * N + i2;
       int write_idx = thr_load_row_off * row_stride + thr_load_col_off + k;
-      if (i2 < N) {
+      if (i2 < N && nullptr != grad_out) {
         U curr_input = static_cast<U>(input[load_idx]);
         U curr_grad_out = static_cast<U>(grad_out[load_idx]);
         warp_buf1[write_idx] = curr_grad_out;
@@ -428,8 +426,10 @@ void cuComputePartGradWeightBias(
     // compute partial sums from strided inputs
     // do this to increase number of loads in flight
     cuLoadWriteStridedInputs(i1_beg, thr_load_row_off, thr_load_col_off, i2_off, row_stride, warp_buf1, warp_buf2, input, grad_out, i1_end, N, mean, rstd);
-    for (int i1_block = i1_beg + blockDim.y * blockDim.y; i1_block < i1_end; i1_block += blockDim.y * blockDim.y) {
-      cuLoadAddStridedInputs(i1_block, thr_load_row_off, thr_load_col_off, i2_off, row_stride, warp_buf1, warp_buf2, input, grad_out, i1_end, N, mean, rstd);
+    if (nullptr != grad_out) {
+      for (int i1_block = i1_beg + blockDim.y * blockDim.y; i1_block < i1_end; i1_block += blockDim.y * blockDim.y) {
+        cuLoadAddStridedInputs(i1_block, thr_load_row_off, thr_load_col_off, i2_off, row_stride, warp_buf1, warp_buf2, input, grad_out, i1_end, N, mean, rstd);
+      }
     }
     __syncthreads();
     // inter-warp reductions
@@ -532,14 +532,21 @@ void cuComputeGradInput(
     T* grad_input)
 {
   for (int i1=blockIdx.y; i1 < M; i1 += gridDim.y) {
+    T* k_grad_input = grad_input + i1 * N;
+    const int numx = blockDim.x * blockDim.y;
+    const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
+    if (nullptr == grad_out) {
+      for (int l = thrx; l < N; l += numx) {
+        k_grad_input[l] = T(0);
+      }
+      continue;
+    }
     U sum_loss1 = U(0);
     U sum_loss2 = U(0);
     const U c_mean = mean[i1];
     const U c_rstd = rstd[i1];
     const T* k_input = input + i1 * N;
     const T* k_grad_out = grad_out + i1 * N;
-    const int numx = blockDim.x * blockDim.y;
-    const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
     if (weight != nullptr) {
       int l = 4 * thrx;
       for (; l + 3 < N; l += 4 * numx) {
@@ -611,7 +618,6 @@ void cuComputeGradInput(
     // all threads now have the two sums over l
     U fH = (U)N;
     U term1 = (U(1) / fH) * c_rstd;
-    T* k_grad_input = grad_input + i1 * N;
     if (weight != nullptr) {
       for (int l = thrx; l < N; l += numx) {
         const U c_h = static_cast<U>(k_input[l]);
@@ -736,6 +742,7 @@ std::tuple<Tensor, Tensor, Tensor> native_layer_norm_cuda(
   const Tensor& input,
   const Tensor& weight /* optional */,
   const Tensor& bias /* optional */,
+  int64_t normalized_ndim,
   int64_t M,
   int64_t N,
   double eps)
@@ -757,15 +764,14 @@ std::tuple<Tensor, Tensor, Tensor> native_layer_norm_cuda(
         bias.defined() ? bias.data_ptr<scalar_t>() : nullptr
       );
     });
-
   return std::make_tuple(output, mean, rstd);
 }
 
 std::tuple<Tensor, Tensor, Tensor> non_differentiable_native_layer_norm_backward_cuda(
-  const Tensor& grad_out,
   const Tensor& input,
   const Tensor& mean,
   const Tensor& rstd,
+  const Tensor& grad_out,
   const Tensor& weight,
   int64_t M,
   int64_t N,
@@ -786,7 +792,7 @@ std::tuple<Tensor, Tensor, Tensor> non_differentiable_native_layer_norm_backward
     [&]() {
       using accscalar_t = at::acc_type<scalar_t, true>;
       HostLayerNormGradient(
-        grad_out.data_ptr<scalar_t>(),
+        grad_out.defined() ? grad_out.data_ptr<scalar_t>() : nullptr,
         mean.data_ptr<accscalar_t>(),
         rstd.data_ptr<accscalar_t>(),
         input,
