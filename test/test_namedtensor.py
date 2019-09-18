@@ -1,11 +1,12 @@
 import unittest
 from common_utils import TestCase, run_tests, TEST_NUMPY
 from common_cuda import TEST_CUDA
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 import itertools
 import functools
 import torch
 from torch import Tensor
+from torch._six import PY2
 import torch.nn.functional as F
 from multiprocessing.reduction import ForkingPickler
 import pickle
@@ -176,6 +177,15 @@ class TestNamedTensor(TestCase):
         self.assertTrue(partially_named.has_names())
         self.assertTrue(fully_named.has_names())
 
+    @unittest.skipIf(PY2, "Ellipsis object not supported in python 2")
+    def test_py3_ellipsis(self):
+        # Need to exec or else flake8 will complain about invalid python 2.
+        tensor = torch.randn(2, 3, 5, 7)
+        scope = {'tensor': tensor}
+        code_str = "output = tensor.refine_names('N', ..., 'C')"
+        exec(code_str, globals(), scope)
+        self.assertEqual(scope['output'].names, ['N', None, None, 'C'])
+
     def test_refine_names(self):
         # Unnamed tensor -> Unnamed tensor
         self._test_name_inference(Tensor.refine_names,
@@ -209,7 +219,7 @@ class TestNamedTensor(TestCase):
 
         # globbing behavior exists
         self._test_name_inference(Tensor.refine_names,
-                                  [create('None:1,None:1,None:2,None:3'), '*', 'C', 'H'],
+                                  [create('None:1,None:1,None:2,None:3'), '...', 'C', 'H'],
                                   [None, None, 'C', 'H'])
 
     def test_repr(self):
@@ -302,35 +312,35 @@ class TestNamedTensor(TestCase):
         named_tensor = torch.empty(1, 1, 1, 1, names=('N', 'C', 'H', 'W'))
 
         self.assertEqual(scalar.renamed(None).names, [])
-        self.assertEqual(scalar.renamed('*').names, [])
+        self.assertEqual(scalar.renamed('...').names, [])
 
         # Check that it works with unnamed tensors
-        self.assertEqual(unnamed_tensor.renamed('*').names, unnamed_tensor.names)
-        self.assertEqual(unnamed_tensor.renamed('*', 'H', 'W').names,
+        self.assertEqual(unnamed_tensor.renamed('...').names, unnamed_tensor.names)
+        self.assertEqual(unnamed_tensor.renamed('...', 'H', 'W').names,
                          [None, None, 'H', 'W'])
-        self.assertEqual(unnamed_tensor.renamed('N', '*', 'W').names,
+        self.assertEqual(unnamed_tensor.renamed('N', '...', 'W').names,
                          ['N', None, None, 'W'])
-        self.assertEqual(unnamed_tensor.renamed('N', 'C', '*').names,
+        self.assertEqual(unnamed_tensor.renamed('N', 'C', '...').names,
                          ['N', 'C', None, None])
 
         # Check that it works with named tensors
-        self.assertEqual(named_tensor.renamed('*').names, named_tensor.names)
-        self.assertEqual(named_tensor.renamed('*', 'width').names,
+        self.assertEqual(named_tensor.renamed('...').names, named_tensor.names)
+        self.assertEqual(named_tensor.renamed('...', 'width').names,
                          ['N', 'C', 'H', 'width'])
-        self.assertEqual(named_tensor.renamed('batch', 'channels', '*', 'width').names,
+        self.assertEqual(named_tensor.renamed('batch', 'channels', '...', 'width').names,
                          ['batch', 'channels', 'H', 'width'])
-        self.assertEqual(named_tensor.renamed('batch', '*').names,
+        self.assertEqual(named_tensor.renamed('batch', '...').names,
                          ['batch', 'C', 'H', 'W'])
 
         # Test empty glob
-        self.assertEqual(unnamed_tensor.renamed('*', None, None, None, None).names,
+        self.assertEqual(unnamed_tensor.renamed('...', None, None, None, None).names,
                          [None, None, None, None])
-        self.assertEqual(named_tensor.renamed('N', 'C', 'H', '*', 'W').names,
+        self.assertEqual(named_tensor.renamed('N', 'C', 'H', '...', 'W').names,
                          ['N', 'C', 'H', 'W'])
 
         # Multiple globs throw
         with self.assertRaisesRegex(RuntimeError, 'More than one '):
-            named_tensor.renamed('*', 'channels', '*')
+            named_tensor.renamed('...', 'channels', '...')
 
     def test_renamed_rename_map(self):
         scalar = torch.randn([])
@@ -818,6 +828,49 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "must be consecutive in"):
             tensor.flatten(['H', 'D', 'W'], 'features')
 
+    def test_unflatten(self):
+        tensor = torch.randn(7, 2 * 3 * 5, 11, names=('N', 'D', 'K'))
+
+        # accepts iterable of tuples
+        out = tensor.unflatten('D', (('C', 2), ('H', 3), ('W', 5)))
+        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
+        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
+
+        # accepts OrderedDict
+        out = tensor.unflatten('D', OrderedDict((('C', 2), ('H', 3), ('W', 5))))
+        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
+        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
+
+        # Unflatten left-most
+        out = tensor.unflatten('N', (('N', 7), ('H', 1)))
+        self.assertEqual(out.names, ('N', 'H', 'D', 'K'))
+        self.assertEqual(out.shape, (7, 1, 2 * 3 * 5, 11))
+
+        # Unflatten right-most
+        out = tensor.unflatten('K', (('K', 11), ('H', 1)))
+        self.assertEqual(out.names, ('N', 'D', 'K', 'H'))
+        self.assertEqual(out.shape, (7, 2 * 3 * 5, 11, 1))
+
+        # takes positional dim
+        out = tensor.unflatten(1, (('C', 2), ('H', 3), ('W', 5)))
+        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
+        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
+
+        with self.assertRaisesRegex(RuntimeError, "don't multiply up to"):
+            tensor.unflatten('D', (('H', 3), ('W', 5)))
+
+        with self.assertRaisesRegex(RuntimeError, 'OrderedDict or iterable of tuples'):
+            tensor.unflatten('D', None)
+
+        with self.assertRaisesRegex(RuntimeError, 'non-empty'):
+            tensor.unflatten('D', OrderedDict())
+
+    def test_unsupported_op_error_msg(self):
+        named = torch.randn(3, 3, names=('N', 'C'))
+        with self.assertRaisesRegex(
+                RuntimeError, "pdist is not yet supported with named tensors"):
+            torch.pdist(named)
+
     def test_reduction_fns(self):
         def check_output(output, expected_names):
             if isinstance(output, torch.Tensor):
@@ -1150,12 +1203,12 @@ class TestNamedTensor(TestCase):
 
         # globbing
         tensor = create('N:7,H:3,W:5,C:2')
-        output = tensor.align_to('*', 'C', 'H', 'W')
+        output = tensor.align_to('...', 'C', 'H', 'W')
         self.assertEqual(output.names, ['N', 'C', 'H', 'W'])
         self.assertEqual(output.shape, [7, 2, 3, 5])
 
         tensor = create('N:7,C:2,H:3,W:5')
-        output = tensor.align_to('*', 'W', 'H')
+        output = tensor.align_to('...', 'W', 'H')
         self.assertEqual(output.names, ['N', 'C', 'W', 'H'])
         self.assertEqual(output.shape, [7, 2, 5, 3])
 

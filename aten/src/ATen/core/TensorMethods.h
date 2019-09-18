@@ -133,6 +133,26 @@ inline Tensor Tensor::refine_names(DimnameList names) const {
 #endif
 }
 #endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::unflatten(Dimname dim, IntArrayRef sizes, DimnameList names) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::unflatten(const_cast<Tensor&>(*this), dim, sizes, names);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::unflatten(Tensor self, Dimname dim, int[] sizes, DimnameList names) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, IntArrayRef, DimnameList)>(type_set())(const_cast<Tensor&>(*this), dim, sizes, names);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::unflatten(int64_t dim, IntArrayRef sizes, DimnameList names) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::unflatten(const_cast<Tensor&>(*this), dim, sizes, names);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::unflatten(Tensor self, int dim, int[] sizes, DimnameList names) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, int64_t, IntArrayRef, DimnameList)>(type_set())(const_cast<Tensor&>(*this), dim, sizes, names);
+#endif
+}
+#endif
 inline Tensor Tensor::abs() const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::abs(const_cast<Tensor&>(*this));
