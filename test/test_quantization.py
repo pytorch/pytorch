@@ -25,6 +25,7 @@ from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedMod
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from hypothesis_utils import no_deadline
 import io
 import copy
 
@@ -827,6 +828,7 @@ class QuantizationDebugTest(QuantizationTestCase):
         loaded = torch.jit.load(buf)
         self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
 
+    @no_deadline
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
