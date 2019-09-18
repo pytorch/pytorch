@@ -1,12 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/nn/module.h>
-#include <torch/nn/modules/functional.h>
-#include <torch/nn/modules/linear.h>
-#include <torch/nn/modules/sequential.h>
-#include <torch/optim.h>
-#include <torch/types.h>
-#include <torch/utils.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/optim_baseline.h>
 #include <test/cpp/api/support.h>

@@ -8,7 +8,6 @@
 
 namespace torch {
 namespace nn {
-LinearOptions::LinearOptions(int64_t in, int64_t out) : in_(in), out_(out) {}
 
 LinearImpl::LinearImpl(LinearOptions options) : options(options) {
   reset();
