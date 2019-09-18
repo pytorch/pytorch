@@ -1049,7 +1049,7 @@
 - name: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   self: log_sigmoid_backward(grad, self, buffer)
 
-- name: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+- name: _log_softmax(Tensor self, int dim, *, bool half_to_float) -> Tensor
   self: _log_softmax_backward_data(grad, result, dim, self)
 
 - name: prelu(Tensor self, Tensor weight) -> Tensor

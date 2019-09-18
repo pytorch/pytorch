@@ -1539,7 +1539,7 @@
   variants: function, method
   supports_named_tensor: True
 
-- func: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+- func: _log_softmax(Tensor self, int dim, *, bool half_to_float) -> Tensor
   use_c10_dispatcher: True
   dispatch:
     CPU: log_softmax_cpu
