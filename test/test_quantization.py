@@ -831,6 +831,8 @@ class ObserverTest(QuantizationTestCase):
             ref_zero_points = [z / 2 for z in ref_zero_points]
 
         self.assertTrue(torch.allclose(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype)))
+        print("qparams = ", qparams)
+        print("ref zero points = ", ref_zero_points)
         self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
 
     def test_observer_scriptable(self):
