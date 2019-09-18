@@ -411,6 +411,12 @@ class CAFFE2_API Tensor {
   #ifdef BUILD_NAMEDTENSOR
   Tensor refine_names(DimnameList names) const;
   #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor unflatten(Dimname dim, IntArrayRef sizes, DimnameList names) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor unflatten(int64_t dim, IntArrayRef sizes, DimnameList names) const;
+  #endif
   Tensor abs() const;
   Tensor & abs_() const;
   Tensor acos() const;
