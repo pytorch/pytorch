@@ -34,7 +34,7 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
     skipCUDANonDefaultStreamIf
 from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
-    skipCPUIfNoLapack, skipCUDAIfNoMagma
+    skipCPUIfNoLapack, skipCUDAIfNoMagma, dtypes, dtypesIfCUDA
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -7836,41 +7836,9 @@ def add_neg_dim_tests():
         assert not hasattr(_TestTorchMixin, test_name), "Duplicated test name: " + test_name
         setattr(_TestTorchMixin, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
 
-# Helpers for device-generic tests.
-# Must be in a different, inherited class for Python2 compat.
-class GenericDeviceTypeHelpers(object):
-    @staticmethod
-    def _select_broadcastable_dims(dims_full=None):
-        # select full dimensionality
-        if dims_full is None:
-            dims_full = []
-            ndims = random.randint(1, 4)
-            dims_full = [random.randint(1, 8) for _ in range(ndims)]
-        else:
-            ndims = len(dims_full)
 
-        # select actual dimensions for ops:
-        # larger: full ndims, individual sizes may be reduced
-        # smaller: possibly reduced ndims, sizes may be reduced
-        smaller_ndims = random.randint(1, ndims)
-        dims_small = []
-        dims_large = []
-        for i in range(ndims - 1, -1, -1):
-            j = random.randint(1, 3)
-            if j == 1:  # no reduced singleton dimension
-                ds = dims_full[i]
-                dl = dims_full[i]
-            elif j == 2:  # larger may have reduced singleton dimension
-                ds = dims_full[i]
-                dl = 1 if len(dims_small) < smaller_ndims else dims_full[i]
-            elif j == 3:  # smaller may have reduced singleton dimension
-                ds = 1
-                dl = dims_full[i]
-            dims_large = [dl] + dims_large
-            if len(dims_small) < smaller_ndims:
-                dims_small = [ds] + dims_small
-        return (dims_small, dims_large, dims_full)
-
+# Device-generic tests. Instantiated below and not run directly.
+class TestTorchDeviceType(TestCase):
     def check_internal_mem_overlap(self, inplace_op, num_inputs, device,
                                    expected_failure=False):
         if isinstance(inplace_op, str):
@@ -7981,8 +7949,37 @@ class GenericDeviceTypeHelpers(object):
             self.assertEqual(actual, expected, allow_inf=True)
             self.assertEqual(actual2, expected, allow_inf=True)
 
-# Device-generic tests. Instantiated below and not run directly.
-class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
+    def _select_broadcastable_dims(self, dims_full=None):
+        # select full dimensionality
+        if dims_full is None:
+            dims_full = []
+            ndims = random.randint(1, 4)
+            dims_full = [random.randint(1, 8) for _ in range(ndims)]
+        else:
+            ndims = len(dims_full)
+
+        # select actual dimensions for ops:
+        # larger: full ndims, individual sizes may be reduced
+        # smaller: possibly reduced ndims, sizes may be reduced
+        smaller_ndims = random.randint(1, ndims)
+        dims_small = []
+        dims_large = []
+        for i in range(ndims - 1, -1, -1):
+            j = random.randint(1, 3)
+            if j == 1:  # no reduced singleton dimension
+                ds = dims_full[i]
+                dl = dims_full[i]
+            elif j == 2:  # larger may have reduced singleton dimension
+                ds = dims_full[i]
+                dl = 1 if len(dims_small) < smaller_ndims else dims_full[i]
+            elif j == 3:  # smaller may have reduced singleton dimension
+                ds = 1
+                dl = dims_full[i]
+            dims_large = [dl] + dims_large
+            if len(dims_small) < smaller_ndims:
+                dims_small = [ds] + dims_small
+        return (dims_small, dims_large, dims_full)
+
     def test_diagonal(self, device):
         x = torch.randn((100, 100), device=device)
         result = torch.diagonal(x)
@@ -12891,7 +12888,9 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: torch.pow(42, input, out=out))
 
-    def test_erfinv(self, device):
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    def test_erfinv(self, device, dtype):
         def checkType(dtype):
             # general testing. Narrow the range to avoid accuracy issues
             input_values = torch.randn(4, 4, dtype=dtype, device=device).clamp(-0.3, 0.3)
@@ -12903,15 +12902,13 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
             self.assertEqual(torch.tensor([-2, 2], dtype=dtype, device=device).erfinv(),
                              torch.tensor([nan, nan], dtype=dtype, device=device))
 
-        if device != 'cpu':
-            checkType(torch.half)
-        checkType(torch.float)
-        checkType(torch.double)
+        checkType(dtype)
 
-        # double precision
-        a = torch.tensor([0.5, 0.8], dtype=torch.double, device=device).erfinv()
-        self.assertAlmostEqual(a[0].item(), 0.47693627620447, places=13)
-        self.assertAlmostEqual(a[1].item(), 0.90619380243682, places=13)
+        if dtype == torch.double:
+            # double precision
+            a = torch.tensor([0.5, 0.8], dtype=torch.double, device=device).erfinv()
+            self.assertAlmostEqual(a[0].item(), 0.47693627620447, places=13)
+            self.assertAlmostEqual(a[1].item(), 0.90619380243682, places=13)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_int_pow(self, device):
