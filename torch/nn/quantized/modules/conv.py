@@ -81,13 +81,11 @@ class Conv2d(torch.nn.Module):
                 self.kernel_size[1]],
             scale=1, zero_point=0, dtype=torch.qint8)
         self.weight_scale = 1.0
-        qbias = None
+        bias_float = None
         if bias:
-            qbias = torch._empty_affine_quantized([out_channels],
-                                                  scale=1.0, zero_point=0,
-                                                  dtype=torch.qint32)
+            bias_float = torch.zeros(out_channels, dtype=torch.float)
 
-        self.set_weight_bias(qweight, qbias)
+        self.set_weight_bias(qweight, bias_float)
         self.scale = 1.0
         self.zero_point = 0
 
@@ -237,9 +235,6 @@ class Conv2d(torch.nn.Module):
         act_scale, act_zp = activation_observer.calculate_qparams()
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have a dtype of qint8'
         wt_scale, wt_zp = weight_observer.calculate_qparams()
-        # Scale bias to activation_scale/2^16, this quantizes bias
-        # to about 24 bits of precision
-        bias_scale = float(act_scale / (2**16))
 
         qweight = torch.quantize_linear(
             mod.weight.float(),
@@ -247,11 +242,7 @@ class Conv2d(torch.nn.Module):
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
-        if mod.bias is not None:
-            qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
-        else:
-            qbias = None
-        qconv.set_weight_bias(qweight, qbias)
+        qconv.set_weight_bias(qweight, mod.bias)
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
 

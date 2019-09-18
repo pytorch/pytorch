@@ -10,6 +10,7 @@ set(libtorch_FILE ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libt
 set(libc10_FILE ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libc10.a)
 set(libnnpack_FILE ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libnnpack.a)
 set(libqnnpack_FILE ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libqnnpack.a)
+set(libpytorch_qnnpack_FILE ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libpytorch_qnnpack.a)
 set(libcpuinfo_FILE ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libcpuinfo.a)
 set(libclog_FILE ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libclog.a)
 
@@ -26,6 +27,9 @@ set_property(TARGET libnnpack PROPERTY IMPORTED_LOCATION ${libnnpack_FILE})
 
 add_library(libqnnpack STATIC IMPORTED)
 set_property(TARGET libqnnpack PROPERTY IMPORTED_LOCATION ${libqnnpack_FILE})
+
+add_library(libpytorch_qnnpack STATIC IMPORTED)
+set_property(TARGET libpytorch_qnnpack PROPERTY IMPORTED_LOCATION ${libpytorch_qnnpack_FILE})
 
 add_library(libcpuinfo STATIC IMPORTED)
 set_property(TARGET libcpuinfo PROPERTY IMPORTED_LOCATION ${libcpuinfo_FILE})
@@ -68,6 +72,7 @@ target_link_libraries(pytorch
     libc10
     libnnpack
     libqnnpack
+    libpytorch_qnnpack
     libcpuinfo
     libclog
 )

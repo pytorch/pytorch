@@ -2,6 +2,7 @@
 
 #include <torch/expanding_array.h>
 #include <torch/nn/cloneable.h>
+#include <torch/nn/options/loss.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
@@ -12,14 +13,6 @@
 
 namespace torch {
 namespace nn {
-/// Options for a L1 loss module.
-struct TORCH_API L1LossOptions {
-  L1LossOptions(Reduction::Reduction reduction = Reduction::Mean)
-      : reduction_(reduction) {}
-
-  /// Specifies the reduction to apply to the output.
-  TORCH_ARG(Reduction::Reduction, reduction);
-};
 
 /// Creates a criterion that measures the mean absolute error (MAE) between each
 /// element in the input : math :`x` and target : `y`.
