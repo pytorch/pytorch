@@ -782,7 +782,7 @@ class ObserverTest(QuantizationTestCase):
     def test_per_channel_minmax_observer(self, qdtype, qscheme, ch_axis, reduce_range):
         # reduce_range cannot be true for symmetric quantization with uint8
         if qdtype == torch.quint8 and qscheme == torch.per_channel_symmetric:
-                reduce_range = False
+            reduce_range = False
         myobs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
         x = torch.tensor(
             [
@@ -793,42 +793,36 @@ class ObserverTest(QuantizationTestCase):
         result = myobs(x)
         self.assertEqual(result, x)
         qparams = myobs.calculate_qparams()
-        if ch_axis == 0:
-            self.assertEqual(myobs.min_vals, [1.0, -4.0])
-            self.assertEqual(myobs.max_vals, [6.0, 8.0])
-            if qscheme == torch.per_channel_symmetric:
-                ref_scales = [0.047058823529412, 0.062745098039216]
-                ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
-            else:
-                ref_scales = [0.023529411764706, 0.047058823529412]
-                ref_zero_points = [-128, -43] if qdtype is torch.qint8 else [0, 85]
-        elif ch_axis == 1:
-            self.assertEqual(myobs.min_vals, [-4.0, 3.0])
-            self.assertEqual(myobs.max_vals, [5.0, 8.0])
-            if qscheme == torch.per_channel_symmetric:
-                ref_scales = [0.03921569, 0.0627451]
-                ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
-            else:
-                ref_scales = [0.03529412, 0.03137255]
-                ref_zero_points = [-15, -128] if qdtype is torch.qint8 else [113, 0]
-        elif ch_axis == 2:
-            self.assertEqual(myobs.min_vals, [-4.0, 2.0])
-            self.assertEqual(myobs.max_vals, [6.0, 8.0])
-            if qscheme == torch.per_channel_symmetric:
-                ref_scales = [0.04705882, 0.0627451]
-                ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
-            else:
-                ref_scales = [0.03921569, 0.03137255]
-                ref_zero_points = [-26, -128] if qdtype is torch.qint8 else [102, 0]
-        elif ch_axis == 3:
-            self.assertEqual(myobs.min_vals, [-4.0, -3.0])
-            self.assertEqual(myobs.max_vals, [7.0, 8.0])
-            if qscheme == torch.per_channel_symmetric:
-                ref_scales = [0.05490196, 0.0627451]
-                ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
-            else:
-                ref_scales = [0.04313726, 0.04313726]
-                ref_zero_points = [-35, -58] if qdtype is torch.qint8 else [93, 70]
+        ref_min_vals = [[1.0, -4.0], [-4.0, 3.0], [-4.0, 2.0], [-4.0, -3.0]]
+        ref_max_vals = [[6.0, 8.0], [5.0, 8.0], [6.0, 8.0], [7.0, 8.0]]
+        per_channel_symmetric_ref_scales = [
+            [0.04705882, 0.06274509],
+            [0.03921569, 0.0627451],
+            [0.04705882, 0.0627451],
+            [0.05490196, 0.0627451],
+        ]
+        per_channel_affine_ref_scales = [
+            [0.02352941, 0.04705882],
+            [0.03529412, 0.03137255],
+            [0.03921569, 0.03137255],
+            [0.04313726, 0.04313726],
+        ]
+        per_channel_affine_qint8_zp = [
+            [-128, -43],
+            [-15, -128],
+            [-26, -128],
+            [-35, -58],
+        ]
+        per_channel_affine_quint8_zp = [[0, 85], [113, 0], [102, 0], [93, 70]]
+
+        self.assertEqual(myobs.min_vals, ref_min_vals[ch_axis])
+        self.assertEqual(myobs.max_vals, ref_max_vals[ch_axis])
+        if qscheme == torch.per_channel_symmetric:
+            ref_scales = per_channel_symmetric_ref_scales[ch_axis]
+            ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
+        else:
+            ref_scales = per_channel_affine_ref_scales[ch_axis]
+            ref_zero_points = per_channel_affine_qint8_zp[ch_axis] if qdtype is torch.qint8 else  per_channel_affine_quint8_zp[ch_axis]
 
         if reduce_range:
             ref_scales = [s * 255 / 127 for s in ref_scales]
