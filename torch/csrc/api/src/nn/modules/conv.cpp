@@ -135,13 +135,8 @@ Tensor Conv3dImpl::forward(const Tensor& input) {
   }
 }
 
-template struct ConvOptions<1>;
 template class ConvImpl<1, Conv1dImpl>;
-
-template struct ConvOptions<2>;
 template class ConvImpl<2, Conv2dImpl>;
-
-template struct ConvOptions<3>;
 template class ConvImpl<3, Conv3dImpl>;
 
 } // namespace nn
