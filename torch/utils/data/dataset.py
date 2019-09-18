@@ -352,8 +352,11 @@ class ChunkDataset(IterableDataset):
             batch = self._cache[:self._batch_size]
             self._cache = self._cache[self._batch_size:]
 
-        # If batch size is 1, we return a sample directly - not a list - because
-        # the user will probably use DataLoader auto collation to get a batch
+        # `self._batch_size` is hard-coded to 1 to leverage DataLoader's auto collation
+        # to create a batch. In this case,  `ChunkDataset` returns a single sample.
+        # In the future, `self._batch_size` might be > 1 to achieve better performance.
+        # In this case, a list of samples would be returned and the DataLoader's
+        # `batch_size` should be set to `None` to disable auto collation.
         if self._batch_size == 1:
             return batch[0]
         else:

@@ -125,19 +125,11 @@ class DistributedChunkSampler(Sampler):
 
     Args:
         num_replicas (int): Number of processes participating in the data reading.
-            This should be equal to the number of distributedprocesses * number of DataLoader workers.
-        global_worker_rank (int, optional): Current rank of the worker in a global index.
-            There are 3 ways :attr:`global_worker_rank` can be assigned:
-                1) If only `DataLoader` workers are being used:
-                    `global_worker_rank`=`worker_id`
-                    (must be assigned at DataLoader worker initialization function)
-                2) If a single `DataLoader` worker is used with a distributed approach
-                    (DistributedDataParallel`, `torch.distributed`, MPI or Horovod)
-                    `global_worker_rank`=`rank`
-                    (must be assigned before the main trainning loop)
-                3) If both multiple DataLoader workers and a distributed approach are being used:
-                    `global_worker_rank`=`worker_id`+`rank`*`num_workers`
-                    (must be assigned at DataLoader worker initialization function)
+            This should be equal to the number of distributed processes * number of DataLoader workers.
+        global_worker_rank (int, optional): Current rank of the worker in a global index
+            :attr:`global_worker_rank` must be calculated based on GPU :attr:`rank` and `DataLoader`
+            information such as number of workers and worker ID as per the expression:
+                `global_worker_rank`=`worker_id`+`rank`*`num_workers`.
         num_chunks (int, optional): Number of chunks participating in the sampling.
             (default: ``0``)
         shuffle (bool, optional): set to ``True`` to have the chunk indices reshuffled.
