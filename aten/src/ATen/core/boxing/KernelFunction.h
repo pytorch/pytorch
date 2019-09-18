@@ -2,9 +2,9 @@
 
 #include <ATen/core/stack.h>
 #include <c10/util/TypeList.h>
-#include <ATen/core/op_registration/kernel_functor.h>
-#include <ATen/core/op_registration/kernel_function.h>
-#include <ATen/core/op_registration/kernel_lambda.h>
+#include <ATen/core/boxing/kernel_functor.h>
+#include <ATen/core/boxing/kernel_function.h>
+#include <ATen/core/boxing/kernel_lambda.h>
 
 namespace c10 {
 
@@ -74,7 +74,7 @@ public:
   using BoxedKernelFunction = void(OperatorKernel*, Stack*);
 
   KernelFunction()
-  : functorCreator_()
+  : functorFactory_()
   , functor_(nullptr)
   , boxed_kernel_func_(nullptr)
   , unboxed_kernel_func_(nullptr)
@@ -201,7 +201,7 @@ public:
    */
   static KernelFunction makeFromBoxedFunction(BoxedKernelFunction* func) {
     return KernelFunction(
-      nullptr,  // no functorCreator_, this can only be called in a boxed way.
+      nullptr,  // no functorFactory_, this can only be called in a boxed way.
       nullptr,  // no functor_ object either
       func,
       nullptr,  // no unboxed function pointer
@@ -226,7 +226,7 @@ public:
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor>, but the functor doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     return KernelFunction(
-      nullptr, // no functorCreator_ because we already have the functor_
+      nullptr, // no functorFactory_ because we already have the functor_
       std::move(kernelFunctor),
       &detail::wrap_kernel_functor_boxed<KernelFunctor, AllowLegacyTypes>::call,
       reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
@@ -254,14 +254,14 @@ public:
    * >   return std::make_shared<MyFunctor>();
    * > });
    */
-  template<bool AllowLegacyTypes = false, class KernelFunctor>
-  static KernelFunction makeFromUnboxedFunctor(std::function<std::shared_ptr<KernelFunctor>()> kernelFunctorCreator) {
+  template<class KernelFunctor, bool AllowLegacyTypes = false>
+  static KernelFunction makeFromUnboxedFunctorFactory(std::function<std::shared_ptr<KernelFunctor>()> kernelFunctorFactory) {
     static_assert(guts::is_functor<KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor> but the argument is not a functor.");
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor>, but the functor doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     return KernelFunction(
-      std::move(kernelFunctorCreator),
-      nullptr, // delay creation of functor_ (it will be created by calling functorCreator_ later)
+      std::move(kernelFunctorFactory),
+      nullptr, // delay creation of functor_ (it will be created by calling functorFactory_ later)
       &detail::wrap_kernel_functor_boxed<KernelFunctor, AllowLegacyTypes>::call,
       reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
       detail::hashFunctionSignature<KernelFunctor>()
@@ -295,7 +295,7 @@ public:
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor>, but the functor doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     return KernelFunction(
-      nullptr, // no functorCreator_ because we already have the functor_
+      nullptr, // no functorFactory_ because we already have the functor_
       std::move(kernelFunctor),
       nullptr, // Don't create a boxed kernel for this
       reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
@@ -396,8 +396,8 @@ public:
 
 private:
 
-  explicit KernelFunction(std::function<std::shared_ptr<OperatorKernel>()> functorCreator, std::shared_ptr<OperatorKernel> functor, BoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func, c10::optional<uint64_t> signature_hash)
-  : functorCreator_(std::move(functorCreator))
+  explicit KernelFunction(std::function<std::shared_ptr<OperatorKernel>()> functorFactory, std::shared_ptr<OperatorKernel> functor, BoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func, c10::optional<uint64_t> signature_hash)
+  : functorFactory_(std::move(functorFactory))
   , functor_(std::move(functor))
   , boxed_kernel_func_(boxed_kernel_func)
   , unboxed_kernel_func_(unboxed_kernel_func)
@@ -406,25 +406,25 @@ private:
 
   OperatorKernel* getFunctor_() const {
     if (functor_.get() == nullptr) {
-      if (!functorCreator_) {
+      if (!functorFactory_) {
         return nullptr;
       }
-      functor_ = functorCreator_();
+      functor_ = functorFactory_();
     }
     return functor_.get();
   }
 
   // If the operator has an unboxed_kernel_func, then either
-  // functorCreator_ or functor_ must be set, possibly both.
-  // If functor_ is not set but functorCreator_ is, we will create
-  // functor_ by calling functorCreator_ the first time it is needed.
+  // functorFactory_ or functor_ must be set, possibly both.
+  // If functor_ is not set but functorFactory_ is, we will create
+  // functor_ by calling functorFactory_ the first time it is needed.
   // We use this indirection because many KernelFunctions are created
   // at static initialization time but are created with functors that
   // store Tensor and we can't call the Tensor() constructor at static
   // initialization time yet (SIOF). So these register with a
-  // functorCreator_ instead of a functor_ and will be initialized
+  // functorFactory_ instead of a functor_ and will be initialized
   // on the first call to the KernelFunction.
-  std::function<std::shared_ptr<OperatorKernel>()> functorCreator_;
+  std::function<std::shared_ptr<OperatorKernel>()> functorFactory_;
   mutable std::shared_ptr<OperatorKernel> functor_;
 
   BoxedKernelFunction* boxed_kernel_func_;
