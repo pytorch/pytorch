@@ -108,6 +108,7 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict([
     ("CUstreamBatchMemOpType", ("hipStreamBatchMemOpType", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
     ("CUdevice_P2PAttribute", ("hipDeviceP2PAttribute", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
     ("CUevent", ("hipEvent_t", CONV_TYPE, API_DRIVER)),
+    ("CUevent_st", ("ihipEvent_t", CONV_TYPE, API_DRIVER)),
     ("CUevent_flags", ("hipEventFlags", CONV_EVENT, API_DRIVER, HIP_UNSUPPORTED)),
     ("CUfilter_mode", ("hipTextureFilterMode", CONV_TEX, API_DRIVER)),
     ("CUGLDeviceList", ("hipGLDeviceList", CONV_GL, API_DRIVER, HIP_UNSUPPORTED)),
