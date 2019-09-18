@@ -3,6 +3,7 @@
 #include <utility>
 
 #define TORCH_ARG(T, name)                                       \
+ public:                                                         \
   auto name(const T& new_##name)->decltype(*this) { /* NOLINT */ \
     this->name##_ = new_##name;                                  \
     return *this;                                                \
@@ -14,4 +15,5 @@
   const T& name() const noexcept { /* NOLINT */                  \
     return this->name##_;                                        \
   }                                                              \
+ private:                                                        \
   T name##_ /* NOLINT */
