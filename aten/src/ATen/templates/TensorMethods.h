@@ -8,10 +8,10 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
-#if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <ATen/core/dispatch/Dispatcher.h>
-#endif
 #include <ATen/core/NamedTensor.h>
+#include <ATen/core/EnableNamedTensor.h>
+
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
 #include <ATen/CPUType.h>

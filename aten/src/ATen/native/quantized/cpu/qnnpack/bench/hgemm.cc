@@ -53,7 +53,7 @@ class HGEMM : public benchmark::Fixture {
     std::generate(b_.begin(), b_.end(), std::ref(rng));
     w_.resize(ncStride() * kcStride() + ncStride());
     std::fill(w_.begin(), w_.end(), 0);
-    pack_hgemm_w(nc(), kc(), nr(), kr(), k(), b(), w());
+    pytorch_pack_hgemm_w(nc(), kc(), nr(), kr(), k(), b(), w());
     c_.resize(mc() * nc());
     std::fill(c_.begin(), c_.end(), UINT16_C(0x7E00) /* NaN */);
   }
@@ -325,7 +325,7 @@ BENCHMARK_TEMPLATE_F(HGEMM_L1, 8x8__aarch32_neonfp16arith, 8, 8, 1)
     state.SkipWithError("NEON FP16 compute is not supported");
   }
   for (auto _ : state) {
-    hgemm_ukernel_8x8__aarch32_neonfp16arith(
+    pytorch_hgemm_ukernel_8x8__aarch32_neonfp16arith(
         mr(),
         nr(),
         kc(),
@@ -348,7 +348,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(HGEMM_Op, 8x8__aarch32_neonfp16arith, 8, 8, 1)
       const uint32_t mrr = min(mc() - m, mr());
       for (uint32_t n = 0; n < nc(); n += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        hgemm_ukernel_8x8__aarch32_neonfp16arith(
+        pytorch_hgemm_ukernel_8x8__aarch32_neonfp16arith(
             mrr,
             nrr,
             kc(),

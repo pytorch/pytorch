@@ -10,7 +10,7 @@
 
 #include <qnnpack/q8dwconv.h>
 
-void q8dwconv_ukernel_mp8x25__neon(
+void pytorch_q8dwconv_ukernel_mp8x25__neon(
     size_t channels,
     size_t output_width,
     const uint8_t** input,
