@@ -27,21 +27,27 @@ public:
     return schema_;
   }
 
-  const KernelFunction& lookupKernel(const Stack* stack) const {
-    // TODO We shouldn't return a reference to something inside the LeftRight.
-    //      Change this API! Note: We probably also shouldn't copy the KernelFunction since that's a refcount bump.
-    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> const KernelFunction& {
-      const KernelFunction& kernel = dispatchTable.lookup(stack);
-      return kernel;
+  template<class Return, class... Args>
+  Return callUnboxed(TensorTypeId dispatchKey, Args... args) const {
+    // TODO Remove dispatchKey argument and instead infer dispatchKey from args...
+    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
+        return dispatchTable.lookup(dispatchKey)
+            .callUnboxed<Return, Args...>(std::forward<Args>(args)...);
     });
   }
 
-  const KernelFunction& lookupKernel(TensorTypeId dispatchKey) const {
-    // TODO We shouldn't return a reference to something inside the LeftRight.
-    //      Change this API! Note: We probably also shouldn't copy the KernelFunction since that's a refcount bump.
-    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> const KernelFunction& {
-      const KernelFunction& kernel = dispatchTable.lookup(dispatchKey);
-      return kernel;
+  template<class Return, class... Args>
+  Return callUnboxedOnly(TensorTypeId dispatchKey, Args... args) const {
+    // TODO Remove dispatchKey argument and instead infer dispatchKey from args...
+    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
+        return dispatchTable.lookup(dispatchKey)
+            .callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
+    });
+  }
+
+  void callBoxed(Stack* stack) const {
+    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) {
+        dispatchTable.lookup(stack).callBoxed(stack);
     });
   }
 
