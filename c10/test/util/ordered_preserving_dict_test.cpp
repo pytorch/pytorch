@@ -341,7 +341,13 @@ TEST(OrderedPreservingDictTest, test_at) {
 
     ASSERT_EQUAL_PRIM(map.at(0), 10);
     ASSERT_EQUAL_PRIM(map.at(-2), 20);
-    ASSERT_THROWS(map.at(1));
+    bool thrown = false;
+    try {
+      map.at(1);
+    } catch (...) {
+      thrown = true;
+    }
+    ASSERT_TRUE(thrown);
 }
 
 
