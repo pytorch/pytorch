@@ -13,29 +13,28 @@ namespace nn {
 /// Options for the `Embedding` module.
 struct TORCH_API EmbeddingOptions {
   EmbeddingOptions(int64_t num_embeddings, int64_t embedding_dim);
-  // The number of embeddings (number of rows in the table).
+  /// The size of the dictionary of embeddings.
   TORCH_ARG(int64_t, num_embeddings);
-  // The size of each embedding vector (number of columns in the table).
+  /// The size of each embedding vector
   TORCH_ARG(int64_t, embedding_dim);
-  // If given, pads the output with the embedding vector at :attr:`padding_idx (initialized to zeros) whenever it encounters the index.
-  TORCH_ARG(c10::optional<int64_t>, padding_idx)=c10::nullopt;
-  // If given, each embedding vector with norm larger than :attr:`max_norm` is renormalized to have norm :attr:`max_norm`.
-  TORCH_ARG(c10::optional<float>, max_norm)=c10::nullopt;
-  // The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``
-  TORCH_ARG(float, norm_type)=2.;
-  // If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``False``.
-  TORCH_ARG(bool, scale_grad_by_freq)=false;
-  // If ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
-  TORCH_ARG(bool, sparse)=false;
-  // The learnable weights of the module of shape (num_embeddings, embedding_dim) initialized from a normal distribution with mean=0, std=1.
-  TORCH_ARG(c10::optional<torch::Tensor>, weight) = c10::nullopt;
+  /// If given, pads the output with the embedding vector at `padding_idx (initialized to zeros) whenever it encounters the index.
+  TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
+  /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
+  TORCH_ARG(c10::optional<float>, max_norm) = c10::nullopt;
+  /// The p of the p-norm to compute for the `max_norm` option. Default ``2``
+  TORCH_ARG(float, norm_type) = 2.;
+  /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``False``.
+  TORCH_ARG(bool, scale_grad_by_freq) = false;
+  /// If ``True``, gradient w.r.t. `_weight` matrix will be a sparse tensor.
+  TORCH_ARG(bool, sparse) = false;
+  /// The learnable weights of the module of shape (num_embeddings, embedding_dim)
+  TORCH_ARG(c10::optional<torch::Tensor>, _weight) = c10::nullopt;
 };
 
 /// Performs a lookup in a fixed size embedding table.
 class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
  public:
-  EmbeddingImpl(int64_t num_embeddings, int64_t embedding_dim, c10::optional<int64_t> padding_idx=c10::nullopt, c10::optional<float> max_norm=c10::nullopt,
-  float norm_type=2., bool scale_grad_by_freq=false, bool sparse=false, c10::optional<torch::Tensor> weight = c10::nullopt)
+  EmbeddingImpl(int64_t num_embeddings, int64_t embedding_dim)
      : EmbeddingImpl(EmbeddingOptions(num_embeddings, embedding_dim)) {}
   explicit EmbeddingImpl(EmbeddingOptions options);
   void reset() override;
@@ -51,8 +50,8 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
   /// Changes to `EmbeddingOptions` *after construction* have no effect.
   EmbeddingOptions options;
 
-  /// The embedding table.
-  //Tensor weight;
+  ///The embedding table
+  Tensor weight;
 };
 
 /// A `ModuleHolder` subclass for `EmbeddingImpl`.
