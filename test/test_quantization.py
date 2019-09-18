@@ -822,7 +822,11 @@ class ObserverTest(QuantizationTestCase):
             ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
         else:
             ref_scales = per_channel_affine_ref_scales[ch_axis]
-            ref_zero_points = per_channel_affine_qint8_zp[ch_axis] if qdtype is torch.qint8 else  per_channel_affine_quint8_zp[ch_axis]
+            ref_zero_points = (
+                per_channel_affine_qint8_zp[ch_axis]
+                if qdtype is torch.qint8
+                else per_channel_affine_quint8_zp[ch_axis]
+            )
 
         if reduce_range:
             ref_scales = [s * 255 / 127 for s in ref_scales]
