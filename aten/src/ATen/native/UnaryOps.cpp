@@ -17,6 +17,7 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
 #include <cmath>
@@ -133,6 +134,7 @@ Tensor& polygamma_(Tensor& self, int64_t n) {
   return at::polygamma_out(self, n, self);
 }
 Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
+  TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
   auto iter = TensorIterator::unary_op(result, self,
     /*check_mem_overlap=*/true);
   polygamma_stub(iter.device_type(), iter, n);

@@ -135,16 +135,19 @@ struct Future;
 
 struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
  private:
-   std::vector<IValue> elements_;
+  std::vector<IValue> elements_;
+  mutable std::shared_ptr<TupleType> type_; // lazily computed for unnamed tuples
 
  public:
-  static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_, std::shared_ptr<TupleType> type_) {
-    TORCH_INTERNAL_ASSERT(nullptr != type_.get(), "Type cannot be nullptr");
+  // named tuples have additional type information, so we
+  // directly create them tagged
+  static c10::intrusive_ptr<Tuple> createNamed(
+      std::vector<IValue> elements_,
+      std::shared_ptr<TupleType> type_) {
     return c10::make_intrusive<Tuple>(std::move(elements_), type_);
   }
-  C10_DEPRECATED_MESSAGE("Creating tuples without type information is deprecated. Please use Tuple::create(elements, type) instead.")
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
-    return c10::make_intrusive<Tuple>(std::move(elements_), nullptr);
+    return c10::make_intrusive<Tuple>(std::move(elements_));
   }
 
  const std::vector<IValue>& elements() const & {
@@ -164,11 +167,11 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
   std::vector<IValue>&& elements() && {
     return std::move(elements_);
   }
+  std::shared_ptr<TupleType> type() const;
 
-  std::shared_ptr<TupleType> type;
  private:
-  Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type)
-    : elements_(std::move(elements)), type(std::move(type)) {}
+  Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
+    : elements_(std::move(elements)), type_(std::move(type)) {}
 
   friend class c10::intrusive_ptr<Tuple>;
 };
@@ -188,6 +191,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  public:
+  Future(TypePtr type) : type_(type) {}
   struct CAFFE2_API FutureError final : public std::exception {
     FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
@@ -266,13 +270,17 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   // Check if the current future has completed
-  bool completed() {
+  bool completed() const{
     return completed_;
   }
 
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const Future& v);
+
+  TypePtr type() const {
+    return type_;
+  }
 
  private:
   void fireCallbacks() {
@@ -290,6 +298,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   std::condition_variable finished_cv_;
 
   IValue value_; // when finished the value
+  TypePtr type_;
   std::vector<std::function<void(void)>> callbacks;
   bool has_error = false;
   FutureError error;

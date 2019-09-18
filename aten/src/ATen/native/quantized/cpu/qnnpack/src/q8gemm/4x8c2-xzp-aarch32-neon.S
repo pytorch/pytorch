@@ -10,7 +10,7 @@
 
 .syntax unified
 
-# void q8gemm_xzp_ukernel_4x8c2__neon(
+# void pytorch_q8gemm_xzp_ukernel_4x8c2__neon(
 #     size_t mr,
 #     size_t nr,
 #     size_t k,
@@ -21,7 +21,7 @@
 #     uint8_t* restrict c,
 #     size_t c_stride,
 #     const union pytorch_qnnp_q31_requantization_params requantization_params[restrict static 1])
-BEGIN_FUNCTION q8gemm_xzp_ukernel_4x8c2__aarch32_neon
+BEGIN_FUNCTION pytorch_q8gemm_xzp_ukernel_4x8c2__aarch32_neon
     .arm
 #ifndef __APPLE__
     .arch armv7-a
@@ -611,7 +611,7 @@ BEGIN_FUNCTION q8gemm_xzp_ukernel_4x8c2__aarch32_neon
     POP {r4, r5, r6, r7, r8, r9, r10, r11}
     BX lr
 
-END_FUNCTION q8gemm_xzp_ukernel_4x8c2__aarch32_neon
+END_FUNCTION pytorch_q8gemm_xzp_ukernel_4x8c2__aarch32_neon
 
 #ifdef __ELF__
 .section ".note.GNU-stack","",%progbits

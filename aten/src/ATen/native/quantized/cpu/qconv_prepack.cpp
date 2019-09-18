@@ -33,9 +33,6 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         "Specify top/left padding only. \
         bottom/right padding assumed to be equal to top/left");
     TORCH_CHECK(dilation.size() == 2, "2D convolution only");
-    TORCH_CHECK(
-        (dilation[0] == 1 && dilation[1] == 1),
-        "Currently dilation should be 1");
     // weights in KRS(C/G) format
     int output_channels = weight.size(0);
     int kernel_h = weight.size(1);
@@ -57,7 +54,8 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         {static_cast<int>(padding[0]),
          static_cast<int>(padding[1]),
          static_cast<int>(padding[0]),
-         static_cast<int>(padding[1])});
+         static_cast<int>(padding[1])},
+        {static_cast<int>(dilation[0]), static_cast<int>(dilation[1])});
 
     auto weight_contig = weight.contiguous();
     const auto qtype = weight.qscheme();
