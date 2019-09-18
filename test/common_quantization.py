@@ -162,6 +162,15 @@ class QuantizationTestCase(TestCase):
 class SingleLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super(SingleLayerLinearModel, self).__init__()
+        self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        return x
+
+class AnnotatedSingleLayerLinearModel(torch.nn.Module):
+    def __init__(self):
+        super(AnnotatedSingleLayerLinearModel, self).__init__()
         self.qconfig = default_qconfig
         self.fc1 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
 
