@@ -30,7 +30,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << ")";
     }
     if (value->undefined() && *value->undefined()) {
-      out << "[AutogradZero]";
+      out << "[Undefined]";
     }
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
@@ -491,6 +491,16 @@ VaryingShape VaryingShape::merge(const VaryingShape& other) const {
   }
   return VaryingShape(std::move(dims));
 }
+
+ TensorTypePtr TensorType::merge(TensorTypePtr other) const {
+    auto scalar_type = merge_primitive(scalarType(), other->scalarType());
+    auto dev = merge_primitive(device(), other->device());
+    auto sz = sizes().merge(other->sizes());
+    auto srs = strides().merge(other->strides());
+    auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
+    auto undef = merge_primitive(undefined(), other->undefined());
+    return TensorType::create(scalar_type, dev, sz, srs, gr, undef);
+  }
 
 std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
 

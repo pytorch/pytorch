@@ -64,7 +64,7 @@ void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
           first = false;
         }
       } else {
-        pno->setType(TensorType::get()->withAutogradZero());
+        pno->setType(TensorType::get()->withUndefined());
       }
     }
 

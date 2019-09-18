@@ -353,9 +353,9 @@ struct CAFFE2_API TensorType : public Type {
                               const VaryingShape &sizes,
                               const VaryingStrides &strides,
                               c10::optional<bool> requires_grad,
-                              c10::optional<bool> autograd_zero = false) {
+                              c10::optional<bool> undefined = false) {
     return TensorTypePtr(new TensorType(scalar_type, device, sizes, strides,
-                                        requires_grad, autograd_zero));
+                                        requires_grad, undefined));
   }
 
   static TensorTypePtr create(
@@ -502,15 +502,8 @@ struct CAFFE2_API TensorType : public Type {
     return cloned;
   }
 
-  TensorTypePtr merge(TensorTypePtr other) const {
-    auto scalar_type = merge_primitive(scalarType(), other->scalarType());
-    auto dev = merge_primitive(device(), other->device());
-    auto sz = sizes().merge(other->sizes());
-    auto srs = strides().merge(other->strides());
-    auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
-    auto zero = *undefined() && *other->undefined();
-    return TensorType::create(scalar_type, dev, sz, srs, gr, zero);
-  }
+  TensorTypePtr merge(TensorTypePtr other) const;
+
   // is all information about the type specified except for autograd?
   // This replaces the notion of a 'CompleteTensorType' that used to exist
   // in the type-hierarchy. Excluding require_grad and undefined allows
@@ -523,7 +516,7 @@ struct CAFFE2_API TensorType : public Type {
     return isComplete() && requiresGrad() && undefined();
   }
 
-  TensorTypePtr withAutogradZero() {
+  TensorTypePtr withUndefined() {
     auto r = clone();
     r->undefined_ = true;
     return r;
@@ -555,7 +548,6 @@ struct CAFFE2_API TensorType : public Type {
             : Type(TypeKind::TensorType), scalar_type_(scalar_type),
               device_(device), sizes_(sizes), strides_(strides),
               requires_grad_(requires_grad), undefined_(autograd_zero) {
-          TORCH_INTERNAL_ASSERT(undefined_);
         }
 
         TensorTypePtr clone() const {

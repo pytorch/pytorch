@@ -5,6 +5,32 @@
 namespace torch {
 namespace jit {
 
+static void replaceWithNoneIfUndefined(Node* node, size_t index) {
+  auto in = node->input(index);
+  auto tt = in->type()->expect<TensorType>();
+  if (tt->undefined() && *tt->undefined()) {
+    WithInsertPoint guard(node);
+    auto none_const = node->owningGraph()->insertConstant(IValue(), OptionalType::create(TensorType::get()));
+    node->replaceInput(index, none_const);
+  }
+}
+
+static void replaceUndefinedWithNone(Block* b)
+{
+  const static auto sym = c10::Symbol::fromQualString("aten::_batch_norm_impl_index_backward");
+  for (auto n : b->nodes()) {
+
+    if (n->kind() == sym) {
+      replaceWithNoneIfUndefined(n, 6);
+      replaceWithNoneIfUndefined(n, 7);
+    }
+
+    for (auto ib: n->blocks()) {
+      replaceUndefinedWithNone(ib);
+    }
+  }
+}
+
 // propagate autograd zero information through a gradient graph and
 // remove grad_of blocks if present.
 // Note: this is a very limited pass. It only propagates autograd zeros for
@@ -31,9 +57,10 @@ void specializeAutogradZero(Graph &g) {
       state[input] = State::Unknown;
     }
   }
-
+  replaceUndefinedWithNone(g.block());
   for (auto it = g.nodes().begin(); it != g.nodes().end(); ++it) {
     auto n = *it;
+
     switch (n->kind()) {
       case prim::GradOf: {
         auto all_zeros =

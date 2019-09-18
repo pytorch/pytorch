@@ -1006,7 +1006,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto t = stack.back().toTensor();
 
             auto actual = t.defined() ? TensorType::create(t)
-                                      : TensorType::get()->withAutogradZero();
+                                      : TensorType::get()->withUndefined();
             const TypePtr &expected = af.types[inst.X];
             push(stack, *expected == *actual);
             ++af.pc;

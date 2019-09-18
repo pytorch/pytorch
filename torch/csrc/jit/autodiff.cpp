@@ -501,20 +501,9 @@ static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
   }
 }
 
-// we need to fold aten::_size_if_not_equal at the differentiation time
-// while we know the shapes of aten::_size_if_not_equal's arguments
-// Otherwise, they will become inputs to a reverse Graph, and we will
-// lose this information and we don't profile Scalars, or Lists yet.
-static void foldSizeIfNotEqual(Block *reverse_block) {
+static void foldSizeIfNotEqual(Block* node);
 
-  for (Node *top_node : reverse_block->nodes()) {
-    AT_ASSERT(top_node->kind() == prim::GradOf ||
-              top_node->kind() == prim::AutogradAdd ||
-              top_node->kind() == prim::AutogradZero);
-    if (top_node->kind() != prim::GradOf)
-      continue;
-    Block *grad_body = top_node->blocks().at(0);
-    for (Node *node : grad_body->nodes()) {
+static void foldSizeIfNotEqual(Node* node) {
       for (Value *input : node->inputs()) {
 
         if (input->node()->kind() != aten::_size_if_not_equal) {
@@ -526,17 +515,14 @@ static void foldSizeIfNotEqual(Block *reverse_block) {
                              ->node()
                              ->input()
                              ->type()
-                             ->cast<TensorType>();
+                             ->expect<TensorType>();
         auto ptt_output = input->node()
                               ->input(1)
                               ->node()
                               ->input()
                               ->type()
-                              ->cast<TensorType>();
+                              ->expect<TensorType>();
 
-        TORCH_INTERNAL_ASSERT(ptt_input && ptt_output,
-                              "prim::GradOf, prim::AutogradAdd,"
-                              "prim::AutogradZero take tensors");
         auto input_size = ptt_input->sizes().concrete_sizes();
         auto output_size = ptt_output->sizes().concrete_sizes();
 
@@ -556,9 +542,74 @@ static void foldSizeIfNotEqual(Block *reverse_block) {
         }
         node->replaceInputWith(input, size);
       }
-    }
-  }
+
+      for (auto ib : node->blocks()) {
+        foldSizeIfNotEqual(ib);
+      }
 }
+
+// we need to fold aten::_size_if_not_equal at the differentiation time
+// while we know the shapes of aten::_size_if_not_equal's arguments
+// Otherwise, they will become inputs to a reverse Graph, and we will
+// lose this information and we don't profile Scalars, or Lists yet.
+static void foldSizeIfNotEqual(Block *reverse_block) {
+  for (auto n : reverse_block->nodes()) {
+    foldSizeIfNotEqual(n);
+  }
+  foldSizeIfNotEqual(reverse_block->return_node());
+}
+
+// static void foldSizeIfNotEqual(Block *reverse_block) {
+
+//   for (Node *top_node : reverse_block->nodes()) {
+//     AT_ASSERT(top_node->kind() == prim::GradOf ||
+//               top_node->kind() == prim::AutogradAdd ||
+//               top_node->kind() == prim::AutogradZero);
+//     if (top_node->kind() != prim::GradOf)
+//       continue;
+//     Block *grad_body = top_node->blocks().at(0);
+//     for (Node *node : grad_body->nodes()) {
+//       for (Value *input : node->inputs()) {
+
+//         if (input->node()->kind() != aten::_size_if_not_equal) {
+//           continue;
+//         }
+
+//         auto ptt_input = input->node()
+//                              ->input(0)
+//                              ->node()
+//                              ->input()
+//                              ->type()
+//                              ->expect<TensorType>();
+//         auto ptt_output = input->node()
+//                               ->input(1)
+//                               ->node()
+//                               ->input()
+//                               ->type()
+//                               ->expect<TensorType>();
+
+//         auto input_size = ptt_input->sizes().concrete_sizes();
+//         auto output_size = ptt_output->sizes().concrete_sizes();
+
+//         if (!input_size || !output_size) {
+//           continue;
+//         }
+//         // insert in front of _grad_sum_to_size
+//         WithInsertPoint guard(node);
+//         IValue ival{};
+//         Value *size;
+//         if (input_size != output_size) {
+//           size = node->owningGraph()->insertConstant(*input_size,
+//                                                      ListType::ofInts());
+//         } else {
+//           size = node->owningGraph()->insertConstant(
+//               IValue(), OptionalType::create(ListType::ofInts()));
+//         }
+//         node->replaceInputWith(input, size);
+//       }
+//     }
+//   }
+// }
 
 static void deduplicateSizeCaptures(
     Gradient& grad_desc,
