@@ -386,6 +386,8 @@ def get_selected_tests(options):
         target_arch = os.environ.get('VSCMD_ARG_TGT_ARCH')
         if target_arch != 'x64':
             WINDOWS_BLACKLIST.append('cpp_extensions')
+            WINDOWS_BLACKLIST.append('jit')
+            WINDOWS_BLACKLIST.append('jit_fuser')
 
         selected_tests = exclude_tests(WINDOWS_BLACKLIST, selected_tests, 'on Windows')
 
