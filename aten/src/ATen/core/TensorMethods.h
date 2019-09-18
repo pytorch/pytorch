@@ -139,7 +139,7 @@ inline Tensor Tensor::unflatten(Dimname dim, IntArrayRef sizes, DimnameList name
     return TypeDefault::unflatten(const_cast<Tensor&>(*this), dim, sizes, names);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::unflatten(Tensor self, Dimname dim, int[] sizes, DimnameList names) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, IntArrayRef, DimnameList)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, sizes, names);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, IntArrayRef, DimnameList>(const_cast<Tensor&>(*this), dim, sizes, names);
 #endif
 }
 #endif
@@ -149,7 +149,7 @@ inline Tensor Tensor::unflatten(int64_t dim, IntArrayRef sizes, DimnameList name
     return TypeDefault::unflatten(const_cast<Tensor&>(*this), dim, sizes, names);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::unflatten(Tensor self, int dim, int[] sizes, DimnameList names) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, IntArrayRef, DimnameList)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, sizes, names);
+    return table->callUnboxed<Tensor, const Tensor &, int64_t, IntArrayRef, DimnameList>(const_cast<Tensor&>(*this), dim, sizes, names);
 #endif
 }
 #endif
