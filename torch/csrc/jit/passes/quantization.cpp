@@ -925,7 +925,6 @@ graph(%self, %x):
 void FoldQuantizeCallIntoBuffer(
     script::Module& module,
     const std::string& method_name) {
-  // TODO: extra filter on scale/zero_point/dtype to make sure they are Constant
   const std::string pattern = R"(
 graph(%self, %scale, %zero_point, %dtype):
    %weight = prim::GetAttr[name="weight"](%self)
@@ -937,6 +936,7 @@ graph(%self, %scale, %zero_point, %dtype):
   auto method = module.get_method(method_name);
   auto graph = method.graph();
   auto matches = findPatternMatches(pattern_graph, *graph);
+  // Extra filter on scale/zero_point/dtype to make sure they are Constant
   auto filter = [](const Match& match, const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
     auto scale_node = match_vmap.at(vmap.at("scale"))->node();

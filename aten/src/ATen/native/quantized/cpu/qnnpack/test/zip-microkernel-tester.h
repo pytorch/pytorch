@@ -51,7 +51,7 @@ class ZipMicrokernelTester {
     return this->iterations_;
   }
 
-  void test(xzipc_ukernel_function xzip) const {
+  void test(pytorch_xzipc_ukernel_function xzip) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);
@@ -76,7 +76,7 @@ class ZipMicrokernelTester {
     }
   }
 
-  void test(xzipv_ukernel_function xzip) const {
+  void test(pytorch_xzipv_ukernel_function xzip) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);

@@ -32,7 +32,6 @@ graph(%a, %b):
       &pattern_graph,
       vmap);
 
-  auto matches = findPatternMatches(pattern_graph, *graph);
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
      const auto& match_vmap = match.values_map;
@@ -77,7 +76,6 @@ graph(%a, %b):
       &pattern_graph,
       vmap);
 
-  auto matches = findPatternMatches(pattern_graph, *graph);
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
      const auto& match_vmap = match.values_map;
