@@ -1395,6 +1395,7 @@
     CUDA: linspace_cuda_out
 
 - func: lgamma(Tensor self) -> Tensor
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
 
