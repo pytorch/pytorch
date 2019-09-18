@@ -1,4 +1,4 @@
-#include <torch/nn/modules/functional.h>
+#include <torch/nn/modules/container/functional.h>
 
 #include <torch/types.h>
 
