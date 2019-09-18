@@ -169,24 +169,24 @@ class TestQuantizedTensor(TestCase):
         qr1 = qr.permute([1, 0, 2, 3])
         qr2 = qr.transpose(0, 1)
         # compare int representation after transformations
-        self.assertTrue(torch.equal(qr1.int_repr(), qr2.int_repr()))
-        self.assertTrue(qr1.q_scale() == qr2.q_scale())
-        self.assertTrue(qr1.q_zero_point() == qr2.q_zero_point())
+        self.assertEqual(qr1.int_repr(), qr2.int_repr())
+        self.assertEqual(qr1.q_scale(), qr2.q_scale())
+        self.assertEqual(qr1.q_zero_point(), qr2.q_zero_point())
         # compare dequantized result
-        self.assertTrue(np.array_equal(qr1.dequantize().numpy(), qr2.dequantize().numpy()))
+        self.assertEqual(qr1.dequantize(), qr2.dequantize())
         # compare permuted + dequantized result with original transposed result
         self.assertTrue(np.allclose(qr2.dequantize().numpy(), r.numpy().transpose([1, 0, 2, 3]), atol=2 / scale))
         # make permuted result contiguous
-        self.assertTrue(torch.equal(qr2.contiguous().int_repr(), qr2.int_repr()))
+        self.assertEqual(qr2.contiguous().int_repr(), qr2.int_repr())
 
         # change memory format
         qlast = qr.contiguous(memory_format=torch.channels_last)
         self.assertEqual(qr.stride(), list(reversed(sorted(qr.stride()))))
         self.assertNotEqual(qlast.stride(), list(reversed(sorted(qlast.stride()))))
-        self.assertTrue(torch.equal(qr.int_repr(), qlast.int_repr()))
-        self.assertTrue(qr.q_scale() == qlast.q_scale())
-        self.assertTrue(qr.q_zero_point() == qlast.q_zero_point())
-        self.assertTrue(np.array_equal(qlast.dequantize().numpy(), qr.dequantize().numpy()))
+        self.assertEqual(qr.int_repr(), qlast.int_repr())
+        self.assertEqual(qr.q_scale(), qlast.q_scale())
+        self.assertEqual(qr.q_zero_point(), qlast.q_zero_point())
+        self.assertEqual(qlast.dequantize(), qr.dequantize())
 
     def test_qtensor_per_channel_permute(self):
         r = torch.rand(20, 10, 2, 2, dtype=torch.float) * 4 - 2
@@ -202,11 +202,11 @@ class TestQuantizedTensor(TestCase):
         qlast = qr.contiguous(memory_format=torch.channels_last)
         self.assertEqual(qr.stride(), list(reversed(sorted(qr.stride()))))
         self.assertNotEqual(qlast.stride(), list(reversed(sorted(qlast.stride()))))
-        self.assertTrue(torch.equal(qr.int_repr(), qlast.int_repr()))
-        self.assertTrue(torch.equal(scales, qlast.q_per_channel_scales()))
-        self.assertTrue(torch.equal(zero_points, qlast.q_per_channel_zero_points()))
-        self.assertEquals((1,), qlast.q_per_channel_axis())
-        self.assertTrue(np.array_equal(qlast.dequantize().numpy(), qr.dequantize().numpy()))
+        self.assertEqual(qr.int_repr(), qlast.int_repr())
+        self.assertEqual(scales, qlast.q_per_channel_scales())
+        self.assertEqual(zero_points, qlast.q_per_channel_zero_points())
+        self.assertEqual((1,), qlast.q_per_channel_axis())
+        self.assertEqual(qlast.dequantize(), qr.dequantize())
 
 
     def test_qtensor_load_save(self):
@@ -315,7 +315,7 @@ class TestQuantizedTensor(TestCase):
         buf.seek(0)
         f2 = torch.load(buf)
 
-        self.assertTrue(f2.qscheme == torch.per_tensor_symmetric)
+        self.assertEqual(f2.qscheme, torch.per_tensor_symmetric)
 
 if __name__ == "__main__":
     run_tests()

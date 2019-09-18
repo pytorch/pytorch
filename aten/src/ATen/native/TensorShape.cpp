@@ -349,8 +349,7 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(
-      quantizer->qscheme() == QScheme::PER_TENSOR_SYMMETRIC ||
-          quantizer->qscheme() == QScheme::PER_TENSOR_AFFINE,
+      quantizer->qscheme() == QScheme::PER_TENSOR_AFFINE,
       "Setting strides is possible only on uniformly quantized tensor");
   auto result = detail::make_tensor<QTensorImpl>(
       Storage(self.storage()), self.type_set(), quantizer);
