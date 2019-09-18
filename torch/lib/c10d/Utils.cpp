@@ -186,13 +186,16 @@ int connect(
       pfd.fd = socket;
       pfd.events = POLLOUT;
 
-      // calculate remaining time and use that as timeout for poll()
-      const auto elapsed = std::chrono::high_resolution_clock::now() - start;
-      const auto remaining =
-          std::chrono::duration_cast<std::chrono::milliseconds>(timeout) -
-          std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
-      const auto remainingMillis = std::max(0, (int)remaining.count());
-      int numReady = ::poll(&pfd, 1, remainingMillis);
+      int pollTimeout = timeout.count();
+      if (timeout != kNoTimeout) {
+        // calculate remaining time and use that as timeout for poll()
+        const auto elapsed = std::chrono::high_resolution_clock::now() - start;
+        const auto remaining =
+            std::chrono::duration_cast<std::chrono::milliseconds>(timeout) -
+            std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
+        pollTimeout = std::max(0, (int)remaining.count());
+      }
+      int numReady = ::poll(&pfd, 1, pollTimeout);
       if (numReady < 0) {
         throw std::system_error(errno, std::system_category());
       } else if (numReady == 0) {
