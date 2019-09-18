@@ -229,7 +229,7 @@ class TestTypePromotion(TestCase):
             torch.lt(y, x, out=x)
             self.assertEqual(x, torch.tensor([False]))
 
-            x = torch.Tensor([0]).int() < 0.5
+            x = torch.tensor([0]).int() < 0.5
             self.assertEqual(x, torch.tensor([True]))
 
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
