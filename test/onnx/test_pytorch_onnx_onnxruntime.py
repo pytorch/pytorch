@@ -789,6 +789,52 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 16, 4, 3, requires_grad=True)
         self.run_test(PixelShuffle(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_scalar_type(self):
+        class ArithmeticModel(torch.nn.Module):
+            def forward(self, x):
+                return x.size(0) * 2 * x
+
+        x = torch.ones(2, 3, dtype=torch.float32)
+        self.run_test(ArithmeticModel(), x)
+
+        class ReciprocalModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.reciprocal(x)
+
+        x = torch.tensor([2.0, 4.0], dtype=torch.double)
+        self.run_test(ReciprocalModel(), x)
+
+        class ComparisonModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x.ge(0.5) & y.le(2)
+
+        x = torch.ones(2, 3, dtype=torch.int32)
+        y = torch.ones(2, 3, dtype=torch.float32)
+        self.run_test(ComparisonModel(), (x, y))
+
+        # TODO: re-enable the two tests after https://github.com/pytorch/pytorch/issues/26328 is resolved.
+        class MatMulModel(torch.nn.Module):
+            def forward(self, x):
+                return (torch.mm(x, x) + x + torch.mm(x, x) + x)
+
+        x = torch.ones(3, 3)
+        # self.run_test(MatMulModel(), x)
+
+        class AddMMModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.mm(x, x) + x
+
+        x = torch.ones(3, 3)
+        # self.run_test(AddMMModel(), x)
+
+        class FullModel(torch.nn.Module):
+            # add is used for exporting full
+            def forward(self, x):
+                return torch.full((3, 4), x)
+        x = torch.tensor(12)
+        self.run_test(FullModel(), x)
+
     def test_frobenius_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
