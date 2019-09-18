@@ -7,7 +7,7 @@
 #include <c10/util/either.h>
 #include <c10/core/TensorTypeId.h>
 #include <ATen/core/ivalue.h>
-#include <ATen/core/dispatch/KernelFunction.h>
+#include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/ATenDispatch.h>
 
 #include <array>
