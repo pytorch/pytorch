@@ -25,30 +25,44 @@ class FakeQuantize(Module):
         self.qscheme = qscheme
         self.quant_min = quant_min
         self.quant_max = quant_max
-        self.enabled = True
+        self.fake_quant_enabled = True
+        self.observer_enabled = True
         self.observer = default_observer(dtype=dtype, qscheme=qscheme)()
         self.scale = None
         self.zero_point = None
 
-    def enable(self, enabled=True):
-        self.enabled = enabled
+    def enable_fake_quant(self, enabled=True):
+        self.fake_quant_enabled = enabled
         return self
 
-    def disable(self):
-        return self.enable(False)
+    def disable_fake_quant(self):
+        return self.enable_fake_quant(False)
+
+    def enable_observer(self, enabled=True):
+        self.observer_enabled = enabled
+
+    def disable_observer(self):
+        return self.enable_observer(False)
 
     def calculate_qparams(self):
         return self.observer.calculate_qparams()
 
     def forward(self, X):
-        if self.enabled:
-            self.observer(X)
+        if self.observer_enabled:
+            X = self.observer(X)
             scale, zero_point = self.calculate_qparams()
             self.scale, self.zero_point = float(scale), int(zero_point)
+        if self.fake_quant_enabled:
             X = torch.fake_quantize_per_tensor_affine(
                 X, self.scale, self.zero_point, self.quant_min,
                 self.quant_max)
         return X
+
+    def extra_repr(self):
+        return 'fake_quant_enabled={}, observer_enabled={},\
+            scale={}, zero_point={}'.format(
+            self.fake_quant_enabled, self.observer_enabled,
+            self.scale, self.zero_point)
 
 def fake_quant(fake_quant_cls, **kwargs):
     return partial(fake_quant_cls, **kwargs)
