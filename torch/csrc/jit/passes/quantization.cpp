@@ -510,8 +510,7 @@ void QuantizeHelper::quantizeBias(Value* v) {
           c10::Scalar(getScale(act_qparam) * getScale(weight_qparam)),
           at::kDouble);
       IValue bias_qparam = c10::ivalue::Tuple::create(
-          std::vector<IValue>({bias_scale, at::scalar_tensor(c10::Scalar(0))}),
-          act_qparam.toTuple()->type);
+          std::vector<IValue>({bias_scale, at::scalar_tensor(c10::Scalar(0))}));
       Node* dequant = insertQuantDeQuantCall(v, bias_qparam, at::kQInt32);
       v->replaceAllUsesWith(dequant->output());
       Node* q = traverseToQuantNode(dequant);
