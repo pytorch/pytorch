@@ -27,6 +27,8 @@ Tensor & _amp_unscale_inf_check_cuda(Tensor & scaled_grad,
   TORCH_CHECK(current_scale.scalar_type() == at::ScalarType::Float, "current_scale must be a float tensor.");
   TORCH_CHECK(found_inf.scalar_type() == at::ScalarType::Float, "found_inf must be a float tensor.");
 
+  auto rscale = current_scale.to(at::ScalarType::Double).reciprocal();
+
   // Act on scaled_grad in place.
   auto iter = TensorIterator::unary_op(scaled_grad, scaled_grad);
 
@@ -35,13 +37,13 @@ Tensor & _amp_unscale_inf_check_cuda(Tensor & scaled_grad,
     "_amp_unscale_inf_check_kernel",
     [&] {
       float* found_inf_ptr = found_inf.data_ptr<float>();
-      float* current_scale_ptr = current_scale.data_ptr<float>();
+      double* rscale_ptr = rscale.data_ptr<double>();
 
-      gpu_kernel(iter, [found_inf_ptr, current_scale_ptr] GPU_LAMBDA(scalar_t val) -> scalar_t {
+      gpu_kernel(iter, [found_inf_ptr, rscale_ptr] GPU_LAMBDA(scalar_t val) -> scalar_t {
           float fval = static_cast<float>(val);
           if(!std::isfinite(fval))
             *found_inf_ptr = 1.f;
-          return static_cast<scalar_t>(fval/(*current_scale_ptr));
+          return static_cast<scalar_t>(fval*(*rscale_ptr));
         });
     });
 

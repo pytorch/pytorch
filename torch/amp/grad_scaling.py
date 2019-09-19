@@ -1,4 +1,6 @@
 import torch
+import types
+from torch._six import container_abcs
 
 
 def _recommend_init_scale():
@@ -22,15 +24,22 @@ def scale_outputs(outputs, current_scale, scaling_enabled=True):
     Returns:
         Outputs scaled by ``current_scale``, or ``outputs`` if ``scaling_enabled=False``.
     """
-    outputs = list(outputs)
+    if not scaling_enabled:
+        return outputs
 
     if isinstance(current_scale, float):
         current_scale = torch.cuda.FloatTensor([current_scale])
 
-    if scaling_enabled:
-        return [output*current_scale for output in outputs]
-    else:
-        return outputs
+    def scale(val):
+        if isinstance(val, torch.Tensor):
+            assert val.is_cuda
+            return val*current_scale
+        elif isinstance(val, container_abcs.Iterable):
+            return type(val)(scale(v) for v in val)
+        else:
+            raise ValueError("outputs must be a Tensor or an interable of Tensors")
+
+    return scale(outputs)
 
 
 def unscale_and_step(self,
@@ -190,10 +199,10 @@ def unscale(self,
         A tuple ``found_inf, recommended_scale``.  ``found_inf`` is a ``torch.cuda.FloatTensor`` that contains > 0 if an inf/nan was found during unscaling, and 0.0 otherwise.  ``recommended_scale`` is a ``torch.cuda.FloatTensor`` containing the recommended gradient scale to use next iteration.  If ``scaling_enabled=False``, the return values will be ``None, None``.
     """
     if scaling_enabled:
+        found_inf = torch.cuda.FloatTensor([0.0])
+
         if isinstance(current_scale, float):
             current_scale = torch.cuda.FloatTensor([current_scale])
-
-        found_inf = torch.cuda.FloatTensor([0.0])
 
         # Eventually, we'd like this to become a multi-tensor apply call dispatched via NestedTensor.
         for group in self.param_groups:
@@ -203,7 +212,7 @@ def unscale(self,
                         raise ValueError("Attempting to unscale FP16 gradients.  If you want to check for infs/nans without "
                                          "unscaling, use optimizer.check_infs() instead.")
                     else:
-                        torch._amp_unscale_inf_check(param.grad, current_scale, found_inf)
+                        torch._amp_unscale_inf_check_(param.grad, current_scale, found_inf)
 
         if scale_scheduler is None:
             next_recommended_scale = _next_recommended_scale(current_scale, found_inf, scale_growth_factor, scale_backoff_factor)
@@ -241,7 +250,7 @@ def check_inf(self, scaling_enabled=True):
         for group in self.param_groups:
             for param in group["params"]:
                 if param.grad is not None:
-                  torch._amp_unscale_inf_check(param.grad, 1.0, found_inf)
+                  torch._amp_unscale_inf_check_(param.grad, 1.0, found_inf)
 
         return found_inf
     else:
@@ -336,11 +345,11 @@ def add_amp_attributes(optimizers):
     Returns:
         A torch.cuda.FloatTensor containing the recommended initial gradient scale value.
     """
-    optimizers = list(optimizers)
+    optimizers = (optimizers,) if isinstance(optimizers, torch.optim.Optimizer) else tuple(optimizers)
     if len(optimizers) == 0:
         raise ValueError("add_amp_attributes received an empty optimizer list.")
 
     for optimizer in optimizers:
         _add_amp_attributes(optimizer)
 
-    return _recommended_init_scale()
+    return _recommend_init_scale()

@@ -230,7 +230,7 @@ Gradient accumulation across iterations (between steps) is a common use case. Th
             loss = loss_fn(output, target)
             loss = loss/iters_to_accumulate
         scale_outputs(loss, S).backward()
-        if i%iters_to_accumulate == 0:
+        if (i + 1) % iters_to_accumulate == 0:
             # Clip gradients here if desired.
             # You may also use the separate unscale() + step_after_unscale() pattern.
             _, found_inf, S = optimizer.unscale_and_step(current_scale=S)
@@ -239,7 +239,9 @@ Gradient accumulation across iterations (between steps) is a common use case. Th
 Batch replay
 ------------
 
-Sometimes every iteration/data batch is valuable enough that you don't want to skip any. Instead, it's preferable to replay the batch with a reduced loss scale until gradients do not contain infs/nans. Batch replay control flow is not provided by the API alone, but it's easy to rig::
+Sometimes every iteration/data batch is valuable enough that you don't want to skip any. Instead, it's preferable to replay the batch with a reduced loss scale until gradients do not contain infs/nans. Batch replay control flow is not provided by the API alone, but it's straightforward to rig.
+
+The simplest approach is to use the separate ``unscale()`` + ``step_after_unscale()`` pattern::
 
     S = add_amp_attributes(optimizer)
     ...
@@ -251,41 +253,46 @@ Sometimes every iteration/data batch is valuable enough that you don't want to s
                 output = model(input)
                 loss = loss_fn(output, target)
             scale_outputs(loss, S).backward()
-            found_inf, S = optimizer.check_inf(current_scale=S)
-
-            # If we didn't find any infs/nans, stop replaying and step.
-            if not found_inf.item():  break
-        optimizer.unscale_and_step(current_scale=S,
-                                   skip_if_inf=False) # we know the gradients don't contain infs at this point
-
-Note the use of the :func:`check_inf` utility function and the ``skip_if_inf`` kwarg to :func:`unscale_and_step`.
-``skip_if_inf=False`` tells :func:`unscale_and_step` that the gradients are known not to contain infs/nans at this point,
-which gives the optimizer leeway to take a faster code path.  ``skip_if_inf=False`` is purely a performance optimization;
-if not supplied, :func:`unscale_and_step` will use the default code path that checks gradients for infs/nans.
-The check is redundant here, but it will still do the right math.
-
-Batch replay may also be implemented with the separate ``unscale()`` + ``step_after_unscale()`` pattern::
-
-    S = add_amp_attributes(optimizer)
-    ...
-    for input, target in data:
-        # Replay this batch until inf/nan-free gradients are produced
-        while True:
-            optimizer.zero_grad()
-            with enable_autocasting():
-                output = model(input)
-                loss = loss_fn(output, target)
-            scale_outputs(loss, S).backward()
-            found_inf, S = optimizer.unscale(current_scale=S)
+            found_inf, S = optimizer.unscale(S)
 
             # If we didn't find any infs/nans, stop replaying and step.
             if not found_inf.item():  break
 
         # manipulate unscaled gradients here
 
-        optimizer.step_after_unscale(found_inf=found_inf, skip_if_inf=False)
+        optimizer.step_after_unscale(found_inf=found_inf,
+                                     skip_if_inf=False) # we know the gradients don't contain infs at this point
 
-Once again, ``skip_if_inf=False`` gives the optimizer leeway to take a faster code path.
+``skip_if_inf=False`` tells :func:`step_after_unscale` that the gradients are known not to contain infs/nans at this point,
+which gives the optimizer leeway to take a faster code path.  ``skip_if_inf=False`` is purely a performance optimization;
+if not supplied, :func:`step_after_unscale` will use the default code path that checks the value contained by ``found_inf``.
+The check is redundant here, but it will still do the right math.
+
+Batch replay may also be implemented using ``unscale_and_step``::
+
+    S = add_amp_attributes(optimizer)
+    ...
+    for input, target in data:
+        # Replay this batch until inf/nan-free gradients are produced
+        while True:
+            optimizer.zero_grad()
+            with enable_autocasting():
+                output = model(input)
+                loss = loss_fn(output, target)
+            scale_outputs(loss, S).backward()
+            found_inf = optimizer.check_inf()
+            if found_inf.item():
+                S = S*0.5 # If gradients contained inf, reduce S and replay.
+            else:
+                break # If gradients did not contain inf, break the loop and step.
+        optimizer.unscale_and_step(current_scale=S,
+                                   skip_if_inf=False) # we know the gradients don't contain infs at this point
+
+Note the use of the :func:`check_inf` utility function.  Only functions that consume the current loss scale to unscale the gradients
+(:func:`unscale` and :func:`unscale_and_step`) have the authority to recommend a new loss scale.  :func:`check_inf` does not
+unscale the gradients, so it does not recommened a new scale.  Therefore, if gradients contained inf/nan, S is reduced manually (``S = S*0.5``) for the next iteration of the replay loop.
+
+Once again, the optional ``skip_if_inf=False`` arg to :func:`unscale_and_step` gives the optimizer leeway to take a faster code path.
 
 Switching mixed precision on and off
 ------------------------------------
