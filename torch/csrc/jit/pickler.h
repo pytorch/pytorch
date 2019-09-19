@@ -144,7 +144,7 @@ class Pickler {
   const std::vector<WriteableTensorData>& tensorData() {
     return tensor_data_;
   }
-
+  void pushEmptyDict();
   void pushDict(const IValue& ivalue);
   void pushInt(int64_t value);
   void pushLong(const std::string& data);
