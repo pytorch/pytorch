@@ -211,16 +211,16 @@ template class RNNImplBase<RNNImpl>;
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-RNNImpl::RNNImpl(const RNNOptions& options)
+RNNImpl::RNNImpl(const RNNOptions& options_)
     : detail::RNNImplBase<RNNImpl>(
-          detail::RNNOptionsBase(options.input_size_, options.hidden_size_)
-              .layers(options.layers_)
-              .with_bias(options.with_bias_)
-              .dropout(options.dropout_)
-              .bidirectional(options.bidirectional_)
-              .batch_first(options.batch_first_),
-          static_cast<CuDNNMode>(options.activation_)),
-      options(options) {}
+          detail::RNNOptionsBase(options_.input_size_, options_.hidden_size_)
+              .layers(options_.layers_)
+              .with_bias(options_.with_bias_)
+              .dropout(options_.dropout_)
+              .bidirectional(options_.bidirectional_)
+              .batch_first(options_.batch_first_),
+          static_cast<CuDNNMode>(options_.activation_)),
+      options(options_) {}
 
 void RNNImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::RNN(input_size=" << options.input_size_
@@ -250,9 +250,9 @@ RNNOutput RNNImpl::forward(const Tensor& input, Tensor state) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LSTM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-LSTMImpl::LSTMImpl(const LSTMOptions& options)
+LSTMImpl::LSTMImpl(const LSTMOptions& options_)
     : detail::RNNImplBase<LSTMImpl>(
-          options,
+          options_,
           CuDNNMode::LSTM,
           /*number_of_gates=*/4) {}
 
@@ -287,9 +287,9 @@ RNNOutput LSTMImpl::forward(const Tensor& input, Tensor state) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-GRUImpl::GRUImpl(const GRUOptions& options)
+GRUImpl::GRUImpl(const GRUOptions& options_)
     : detail::RNNImplBase<GRUImpl>(
-          options,
+          options_,
           CuDNNMode::GRU,
           /*number_of_gates=*/3) {}
 

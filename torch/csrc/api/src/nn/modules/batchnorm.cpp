@@ -13,7 +13,7 @@
 namespace torch {
 namespace nn {
 
-BatchNormImpl::BatchNormImpl(BatchNormOptions options) : options(options) {
+BatchNormImpl::BatchNormImpl(const BatchNormOptions& options_) : options(options_) {
   reset();
 }
 
