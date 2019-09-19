@@ -87,7 +87,7 @@ inline bool Tensor::is_leaf() const {
     return TypeDefault::is_leaf(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::is_leaf(Tensor self) -> bool");
-    return table->getOp<bool (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
+    return table->callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline int64_t Tensor::output_nr() const {
@@ -95,7 +95,7 @@ inline int64_t Tensor::output_nr() const {
     return TypeDefault::output_nr(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::output_nr(Tensor self) -> int");
-    return table->getOp<int64_t (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
+    return table->callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
