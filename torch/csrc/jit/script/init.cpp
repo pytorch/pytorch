@@ -370,6 +370,73 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   module.type()->addMethod(method);
 }
 
+// this is used in our test suite to check that we correctly preserved type tags
+bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
+  struct Work {
+    IValue a;
+    IValue b;
+  };
+  std::unordered_set<const void*> visited;
+  std::vector<Work> work = {{lhs.module_object(), rhs.module_object()}};
+  while (!work.empty()) {
+    Work item = work.back();
+    work.pop_back();
+    if (item.a.isPtrType()) {
+      // uncomment to debug type matching errors
+      // std::cout << "MATCHING " << /*item.a <<*/ "(" << *item.a.type() << ") "
+      //          << item.a.internalToPointer() << " " << /*item.b <<*/ " ("
+      //          << *item.b.type() << ") " << item.b.internalToPointer() <<
+      //          "\n";
+
+      if (visited.count(item.a.internalToPointer())) {
+        continue;
+      }
+      visited.emplace(item.a.internalToPointer());
+    }
+    if (*unshapedType(item.a.type()) != *unshapedType(item.b.type())) {
+      return false;
+    }
+    // check tags for objects that contain subobjects
+    if (item.a.isObject()) {
+      auto ao = item.a.toObject();
+      auto bo = item.b.toObject();
+      for (size_t i = 0; i < ao->slots().size(); ++i) {
+        work.emplace_back(Work{ao->slots().at(i), bo->slots().at(i)});
+      }
+    } else if (item.a.isTuple()) {
+      auto at = item.a.toTuple();
+      auto bt = item.b.toTuple();
+      for (size_t i = 0; i < at->elements().size(); ++i) {
+        work.emplace_back(Work{at->elements().at(i), bt->elements().at(i)});
+      }
+    } else if (item.a.isGenericList()) {
+      auto al = item.a.toGenericList();
+      auto bl = item.b.toGenericList();
+      for (size_t i = 0; i < al.size(); ++i) {
+        work.emplace_back(Work{al.get(i), bl.get(i)});
+      }
+    } else if (item.a.isGenericDict()) {
+      auto ad = item.a.toGenericDict();
+      auto bd = item.b.toGenericDict();
+      for (auto& item : ad) {
+        // Dictionaory keys cannot contain List/Dicts that require tags
+        // so we do not have to check them.
+        // Furthermore without ordered dicts it is expensive to find the
+        // equivalent key
+        work.emplace_back(Work{item.value(), bd.at(item.key())});
+      }
+    } else if (item.a.isFuture()) {
+      auto af = item.a.toFuture();
+      auto bf = item.b.toFuture();
+      af->wait();
+      bf->wait();
+      work.emplace_back(Work{af->value(), bf->value()});
+    }
+  }
+
+  return true;
+}
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -872,6 +939,7 @@ void initJitScriptBindings(PyObject* module) {
         auto fn = cu->create_function(std::move(name), graph);
         return StrongFunctionPtr(std::move(cu), fn);
       });
+  m.def("_ivalue_tags_match", ivalue_tags_match);
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())
