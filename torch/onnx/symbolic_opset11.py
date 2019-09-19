@@ -44,7 +44,7 @@ def pixel_shuffle(g, self, upscale_factor):
 @parse_args('v', 'i', 'v', 'v')
 def gather(g, self, dim, index, sparse_grad=False):
     if sparse_grad:
-        return _unimplemented(name, "sparse_grad == True")
+        return _unimplemented("gather", "sparse_grad == True")
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", self, dim, index, sparse_grad, operator_s="gather")
     return g.op("GatherElements", self, index, axis_i=dim)

@@ -1681,7 +1681,7 @@ def prim_shape(g, self):
 @parse_args('v', 'i', 'v', 'v')
 def gather(g, self, dim, index, sparse_grad=False):
     if sparse_grad:
-        return _unimplemented(name, "sparse_grad == True")
+        return _unimplemented("gather", "sparse_grad == True")
     # NOTE: This workaround is needed since GatherElement is only supported
     #       since opset 11, and Gather in ONNX is not the same as torch.gather.
     dtype = self.type().scalarType()
