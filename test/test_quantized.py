@@ -1439,7 +1439,7 @@ class TestQNNPackOps(TestCase):
             result_ref = conv_op(X)
 
             X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
-            W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp, dtype=torch.quint8)
+            W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
             b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
 
             W_pack = torch.ops.quantized.conv_prepack(W_q, b, stride, padding, dilation, groups)

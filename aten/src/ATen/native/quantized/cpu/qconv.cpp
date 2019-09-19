@@ -381,7 +381,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       packB = pack_ptr_new.w.get();
     }
 
->>>>>>> Changes to support int8 weight and fp32 bias in QNNPACK similar to FBGEMM.
     auto outShape =
         convOutputShape(N, K, H, W, kernel, stride, padding, dilation);
     TORCH_CHECK(
