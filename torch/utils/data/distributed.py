@@ -120,8 +120,7 @@ class DistributedChunkSampler(Sampler):
     so that one of them reads all even batches (e.g. `rank` 0)
     while the other process reads all odd batches (e.g. `rank` 1).
 
-    If :attr:`shuffle` is ``False``, `SequentialSampler` will be used to select
-    chunk indicies; ``RandomSampler`` will be used otherwise.
+    If :attr:`shuffle` is ``True``, sampler will shuffle the indicies
 
     Args:
         num_replicas (int): Number of processes participating in the data reading.
@@ -147,17 +146,18 @@ class DistributedChunkSampler(Sampler):
         self.num_replicas = num_replicas
         self.num_chunks = num_chunks
         self.shuffle = shuffle
-
-        if shuffle:
-            sampler = RandomSampler(data_source=range(num_chunks))
-        else:
-            sampler = SequentialSampler(data_source=range(num_chunks))
-        self.sampler = sampler
+        self.epoch = 0
 
     def __iter__(self):
         r"""Stride logic is implemented here"""
-        # Fetches all indices
-        indices = list(self.sampler)
+
+        # Deterministically shuffle based on epoch
+        g = torch.Generator()
+        g.manual_seed(self.epoch)
+        if self.shuffle:
+            indices = torch.randperm(self.num_chunks, generator=g).tolist()
+        else:
+            indices = list(range(self.num_replicas))
 
         # Create a strided sublist
         indices = indices[self.rank:self.num_chunks:self.num_replicas]
@@ -173,8 +173,8 @@ class DistributedChunkSampler(Sampler):
         to prevent sampling the same indices in different workers
         """
         assert rank >= 0, 'rank must be >= 0'
-        assert rank == 0 or rank < self.num_replicas, 'rank must < num_replicas'
+        assert rank < self.num_replicas, 'rank must < num_replicas'
         self.rank = rank
 
-    def get_rank(self):
-        return self.rank
+    def set_epoch(self, epoch):
+        self.epoch = epoch

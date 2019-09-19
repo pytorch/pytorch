@@ -307,7 +307,7 @@ class ChunkDataset(IterableDataset):
         self.shuffle_cache = shuffle_cache
 
         # Internal state
-        self._chunk_sampler_iter = iter(self.chunk_sampler)
+        self._chunk_sampler_iter = None
         self._cache = []
         self._batch_size = 1
         self._min_cache = 1000
@@ -341,6 +341,10 @@ class ChunkDataset(IterableDataset):
             except StopIteration:
                 pass
 
+            # Apply second level of shuffling
+            if new_chunk and self.shuffle_cache:
+                random.shuffle(new_chunk)
+
             # Updates internal cache
             if new_chunk and cache_size > 0:
                 self._cache = self._cache + new_chunk
@@ -348,10 +352,6 @@ class ChunkDataset(IterableDataset):
                 self._cache = new_chunk
             elif not new_chunk and cache_size == 0:
                 raise StopIteration
-
-            # Apply second level of shuffling
-            if self.shuffle_cache:
-                random.shuffle(self._cache)
 
         # Get a batch and update internal cache cache
         if len(self._cache) > 0:
@@ -368,12 +368,15 @@ class ChunkDataset(IterableDataset):
         else:
             return batch
 
-    def reset(self):
+    def reset(self, epoch=None):
         r"""Resets internal state of ChunkDataset
 
         Typically will be used before a new epoch starts.
         """
 
+        if isinstance(epoch, int):
+            assert epoch >= 0, "epoch must be >= 0"
+            self.chunk_sampler.set_epoch(epoch)
         self._chunk_sampler_iter = iter(self.chunk_sampler)
 
     def _update_global_worker_rank(self):
@@ -385,12 +388,13 @@ class ChunkDataset(IterableDataset):
             # Calculate global worker rank based on DataLoader workers and distributed rank
             worker_id = get_worker_info().id
             num_workers = get_worker_info().num_workers
-            global_worker_rank = worker_id + self.chunk_sampler.get_rank() * num_workers
+            global_worker_rank = worker_id + self.chunk_sampler.rank * num_workers
             self.chunk_sampler.set_rank(global_worker_rank)
-            self.reset()
         except AttributeError:
             # Ignore when DataLoader num_workers are not used
             pass
+
+        self.reset()
         self._is_ready = True
 
     next = __next__  # py2 compatibility
