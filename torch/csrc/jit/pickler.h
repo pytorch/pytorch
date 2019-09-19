@@ -275,7 +275,7 @@ class Unpickler {
   PickleOpCode readInstruction();
   PickleOpCode readOpCode();
   std::string readString();
-  void readList(IValue& list_ivalue);
+  void readList();
   void setInput(size_t memo_id);
   void run();
 
