@@ -115,10 +115,10 @@ def conv2d(input, weight, bias,
 
     prepacked_weight = torch.ops.quantized.conv_prepack(
         weight, bias, stride, padding, dilation, groups)
-    return torch.ops.quantized.conv2d(input.permute([0, 2, 3, 1]),
+    return torch.ops.quantized.conv2d(input,
                                       prepacked_weight,
                                       stride, padding, dilation,
-                                      groups, scale, zero_point).permute([0, 3, 1, 2])
+                                      groups, scale, zero_point)
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
