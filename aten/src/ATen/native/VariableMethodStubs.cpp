@@ -16,5 +16,9 @@ Tensor data(const Tensor& self) {
   AT_ERROR("data is not implemented for Tensor");
 }
 
+bool is_leaf(const Tensor& self) {
+  AT_ERROR("is_leaf is not implemented for Tensor");
+}
+
 } // namespace native
 } // namespace at

@@ -185,7 +185,7 @@ TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
 TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
-
+TEST_WITH_QNNPACK = os.getenv('PYTORCH_TEST_WITH_QNNPACK', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -214,52 +214,6 @@ def _test_function(fn, device):
     def run_test_function(self):
         return fn(self, device)
     return run_test_function
-
-
-class torchtest():
-    """Allows to generate and run per-device unittests.
-
-    This decorator class allows to generate and run per-device unittest.
-
-    Example:
-
-    class _TestTorchMixin(torchtest):
-
-        @torchtest.for_all_device_types()
-        def test_zeros_like(self, device):
-            expected = torch.zeros((100, 100,), device=device)
-
-    Will execute:
-
-        test_zeros_like (__main__.TestTorch) ... skipped 'Look at test_zeros_like_cpu, test_zeros_like_cuda results.'
-        test_zeros_like_cpu (__main__.TestTorch) ... ok
-        test_zeros_like_cuda (__main__.TestTorch) ... ok
-
-    To work properly, test class should be inherited from `torchtest`.
-    for_all_device_types decorator does not guarantee proper functionality in
-    combination with other decorators.
-
-    Please do not extend this decorator to support other cases (such as dtype,
-    layouts, etc) without consulting with bigger group. Devices is the special
-    case as build flags control additions/removals (see
-    https://github.com/pytorch/pytorch/pull/23824 for the reference).
-    """
-    @classmethod
-    def for_all_device_types(cls):
-        def wrapper(fn):
-            test_names = []
-
-            for device in torch.testing.get_all_device_types():
-                test_name = fn.__name__ + '_' + device
-                assert not hasattr(cls, test_name), "Duplicated test name: " + test_name
-                setattr(cls, test_name, _test_function(fn, device))
-                test_names.append(test_name)
-
-            @wraps(fn)
-            def empty_test(*args, **kwargs):
-                raise unittest.SkipTest("Look at {} results.".format(", ".join(test_names)))
-            return empty_test
-        return wrapper
 
 
 def skipIfNoLapack(fn):
@@ -537,7 +491,7 @@ class TestCase(expecttest.TestCase):
 
         # Wraps the tested method if we should enforce non default CUDA stream.
         self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
-        if self._do_cuda_non_default_stream and not IS_WINDOWS:
+        if self._do_cuda_non_default_stream and not IS_WINDOWS and not TEST_WITH_ROCM:
             self.wrap_with_cuda_policy(method_name, self.enforceNonDefaultStream)
 
     def assertLeaksNoCudaTensors(self, name=None):
