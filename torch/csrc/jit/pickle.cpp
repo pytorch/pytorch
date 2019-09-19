@@ -72,16 +72,17 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
 
   auto writeable_tensors = data_pickler.tensorData();
 
-  std::vector<at::IValue> keys;
+  c10::List<std::string> keys;
   keys.reserve(writeable_tensors.size());
-  std::vector<at::TypePtr> types(writeable_tensors.size(), at::StringType::get());
+  // std::vector<at::TypePtr> types(writeable_tensors.size(), at::StringType::get());
 
   for (size_t i = 0; i < writeable_tensors.size(); i++) {
     keys.emplace_back(std::to_string(i));
   }
 
-  auto keys_tuple = at::ivalue::Tuple::create(keys, at::TupleType::create(types));
-  jit::pickle(writer, keys_tuple);
+  // c10::List<std::string> keys;
+  // auto keys_tuple = at::ivalue::Tuple::create(keys, at::TupleType::create(types));
+  jit::pickle(writer, keys);
 
   for (const auto& tensor_data : writeable_tensors) {
     const char* addr = tensor_data.data();
@@ -94,6 +95,10 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
 }
 
 IValue pickle_load(const std::function<bool(char*, size_t)>& reader) {
+  // This follows the loading of `serialization.py`. The pickle binary is
+  // composed of 5 pickle archives (START ... STOP) catted together, followed
+  // by the binary storage of each tensor storage.
+
   // Read the magic number
   Unpickler(reader, nullptr, nullptr).parse_ivalue();
 
@@ -103,16 +108,22 @@ IValue pickle_load(const std::function<bool(char*, size_t)>& reader) {
   // Read the system metadata number
   Unpickler(reader, nullptr, nullptr).parse_ivalue();
 
-
+  // Read the main pickle data (the actual values, tensors will only have a key
+  // to their storage)
   Unpickler data_pickle(reader, nullptr, nullptr);
   auto data = data_pickle.parse_ivalue();
 
+  // Read a vector of storage keys that specifies the order their binaries are
+  // saved
   auto storage_keys = Unpickler(reader, nullptr, nullptr)
                           .parse_ivalue();
 
+  // Get all the storages encountered by the unpickler
   const auto& uninitialized_storages = data_pickle.uninitializedStorages();
 
-  for (const auto& key : storage_keys.to<c10::List<std::string>>()) {
+  for (const std::string& key : storage_keys.to<c10::List<std::string>>()) {
+    // Read each storage in order and set it from the file
+    // Each storage is saved as [8 byte numel, binary data]
     auto item = uninitialized_storages.find(key);
     TORCH_INTERNAL_ASSERT(item != uninitialized_storages.end());
     const auto* storage_ptr = item->second;

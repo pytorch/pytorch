@@ -25,35 +25,77 @@ TORCH_API void pickle(
 /// are contained within `ivalue` are stored, and the bytes returned by the
 /// pickler will only include references to these tensors in the table. This can
 /// be used to keep the binary blob size small.
-/// If not provided, tensors are stored in the same byte stream as the pickle
-/// data, similar to `torch.save()` in eager Python.
-///
-/// Pickled values can be loaded in Python and C++:
-/// \rst
-/// .. code-block:: cpp
-///
-///  torch::IValue float_value(2.3);
-///
-///  // TODO: when tensors are stored in the pickle, delete this
-///  std::vector<at::Tensor> tensor_table;
-///  auto data = torch::jit::pickle(float_value, &tensor_table);
-///
-///  std::vector<torch::IValue> ivalues =
-///      torch::jit::unpickle(data.data(), data.size());
-///
-/// .. code-block:: python
-///
-///   values = torch.load('data.pkl')
-///   print(values)
-///
-/// \endrst
 TORCH_API std::vector<char> pickle(
     const IValue& ivalue,
     std::vector<at::Tensor>* tensor_table = nullptr);
 
-
+/// Save a `torch::IValue` in a format compatible with Python's `pickle` module
+///
+/// Pickled values can be loaded in Python and C++:
+///
+/// \rst
+/// .. code-block:: cpp
+///
+///   // Generate a tensor and save it
+///   auto x = torch::ones({2, 3});
+///   auto data = torch::pickle_save(x);
+///   std::ofstream out("my_tensor.pt");
+///   out.write(data.data(), data.size());
+///   out.flush();
+///
+///   // Read the tensor back in in C++
+///   std::ifstream input("my_tensor.pt");
+///   torch::IValue ivalue = torch::pickle_load([&](char* buffer, size_t len) {
+///     if (!input.good()) {
+///       return false;
+///     }
+///     input.read(buffer, len);
+///     return input.good();
+///   });
+///   std::cout << ivalue << "\n";
+///
+/// .. code-block:: python
+///
+///   // Read the tensor in Python
+///   values = torch.load('my_tensor.pt')
+///   print(values)
+///
+/// \endrst
 TORCH_API std::vector<char> pickle_save(const IValue& ivalue);
+  std::ifstream input("my_tensor.pt");
+  torch::IValue ivalue = torch::pickle_load([&](char* buffer, size_t len) {
+    if (!input.good()) {
+      return false;
+    }
+    input.read(buffer, len);
+    return input.good();
+  });
 
+/// Load a `torch::IValue` from a pickle file. The pickle file can be one
+/// produced by `torch.save()` (for the values supported by IValue) or
+/// `pickle_save`.
+///
+/// .. code-block:: python
+///
+///   // Create a tensor in Python
+///   x = torch.ones(3, 3) + 10
+///   torch.save(x, "my_tensor.pt")
+///
+/// \rst
+/// .. code-block:: cpp
+///
+///   // Load the tensor in C++
+///   std::ifstream input("my_tensor.pt");
+///   torch::IValue ivalue = torch::pickle_load([&](char* buffer, size_t len) {
+///     if (!input.good()) {
+///       return false;
+///     }
+///     input.read(buffer, len);
+///     return input.good();
+///   });
+///   std::cout << ivalue << "\n";
+///
+/// \endrst
 TORCH_API IValue pickle_load(const std::function<bool(char*, size_t)>& reader);
 
 

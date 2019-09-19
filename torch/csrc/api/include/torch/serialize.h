@@ -74,6 +74,7 @@ void save(const std::vector<torch::Tensor>& tensor_vec, SaveToArgs&&... args) {
 }
 
 TORCH_API std::vector<char> pickle_save(const torch::IValue& ivalue);
+TORCH_API IValue pickle_load(const std::function<bool(char*, size_t)>& reader);
 
 /// Deserializes the given `value`.
 /// There must be an overload of `operator>>` between `serialize::InputArchive`

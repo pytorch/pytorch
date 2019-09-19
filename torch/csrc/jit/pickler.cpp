@@ -705,6 +705,16 @@ PickleOpCode Unpickler::readInstruction() {
     case PickleOpCode::APPENDS: {
       readList();
     } break;
+    case PickleOpCode::APPEND: {
+      auto value = stack_.back();
+      stack_.pop_back();
+      auto list_value = stack_.back();
+      if (list_value.isGenericList()) {
+        list_value.toGenericList().push_back(value);
+      } else {
+        AT_ERROR("APPPEN is not implemented for ", list_value.tagKind());
+      }
+    } break;
     case PickleOpCode::SETITEMS: {
       size_t start = marks_.back();
       marks_.pop_back();
