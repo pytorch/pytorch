@@ -825,24 +825,7 @@ PickleOpCode Unpickler::readInstruction() {
           c10::impl::GenericDict(AnyType::get(), AnyType::get()));
       break;
     case PickleOpCode::APPENDS: {
-      size_t start = marks_.back();
-      auto list_ivalue = stack_.at(start - 1);
-      readList(list_ivalue);
-    } break;
-    case PickleOpCode::LIST: {
-      IValue list_ivalue = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
-      readList(list_ivalue);
-      stack_.push_back(std::move(list_ivalue));
-    } break;
-    case PickleOpCode::DICT: {
-      size_t start = marks_.back();
-      marks_.pop_back();
-      auto dict = c10::impl::GenericDict(c10::impl::deprecatedUntypedDict());
-      for (size_t i = start; i < stack_.size(); i += 2) {
-        dict.insert_or_assign(stack_[i], stack_[i + 1]);
-      }
-      stack_.erase(stack_.begin() + start, stack_.end());
-      stack_.push_back(std::move(dict));
+      readList();
     } break;
     case PickleOpCode::SETITEMS: {
       size_t start = marks_.back();
@@ -1084,9 +1067,10 @@ std::string Unpickler::readBytes(size_t length) {
 
 // Pop all the list items off of the stack and append them to the list at
 // the corresponding MARK
-void Unpickler::readList(IValue& list_ivalue) {
+void Unpickler::readList() {
   size_t start = marks_.back();
   marks_.pop_back();
+  auto list_ivalue = stack_.at(start - 1);
   auto num_elements = stack_.size() - start;
   auto elements = at::ArrayRef<IValue>(stack_).slice(start);
   if (list_ivalue.isIntList()) {
