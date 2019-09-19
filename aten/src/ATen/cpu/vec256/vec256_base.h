@@ -11,6 +11,7 @@
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
 #include <c10/util/BFloat16.h>
+#include <ATen/native/cpu/zmath.h>
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
@@ -168,12 +169,28 @@ public:
     }
     return ret;
   }
+  Vec256<T> map(T (*f)(const T &)) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i != size(); i++) {
+      ret[i] = f(values[i]);
+    }
+    return ret;
+  }
   Vec256<T> abs() const {
     Vec256<T> ret;
     for (int64_t i = 0; i < size(); i++) {
-      ret[i] = values[i] < 0 ? -values[i] : values[i];
+      ret[i] = static_cast<T>(std::abs(values[i]));
     }
     return ret;
+  }
+  Vec256<T> angle() const {
+    return *this;
+  }
+  Vec256<T> real() const {
+    return *this;
+  }
+  Vec256<T> imag() const {
+    return *this;
   }
   Vec256<T> acos() const {
     return map(std::acos);
@@ -219,7 +236,7 @@ public:
     return map(std::log2);
   }
   Vec256<T> ceil() const {
-    return map(std::ceil);
+    return map(at::native::ceil_impl);
   }
   Vec256<T> cos() const {
     return map(std::cos);
@@ -228,7 +245,7 @@ public:
     return map(std::cosh);
   }
   Vec256<T> floor() const {
-    return map(std::floor);
+    return map(at::native::floor_impl);
   }
   Vec256<T> neg() const {
     // NB: the trailing return type is needed because we need to coerce the
@@ -238,7 +255,7 @@ public:
   }
   Vec256<T> round() const {
     // We do not use std::round because we would like to round midway numbers to the nearest even integer.
-    return map(std::nearbyint);
+    return map(at::native::round_impl);
   }
   Vec256<T> sin() const {
     return map(std::sin);
@@ -253,7 +270,7 @@ public:
     return map(std::tanh);
   }
   Vec256<T> trunc() const {
-    return map(std::trunc);
+    return map(at::native::trunc_impl);
   }
   Vec256<T> sqrt() const {
     return map(std::sqrt);
@@ -262,7 +279,7 @@ public:
     return map([](T x) { return (T)(1) / x; });
   }
   Vec256<T> rsqrt() const {
-    return map([](T x) { return 1 / std::sqrt(x); });
+    return map([](T x) { return (T)1 / std::sqrt(x); });
   }
   Vec256<T> pow(const Vec256<T> &exp) const {
     Vec256<T> ret;
@@ -387,24 +404,30 @@ inline T minimum(const T& a, const T& b) {
 // To save BC, it will not propagate NaN based on IEEE 754 201X
 template <class T> Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
+  using value_t = typename at::native::ztype<T>::value_t;
+  value_t (*zabs_)(T) = at::native::zabs;
   for (int i = 0; i != Vec256<T>::size(); i++) {
-    c[i] = a[i] < min_vec[i] ? min_vec[i] : (a[i] > max_vec[i] ? max_vec[i] : a[i]);
+    c[i] = zabs_(a[i]) < zabs_(min_vec[i]) ? min_vec[i] : (zabs_(a[i]) > zabs_(max_vec[i]) ? max_vec[i] : a[i]);
   }
   return c;
 }
 
 template <class T> Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
+  using value_t = typename at::native::ztype<T>::value_t;
+  value_t (*zabs_)(T) = at::native::zabs;
   for (int i = 0; i != Vec256<T>::size(); i++) {
-    c[i] = a[i] > max_vec[i] ? max_vec[i] : a[i];
+    c[i] = zabs_(a[i]) > zabs_(max_vec[i]) ? max_vec[i] : a[i];
   }
   return c;
 }
 
 template <class T> Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
   Vec256<T> c = Vec256<T>();
+  using value_t = typename at::native::ztype<T>::value_t;
+  value_t (*zabs_)(T) = at::native::zabs;
   for (int i = 0; i != Vec256<T>::size(); i++) {
-    c[i] = a[i] < min_vec[i] ? min_vec[i] : a[i];
+    c[i] = zabs_(a[i]) < zabs_(min_vec[i]) ? min_vec[i] : a[i];
   }
   return c;
 }
