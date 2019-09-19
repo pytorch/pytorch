@@ -36,7 +36,7 @@ Tensor euclidean_dist_out(const Tensor& x1, const Tensor& x2) {
   return result;
 }
 
-Tensor cdist(const Tensor& x1, const Tensor& x2, const double p) {
+Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, const int64_t euclid_opt) {
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
   auto device1 = x1.type().device_type();
@@ -82,7 +82,7 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p) {
     result = at::empty(output_shape, x1.options());
   } else if (c1 == 0) {
     result = at::zeros(output_shape, x1.options());
-  } else if (p == 2) {
+  } else if (p == 2 && (euclid_opt == 1 || (euclid_opt == 0 && r1 > 512 && r2 >= 512))) {
     Tensor dist = (expand_batch_product == 1) ? euclidean_dist_out(x1, x2) :
                   euclidean_dist_out(tensor1_expanded, tensor2_expanded);
     result = dist.view(output_shape);
