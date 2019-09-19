@@ -9,14 +9,24 @@ struct QnnpackOperatorDeleter {
     pytorch_qnnp_delete_operator(op);
   }
 };
+
+// PackedWeight struct stores the original Weight and Bias as QNNPACK currently
+// does not support an unpack function.
+// Possible optimiation - For PyTorch Mobile, once the model is scripted and
+// serialized we don't need to call unpack, so we can save some memory by
+// checking for this case.
 struct PackedLinearWeightsQnnp {
   std::unique_ptr<qnnpack::PackBMatrix> w;
+  at::Tensor orig_weight;
+  at::Tensor bias;
   double w_scale;
   int64_t w_zp;
 };
 
 struct PackedConvWeightsQnnp {
   std::unique_ptr<qnnpack::PrePackConvWeights> w;
+  at::Tensor orig_weight;
+  at::Tensor bias;
   std::vector<int64_t> kernel;
   double w_scale;
   int64_t w_zp;
