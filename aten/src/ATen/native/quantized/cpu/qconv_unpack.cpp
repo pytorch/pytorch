@@ -58,6 +58,8 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
           {output_channels, kernel_h, kernel_w, C_per_G},
           {0}, /* The output channel axis is 0 */
           device(kCPU).dtype(kQInt8));
+    } else {
+      TORCH_CHECK(false, "Unsupported qscheme: ", toString(pack_ptr.q_scheme));
     }
     int8_t* unpacked_weights_p =
         reinterpret_cast<int8_t*>(unpacked_weights.data_ptr<c10::qint8>());
