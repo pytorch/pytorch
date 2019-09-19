@@ -127,7 +127,7 @@ class Pickler {
  public:
   Pickler(
       std::function<void(const char*, size_t)> writer,
-      std::vector<at::Tensor>* tensor_table = nullptr)
+      std::vector<at::Tensor>* tensor_table)
       : writer_(writer), tensor_table_(tensor_table) {}
 
   // Push protocol onto the stack
@@ -138,30 +138,26 @@ class Pickler {
 
   void pushIValue(const IValue& ivalue);
 
-  // See torch/serialization.py for details, pushes a magic number, torch
-  // serialization version, and system info to the pickle archive all as
-  // individual pickle programs
-  void torchSaveStart();
-  void torchSaveStop();
-
   void startTuple();
   void endTuple();
 
   const std::vector<WriteableTensorData>& tensorData() {
     return tensor_data_;
   }
+  void pushEmptyDict();
+  void pushDict(const IValue& ivalue);
+  void pushInt(int64_t value);
+  void pushLong(const std::string& data);
 
  private:
   void pushIValueImpl(const IValue& ivalue);
-  void pushDict(const IValue& ivalue);
   void pushDouble(double value);
   void pushGenericList(const IValue& ivalue);
-  void pushInt(int64_t value);
   void pushIntList(const IValue& ivalue);
   void pushList(const IValue& ivalue);
-  void pushLiteralTensor(const IValue& ivalue);
   void pushTensor(const IValue& ivalue);
   void pushTensorReference(const IValue& ivalue);
+  void pushLiteralTensor(const IValue& ivalue);
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
   // unmemoized version

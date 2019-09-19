@@ -4,6 +4,7 @@
 
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 void THCTensor_(cbitand)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
 {
@@ -207,7 +208,6 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(expm1, THCNumerics<scalar_t>::expm1, Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  cos, THCNumerics<scalar_t>::cos,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  sin, THCNumerics<scalar_t>::sin,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC( sqrt, THCNumerics<scalar_t>::sqrt,  Real)
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(rsqrt, THCNumerics<scalar_t>::rsqrt, Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(floor, THCNumerics<scalar_t>::floor, Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(trunc, THCNumerics<scalar_t>::trunc, Real)
 
@@ -220,7 +220,6 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  atan, THCNumerics<scalar_t>::atan,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  tanh, THCNumerics<scalar_t>::tanh,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(   erf, THCNumerics<scalar_t>::erf,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  erfc, THCNumerics<scalar_t>::erfc,  Real)
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC( round, THCNumerics<scalar_t>::round, Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  frac, THCNumerics<scalar_t>::frac,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  cinv, THCNumerics<scalar_t>::cinv,  Real)
 

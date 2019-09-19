@@ -2,14 +2,7 @@
 
 #include <c10/util/tempfile.h>
 
-#include <torch/nn/modules/functional.h>
-#include <torch/nn/modules/linear.h>
-#include <torch/nn/modules/sequential.h>
-#include <torch/optim/optimizer.h>
-#include <torch/optim/sgd.h>
-#include <torch/serialize.h>
-#include <torch/types.h>
-#include <torch/utils.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
 
