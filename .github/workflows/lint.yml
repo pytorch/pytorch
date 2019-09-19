@@ -36,7 +36,7 @@ jobs:
           flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8-output.txt
           cat ${GITHUB_WORKSPACE}/flake8-output.txt
       - name: Add annotations
-        uses: suo/add-annotations-github-action@master
+        uses: pytorch/add-annotations-github-action@master
         with:
           check_name: 'flake8-py3'
           linter_output_path: 'flake8-output.txt'
