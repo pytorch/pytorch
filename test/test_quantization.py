@@ -398,7 +398,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             'dtype': torch.quint8,
             'qscheme': torch.per_tensor_affine
         }
-        custom_dynamic_qconfig = QConfig_dynamic(weight=default_weight_observer())
+        custom_dynamic_qconfig = QConfig_dynamic(weight=default_weight_observer)
         qconfig_dynamic_dict = {
             'fc3': default_dynamic_qconfig,
             'sub2': default_dynamic_qconfig,
@@ -837,7 +837,7 @@ class ObserverTest(QuantizationTestCase):
         self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
 
     def test_observer_scriptable(self):
-        obs = torch.quantization.default_observer()()
+        obs = torch.quantization.default_observer()
         scripted = torch.jit.script(obs)
 
         x = torch.rand(3, 4)

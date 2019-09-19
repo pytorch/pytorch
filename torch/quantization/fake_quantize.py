@@ -26,7 +26,7 @@ class FakeQuantize(Module):
         self.quant_min = quant_min
         self.quant_max = quant_max
         self.enabled = True
-        self.observer = default_observer(dtype=dtype, qscheme=qscheme)()
+        self.observer = default_observer(dtype=dtype, qscheme=qscheme)
         self.scale = None
         self.zero_point = None
 
@@ -50,15 +50,10 @@ class FakeQuantize(Module):
                 self.quant_max)
         return X
 
-def fake_quant(fake_quant_cls, **kwargs):
-    return partial(fake_quant_cls, **kwargs)
+default_fake_quant = FakeQuantize
 
-def default_fake_quant(**kwargs):
-    return fake_quant(FakeQuantize, **kwargs)
-
-def default_weight_fake_quant(**kwargs):
-    kwargs.setdefault('dtype', torch.qint8)
-    kwargs.setdefault('qscheme', torch.per_tensor_symmetric)
-    kwargs.setdefault('quant_min', -128)
-    kwargs.setdefault('quant_max', 127)
-    return fake_quant(FakeQuantize, **kwargs)
+default_weight_fake_quant = partial(FakeQuantize,
+                                    dtype=torch.qint8,
+                                    qscheme=torch.per_tensor_symmetric,
+                                    quant_min=-128,
+                                    quant_max=127)
