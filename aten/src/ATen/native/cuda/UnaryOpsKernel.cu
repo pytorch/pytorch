@@ -67,6 +67,15 @@ void round_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void rsqrt_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "rsqrt_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
+      return ::rsqrt(a);
+    });
+  });
+}
+
 void sign_kernel_cuda(TensorIterator& iter){
     if (iter.dtype() == ScalarType::Bool) {
       gpu_kernel(iter, []GPU_LAMBDA(bool a){
@@ -119,6 +128,7 @@ REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
 REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda);
 REGISTER_DISPATCH(neg_stub, &neg_kernel_cuda);
 REGISTER_DISPATCH(round_stub, &round_kernel_cuda);
+REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
 REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(digamma_stub, &digamma_kernel_cuda);

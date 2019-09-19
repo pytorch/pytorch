@@ -86,40 +86,30 @@ def add(g, self, other, alpha=None):
     # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
     if alpha and sym_help._scalar(sym_help._maybe_get_scalar(alpha)) != 1:
         return _unimplemented("add", "alpha != 1")
-    # See Note [Pointwise by scalar]
-    other = sym_help._maybe_get_scalar(other)
-    return g.op("Add", self, sym_help._if_scalar_type_as(g, other, self))
+    return g.op("Add", self, other)
 
 
 def sub(g, self, other, alpha=None):
     # default alpha arg is to allow no-alpha sub (aten sub st overload no alpha)
     if alpha and sym_help._scalar(sym_help._maybe_get_scalar(alpha)) != 1:
         return _unimplemented("sub", "alpha != 1")
-    # See Note [Pointwise by scalar]. Note that self or other may be scalars.
-    other = sym_help._maybe_get_scalar(other)
-    return g.op("Sub", self, sym_help._if_scalar_type_as(g, other, self))
+    return g.op("Sub", self, other)
 
 
 def rsub(g, self, other, alpha=None):
-    other = sym_help._maybe_get_scalar(other)
-    other = sym_help._if_scalar_type_as(g, other, self)
     return sub(g, other, self, alpha=alpha)
 
 
 def mul(g, self, other):
-    # See Note [Pointwise by scalar]
-    other = sym_help._maybe_get_scalar(other)
-    return g.op("Mul", self, sym_help._if_scalar_type_as(g, other, self))
+    return g.op("Mul", self, other)
 
 
 def div(g, self, other):
-    # See Note [Pointwise by scalar]
-    other = sym_help._maybe_get_scalar(other)
-    return g.op("Div", self, sym_help._if_scalar_type_as(g, other, self))
+    return g.op("Div", self, other)
 
 
 def reciprocal(g, self):
-    return g.op("Div", sym_help._if_scalar_type_as(g, torch.ones(1), self), self)
+    return g.op("Div", torch.ones(1), self)
 
 
 @parse_args('v', 'i')
@@ -137,8 +127,7 @@ def stack(g, tensor_list, dim):
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
-    ty = sym_help._try_get_scalar_type(self, other).lower()
-    C = g.constant(0, [1], ty)
+    C = g.op("Constant", value_t=torch.tensor([1]))
     return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
 
 
@@ -788,8 +777,7 @@ def gt(g, input, other):
 
 
 def gt_impl(g, input, other):
-    other = sym_help._maybe_get_scalar(other)
-    return g.op("Greater", input, sym_help._if_scalar_type_as(g, other, input))
+    return g.op("Greater", input, other)
 
 
 def lt(g, input, other):
@@ -797,20 +785,17 @@ def lt(g, input, other):
 
 
 def lt_impl(g, input, other):
-    other = sym_help._maybe_get_scalar(other)
-    return g.op("Less", input, sym_help._if_scalar_type_as(g, other, input))
+    return g.op("Less", input, other)
 
 
 @wrap_logical_op_with_negation
 def ge(g, input, other):
-    other = sym_help._maybe_get_scalar(other)
-    return lt_impl(g, input, sym_help._if_scalar_type_as(g, other, input))
+    return lt_impl(g, input, other)
 
 
 @wrap_logical_op_with_negation
 def le(g, input, other):
-    other = sym_help._maybe_get_scalar(other)
-    return gt_impl(g, input, sym_help._if_scalar_type_as(g, other, input))
+    return gt_impl(g, input, other)
 
 
 @wrap_logical_op_with_cast_to_and_from('Bool')
@@ -1037,8 +1022,7 @@ def log1p(g, self):
 
 
 def pow(g, self, exponent):
-    exponent = sym_help._maybe_get_scalar(exponent)
-    return g.op("Pow", self, sym_help._if_scalar_type_as(g, exponent, self))
+    return g.op("Pow", self, exponent)
 
 
 def clamp(g, self, min, max):
@@ -1903,9 +1887,9 @@ def index(g, self, index):
 
 @parse_args('v', 'is', 'i')
 def frobenius_norm(g, self, dim=None, keepdim=False):
-    sqrt = g.op('Mul', self, self)
-    sumsqrt = g.op('ReduceSum', sqrt, axes_i=dim, keepdims_i=keepdim)
-    return g.op('Sqrt', sumsqrt)
+    sqr = g.op('Mul', self, self)
+    sumsqr = g.op('ReduceSum', sqr, axes_i=dim, keepdims_i=keepdim)
+    return g.op('Sqrt', sumsqr)
 
 
 @parse_args('v', 'i', 'b', 'v')
@@ -1919,3 +1903,10 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
     return g.op("Multinomial", log_input,
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
+
+
+def gelu(g, self):
+    _sqrt2 = 1.4142135623730951
+    erf = g.op('Erf', div(g, self, torch.tensor(_sqrt2)))
+    erf_plusone = add(g, erf, g.op('Constant', value_t=torch.tensor(1, dtype=torch.float)))
+    return mul(g, mul(g, self, erf_plusone), g.op('Constant', value_t=torch.tensor(0.5, dtype=torch.float)))
