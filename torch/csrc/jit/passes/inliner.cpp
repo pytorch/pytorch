@@ -9,7 +9,7 @@ namespace prim {
 using namespace ::c10::prim;
 }
 
-void inlineCalls(Block* block, bool recurse) {
+void inlineCalls(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* cur = *it++;
@@ -20,32 +20,26 @@ void inlineCalls(Block* block, bool recurse) {
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
         cur->removeInput(0);
-        if (recurse) {
-          Inline(*fun_type->function()->graph(), recurse);
-        }
         inlineCallTo(cur, *fun_type->function()->graph());
       } break;
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
         if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
           auto function = class_type->getMethod(name);
-          if (recurse) {
-            Inline(*function->graph(), recurse);
-          }
           inlineCallTo(cur, *function->graph());
         }
       } break;
       default: {
         for (auto b : cur->blocks()) {
-          inlineCalls(b, recurse);
+          inlineCalls(b);
         }
       } break;
     }
   }
 }
 
-void Inline(Graph& graph, bool recurse) {
-  inlineCalls(graph.block(), recurse);
+void Inline(Graph& graph) {
+  inlineCalls(graph.block());
 }
 
 } // namespace jit

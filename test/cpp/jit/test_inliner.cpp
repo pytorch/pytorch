@@ -39,7 +39,6 @@ struct InlinerGuard {
 
 void testInliner() {
   {
-    // Test that the recursive inlining works
     // disable automatic inlining so we can test it manually
     InlinerGuard guard(/*shouldInline=*/false);
 
@@ -47,18 +46,7 @@ void testInliner() {
     auto& fn = cu.get_function("foo3");
 
     auto g = fn.graph();
-    Inline(*g, /*recurse=*/true);
-    FileCheck().check_count("prim::Print", 3)->run(*g);
-  }
-  {
-    // disable automatic inlining so we can test it manually
-    InlinerGuard guard(/*shouldInline=*/false);
-
-    CompilationUnit cu(testSource);
-    auto& fn = cu.get_function("foo3");
-
-    auto g = fn.graph();
-    Inline(*g, /*recurse=*/false);
+    Inline(*g);
     FileCheck()
         .check("three")
         ->check("two")
