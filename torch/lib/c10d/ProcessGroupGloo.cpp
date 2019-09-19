@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <gloo/allgather.h>
+#include <gloo/allgatherv.h>
 #include <gloo/allreduce.h>
 #include <gloo/barrier.h>
 #include <gloo/broadcast.h>
@@ -148,6 +149,11 @@ void setOutputs(O& opts, std::vector<at::Tensor>& tensors) {
 template <typename T, typename O>
 void setOutput(O& opts, at::Tensor& tensor) {
   opts.setOutput(getDataPointer<T>(tensor), tensor.numel());
+}
+
+template <typename T, typename O>
+void setOutput(O& opts, at::Tensor& tensor, std::vector<size_t>& counts) {
+  opts.setOutput(getDataPointer<T>(tensor), counts);
 }
 
 #ifdef USE_CUDA
@@ -958,29 +964,38 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
   std::vector<at::Tensor> allgather_indices(
       const at::Tensor& tensor,
       const std::vector<SparseTensorMetadata>& metadata) {
-    auto max_nnz = metadata[0].nnz();
-    for (size_t i = 1; i < metadata.size(); i++) {
-      max_nnz = std::max(max_nnz, metadata[i].nnz());
+    const auto sparseDim = tensor.sparse_dim();
+
+    std::vector<size_t> counts(context->size);
+    int64_t totalSize = 0;
+    for (size_t i = 0; i < metadata.size(); i++) {
+      counts[i] = metadata[i].nnz() * sparseDim;
+      totalSize += counts[i];
     }
 
-    // There are #sparse_dim() 1-dimensional tensors with nnz elems per rank.
-    auto buffer =
-        at::empty({context->size, tensor.sparse_dim(), max_nnz}, at::kLong);
-    buffer.select(0, context->rank)
-        .narrow(1, 0, tensor._nnz())
-        .copy_(tensor.indices());
+    auto output = at::empty({totalSize}, at::kLong);
 
-    // Allgather indices.
-    gloo::AllgatherOptions opts(context);
-    opts.setOutput(buffer.data_ptr<int64_t>(), buffer.numel());
+    // tensors copied from cuda may not be contiguous, get a contiguous
+    // tensor before use its data_ptr
+    auto input = tensor.indices().contiguous();
+
+    // Allgatherv indices.
+    gloo::AllgathervOptions opts(context);
+    opts.setInput(input.data_ptr<int64_t>(), input.numel());
+    opts.setOutput(output.data_ptr<int64_t>(), counts);
     opts.setTag(tag);
-    gloo::allgather(opts);
+    gloo::allgatherv(opts);
 
     // Compile indices tensor per rank.
     std::vector<at::Tensor> indices;
     indices.reserve(metadata.size());
+    size_t offset = 0;
     for (size_t i = 0; i < metadata.size(); i++) {
-      indices.push_back(buffer.select(0, i).narrow(1, 0, metadata[i].nnz()));
+      const auto nnz = metadata[i].nnz();
+      const auto numel = sparseDim * nnz;
+      indices.push_back(
+          output.narrow(0, offset, numel).reshape({sparseDim, nnz}));
+      offset += numel;
     }
 
     return indices;
@@ -989,34 +1004,47 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
   std::vector<at::Tensor> allgather_values(
       const at::Tensor& tensor,
       const std::vector<SparseTensorMetadata>& metadata) {
-    auto max_nnz = metadata[0].nnz();
-    for (size_t i = 1; i < metadata.size(); i++) {
-      max_nnz = std::max(max_nnz, metadata[i].nnz());
+    // There are nnz #dense_dim()-dimensional tensors per rank.
+    const auto valueShape = tensor.sizes().slice(tensor.sparse_dim());
+    size_t denseNumel = 1;
+    for (auto dim : valueShape) {
+      denseNumel *= dim;
     }
 
-    // There are nnz #dense_dim()-dimensional tensors per rank.
-    const auto value_shape = tensor.sizes().slice(tensor.sparse_dim());
-    auto buffer_shape = std::vector<int64_t>({context->size, max_nnz});
-    std::copy(
-        value_shape.begin(),
-        value_shape.end(),
-        std::back_inserter(buffer_shape));
-    auto buffer = at::empty(buffer_shape, tensor.scalar_type());
-    buffer.select(0, context->rank)
-        .narrow(0, 0, tensor._nnz())
-        .copy_(tensor.values());
+    std::vector<size_t> counts(context->size);
+    int64_t totalSize = 0;
+    for (size_t i = 0; i < metadata.size(); i++) {
+      counts[i] = metadata[i].nnz() * denseNumel;
+      totalSize += counts[i];
+    }
 
-    // Allgather values.
-    gloo::AllgatherOptions opts(context);
-    GENERATE_ALL_TYPES(tensor.scalar_type(), setOutput, opts, buffer);
+    auto output = at::empty({totalSize}, tensor.scalar_type());
+
+    // Allgatherv indices.
+    gloo::AllgathervOptions opts(context);
+    // tensors copied from cuda may not be contiguous, get a contiguous
+    // tensor before use its data_ptr
+    at::Tensor valueTensor = tensor.values().contiguous();
+    GENERATE_ALL_TYPES(valueTensor.scalar_type(), setInput, opts, valueTensor);
+    GENERATE_ALL_TYPES(
+        valueTensor.scalar_type(), setOutput, opts, output, counts);
     opts.setTag(tag);
-    gloo::allgather(opts);
+    gloo::allgatherv(opts);
 
     // Compile values tensor per rank.
     std::vector<at::Tensor> values;
     values.reserve(metadata.size());
+    size_t offset = 0;
     for (size_t i = 0; i < metadata.size(); i++) {
-      values.push_back(buffer.select(0, i).narrow(0, 0, metadata[i].nnz()));
+      const auto nnz = metadata[i].nnz();
+      const auto numel = denseNumel * nnz;
+      auto tensorShape = std::vector<int64_t>({(int64_t)nnz});
+      std::copy(
+          valueShape.begin(),
+          valueShape.end(),
+          std::back_inserter(tensorShape));
+      values.push_back(output.narrow(0, offset, numel).reshape(tensorShape));
+      offset += numel;
     }
 
     return values;
