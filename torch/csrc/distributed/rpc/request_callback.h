@@ -24,7 +24,7 @@ class TORCH_API RequestCallback {
   // containing an exception. Different rpc agent implementations are expected
   // to ensure delivery of the response/exception based on their implementation
   // specific mechanisms.
-  virtual Message processMessage(Message& request) = 0;
+  virtual Message processMessage(const Message& request) = 0;
 };
 
 } // namespace rpc

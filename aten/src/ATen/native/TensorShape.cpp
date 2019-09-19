@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <vector>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 namespace native {

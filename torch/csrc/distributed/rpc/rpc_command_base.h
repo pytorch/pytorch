@@ -7,14 +7,14 @@ namespace distributed {
 namespace rpc {
 
 // Base class for all RPC request and responses.
-class RpcBase {
+class RpcCommandBase {
  public:
   // Need to override this to serialize the RPC.
   virtual Message toMessage() = 0;
-  virtual ~RpcBase() = 0;
+  virtual ~RpcCommandBase() = 0;
 };
 
-inline RpcBase::~RpcBase() {}
+inline RpcCommandBase::~RpcCommandBase() {}
 
 } // namespace rpc
 } // namespace distributed

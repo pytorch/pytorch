@@ -88,9 +88,6 @@ class TORCH_API DistAutogradContainer {
   // and worker_id_ are immutable.
   mutable std::mutex autograd_context_lock_;
 
-  // Each thread has a single autograd_context_id valid at any point in time.
-  static thread_local int64_t current_context_id_;
-
   // Autograd message id to identify unique send/recv autograd function pairs.
   std::atomic<int64_t> next_autograd_message_id_;
 

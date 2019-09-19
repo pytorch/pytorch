@@ -54,10 +54,10 @@ std::shared_ptr<Operator> matchBuiltinOp(
 
 using namespace torch::distributed::autograd;
 
-py::object toPyObjInternal(RpcBase* rpc, MessageType messageType) {
+py::object toPyObjInternal(RpcCommandBase* rpc, MessageType messageType) {
   switch (messageType) {
     case MessageType::SCRIPT_RET: {
-      auto ret = static_cast<ScriptRet*>(rpc);
+      auto ret = static_cast<ScriptResp*>(rpc);
       Stack stack;
       stack.push_back(ret->value());
       return torch::jit::createPyObjectForStack(std::move(stack));

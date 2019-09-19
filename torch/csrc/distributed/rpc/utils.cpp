@@ -4,14 +4,14 @@
 #include <torch/csrc/distributed/rpc/rpc_with_autograd.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
-#include <torch/csrc/distributed/rpc/script_ret.h>
+#include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/script_rref_proto.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
-std::unique_ptr<RpcBase> deserializeRequest(const Message& request) {
+std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
   switch (request.type()) {
     case MessageType::SCRIPT_CALL: {
       return ScriptCall::fromMessage(request);
@@ -41,10 +41,10 @@ std::unique_ptr<RpcBase> deserializeRequest(const Message& request) {
   }
 }
 
-std::unique_ptr<RpcBase> deserializeResponse(const Message& response) {
+std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
   switch (response.type()) {
     case MessageType::SCRIPT_RET: {
-      return ScriptRet::fromMessage(response);
+      return ScriptResp::fromMessage(response);
     }
     case MessageType::PYTHON_RET: {
       return PythonUDFResp::fromMessage(response);
