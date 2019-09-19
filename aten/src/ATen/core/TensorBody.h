@@ -17,6 +17,7 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
+#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/NamedTensor.h>
 
 namespace caffe2 {
@@ -395,6 +396,7 @@ class CAFFE2_API Tensor {
   void backward(const Tensor & gradient={}, bool keep_graph=false, bool create_graph=false) const;
   void set_data(const Tensor & new_data) const;
   Tensor data() const;
+  bool is_leaf() const;
   #ifdef BUILD_NAMEDTENSOR
   Tensor & names_(c10::optional<DimnameList> names) const;
   #endif
@@ -409,6 +411,12 @@ class CAFFE2_API Tensor {
   #endif
   #ifdef BUILD_NAMEDTENSOR
   Tensor refine_names(DimnameList names) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor unflatten(Dimname dim, IntArrayRef sizes, DimnameList names) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor unflatten(int64_t dim, IntArrayRef sizes, DimnameList names) const;
   #endif
   Tensor abs() const;
   Tensor & abs_() const;
