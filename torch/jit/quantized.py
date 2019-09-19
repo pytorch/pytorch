@@ -470,7 +470,7 @@ class QuantizedLSTM(QuantizedRNNBase):
         assert batch_sizes is None
         result = _VF.quantized_lstm(input, hx, self._get_all_weights(), self.bias, self.num_layers,
                                     float(self.dropout), self.training, self.bidirectional,
-                                    self.batch_first, dtype=self.dtype)
+                                    self.batch_first, dtype=self.dtype, use_dynamic=False)
         output = result[0]
         hidden = result[1:]
 

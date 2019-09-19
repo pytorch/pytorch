@@ -1115,6 +1115,10 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
   const int kernel_dim = KernelDim_();
   const int Y_HxW = this->GetDimsSize(*Y);
 
+  if (N == 0) {
+    LOG(WARNING) << "The batch size is 0 in ConvNHWCCore_ function!";
+  }
+
   if (FLAGS_caffe2_dnnlowp_dump_tensors) {
     // Dump input activation
     StoreMatrixInMatrixMarketFormat(
