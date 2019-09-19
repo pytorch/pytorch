@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 
 #include <algorithm>
@@ -48,7 +47,6 @@ static void adaptive_avg_pool2d_single_out_frame(
     int64_t istrideH,
     int64_t istrideW) {
   at::parallel_for(0, sizeD, 0, [&](int64_t start, int64_t end) {
-
     for (auto d = start; d < end; d++) {
       /* loop over output */
       int64_t oh, ow;
@@ -81,14 +79,17 @@ static void adaptive_avg_pool2d_single_out_frame(
 
           /* set output to local average */
           // TODO: add the max/min clip
-          op->val_ = static_cast<typename scalar_t::underlying>(std::nearbyint(sum * kHWr));
+          op->val_ = static_cast<typename scalar_t::underlying>(
+              std::nearbyint(sum * kHWr));
         }
       }
     }
   });
 }
 
-std::vector<int64_t> get_output_shape(const Tensor& input, IntArrayRef output_size) {
+std::vector<int64_t> get_output_shape(
+    const Tensor& input,
+    IntArrayRef output_size) {
   for (int64_t i = 0; i < input.dim(); i++) {
     TORCH_CHECK(
         input.size(i) > 0,
@@ -123,9 +124,7 @@ std::vector<int64_t> get_output_shape(const Tensor& input, IntArrayRef output_si
 }
 
 template <typename scalar_t>
-Tensor q_adaptive_avg_pool2d(
-    const Tensor& input,
-    IntArrayRef output_size) {
+Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
   Tensor output;
   const auto output_shape = get_output_shape(input, output_size);
   /* sizes */
@@ -188,12 +187,9 @@ Tensor q_adaptive_avg_pool2d(
     return output;
   } else {
     Tensor output = at::_empty_affine_quantized(
-        output_shape,
-        input.options(),
-        input.q_scale(),
-        input.q_zero_point());
+        output_shape, input.options(), input.q_scale(), input.q_zero_point());
     auto input_contig = input.contiguous();
-    auto input_data = input.data_ptr<scalar_t>();
+    auto input_data = input_contig.data_ptr<scalar_t>();
     auto output_data = output.data_ptr<scalar_t>();
 
     if (input.dim() == 3 || input.size(0) == 1) {
@@ -235,9 +231,10 @@ Tensor quantized_adaptive_avg_pool2d(
     const at::Tensor& input,
     IntArrayRef output_size) {
   Tensor output;
-  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "quantized_adaptive_avg_pool2d", [&]() {
-      output = q_adaptive_avg_pool2d<scalar_t>(input, output_size);
-  });
+  AT_DISPATCH_QINT_TYPES(
+      input.scalar_type(), "quantized_adaptive_avg_pool2d", [&]() {
+        output = q_adaptive_avg_pool2d<scalar_t>(input, output_size);
+      });
   return output;
 }
 

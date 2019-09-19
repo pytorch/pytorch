@@ -589,15 +589,18 @@ Vec256<int16_t> inline clamp_min(const Vec256<int16_t>& a, const Vec256<int16_t>
   return _mm256_max_epi16(min_val, a);
 }
 
-Vec256<int32_t> inline convert_8(const int8_t* ptr) {
-  return _mm256_cvtepi8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr)));
-}
-
-Vec256<int32_t> inline convert_8(const int32_t* ptr) {
+template<typename T>
+Vec256<int32_t> inline convert_to_int32(const void* ptr) {
   return Vec256<int32_t>::loadu(ptr);
 }
 
-Vec256<int32_t> inline convert_8(const uint8_t* ptr) {
+template<>
+Vec256<int32_t> inline convert_to_int32<int8_t>(const void* ptr) {
+  return _mm256_cvtepi8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr)));
+}
+
+template<>
+Vec256<int32_t> inline convert_to_int32<uint8_t>(const void* ptr) {
   return _mm256_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr)));
 }
 

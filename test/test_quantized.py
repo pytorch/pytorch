@@ -523,7 +523,7 @@ class TestQuantizedOps(TestCase):
         # Run reference on int_repr + round to avoid double rounding error.
         X_ref = torch.nn.functional.avg_pool2d(
             qX.int_repr().to(torch.float), kernel_size=kernel, stride=stride, padding=padding,
-                ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override).round()
+            ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override).round()
 
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool2d,
@@ -564,12 +564,12 @@ class TestQuantizedOps(TestCase):
         X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
         X = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
         qX = torch.quantize_linear(torch.from_numpy(X_nchw), scale=scale,
-                                      zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
+                                   zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
 
         # Run reference on int_repr + round to avoid double rounding error.
         X_ref = torch.nn.functional.avg_pool2d(
             qX.int_repr().to(torch.double), kernel_size=kernel, stride=stride, padding=padding,
-                ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override).round()
+            ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override).round()
 
         self.assertTrue(qX.stride() != sorted(qX.stride()))
         ops_under_test = {
@@ -579,7 +579,7 @@ class TestQuantizedOps(TestCase):
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
         for name, op in ops_under_test.items():
             X_hat = op(qX, kernel_size=kernel, stride=stride, padding=padding, ceil_mode=ceil_mode,
-                        count_include_pad=count_include_pad, divisor_override=divisor_override)
+                       count_include_pad=count_include_pad, divisor_override=divisor_override)
             self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
             self.assertEqual(X_ref, X_hat.int_repr().to(torch.double), prec=1.0,
                              message="{} results are off".format(name))
@@ -587,7 +587,7 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.scale', scale, X_hat.q_scale()))
             self.assertEqual(zero_point, X_hat.q_zero_point(),
                              message=error_message.format(name + '.zero_point', scale,
-                                                          X_hat.q_zero_point()))
+                             X_hat.q_zero_point()))
 
     @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
@@ -605,7 +605,6 @@ class TestQuantizedOps(TestCase):
             output_size = output_size_h
         else:
             output_size = (output_size_h, output_size_w)
-
         X = torch.from_numpy(X)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                        dtype=torch_type)
@@ -635,7 +634,7 @@ class TestQuantizedOps(TestCase):
     """Tests adaptive average pool operation on NHWC quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
-                       qparams=hu.qparams()),
+                       qparams=hu.qparams(dtypes=torch.qint8)),
            output_size_h=st.integers(1, 10),
            output_size_w=st.integers(1, 10))
     def test_adaptive_avg_pool2d_nhwc(self, X, output_size_h, output_size_w):
@@ -654,11 +653,10 @@ class TestQuantizedOps(TestCase):
         X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
         X = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
         qX = torch.quantize_linear(torch.from_numpy(X_nchw), scale=scale,
-                                      zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
+                                   zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
 
         # Run reference on int_repr + round to avoid double rounding error.
-        X_ref = torch.nn.functional.adaptive_avg_pool2d(
-            qX.int_repr().to(torch.float), output_size).round()
+        X_ref = torch.nn.functional.adaptive_avg_pool2d(qX.int_repr().to(torch.double), output_size).round()
 
         self.assertTrue(qX.stride() != sorted(qX.stride()))
 
