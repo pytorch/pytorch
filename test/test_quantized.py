@@ -1099,18 +1099,16 @@ class TestQuantizedConv(unittest.TestCase):
         # reformat X_init and W_init in the required format by qconv operator
         # NCHW -> NHWC
         X_NHWC = X.permute([0, 2, 3, 1]).contiguous()
-        # K(C/G)RS -> KRS(C/G)
-        W_KRSC = W.permute([0, 2, 3, 1]).contiguous()
 
         X_q = torch.quantize_linear(X_NHWC, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
         if use_channelwise:
-            W_q = torch.quantize_linear_per_channel(W_KRSC,
+            W_q = torch.quantize_linear_per_channel(W,
                                                     W_scales_tensor.to(dtype=torch.double),
                                                     W_zero_points_tensor.to(dtype=torch.long),
                                                     [0],
                                                     dtype=torch.qint8)
         else:
-            W_q = torch.quantize_linear(W_KRSC, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
+            W_q = torch.quantize_linear(W, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
 
         bias_float = b if use_bias else None
         W_prepack = qconv_prepack(W_q, bias_float, stride, pad, dilation, groups)
@@ -1177,18 +1175,15 @@ class TestQuantizedConv(unittest.TestCase):
         qconv_prepack = torch.ops.quantized.conv_prepack
         qconv_unpack = torch.ops.quantized.conv_unpack
 
-        # Orig tensor is assumed to be in K(C/G)RS format
         W = torch.from_numpy(filters).to(torch.float)
-        # K(C/G)RS -> KRS(C/G)
-        W_KRSC = W.permute([0, 2, 3, 1]).contiguous()
         if channelwise:
-            W_q = torch.quantize_linear_per_channel(W_KRSC,
+            W_q = torch.quantize_linear_per_channel(W,
                                                     scales=filters_scale,
                                                     zero_points=filters_zero_point,
                                                     axis=[0],
                                                     dtype=filters_qtype)
         else:
-            W_q = torch.quantize_linear(W_KRSC, scale=filters_scale, zero_point=filters_zero_point, dtype=filters_qtype)
+            W_q = torch.quantize_linear(W, scale=filters_scale, zero_point=filters_zero_point, dtype=filters_qtype)
 
         # Pack weights using weight packing operator
         strides = [strideH, strideW]
