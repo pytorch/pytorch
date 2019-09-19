@@ -751,15 +751,15 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   return grad_input.add(grad_input.transpose(-1, -2)).mul_(0.5);  // Symmetrizing the gradient
 }
 
-Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor L_inv) {
+Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inverse) {
   Tensor grad_L;
   if (grad.defined()) {
     Tensor common_term = grad + grad.transpose(-2, -1);
-    common_term = at::matmul(L_inv, at::matmul(common_term, L_inv));
+    common_term = at::matmul(inverse, at::matmul(common_term, inverse));
     if (upper) {
-      grad_L = -at::matmul(L, common_term);
+      grad_L = -at::matmul(inverse, common_term);
     } else {
-      grad_L = -at::matmul(common_term, L);
+      grad_L = -at::matmul(common_term, inverse);
     }
   } else {
     grad_L = at::zeros({1}, L.options()).expand_as(L);
