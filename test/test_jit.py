@@ -4450,17 +4450,6 @@ a")
         self.checkScript(test_scalar_cast, (torch.tensor(1.0),))
         self.checkScript(test_scalar_cast, (torch.tensor(1),))
 
-        expected_str = r"Use int\(tensor\) or float\(tensor\) to retrieve"
-        with self.assertRaisesRegex(RuntimeError, expected_str):
-            @torch.jit.script
-            def int_fn(a):
-                # type: (int) -> int
-                return a
-
-            @torch.jit.script
-            def test_error_msg(x):
-                return int_fn(x.item())
-
     def test_method_on_number(self):
         def func():
             c = 1
