@@ -628,19 +628,10 @@ void QuantFusion(std::shared_ptr<Graph>& graph) {
   const std::string quantized_linear_with_bias =
       R"(
 graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
-        %0 : int = prim::Constant[value=0]()
-        %1 : int = prim::Constant[value=1]()
-        %2 : int = prim::Constant[value=2]()
-        %3 : int = prim::Constant[value=3]()
-        %in_param : int[] = prim::ListConstruct(%0, %2, %3, %1)
-        %a_perm : Tensor = aten::permute(%a_quant, %in_param)
         %w_quant_t = aten::t(%w_quant)
-        %w_perm : Tensor = aten::permute(%w_quant_t, %in_param)
-        %w_packed = quantized::fbgemm_linear_prepack(%w_perm)
-        %r = quantized::fbgemm_linear(%a_perm, %w_packed, %b_quant, %r_scale, %r_zero_point)
-        %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
-        %r_perm = aten::permute(%r, %out_param)
-        return (%r_perm))";
+        %packed_params = quantized::linear_prepack(%w_quant_t, %b_quant)
+        %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
+        return (%r))";
   const std::unordered_map<std::string, std::string> pattern_and_replacements =
       {// quantized::conv2d
        {R"(
@@ -707,20 +698,11 @@ graph(%a_quant, %w_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_p
         return (%r_quant))",
         R"(
 graph(%a_quant, %w_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype):
-        %0 : int = prim::Constant[value=0]()
-        %1 : int = prim::Constant[value=1]()
-        %2 : int = prim::Constant[value=2]()
-        %3 : int = prim::Constant[value=3]()
-        %in_param : int[] = prim::ListConstruct(%0, %2, %3, %1)
-        %a_perm : Tensor = aten::permute(%a_quant, %in_param)
         %w_quant_t = aten::t(%w_quant)
-        %w_perm : Tensor = aten::permute(%w_quant_t, %in_param)
-        %w_packed = quantized::fbgemm_linear_prepack(%w_perm)
         %bias: Tensor? = prim::Constant()
-        %r = quantized::fbgemm_linear(%a_perm, %w_packed, %bias, %r_scale, %r_zero_point)
-        %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
-        %r_perm = aten::permute(%r, %out_param)
-        return (%r_perm))"}};
+        %packed_params = quantized::linear_prepack(%w_quant_t, %bias)
+        %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
+        return (%r))"}};
   for (const auto& item : pattern_and_replacements) {
     SubgraphRewriter rewriter;
     rewriter.RegisterRewritePattern(item.first, item.second);
