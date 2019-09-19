@@ -32,7 +32,7 @@ FunctionSchema PythonValue::getSchema(
     const SourceRange& loc) {
   auto annotations = py::module::import("torch.jit.annotations");
   auto signature =
-      annotations.attr("get_signature")(self, rcb ? *rcb : py::none());
+      annotations.attr("get_signature")(self, rcb ? *rcb : py::none(), loc);
   std::vector<Argument> args, rets;
   // We may mutate this if we can determine the number of args from Python
   // introspection.

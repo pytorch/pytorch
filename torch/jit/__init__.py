@@ -1214,8 +1214,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return fn
 
 def _gen_rcb(obj, _frames_up):
-    print(obj)
-    print(_frames_up)
     _frames_up = _frames_up + 1  # for invoking _gen_rcb()
 
     closure_rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
@@ -1996,7 +1994,7 @@ def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_
     return fn
 
 def _check_no_signature(func):
-    signature = torch.jit.annotations.get_signature(func)
+    signature = torch.jit.annotations.get_signature(func, None)
     if signature is None:
         qual_name = _qualified_name(func)
         raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))
