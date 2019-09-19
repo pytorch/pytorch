@@ -48,6 +48,34 @@ void neg_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+// We manually overload nearbyint because std::nearbyint does not work with ROCm.
+template <typename scalar_t>
+__host__ __device__ static inline scalar_t nearbyint_wrapper(scalar_t a) {
+  return static_cast<scalar_t>(::nearbyintf(static_cast<float>(a)));
+}
+
+__host__ __device__ static inline double nearbyint_wrapper(double a) {
+  return ::nearbyint(a);
+}
+
+void round_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "round_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      // We do not use std::round because we would like to round midway numbers to the nearest even integer.
+      return nearbyint_wrapper(a);
+    });
+  });
+}
+
+void rsqrt_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "rsqrt_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
+      return ::rsqrt(a);
+    });
+  });
+}
+
 void sign_kernel_cuda(TensorIterator& iter){
     if (iter.dtype() == ScalarType::Bool) {
       gpu_kernel(iter, []GPU_LAMBDA(bool a){
@@ -99,6 +127,8 @@ REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
 REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda);
 REGISTER_DISPATCH(neg_stub, &neg_kernel_cuda);
+REGISTER_DISPATCH(round_stub, &round_kernel_cuda);
+REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
 REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(digamma_stub, &digamma_kernel_cuda);

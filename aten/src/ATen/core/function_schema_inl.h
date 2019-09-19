@@ -51,6 +51,30 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   return out;
 }
 
+inline bool Argument::isBackwardCompatibleWith(
+      const Argument& old,
+      std::ostream* why_not) const {
+    const Argument* lhs = this;
+    const Argument* rhs = &old;
+    if (!(lhs->name() == rhs->name()
+        && lhs->N() == rhs->N()
+        && lhs->alias_info() == rhs->alias_info())) {
+      return false;
+    }
+    if (lhs->kwarg_only() && !rhs->kwarg_only()) {
+      return false;
+    }
+    if (!rhs->type()->isSubtypeOfExt(lhs->type(), why_not)) {
+      return false;
+    }
+    if (rhs->default_value().has_value() &&
+        !detail::defaultValueEquals_(lhs->default_value(),
+                                     rhs->default_value())) {
+      return false;
+    }
+    return true;
+}
+
 inline std::string FunctionSchema::formatTypeMismatchMsg(
     const Argument& expected,
     const std::string& actual_type,
@@ -72,6 +96,90 @@ inline std::string FunctionSchema::formatTypeMismatchMsg(
       value_str,
       "Declaration: ",
       *this);
+}
+
+inline bool FunctionSchema::isBackwardCompatibleWith(
+    const FunctionSchema& old,
+    std::ostream* why_not) const {
+  if (!(name() == old.name()
+        && overload_name() == old.overload_name()
+        // we are conservative on is_vararg and is_varret,
+        // since they are only used by internal operators
+        && is_vararg() == old.is_vararg()
+        && is_varret() == old.is_varret()
+        && returns().size() == old.returns().size()
+        && arguments().size() >= old.arguments().size())) {
+    return false;
+  }
+  for (size_t i = 0; i < returns().size(); ++i) {
+    // functions are covariant in arguments but contravariant in returns
+    if (!old.returns().at(i).isBackwardCompatibleWith(
+          returns().at(i),
+          why_not)) {
+      return false;
+    }
+  }
+  std::vector<const Argument*> args, old_args;
+  std::map<std::string, const Argument*> kwargs, old_kwargs;
+  auto split_func = [](const std::vector<Argument>& arguments,
+      std::vector<const Argument*>* positionals,
+      std::map<std::string, const Argument*>* nameds) {
+    for (const Argument& arg : arguments) {
+      if (!arg.kwarg_only()) {
+        positionals->emplace_back(&arg);
+      }
+      nameds->emplace(arg.name(), &arg);
+    }
+  };
+  // we split args into positional and keyward parts,
+  split_func(arguments(), &args, &kwargs);
+  split_func(old.arguments(), &old_args, &old_kwargs);
+  if (old_args.size() > args.size()) {
+    return false;
+  }
+  // make sure that all the old positional args have their corresponding
+  // backward compatible positional args in this schema
+  for (size_t i = 0; i < old_args.size(); ++i) {
+    if (!args.at(i)->isBackwardCompatibleWith(
+          *old_args.at(i),
+          why_not)) {
+      return false;
+    }
+  }
+  // check the extra positional args in this schema either has corresponding
+  // backward compatible keyward args since positional args also can be used as
+  // a keyward arg, or provided default values
+  for (size_t i = old_args.size(); i < args.size(); ++i) {
+    if (!args.at(i)->default_value()) {
+      auto it = old_kwargs.find(args.at(i)->name());
+      if (it == old_kwargs.end() ||
+          !args.at(i)->isBackwardCompatibleWith(
+            *it->second,
+            why_not)) {
+        return false;
+      }
+    }
+  }
+  // make sure that all the keyword args in the old schema have their
+  // corresponding backward compatible keyward args in this schema
+  for (auto& kv : old_kwargs) {
+    auto it = kwargs.find(kv.first);
+    if (it == kwargs.end() ||
+        !it->second->isBackwardCompatibleWith(
+          *kv.second,
+          why_not)) {
+      return false;
+    }
+    kwargs.erase(it);
+  }
+  // check all the extra keyword args in this schema provide default values
+  for (auto& kv : kwargs) {
+    if (!kv.second->default_value()) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 inline void FunctionSchema::checkArg(
@@ -189,14 +297,6 @@ inline FunctionSchema FunctionSchema::cloneWithRemappedTypes(
       is_varret());
 }
 
-inline bool operator==(const OperatorName& lhs, const OperatorName& rhs) {
-  return lhs.name == rhs.name && lhs.overload_name == rhs.overload_name;
-}
-
-inline bool operator!=(const OperatorName& lhs, const OperatorName& rhs) {
-  return !operator==(lhs, rhs);
-}
-
 // covariant subtyping of list of Arguments
 inline bool isSubtypeOfList(
     ArrayRef<Argument> child,
@@ -232,12 +332,3 @@ inline bool FunctionSchema::isSubtypeOf(
 }
 
 } // namespace c10
-
-namespace std {
-  template <>
-  struct hash<::c10::OperatorName> {
-    size_t operator()(const ::c10::OperatorName& x) const {
-      return std::hash<std::string>()(x.name) ^ (~ std::hash<std::string>()(x.overload_name));
-    }
-  };
-}
