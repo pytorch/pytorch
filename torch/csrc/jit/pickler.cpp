@@ -904,7 +904,7 @@ PickleOpCode Unpickler::readInstruction() {
         storage = at::Storage(
             at::CPU(type).typeMeta(),
             numel,
-            /*allocator=*/at::getCPUAllocator(),
+            /*allocator=*/at::GetAllocator(device.type()),
             /*resizable=*/false);
       } else {
         at::DataPtr storage_ptr = read_record_(key);

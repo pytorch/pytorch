@@ -93,7 +93,7 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
   return data;
 }
 
-IValue pickle_load(std::function<bool(char*, size_t)> reader) {
+IValue pickle_load(const std::function<bool(char*, size_t)>& reader) {
   // Read the magic number
   Unpickler(reader, nullptr, nullptr).parse_ivalue();
 

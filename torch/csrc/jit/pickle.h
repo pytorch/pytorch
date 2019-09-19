@@ -54,7 +54,7 @@ TORCH_API std::vector<char> pickle(
 
 TORCH_API std::vector<char> pickle_save(const IValue& ivalue);
 
-TORCH_API IValue pickle_load(std::function<bool(char*, size_t)> reader);
+TORCH_API IValue pickle_load(const std::function<bool(char*, size_t)>& reader);
 
 
 /// `reader` is a function that takes in a size to read from some pickled

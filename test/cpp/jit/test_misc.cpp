@@ -65,6 +65,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <fstream>
 
 namespace torch {
 namespace jit {
