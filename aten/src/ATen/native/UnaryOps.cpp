@@ -17,6 +17,7 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
 #include <cmath>
@@ -68,9 +69,17 @@ Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_ou
 Tensor erfinv(const Tensor& self) { return unary_op_impl(self, at::erfinv_out); }
 Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
 
+Tensor& round_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, round_stub); }
+Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
+Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
+
 Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, digamma_stub); }
 Tensor digamma(const Tensor& self) { return unary_op_impl(self, digamma_out); }
 Tensor& digamma_(Tensor& self) { return unary_op_impl_(self, digamma_out); }
+
+Tensor& rsqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, rsqrt_stub); }
+Tensor rsqrt(const Tensor& self) { return unary_op_impl(self, at::rsqrt_out); }
+Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
 
 Tensor& neg_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
@@ -129,6 +138,7 @@ Tensor& polygamma_(Tensor& self, int64_t n) {
   return at::polygamma_out(self, n, self);
 }
 Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
+  TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
   auto iter = TensorIterator::unary_op(result, self,
     /*check_mem_overlap=*/true);
   polygamma_stub(iter.device_type(), iter, n);
@@ -271,8 +281,6 @@ IMPLEMENT_UNARY_OP_VEC(log10)
 IMPLEMENT_UNARY_OP_VEC(log1p)
 IMPLEMENT_UNARY_OP_VEC(log2)
 IMPLEMENT_UNARY_OP_VEC(reciprocal)
-IMPLEMENT_UNARY_OP_VEC(round)
-IMPLEMENT_UNARY_OP_VEC(rsqrt)
 IMPLEMENT_UNARY_OP_VEC(sigmoid)
 IMPLEMENT_UNARY_OP_VEC(sin)
 IMPLEMENT_UNARY_OP_VEC(sinh)
@@ -280,6 +288,7 @@ IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
+IMPLEMENT_UNARY_OP_VEC(lgamma)
 
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(acos_stub);
@@ -318,5 +327,6 @@ DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
 DEFINE_DISPATCH(trunc_stub);
+DEFINE_DISPATCH(lgamma_stub);
 }
 } // namespace at

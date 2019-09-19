@@ -684,6 +684,14 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         input = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
         self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
 
+    def test_rsqrt(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, input):
+                return input.rsqrt()
+
+        input = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
+
     def test_log(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -905,6 +913,45 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         m1 = torch.randn(3, 4)
         m2 = torch.randn(4, 5)
         self.run_model_test(MyModel(), train=False, input=(ma, m1, m2), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_scalar_type(self):
+        class ArithmeticModel(torch.nn.Module):
+            def forward(self, x):
+                return x.size(0) * 2 * x
+
+        x = torch.ones(2, 3, dtype=torch.float32)
+        self.run_model_test(ArithmeticModel(), input=x, train=False, batch_size=BATCH_SIZE)
+
+        class ReciprocalModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.reciprocal(x)
+
+        x = torch.tensor([2.0, 4.0], dtype=torch.double)
+        self.run_model_test(ReciprocalModel(), input=x, train=False, batch_size=BATCH_SIZE)
+
+        class ComparisonModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x.ge(0.5) & y.le(2)
+
+        x = torch.ones(2, 3, dtype=torch.int32)
+        y = torch.ones(2, 3, dtype=torch.float32)
+        self.run_model_test(ComparisonModel(), input=(x, y), train=False, batch_size=BATCH_SIZE)
+
+        # TODO: re-enable the two tests after https://github.com/pytorch/pytorch/issues/26328 is resolved.
+        class MatMulModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.mm(x, y)
+
+        x = torch.ones(3, 4)
+        y = torch.ones(4, 5)
+        # self.run_model_test(MatMulModel(), input=(x, y), train=False, batch_size=BATCH_SIZE)
+
+        class AddMMModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.mm(x, x) + x
+
+        x = torch.ones(3, 3)
+        # self.run_model_test(AddMMModel(), input=x, train=False, batch_size=BATCH_SIZE)
 
     # test for a pytorch optimization pass, see https://github.com/pytorch/pytorch/pull/7872
     def test_consecutive_transposes(self):
@@ -1337,6 +1384,28 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.tensor(12)
         self.run_model_test(FullClass(), train=False, input=(x,), batch_size=BATCH_SIZE,
                             use_gpu=False, example_outputs=FullClass()(x))
+
+    def test_clamp(self):
+        class ClampModel(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(-0.5, 0.5)
+
+        x = torch.randn(3, 4)
+        self.run_model_test(ClampModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
+        class ClampMinModel(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(min=-0.5)
+
+        x = torch.randn(3, 4)
+        self.run_model_test(ClampMinModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
+        class ClampMaxModel(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(max=0.5)
+
+        x = torch.randn(3, 4)
+        self.run_model_test(ClampMaxModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_where_functional(self):
@@ -2109,6 +2178,18 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_model_test(MaskedFillModel2(), input=(x, ), train=False, batch_size=BATCH_SIZE)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_gelu(self):
+        class GeluModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.gelu(x)
+
+        model = GeluModel()
+        inputs = torch.randn(2, 4, 5, 6, requires_grad=True)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
 
 # a bit of metaprogramming to set up all the rnn tests
 
