@@ -142,7 +142,7 @@ private:
   // function schema changed between the executions, but it works as long
   // as the function schema didn't change. A better solution would be to
   // unload the old extension library from the Jupyter cell when the cell is
-  // re-ececuted and then only allow one kernel here, i.e. error if a kernel
+  // re-executed and then only allow one kernel here, i.e. error if a kernel
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
   ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>> kernels_;
