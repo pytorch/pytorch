@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define DECLARE_Q8GEMM_UKERNEL_FUNCTION(fn_name) \
+#define DECLARE_PYTORCH_Q8GEMM_UKERNEL_FUNCTION(fn_name) \
   PYTORCH_QNNP_INTERNAL void fn_name(            \
       size_t mr,                                 \
       size_t nr,                                 \
@@ -30,20 +30,20 @@ extern "C" {
       size_t c_stride,                           \
       const union pytorch_qnnp_conv_quantization_params* quantization_params);
 
-DECLARE_Q8GEMM_UKERNEL_FUNCTION(q8gemm_ukernel_3x3c8__neon)
-DECLARE_Q8GEMM_UKERNEL_FUNCTION(q8gemm_ukernel_2x4c8__neon)
-DECLARE_Q8GEMM_UKERNEL_FUNCTION(q8gemm_ukernel_4x8__neon)
-DECLARE_Q8GEMM_UKERNEL_FUNCTION(q8gemm_ukernel_6x4__neon)
-DECLARE_Q8GEMM_UKERNEL_FUNCTION(q8gemm_ukernel_8x8__neon)
+DECLARE_PYTORCH_Q8GEMM_UKERNEL_FUNCTION(pytorch_q8gemm_ukernel_3x3c8__neon)
+DECLARE_PYTORCH_Q8GEMM_UKERNEL_FUNCTION(pytorch_q8gemm_ukernel_2x4c8__neon)
+DECLARE_PYTORCH_Q8GEMM_UKERNEL_FUNCTION(pytorch_q8gemm_ukernel_4x8__neon)
+DECLARE_PYTORCH_Q8GEMM_UKERNEL_FUNCTION(pytorch_q8gemm_ukernel_6x4__neon)
+DECLARE_PYTORCH_Q8GEMM_UKERNEL_FUNCTION(pytorch_q8gemm_ukernel_8x8__neon)
 
-DECLARE_Q8GEMM_UKERNEL_FUNCTION(q8gemm_ukernel_4x8__aarch32_neon)
+DECLARE_PYTORCH_Q8GEMM_UKERNEL_FUNCTION(pytorch_q8gemm_ukernel_4x8__aarch32_neon)
 
-DECLARE_Q8GEMM_UKERNEL_FUNCTION(q8gemm_ukernel_8x8__aarch64_neon)
+DECLARE_PYTORCH_Q8GEMM_UKERNEL_FUNCTION(pytorch_q8gemm_ukernel_8x8__aarch64_neon)
 
-DECLARE_Q8GEMM_UKERNEL_FUNCTION(q8gemm_ukernel_2x4c8__sse2)
-DECLARE_Q8GEMM_UKERNEL_FUNCTION(q8gemm_ukernel_4x4c2__sse2)
+DECLARE_PYTORCH_Q8GEMM_UKERNEL_FUNCTION(pytorch_q8gemm_ukernel_2x4c8__sse2)
+DECLARE_PYTORCH_Q8GEMM_UKERNEL_FUNCTION(pytorch_q8gemm_ukernel_4x4c2__sse2)
 
-#define DECLARE_Q8GEMM_XZP_UKERNEL_FUNCTION(fn_name)      \
+#define DECLARE_PYTORCH_Q8GEMM_XZP_UKERNEL_FUNCTION(fn_name)      \
   PYTORCH_QNNP_INTERNAL void fn_name(                     \
       size_t mr,                                          \
       size_t nr,                                          \
@@ -56,10 +56,10 @@ DECLARE_Q8GEMM_UKERNEL_FUNCTION(q8gemm_ukernel_4x4c2__sse2)
       size_t c_stride,                                    \
       const union pytorch_qnnp_q31_requantization_params* \
           requantization_params);
-DECLARE_Q8GEMM_XZP_UKERNEL_FUNCTION(q8gemm_xzp_ukernel_4x8c2__neon)
-DECLARE_Q8GEMM_XZP_UKERNEL_FUNCTION(q8gemm_xzp_ukernel_4x8c2__aarch32_neon)
+DECLARE_PYTORCH_Q8GEMM_XZP_UKERNEL_FUNCTION(pytorch_q8gemm_xzp_ukernel_4x8c2__neon)
+DECLARE_PYTORCH_Q8GEMM_XZP_UKERNEL_FUNCTION(pytorch_q8gemm_xzp_ukernel_4x8c2__aarch32_neon)
 
-PYTORCH_QNNP_INTERNAL void q8sumrows_ukernel_4x__neon(
+PYTORCH_QNNP_INTERNAL void pytorch_q8sumrows_ukernel_4x__neon(
     const uint8_t* a,
     size_t m,
     size_t k,

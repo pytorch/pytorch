@@ -255,6 +255,9 @@ public:
   Vec256<T> trunc() const {
     return map(std::trunc);
   }
+  Vec256<T> lgamma() const {
+    return map(std::lgamma);
+  }
   Vec256<T> sqrt() const {
     return map(std::sqrt);
   }
