@@ -21,8 +21,10 @@ jobs:
         run: |
           set -eux
           if [ -z "${GITHUB_HEAD_REF}" ]; then
+            # We are on master, just set the SHA from our current location
             echo ::set-output name=commit_sha::${GITHUB_SHA}
           else
+            # We are on a PR, we need to check out PR branch
             git checkout ${GITHUB_HEAD_REF}
             echo ::set-output name=commit_sha::$(git rev-parse ${GITHUB_HEAD_REF})
           fi
