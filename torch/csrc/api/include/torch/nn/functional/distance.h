@@ -13,8 +13,8 @@ inline Tensor cosine_similarity(
   return torch::cosine_similarity(
       x1,
       x2,
-      options.dim_,
-      options.eps_);
+      options.dim(),
+      options.eps());
 }
 
 // ============================================================================
@@ -26,9 +26,9 @@ inline Tensor pairwise_distance(
   return torch::pairwise_distance(
       x1,
       x2,
-      options.p_,
-      options.eps_,
-      options.keepdim_);
+      options.p(),
+      options.eps(),
+      options.keepdim());
 }
 
 } // namespace functional
