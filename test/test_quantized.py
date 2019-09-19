@@ -1096,21 +1096,15 @@ class TestQuantizedConv(unittest.TestCase):
         # quantize reference results for comparision
         result_ref_q = torch.quantize_linear(result_ref, scale=Y_scale, zero_point=Y_zero_point, dtype=torch.quint8)
 
-        # reformat X_init and W_init in the required format by qconv operator
-        # NCHW -> NHWC
-        X_NHWC = X.permute([0, 2, 3, 1]).contiguous()
-        # K(C/G)RS -> KRS(C/G)
-        W_KRSC = W.permute([0, 2, 3, 1]).contiguous()
-
-        X_q = torch.quantize_linear(X_NHWC, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
+        X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
         if use_channelwise:
-            W_q = torch.quantize_linear_per_channel(W_KRSC,
+            W_q = torch.quantize_linear_per_channel(W,
                                                     W_scales_tensor.to(dtype=torch.double),
                                                     W_zero_points_tensor.to(dtype=torch.long),
                                                     [0],
                                                     dtype=torch.qint8)
         else:
-            W_q = torch.quantize_linear(W_KRSC, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
+            W_q = torch.quantize_linear(W, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
 
         bias_float = b if use_bias else None
         W_prepack = qconv_prepack(W_q, bias_float, stride, pad, dilation, groups)
@@ -1125,9 +1119,6 @@ class TestQuantizedConv(unittest.TestCase):
             Y_scale,
             Y_zero_point,
         )
-
-        # Back to NCHW format
-        Y_q = Y_q.permute([0, 3, 1, 2]).contiguous()
 
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
@@ -1177,18 +1168,15 @@ class TestQuantizedConv(unittest.TestCase):
         qconv_prepack = torch.ops.quantized.conv_prepack
         qconv_unpack = torch.ops.quantized.conv_unpack
 
-        # Orig tensor is assumed to be in K(C/G)RS format
         W = torch.from_numpy(filters).to(torch.float)
-        # K(C/G)RS -> KRS(C/G)
-        W_KRSC = W.permute([0, 2, 3, 1]).contiguous()
         if channelwise:
-            W_q = torch.quantize_linear_per_channel(W_KRSC,
+            W_q = torch.quantize_linear_per_channel(W,
                                                     scales=filters_scale,
                                                     zero_points=filters_zero_point,
                                                     axis=[0],
                                                     dtype=filters_qtype)
         else:
-            W_q = torch.quantize_linear(W_KRSC, scale=filters_scale, zero_point=filters_zero_point, dtype=filters_qtype)
+            W_q = torch.quantize_linear(W, scale=filters_scale, zero_point=filters_zero_point, dtype=filters_qtype)
 
         # Pack weights using weight packing operator
         strides = [strideH, strideW]
@@ -1450,11 +1438,8 @@ class TestQNNPackOps(TestCase):
 
             result_ref = conv_op(X)
 
-            X_NHWC = X.permute([0, 2, 3, 1]).contiguous()
-            W_RSCK = W.permute([0, 2, 3, 1]).contiguous()
-
-            X_q = torch.quantize_linear(X_NHWC, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
-            W_q = torch.quantize_linear(W_RSCK, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
+            X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
+            W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
             b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
 
             W_pack = torch.ops.quantized.conv_prepack(W_q, b, stride, padding, dilation, groups)
@@ -1473,12 +1458,11 @@ class TestQNNPackOps(TestCase):
                 Y_zp
             )
 
-            result_NHWK = result_ref.permute([0, 2, 3, 1])
             if use_relu:
                 relu = torch.nn.ReLU()
-                result_NHWK = relu(result_NHWK)
+                result_ref = relu(result_ref)
 
-            result_ref_q = torch.quantize_linear(result_NHWK, scale=Y_scale, zero_point=Y_zp, dtype=torch.quint8)
+            result_ref_q = torch.quantize_linear(result_ref, scale=Y_scale, zero_point=Y_zp, dtype=torch.quint8)
 
             np.testing.assert_array_almost_equal(result_ref_q.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=0)
 
@@ -1512,10 +1496,8 @@ class TestQNNPackOps(TestCase):
 
             # Orig tensor is assumed to be in K(C/G)RS format
             W = torch.from_numpy(filters).to(torch.float)
-            # K(C/G)RS -> KRS(C/G)
-            W_KRSC = W.permute([0, 2, 3, 1]).contiguous()
 
-            W_q = torch.quantize_linear(W_KRSC, scale=filters_scale, zero_point=filters_zero_point, dtype=filters_qtype)
+            W_q = torch.quantize_linear(W, scale=filters_scale, zero_point=filters_zero_point, dtype=filters_qtype)
 
             # Pack weights using weight packing operator
             strides = [strideH, strideW]
@@ -1613,7 +1595,6 @@ class TestQNNPackOps(TestCase):
             qa = torch.quantize_linear(a, scale=scale, zero_point=zero_point,
                                        dtype=torch_type)
 
-            qa_nhwc = qa.permute([0, 2, 3, 1]).contiguous()
             a_ref = qa.dequantize()
 
             a_pool = F.max_pool2d(a_ref, kernel_size=k, stride=s, padding=p,
@@ -1621,18 +1602,18 @@ class TestQNNPackOps(TestCase):
 
             a_pool_nhwc = a_pool.permute([0, 2, 3, 1])
 
-            qa_pool = q_max_pool(qa_nhwc, k, s, p, d)
+            qa_pool = q_max_pool(qa, k, s, p, d)
 
             qa_pool_int = qa_pool.dequantize()
-            np.testing.assert_equal(a_pool_nhwc.numpy(), qa_pool_int.numpy())
+            np.testing.assert_equal(a_pool.numpy(), qa_pool_int.numpy())
 
-            A = torch.ones((0, 4, 4, 2), dtype=torch.float32)
+            A = torch.ones((0, 2, 4, 4), dtype=torch.float32)
             qa = torch.quantize_linear(A, scale=scale, zero_point=zero_point,
                                        dtype=torch_type)
             qc = q_max_pool(qa, k, s, p, d)
             oH = pool_output_shape(4, kernel, padding, stride, dilation)
             oW = pool_output_shape(4, kernel, padding, stride, dilation)
-            np.testing.assert_equal(qc.size(), (0, oH, oW, 2),
+            np.testing.assert_equal(qc.size(), (0, 2, oH, oW),
                                     "Quantized maxpool2d with batch size 0 failed.")
 
 

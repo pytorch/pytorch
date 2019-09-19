@@ -277,7 +277,13 @@ class QMaxPool2D_arr_args final : public torch::OperatorKernel {
          "qnnpack_maxpool(): Expected padding to be 2-dimensional: got ",
          padding.size());
 
-     Tensor input_contig = input.contiguous();
+     int64_t batch_size = input.size(0);
+     int64_t inC = input.size(1);
+     int64_t inH = input.size(2);
+     int64_t inW = input.size(3);
+     // TODO: change it to contiguous(MemoryFormat::ChannelsLast) once a perf
+     // regression of it is fixed.
+     Tensor input_contig = input.permute({0, 2, 3, 1}).contiguous();
 
      initQNNPACK();
      const auto scale = input_contig.q_scale();
@@ -299,12 +305,6 @@ class QMaxPool2D_arr_args final : public torch::OperatorKernel {
      TORCH_CHECK(
          strideH > 0 && strideW > 0,
          "qnnpack_maxpool(): strides should be greater than zero.");
-
-     // Input is in NHWC format
-     int64_t batch_size = input_contig.size(0);
-     int64_t inH = input_contig.size(1);
-     int64_t inW = input_contig.size(2);
-     int64_t inC = input_contig.size(3);
 
      const pytorch_qnnp_status createStatus =
          pytorch_qnnp_create_max_pooling2d_nhwc_u8(
@@ -368,7 +368,8 @@ class QMaxPool2D_arr_args final : public torch::OperatorKernel {
      TORCH_INTERNAL_ASSERT(
          runStatus == pytorch_qnnp_status_success,
          "failed to run QNNPACK MaxPool operator");
-     return qy;
+     //TODO: remove permute once MemoryLayout is added above
+     return qy.permute({0, 3, 1, 2});
    }
    #endif
   Tensor operator()(
