@@ -106,7 +106,7 @@ class DistributedChunkSampler(Sampler):
     the dependency on the size of the dataset. With two levels of sampling, the
     `DistributedChunkSampler` is used by the dataset and hence run by a dataloader worker.
     To distinguish workers from the same node and distribute data among all participating workers,
-    each sampler needs to be configured with :attr:`global_worker_rank` using a worker initialization function.
+    each sampler needs to be configured with :attr:`rank` using a worker initialization function.
 
     Python DataLoader uses multi-processing instead of
     multi-threading for parallelism, therefore, each worker
@@ -117,32 +117,33 @@ class DistributedChunkSampler(Sampler):
 
     For example, assume 2 workers reading the same `ChunkDataset` dataset.
     Each worker process needs to configure their `DistributedChunkSampler`
-    so that one of them reads all even batches (e.g. `global_worker_rank` 0)
-    while the other process reads all odd batches (e.g. `global_worker_rank` 1).
+    so that one of them reads all even batches (e.g. `rank` 0)
+    while the other process reads all odd batches (e.g. `rank` 1).
 
     If :attr:`shuffle` is ``False``, `SequentialSampler` will be used to select
     chunk indicies; ``RandomSampler`` will be used otherwise.
 
     Args:
         num_replicas (int): Number of processes participating in the data reading.
-            This should be equal to the number of distributed processes * number of DataLoader workers.
-        global_worker_rank (int, optional): Current rank of the worker in a global index
-            :attr:`global_worker_rank` must be calculated based on GPU :attr:`rank` and `DataLoader`
-            information such as number of workers and worker ID as per the expression:
-                `global_worker_rank`=`worker_id`+`rank`*`num_workers`.
+            Must be equal to the number of distributed processes * number of DataLoader workers.
+        rank (int, optional): Current rank of the worker
+            Internally, :attr:`rank` will be recalculated on each `DataLoader` worker
+            based on current :attr:`rank`, and `DataLoader` information
+            such as number of workers and worker ID, following the expression:
+                `rank`=`worker_id`+`current_rank`*`num_workers`. (default: ``0``)
         num_chunks (int, optional): Number of chunks participating in the sampling.
             (default: ``0``)
         shuffle (bool, optional): set to ``True`` to have the chunk indices reshuffled.
             (default: ``False``)
     """
 
-    def __init__(self, num_replicas, global_worker_rank=0, num_chunks=0, shuffle=False):
+    def __init__(self, num_replicas, rank=0, num_chunks=0, shuffle=False):
         super(DistributedChunkSampler, self).__init__(None)
-        assert global_worker_rank >= 0, 'rank must be >= 0'
+        assert rank >= 0, 'rank must be >= 0'
         assert num_replicas >= 0, 'num_replicas must be >= 0'
-        assert global_worker_rank <= num_replicas, 'rank must be <= num_replicas'
+        assert rank <= num_replicas, 'rank must be <= num_replicas'
         assert num_chunks >= num_replicas, 'num_chunks must be >= num_replicas'
-        self.global_worker_rank = global_worker_rank
+        self.rank = rank
         self.num_replicas = num_replicas
         self.num_chunks = num_chunks
         self.shuffle = shuffle
@@ -159,21 +160,21 @@ class DistributedChunkSampler(Sampler):
         indices = list(self.sampler)
 
         # Create a strided sublist
-        indices = indices[self.global_worker_rank:self.num_chunks:self.num_replicas]
+        indices = indices[self.rank:self.num_chunks:self.num_replicas]
         return iter(indices)
 
     def __len__(self):
         raise NotImplementedError
 
-    def set_global_worker_rank(self, global_worker_rank):
+    def set_rank(self, rank):
         r"""Sets current global worker rank
 
         Typically used after new processes are spawned with a copy of this sampler
         to prevent sampling the same indices in different workers
         """
-        assert global_worker_rank >= 0, 'global_worker_rank must be >= 0'
-        assert global_worker_rank == 0 or global_worker_rank < self.num_replicas, 'global_worker_rank must < num_replicas'
-        self.global_worker_rank = global_worker_rank
+        assert rank >= 0, 'rank must be >= 0'
+        assert rank == 0 or rank < self.num_replicas, 'rank must < num_replicas'
+        self.rank = rank
 
-    def get_global_worker_rank(self):
-        return self.global_worker_rank
+    def get_rank(self):
+        return self.rank

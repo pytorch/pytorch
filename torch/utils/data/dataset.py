@@ -326,7 +326,6 @@ class ChunkDataset(IterableDataset):
         # Run once: update global worker rank on each worker process
         if not self._is_ready:
             self._update_global_worker_rank()
-        assert self._is_ready, "`_update_global_worker_rank()` must be called before iterating over `ChunkDataset`"
 
         cache_size = 0
         if len(self._cache) > 0:
@@ -386,8 +385,8 @@ class ChunkDataset(IterableDataset):
             # Calculate global worker rank based on DataLoader workers and distributed rank
             worker_id = get_worker_info().id
             num_workers = get_worker_info().num_workers
-            global_worker_rank = worker_id + self.chunk_sampler.get_global_worker_rank() * num_workers
-            self.chunk_sampler.set_global_worker_rank(global_worker_rank)
+            global_worker_rank = worker_id + self.chunk_sampler.get_rank() * num_workers
+            self.chunk_sampler.set_rank(global_worker_rank)
             self.reset()
         except AttributeError:
             # Ignore when DataLoader num_workers are not used
