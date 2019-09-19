@@ -93,8 +93,18 @@ class TORCH_API MaxPoolImpl : public torch::nn::Cloneable<Derived> {
   /// Pretty prints the `MaxPool{1,2,3}d` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
+  /// Returns the indices of the max values if `options.return_indices()` is `true`.
+  const Tensor& max_indices() const {
+    TORCH_CHECK(options.return_indices(),
+      "To obtain max indices with `.max_indices()`, the module must be constructed with `return_indices` option set to `true`");
+    return *max_indices_;
+  }
+
   /// The options with which this `Module` was constructed.
   MaxPoolOptions<D> options;
+
+ protected:
+  c10::optional<Tensor> max_indices_;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MaxPool1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
