@@ -33,10 +33,10 @@ SKIP_PYTHON_BINDINGS = [
     'copy_sparse_to_sparse_', 'copy_',
     'numpy_T',  # this needs to be an attribute in Python, not a function
     'nonzero(_(out|numpy))?',
-    'set_quantizer_',
+    'set_quantizer_',  # return types not supported yet
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
-    'data', 'is_leaf'
+    'data', 'is_leaf', 'output_nr'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -156,6 +156,7 @@ SUPPORTED_RETURN_TYPES = {
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
     'QScheme', 'double',
+    'IntArrayRef',
 }
 
 TENSOR_OPTIONS = CodeTemplate("""\
