@@ -82,6 +82,22 @@ inline Tensor Tensor::data() const {
         .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
+inline bool Tensor::is_leaf() const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::is_leaf(const_cast<Tensor&>(*this));
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::is_leaf(Tensor self) -> bool");
+    return table->getOp<bool (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+#endif
+}
+inline int64_t Tensor::output_nr() const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::output_nr(const_cast<Tensor&>(*this));
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::output_nr(Tensor self) -> int");
+    return table->getOp<int64_t (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+#endif
+}
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor & Tensor::names_(c10::optional<DimnameList> names) const {
 #ifdef USE_STATIC_DISPATCH
@@ -130,6 +146,26 @@ inline Tensor Tensor::refine_names(DimnameList names) const {
 #else
     static auto table = globalATenDispatch().getOpTable("aten::refine_names(Tensor(a) self, DimnameList names) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, DimnameList)>(type_set())(const_cast<Tensor&>(*this), names);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::unflatten(Dimname dim, IntArrayRef sizes, DimnameList names) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::unflatten(const_cast<Tensor&>(*this), dim, sizes, names);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::unflatten(Tensor self, Dimname dim, int[] sizes, DimnameList names) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, IntArrayRef, DimnameList)>(type_set())(const_cast<Tensor&>(*this), dim, sizes, names);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::unflatten(int64_t dim, IntArrayRef sizes, DimnameList names) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::unflatten(const_cast<Tensor&>(*this), dim, sizes, names);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::unflatten(Tensor self, int dim, int[] sizes, DimnameList names) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, int64_t, IntArrayRef, DimnameList)>(type_set())(const_cast<Tensor&>(*this), dim, sizes, names);
 #endif
 }
 #endif
@@ -1942,13 +1978,7 @@ inline Tensor Tensor::rsqrt() const {
 }
 inline Tensor & Tensor::rsqrt_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::rsqrt_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("rsqrt_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::rsqrt_(const_cast<Tensor&>(*this));
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::rsqrt_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
