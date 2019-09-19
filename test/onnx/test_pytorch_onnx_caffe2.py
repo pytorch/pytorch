@@ -1385,6 +1385,28 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(FullClass(), train=False, input=(x,), batch_size=BATCH_SIZE,
                             use_gpu=False, example_outputs=FullClass()(x))
 
+    def test_clamp(self):
+        class ClampModel(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(-0.5, 0.5)
+
+        x = torch.randn(3, 4)
+        self.run_model_test(ClampModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
+        class ClampMinModel(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(min=-0.5)
+
+        x = torch.randn(3, 4)
+        self.run_model_test(ClampMinModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
+        class ClampMaxModel(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(max=0.5)
+
+        x = torch.randn(3, 4)
+        self.run_model_test(ClampMaxModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_where_functional(self):
         class WhereFunctional(torch.nn.Module):
@@ -2156,6 +2178,18 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_model_test(MaskedFillModel2(), input=(x, ), train=False, batch_size=BATCH_SIZE)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_gelu(self):
+        class GeluModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.gelu(x)
+
+        model = GeluModel()
+        inputs = torch.randn(2, 4, 5, 6, requires_grad=True)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
 
 # a bit of metaprogramming to set up all the rnn tests
 
