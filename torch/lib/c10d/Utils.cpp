@@ -194,7 +194,8 @@ int connect(
         const auto remaining =
             std::chrono::duration_cast<std::chrono::milliseconds>(timeout) -
             std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
-        pollTimeout = std::max(0L, remaining.count());
+        pollTimeout = std::max(
+            static_cast<int64_t>(0), static_cast<int64_t>(remaining.count()));
       }
       int numReady = ::poll(&pfd, 1, pollTimeout);
       if (numReady < 0) {
