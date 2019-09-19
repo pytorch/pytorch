@@ -559,11 +559,21 @@ TEST_F(ModulesTest, PrettyPrintEmbedding) {
 }
 
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
-  ASSERT_EQ(c10::str(CosineSimilarity()), "torch::nn::CosineSimilarity()");
+  ASSERT_EQ(
+      c10::str(CosineSimilarity()),
+      "torch::nn::CosineSimilarity(dim=1, eps=1e-08)");
+  ASSERT_EQ(
+      c10::str(CosineSimilarity(CosineSimilarityOptions().dim(0).eps(0.5))),
+      "torch::nn::CosineSimilarity(dim=0, eps=0.5)");
 }
 
 TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {
-  ASSERT_EQ(c10::str(PairwiseDistance()), "torch::nn::PairwiseDistance()");
+  ASSERT_EQ(
+      c10::str(PairwiseDistance()),
+      "torch::nn::PairwiseDistance(p=2, eps=1e-06, keepdim=false)");
+  ASSERT_EQ(
+      c10::str(PairwiseDistance(PairwiseDistanceOptions(3).eps(0.5).keepdim(true))),
+      "torch::nn::PairwiseDistance(p=3, eps=0.5, keepdim=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintNestedModel) {

@@ -11,7 +11,10 @@ CosineSimilarityImpl::CosineSimilarityImpl(CosineSimilarityOptions options)
 void CosineSimilarityImpl::reset() {}
 
 void CosineSimilarityImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::CosineSimilarity()";
+  stream << std::boolalpha
+         << "torch::nn::CosineSimilarity"
+         << "(dim=" << options.dim()
+         << ", eps=" << options.eps() << ")";
 }
 
 Tensor CosineSimilarityImpl::forward(const Tensor& x1, const Tensor& x2) {
@@ -26,7 +29,11 @@ PairwiseDistanceImpl::PairwiseDistanceImpl(PairwiseDistanceOptions options)
 void PairwiseDistanceImpl::reset() {}
 
 void PairwiseDistanceImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::PairwiseDistance()";
+  stream << std::boolalpha
+         << "torch::nn::PairwiseDistance"
+         << "(p=" << options.p()
+         << ", eps=" << options.eps()
+         << ", keepdim=" << options.keepdim() << ")";
 }
 
 Tensor PairwiseDistanceImpl::forward(const Tensor& x1, const Tensor& x2) {
