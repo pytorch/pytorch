@@ -135,14 +135,13 @@ TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
 # add non-virtual declaration to Tensor.cpp
-# TODO: This will need to be adjusted for multiple dispatch
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(type_set())(${method_actuals});
+    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${method_actuals});
 #endif
 }
 """)
@@ -152,7 +151,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     ${static_dispatch_method_body}
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
-    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(${inferred_type_set}))
         .callUnboxed<${formals_types_with_return}>(${method_actuals});
 #endif
 }
@@ -856,7 +855,13 @@ def create_generic(top_env, declarations):
 
     def find_dispatch_tensor(formals):
         # type: (List[AtFormal]) -> Optional[str]
-        # dispatch to self if it's a parameter
+        # Determine legacy TH-style single dispatch tensor.
+        #
+        # Also used to determine what tensor should be used to provide a default
+        # DeviceGuard.  Unlike dispatch, we don't guard on ALL tensor arguments
+        # (because this is not actually a thing you can do.)  Guarding on the
+        # first argument is best effort to help people avoid doing this
+        # themselves.
 
         for formal in formals:
             if formal['name'] == 'self' and is_any_tensor_type(formal) and not formal.get('is_nullable', False):
@@ -868,6 +873,28 @@ def create_generic(top_env, declarations):
                 return formal['name']
 
         return None
+
+    def find_multidispatch_tensors(formals):
+        # type: (List[AtFormal]) -> List[str]
+        # Compute the list of all tensor arguments which should be considered
+        # for multiple dispatch.  Note that this doesn't completely replace
+        # find_dispatch_tensor because we use the "dispatch tensor" to determine
+        # device guards.  TensorOptions is included as part of this calculation.
+        #
+        # The interaction of multiple dispatch with TensorOptions
+        # is quite interesting.  In particular, suppose I have:
+        #
+        #   cuda_tensor.new_like(1, device='cpu')
+        #
+        # Multiple dispatch will attempt a dispatch to CUDA, even though
+        # the end tensor that should be produced here is a CPU one.  The
+        # upshot is that if you have an operator with mixed TensorOptions
+        # and Tensor arguments, you MUST only ever register it generically.
+        r = []
+        for formal in formals:
+            if formal['dynamic_type'] in ['TensorOptions', 'TensorList'] or is_any_tensor_type(formal):
+                r.append(formal['name'])
+        return r
 
     def format_formal(f):
         # type: (AtFormal) -> str
@@ -911,8 +938,10 @@ def create_generic(top_env, declarations):
 
         return broadcast_actuals
 
-    def process_option(option):
+    def process_legacy_th_option(option):
         # type: (FunctionOption) -> None
+        # Mutably populate option with derived values computed from values
+        # passed in to option.
         option['inplace'] = re.search(
             '(^__i|[^_]_$)', option['api_name']) is not None
 
@@ -941,6 +970,7 @@ def create_generic(top_env, declarations):
 
         assert 'method' not in option['variants'], 'TH functions cannot be methods'
         is_function = 'function' in option['variants']
+        # NB: TH functions don't support multiple dispatch
         dispatch_tensor = find_dispatch_tensor(formals)
         is_namespace_function = is_function and dispatch_tensor is not None
 
@@ -1108,8 +1138,17 @@ def create_generic(top_env, declarations):
         def has_named_tensor_formals(formals):
             return any(['Dimname' in formal['dynamic_type'] for formal in formals])
 
-        def gen_tensor_method(option):
-            # type: (Any) -> FunctionCode
+        def gen_tensor_method(option, multidispatch_tensors):
+            # type: (Any, List[str]) -> FunctionCode
+            def swizzle_self(t):  # blegh
+                if t == 'self':
+                    return '*this'
+                else:
+                    return t
+            option['inferred_type_set'] = 'at::detail::multi_dispatch_tensor_type_set({})'.format(
+                ', '.join(swizzle_self(t) for t in multidispatch_tensors)
+            )
+
             if isinstance(type_method_dispatch, dict):
                 static_dispatch_function_switches = []
                 # NB: As this code is currently written, there will NEVER be
@@ -1146,16 +1185,10 @@ def create_generic(top_env, declarations):
                 definition=method_definition.substitute(
                     option, static_dispatch_method_body=static_dispatch_method_body))
 
-        def gen_namespace_function(option, dispatch_tensor, dispatch_options):
-            # type: (Any, Optional[str], Any) -> FunctionCode
-            if dispatch_tensor:
-                option['inferred_type_set'] = 'at::detail::infer_tensor_type_set({})'.format(dispatch_tensor)
-            elif dispatch_options:
-                option['inferred_type_set'] = '{}.type_set()'.format(dispatch_options['name'])
-            else:
-                # doesn't depend on a specific backend, use the empty set
-                # TODO: Does this actually work?
-                option['inferred_type_set'] = 'TensorTypeSet()'
+        def gen_namespace_function(option, multidispatch_tensors):
+            # type: (Any, List[str]) -> FunctionCode
+            option['inferred_type_set'] = (
+                'at::detail::multi_dispatch_tensor_type_set({})'.format(', '.join(multidispatch_tensors)))
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
 
@@ -1213,9 +1246,7 @@ def create_generic(top_env, declarations):
 
         type_method_dispatch = option['type_method_definition_dispatch']
 
-        dispatch_options = find_formal('TensorOptions', formals)
-        # Only dispatch via tensor if there is no Options argument
-        dispatch_tensor = None if dispatch_options else find_dispatch_tensor(formals)
+        multidispatch_tensors = find_multidispatch_tensors(formals)
 
         option['type_method_formals'] = [format_formal(f) for f in formals]
         option['type_method_actuals'] = [f['name'] for f in formals]
@@ -1235,10 +1266,16 @@ def create_generic(top_env, declarations):
         check_methods_do_not_start_with_underscore(option['name'], is_method)
 
         option['method_prefix_derived'] = ''
-        option['device_guard_declaration'] = device_guard(option, dispatch_options, dispatch_tensor)
+        # NB: Device guard and scalar type generated code is still based on the
+        # first argument.  Scalar type test will be removed once TH is removed.
+        # If you need more complex device guard behavior, you should disable
+        # device guard and then manually add the guards you need.
+        dispatch_options = find_formal('TensorOptions', formals)
+        guard_tensor = None if dispatch_options else find_dispatch_tensor(formals)
+        option['device_guard_declaration'] = device_guard(option, dispatch_options, guard_tensor)
         option['named_guard_declaration'] = named_guard(option, find_tensors(formals),
                                                         find_tensorlists(formals))
-        option['dispatch_scalar_type_declaration'] = dispatch_scalar_type(option, dispatch_options, dispatch_tensor)
+        option['dispatch_scalar_type_declaration'] = dispatch_scalar_type(option, dispatch_options, guard_tensor)
 
         broadcast_arg = get_broadcast_argument(option)
         if broadcast_arg is not None:
@@ -1296,7 +1333,7 @@ def create_generic(top_env, declarations):
 
         method_of = ['Type']
         if is_method:
-            code = gen_tensor_method(option)
+            code = gen_tensor_method(option, multidispatch_tensors)
             if is_named_tensor_only:
                 code = add_namedtensor_enabled_macro(code)
             top_env['tensor_method_declarations'].append(code.declaration)
@@ -1304,7 +1341,7 @@ def create_generic(top_env, declarations):
             method_of.append('Tensor')
 
         if is_namespace_function:
-            code = gen_namespace_function(option, dispatch_tensor, dispatch_options)
+            code = gen_namespace_function(option, multidispatch_tensors)
             if is_named_tensor_only:
                 code = add_namedtensor_enabled_macro(code)
             top_env['function_definitions'].append(code.definition)
@@ -1345,8 +1382,8 @@ def create_generic(top_env, declarations):
             option["schema_string"] = declaration["schema_string"]
             try:
                 if option['mode'] != 'native':
-                    # XXX: Does the following line do anything meaningful?
-                    process_option(option)
+                    # Mutably populate option with values
+                    process_legacy_th_option(option)
                 else:
                     output_option = process_native(option)
                     if output_option:
@@ -1706,7 +1743,7 @@ def create_derived(backend_type_env, declarations):
         body.append(LEGACY_TH_DEFINITION_SWITCH_STATEMENT.substitute(env, cases=cases))
         return body
 
-    def process_option(option):
+    def process_legacy_th_option(option):
         # type: (FunctionOption) -> None
         backend = backend_type_env['Backend']
         if backend in option['backend_types']:
@@ -1748,7 +1785,7 @@ def create_derived(backend_type_env, declarations):
                     if option['mode'] == 'NN' and option.get('cimpls') is None:
                         continue
                     if option['mode'] != 'native':
-                        process_option(option)
+                        process_legacy_th_option(option)
                     else:
                         process_native(option)
                 except NYIError:
