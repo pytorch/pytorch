@@ -104,10 +104,17 @@ void logical_xor_kernel(TensorIterator& iter) {
 }
 
 void lt_kernel(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Bool || iter.input_dtype() == ScalarType::Byte) {
+  if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "lt_cpu", [&]() {
       cpu_kernel(iter,
        [=](scalar_t a, scalar_t b) -> bool {
+         return a < b;
+       });
+    });
+  } else if (iter.dtype() == ScalarType::Byte) {
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "lt_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> uint8_t {
          return a < b;
        });
     });
@@ -119,7 +126,6 @@ void lt_kernel(TensorIterator& iter) {
        });
     });
   }
-
 }
 
 } // anonymous namespace
