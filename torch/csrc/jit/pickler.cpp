@@ -94,56 +94,6 @@ void Pickler::stop() {
   push<PickleOpCode>(PickleOpCode::STOP);
 }
 
-void Pickler::torchSaveStop() {
-  // Add the binary data for all the tensors to be included in the same binary
-  // TODO: The pickler should be refactored to stream out to a stream directly
-  // instead of staging in the stack_ array
-  // As another pickle program in the same binary archive, add a list of
-  // keys for each tensor (see torch/serialization.py)
-  protocol();
-  push<PickleOpCode>(PickleOpCode::MARK);
-  for (size_t i = 0; i < tensor_data_.size(); ++i) {
-    std::string key = std::to_string(i);
-    push<PickleOpCode>(PickleOpCode::BINUNICODE);
-    push<uint32_t>(key.size());
-    pushBytes(key);
-  }
-
-  push<PickleOpCode>(PickleOpCode::TUPLE);
-  stop();
-
-  // Now dump the tensor binary data
-  for (const auto& data : tensor_data_) {
-    // first dump size
-    push<size_t>(data.numel());
-    writer_(data.data(), data.sizeInBytes());
-  }
-}
-
-void Pickler::torchSaveStart() {
-  // Output data to match torch.save, see torch/serialization.py for details
-  // Magic number (0x1950a86a20f9469cfc6c)
-  protocol();
-  push<PickleOpCode>(PickleOpCode::LONG1);
-  // LONG1 size
-  pushBytes("\x0a");
-  // LONG1 data
-  pushBytes("\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19");
-  stop();
-
-  // Protocol Version (1001)
-  protocol();
-  push<PickleOpCode>(PickleOpCode::BININT2);
-  pushBytes("\xe9\x03");
-  stop();
-
-  // sys_info, this isn't actually used in de-serialization so we can leave this
-  // one empty
-  protocol();
-  push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
-  stop();
-}
-
 // unmemoized version called by pushIValue
 void Pickler::pushIValueImpl(const IValue& ivalue) {
   if (ivalue.isTensor()) {
@@ -332,6 +282,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   push<PickleOpCode>(PickleOpCode::TUPLE);
   push<PickleOpCode>(PickleOpCode::BINPERSID);
 
+  // TODO: Skip this if not writing tensors
   memoized_storage_map_[addr] = pushNextBinPut();
   tensor_data_.push_back(getWriteableTensorData(tensor));
 }
@@ -426,19 +377,6 @@ void Pickler::pushClass(PicklerClass cls) {
   pushGlobal("torch.jit._pickle", getClassName(cls));
 }
 
-void Pickler::pushTensorReference(const IValue& ivalue) {
-  pushClass(PicklerClass::TENSOR);
-  tensor_table_->push_back(ivalue.toTensor());
-  int64_t tensor_id = tensor_table_->size() - 1;
-  // Reduce arguments are spread (e.g. `*args`) before calling the global,
-  // so wrap in a tuple
-  push<PickleOpCode>(PickleOpCode::MARK);
-  pushIValue(tensor_id);
-  push<PickleOpCode>(PickleOpCode::TUPLE);
-
-  push<PickleOpCode>(PickleOpCode::REDUCE);
-}
-
 void Pickler::pushSpecializedList(
     const IValue& ivalue,
     PicklerClass cls,
@@ -476,13 +414,48 @@ void Pickler::pushDouble(double value) {
   }
 }
 
-void Pickler::pushDict(const IValue& ivalue) {
+void Pickler::pushLong(const std::string& data) {
+  uint64_t size = data.size();
+
+  if (size <= std::numeric_limits<uint8_t>::max()) {
+    push<PickleOpCode>(PickleOpCode::LONG1);
+    push<uint8_t>(size);
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        data.size() > std::numeric_limits<uint32_t>::max(),
+        "Cannot pickle a long with a size larger than 4 bytes")
+    push<PickleOpCode>(PickleOpCode::LONG4);
+    push<uint64_t>(size);
+  }
+  pushBytes(data);
+}
+
+void Pickler::pushTensorReference(const IValue& ivalue) {
+  pushClass(PicklerClass::TENSOR);
+  tensor_table_->push_back(ivalue.toTensor());
+  int64_t tensor_id = tensor_table_->size() - 1;
+  // Reduce arguments are spread (e.g. `*args`) before calling the global,
+  // so wrap in a tuple
+  push<PickleOpCode>(PickleOpCode::MARK);
+  pushIValue(tensor_id);
+  push<PickleOpCode>(PickleOpCode::TUPLE);
+
+  push<PickleOpCode>(PickleOpCode::REDUCE);
+}
+
+void Pickler::pushEmptyDict() {
   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
+}
+void Pickler::pushDict(const IValue& ivalue) {
+  pushEmptyDict();
+  auto dict_items = iterationOrder(ivalue.toGenericDict());
+  if (dict_items.size() == 0) {
+    return;
+  }
 
   push<PickleOpCode>(PickleOpCode::MARK);
 
   // Sort the dict for deterministic keys
-  auto dict_items = iterationOrder(ivalue.toGenericDict());
   for (const auto& pair : dict_items) {
     pushIValue(pair.first);
     pushIValue(pair.second);
@@ -551,12 +524,136 @@ void Pickler::pushTuple(const IValue& ivalue) {
   }
 }
 
+// Pickled objects are stored in a form compatible with Python pickling.
+// In torchscript List[T]/Dict[K, V] are statically typed and contain
+// dynamic type tags allow T, K, and V to be recovered. But this info
+// is not stored in the Python pickling information. However, we
+// can recover this information from the static type of the top-level
+// object being unpickled, because we have a record of the type of the
+// objects it contains as attributes.
+// `IfPossible` - we can only do this recovery when we have an object as
+// the top-level unpickled thing (which is guarenteed for Modules, but
+// not for torch.load/torch,save). Otherwise we do not know the types
+// of the contained objects and cannot restore the tags.
+static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
+  if (!root.isObject()) {
+    return;
+  }
+  struct Work {
+    TypePtr static_type;
+    IValue value;
+  };
+  std::vector<Work> to_process = {{root.type(), root}};
+  std::unordered_set<const void*> scanned;
+  while (!to_process.empty()) {
+    Work w = std::move(to_process.back());
+    to_process.pop_back();
+    // ensure we only scan each pointer value once, otherwise this
+    // can become exponential (and if we allow recursive data in the future,
+    // it would not terminiate).
+    if (w.value.isPtrType()) {
+      const void* key = w.value.internalToPointer();
+      auto it = scanned.find(key);
+      if (it != scanned.end()) {
+        continue;
+      }
+      scanned.emplace_hint(it, key);
+    }
+    switch (w.static_type->kind()) {
+      case TensorType::Kind:
+      case NumberType::Kind:
+      case FloatType::Kind:
+      case IntType::Kind:
+      case NoneType::Kind:
+      case GeneratorType::Kind:
+      case BoolType::Kind:
+      case VarType::Kind:
+      case CapsuleType::Kind:
+      case StringType::Kind:
+      case FunctionType::Kind:
+      case DeviceObjType::Kind:
+        // no op, there is nothing to tag
+        break;
+      case AnyType::Kind:
+        // if Any type does show up, we no longer have a way to precisely
+        // recover the type information since the w.value may be an untagged
+        // List/Dict. We should prevent objects being serialized from having the
+        // Any type and if we do allow it in functions limit it to non-heap
+        // locations.
+        TORCH_INTERNAL_ASSERT(
+            false, "AnyType should not show up in the static type of objects");
+      case TupleType::Kind: {
+        auto t = w.value.toTuple();
+        auto ttype = w.static_type->expect<TupleType>();
+        for (size_t i = 0; i < ttype->containedTypes().size(); ++i) {
+          Work elem = {ttype->containedTypes().at(i), t->elements().at(i)};
+          to_process.emplace_back(std::move(elem));
+        }
+      } break;
+      case FutureType::Kind: {
+        auto f = w.value.toFuture();
+        auto t = w.static_type->expect<FutureType>();
+        if (f->completed()) {
+          Work elem = {t->getElementType(), f->value()};
+          to_process.emplace_back(std::move(elem));
+        }
+      } break;
+      case OptionalType::Kind: {
+        if (!w.value.isNone()) {
+          auto t = w.static_type->expect<OptionalType>();
+          Work elem = {t->getElementType(), w.value};
+          to_process.emplace_back(std::move(elem));
+        }
+      } break;
+      case ListType::Kind: {
+        // specialized lists do not need their type refined, so we can exit
+        // early here
+        if (!w.value.isGenericList()) {
+          break;
+        }
+        auto elem_type = w.static_type->cast<ListType>()->getElementType();
+        auto lst = w.value.toGenericList();
+        lst.unsafeSetElementType(elem_type);
+        for (const IValue& item : lst) {
+          Work elem = {elem_type, item};
+          to_process.emplace_back(std::move(elem));
+        }
+      } break;
+      case DictType::Kind: {
+        auto dt = w.static_type->cast<DictType>();
+        auto d = w.value.toGenericDict();
+        d.unsafeSetKeyType(dt->getKeyType());
+        d.unsafeSetValueType(dt->getValueType());
+        for (const auto& item : d) {
+          Work kelem = {dt->getKeyType(), item.key()};
+          Work velem = {dt->getValueType(), item.value()};
+          to_process.emplace_back(std::move(kelem));
+          to_process.emplace_back(std::move(velem));
+        }
+      } break;
+      // in both cases the dynamic type is a class, and we are going to tag with
+      // the dynamic type
+      case InterfaceType::Kind:
+      case ClassType::Kind: {
+        auto obj = w.value.toObject();
+        auto typ = obj->type(); // note: intentionally using the dynamic type,
+                                // the static type is potentially less accurate
+        for (size_t i = 0; i < typ->numAttributes(); ++i) {
+          Work elem = {typ->getAttribute(i), obj->getSlot(i)};
+          to_process.emplace_back(std::move(elem));
+        }
+      };
+    }
+  }
+}
+
 IValue Unpickler::parse_ivalue() {
   run();
   TORCH_CHECK(
       stack_.size() == 1,
       "Unpickler expected 1 element on the stack, but found ",
       stack_.size());
+  restoreAccurateTypeTagsIfPossible(stack_[0]);
 
   return stack_[0];
 }
@@ -639,8 +736,7 @@ PickleOpCode Unpickler::readInstruction() {
   auto opcode = readOpCode();
   switch (opcode) {
     case PickleOpCode::EMPTY_LIST: {
-      stack_.emplace_back(
-          c10::impl::GenericList(c10::impl::deprecatedUntypedList()));
+      stack_.emplace_back(c10::impl::GenericList(AnyType::get()));
     } break;
     case PickleOpCode::EMPTY_TUPLE: {
       if (empty_tuple_.isNone()) {
@@ -725,7 +821,8 @@ PickleOpCode Unpickler::readInstruction() {
         stack_.emplace_back(tuple);
     } break;
     case PickleOpCode::EMPTY_DICT:
-      stack_.emplace_back(c10::impl::GenericDict(c10::impl::deprecatedUntypedDict()));
+      stack_.emplace_back(
+          c10::impl::GenericDict(AnyType::get(), AnyType::get()));
       break;
     case PickleOpCode::APPENDS: {
       readList();
@@ -760,6 +857,9 @@ PickleOpCode Unpickler::readInstruction() {
           stack_.pop_back();
           switch (pickler_class) {
             case PicklerClass::TENSOR:
+              TORCH_INTERNAL_ASSERT(
+                  tensor_table_,
+                  "Pickler tried to write a tensor but had no tensor table to write to");
               stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
               break;
             case PicklerClass::INTLIST:
@@ -779,7 +879,7 @@ PickleOpCode Unpickler::readInstruction() {
             case PicklerClass::TENSOR:
               TORCH_CHECK(
                   tensor_table_,
-                  "Found a tensor table reference but Pickler"
+                  "Found a tensor table reference but Unpickler"
                   " has no tensor table\n");
               stack_.emplace_back(tensor_table_->at(data.toInt()));
               break;
