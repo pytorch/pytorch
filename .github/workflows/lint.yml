@@ -1,0 +1,46 @@
+name: Lint
+
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+
+jobs:
+  flake8-py3:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7.4
+          architecture: x64
+      - name: Fetch PyTorch
+        uses: actions/checkout@master
+      - name: Checkout PR tip
+        run: |
+          set -eux
+          if [ -z "${GITHUB_HEAD_REF}" ]; then
+            # We are on master, just set the SHA from our current location
+            echo ::set-output name=commit_sha::${GITHUB_SHA}
+          else
+            # We are on a PR, we need to check out PR branch
+            git checkout ${GITHUB_HEAD_REF}
+            echo ::set-output name=commit_sha::$(git rev-parse ${GITHUB_HEAD_REF})
+          fi
+        id: get_pr_tip
+      - name: Run flake8
+        run: |
+          set -eux
+          pip install flake8
+          flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8-output.txt
+          cat ${GITHUB_WORKSPACE}/flake8-output.txt
+      - name: Add annotations
+        uses: pytorch/add-annotations-github-action@master
+        with:
+          check_name: 'flake8-py3'
+          linter_output_path: 'flake8-output.txt'
+          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
+          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w\d+) (?<errorDesc>[\s|\w]*)'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
