@@ -36,14 +36,16 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
     int C_per_G = input_channels / groups;
 
     // Tensor for unpacked weights
-    // Unpacked format would be KRS(C/G)
+    // Unpacked format would be physical KRS(C/G) but logical KCRS (channels first)
+    // because that's how FBGEMM stores the weights
     Tensor unpacked_weights;
     if (pack_ptr.q_scheme == kPerTensorAffine) {
       unpacked_weights = _empty_affine_quantized(
-          {output_channels, kernel_h, kernel_w, C_per_G},
+          {output_channels, C_per_G, kernel_h, kernel_w},
           device(kCPU).dtype(kQInt8),
           pack_ptr.w_scale[0],
-          pack_ptr.w_zp[0]);
+          pack_ptr.w_zp[0],
+          MemoryFormat::ChannelsLast);
     } else if (pack_ptr.q_scheme == kPerChannelAffine) {
       auto scales = from_blob(
           pack_ptr.w_scale.data(),
@@ -55,9 +57,10 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
       unpacked_weights = _empty_per_channel_affine_quantized_like(
           scales.toType(kDouble),
           zero_points.toType(kLong),
-          {output_channels, kernel_h, kernel_w, C_per_G},
+          {output_channels, C_per_G, kernel_h, kernel_w},
           {0}, /* The output channel axis is 0 */
-          device(kCPU).dtype(kQInt8));
+          device(kCPU).dtype(kQInt8),
+          MemoryFormat::ChannelsLast);
     } else {
       TORCH_CHECK(false, "Unsupported qscheme: ", toString(pack_ptr.q_scheme));
     }
