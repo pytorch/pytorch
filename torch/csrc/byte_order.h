@@ -12,7 +12,7 @@ enum THPByteOrder {
   THP_BIG_ENDIAN = 1
 };
 
-THPByteOrder THP_nativeByteOrder();
+TORCH_API THPByteOrder THP_nativeByteOrder();
 
 TORCH_API void THP_decodeInt16Buffer(
     int16_t* dst,
