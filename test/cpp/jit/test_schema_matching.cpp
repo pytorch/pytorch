@@ -1,4 +1,3 @@
-#include <ATen/test/test_assert.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/jit.h>
@@ -42,7 +41,13 @@ void testSchemaMatching() {
           return torch.test_vartype(a, non_float)
     )JIT";
 
-    ASSERT_THROWSM(m.define(error_example), "previously matched to type");
+    std::string err = "";
+    try {
+      m.define(error_example);
+    } catch (const std::exception &e) {
+      err = e.what();
+    }
+    TORCH_INTERNAL_ASSERT(err.find("previously matched to type") != std::string::npos);
   }
   {
     RegisterOperators reg({
@@ -72,7 +77,15 @@ void testSchemaMatching() {
           a = (1, 2)
           return torch.test_vartype2(3.0, a)
     )JIT";
-    ASSERT_THROWSM(m.define(error_exam2), "previously matched to type");
+
+
+    std::string err = "";
+    try {
+      m.define(error_exam2);
+    } catch (const std::exception &e) {
+      err = e.what();
+    }
+    TORCH_INTERNAL_ASSERT(err.find("previously matched to type") != std::string::npos);
   }
 }
 } // namespace jit
