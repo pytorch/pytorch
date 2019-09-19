@@ -9,57 +9,6 @@
 namespace c10 {
 
 namespace detail {
-template<class Type>
-constexpr uint64_t hashType() {
-  return typeid(Type).hash_code()
-      + 1000 * std::is_lvalue_reference<Type>::value
-      + 5000 * std::is_rvalue_reference<Type>::value
-      + 10000 * std::is_const<guts::remove_reference_t<Type>>::value
-      + 15000 * std::is_volatile<guts::remove_reference_t<Type>>::value
-      ;
-}
-template<class TypeList> struct hashTypeList_ final {};
-template<class Head, class... Tail>
-struct hashTypeList_<guts::typelist::typelist<Head, Tail...>> final {
-  static constexpr uint64_t call(uint64_t index) {
-    return 1000000 * index * hashType<Head>() + hashTypeList_<guts::typelist::typelist<Tail...>>::call(index + 1);
-  }
-};
-template<>
-struct hashTypeList_<guts::typelist::typelist<>> final {
-  static constexpr uint64_t call(uint64_t index) {
-    return 0;
-  }
-};
-
-template<class TypeList>
-constexpr uint64_t hashTypeList() {
-  return hashTypeList_<TypeList>::call(1);
-}
-
-// Take a function signature and produce a hash value depending on its
-// argument and return types. For the same function signature and while
-// running the same executable, this will always produce the same hash.
-// A different compiler/OS might generate different hashes, so don't use
-// these for serialization, but they're good for error checking the casting
-// of void* function pointers into actual typed function pointers.
-// Note that there it is not perfect error checking, two different signatures
-// might have the same hash, but it is probably good enough.
-template<class FuncSignature>
-constexpr uint64_t hashFunctionSignature() {
-#if 0 // Disabling because the CUDA compiler complains.
-  using func_traits = guts::infer_function_traits_t<FuncSignature>;
-  return hashTypeList<
-    guts::typelist::concat_t<
-      guts::typelist::typelist<typename func_traits::return_type>,
-      typename func_traits::parameter_types
-    >>();
-#else
-  // TODO Fix this
-  return 0;
-#endif
-}
-
 template<class Return, class... Args> struct boxAndCallBoxedFunc;
 }
 
@@ -78,7 +27,6 @@ public:
   , functor_(nullptr)
   , boxed_kernel_func_(nullptr)
   , unboxed_kernel_func_(nullptr)
-  , signature_hash_(c10::nullopt)
   {}
 
   bool isValid() const {
@@ -141,9 +89,6 @@ public:
 
     // TODO Remove this function once all kernels support a boxed variant
 
-    TORCH_INTERNAL_ASSERT(!signature_hash_.has_value() || (detail::hashFunctionSignature<Return (Args...)>() == *signature_hash_),
-      "Called KernelFunction::callUnboxedOnly with wrong argument types");
-
     if (unboxed_kernel_func_ != nullptr) {
       using ActualSignature = Return (OperatorKernel*, Args...);
       ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func_);
@@ -178,9 +123,6 @@ public:
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
 
-    TORCH_INTERNAL_ASSERT(!signature_hash_.has_value() || (detail::hashFunctionSignature<Return (Args...)>() == *signature_hash_),
-      "Called KernelFunction::callUnboxed with wrong argument types");
-
     if (unboxed_kernel_func_ != nullptr) {
       using ActualSignature = Return (OperatorKernel*, Args...);
       ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func_);
@@ -204,8 +146,7 @@ public:
       nullptr,  // no functorFactory_, this can only be called in a boxed way.
       nullptr,  // no functor_ object either
       func,
-      nullptr,  // no unboxed function pointer
-      c10::nullopt  // signature is not known, we can't error check unboxed calls.
+      nullptr  // no unboxed function pointer
     );
   }
 
@@ -229,8 +170,7 @@ public:
       nullptr, // no functorFactory_ because we already have the functor_
       std::move(kernelFunctor),
       &detail::wrap_kernel_functor_boxed<KernelFunctor, AllowLegacyTypes>::call,
-      reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
-      detail::hashFunctionSignature<KernelFunctor>()
+      reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call)
     );
   }
 
@@ -263,8 +203,7 @@ public:
       std::move(kernelFunctorFactory),
       nullptr, // delay creation of functor_ (it will be created by calling functorFactory_ later)
       &detail::wrap_kernel_functor_boxed<KernelFunctor, AllowLegacyTypes>::call,
-      reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
-      detail::hashFunctionSignature<KernelFunctor>()
+      reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call)
     );
   }
 
@@ -298,8 +237,7 @@ public:
       nullptr, // no functorFactory_ because we already have the functor_
       std::move(kernelFunctor),
       nullptr, // Don't create a boxed kernel for this
-      reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
-      detail::hashFunctionSignature<KernelFunctor>()
+      reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call)
     );
   }
 
@@ -396,12 +334,11 @@ public:
 
 private:
 
-  explicit KernelFunction(std::function<std::shared_ptr<OperatorKernel>()> functorFactory, std::shared_ptr<OperatorKernel> functor, BoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func, c10::optional<uint64_t> signature_hash)
+  explicit KernelFunction(std::function<std::shared_ptr<OperatorKernel>()> functorFactory, std::shared_ptr<OperatorKernel> functor, BoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func)
   : functorFactory_(std::move(functorFactory))
   , functor_(std::move(functor))
   , boxed_kernel_func_(boxed_kernel_func)
   , unboxed_kernel_func_(unboxed_kernel_func)
-  , signature_hash_(signature_hash)
   {}
 
   OperatorKernel* getFunctor_() const {
@@ -429,12 +366,6 @@ private:
 
   BoxedKernelFunction* boxed_kernel_func_;
   void* unboxed_kernel_func_;
-
-  // signature_hash_ is set to the hash of the function signature if the
-  // KernelFunction was created in a way that allowed us to know the function
-  // signature. If this is set, it will be used in unboxed function calls
-  // to verify their arguments against the known function signature.
-  c10::optional<uint64_t> signature_hash_;
 };
 
 namespace detail {
