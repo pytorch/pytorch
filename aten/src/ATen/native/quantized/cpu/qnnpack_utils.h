@@ -15,6 +15,13 @@ struct PackedLinearWeightsQnnp {
   int64_t w_zp;
 };
 
+struct PackedConvWeightsQnnp {
+  std::unique_ptr<qnnpack::PrePackConvWeights> w;
+  std::vector<int64_t> kernel;
+  double w_scale;
+  int64_t w_zp;
+};
+
 enum class Activation : uint8_t { NONE = 0, RELU = 1 };
 
 #if defined(__ANDROID__) && !defined(__NDK_MAJOR__)
