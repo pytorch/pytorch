@@ -577,7 +577,7 @@ if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR BUILD_CUSTOM_PROTOBUF)
       "generate files that are not well tested.")
 endif()
 
-if (USE_CUDA OR USE_ROCM)
+if (USE_CUDA)
   # TODO: check if we should include other cuda dependency libraries
   # to the interface as well.
   if(${FIND_CUDA_MODULE_DEPRECATED})
