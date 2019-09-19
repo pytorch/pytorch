@@ -4102,7 +4102,7 @@
   supports_named_tensor: True
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_lgamma_
+    CPU: _lgamma__cpu
     CUDA: legacy::cuda::_th_lgamma_
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -4799,7 +4799,7 @@
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: legacy::cpu::_th_lgamma_out
+    CPU: _lgamma_out_cpu
     CUDA: legacy::cuda::_th_lgamma_out
 
 - func: lgamma(Tensor self) -> Tensor
@@ -4807,7 +4807,7 @@
   supports_named_tensor: True
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_lgamma
+    CPU: lgamma
     CUDA: legacy::cuda::_th_lgamma
 
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
