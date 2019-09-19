@@ -188,6 +188,7 @@ Pointwise Ops
 .. autofunction:: add
 .. autofunction:: addcdiv
 .. autofunction:: addcmul
+.. autofunction:: angle
 .. autofunction:: asin
 .. autofunction:: atan
 .. autofunction:: atan2

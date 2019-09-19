@@ -127,6 +127,14 @@ inline Tensor & Tensor::abs_() const {
     return table->getOp<Tensor & (Tensor &)>(type_set(), is_variable())(const_cast<Tensor&>(*this));
 #endif
 }
+inline Tensor Tensor::angle() const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::angle(const_cast<Tensor&>(*this));
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::angle(Tensor self) -> Tensor");
+    return table->getOp<Tensor (const Tensor &)>(type_set(), is_variable())(const_cast<Tensor&>(*this));
+#endif
+}
 inline Tensor Tensor::real() const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::real(const_cast<Tensor&>(*this));

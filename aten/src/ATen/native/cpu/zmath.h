@@ -21,6 +21,36 @@ struct ztype<std::complex<float>> {
   using value_t = float;
 };
 
+template <typename SCALAR_TYPE, typename VALUE_TYPE>
+inline VALUE_TYPE zabs (SCALAR_TYPE z) {
+  return z;
+}
+
+template<>
+inline float zabs <std::complex<float>> (std::complex<float> z) {
+  return std::abs(z);
+}
+
+template<>
+inline double zabs <std::complex<double>> (std::complex<double> z) {
+  return std::abs(z);
+}
+
+template <typename TYPE>
+inline TYPE angle_impl (TYPE z) {
+  return 0;
+}
+
+template<>
+inline std::complex<float> angle_impl <std::complex<float>> (std::complex<float> z) {
+  return std::complex<float>(std::arg(z), 0.0);
+}
+
+template<>
+inline std::complex<double> angle_impl <std::complex<double>> (std::complex<double> z) {
+  return std::complex<double>(std::arg(z), 0.0);
+}
+
 template <typename TYPE>
 inline TYPE real_impl (TYPE z) {
   return z; //No-Op

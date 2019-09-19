@@ -183,6 +183,9 @@ public:
     }
     return ret;
   }
+  Vec256<T> angle() const {
+    return *this;
+  }
   Vec256<T> real() const {
     return *this;
   }
@@ -400,24 +403,30 @@ inline T minimum(const T& a, const T& b) {
 // To save BC, it will not propagate NaN based on IEEE 754 201X
 template <class T> Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
+  using value_t = typename at::native::ztype<T>::value_t;
+  value_t (*zabs_)(T) = at::native::zabs;
   for (int i = 0; i != Vec256<T>::size(); i++) {
-    c[i] = a[i] < min_vec[i] ? min_vec[i] : (a[i] > max_vec[i] ? max_vec[i] : a[i]);
+    c[i] = zabs_(a[i]) < zabs_(min_vec[i]) ? min_vec[i] : (zabs_(a[i]) > zabs_(max_vec[i]) ? max_vec[i] : a[i]);
   }
   return c;
 }
 
 template <class T> Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
+  using value_t = typename at::native::ztype<T>::value_t;
+  value_t (*zabs_)(T) = at::native::zabs;
   for (int i = 0; i != Vec256<T>::size(); i++) {
-    c[i] = a[i] > max_vec[i] ? max_vec[i] : a[i];
+    c[i] = zabs_(a[i]) > zabs_(max_vec[i]) ? max_vec[i] : a[i];
   }
   return c;
 }
 
 template <class T> Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
   Vec256<T> c = Vec256<T>();
+  using value_t = typename at::native::ztype<T>::value_t;
+  value_t (*zabs_)(T) = at::native::zabs;
   for (int i = 0; i != Vec256<T>::size(); i++) {
-    c[i] = a[i] < min_vec[i] ? min_vec[i] : a[i];
+    c[i] = zabs_(a[i]) < zabs_(min_vec[i]) ? min_vec[i] : a[i];
   }
   return c;
 }

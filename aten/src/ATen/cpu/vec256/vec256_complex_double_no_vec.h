@@ -2,9 +2,6 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
-#if defined(__AVX__) && !defined(_MSC_VER)
-#include <sleef.h>
-#endif
 
 namespace at {
 namespace vec256 {
@@ -59,7 +56,11 @@ public:
     return vec;
   }
   static Vec256<std::complex<double>> arange(std::complex<double> base = 0., std::complex<double> step = 1.) {
-    return Vec256(base, base + step);
+    Vec256 vec;
+    for (int i = 0; i < size(); i++) {
+      vec.values[i] = base + static_cast<std::complex<double>>(i)*step;
+    }
+    return vec;
   }
   static Vec256<std::complex<double>> set(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b,
                             int64_t count = size()) {
@@ -98,6 +99,13 @@ public:
     Vec256<std::complex<double>> ret;
     for (int i = 0; i < size(); i++) {
       ret[i] = std::abs(values[i]);
+    }
+    return ret;
+  }
+  Vec256<std::complex<double>> angle() const {
+    Vec256<std::complex<double>> ret;
+    for (int i = 0; i < size(); i++) {
+      ret[i] = std::arg(values[i]);
     }
     return ret;
   }

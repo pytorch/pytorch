@@ -2,7 +2,6 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
-#include <complex>
 
 namespace at {
 namespace vec256 {
@@ -102,6 +101,13 @@ public:
     Vec256<std::complex<float>> ret;
     for (int i = 0; i < size(); i++) {
       ret[i] = std::abs(values[i]);
+    }
+    return ret;
+  }
+  Vec256<std::complex<float>> angle() const {
+    Vec256<std::complex<float>> ret;
+    for (int i = 0; i < size(); i++) {
+      ret[i] = std::arg(values[i]);
     }
     return ret;
   }

@@ -131,6 +131,16 @@
     CPU: _abs_out_cpu
     CUDA: _abs_out_cuda
 
+- func: angle(Tensor self) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: angle.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+  dispatch:
+    CPU: _angle_out_cpu
+    CUDA: _abs_out_cuda
+
 - func: real(Tensor self) -> Tensor
   variants: function, method
   named_guard: False

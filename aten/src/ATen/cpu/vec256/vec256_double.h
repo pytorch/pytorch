@@ -91,6 +91,9 @@ public:
     auto mask = _mm256_set1_pd(-0.f);
     return _mm256_andnot_pd(mask, values);
   }
+  Vec256<double> angle() const {
+    return _mm256_set1_pd(0);
+  }
   Vec256<double> real() const {
     return *this;
   }
