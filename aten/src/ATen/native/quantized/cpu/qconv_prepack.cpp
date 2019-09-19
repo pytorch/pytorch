@@ -210,6 +210,8 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
                 conv_p,
                 (uint8_t*)weight_contig.data_ptr<c10::quint8>(),
                 (int32_t*)bias_contig.data_ptr<c10::qint32>()),
+            weight_contig,
+            bias_contig,
             {kernel_h, kernel_w},
             weight.q_scale(),
             weight.q_zero_point()});
