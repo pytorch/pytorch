@@ -36,9 +36,26 @@ _eval_env = {
     'Dict': Dict,
     'Optional': Optional,
 }
+class EvalEnv(object):
+    env = {
+        'torch': Module('torch', {'Tensor': torch.Tensor}),
+        'Tensor': torch.Tensor,
+        'typing': Module('typing', {'Tuple': Tuple}),
+        'Tuple': Tuple,
+        'List': List,
+        'Dict': Dict,
+        'Optional': Optional,
+    }
 
+    def __init__(self, rcb):
+        self.rcb = rcb
 
-def get_signature(fn):
+    def __getitem__(self, name):
+        if name in self.env:
+            return self.env[name]
+        return self.rcb(name)
+
+def get_signature(fn, rcb):
     # Python 3.5 adds support for the nice annotation syntax, so try that first.
     if PY35:
         sig = try_real_annotations(fn)
@@ -56,7 +73,7 @@ def get_signature(fn):
     if type_line is None:
         return None
 
-    return parse_type_line(type_line)
+    return parse_type_line(type_line, rcb)
 
 
 # This is essentially a weaker form of get_signature(), where we don't care if
@@ -87,7 +104,7 @@ def get_num_params(fn, loc):
         return num_params
 
 
-def parse_type_line(type_line):
+def parse_type_line(type_line, rcb):
     """Parses a type annotation specified as a comment.
 
     Example inputs:
@@ -97,15 +114,17 @@ def parse_type_line(type_line):
     arg_ann_str, ret_ann_str = split_type_line(type_line)
 
     try:
-        arg_ann = eval(arg_ann_str, _eval_env)  # noqa: P204
+        arg_ann = eval(arg_ann_str, {}, EvalEnv(rcb))  # noqa: P204
+        # arg_ann = eval(arg_ann_str, _eval_env)  # noqa: P204
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the argument list of a type annotation: {}".format(str(e)))
 
     if not isinstance(arg_ann, tuple):
         arg_ann = (arg_ann,)
 
+    print(type_line)
     try:
-        ret_ann = eval(ret_ann_str, _eval_env)  # noqa: P204
+        ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # noqa: P204
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the return type of a type annotation: {}".format(str(e)))
 
@@ -226,6 +245,7 @@ def ann_to_type(ann):
         return BoolType.get()
     elif hasattr(ann, "__torch_script_class__"):
         return ClassType(_qualified_name(ann))
+    print(ann)
     raise ValueError("Unknown type annotation: '{}'".format(ann))
 
 

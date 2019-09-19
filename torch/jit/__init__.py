@@ -1214,6 +1214,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return fn
 
 def _gen_rcb(obj, _frames_up):
+    print(obj)
+    print(_frames_up)
     _frames_up = _frames_up + 1  # for invoking _gen_rcb()
 
     closure_rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
