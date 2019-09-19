@@ -20,7 +20,6 @@ SmallVector<int64_t, 4> convOutputShape(
     const torch::List<int64_t>& dilation) {
   SmallVector<int64_t, 4> out_shape;
   out_shape.push_back(N);
-  out_shape.push_back(K);
 
   int H_out = std::floor(
       (H + 2 * padding[0] - dilation[0] * (kernel[0] - 1) - 1) / stride[0] + 1);
@@ -28,6 +27,8 @@ SmallVector<int64_t, 4> convOutputShape(
       (W + 2 * padding[1] - dilation[1] * (kernel[1] - 1) - 1) / stride[1] + 1);
   out_shape.push_back(H_out);
   out_shape.push_back(W_out);
+  // TODO: reorder it to NCHW order once the memory format regression is fixed
+  out_shape.push_back(K);
 
   return out_shape;
 }
@@ -78,8 +79,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     // mind. Ideally, we'd be compatible with conv2d behavior and preserve the
     // inputs layout as is (doing necessary upconversions).
     //
-    // However, to be more robust, we'd just force output layout to always be
-    // NHWC (channels last) right now, thus opportunistically improving perf.
+    // However, to be more robust, for now we just force output layout to always
+    // be NHWC (channels last), thus opportunistically improving perf.
     //
     // This might change when full memory format support lands
     // See https://github.com/pytorch/pytorch/issues/23403
@@ -97,7 +98,10 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     int W = act.size(3);
 
     // FBGEMM requires NHWC
-    Tensor act_contig = act.contiguous(MemoryFormat::ChannelsLast);
+    // TODO: change it to contiguous(MemoryFormat::ChannelsLast) once a perf
+    // regression of it is fixed. Today it's equivalent because `act` sizes
+    // are not used below
+    Tensor act_contig = act.permute({0, 2, 3, 1}).contiguous();
     const uint8_t* act_ptr =
         reinterpret_cast<uint8_t*>(act_contig.data_ptr<c10::quint8>());
 
@@ -176,6 +180,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       TORCH_CHECK(false, "[QConv2D] Unknown quantization scheme");
     }
 
+    // TODO: change convOutputShape to return NCHW sizes once perf is fixed
     auto outShape =
         convOutputShape(N, K, H, W, kernel, stride, padding, dilation);
     TORCH_CHECK(
@@ -185,9 +190,9 @@ class QConv2dInt8 final : public c10::OperatorKernel {
 
     // Force output format to be NHWC
     // TODO: consider preserving input format
+    // TODO: add MemoryFormat::ChannelsLast here once perf is fixed
     Tensor output = _empty_affine_quantized(
-        outShape, device(kCPU).dtype(kQUInt8), output_scale, output_zero_point,
-        MemoryFormat::ChannelsLast);
+        outShape, device(kCPU).dtype(kQUInt8), output_scale, output_zero_point);
     auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
     if (pack_ptr.q_scheme == kPerTensorAffine) {
@@ -246,7 +251,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
           1 /* num_threads */);
     }
 
-    return output;
+    //TODO: remove permute once MemoryLayout is added above
+    return output.permute({0, 3, 1, 2});
   }
 #else // USE_FBGEMM
   Tensor operator()(

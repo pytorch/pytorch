@@ -1168,7 +1168,6 @@ class TestQuantizedConv(unittest.TestCase):
         qconv_prepack = torch.ops.quantized.conv_prepack
         qconv_unpack = torch.ops.quantized.conv_unpack
 
-        # Orig tensor is assumed to be in K(C/G)RS format
         W = torch.from_numpy(filters).to(torch.float)
         if channelwise:
             W_q = torch.quantize_linear_per_channel(W,
