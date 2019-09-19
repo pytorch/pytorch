@@ -5,8 +5,8 @@ namespace F = torch::nn::functional;
 namespace torch {
 namespace nn {
 
-CosineSimilarityImpl::CosineSimilarityImpl(CosineSimilarityOptions options)
-    : options(options) {}
+CosineSimilarityImpl::CosineSimilarityImpl(const CosineSimilarityOptions& options_)
+    : options(options_) {}
 
 void CosineSimilarityImpl::reset() {}
 
@@ -23,8 +23,8 @@ Tensor CosineSimilarityImpl::forward(const Tensor& x1, const Tensor& x2) {
 
 // ============================================================================
 
-PairwiseDistanceImpl::PairwiseDistanceImpl(PairwiseDistanceOptions options)
-    : options(options) {}
+PairwiseDistanceImpl::PairwiseDistanceImpl(const PairwiseDistanceOptions& options_)
+    : options(options_) {}
 
 void PairwiseDistanceImpl::reset() {}
 

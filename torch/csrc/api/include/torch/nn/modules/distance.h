@@ -15,7 +15,7 @@ namespace nn {
 /// along `dim`.
 class TORCH_API CosineSimilarityImpl : public Cloneable<CosineSimilarityImpl> {
  public:
-  explicit CosineSimilarityImpl(CosineSimilarityOptions = {});
+  explicit CosineSimilarityImpl(const CosineSimilarityOptions& options_ = {});
 
   void reset() override;
 
@@ -40,7 +40,7 @@ TORCH_MODULE(CosineSimilarity);
 /// :math:`v_2` using the p-norm.
 class TORCH_API PairwiseDistanceImpl : public Cloneable<PairwiseDistanceImpl> {
  public:
-  explicit PairwiseDistanceImpl(PairwiseDistanceOptions = {});
+  explicit PairwiseDistanceImpl(const PairwiseDistanceOptions& options_ = {});
 
   void reset() override;
 
