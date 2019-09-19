@@ -60,9 +60,7 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
   // sys_info, this isn't actually used in de-serialization so we can leave this
   // one empty
   pickler.protocol();
-  IValue dict_ivalue =
-      c10::impl::GenericDict(c10::impl::deprecatedUntypedDict());
-  pickler.pushDict(dict_ivalue);
+  pickler.pushEmptyDict();
   pickler.stop();
 
   jit::Pickler data_pickler(writer, /*tensor_table=*/nullptr);
