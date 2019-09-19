@@ -489,8 +489,6 @@ def gen_pyi(declarations_path, out):
                    'def stride(self, _int) -> _int: ...'],
         'new_ones': ['def new_ones(self, size: {}, {}) -> Tensor: ...'.
                      format(type_to_python('IntArrayRef'), FACTORY_PARAMS)],
-        'new_zeros': ['def new_zeros(self, size: {}, {}) -> Tensor: ...'.
-                      format(type_to_python('IntArrayRef'), FACTORY_PARAMS)],
         'new_tensor': ["def new_tensor(self, data: Any, {}) -> Tensor: ...".format(FACTORY_PARAMS)],
         # clamp has no default values in the Declarations
         'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
