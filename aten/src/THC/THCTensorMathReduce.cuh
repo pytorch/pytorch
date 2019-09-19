@@ -96,17 +96,17 @@ struct ReduceWelford {
 
 template <typename T, typename U>
 struct VarianceWelford {
-  VarianceWelford(const int _biased, const bool _apply_sqrt): biased{_biased}, apply_sqrt(_apply_sqrt) {}
+  VarianceWelford(const int _unbiased, const bool _apply_sqrt): unbiased{_unbiased}, apply_sqrt(_apply_sqrt) {}
 
   inline __device__ T operator()(const WelfordData<T, U> &a) const {
-    T res = THCNumerics<T>::div(a.m_2_n_, biased!=0 ? a.count_ : a.count_-1);
+    T res = THCNumerics<T>::div(a.m_2_n_, unbiased ? a.count_ : a.count_-1);
     if (apply_sqrt) {
       return THCNumerics<T>::sqrt(res);
     }
     return res;
   }
 
-  const int biased;
+  const int unbiased;
   const bool apply_sqrt;
 };
 

@@ -56,7 +56,8 @@ class RpcBackend(Enum):
 def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
               self_name=None,
               self_rank=-1,
-              init_method=None):
+              init_method=None,
+              num_send_recv_threads=4):
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
 
@@ -73,7 +74,7 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
             raise RuntimeError("self_rank argument {} doesn't match pg rank {}".format(
                                self_rank, group.rank()))
         # TODO: add try-except and destroy _agent in all processes if any fails.
-        _agent = ProcessGroupAgent(self_name, group)
+        _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
         init_rref_context(_agent)
     elif is_backend_registered(rpc_backend):
         _agent = registered_init_rpc(rpc_backend,

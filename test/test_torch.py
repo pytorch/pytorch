@@ -30,11 +30,11 @@ from common_methods_invocations import tri_tests_args, run_additional_tri_tests,
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, torchtest, \
+    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, \
     skipCUDANonDefaultStreamIf
 from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
-    skipCPUIfNoLapack, skipCUDAIfNoMagma
+    skipCPUIfNoLapack, skipCUDAIfNoMagma, dtypes, dtypesIfCUDA
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -104,7 +104,7 @@ class BytesIOContext(io.BytesIO):
 
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
-class _TestTorchMixin(torchtest):
+class _TestTorchMixin(object):
     def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True):
         float_types = [torch.double,
                        torch.float]
@@ -248,6 +248,7 @@ class _TestTorchMixin(torchtest):
                        'has_names',  # BUILD_NAMEDTENSOR only
                        'rename',  # BUILD_NAMEDTENSOR only
                        'refine_names',  # BUILD_NAMEDTENSOR only
+                       'unflatten',  # BUILD_NAMEDTENSOR only
                        )
         test_namespace(torch.nn)
         test_namespace(torch.nn.functional, 'assert_int_or_pair', 'feature_alpha_dropout')
@@ -626,6 +627,9 @@ class _TestTorchMixin(torchtest):
             self._test_math(lambda x: torch.polygamma(n, x),
                             lambda x: polygamma(n, x).item(),
                             self._digamma_input(test_poles=False))
+
+        with self.assertRaisesRegex(RuntimeError, r'polygamma\(n, x\) does not support negative n\.'):
+            torch.polygamma(-1, torch.tensor([1.0, 2.0]))
 
     def test_asin(self):
         self._test_math(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else nan)
@@ -7832,41 +7836,9 @@ def add_neg_dim_tests():
         assert not hasattr(_TestTorchMixin, test_name), "Duplicated test name: " + test_name
         setattr(_TestTorchMixin, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
 
-# Helpers for device-generic tests.
-# Must be in a different, inherited class for Python2 compat.
-class GenericDeviceTypeHelpers(object):
-    @staticmethod
-    def _select_broadcastable_dims(dims_full=None):
-        # select full dimensionality
-        if dims_full is None:
-            dims_full = []
-            ndims = random.randint(1, 4)
-            dims_full = [random.randint(1, 8) for _ in range(ndims)]
-        else:
-            ndims = len(dims_full)
 
-        # select actual dimensions for ops:
-        # larger: full ndims, individual sizes may be reduced
-        # smaller: possibly reduced ndims, sizes may be reduced
-        smaller_ndims = random.randint(1, ndims)
-        dims_small = []
-        dims_large = []
-        for i in range(ndims - 1, -1, -1):
-            j = random.randint(1, 3)
-            if j == 1:  # no reduced singleton dimension
-                ds = dims_full[i]
-                dl = dims_full[i]
-            elif j == 2:  # larger may have reduced singleton dimension
-                ds = dims_full[i]
-                dl = 1 if len(dims_small) < smaller_ndims else dims_full[i]
-            elif j == 3:  # smaller may have reduced singleton dimension
-                ds = 1
-                dl = dims_full[i]
-            dims_large = [dl] + dims_large
-            if len(dims_small) < smaller_ndims:
-                dims_small = [ds] + dims_small
-        return (dims_small, dims_large, dims_full)
-
+# Device-generic tests. Instantiated below and not run directly.
+class TestTorchDeviceType(TestCase):
     def check_internal_mem_overlap(self, inplace_op, num_inputs, device,
                                    expected_failure=False):
         if isinstance(inplace_op, str):
@@ -7977,8 +7949,37 @@ class GenericDeviceTypeHelpers(object):
             self.assertEqual(actual, expected, allow_inf=True)
             self.assertEqual(actual2, expected, allow_inf=True)
 
-# Device-generic tests. Instantiated below and not run directly.
-class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
+    def _select_broadcastable_dims(self, dims_full=None):
+        # select full dimensionality
+        if dims_full is None:
+            dims_full = []
+            ndims = random.randint(1, 4)
+            dims_full = [random.randint(1, 8) for _ in range(ndims)]
+        else:
+            ndims = len(dims_full)
+
+        # select actual dimensions for ops:
+        # larger: full ndims, individual sizes may be reduced
+        # smaller: possibly reduced ndims, sizes may be reduced
+        smaller_ndims = random.randint(1, ndims)
+        dims_small = []
+        dims_large = []
+        for i in range(ndims - 1, -1, -1):
+            j = random.randint(1, 3)
+            if j == 1:  # no reduced singleton dimension
+                ds = dims_full[i]
+                dl = dims_full[i]
+            elif j == 2:  # larger may have reduced singleton dimension
+                ds = dims_full[i]
+                dl = 1 if len(dims_small) < smaller_ndims else dims_full[i]
+            elif j == 3:  # smaller may have reduced singleton dimension
+                ds = 1
+                dl = dims_full[i]
+            dims_large = [dl] + dims_large
+            if len(dims_small) < smaller_ndims:
+                dims_small = [ds] + dims_small
+        return (dims_small, dims_large, dims_full)
+
     def test_diagonal(self, device):
         x = torch.randn((100, 100), device=device)
         result = torch.diagonal(x)
@@ -8027,7 +8028,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_inverse(self, device):
         from common_utils import random_fullrank_matrix_distinct_singular_value
 
@@ -8314,7 +8314,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_inverse_many_batches(self, device):
         from common_utils import random_fullrank_matrix_distinct_singular_value
 
@@ -8330,32 +8329,36 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_pinverse(self, device):
+        from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
+
         def run_test(M):
             # Testing against definition for pseudo-inverses
             MPI = torch.pinverse(M)
-            self.assertEqual(M, M.mm(MPI).mm(M), 1e-8, 'pseudo-inverse condition 1')
-            self.assertEqual(MPI, MPI.mm(M).mm(MPI), 1e-8, 'pseudo-inverse condition 2')
-            self.assertEqual(M.mm(MPI), (M.mm(MPI)).t(), 1e-8, 'pseudo-inverse condition 3')
-            self.assertEqual(MPI.mm(M), (MPI.mm(M)).t(), 1e-8, 'pseudo-inverse condition 4')
-
-        # Square matrix
-        M = torch.randn(5, 5, device=device)
-        run_test(M)
-
-        # Rectangular matrix
-        M = torch.randn(3, 4, device=device)
-        run_test(M)
+            if M.numel() > 0:
+                self.assertEqual(M, M.matmul(MPI).matmul(M), 1e-8, 'pseudo-inverse condition 1')
+                self.assertEqual(MPI, MPI.matmul(M).matmul(MPI), 1e-8, 'pseudo-inverse condition 2')
+                self.assertEqual(M.matmul(MPI), (M.matmul(MPI)).transpose(-2, -1), 1e-8, 'pseudo-inverse condition 3')
+                self.assertEqual(MPI.matmul(M), (MPI.matmul(M)).transpose(-2, -1), 1e-8, 'pseudo-inverse condition 4')
+            else:
+                self.assertEqual(M.shape, MPI.shape[:-2] + (MPI.shape[-1], MPI.shape[-2]))
+        for sizes in [(5, 5), (3, 5, 5), (3, 7, 5, 5),  # square matrices
+                      (3, 2), (5, 3, 2), (7, 5, 3, 2),  # fat matrices
+                      (2, 3), (5, 2, 3), (7, 5, 2, 3),  # thin matrices
+                      (0, 0), (0, 2), (2, 0), (3, 0, 0), (0, 3, 0), (0, 0, 3)]:  # zero numel matrices
+            M = torch.randn(*sizes, device=device)
+            run_test(M)
 
         # Test inverse and pseudo-inverse for invertible matrix
-        M = torch.randn(5, 5)
-        M = M.mm(M.t()).to(device)
-        self.assertEqual(torch.eye(5, device=device), M.pinverse().mm(M), 1e-7, 'pseudo-inverse for invertible matrix')
+        for sizes in [(5, 5), (3, 5, 5), (3, 7, 5, 5)]:
+            matsize = sizes[-1]
+            batchdims = sizes[:-2]
+            M = fullrank(matsize, *batchdims).to(device=device)
+            self.assertEqual(torch.eye(matsize, device=device).expand(sizes), M.pinverse().matmul(M),
+                             1e-7, 'pseudo-inverse for invertible matrix')
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_matrix_rank(self, device):
         a = torch.eye(10, device=device)
         self.assertEqual(torch.matrix_rank(a).item(), 10)
@@ -8389,7 +8392,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_matrix_power(self, device):
         def run_test(M, sign=1):
             if sign == -1:
@@ -8449,7 +8451,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_det_logdet_slogdet(self, device):
         def reference_slogdet(M):
             if TEST_NUMPY:
@@ -8630,7 +8631,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_det_logdet_slogdet_batched(self, device):
         from common_utils import (random_symmetric_matrix, random_symmetric_psd_matrix,
                                   random_symmetric_pd_matrix, random_square_matrix_of_rank)
@@ -8681,7 +8681,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_solve(self, device):
         from common_utils import solve_test_helper
         for (k, n) in zip([2, 3, 5], [3, 5, 7]):
@@ -8691,7 +8690,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_solve_batched(self, device):
         from common_utils import solve_test_helper
 
@@ -8710,7 +8708,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_solve_batched_non_contiguous(self, device):
         from numpy.linalg import solve
@@ -8724,7 +8721,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_solve_batched_many_batches(self, device):
         from common_utils import solve_test_helper
 
@@ -8738,7 +8734,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_solve_batched_broadcasting(self, device):
         from numpy.linalg import solve
@@ -8764,7 +8759,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_cholesky_solve(self, device):
         from common_utils import cholesky_solve_test_helper
         for (k, n), upper in product(zip([2, 3, 5], [3, 5, 7]), [True, False]):
@@ -8774,7 +8768,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_cholesky_solve_batched(self, device):
         from common_utils import cholesky_solve_test_helper
 
@@ -8793,7 +8786,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_cholesky_solve_batched_non_contiguous(self, device):
         from numpy.linalg import solve
@@ -8813,7 +8805,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_cholesky_solve_batched_many_batches(self, device):
         from common_utils import cholesky_solve_test_helper
 
@@ -8828,7 +8819,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_cholesky_solve_batched_broadcasting(self, device):
         from numpy.linalg import solve
@@ -8857,7 +8847,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_cholesky_inverse(self, device):
         from common_utils import random_symmetric_pd_matrix
         a = random_symmetric_pd_matrix(5).to(device)
@@ -8883,7 +8872,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_cholesky_batched_many_batches(self, device):
         from common_utils import random_symmetric_pd_matrix
 
@@ -8906,7 +8894,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_cholesky_batched(self, device):
         from common_utils import random_symmetric_pd_matrix
 
@@ -8921,7 +8908,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_cholesky(self, device):
         x = torch.rand(10, 10, device=device) + 1e-1
         A = torch.mm(x, x.t())
@@ -10063,7 +10049,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_lu_solve_batched_non_contiguous(self, device):
         from numpy.linalg import solve
@@ -10082,7 +10067,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_lu_solve_batched_many_batches(self, device):
         from common_utils import lu_solve_test_helper
 
@@ -10100,7 +10084,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_lu_solve_batched_broadcasting(self, device):
         from numpy.linalg import solve
@@ -10270,7 +10253,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_symeig(self, device):
         from common_utils import random_symmetric_matrix
 
@@ -10313,7 +10295,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_svd(self, device):
         def run_test(dims, some, compute_uv):
             x = torch.randn(*dims, device=device)
@@ -10370,7 +10351,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_svd_no_singularvectors(self, device):
         for size in [(5, 5), (5, 20), (20, 5)]:
             a = torch.randn(*size, device=device)
@@ -10424,7 +10404,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_norm(self, device):
         # full reduction
@@ -10455,7 +10434,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
         self.assertEqual(2 * torch.norm(torch.ones(10000)), torch.norm(torch.ones(40000)))
 
     @skipCUDAIfNoMagma
-    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_nuclear_norm_axes_small_brute_force(self, device):
         def check_single_nuclear_norm(x, axes):
@@ -10533,7 +10511,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
                             check_single_nuclear_norm(x, axes)
 
     @skipCUDAIfNoMagma
-    @skipCUDANonDefaultStreamIf(True)
     def test_nuclear_norm_exceptions(self, device):
         for lst in [], [1], [1, 2]:
             for axes in (), (0,), (0, 1):
@@ -10560,7 +10537,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_geqrf(self, device):
         a = torch.randn(5, 5, device=device)
         b, c = torch.geqrf(a)
@@ -10571,7 +10547,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_triangular_solve(self, device):
         from common_utils import triangular_solve_test_helper
         for (k, n), (upper, unitriangular, transpose) in product(zip([2, 3, 5], [3, 5, 7]),
@@ -10586,7 +10561,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_triangular_solve_batched_many_batches(self, device):
         from common_utils import triangular_solve_test_helper
 
@@ -10610,7 +10584,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_triangular_solve_batched_broadcasting(self, device):
         from scipy.linalg import solve_triangular as tri_solve
@@ -10646,7 +10619,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_lstsq(self, device):
         def cast_fn(tensor):
             return tensor.to(device=device)
@@ -10769,7 +10741,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_qr(self, device):
         def run_test(tensor_dims, some):
             A = torch.randn(*tensor_dims, device=device)
@@ -11019,7 +10990,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDANonDefaultStreamIf(True)
     def test_lapack_empty(self, device):
         # FIXME: these are just a selection of LAPACK functions -- we need a general strategy here.
         # The LAPACK functions themselves generally do NOT work with zero sized dimensions, although
@@ -12819,9 +12789,9 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
             ("reciprocal", doubles, True, True, 'cpu'),
             ("reciprocal", doubles, False, True, 'cuda'),
             ("round", doubles, True, True, 'cpu'),
-            ("round", doubles, False, True, 'cuda'),
+            ("round", doubles, True, True, 'cuda'),
             ("rsqrt", positives, True, True, 'cpu'),
-            ("rsqrt", positives, False, True, 'cuda'),
+            ("rsqrt", positives, True, True, 'cuda'),
             ("sin", doubles, True, True, 'cpu'),
             ("sin", doubles, False, True, 'cuda'),
             ("sinh", doubles, True, True, 'cpu'),
@@ -12918,7 +12888,9 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: torch.pow(42, input, out=out))
 
-    def test_erfinv(self, device):
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    def test_erfinv(self, device, dtype):
         def checkType(dtype):
             # general testing. Narrow the range to avoid accuracy issues
             input_values = torch.randn(4, 4, dtype=dtype, device=device).clamp(-0.3, 0.3)
@@ -12930,15 +12902,13 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
             self.assertEqual(torch.tensor([-2, 2], dtype=dtype, device=device).erfinv(),
                              torch.tensor([nan, nan], dtype=dtype, device=device))
 
-        if device != 'cpu':
-            checkType(torch.half)
-        checkType(torch.float)
-        checkType(torch.double)
+        checkType(dtype)
 
-        # double precision
-        a = torch.tensor([0.5, 0.8], dtype=torch.double, device=device).erfinv()
-        self.assertAlmostEqual(a[0].item(), 0.47693627620447, places=13)
-        self.assertAlmostEqual(a[1].item(), 0.90619380243682, places=13)
+        if dtype == torch.double:
+            # double precision
+            a = torch.tensor([0.5, 0.8], dtype=torch.double, device=device).erfinv()
+            self.assertAlmostEqual(a[0].item(), 0.47693627620447, places=13)
+            self.assertAlmostEqual(a[1].item(), 0.90619380243682, places=13)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_int_pow(self, device):
