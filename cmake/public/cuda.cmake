@@ -262,14 +262,15 @@ endif()
 # interface library similar to cudart.
 add_library(caffe2::cublas INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
-    set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
     if (CUDA_VERSION VERSION_EQUAL 10.1)
       set_property(
         TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/lcublasLt_static.a"
       )
+    else()
+      set_property(
+        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
     endif()
 else()
     set_property(
