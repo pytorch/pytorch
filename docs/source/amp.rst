@@ -29,8 +29,8 @@ Gradient scaling
 ^^^^^^^^^^^^^^^^
 
 Late in training, FP16 gradients can underflow, halting convergence and in some cases causing destabilization.
-Amp mitigates underflow via "dynamic gradient scaling."  Gradients are scaled by multiplying the network's output(s) 
-by some scale factor S, then invoking a backward pass on the *scaled* output(s).  
+Amp mitigates underflow via "dynamic gradient scaling."  Gradients are scaled by multiplying the network's output(s)
+by some scale factor S, then invoking a backward pass on the *scaled* output(s).
 The chain rule then ensures that all gradients flowing backward through are scaled by S.
 
 Amp attempts to maximize use of FP16's full dynamic range by choosing the highest S that can be used without incurring
@@ -91,7 +91,7 @@ In other words, existing optimizers should work properly with the gradient scali
 any methods.
 
 However, if some or all of these methods are already members of the optimizer instance, :func:`add_amp_attributes` won't touch
-them.  When writing a custom optimizer, if you wish to customize the behavior of the :func:`unscale`, :func:`check_inf`, 
+them.  When writing a custom optimizer, if you wish to customize the behavior of the :func:`unscale`, :func:`check_inf`,
 :func:`step_after_unscale`, and/or :func:`unscale_and_step` control points, you may (but are not required to) define some or all of
 these methods as part of your optimizer class.  User scripts that obey the API will then invoke your custom behavior without
 further changes on their part.
@@ -301,7 +301,7 @@ The ``scaling_enabled`` kwarg allows mixed precision to be globally enabled/disa
 
     S = add_amp_attributes(optimizer)
     enabled = args.use_mixed_precision
-    
+
     for input, target in data:
         optimizer.zero_grad()
         with enable_autocasting(enabled=enabled):
