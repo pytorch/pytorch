@@ -228,20 +228,20 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
       int64_t groups) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
-    if (ctx.preferredQuantizedEngine() == at::QEngine::FBGEMM) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return fbgemm_conv_prepack(
           weight, bias, stride, padding, dilation, groups);
     }
 #endif
 #ifdef USE_PYTORCH_QNNPACK
-    if (ctx.preferredQuantizedEngine() == at::QEngine::QNNPACK) {
+    if (ctx.qEngine() == at::QEngine::QNNPACK) {
       return qnnpack_conv_prepack(
           weight, bias, stride, padding, dilation, groups);
     }
 #endif
     TORCH_INTERNAL_ASSERT(
         "Didn't find engine for operation quantized::conv_prepack ",
-        toString(ctx.preferredQuantizedEngine()));
+        toString(ctx.qEngine()));
     return at::Tensor();
   }
 };
