@@ -961,15 +961,6 @@ class _TestTorchMixin(object):
             res = torch.where(a > 0)
             self.assertEqual(1, len(res))
 
-    def test_all_any_empty(self):
-        x = torch.ByteTensor()
-        self.assertTrue(x.all())
-        self.assertFalse(x.any())
-
-        x = torch.BoolTensor()
-        self.assertTrue(x.all())
-        self.assertFalse(x.any())
-
     def test_all_any_with_dim(self):
         def test(x):
             r1 = x.prod(dim=0, keepdim=False).byte()
