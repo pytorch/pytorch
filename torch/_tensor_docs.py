@@ -1920,10 +1920,11 @@ the tensor.
 
 add_docstr_all('q_per_channel_axis',
                r"""
-q_per_channel_zero_points() -> tuple of ints
+q_per_channel_axis() -> tuple of ints
 
 Given a Tensor quantized by linear (affine) per-channel quantization,
 returns a indices of dimensions on which per-channel quantization is applied.
+In the most commmon case there is only one such dimension.
 """)
 
 add_docstr_all('random_',
