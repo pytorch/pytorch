@@ -2567,18 +2567,22 @@ class TestAutograd(TestCase):
     @skipIfNoLapack
     def test_cholesky_inverse(self):
         def _test_with_size(upper, dims):
-            # Too small values cause inconsistencies in gradient calculation, hence the special initialization
-            root = (torch.empty(*dims).uniform_(1, 2)).requires_grad_()
+            # We require to create a Cholesky factor which requires that the diagonal elements are positive.
+            # Initializing too small values for the diagonal elements could cause issues when being perturbed
+            # to obtain the numerical Jacobian, thereby leading to inconsistent gradcheck
+            A = torch.randn(*dims)
+            A.diagonal().uniform_(0.1, 5.0)
+            A.requires_grad_()
 
-            def func(root, upper):
+            def func(A, upper):
                 if upper:
-                    A = root.triu()
+                    root = A.triu()
                 else:
-                    A = root.tril()
-                return torch.cholesky_inverse(A, upper)
+                    root = A.tril()
+                return torch.cholesky_inverse(root, upper)
 
-            gradcheck(func, [root, upper])
-            gradgradcheck(func, [root, upper])
+            gradcheck(func, [A, upper])
+            gradgradcheck(func, [A, upper])
 
         for upper, dims in product([True, False], [(3, 3), (5, 5)]):
             _test_with_size(upper, dims)
