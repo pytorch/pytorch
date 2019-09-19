@@ -13,7 +13,9 @@ from typing import List, Optional
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
 
-DOCKER_IMAGE_VERSION = 339
+# ARE YOU EDITING THIS NUMBER?  MAKE SURE YOU READ THE GUIDANCE AT THE
+# TOP OF .circleci/config.yml
+DOCKER_IMAGE_VERSION = 347
 
 
 @dataclass
