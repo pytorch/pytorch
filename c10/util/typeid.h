@@ -62,12 +62,7 @@ namespace caffe2 {
  */
 class C10_API TypeIdentifier final
     : public at::IdWrapper<TypeIdentifier, c10::util::type_index> {
-private:
-  struct DummyTypeForUninitializedTypeId final {};
-
  public:
-  static TypeIdentifier createTypeId();
-
   friend std::ostream& operator<<(std::ostream& stream, TypeIdentifier typeId);
   friend bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
 
@@ -83,9 +78,8 @@ private:
     return TypeIdentifier(c10::util::get_type_index<T>());
   }
 
-  // 0 is uint8_t (due to ScalarType BC constraint)
   static constexpr TypeIdentifier uninitialized() {
-    return Get<DummyTypeForUninitializedTypeId>();
+    return TypeIdentifier(c10::util::type_index{11});  // 11 is Undefined from ScalarType
   }
 
  private:
@@ -520,23 +514,16 @@ inline std::ostream& operator<<(
 
 /**
  * CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE is used
- * to preallocate ids for types that are queried very often so that they
- * can be resolved at compile time. Please use CAFFE_KNOWN_TYPE() instead
- * for your own types to allocate dynamic ids for them.
+ * to preallocate numbers so they line up exactly
+ * with at::ScalarType's numbering.  All other numbers do not matter.
+ * Please use CAFFE_KNOWN_TYPE instead for your own types.
  */
 #define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)      \
   template <>                                                         \
   constexpr inline TypeIdentifier TypeIdentifier::Get<T>() noexcept { \
     return TypeIdentifier(c10::util::type_index{PreallocatedId});     \
   }
-#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)       \
-  CAFFE_KNOWN_TYPE(T)
 
-// Note: we have preallocated the numbers so they line up exactly
-// with at::ScalarType's numbering.  All other numbers do not matter.
-
-struct _CaffeHighestPreallocatedTypeId final {};
-// TODO static_assert number of declare/define align
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(0, uint8_t)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(1, int8_t)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(2, int16_t)
@@ -592,6 +579,5 @@ CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(29, c10::qint8)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(30, c10::quint8)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(31, c10::qint32)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(32, at::BFloat16)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(33, _CaffeHighestPreallocatedTypeId)
 
 } // namespace caffe2
