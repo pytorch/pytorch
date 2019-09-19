@@ -7,7 +7,7 @@
 # TODO: remove when we have Type support in the IR
 - func: _cast_Byte(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: 'full'
-  variants: functionf
+  variants: function
 
 - func: _cast_Char(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: 'full'
@@ -99,7 +99,6 @@
     CUDA: _cudnn_rnn_backward
 
 - func: _cudnn_init_dropout_state(float dropout, bool train, int dropout_seed, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
   dispatch:
     CUDA: _cudnn_init_dropout_state
 
@@ -108,6 +107,7 @@
   variants: function
 
 - func: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
+  use_c10_dispatcher: 'unboxed_only'
   variants: function
   dispatch:
      CUDA: fused_dropout_cuda
@@ -437,6 +437,7 @@
 
 # Sample bernoulli with values in `self` as probability.
 - func: bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
   variants: function, method
   supports_named_tensor: True
 
@@ -445,6 +446,7 @@
   supports_named_tensor: True
 
 - func: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: bernoulli_tensor_cpu_
@@ -452,6 +454,7 @@
   supports_named_tensor: True
 
 - func: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: bernoulli_scalar_cpu_
@@ -462,6 +465,7 @@
 # There is no default valid on `p` here because it would introduce ambiguity
 # with `bernoulli(Tensor self, *, Generator? generator=None)` declaration.
 - func: bernoulli.p(Tensor self, float p, *, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
   variants: function, method
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
@@ -816,13 +820,11 @@
     CUDA: cudnn_grid_sampler_backward
 
 - func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
   variants: function, method
 
 - func: cumsum.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
   variants: function, method
 
 - func: cumprod.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
@@ -964,7 +966,6 @@
   device_guard: False
 
 - func: empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
@@ -2189,8 +2190,10 @@
     CUDA: round_out
 
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
 
 - func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: 'unboxed_only'
 
 - func: relu(Tensor self) -> Tensor
   use_c10_dispatcher: 'full'
@@ -2936,6 +2939,7 @@
     CUDA: _standard_gamma_grad_cuda
 
 - func: _standard_gamma(Tensor self, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
   variants: function
   dispatch:
     CPU: _s_gamma_cpu
@@ -2948,12 +2952,14 @@
     CUDA: _dirichlet_grad_cuda
 
 - func: _sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
   variants: function
   dispatch:
     CPU: _s_dirichlet_cpu
     CUDA: _s_dirichlet_cuda
 
 - func: poisson(Tensor self, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
@@ -4295,6 +4301,7 @@
   variants: method
 
 - func: random_.from(Tensor(a!) self, int from, int to, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_random_
@@ -4302,6 +4309,7 @@
   supports_named_tensor: True
 
 - func: random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_random_
@@ -4309,6 +4317,7 @@
   supports_named_tensor: True
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_random_
@@ -4316,6 +4325,7 @@
   supports_named_tensor: True
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_uniform_
@@ -4323,6 +4333,7 @@
   supports_named_tensor: True
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_normal_
@@ -4330,6 +4341,7 @@
   supports_named_tensor: True
 
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_cauchy_
@@ -4337,6 +4349,7 @@
   supports_named_tensor: True
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_log_normal_
@@ -4344,6 +4357,7 @@
   supports_named_tensor: True
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_exponential_
@@ -4351,6 +4365,7 @@
   supports_named_tensor: True
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_geometric_
@@ -4854,6 +4869,7 @@
     CUDA: multinomial_out
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
   variants: method, function
   dispatch:
     CPU: multinomial
@@ -4867,6 +4883,7 @@
     CUDA: legacy::cuda::_th_multinomial_alias_setup
 
 - func: _multinomial_alias_draw(Tensor J, Tensor q, int num_samples, *, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
   variants: function
   dispatch:
     CPU: legacy::cpu::_th_multinomial_alias_draw
@@ -5168,6 +5185,7 @@
     CUDA: normal_out_cuda
 
 - func: normal.Tensor_float(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
   dispatch:
     CPU: legacy::cpu::_th_normal
     CUDA: normal_cuda
@@ -5178,6 +5196,7 @@
     CUDA: normal_out_cuda
 
 - func: normal.float_Tensor(float mean, Tensor std, *, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
   dispatch:
     CPU: legacy::cpu::_th_normal
     CUDA: normal_cuda
@@ -5188,6 +5207,7 @@
     CUDA: normal_out_cuda
 
 - func: normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
   dispatch:
     CPU: legacy::cpu::_th_normal
     CUDA: normal_cuda
@@ -5742,6 +5762,7 @@
     CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward_out
 
 - func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: 'unboxed_only'
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_rrelu_with_noise_forward
@@ -5761,6 +5782,7 @@
     CUDA: legacy::cuda::_thnn_rrelu_with_noise_backward
 
 - func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: 'unboxed_only'
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_rrelu_with_noise_forward_

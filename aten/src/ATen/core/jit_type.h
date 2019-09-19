@@ -1174,7 +1174,7 @@ template <typename T>
 struct getTypePtr_ final {
   static TypePtr call() {
     if (!isCustomClassRegistered<T>()) {
-      throw c10::Error("Type could not be converted to any of the known types.", "");
+      throw c10::Error(std::string() + "Type " + typeid(T).name() + " could not be converted to any of the known types.", "");
     }
     auto res = getCustomClassType<T>();
     return std::dynamic_pointer_cast<Type>(res.type_);
@@ -1209,6 +1209,12 @@ template <>
 struct getTypePtr_<at::Scalar> final {
   static TypePtr call() {
     return NumberType::get();
+  }
+};
+template <>
+struct getTypePtr_<at::Generator*> final {
+  static TypePtr call() {
+    return OptionalType::create(GeneratorType::get());
   }
 };
 template <>
@@ -1294,7 +1300,7 @@ struct MatchTypeReturn {
   }
 
  private:
-  MatchTypeReturn() 
+  MatchTypeReturn()
   : reason_(c10::nullopt) {}
   c10::optional<std::string> reason_; // is there is no match, this contains the reason
 };
@@ -1304,13 +1310,13 @@ struct MatchTypeReturn {
 // and a r.reason() that describes why it could not match.
 // note: It is possible to successfully match a formal, but for type variables
 // in the formal to still not be defined. In particular, None matches Optional[T]
-// but does not define the value of T. 
+// but does not define the value of T.
 CAFFE2_API MatchTypeReturn
 matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 
-// replace type variables appearing in `type` with the values in 
-// `type_env`. Returns nullptr if a variable used in `type` 
-// does not appear in `type_env` 
+// replace type variables appearing in `type` with the values in
+// `type_env`. Returns nullptr if a variable used in `type`
+// does not appear in `type_env`
 CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
 /**

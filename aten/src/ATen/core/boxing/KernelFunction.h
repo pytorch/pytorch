@@ -238,7 +238,7 @@ public:
    * Create a KernelFunction from an unboxed functor and delay functor creation
    * until the first call to the KernelFunction. This is useful for functors
    * that are registered at static initialization time but can't be created
-   * there yet. For example, some operator functors store Tensor members
+   * there yet. For example, we want to allow functors to store Tensor members
    * (we can't create Tensor objects at static initialization time because of SIOF)
    * but these functors are registered as kernels at static initialization time.
    * Using this method, we can delay functor instantiation until the operator
