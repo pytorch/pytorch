@@ -25,8 +25,8 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
   if (THP_nativeByteOrder() == THPByteOrder::THP_LITTLE_ENDIAN)
     doWrite(fd, &size, sizeof(int64_t));
   else {
-    int64_t nsize = size; // convert big endian cpu to little endian storage
-    THP_encodeInt64Buffer((uint8_t*)&nsize, &size, THPByteOrder::THP_LITTLE_ENDIAN, 1);
+    int64_t nsize; // convert big endian cpu to little endian storage
+    THP_encodeInt64Buffer((uint8_t*)&nsize, (const int64_t *)&size, THPByteOrder::THP_LITTLE_ENDIAN, 1);
     doWrite(fd, &nsize, sizeof(int64_t));
   }
   // fast track for bytes and little endian
@@ -75,7 +75,8 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
   int64_t size;
   doRead(file, &size, sizeof(int64_t));
   if (THP_nativeByteOrder() == THPByteOrder::THP_BIG_ENDIAN) {
-    int64_t nsize = size; // convert little endian storage to big endian cpu
+    int64_t nsize; // convert little endian storage to big endian cpu
+    nsize = size;
     THP_decodeInt64Buffer(&size, (const uint8_t*)&nsize, THP_nativeByteOrder(), 1);
   }
   THWStoragePtr storage;
