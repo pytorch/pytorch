@@ -673,7 +673,7 @@ jobs:
         name: Build
         no_output_timeout: "1h"
         command: |
-            ANACONDA_USER=pytorch LDFLAGS="-lcublasLt_static" source "/pytorch/.circleci/scripts/binary_linux_build.sh"
+            ANACONDA_USER=pytorch source "/pytorch/.circleci/scripts/binary_linux_build.sh"
     - persist_to_workspace:
         root: /
         paths: final_pkgs
