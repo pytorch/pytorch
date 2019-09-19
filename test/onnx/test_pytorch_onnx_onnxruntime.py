@@ -146,6 +146,55 @@ class TestONNXRuntime(unittest.TestCase):
     def test_index_2d_neg_slice(self):
         self._test_index_generic(lambda input: input[0:-1, :])
 
+    def test_clamp(self):
+        class ClampModel(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(-0.5, 0.5)
+
+        x = torch.randn(3, 4)
+        self.run_test(ClampModel(), x)
+
+        class ClampMinModel(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(min=-0.5)
+
+        x = torch.randn(3, 4)
+        self.run_test(ClampMinModel(), x)
+
+        class ClampMaxModel(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(max=0.5)
+
+        x = torch.randn(3, 4)
+        self.run_test(ClampMaxModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_clamp_dyn(self):
+        class ClampMaxModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x.clamp(None, x.size(0))
+
+        x = torch.arange(16).view(4, 4).float()
+        self.run_test(ClampMaxModel(), x)
+
+
+        class ClampMinModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x.clamp(x.size(0), None)
+
+        x = torch.arange(16).view(4, 4).float()
+        self.run_test(ClampMinModel(), x)
+
+        class ClampMinMaxModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x.clamp(x.size(0), x.size(1))
+
+        x = torch.arange(16).view(2, 8).float()
+        self.run_test(ClampMinMaxModel(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_full_trace(self):
         class FullModel(torch.nn.Module):
