@@ -127,9 +127,9 @@ def parse_type_line(type_line, rcb, loc):
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the return type of a type annotation: {}".format(str(e)))
 
-    lookup = (rcb, loc)
-    arg_types = [ann_to_type(ann, lookup) for ann in arg_ann]
-    return arg_types, ann_to_type(ret_ann, lookup)
+    resolver = (rcb, loc)
+    arg_types = [ann_to_type(ann, resolver) for ann in arg_ann]
+    return arg_types, ann_to_type(ret_ann, resolver)
 
 
 def get_type_line(source):
@@ -217,7 +217,9 @@ def try_real_annotations(fn):
     return arg_types, return_type
 
 
-def ann_to_type(ann, lookup=None):
+def ann_to_type(ann, resolver=None):
+    # resolver should be a Tuple[Callable, SourceRange] where the Callable
+    # is a resolutionCallback
     if ann is None:
         return TensorType.get()
     elif ann is torch.Tensor:
@@ -245,9 +247,9 @@ def ann_to_type(ann, lookup=None):
         return BoolType.get()
     elif hasattr(ann, "__torch_script_class__"):
         return ClassType(_qualified_name(ann))
-    elif lookup is not None:
+    elif resolver is not None:
         # Maybe resolve a NamedTuple to a Tuple Type
-        rcb, loc = lookup
+        rcb, loc = resolver
         the_type = torch._C._resolve_type(ann.__name__, loc, rcb)
         if the_type is not None:
             return the_type
