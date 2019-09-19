@@ -22,6 +22,7 @@ namespace tcputil {
 namespace {
 
 constexpr int LISTEN_QUEUE_SIZE = 2048;
+const std::string kConnectTimeoutMsg = "connect() timed out.";
 
 void setSocketNoDelay(int socket) {
   int flag = 1;
@@ -200,7 +201,7 @@ int connect(
         throw std::system_error(errno, std::system_category());
       } else if (numReady == 0) {
         errno = 0;
-        throw std::runtime_error("connect() timed out");
+        throw std::runtime_error(kConnectTimeoutMsg);
       }
 
       socklen_t errLen = sizeof(errno);
@@ -248,7 +249,7 @@ int connect(
           const auto elapsed =
               std::chrono::high_resolution_clock::now() - start;
           if (elapsed > timeout) {
-            throw std::runtime_error("connect() timed out");
+            throw std::runtime_error(kConnectTimeoutMsg);
           }
         }
         std::this_thread::sleep_for(std::chrono::seconds(1));
