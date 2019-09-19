@@ -30,6 +30,7 @@ struct FunctionSchema;
 using OptNameList = c10::optional<std::vector<std::string>>;
 
 #define C10_FORALL_TYPES(_) \
+  _(AnyType)                \
   _(TensorType)             \
   _(TupleType)              \
   _(ListType)               \
@@ -162,6 +163,29 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
         "type with contained types did not overload createWithContained: ",
         str());
   }
+};
+
+struct AnyType;
+using AnyTypePtr = std::shared_ptr<AnyType>;
+// Any is the top of the type hierarchy, all other types are subtypes
+// T <: Any, forall T
+struct CAFFE2_API AnyType : public Type {
+  static AnyTypePtr create() {
+    return AnyTypePtr(
+        new AnyType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Any";
+  }
+  static const TypeKind Kind = TypeKind::AnyType;
+  // global singleton
+  static AnyTypePtr get();
+
+ private:
+  AnyType() : Type(TypeKind::AnyType) {}
 };
 
 inline std::string toString(TypePtr typePtr) {
@@ -548,7 +572,7 @@ struct CAFFE2_API TensorType : public Type {
         sizes_(tensor.sizes().size()),
         strides_(tensor.sizes().size()),
         requires_grad_(tensor.requires_grad()) {
-          if (!tensor.is_mkldnn()) {
+          if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
             sizes_ = tensor.sizes().vec();
             strides_ = tensor.strides().vec();
           }
@@ -642,6 +666,7 @@ struct CAFFE2_API DictType : public Type {
 
   static DictTypePtr create(TypePtr key, TypePtr value) {
     switch (key->kind()) {
+      case TypeKind::AnyType:
       case TypeKind::IntType:
       case TypeKind::FloatType:
       case TypeKind::StringType:
