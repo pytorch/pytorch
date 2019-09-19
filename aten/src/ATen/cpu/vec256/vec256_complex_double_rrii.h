@@ -111,19 +111,19 @@ public:
     return _mm256_sqrt_pd(abs_2_());
   }
   Vec256<std::complex<double>> abs() const {
-   return Vec256<std::complex<double>>(abs_());
+   return abs_();
   }
   __m256d angle_() const {return Sleef_atan2d4_u10(imag_values, real_values);}
   Vec256<std::complex<double>> angle() const {
-    return Vec256<std::complex<double>>(angle_());
+    return angle_();
   }
   __m256d real_() const {return real_values;}
   Vec256<std::complex<double>> real() const {
-    return Vec256<std::complex<double>>(real_());
+    return real_();
   }
   __m256d imag_() const {return imag_values;}
   Vec256<std::complex<double>> imag() const {
-    return Vec256<std::complex<double>>(imag_());
+    return imag_();
   }
   Vec256<std::complex<double>> acos() const {
     return map(std::acos);
@@ -174,14 +174,15 @@ public:
     return map(std::cosh);
   }
   Vec256<std::complex<double>> ceil() const {
-    return Vec256<std::complex<double>>(_mm256_ceil_pd(real_values), _mm256_ceil_pd(imag_values));
+    return _mm256_ceil_pd(real_values), _mm256_ceil_pd(imag_values);
   }
   Vec256<std::complex<double>> floor() const {
-    return Vec256<std::complex<double>>(_mm256_floor_pd(real_values), _mm256_floor_pd(imag_values));
+    return _mm256_floor_pd(real_values), _mm256_floor_pd(imag_values);
   }
   Vec256<std::complex<double>> neg() const {
     auto zero = _mm256_setzero_pd();
-    return Vec256<std::complex<double>>(_mm256_sub_pd(zero, real_values), _mm256_sub_pd(zero, imag_values));
+    return Vec256<std::complex<double>>(_mm256_sub_pd(zero, real_values),
+                                        _mm256_sub_pd(zero, imag_values));
   }
   Vec256<std::complex<double>> round() const {
     return Vec256<std::complex<double>>(
@@ -224,7 +225,8 @@ public:
   Vec256<std::complex<double>> operator!=(const Vec256<std::complex<double>>& other) const {
     auto real_cmp = _mm256_cmp_pd(real_values, other.real_values, _CMP_NEQ_OQ);
     auto imag_cmp = _mm256_cmp_pd(imag_values, other.imag_values, _CMP_NEQ_OQ);
-    return Vec256<std::complex<double>>(_mm256_and_pd(real_cmp, imag_cmp), _mm256_setzero_pd());
+    return Vec256<std::complex<double>>(_mm256_and_pd(real_cmp, imag_cmp),
+                                        _mm256_setzero_pd());
   }
   Vec256<std::complex<double>> operator<(const Vec256<std::complex<double>>& other) const {
     AT_ERROR("not supported for complex numbers");
@@ -241,11 +243,13 @@ public:
 };
 
 template <> Vec256<std::complex<double>> inline operator+(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
-  return Vec256<std::complex<double>>(_mm256_add_pd(a.real_(), b.real_()), _mm256_add_pd(a.imag_(), b.imag_()));
+  return Vec256<std::complex<double>>(_mm256_add_pd(a.real_(), b.real_()),
+                                      _mm256_add_pd(a.imag_(), b.imag_()));
 }
 
 template <> Vec256<std::complex<double>> inline operator-(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
-  return Vec256<std::complex<double>>(_mm256_sub_pd(a.real_(), b.real_()), _mm256_sub_pd(a.imag_(), b.imag_()));
+  return Vec256<std::complex<double>>(_mm256_sub_pd(a.real_(), b.real_()),
+                                      _mm256_sub_pd(a.imag_(), b.imag_()));
 }
 
 template <> Vec256<std::complex<double>> inline operator*(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
@@ -254,7 +258,8 @@ template <> Vec256<std::complex<double>> inline operator*(const Vec256<std::comp
   auto bd = _mm256_mul_pd(a.imag_(), b.imag_());
   auto ad = _mm256_mul_pd(a.real_(), b.imag_());
   auto bc = _mm256_mul_pd(a.imag_(), b.real_());
-  return Vec256<std::complex<double>>(_mm256_sub_pd(ac, bd), _mm256_add_pd(ad, bc));
+  return Vec256<std::complex<double>>(_mm256_sub_pd(ac, bd),
+                                      _mm256_add_pd(ad, bc));
 }
 
 template <> Vec256<std::complex<double>> inline operator/(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) __ubsan_ignore_float_divide_by_zero__ {

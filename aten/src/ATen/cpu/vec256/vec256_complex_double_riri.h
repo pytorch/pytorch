@@ -41,9 +41,9 @@ public:
       case 0:
         return a;
       case 1:
-        return Vec256<std::complex<double>>(_mm256_blend_pd(a.values, b.values, 0x3));
+        return _mm256_blend_pd(a.values, b.values, 0x3);
       case 2:
-        return Vec256<std::complex<double>>(_mm256_blend_pd(a.values, b.values, 0xc));
+        return _mm256_blend_pd(a.values, b.values, 0xc);
       case 3:
         return b;
       default:
@@ -54,7 +54,7 @@ public:
                                const Vec256<std::complex<double>>& mask) {
     // convert std::complex<V> index mask to V index mask: xy -> xxyy
     auto mask_ = _mm256_unpacklo_pd(mask.values, mask.values);
-    return Vec256<std::complex<double>>(_mm256_blendv_pd(a.values, b.values, mask_));
+    return _mm256_blendv_pd(a.values, b.values, mask_);
 
   }
   static Vec256<std::complex<double>> arange(std::complex<double> base = 0., std::complex<double> step = 1.) {
@@ -110,7 +110,7 @@ public:
     return _mm256_mul_pd(abs, mask);                // abs     0
   }
   Vec256<std::complex<double>> abs() const {
-   return Vec256<std::complex<double>>(abs_());     // abs     0
+   return abs_();     // abs     0
   }
   __m256d angle_() const {
     auto b_a = _mm256_permute_pd(values, 0x5);      //b        a
@@ -119,21 +119,21 @@ public:
     return _mm256_mul_pd(angle, mask);              //0        angle
   }
   Vec256<std::complex<double>> angle() const {
-    return Vec256<std::complex<double>>(_mm256_permute_pd(angle_(), 0x5));  // angle     0
+    return _mm256_permute_pd(angle_(), 0x5);        // angle     0
   }
   __m256d real_() const {
     auto mask = _mm256_setr_pd(1.0, 0.0, 1.0, 0.0);
     return _mm256_mul_pd(values, mask);
   }
   Vec256<std::complex<double>> real() const {
-    return Vec256<std::complex<double>>(real_());
+    return real_();
   }
   __m256d imag_() const {
     auto mask = _mm256_setr_pd(0.0, 1.0, 0.0, 1.0);
     return _mm256_mul_pd(values, mask);
     }
   Vec256<std::complex<double>> imag() const {
-    return Vec256<std::complex<double>>(_mm256_permute_pd(imag_(), 0x5)); //b        a
+    return _mm256_permute_pd(imag_(), 0x5);        //b        a
   }
   Vec256<std::complex<double>> acos() const {
     return map(std::acos);
@@ -184,17 +184,17 @@ public:
     return map(std::cosh);
   }
   Vec256<std::complex<double>> ceil() const {
-    return Vec256<std::complex<double>>(_mm256_ceil_pd(values));
+    return _mm256_ceil_pd(values);
   }
   Vec256<std::complex<double>> floor() const {
-    return Vec256<std::complex<double>>(_mm256_floor_pd(values));
+    return _mm256_floor_pd(values);
   }
   Vec256<std::complex<double>> neg() const {
     auto zero = _mm256_setzero_pd();
-    return Vec256<std::complex<double>>(_mm256_sub_pd(zero, values));
+    return _mm256_sub_pd(zero, values);
   }
   Vec256<std::complex<double>> round() const {
-    return Vec256<std::complex<double>>(_mm256_round_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC)));
+    return _mm256_round_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   }
   Vec256<std::complex<double>> tan() const {
     return map(std::tan);
@@ -203,7 +203,7 @@ public:
     return map(std::tanh);
   }
   Vec256<std::complex<double>> trunc() const {
-    return Vec256<std::complex<double>>(_mm256_round_pd(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC)));
+    return _mm256_round_pd(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
   }
   Vec256<std::complex<double>> sqrt() const {
     return map(std::sqrt);
@@ -221,10 +221,10 @@ public:
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN
   Vec256<std::complex<double>> operator==(const Vec256<std::complex<double>>& other) const {
-    return Vec256<std::complex<double>>(_mm256_cmp_pd(values, other.values, _CMP_EQ_OQ));
+    return _mm256_cmp_pd(values, other.values, _CMP_EQ_OQ);
   }
   Vec256<std::complex<double>> operator!=(const Vec256<std::complex<double>>& other) const {
-    return Vec256<std::complex<double>>(_mm256_cmp_pd(values, other.values, _CMP_NEQ_OQ));
+    return _mm256_cmp_pd(values, other.values, _CMP_NEQ_OQ);
   }
   Vec256<std::complex<double>> operator<(const Vec256<std::complex<double>>& other) const {
     AT_ERROR("not supported for complex numbers");
@@ -241,11 +241,11 @@ public:
 };
 
 template <> Vec256<std::complex<double>> inline operator+(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
-  return Vec256<std::complex<double>>(_mm256_add_pd(a, b));
+  return _mm256_add_pd(a, b);
 }
 
 template <> Vec256<std::complex<double>> inline operator-(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
-  return Vec256<std::complex<double>>(_mm256_sub_pd(a, b));
+  return _mm256_sub_pd(a, b);
 }
 
 template <> Vec256<std::complex<double>> inline operator*(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
@@ -258,7 +258,7 @@ template <> Vec256<std::complex<double>> inline operator*(const Vec256<std::comp
   auto ad_bc = _mm256_mul_pd(a, d_c);       //ad      -bc
 
   auto ret = _mm256_hsub_pd(ac_bd, ad_bc);  //ac - bd  ad + bc
-  return Vec256<std::complex<double>>(ret);
+  return ret;
 }
 
 template <> Vec256<std::complex<double>> inline operator/(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) __ubsan_ignore_float_divide_by_zero__ {
@@ -273,7 +273,7 @@ Vec256<std::complex<double>> inline maximum(const Vec256<std::complex<double>>& 
   auto abs_a = a.abs_2_();
   auto abs_b = b.abs_2_();
   auto mask = _mm256_cmp_pd(abs_a, abs_b, _CMP_LT_OQ);
-  return Vec256<std::complex<double>>(_mm256_blendv_pd(a, b, mask));
+  return _mm256_blendv_pd(a, b, mask);
 }
 
 template <>
@@ -281,7 +281,7 @@ Vec256<std::complex<double>> inline minimum(const Vec256<std::complex<double>>& 
   auto abs_a = a.abs_2_();
   auto abs_b = b.abs_2_();
   auto mask = _mm256_cmp_pd(abs_a, abs_b, _CMP_GT_OQ);
-  return Vec256<std::complex<double>>(_mm256_blendv_pd(a, b, mask));
+  return _mm256_blendv_pd(a, b, mask);
 }
 
 template <>
@@ -291,7 +291,7 @@ Vec256<std::complex<double>> inline clamp(const Vec256<std::complex<double>>& a,
   auto max_mask = _mm256_cmp_pd(abs_a, abs_min, _CMP_LT_OQ);
   auto abs_max = max.abs_2_();
   auto min_mask = _mm256_cmp_pd(abs_a, abs_max, _CMP_GT_OQ);
-  return Vec256<std::complex<double>>(_mm256_blendv_pd(_mm256_blendv_pd(a, min, max_mask), max, min_mask));
+  return _mm256_blendv_pd(_mm256_blendv_pd(a, min, max_mask), max, min_mask);
 }
 
 template <>
@@ -299,7 +299,7 @@ Vec256<std::complex<double>> inline clamp_min(const Vec256<std::complex<double>>
   auto abs_a = a.abs_2_();
   auto abs_min = min.abs_2_();
   auto max_mask = _mm256_cmp_pd(abs_a, abs_min, _CMP_LT_OQ);
-  return Vec256<std::complex<double>>(_mm256_blendv_pd(a, min, max_mask));
+  return _mm256_blendv_pd(a, min, max_mask);
 }
 
 template <>
@@ -307,7 +307,7 @@ Vec256<std::complex<double>> inline clamp_max(const Vec256<std::complex<double>>
   auto abs_a = a.abs_2_();
   auto abs_max = max.abs_2_();
   auto min_mask = _mm256_cmp_pd(abs_a, abs_max, _CMP_GT_OQ);
-  return Vec256<std::complex<double>>(_mm256_blendv_pd(a, max, min_mask));
+  return _mm256_blendv_pd(a, max, min_mask);
 }
 
 template <>
