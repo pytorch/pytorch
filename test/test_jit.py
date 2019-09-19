@@ -1065,6 +1065,47 @@ graph(%x : Tensor,
         test_module(M2, 'prim::CallMethod[name="forward"]', 0)
 
     @_tmp_donotuse_dont_inline_everything
+    def test_insert_observers_weight_dtype(self):
+        class Observer(torch.nn.Module):
+            def __init__(self, dtype=torch.quint8):
+                super(Observer, self).__init__()
+                self.dtype = dtype
+
+            def forward(self, x):
+                return x
+
+            @torch.jit.export
+            def calculate_qparams(self):
+                return torch.tensor([2.0]), torch.tensor([3])
+
+        class WeightObserver(Observer):
+            def __init__(self):
+                super(WeightObserver, self).__init__(torch.qint8)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 5, 3)
+
+            def forward(self, x):
+                return F.relu(self.conv(x))
+        def get_forward(m):
+            return m._c._get_method("forward")
+
+        m = torch.jit.script(M())
+        observer = torch.jit.script(Observer())
+        weight_observer = torch.jit.script(WeightObserver())
+        qconfig_dict = {
+            '':
+            QConfig(
+                activation=observer._c,
+                weight=weight_observer._c)
+        }
+        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+        assert m._c._get_module('conv')._get_module('observer_for_input.1')._get_attribute('dtype') == 13 # torch.quint8
+        assert m._c._get_module('conv')._get_module('observer_for_weight.1')._get_attribute('dtype') == 12 # torch.qint8
+
+    @_tmp_donotuse_dont_inline_everything
     def test_insert_quant_dequant(self):
         class Observer(torch.nn.Module):
             def __init__(self):
@@ -19509,6 +19550,10 @@ class TestClassType(JitTestCase):
                 # type: (int) -> int
                 return other + 1
 
+            def __setitem__(self, idx, val):
+                # type: (int, int) -> None
+                self.x = val * idx
+
         def add():
             return BinOps(4) + 3
         def sub():  # noqa: E306
@@ -19539,8 +19584,13 @@ class TestClassType(JitTestCase):
             return BinOps(4) ^ 3
         def getitem():  # noqa: E306
             return BinOps(4)[1]
+        def setitem():  # noqa: E306
+            a = BinOps(4)
+            a[1] = 5
+            return a.x
 
-        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem]
+        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem, setitem]
+
         if not PY2:
             ops.append(truediv)
         for func in ops:

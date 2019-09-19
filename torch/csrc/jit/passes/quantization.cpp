@@ -246,11 +246,12 @@ void propagateWeightValues(
     Node* n,
     const script::Module& module,
     const std::string& module_method_name,
-    std::unordered_set<Value*> weight_values) {
+    std::unordered_set<Value*>& weight_values) {
   auto method = module.get_method(module_method_name);
   auto graph = method.graph();
   for (auto i = 1; i < n->inputs().size(); ++i) {
     if (weight_values.count(n->inputs()[i])) {
+      std::cout << "adding value " << i << " " << graph->inputs()[i] << std::endl;
       weight_values.emplace(graph->inputs()[i]);
     }
   }
@@ -293,8 +294,8 @@ void InsertObserversImpl(
     if (!values_to_skip.count(v) && valueNeedsToBeQuantized(v)) {
       auto qconfig = module_qconfig_map.at(module.module_object());
       if (qconfig) {
-        auto observer_node =
-          insertObserver(v, v->owningGraph(), module, qconfig.value(), weight_values);
+        auto observer_node = insertObserver(
+            v, v->owningGraph(), module, qconfig.value(), weight_values);
         if (observer_node) {
           observer_for_input.emplace(observer_node);
         }
@@ -317,10 +318,10 @@ void InsertObserversImpl(
       for (Value* v : n->outputs()) {
         if (!values_to_skip.count(v) && valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
-          if (v->node()->kind() == prim::GetAttr &&
-              v->node()->s(attr::name) == "weight") {
-            weight_values.emplace(v);
-          }
+        }
+        if (v->node()->kind() == prim::GetAttr &&
+            v->node()->s(attr::name) == "weight") {
+          weight_values.emplace(v);
         }
         if (v->node()->kind() == prim::CallMethod) {
           // If we find a call to a method of a child module,
@@ -328,16 +329,19 @@ void InsertObserversImpl(
           // the child module.
           auto module_instance = v->node()->inputs()[0];
           auto module_method_name = v->node()->s(attr::name);
-          // TODO: looks like this block is not related to v? maybe we should move
-          // this outside
+          // TODO: looks like this block is not related to v? maybe we should
+          // move this outside
           if (module_instance->node()->kind() == prim::GetAttr) {
             auto child_module_name = module_instance->node()->s(attr::name);
             auto child_module = module.find_module(child_module_name);
             TORCH_INTERNAL_ASSERT(
                 child_module,
                 "Child module " + child_module_name + " does not exist");
-            propagateWeightValues(v->node(), child_module.value(), module_method_name,
-                                  weight_values);
+            propagateWeightValues(
+                v->node(),
+                child_module.value(),
+                module_method_name,
+                weight_values);
             // Recursively insert observer for the forward function of child
             // module
             InsertObserversImpl(
@@ -351,10 +355,15 @@ void InsertObserversImpl(
                 module_instance == graph->inputs()[0],
                 "We only support call method either on %self"
                 "or child instance in insert_observers_pass right now");
-            propagateWeightValues(v->node(), module, module_method_name,
-                                  weight_values);
+            std::cout << "propagate values for " << module_method_name << std::endl;
+            std::cout << "weight values: " << weight_values.size() << std::endl;
+            propagateWeightValues(
+                v->node(), module, module_method_name, weight_values);
             InsertObserversImpl(
-                module, module_method_name, module_qconfig_map, values_to_skip,
+                module,
+                module_method_name,
+                module_qconfig_map,
+                values_to_skip,
                 weight_values);
           }
         }
@@ -376,7 +385,8 @@ void InsertObserversImpl(
     auto qconfig = module_qconfig_map.at(module.module_object());
     // Skip inserting observer if no qconfig is specified
     if (qconfig) {
-      insertObserver(v, v->owningGraph(), module, qconfig.value(), weight_values);
+      insertObserver(
+          v, v->owningGraph(), module, qconfig.value(), weight_values);
     }
   }
 }
@@ -506,8 +516,7 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
       v->debugName(),
       " exists.");
   auto om = observer_module.value();
-  auto calculate_qparams =
-      om.get_method("calculate_qparams");
+  auto calculate_qparams = om.get_method("calculate_qparams");
   IValue qparams = calculate_qparams(std::vector<IValue>());
   auto scalar_type = om.get_attribute("dtype");
   return std::make_tuple(qparams, scalar_type);
@@ -623,7 +632,8 @@ TORCH_API void InsertObservers(
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   std::unordered_set<Value*> values_to_skip;
   std::unordered_set<Value*> weight_values;
-  InsertObserversImpl(module, method_name, module_qconfig_map, values_to_skip, weight_values);
+  InsertObserversImpl(
+      module, method_name, module_qconfig_map, values_to_skip, weight_values);
 }
 
 script::Module InsertQuantDeQuant(
@@ -896,7 +906,6 @@ graph(%self, %x):
 void FoldQuantizeCallIntoBuffer(
     script::Module& module,
     const std::string& method_name) {
-  // TODO: extra filter on scale/zero_point/dtype to make sure they are Constant
   const std::string pattern = R"(
 graph(%self, %scale, %zero_point, %dtype):
    %weight = prim::GetAttr[name="weight"](%self)
@@ -908,12 +917,26 @@ graph(%self, %scale, %zero_point, %dtype):
   auto method = module.get_method(method_name);
   auto graph = method.graph();
   auto matches = findPatternMatches(pattern_graph, *graph);
+  // Extra filter on scale/zero_point/dtype to make sure they are Constant
+  auto filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto scale_node = match_vmap.at(vmap.at("scale"))->node();
+    auto zero_point_node = match_vmap.at(vmap.at("zero_point"))->node();
+    auto dtype_node = match_vmap.at(vmap.at("dtype"))->node();
+    return scale_node->kind() == prim::Constant &&
+        zero_point_node->kind() == prim::Constant &&
+        dtype_node->kind() == prim::Constant;
+  };
   for (const auto& match : matches) {
+    if (!filter(match, vmap)) {
+      continue;
+    }
     auto match_vmap = match.values_map;
     auto float_weight = module.get_parameter("weight").variable_data();
     auto scale = toIValue(match_vmap.at(vmap.at("scale"))).value().toDouble();
     auto zero_point =
-        toIValue(match_vmap.at(vmap.at("zero_point"))).value().toInt();
+      toIValue(match_vmap.at(vmap.at("zero_point"))).value().toInt();
     auto dtype =
         toIValue(match_vmap.at(vmap.at("dtype"))).value().toScalarType();
     module.register_buffer(
@@ -927,7 +950,7 @@ graph(%self, %scale, %zero_point, %dtype):
     return (%weight_quant))";
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(pattern, replacement);
-  rewriter.runOnGraph(graph);
+  rewriter.runOnGraph(graph, filter);
 }
 } // namespace jit
 } // namespace torch
