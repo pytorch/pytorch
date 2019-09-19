@@ -267,7 +267,8 @@ if(CAFFE2_STATIC_LINK_CUDA)
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
     if (CUDA_VERSION VERSION_EQUAL 10.1)
       set_property(
-        TARGET caffe2::cublas PROPERTY LINK_FLAGS "-lcublasLt_static"
+        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/lcublasLt_static.a"
       )
     endif()
 else()
