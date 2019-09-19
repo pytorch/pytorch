@@ -4,6 +4,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
 
+#include <ATen/core/ATenDispatch.h>
+
 using namespace at;
 
 static int test_int;
@@ -61,4 +63,13 @@ TEST(BackendExtensionTest, TestRegisterOp) {
         .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(TensorTypeId::MSNPUTensorId)
         .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   );
+}
+
+void generic_override(const char* schema, torch::jit::Stack* stack) {
+  std::cerr << "arf\n";
+}
+
+TEST(BackendExtensionTest, TestBoxedFallback) {
+  globalATenDispatch().registerFallbackBoxedOp(TensorTypeId::XLATensorId, &generic_override);
+  Tensor a = empty({5, 5}, at::DeviceType::XLA);
 }

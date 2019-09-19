@@ -83,8 +83,7 @@ using not_ok_to_box =
     // template arguments, so we must blacklist them explicitly
     // TODO: The correct fix is to sfinae based on is_constructible of T
     std::is_same<optional<ArrayRef<Dimname>>, T>,
-    std::is_same<optional<ScalarType>, T>,
-    std::is_same<optional<MemoryFormat>, T>
+    std::is_same<optional<ScalarType>, T>
   >;
 
 template <class Result, class... Args>
@@ -206,11 +205,6 @@ Result ATenOpTable::callUnboxed(Args... args) const {
     return (*unboxed_fn)(std::forward<Args>(args)...);
   }
 
-  auto* unboxed_fallback_fn = reinterpret_cast<FuncType*>(function_table_[static_cast<int64_t>(TensorTypeId::UndefinedTensorId)]);
-  if (C10_LIKELY(unboxed_fallback_fn != nullptr)) {
-    return (*unboxed_fallback_fn)(std::forward<Args>(args)...);
-  }
-
   // We need to do a if statement on box fallback support AS WELL
   // as SFINAE.
   //    - If statement: because some functions return void, and so
@@ -220,9 +214,14 @@ Result ATenOpTable::callUnboxed(Args... args) const {
   //    we must not typecheck code if it does not work
   if (supports_boxed_fallback<Result, Args...>::value) {
     auto* boxed_fallback_fn = globalATenDispatch().getFallbackBoxedOp(tid);
-    if (boxed_fallback_fn) {
+    if (C10_UNLIKELY(boxed_fallback_fn)) {
       return callBoxedFallback<Result, Args...>(schema_.c_str(), boxed_fallback_fn, std::forward<Args>(args)...);
     }
+  }
+
+  auto* unboxed_fallback_fn = reinterpret_cast<FuncType*>(function_table_[static_cast<int64_t>(TensorTypeId::UndefinedTensorId)]);
+  if (C10_LIKELY(unboxed_fallback_fn != nullptr)) {
+    return (*unboxed_fallback_fn)(std::forward<Args>(args)...);
   }
 
   reportError(tid);
