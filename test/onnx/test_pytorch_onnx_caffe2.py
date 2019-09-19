@@ -1385,6 +1385,28 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(FullClass(), train=False, input=(x,), batch_size=BATCH_SIZE,
                             use_gpu=False, example_outputs=FullClass()(x))
 
+    def test_clamp(self):
+        class ClampModel(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(-0.5, 0.5)
+
+        x = torch.randn(3, 4)
+        self.run_model_test(ClampModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
+        class ClampMinModel(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(min=-0.5)
+
+        x = torch.randn(3, 4)
+        self.run_model_test(ClampMinModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
+        class ClampMaxModel(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(max=0.5)
+
+        x = torch.randn(3, 4)
+        self.run_model_test(ClampMaxModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_where_functional(self):
         class WhereFunctional(torch.nn.Module):
