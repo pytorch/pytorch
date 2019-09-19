@@ -955,6 +955,12 @@ class _TestTorchMixin(object):
         test((10,))
         test((5, 5))
 
+    def test_where_bool_tensor(self):
+        for d in torch.testing.get_all_device_types():
+            a = torch.tensor([True, False], device=d)
+            res = torch.where(a > 0)
+            self.assertEqual(1, len(res))
+
     def test_all_any_with_dim(self):
         def test(x):
             r1 = x.prod(dim=0, keepdim=False).byte()
@@ -7290,7 +7296,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(res1, empty)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    'non-empty list of Tensors'):
+                                    'expected a non-empty list of Tensors'):
             torch.cat([], dim=1)
 
     def test_cat_empty(self, device):
