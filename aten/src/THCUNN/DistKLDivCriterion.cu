@@ -16,7 +16,7 @@ struct kl_functor
   __host__ __device__ Acctype operator()(const Dtype& x, const Dtype& y) const
   {
       Acctype yAcc = ScalarConvert<Dtype, Acctype>::to(y);
-      return y > 0 ? yAcc * (THCNumerics<Acctype>::log(yAcc) - x) : Acctype(0);
+      return y > 0 ? yAcc * (std::log(yAcc) - x) : Acctype(0);
   }
 };
 
@@ -28,7 +28,7 @@ struct kl_updateOutput_no_reduce_functor
       const Dtype *y,
       Dtype *output)
   {
-      *output = *y > 0 ? *y * (THCNumerics<Dtype>::log(*y) - *x) : ScalarConvert<int, Dtype>::to(0);
+      *output = *y > 0 ? ScalarConvert<int, Dtype>::to(*y * (std::log(*y) - *x)) : ScalarConvert<int, Dtype>::to(0);
   }
 };
 
