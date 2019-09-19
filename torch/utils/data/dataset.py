@@ -309,7 +309,6 @@ class ChunkDataset(IterableDataset):
         # Internal state
         self._chunk_sampler_iter = None
         self._cache = []
-        self._batch_size = 1
         self._min_cache = 1000
         self._is_ready = False
 
@@ -355,18 +354,10 @@ class ChunkDataset(IterableDataset):
 
         # Get a batch and update internal cache cache
         if len(self._cache) > 0:
-            batch = self._cache[:self._batch_size]
-            self._cache = self._cache[self._batch_size:]
+            batch = self._cache[:1]
+            self._cache = self._cache[1:]
 
-        # `self._batch_size` is hard-coded to 1 to leverage DataLoader's auto collation
-        # to create a batch. In this case,  `ChunkDataset` returns a single sample.
-        # In the future, `self._batch_size` might be > 1 to achieve better performance.
-        # In this case, a list of samples would be returned and the DataLoader's
-        # `batch_size` should be set to `None` to disable auto collation.
-        if self._batch_size == 1:
-            return batch[0]
-        else:
-            return batch
+        return batch[0]
 
     def reset(self, epoch=None):
         r"""Resets internal state of ChunkDataset
