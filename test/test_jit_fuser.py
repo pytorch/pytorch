@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import FileCheck
 
-from common_utils import run_tests, IS_WINDOWS, IS_SANDCASTLE
+from common_utils import run_tests, IS_SANDCASTLE
 from textwrap import dedent
 from itertools import product, permutations
 
@@ -37,7 +37,7 @@ class TestFuser(JitTestCase):
         self.assertEqual(func(a), a.abs() * 2)
         self.assertAllFused(func.graph_for(a))
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser CPU support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @enable_cpu_fuser
     def test_abs_cpu(self):
         self._test_fused_abs()
@@ -180,7 +180,7 @@ class TestFuser(JitTestCase):
             for fn in fns:
                 self.checkScript(fn, [tensor])
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser CPU support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @enable_cpu_fuser
     def test_chunk_correctness(self):
         return self._test_chunk_correctness(self, 'cpu')
@@ -502,7 +502,7 @@ class TestFuser(JitTestCase):
         self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
                                                                   "aten::_size_if_not_equal"))
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser CPU support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @enable_cpu_fuser
     def test_fuser_deduplication(self):
         # See that fusion kernel outputs are deduplicated when removing  _grad_sum_to_size in the fuser's compilation
@@ -522,7 +522,7 @@ class TestFuser(JitTestCase):
         # check that a, b share storage, i.e. were generated as a single output in the fuser
         self.assertEqual(ga.data_ptr(), gb.data_ptr())
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser CPU support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @enable_cpu_fuser
     @unittest.skip("temporarily disabled because fusion was restricted in fixing #22833")
     def test_fuser_iou(self):
@@ -683,7 +683,7 @@ class TestFuser(JitTestCase):
             .check_not("aten::tanh").check("FusionGroup").check_next("TupleConstruct") \
             .check_next("return").check_not("FusionGroup_1").run(str(graph))
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser CPU support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
     @enable_cpu_fuser
     def test_lstm_traced_cpu(self):
@@ -782,7 +782,7 @@ class TestFuser(JitTestCase):
         out = script_f(x, y)
         self.assertEqual(out[0], out[1])
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser CPU support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @enable_cpu_fuser
     def test_scalar(self):
         def fn(x, y):
@@ -828,7 +828,7 @@ class TestFuser(JitTestCase):
         self.assertGraphContainsExactly(
             ge.graph_for(*inputs), 'prim::FusionGroup', 0, consider_subgraphs=True)
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser CPU support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @enable_cpu_fuser
     def test_where_and_typing(self):
         def f(x, y):

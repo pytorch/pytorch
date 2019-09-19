@@ -5,6 +5,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/Dimname.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <torch/csrc/utils/variadic.h>
 

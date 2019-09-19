@@ -1,7 +1,7 @@
 #ifndef THP_AUTOGRAD_H
 #define THP_AUTOGRAD_H
 
-PyObject * THPAutograd_initExtension(PyObject *_unused);
+PyObject * THPAutograd_initExtension(PyObject *_unused, PyObject *unused);
 void THPAutograd_initFunctions();
 
 namespace torch { namespace autograd {
