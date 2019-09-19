@@ -757,6 +757,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::backward", ""},
         {"aten::set_data", ""},
         {"aten::is_leaf", ""},
+        {"aten::output_nr", ""},
     #ifdef BUILD_NAMEDTENSOR
         {"aten::names_", ""},
     #endif
