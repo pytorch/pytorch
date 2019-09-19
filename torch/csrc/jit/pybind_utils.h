@@ -395,7 +395,9 @@ inline IValue toIValue(
       for (size_t i = 0; i < tuple_size; ++i) {
         values.push_back(toIValue(tuple[i], elem_types[i]));
       }
-      return c10::ivalue::Tuple::create(std::move(values), tuple_type);
+      return tuple_type->name()
+          ? c10::ivalue::Tuple::createNamed(std::move(values), tuple_type)
+          : c10::ivalue::Tuple::create(std::move(values));
     }
     case TypeKind::StringType:
       return ConstantString::create(py::cast<std::string>(obj));
@@ -495,6 +497,8 @@ inline IValue toIValue(
       AT_ERROR("Function Values aren't yet supported");
     case TypeKind::CapsuleType:
       AT_ERROR("Capsule Values aren't supported");
+    case TypeKind::AnyType:
+      AT_ERROR("AnyType Values aren't supported");
   }
   AT_ERROR(
       "Missing cases in toIValue for type: ",
@@ -612,11 +616,11 @@ inline py::object toPyObject(IValue&& ivalue) {
     for (size_t i = 0; i < elements.size(); ++i) {
       t[i] = toPyObject(IValue{elements.at(i)});
     }
-    if (tuple->type && tuple->type->schema() &&
-        tuple->type->schema()->name() != "") {
-      auto unqualName = tuple->type->name()->name();
+    if (tuple->type() && tuple->type()->schema() &&
+        tuple->type()->schema()->name() != "") {
+      auto unqualName = tuple->type()->name()->name();
       auto fieldNames = fmap(
-          tuple->type->schema()->arguments(),
+          tuple->type()->schema()->arguments(),
           [](const Argument& arg) { return arg.name(); });
       return py::module::import("torch.jit")
           .attr("_create_named_tuple")(
