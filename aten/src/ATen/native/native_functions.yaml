@@ -1445,15 +1445,12 @@
   use_c10_dispatcher: True
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _log__cpu
-    CUDA: _log__cuda
 
 - func: log.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _log_out_cpu
-    CUDA: _log_out_cuda
+    CPU: log_out
+    CUDA: log_out
 
 - func: log10(Tensor self) -> Tensor
   use_c10_dispatcher: True

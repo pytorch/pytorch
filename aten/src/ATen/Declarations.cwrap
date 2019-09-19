@@ -1159,20 +1159,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_log
-  cname: log
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_log10
   cname: log10
   types:
