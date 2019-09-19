@@ -270,7 +270,9 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                                          lambda x, *args, **kw: test_case._forward(module, x), (input,) + params)
 
         # check if module can be printed
-        module.__repr__()
+        representation = module.__repr__()
+        for constant in module.__constants__:
+            test_case.assertIn(constant + "=", representation)
 
         if self.check_inplace:
             # check if the inplace variant of the module gives the same result
