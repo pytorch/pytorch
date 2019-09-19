@@ -2567,7 +2567,8 @@ class TestAutograd(TestCase):
     @skipIfNoLapack
     def test_cholesky_inverse(self):
         def _test_with_size(upper, dims):
-            root = torch.randn(*dims).requires_grad_()
+            # Too small values cause inconsistencies in gradient calculation, hence the special initialization
+            root = (torch.empty(*dims).uniform_(1, 2)).requires_grad_()
 
             def func(root, upper):
                 if upper:
