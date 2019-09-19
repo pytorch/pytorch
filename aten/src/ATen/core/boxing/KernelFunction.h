@@ -10,6 +10,16 @@ namespace c10 {
 
 namespace detail {
 template<class Return, class... Args> struct boxAndCallBoxedFunc;
+
+template<class FuncType>
+constexpr uint64_t hashFunctionSignature() {
+  using func_traits = guts::infer_function_traits_t<FuncType>;
+  #ifdef __GXX_RTTI
+    return typeid(typename func_traits::func_type).hash_code();
+  #else
+    return 0;
+  #endif
+}
 }
 
 /**
@@ -27,6 +37,7 @@ public:
   , functor_(nullptr)
   , boxed_kernel_func_(nullptr)
   , unboxed_kernel_func_(nullptr)
+  , signature_hash_(c10::nullopt)
   {}
 
   bool isValid() const {
@@ -89,6 +100,9 @@ public:
 
     // TODO Remove this function once all kernels support a boxed variant
 
+    TORCH_INTERNAL_ASSERT(!signature_hash_.has_value() || (detail::hashFunctionSignature<Return (Args...)>() == *signature_hash_),
+      "Called KernelFunction::callUnboxedOnly with wrong argument types");
+
     if (unboxed_kernel_func_ != nullptr) {
       using ActualSignature = Return (OperatorKernel*, Args...);
       ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func_);
@@ -123,6 +137,9 @@ public:
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
 
+    TORCH_INTERNAL_ASSERT(!signature_hash_.has_value() || (detail::hashFunctionSignature<Return (Args...)>() == *signature_hash_),
+      "Called KernelFunction::callUnboxed with wrong argument types");
+
     if (unboxed_kernel_func_ != nullptr) {
       using ActualSignature = Return (OperatorKernel*, Args...);
       ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func_);
@@ -146,7 +163,8 @@ public:
       nullptr,  // no functorFactory_, this can only be called in a boxed way.
       nullptr,  // no functor_ object either
       func,
-      nullptr  // no unboxed function pointer
+      nullptr,  // no unboxed function pointer
+      c10::nullopt  // signature is not known, we can't error check unboxed calls.
     );
   }
 
@@ -170,7 +188,8 @@ public:
       nullptr, // no functorFactory_ because we already have the functor_
       std::move(kernelFunctor),
       &detail::wrap_kernel_functor_boxed<KernelFunctor, AllowLegacyTypes>::call,
-      reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call)
+      reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
+      detail::hashFunctionSignature<KernelFunctor>()
     );
   }
 
@@ -203,7 +222,8 @@ public:
       std::move(kernelFunctorFactory),
       nullptr, // delay creation of functor_ (it will be created by calling functorFactory_ later)
       &detail::wrap_kernel_functor_boxed<KernelFunctor, AllowLegacyTypes>::call,
-      reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call)
+      reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
+      detail::hashFunctionSignature<KernelFunctor>()
     );
   }
 
@@ -237,7 +257,8 @@ public:
       nullptr, // no functorFactory_ because we already have the functor_
       std::move(kernelFunctor),
       nullptr, // Don't create a boxed kernel for this
-      reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call)
+      reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
+      detail::hashFunctionSignature<KernelFunctor>()
     );
   }
 
@@ -334,11 +355,12 @@ public:
 
 private:
 
-  explicit KernelFunction(std::function<std::shared_ptr<OperatorKernel>()> functorFactory, std::shared_ptr<OperatorKernel> functor, BoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func)
+  explicit KernelFunction(std::function<std::shared_ptr<OperatorKernel>()> functorFactory, std::shared_ptr<OperatorKernel> functor, BoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func, c10::optional<uint64_t> signature_hash)
   : functorFactory_(std::move(functorFactory))
   , functor_(std::move(functor))
   , boxed_kernel_func_(boxed_kernel_func)
   , unboxed_kernel_func_(unboxed_kernel_func)
+  , signature_hash_(signature_hash)
   {}
 
   OperatorKernel* getFunctor_() const {
@@ -366,6 +388,12 @@ private:
 
   BoxedKernelFunction* boxed_kernel_func_;
   void* unboxed_kernel_func_;
+
+  // signature_hash_ is set to the hash of the function signature if the
+  // KernelFunction was created in a way that allowed us to know the function
+  // signature. If this is set, it will be used in unboxed function calls
+  // to verify their arguments against the known function signature.
+  c10::optional<uint64_t> signature_hash_;
 };
 
 namespace detail {
