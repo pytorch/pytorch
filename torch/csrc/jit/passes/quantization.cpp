@@ -510,8 +510,7 @@ void QuantizeHelper::quantizeBias(Value* v) {
           c10::Scalar(getScale(act_qparam) * getScale(weight_qparam)),
           at::kDouble);
       IValue bias_qparam = c10::ivalue::Tuple::create(
-          std::vector<IValue>({bias_scale, at::scalar_tensor(c10::Scalar(0))}),
-          act_qparam.toTuple()->type);
+          std::vector<IValue>({bias_scale, at::scalar_tensor(c10::Scalar(0))}));
       Node* dequant = insertQuantDeQuantCall(v, bias_qparam, at::kQInt32);
       v->replaceAllUsesWith(dequant->output());
       Node* q = traverseToQuantNode(dequant);
@@ -925,7 +924,6 @@ graph(%self, %x):
 void FoldQuantizeCallIntoBuffer(
     script::Module& module,
     const std::string& method_name) {
-  // TODO: extra filter on scale/zero_point/dtype to make sure they are Constant
   const std::string pattern = R"(
 graph(%self, %scale, %zero_point, %dtype):
    %weight = prim::GetAttr[name="weight"](%self)
@@ -937,7 +935,21 @@ graph(%self, %scale, %zero_point, %dtype):
   auto method = module.get_method(method_name);
   auto graph = method.graph();
   auto matches = findPatternMatches(pattern_graph, *graph);
+  // Extra filter on scale/zero_point/dtype to make sure they are Constant
+  auto filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto scale_node = match_vmap.at(vmap.at("scale"))->node();
+    auto zero_point_node = match_vmap.at(vmap.at("zero_point"))->node();
+    auto dtype_node = match_vmap.at(vmap.at("dtype"))->node();
+    return scale_node->kind() == prim::Constant &&
+        zero_point_node->kind() == prim::Constant &&
+        dtype_node->kind() == prim::Constant;
+  };
   for (const auto& match : matches) {
+    if (!filter(match, vmap)) {
+      continue;
+    }
     auto match_vmap = match.values_map;
     auto float_weight = module.get_parameter("weight").variable_data();
     auto scale = toIValue(match_vmap.at(vmap.at("scale"))).value().toDouble();
@@ -956,7 +968,7 @@ graph(%self, %scale, %zero_point, %dtype):
     return (%weight_quant))";
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(pattern, replacement);
-  rewriter.runOnGraph(graph);
+  rewriter.runOnGraph(graph, filter);
 }
 } // namespace jit
 } // namespace torch
