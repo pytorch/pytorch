@@ -11,7 +11,7 @@ void L1LossImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor L1LossImpl::forward(const Tensor& input, const Tensor& target) {
-  return torch::l1_loss(input, target, options.reduction_);
+  return torch::l1_loss(input, target, options.reduction());
 }
 
 } // namespace nn
