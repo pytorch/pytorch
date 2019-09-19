@@ -609,8 +609,6 @@ CAFFE2_API void ReinitializeAndCopyFrom(
     const Tensor& src,
     bool async = false);
 
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(12, Tensor)
-
 using TensorCPU = Tensor;
 
 constexpr int k_limit_default_ = 1000;
