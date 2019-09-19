@@ -48,22 +48,12 @@ void check_names_valid_for(const Tensor& tensor, DimnameList names) {
 
 namespace impl {
 
-static DimnameList::const_iterator find_duplicate_names(
-    DimnameList::const_iterator begin,
-    DimnameList::const_iterator end,
-    const Dimname& target) {
-  return std::find_if(begin, end,
-      [&target](const Dimname& candidate) {
-        return target == candidate;
-      });
-}
-
 static void check_unique_names(DimnameList names) {
   // Strategy: Compare each element with the ones that come after it.
   // Although this is O(N^2), in practice N is small (no more than 25).
   for (auto it = names.begin(); it != names.end(); ++it) {
     if (it->is_wildcard()) continue;
-    auto dup = find_duplicate_names(it + 1, names.end(), *it);
+    auto dup = std::find(it + 1, names.end(), *it);
     while (dup != names.end()) {
       TORCH_CHECK(false,
           "Cannot construct a tensor with duplicate names. Got names: ",
