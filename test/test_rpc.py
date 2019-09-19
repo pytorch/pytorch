@@ -7,9 +7,17 @@ import unittest
 import torch
 import torch.distributed as dist
 
+if not dist.is_available():
+    print("c10d not available, skipping tests")
+    sys.exit(0)
+
+from torch.distributed.rpc import RpcBackend
 from common_distributed import MultiProcessTestCase
 from common_utils import load_tests, run_tests
+from os import getenv
 
+BACKEND = getenv('RPC_BACKEND', RpcBackend.PROCESS_GROUP)
+RPC_INIT_URL = getenv('RPC_INIT_URL', '')
 
 # it is used to test python user defined function over rpc
 def my_function(a, b, c):
@@ -63,11 +71,6 @@ class my_class:
 load_tests = load_tests
 
 
-if not dist.is_available():
-    print("c10d not available, skipping tests")
-    sys.exit(0)
-
-
 def _wrap_with_rpc(func):
     '''
         We use this decorator for setting up and tearing down state since
@@ -79,7 +82,10 @@ def _wrap_with_rpc(func):
         store = dist.FileStore(self.file.name, self.world_size)
         dist.init_process_group(backend='gloo', rank=self.rank,
                                 world_size=self.world_size, store=store)
-        dist.init_model_parallel('worker%d' % self.rank)
+        dist.init_model_parallel(self_name='worker%d' % self.rank,
+                                 backend=BACKEND,
+                                 self_rank=self.rank,
+                                 init_method=RPC_INIT_URL)
         func(self)
         dist.join_rpc()
 
@@ -123,33 +129,39 @@ class RpcTest(MultiProcessTestCase):
         ):
             dist.rpc(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
 
-    def test_duplicated_names(self):
+    def test_reinit(self):
         store = dist.FileStore(self.file.name, self.world_size)
         dist.init_process_group(backend="gloo", rank=self.rank,
                                 world_size=self.world_size, store=store)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
-            dist.init_model_parallel("duplicated_name")
+            dist.init_model_parallel(self_name="duplicate_name",
+                                     backend=BACKEND,
+                                     self_rank=self.rank,
+                                     init_method=RPC_INIT_URL)
         dist.join_rpc()
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     def test_invalid_names(self):
         store = dist.FileStore(self.file.name, self.world_size)
         dist.init_process_group(backend="gloo", rank=self.rank,
                                 world_size=self.world_size, store=store)
 
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            dist.init_model_parallel("abc*")
+            dist.init_model_parallel(self_name="abc*")
 
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            dist.init_model_parallel(" ")
+            dist.init_model_parallel(self_name=" ")
 
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
-            dist.init_model_parallel("")
+            dist.init_model_parallel(self_name="")
 
         # If the number in the message does not match, it is likely that the
         # value of MAX_NAME_LEN in RPC WorkerId has changed.
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
-            dist.init_model_parallel("".join(["a" for _ in range(500)]))
-
+            dist.init_model_parallel(self_name="".join(["a" for _ in range(500)]),
+                                     backend=BACKEND,
+                                     self_rank=self.rank,
+                                     init_method=RPC_INIT_URL)
         dist.join_rpc()
 
     @_wrap_with_rpc

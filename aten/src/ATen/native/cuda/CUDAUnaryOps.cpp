@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 namespace at { namespace native {
 
@@ -80,8 +81,6 @@ IMPLEMENT_UNARY_OP_PREQUEL(log10)
 IMPLEMENT_UNARY_OP_PREQUEL(log1p)
 IMPLEMENT_UNARY_OP_PREQUEL(log2)
 IMPLEMENT_UNARY_OP_PREQUEL(reciprocal)
-IMPLEMENT_UNARY_OP_PREQUEL(round)
-IMPLEMENT_UNARY_OP_PREQUEL(rsqrt)
 IMPLEMENT_UNARY_OP_PREQUEL(sigmoid)
 IMPLEMENT_UNARY_OP_PREQUEL(sin)
 IMPLEMENT_UNARY_OP_PREQUEL(sinh)
