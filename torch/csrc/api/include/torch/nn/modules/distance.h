@@ -13,8 +13,11 @@ namespace nn {
 
 /// Returns the cosine similarity between :math:`x_1` and :math:`x_2`, computed
 /// along `dim`.
-struct TORCH_API CosineSimilarityImpl : Module {
+class TORCH_API CosineSimilarityImpl : public Cloneable<CosineSimilarityImpl> {
+ public:
   explicit CosineSimilarityImpl(CosineSimilarityOptions = {});
+
+  void reset() override;
 
   /// Pretty prints the `CosineSimilarity` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -35,8 +38,11 @@ TORCH_MODULE(CosineSimilarity);
 
 /// Returns the batchwise pairwise distance between vectors :math:`v_1`,
 /// :math:`v_2` using the p-norm.
-struct TORCH_API PairwiseDistanceImpl : Module {
+class TORCH_API PairwiseDistanceImpl : public Cloneable<PairwiseDistanceImpl> {
+ public:
   explicit PairwiseDistanceImpl(PairwiseDistanceOptions = {});
+
+  void reset() override;
 
   /// Pretty prints the `PairwiseDistance` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
