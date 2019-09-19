@@ -24,7 +24,7 @@ struct logSigmoid_updateOutput_functor
   __device__ void operator()(T *output, const T *input) const {
     const T max = fmaxType(ZERO_MACRO, -*input);
     const T z = THCNumerics<T>::exp(-max) + THCNumerics<T>::exp(-*input -max);
-    *output = -(max + std::log(z));
+    *output = -(max + static_cast<T>(std::log(z)));
   }
 };
 
