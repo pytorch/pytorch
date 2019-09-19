@@ -858,6 +858,18 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModule()
         self.run_test(model, (x, batch1, batch2))
 
+    def test_baddbmm_dynamic(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input, batch1, batch2, alpha, beta):
+                return torch.baddbmm(input, batch1, batch2, alpha=alpha, beta=beta)
+        x = torch.randn(10, 3, 5)
+        batch1 = torch.randn(10, 3, 4)
+        batch2 = torch.randn(10, 4, 5)
+        alpha = torch.tensor(5)
+        beta = torch.tensor(3.5)
+        model = MyModule()
+        self.run_test(model, (x, batch1, batch2, alpha, beta))
+        
     def test_log(self):
         class Log(torch.nn.Module):
             def forward(self, input):
