@@ -100,9 +100,8 @@ Value* tryConvertToType(
       if (*concrete_type == *FloatType::get()) {
         value = graph.insert(aten::Float, {value});
       }
-
       // convert Number to int
-      if (*concrete_type == *IntType::get()) {
+      else if (*concrete_type == *IntType::get()) {
         value = graph.insert(aten::Int, {value});
       }
     }
