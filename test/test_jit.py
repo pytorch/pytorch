@@ -39,7 +39,7 @@ from test_module.future_div import div_int_future, div_float_future
 from test_module.no_future_div import div_int_nofuture, div_float_nofuture
 
 # Standard library
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
@@ -1089,6 +1089,7 @@ graph(%x : Tensor,
 
             def forward(self, x):
                 return F.relu(self.conv(x))
+
         def get_forward(m):
             return m._c._get_method("forward")
 
@@ -1102,8 +1103,8 @@ graph(%x : Tensor,
                 weight=weight_observer._c)
         }
         torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
-        assert m._c._get_module('conv')._get_module('observer_for_input.1')._get_attribute('dtype') == 13 # torch.quint8
-        assert m._c._get_module('conv')._get_module('observer_for_weight.1')._get_attribute('dtype') == 12 # torch.qint8
+        assert m._c._get_module('conv')._get_module('observer_for_input.1')._get_attribute('dtype') == 13  # torch.quint8
+        assert m._c._get_module('conv')._get_module('observer_for_weight.1')._get_attribute('dtype') == 12  # torch.qint8
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_quant_dequant(self):
@@ -6441,7 +6442,7 @@ a")
             return ten1
         ''')
 
-        lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]",
+        lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]", "(1, 1)",
                  "torch.jit.annotate(List[int], [])", "[2.5, 2.5]", "[[2], [2]]", "[[-.5], [2.2]]", "[[False], [True]]"]
 
         dtypes = ["", ", dtype=torch.float", ", dtype=torch.double", ", dtype=torch.half",
@@ -10343,6 +10344,11 @@ a")
         r = M().create()
         self.assertEqual(r.dtype, torch.float)
         self.assertEqual(torch.zeros([1, 1, 2], dtype=torch.float), r)
+
+        def fn():
+            return torch.zeros((1, 2, 3))
+
+        self.checkScript(fn, ())
 
     def test_vararg_zeros(self):
         def foo():
@@ -18906,6 +18912,36 @@ class TestDict(JitTestCase):
         a_dict = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
         self.checkScript(fn, (a_dict, ('a', 'c')))
 
+    def test_ordered_dict(self):
+        def test_func(fn, inputs):
+            self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
+
+        def repeated_key():
+            return OrderedDict([(1, 2), (2, 3), (1, 4)])
+
+        test_func(repeated_key, ())
+
+        def no_args():
+            a = OrderedDict()
+            a["one"] = torch.tensor(1)
+            a["two"] = torch.tensor(2)
+
+        test_func(no_args, ())
+
+        def test_dict_constructor():
+            a = dict()
+            a["one"] = torch.tensor(1)
+            return a, dict([(1, 2), (2, 3), (1, 4)])  # noqa: C406
+
+        test_func(test_dict_constructor, ())
+
+        def test_dict_error():
+            a = dict()
+            a[1] = 2
+            return a
+
+        with self.assertRaisesRegex(Exception, "Arguments for call are not"):
+            torch.jit.script(test_dict_error)
 
 class TestClassType(JitTestCase):
     def test_get_with_method(self):
