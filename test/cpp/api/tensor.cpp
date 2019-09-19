@@ -339,3 +339,29 @@ TEST(TensorTest, BackwardCreatesOnesGrad) {
   ASSERT_TRUE(torch::equal(x.grad(),
               torch::ones_like(x)));
 }
+
+TEST(TensorTest, IsLeaf) {
+  auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  auto y = x * x;
+  ASSERT_TRUE(x.is_leaf());
+  ASSERT_FALSE(y.is_leaf());
+
+  x = at::tensor({5});
+  y = x * x;
+  const auto message = "is_leaf is not implemented for Tensor";
+  ASSERT_THROWS_WITH(y.is_leaf(), message);
+  ASSERT_THROWS_WITH(x.is_leaf(), message);
+}
+
+TEST(TensorTest, OutputNr) {
+  auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  auto y = x * x;
+  ASSERT_EQ(x.output_nr(), 0);
+  ASSERT_EQ(y.output_nr(), 0);
+
+  x = at::tensor({5});
+  y = x * x;
+  const auto message = "output_nr is not implemented for Tensor";
+  ASSERT_THROWS_WITH(y.output_nr(), message);
+  ASSERT_THROWS_WITH(x.output_nr(), message);
+}

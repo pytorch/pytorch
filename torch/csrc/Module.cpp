@@ -489,7 +489,7 @@ PyObject *THPModule_getDefaultDevice(PyObject *_unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPModule_setQEngine(PyObject *_unused, PyObject *arg)
+PyObject *THPModule_setQEngine(PyObject */* unused */, PyObject *arg)
 {
   TORCH_CHECK(THPQEngine_Check(arg), "qengine arg must be an instance of the torch.qengine");
   const auto qengine = reinterpret_cast<THPQEngine*>(arg);
@@ -497,7 +497,7 @@ PyObject *THPModule_setQEngine(PyObject *_unused, PyObject *arg)
   Py_RETURN_NONE;
 }
 
-PyObject *THPModule_qEngine(PyObject *_unused)
+PyObject *THPModule_qEngine(PyObject */* unused */)
 {
   return THPQEngine_New(at::globalContext().qEngine(), toString(at::globalContext().qEngine()));
 }
