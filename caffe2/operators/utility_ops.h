@@ -366,7 +366,7 @@ class WeightedSumOp : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     // the code is written this way because of 10.1 + gcc 7.3.1 compiler bug
-    // as discussed at https://fburl.com/pwe6h1zo
+    // as discussed at https://devtalk.nvidia.com/default/topic/1048037/linux/cuda-10-1-nvidia-you-re-now-quot-fixing-quot-gcc-bugs-that-gcc-doesn-t-even-have/
     const int input_size = (*this).InputSize();
     CAFFE_ENFORCE_EQ(input_size % 2, 0);
     const auto& X0 = Input(0);
