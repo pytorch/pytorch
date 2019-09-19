@@ -71,11 +71,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_id",
-          (const WorkerId& (ProcessGroupAgent::*)(void)const) &
-              RpcAgent::getWorkerId,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_worker_id",
           (const WorkerId& (ProcessGroupAgent::*)(const std::string&)const) &
               ProcessGroupAgent::getWorkerId,
           py::call_guard<py::gil_scoped_release>())
