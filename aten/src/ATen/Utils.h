@@ -76,7 +76,7 @@ static inline TensorImpl* checked_dense_tensor_unwrap(const Tensor& expr, const 
              " for argument #", pos, " '", name, "' in call to ", api);
   }
   if (expr.device().type() != device_type) {
-    AT_ERROR("Expected object of device type ", device_type, " but got backend ", expr.device().type(),
+    AT_ERROR("Expected object of device type ", device_type, " but got device type ", expr.device().type(),
              " for argument #", pos, " '", name, "' in call to ", api);
   }
   if (expr.scalar_type() != scalar_type) {
