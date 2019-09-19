@@ -28,7 +28,7 @@ struct kl_updateOutput_no_reduce_functor
       const Dtype *y,
       Dtype *output)
   {
-      *output = *y > 0 ? ScalarConvert<int, Dtype>::to(*y * (std::log(*y) - *x)) : ScalarConvert<int, Dtype>::to(0);
+      *output = *y > 0 ? *y * (ScalarConvert<int, Dtype>::to(std::log(*y)) - *x) : ScalarConvert<int, Dtype>::to(0);
   }
 };
 
