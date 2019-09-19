@@ -662,9 +662,9 @@ def device_guard(option, dispatch_options, dispatch_tensor):
 
 
 def named_guard(option, tensors, tensorlists):
-    if not option.get('named_guard', True) or (len(tensors) + len(tensorlists) == 0):
+    if option.get('supports_named_tensor', False) or (len(tensors) + len(tensorlists) == 0):
         return ''
-    # Override: named_guard = True for _th_ functions. This is because:
+    # Override: supports_named_tensor = False for _th_ functions. This is because:
     # There is always some at:: function that calls the _th_ function.
     if option['name'].startswith('_th_'):
         return ''
@@ -675,7 +675,10 @@ def named_guard(option, tensors, tensorlists):
         named_conditions.append('at::has_names({})'.format(tensorlist))
     return ("""\
 if ({named_conditions}) {{
-    AT_ERROR("{op}: no named inference rule implemented.");
+    AT_ERROR(
+        "{op} is not yet supported with named tensors. Please drop names via "
+        "`tensor = tensor.renamed(None)`, call the op with an unnamed tensor, "
+        "and set names on the result of the operation.");
 }}""".format(named_conditions=' || '.join(named_conditions), op=option['name']))
 
 
