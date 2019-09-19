@@ -19,7 +19,7 @@ install_ubuntu() {
     wget https://github.com/flame/libflame/archive/5.2.0.tar.gz
     tar xzf 5.2.0.tar.gz
     pushd libflame-5.2.0
-    ./configure --enable-dynamic-build --enable-lapack2flame --enable-max-arg-list-hack --enable-supermatrix --disable-ldim-alignment --enable-multithreading=openmp
+    ./configure --enable-dynamic-build --enable-lapack2flame --enable-max-arg-list-hack --enable-supermatrix --disable-ldim-alignment --enable-multithreading=openmp --disable-autodetect-f77-ldflags --disable-autodetect-f77-name-mangling
     make -j
     make install
     popd
