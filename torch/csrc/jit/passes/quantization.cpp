@@ -430,7 +430,6 @@ class QuantizeHelper {
   IValue getQParams(Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
       Value* child_instance);
-  void quantizeBias(Value* v);
   void quantizeTensor(Value* v, bool insert_after = true);
   void removeObserver(Value* v, const std::string& observer_name);
   void destroyNodes() {
@@ -487,37 +486,6 @@ IValue QuantizeHelper::getQParams(Value* v) {
 
 double getScale(const IValue& qparam) {
   return qparam.toTuple()->elements()[0].toTensor().item().toDouble();
-}
-
-void QuantizeHelper::quantizeBias(Value* v) {
-  // Traverse to the place where this is used
-  std::vector<Symbol> ops_with_bias = {Symbol::aten("conv2d"),
-                                       Symbol::aten("_convolution")};
-  for (const auto& use : v->uses()) {
-    if (std::find(
-            ops_with_bias.begin(), ops_with_bias.end(), use.user->kind()) !=
-        ops_with_bias.end()) {
-      // Make sure there is no observer module for bias
-      auto observer_name = findObserverName(v);
-      TORCH_INTERNAL_ASSERT(!observer_name, "bias should not be observed!");
-      Value* activation = use.user->inputs()[0];
-      Value* weight = use.user->inputs()[1];
-      // Get qparam from activation
-      IValue act_qparam = getQParams(activation);
-      // Get qparam from weight
-      IValue weight_qparam = getQParams(weight);
-      IValue bias_scale = at::scalar_tensor(
-          c10::Scalar(getScale(act_qparam) * getScale(weight_qparam)),
-          at::kDouble);
-      IValue bias_qparam = c10::ivalue::Tuple::create(
-          std::vector<IValue>({bias_scale, at::scalar_tensor(c10::Scalar(0))}));
-      Node* dequant = insertQuantDeQuantCall(v, bias_qparam, at::kQInt32);
-      v->replaceAllUsesWith(dequant->output());
-      Node* q = traverseToQuantNode(dequant);
-      TORCH_INTERNAL_ASSERT(q != nullptr);
-      q->replaceInputWith(dequant->output(), v);
-    }
-  }
 }
 
 void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
@@ -602,10 +570,9 @@ void InsertQuantDeQuantImpl(
         }
         if (v->node()->kind() == prim::GetAttr &&
             v->node()->s(c10::attr::name) == "bias") {
-          qh.quantizeBias(v);
-        } else {
-          qh.quantizeTensor(v);
+          continue;
         }
+        qh.quantizeTensor(v);
       }
 
       for (Block* subblock : n->blocks()) {
