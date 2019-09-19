@@ -47,6 +47,9 @@
   use_c10_dispatcher: True
   variants: method
 
+- func: is_leaf(Tensor self) -> bool
+  variants: method
+
 - func: names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
@@ -2242,15 +2245,12 @@
   use_c10_dispatcher: True
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _rsqrt__cpu
-    CUDA: _rsqrt__cuda
 
 - func: rsqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _rsqrt_out_cpu
-    CUDA: _rsqrt_out_cuda
+    CPU: rsqrt_out
+    CUDA: rsqrt_out
 
 - func: select.Dimname(Tensor(a) self, Dimname dim, int index) -> Tensor(a)
   variants: function, method
