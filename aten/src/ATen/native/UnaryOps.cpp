@@ -17,6 +17,7 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
 #include <cmath>
@@ -75,6 +76,10 @@ Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
 Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, digamma_stub); }
 Tensor digamma(const Tensor& self) { return unary_op_impl(self, digamma_out); }
 Tensor& digamma_(Tensor& self) { return unary_op_impl_(self, digamma_out); }
+
+Tensor& rsqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, rsqrt_stub); }
+Tensor rsqrt(const Tensor& self) { return unary_op_impl(self, at::rsqrt_out); }
+Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
 
 Tensor& neg_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
@@ -276,7 +281,6 @@ IMPLEMENT_UNARY_OP_VEC(log10)
 IMPLEMENT_UNARY_OP_VEC(log1p)
 IMPLEMENT_UNARY_OP_VEC(log2)
 IMPLEMENT_UNARY_OP_VEC(reciprocal)
-IMPLEMENT_UNARY_OP_VEC(rsqrt)
 IMPLEMENT_UNARY_OP_VEC(sigmoid)
 IMPLEMENT_UNARY_OP_VEC(sin)
 IMPLEMENT_UNARY_OP_VEC(sinh)

@@ -281,6 +281,13 @@ if (ANDROID OR IOS)
   set(INTERN_BUILD_MOBILE ON)
 endif()
 
+# Setting `PYTORCH_BUILD_MOBILE` environment variable can force it to do mobile
+# build with host toolchain.
+if (DEFINED ENV{PYTORCH_BUILD_MOBILE})
+  set(INTERN_BUILD_MOBILE ON)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DC10_MOBILE")
+endif()
+
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
 # It's disabled for caffe2 mobile library.
 if (INTERN_BUILD_MOBILE AND BUILD_CAFFE2_MOBILE)
