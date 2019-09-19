@@ -47,6 +47,9 @@
   use_c10_dispatcher: True
   variants: method
 
+- func: is_leaf(Tensor self) -> bool
+  variants: method
+
 - func: names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
