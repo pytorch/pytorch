@@ -742,7 +742,7 @@ class TestOperators(TestCase):
         x = torch.randint(3, (2, 3, 4, 5)).float()
         self.assertONNX(lambda x: torch.unique(x, dim=0, sorted=True, return_inverse=False, return_counts=True), x,
                         opset_version=11)
-        
+
     def test_meshgrid(self):
         x = torch.ones(3, requires_grad=True)
         y = torch.zeros(4, requires_grad=True)
