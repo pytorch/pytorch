@@ -1964,25 +1964,26 @@ struct to_ir {
         graph->insert(
             aten::index_put_, {slicedArg, indices, rhs}, {}, stmtRange);
       }
-
-      // Otherwise, this is a list. Dispatch to aten::_set_item to both select
-      // and assign
+      // Otherwise, this is a list or a classtype.
+      // Dispatch to aten::_set_item to both select and assign
     } else {
       const auto subscript = lhs.subscript_exprs();
       if (subscript.size() != 1 || subscript[0].kind() == TK_SLICE_EXPR) {
         throw ErrorReport(subscript)
             << "Sliced expression not yet supported for"
-            << " subscripted list assignment. "
+            << " subscripted assignment. "
             << "File a bug if you want this";
       }
 
       std::vector<NamedValue> args;
-      args.emplace_back(lhs.value().range(), "list", sliceable);
+      args.emplace_back(lhs.value().range(), "self", sliceable);
       args.emplace_back(
           lhs.subscript_exprs().range(), "idx", emitExpr(subscript[0]));
       args.push_back(rhs);
-
-      graph->insert(aten::_set_item, args, {}, stmtRange);
+      makeMagic(
+          "__setitem__",
+          std::make_shared<BuiltinFunction>(aten::_set_item, at::nullopt))
+          ->call(stmtRange, method, args, {}, 0);
     }
   }
 
