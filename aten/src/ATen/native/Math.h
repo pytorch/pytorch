@@ -1,5 +1,11 @@
+#pragma once
+
 #include <stdlib.h>
 #include <math.h>
+
+#ifndef M_PIf
+#define M_PIf 3.1415926535f
+#endif  // M_PIf
 
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
 Below is the copyright.
@@ -85,6 +91,11 @@ Date:  February 1996
   x = x - (erf(x) - y)/( (2.0/sqrt(M_PI))*exp(-x*x));
 
   return(x);
+}
+
+static inline float calc_erfinv(float y) {
+  double z = y;
+  return calc_erfinv(z);
 }
 
 #undef CENTRAL_RANGE
