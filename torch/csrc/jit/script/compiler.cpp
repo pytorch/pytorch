@@ -1268,6 +1268,59 @@ struct to_ir {
     return expr.kind() == TK_IS || expr.kind() == TK_ISNOT;
   }
 
+  Value* emitIsInstance(Expr obj, Expr classinfo) {
+    // turn (float, (int, tuple)) into a flat list of types and type kind
+    // category checks: tuple_check = true, types = {float, int}
+    struct GatheredTypes {
+      GatheredTypes(ScriptTypeParser parser) : typeParser_(std::move(parser)) {}
+      void gather(Expr classinfo) {
+        if (classinfo.kind() == TK_TUPLE_LITERAL) {
+          for (Expr e : TupleLiteral(classinfo).inputs()) {
+            gather(e);
+          }
+          return;
+        }
+        if (classinfo.kind() == TK_VAR) {
+          // Special casing for list and tuple since isinstance(x, list) and
+          // isinstance(x, tuple) does not accept List[int] / Tuple[int] like
+          // subscript type annotation in python
+          auto name = Var(classinfo).name().name();
+          if (name == "tuple") {
+            tuple_check = true;
+            return;
+          } else if (name == "list") {
+            list_check = true;
+            return;
+          }
+        }
+        TypePtr type = typeParser_.parseTypeFromExpr(classinfo);
+        types.emplace_back(type);
+      }
+      ScriptTypeParser typeParser_;
+      bool list_check = false;
+      bool tuple_check = false;
+      std::vector<TypePtr> types;
+    };
+    GatheredTypes gathered(typeParser_);
+    gathered.gather(classinfo);
+    auto val = emitExpr(obj);
+    if (val->type()->kind() == OptionalType::Kind) {
+      throw ErrorReport(obj.range())
+          << "Optional isinstance check is not supported, "
+          << "consider use is/is not None instead";
+    }
+    if ((gathered.list_check && val->type()->kind() == ListType::Kind) ||
+        (gathered.tuple_check && val->type()->kind() == TupleType::Kind)) {
+      return graph->insertConstant(true, obj.range());
+    }
+    for (const TypePtr& typ : gathered.types) {
+      if (val->type()->isSubtypeOf(typ)) {
+        return graph->insertConstant(true, obj.range());
+      }
+    }
+    return graph->insertConstant(false, obj.range());
+  }
+
   void emitIf(const If& stmt) {
     // NOTE: emitIf checks on If stmt condition to see if the cond AST is
     // a potential none check with is/is not, or an isinstance check.
@@ -2126,10 +2179,8 @@ struct to_ir {
     });
   }
 
-  void checkApplyExpr(
-      Apply& apply,
-      SourceRange& loc,
-      size_t expected_inputs = 2) {
+  void checkApplyNumInputs(Apply& apply, size_t expected_inputs) {
+    const SourceRange& loc = apply.range();
     if (apply.inputs().size() != expected_inputs) {
       throw ErrorReport(loc)
           << Var(apply.callee()).name().name() << " expected exactly "
@@ -2156,7 +2207,7 @@ struct to_ir {
       auto attributes = emitAttributes(apply.attributes());
       return emitForkExpr(loc, forked, inputs, attributes);
     } else if (auto annotate_value = dynamic_cast<AnnotateValue*>(sv.get())) {
-      checkApplyExpr(apply, loc);
+      checkApplyNumInputs(apply, 2);
       TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
       Value* expr = tryConvertToType(
           apply.range(),
@@ -2187,7 +2238,7 @@ struct to_ir {
 
       return std::make_shared<SimpleValue>(expr);
     } else if (auto getattr = dynamic_cast<GetAttrValue*>(sv.get())) {
-      checkApplyExpr(apply, loc);
+      checkApplyNumInputs(apply, 2);
       auto obj = emitSugaredExpr(apply.inputs()[0], 1);
       auto selector = apply.inputs()[1];
       if (selector.kind() != TK_STRINGLITERAL) {
@@ -2199,13 +2250,13 @@ struct to_ir {
     } else if (
         auto uninitialized_value =
             dynamic_cast<UninitializedValue*>(sv.get())) {
-      checkApplyExpr(apply, loc, 1);
+      checkApplyNumInputs(apply, 1);
       TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
       auto out = graph->insertNode(graph->createUninitialized(type))
                      ->setSourceRange(loc);
       return std::make_shared<SimpleValue>(out->output());
     } else if (auto tuple_call = dynamic_cast<TupleCallValue*>(sv.get())) {
-      checkApplyExpr(apply, loc, /*expected_inputs*/ 1);
+      checkApplyNumInputs(apply, 1);
       auto arg = emitSugaredExpr(apply.inputs()[0], 1);
       auto inputs = arg->asTuple(apply.range(), method);
       auto inp_values = fmap(inputs, [&](const SugaredValuePtr& sv) {
@@ -2217,48 +2268,9 @@ struct to_ir {
       // NOTE: for `isinstance` builtin call in JIT, we only check the static
       // types on the inputs to evaluate, and insert the corresponding constant
       // node
-      std::function<bool(Expr, Expr)> isInstanceCheck = [&](Expr obj,
-                                                            Expr classinfo) {
-        if (classinfo.kind() == TK_TUPLE_LITERAL) {
-          // handle the case for recursive tuple classinfo
-          // return true if obj is an instance of any of the types
-          for (Expr e : TupleLiteral(classinfo).inputs()) {
-            if (isInstanceCheck(obj, e)) {
-              return true;
-            }
-          }
-          return false;
-        }
-        auto type_name = typeParser_.parseBaseTypeName(classinfo);
-        if (!type_name) {
-          throw ErrorReport(classinfo.range())
-              << "type must be a type identifier";
-        }
-        auto val = emitExpr(obj);
-        // Special casing for list and tuple since isinstance(x, list) and
-        // isinstance(x, tuple) does not accept List[int] / Tuple[int] like
-        // subscript type annotation in python
-        if (*type_name == "list" && val->type()->cast<ListType>()) {
-          return true;
-        } else if (*type_name == "tuple" && val->type()->cast<TupleType>()) {
-          return true;
-        } else if (val->type()->cast<OptionalType>()) {
-          throw ErrorReport(loc)
-              << "Optional isinstance check is not supported, "
-              << "consider use is/isnot None instead";
-        } else {
-          TypePtr type = typeParser_.parseTypeFromExpr(classinfo);
-          if (val->type()->isSubtypeOf(type)) {
-            return true;
-          }
-        }
-        return false;
-      };
-      checkApplyExpr(apply, loc);
-      bool is_instance_val =
-          isInstanceCheck(apply.inputs()[0], apply.inputs()[1]);
-      return std::make_shared<SimpleValue>(
-          graph->insertConstant(is_instance_val, loc));
+      checkApplyNumInputs(apply, 2);
+      auto result = emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+      return std::make_shared<SimpleValue>(result);
     } else if (auto classNew = dynamic_cast<ClassNewMethod*>(sv.get())) {
       if (apply.inputs().size() != 1) {
         throw ErrorReport(loc) << "Only one argument to __new__ allowed";
