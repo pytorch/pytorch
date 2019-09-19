@@ -1215,7 +1215,7 @@ RegisterOperators reg(
            TypePtr value_type = dt->getValueType();
            return [=](Stack& stack) {
              auto vals = c10::impl::GenericDict(key_type, value_type);
-             vals.reserve(stack.size() / 2);
+             vals.reserve(num_inputs / 2);
              for (size_t i = 0; i < num_inputs; i += 2) {
                auto val = pop(stack);
                auto key = pop(stack);
