@@ -8,6 +8,8 @@ namespace jit {
 
 using Kwargs = std::unordered_map<std::string, IValue>;
 
+void preoptimizeGraph(std::shared_ptr<Graph>& graph);
+
 // A Function is a pure Graph with no implicit `self` object bound.
 // It contains schema information, and the executor that manages the
 // execution of the function. script::Method is a wrapper around a
@@ -37,6 +39,15 @@ struct TORCH_API Function {
 
   std::shared_ptr<Graph> graph() const {
     return graph_;
+  }
+
+  std::shared_ptr<Graph> optimized_graph() const {
+    if (!optimized_graph_) {
+      optimized_graph_ = graph_->copy();
+
+      preoptimizeGraph(*optimized_graph_);
+    }
+    return *optimized_graph_;
   }
 
   const c10::QualifiedName& qualname() const {
@@ -96,7 +107,13 @@ struct TORCH_API Function {
 
  private:
   c10::QualifiedName name_;
+  // The original, non-optimized graph
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
+
+  // Optimized graph, computed lazily. Used for inlining.
+  // Note: this graph is not specialized, only generic optimizations are applied
+  // here.
+  mutable c10::optional<std::shared_ptr<Graph>> optimized_graph_;
 
   GraphExecutor executor_; // for execution
 
