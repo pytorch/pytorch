@@ -9,6 +9,7 @@
 
 #include <THC/THCReduceApplyUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
+#include <THC/THCNumerics.cuh>
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -34,13 +35,13 @@ __global__ void renormRowsL1(scalar_t* dist, long rows, long cols) {
     scalar_t sum = static_cast<scalar_t>(0);
     for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
       val = dist[row * cols + col];
-      assert(!(val < zero)); // ! < 0 for NaN handling
+      assert(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
       sum = sum + val;
     }
 
     sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<scalar_t>(), zero);
     if (threadIdx.x == 0) {
-      assert(!(val < zero)); // ! < 0 for NaN handling
+      assert(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
       smem[0] = sum;
     }
     __syncthreads();
@@ -240,8 +241,8 @@ sampleMultinomialOnce(int64_t* dest,
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
       val = dist[curDist * stride_dist + cat * stride_categories];
       assert(val >= zero);
-      assert(!std::isinf(val));
-      assert(!std::isnan(val));
+      assert(!THCNumerics<scalar_t>::isinf(val));
+      assert(!THCNumerics<scalar_t>::isnan(val));
       sum = sum + static_cast<accscalar_t>(val);
     }
 
@@ -251,7 +252,7 @@ sampleMultinomialOnce(int64_t* dest,
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
       // Make sure the sum of our distribution didn't overflow
-      assert(!std::isinf(sum));
+      assert(!THCNumerics<accscalar_t>::isinf(sum));
       assert(sum > accZero);
 
       asmem[0] = sum;
