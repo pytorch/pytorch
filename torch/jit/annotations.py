@@ -53,7 +53,8 @@ class EvalEnv(object):
     def __getitem__(self, name):
         if name in self.env:
             return self.env[name]
-        return self.rcb(name)
+        if self.rcb is not None:
+            return self.rcb(name)
 
 def get_signature(fn, rcb, loc):
     # Python 3.5 adds support for the nice annotation syntax, so try that first.
@@ -121,7 +122,6 @@ def parse_type_line(type_line, rcb, loc):
     if not isinstance(arg_ann, tuple):
         arg_ann = (arg_ann,)
 
-    print(type_line)
     try:
         ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # noqa: P204
     except (NameError, SyntaxError) as e:
