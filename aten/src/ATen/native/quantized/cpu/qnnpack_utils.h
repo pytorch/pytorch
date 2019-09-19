@@ -1,11 +1,12 @@
 #pragma once
 
-#ifdef USE_QNNPACK
-#include <qnnpack.h>
+#ifdef USE_PYTORCH_QNNPACK
+#include <pytorch_qnnpack.h>
 
 struct QnnpackOperatorDeleter {
-  void operator()(qnnp_operator_t op) {
-    qnnp_delete_operator(op);
+  void operator()(pytorch_qnnp_operator_t op) {
+    pytorch_qnnp_delete_operator(op);
   }
 };
+
 #endif

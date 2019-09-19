@@ -19,14 +19,8 @@
 
 namespace torch {
 namespace nn {
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNNOptionsBase ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-namespace detail {
-RNNOptionsBase::RNNOptionsBase(int64_t input_size, int64_t hidden_size)
-    : input_size_(input_size), hidden_size_(hidden_size) {}
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNNImplBase ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+namespace detail {
 template <typename Derived>
 RNNImplBase<Derived>::RNNImplBase(
     const RNNOptionsBase& options_,
@@ -216,17 +210,6 @@ template class RNNImplBase<RNNImpl>;
 } // namespace detail
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-RNNOptions::RNNOptions(int64_t input_size, int64_t hidden_size)
-    : input_size_(input_size), hidden_size_(hidden_size) {}
-
-RNNOptions& RNNOptions::tanh() {
-  return activation(RNNActivation::Tanh);
-}
-
-RNNOptions& RNNOptions::relu() {
-  return activation(RNNActivation::ReLU);
-}
 
 RNNImpl::RNNImpl(const RNNOptions& options)
     : detail::RNNImplBase<RNNImpl>(
