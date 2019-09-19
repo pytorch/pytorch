@@ -627,9 +627,9 @@ void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
 void QuantFusion(std::shared_ptr<Graph>& graph) {
   const std::string quantized_linear_with_bias =
       R"(
-graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %w_quant_t = aten::t(%w_quant)
-        %packed_params = quantized::linear_prepack(%w_quant_t, %b_quant)
+        %packed_params = quantized::linear_prepack(%w_quant_t, %b)
         %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r))";
   const std::unordered_map<std::string, std::string> pattern_and_replacements =
@@ -661,28 +661,24 @@ graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale,
         return (%r_perm))"},
        // addmm -> quantized::linear
        {R"(
-graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_intrepr = aten::int_repr(%a_quant)
         %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
         %w_intrepr = aten::int_repr(%w_quant)
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
-        %b_intrepr = aten::int_repr(%b_quant)
-        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
-        %r = aten::addmm(%b_dequant, %a_dequant, %w_dequant, %4, %4)
+        %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))",
         quantized_linear_with_bias},
        // matmul(with bias) -> quantized::linear
        {R"(
-graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_intrepr = aten::int_repr(%a_quant)
         %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
         %w_intrepr = aten::int_repr(%w_quant)
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
-        %b_intrepr = aten::int_repr(%b_quant)
-        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
         %output = aten::matmul(%a_dequant, %w_dequant)
-        %r = aten::add_(%output, %b_dequant, %4)
+        %r = aten::add_(%output, %b, %4)
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))",
         quantized_linear_with_bias},
