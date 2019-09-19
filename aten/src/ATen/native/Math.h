@@ -1,5 +1,7 @@
-#include <stdlib.h>
-#include <math.h>
+#include <cstdlib>
+#include <cmath>
+#include <limits>
+#include <type_traits>
 
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
 Below is the copyright.
@@ -52,7 +54,9 @@ Output was modified to be inf or -inf when input is 1 or -1. */
 
 #define CENTRAL_RANGE 0.7
 
-static inline double calc_erfinv(double y) {
+template <typename T>
+static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+calc_erfinv(T y) {
 /* Function to calculate inverse error function.  Rational approximation
 is used to generate an initial approximation, which is then improved to
 full accuracy by two steps of Newton's method.  Code is a direct
@@ -60,29 +64,30 @@ translation of the erfinv m file in matlab version 2.0.
 Author:  Gary L. Pavlis, Indiana University
 Date:  February 1996
 */
-  double x,z,num,dem; /*working variables */
+  T x, z, num, dem; /*working variables */
   /* coefficients in rational expansion */
-  double a[4]={ 0.886226899, -1.645349621,  0.914624893, -0.140543331};
-  double b[4]={-2.118377725,  1.442710462, -0.329097515,  0.012229801};
-  double c[4]={-1.970840454, -1.624906493,  3.429567803,  1.641345311};
-  double d[2]={ 3.543889200,  1.637067800};
-  if(fabs(y) > 1.0) return (atof("NaN"));  /* This needs IEEE constant*/
-  if(fabs(y) == 1.0) return((copysign(1.0,y))*atof("INFINITY"));
-  if(fabs(y) <= CENTRAL_RANGE){
-    z = y*y;
+  T a[4]={ 0.886226899, -1.645349621,  0.914624893, -0.140543331};
+  T b[4]={-2.118377725,  1.442710462, -0.329097515,  0.012229801};
+  T c[4]={-1.970840454, -1.624906493,  3.429567803,  1.641345311};
+  T d[2]={ 3.543889200,  1.637067800};
+  T y_abs = std::abs(y);
+  if(y_abs > 1.0) return std::numeric_limits<T>::quiet_NaN();
+  if(y_abs == 1.0) return std::copysign(std::numeric_limits<T>::infinity(), y);
+  if(y_abs <= static_cast<T>(CENTRAL_RANGE)) {
+    z = y * y;
     num = (((a[3]*z + a[2])*z + a[1])*z + a[0]);
-    dem = ((((b[3]*z + b[2])*z + b[1])*z +b[0])*z + 1.0);
-    x = y*num/dem;
+    dem = ((((b[3]*z + b[2])*z + b[1])*z +b[0]) * z + static_cast<T>(1.0));
+    x = y * num / dem;
   }
   else{
-    z = sqrt(-log((1.0-fabs(y))/2.0));
-    num = ((c[3]*z + c[2])*z + c[1])*z + c[0];
-    dem = (d[1]*z + d[0])*z + 1.0;
-    x = (copysign(1.0,y))*num/dem;
+    z = std::sqrt(-std::log((static_cast<T>(1.0)-y_abs)/static_cast<T>(2.0)));
+    num = ((c[3]*z + c[2])*z + c[1]) * z + c[0];
+    dem = (d[1]*z + d[0])*z + static_cast<T>(1.0);
+    x = std::copysign(num, y) / dem;
   }
   /* Two steps of Newton-Raphson correction */
-  x = x - (erf(x) - y)/( (2.0/sqrt(M_PI))*exp(-x*x));
-  x = x - (erf(x) - y)/( (2.0/sqrt(M_PI))*exp(-x*x));
+  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(M_PI)))*std::exp(-x*x));
+  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(M_PI)))*std::exp(-x*x));
 
   return(x);
 }

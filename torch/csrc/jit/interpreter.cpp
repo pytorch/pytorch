@@ -336,6 +336,7 @@ struct CodeImpl {
   int register_size_ = 0;
   size_t n_outputs;
   size_t n_inputs;
+  TypePtr return_type_;
 
   // We MUST hold onto graph here because some Operators stored in the
   // instruction lists have dependencies on meta-data stored in the graph
@@ -366,6 +367,12 @@ struct CodeImpl {
       : preprocess_(*graph), current_node_(preprocess_.graph->return_node()) {
     graph_ = preprocess_.graph;
     n_outputs = graph_->outputs().size();
+    if (n_outputs == 1) {
+      return_type_ = graph->outputs().at(0)->type();
+    } else {
+      return_type_ = TupleType::create(
+          fmap(graph->outputs(), [](const Value* v) { return v->type(); }));
+    }
     n_inputs = graph_->inputs().size();
     // std::cout << *graph_ << "\n";
     emitCodeForBlock(graph_->block());
@@ -1041,7 +1048,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
  public:
   c10::intrusive_ptr<Future> getOrCreateFuture() {
     if (!future_) {
-      future_ = c10::make_intrusive<Future>();
+      future_ =
+          c10::make_intrusive<Future>(frames.front().function->return_type_);
     }
     return future_;
   }
