@@ -56,7 +56,6 @@ class FunctionalAPITest(QuantizationTestCase):
         dilation = (1, 1)
 
         X = torch.randn(N, iC, H, W, dtype=torch.float32)
-        X = X.permute([0, 2, 3, 1]).contiguous()
         qX = torch.quantize_linear(X, scale=scale, zero_point=128, dtype=torch.quint8)
 
         w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
@@ -64,23 +63,22 @@ class FunctionalAPITest(QuantizationTestCase):
         qw = torch.quantize_linear(w, scale=scale, zero_point=0, dtype=torch.qint8)
 
         b = torch.randn(oC, dtype=torch.float32) if use_bias else None
-        q_bias = torch.quantize_linear(b, scale=1.0 / 1024, zero_point=0, dtype=torch.qint32) if use_bias else None
-        q_filters_ref = torch.ops.quantized.conv_prepack(qw.permute([0, 2, 3, 1]),
-                                                         q_bias,
+        q_filters_ref = torch.ops.quantized.conv_prepack(qw,
+                                                         b,
                                                          stride,
                                                          i_padding,
                                                          dilation,
                                                          g)
 
 
-        ref_result = torch.ops.quantized.conv2d(qX.permute([0, 2, 3, 1]), q_filters_ref,
+        ref_result = torch.ops.quantized.conv2d(qX, q_filters_ref,
                                                 stride,
                                                 i_padding, dilation,
-                                                g, scale, zero_point).permute([0, 3, 1, 2])
+                                                g, scale, zero_point)
 
         q_result = torch.nn.quantized.functional.conv2d(qX,
                                                         qw,
-                                                        bias=q_bias, scale=scale,
+                                                        bias=b, scale=scale,
                                                         zero_point=zero_point,
                                                         stride=stride, padding=i_padding,
                                                         dilation=dilation, groups=g,
@@ -223,7 +221,6 @@ class ModuleAPITest(QuantizationTestCase):
         X = torch.rand(batch_size, in_features).float()
         X_q = torch.quantize_linear(X, 0.2, 10, torch.quint8)
         B = torch.rand(out_features).float() if use_bias else None
-        B_q = torch.quantize_linear(B, W_q.q_scale() * X_q.q_scale(), 0, torch.qint32) if use_bias else None
         scale = 0.5
         zero_point = 3
         if use_fused:
@@ -235,7 +232,7 @@ class ModuleAPITest(QuantizationTestCase):
         # This tests that the constructor is correct.
         qlinear(X_q)
 
-        qlinear.set_weight_bias(W_q, B_q)
+        qlinear.set_weight_bias(W_q, B)
         # Simple round-trip test to ensure weight()/set_weight() API
         self.assertEqual(qlinear.weight(), W_q)
         W_pack = qlinear._packed_params
@@ -256,7 +253,7 @@ class ModuleAPITest(QuantizationTestCase):
         model_dict = qlinear.state_dict()
         self.assertEqual(model_dict['weight'], W_q)
         if use_bias:
-            self.assertEqual(model_dict['bias'], B_q)
+            self.assertEqual(model_dict['bias'], B)
         b = io.BytesIO()
         torch.save(model_dict, b)
         b.seek(0)
@@ -350,7 +347,6 @@ class ModuleAPITest(QuantizationTestCase):
         scale, zero_point = 1.0 / 255, 128
 
         X = torch.randn(N, iC, H, W, dtype=torch.float32)
-        X = X.permute([0, 2, 3, 1]).contiguous()
         qX = torch.quantize_linear(X, scale=scale, zero_point=128, dtype=torch.quint8)
 
         w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
@@ -358,7 +354,6 @@ class ModuleAPITest(QuantizationTestCase):
         qw = torch.quantize_linear(w, scale=scale, zero_point=0, dtype=torch.qint8)
 
         b = torch.randn(oC, dtype=torch.float32) if use_bias else None
-        qb = torch.quantize_linear(b, scale=1.0 / 1024, zero_point=0, dtype=torch.qint32) if use_bias else None
 
         if use_fused:
             conv_under_test = ConvReLU2d(in_channels=iC,
@@ -382,7 +377,7 @@ class ModuleAPITest(QuantizationTestCase):
                                      padding_mode='zeros')
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
-        conv_under_test.set_weight_bias(qw, qb)
+        conv_under_test.set_weight_bias(qw, b)
         conv_under_test(qX)
 
         conv_under_test.scale = scale
@@ -395,13 +390,13 @@ class ModuleAPITest(QuantizationTestCase):
 
         # Test properties
         self.assertEqual(qw, conv_under_test.weight())
-        self.assertEqual(qb, conv_under_test.bias())
+        self.assertEqual(b, conv_under_test.bias())
         self.assertEqual(scale, conv_under_test.scale)
         self.assertEqual(zero_point, conv_under_test.zero_point)
 
         # Test forward
         result_under_test = conv_under_test(qX)
-        result_reference = qF.conv2d(qX, qw, bias=qb,
+        result_reference = qF.conv2d(qX, qw, bias=b,
                                      scale=scale, zero_point=zero_point,
                                      stride=1, padding=0,
                                      dilation=1, groups=g, dtype=torch.quint8
@@ -425,7 +420,7 @@ class ModuleAPITest(QuantizationTestCase):
         model_dict = conv_under_test.state_dict()
         self.assertEqual(model_dict['weight'], qw)
         if use_bias:
-            self.assertEqual(model_dict['bias'], qb)
+            self.assertEqual(model_dict['bias'], b)
         b = io.BytesIO()
         torch.save(model_dict, b)
         b.seek(0)
@@ -498,10 +493,8 @@ class ModuleAPITest(QuantizationTestCase):
 
         # Smoke test to make sure the module actually runs
         quantized_float_conv(qX)
-        # Check that bias is quantized based on output scale
         if use_bias:
-            qbias = torch.quantize_linear(float_conv.bias, quantized_float_conv[0].scale / 2**16, 0, torch.qint32)
-            self.assertEqual(quantized_float_conv[0].bias().dequantize(), qbias.dequantize())
+            self.assertEqual(quantized_float_conv[0].bias(), float_conv.bias)
         # Smoke test extra_repr
         str(quantized_float_conv)
 
