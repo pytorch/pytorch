@@ -82,6 +82,14 @@ inline Tensor Tensor::data() const {
         .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
+inline bool Tensor::is_leaf() const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::is_leaf(const_cast<Tensor&>(*this));
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::is_leaf(Tensor self) -> bool");
+    return table->getOp<bool (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+#endif
+}
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor & Tensor::names_(c10::optional<DimnameList> names) const {
 #ifdef USE_STATIC_DISPATCH
