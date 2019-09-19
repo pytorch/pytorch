@@ -74,14 +74,9 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
 
   c10::List<std::string> keys;
   keys.reserve(writeable_tensors.size());
-  // std::vector<at::TypePtr> types(writeable_tensors.size(), at::StringType::get());
-
   for (size_t i = 0; i < writeable_tensors.size(); i++) {
     keys.emplace_back(std::to_string(i));
   }
-
-  // c10::List<std::string> keys;
-  // auto keys_tuple = at::ivalue::Tuple::create(keys, at::TupleType::create(types));
   jit::pickle(writer, keys);
 
   for (const auto& tensor_data : writeable_tensors) {
