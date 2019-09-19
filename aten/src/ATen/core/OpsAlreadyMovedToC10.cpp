@@ -756,6 +756,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
   static std::unordered_set<std::pair<const char*, const char*>, OpNameHash, OpNameEquals> ops {
         {"aten::backward", ""},
         {"aten::set_data", ""},
+        {"aten::is_leaf", ""},
     #ifdef BUILD_NAMEDTENSOR
         {"aten::names_", ""},
     #endif
