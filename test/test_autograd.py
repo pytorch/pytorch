@@ -3416,7 +3416,6 @@ class TestAutograd(TestCase):
 
         return mod_control, mod_scaling, opt_control, opt_scaling, S
 
-
     def _create_scaling_case(self):
         mod_control, mod_scaling, opt_control, opt_scaling, S = self._create_scaling_models_optimizers_S()
 
@@ -3448,11 +3447,13 @@ class TestAutograd(TestCase):
                 loss = loss_fn(output, target)
                 if try_scaling_api:
                     torch.amp.scale_outputs(loss, S).backward()
-                    if i == skip_iter:  model[1].weight.grad.data.fill_(float('inf'))
+                    if i == skip_iter:
+                        model[1].weight.grad.data.fill_(float('inf'))
                     _, found_inf, S = optimizer.unscale_and_step(current_scale=S)
                 else:
                     loss.backward()
-                    if i != skip_iter:  optimizer.step()
+                    if i != skip_iter:
+                        optimizer.step()
 
         run(mod_control, opt_control, S, False)
         run(mod_scaling, opt_scaling, S, True)
@@ -3466,20 +3467,22 @@ class TestAutograd(TestCase):
         mod_control, mod_scaling, opt_control, opt_scaling, S, data, loss_fn, skip_iter = self._create_scaling_case()
 
         def run(model, optimizer, S, try_scaling_api):
-            max_norm = 0.2 # A reasonable value that actually has an effect, based on printouts of grads
+            max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
             for i, (input, target) in enumerate(data):
                 optimizer.zero_grad()
                 output = model(input)
                 loss = loss_fn(output, target)
                 if try_scaling_api:
                     torch.amp.scale_outputs(loss, S).backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm*S)
-                    if i == skip_iter:  model[1].weight.grad.data.fill_(float('inf'))
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm * S)
+                    if i == skip_iter:
+                        model[1].weight.grad.data.fill_(float('inf'))
                     _, found_inf, S = optimizer.unscale_and_step(current_scale=S)
                 else:
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-                    if i != skip_iter:  optimizer.step()
+                    if i != skip_iter:
+                        optimizer.step()
 
         run(mod_control, opt_control, S, False)
         run(mod_scaling, opt_scaling, S, True)
@@ -3495,21 +3498,23 @@ class TestAutograd(TestCase):
         mod_control, mod_scaling, opt_control, opt_scaling, S, data, loss_fn, skip_iter = self._create_scaling_case()
 
         def run(model, optimizer, S, try_scaling_api):
-            max_norm = 0.2 # A reasonable value that actually has an effect, based on printouts of grads
+            max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
             for i, (input, target) in enumerate(data):
                 optimizer.zero_grad()
                 output = model(input)
                 loss = loss_fn(output, target)
                 if try_scaling_api:
                     torch.amp.scale_outputs(loss, S).backward()
-                    if i == skip_iter:  model[1].weight.grad.data.fill_(float('inf'))
+                    if i == skip_iter:
+                        model[1].weight.grad.data.fill_(float('inf'))
                     found_inf, S = optimizer.unscale(S)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
                     optimizer.step_after_unscale(found_inf=found_inf)
                 else:
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-                    if i != skip_iter:  optimizer.step()
+                    if i != skip_iter:
+                        optimizer.step()
 
         run(mod_control, opt_control, S, False)
         run(mod_scaling, opt_scaling, S, True)
@@ -3531,7 +3536,7 @@ class TestAutograd(TestCase):
                 if try_scaling_api:
                     grad_params = torch.autograd.grad(torch.amp.scale_outputs(loss, S),
                                                       model.parameters(), create_graph=True)
-                    grad_params = [p*(1./S) for p in grad_params]
+                    grad_params = [p * (1. / S) for p in grad_params]
                 else:
                     grad_params = torch.autograd.grad(loss, model.parameters(), create_graph=True)
 
@@ -3543,11 +3548,13 @@ class TestAutograd(TestCase):
 
                 if try_scaling_api:
                     torch.amp.scale_outputs(loss, S).backward()
-                    if i == skip_iter:  model[1].weight.grad.data.fill_(float('inf'))
+                    if i == skip_iter:
+                        model[1].weight.grad.data.fill_(float('inf'))
                     _, found_inf, S = optimizer.unscale_and_step(current_scale=S)
                 else:
                     loss.backward()
-                    if i != skip_iter:  optimizer.step()
+                    if i != skip_iter:
+                        optimizer.step()
 
         run(mod_control, opt_control, S, False)
         run(mod_scaling, opt_scaling, S, True)
@@ -3565,7 +3572,7 @@ class TestAutograd(TestCase):
             for i, (input, target) in enumerate(data):
                 output = model(input)
                 loss = loss_fn(output, target)
-                loss = loss/iters_to_accumulate
+                loss = loss / iters_to_accumulate
                 if try_scaling_api:
                     torch.amp.scale_outputs(loss, S).backward()
                 else:
@@ -3603,7 +3610,7 @@ class TestAutograd(TestCase):
                             try_injection = False
                         found_inf = optimizer.check_inf()
                         if found_inf.item():
-                            S = S*0.5
+                            S = S * 0.5
                         else:
                             break
                     else:
@@ -3638,7 +3645,8 @@ class TestAutograd(TestCase):
                             model[1].weight.grad.data.fill_(float('inf'))
                             try_injection = False
                         found_inf, S = optimizer.unscale(S)
-                        if not found_inf.item():  break
+                        if not found_inf.item():
+                            break
                     else:
                         loss.backward()
                         break
@@ -3692,13 +3700,14 @@ class TestAutograd(TestCase):
                 optimizer1.zero_grad()
                 output0 = model0(input)
                 output1 = model1(input)
-                loss0 = loss_fn(2*output0 + 3*output1, target)
-                loss1 = loss_fn(3*output0 - 5*output1, target)
+                loss0 = loss_fn(2 * output0 + 3 * output1, target)
+                loss1 = loss_fn(3 * output0 - 5 * output1, target)
 
                 if try_scaling_api:
                     torch.amp.scale_outputs(loss0, S).backward(retain_graph=True)
                     torch.amp.scale_outputs(loss1, S).backward()
-                    if i == skip_iter:  model1[1].weight.grad.data.fill_(float('inf'))
+                    if i == skip_iter:
+                        model1[1].weight.grad.data.fill_(float('inf'))
                     _, found_inf0, S0 = optimizer0.unscale_and_step(current_scale=S)
                     _, found_inf1, S1 = optimizer1.unscale_and_step(current_scale=S)
                     S = min(S0, S1)
@@ -3706,7 +3715,8 @@ class TestAutograd(TestCase):
                     loss0.backward(retain_graph=True)
                     loss1.backward()
                     optimizer0.step()
-                    if i != skip_iter: optimizer1.step()
+                    if i != skip_iter:
+                        optimizer1.step()
 
         run(mod_control0, mod_control1, opt_control0, opt_control1, S, False)
         run(mod_scaling0, mod_scaling1, opt_scaling0, opt_scaling1, S, True)
