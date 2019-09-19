@@ -212,10 +212,12 @@ Result ATenOpTable::callUnboxed(Args... args) const {
   //    return.
   //    - SFINAE: our template gadget doesn't work on all types,
   //    we must not typecheck code if it does not work
-  if (supports_boxed_fallback<Result, Args...>::value) {
-    auto* boxed_fallback_fn = globalATenDispatch().getFallbackBoxedOp(tid);
-    if (C10_UNLIKELY(boxed_fallback_fn)) {
+  auto* boxed_fallback_fn = globalATenDispatch().getFallbackBoxedOp(tid);
+  if (C10_UNLIKELY(boxed_fallback_fn)) {
+    if (supports_boxed_fallback<Result, Args...>::value) {
       return callBoxedFallback<Result, Args...>(schema_.c_str(), boxed_fallback_fn, std::forward<Args>(args)...);
+    } else {
+      TORCH_INTERNAL_ASSERT(0, schema_, " does not support boxed fallback, but boxed fallback for ", tid, "was available");
     }
   }
 
