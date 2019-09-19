@@ -1,5 +1,10 @@
 #include <torch/csrc/jit/function.h>
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/peephole.h>
 
 #include <torch/csrc/jit/script/error_report.h>
 
@@ -55,9 +60,21 @@ const FunctionSchema& Function::getSchema() const {
 }
 
 void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
-  // TODO: Invoke cleanup passes before and after inlining to reduce amount of
-  // code we're copying.
+  EliminateDeadCode(graph);
+  EliminateCommonSubexpression(graph);
+  ConstantPooling(graph);
+  PeepholeOptimize(graph);
+  ConstantPropagation(graph);
+  EliminateDeadCode(graph);
+
   Inline(*graph);
+
+  EliminateDeadCode(graph);
+  EliminateCommonSubexpression(graph);
+  ConstantPooling(graph);
+  PeepholeOptimize(graph);
+  ConstantPropagation(graph);
+  EliminateDeadCode(graph);
 }
 
 } // namespace jit
