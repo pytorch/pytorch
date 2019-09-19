@@ -25,14 +25,6 @@ RNN_INPUT_SIZE = 5
 RNN_HIDDEN_SIZE = 3
 
 
-BATCH_SIZE = 2
-
-RNN_BATCH_SIZE = 7
-RNN_SEQUENCE_LENGTH = 11
-RNN_INPUT_SIZE = 5
-RNN_HIDDEN_SIZE = 3
-
-
 def _skipper(condition, reason):
     def decorator(f):
         @functools.wraps(f)

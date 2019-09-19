@@ -437,19 +437,6 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index, int opset_versio
   fixed_init_state->addInput(concated_dims->outputs()[0]);
   n->replaceInput(input_index, fixed_init_state->outputs()[0]);
 
-  /*if (opset_version < 9) {
-    Node* constant_fill = graph->create(onnx::ConstantFill, 1);
-    constant_fill->insertBefore(n);
-    constant_fill->i_(attr::input_as_shape, 1);
-    constant_fill->addInput(concated_dims->outputs()[0]);
-    n->replaceInput(input_index, constant_fill->outputs()[0]);
-  } else {
-    Node* constant_of_shape = graph->create(onnx::ConstantOfShape, 1);
-    constant_of_shape->insertBefore(n);
-    constant_of_shape->addInput(concated_dims->outputs()[0]);
-    n->replaceInput(input_index, constant_of_shape->outputs()[0]);
-  }*/
-
   if (initial_state->uses().size() == 0) {
     initial_state->node()->destroy();
   }
