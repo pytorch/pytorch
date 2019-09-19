@@ -435,6 +435,38 @@ class ModelForFusion(nn.Module):
         x = self.fc(x)
         return x
 
+class ConvBNReLU(nn.Sequential):
+    def __init__(self):
+        super(ConvBNReLU, self).__init__(
+            nn.Conv2d(3, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(3),
+            nn.ReLU(inplace=False)
+        )
+
+class ModelForFusion2(nn.Module):
+    def __init__(self):
+        super(ModelForFusion2, self).__init__()
+        self.conv1 = nn.Conv2d(3, 3, 1)
+        self.relu1 = nn.ReLU(inplace=False)
+        layers = []
+        for i in range(3):
+            layers.append(ConvBNReLU())
+        self.features = nn.Sequential(*layers)
+        head = [nn.Linear(300, 10), nn.ReLU(inplace=False)]
+        self.classifier = nn.Sequential(*head)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.conv1(x)
+        x = self.relu1(x)
+        x = self.features(x)
+        x = torch.reshape(x, (-1, 3 * 10 * 10))
+        x = self.classifier(x)
+        x = self.dequant(x)
+        return x
+
 
 class DummyObserver(torch.nn.Module):
     def calculate_qparams(self):

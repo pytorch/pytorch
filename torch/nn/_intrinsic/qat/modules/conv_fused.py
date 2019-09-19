@@ -246,17 +246,16 @@ class ConvReLU2d(nnqat.Conv2d):
                  qconfig=None):
         super(ConvReLU2d, self).__init__(in_channels, out_channels, kernel_size,
                                          stride=stride, padding=padding, dilation=dilation,
-                                         groups=groups, bias=bias, padding_mode=padding_mode)
+                                         groups=groups, bias=bias, padding_mode=padding_mode,
+                                         qconfig = qconfig)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.observer = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
 
     def forward(self, input):
-        return self.observer(F.relu(conv2d_forward(input, self.padding_mode,
-                             self.padding, self.weight_fake_quant(self.weight),
-                             self.bias, self.stride, self.dilation, self.groups),
-                             True))
+        return self.observer(F.relu(super(ConvReLU2d, self).conv2d_forward(input,
+                             self.weight_fake_quant(self.weight))))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):

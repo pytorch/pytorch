@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn._intrinsic import LinearReLU
 
 class Linear(nn.Linear):
     r"""
@@ -44,7 +45,10 @@ class Linear(nn.Linear):
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert mod.qconfig, 'Input float module must have a valid qconfig'
-            qconfig = mod.qconfig
+        if type(mod) == LinearReLU:
+            mod = mod[0]
+
+        qconfig = mod.qconfig
         qat_linear = cls(mod.in_features, mod.out_features, bias=mod.bias is not None, qconfig=qconfig)
         qat_linear.weight = mod.weight
         qat_linear.bias = mod.bias

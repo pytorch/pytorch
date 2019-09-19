@@ -216,9 +216,6 @@ class Linear(torch.nn.Module):
             assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
                 cls._FLOAT_MODULE.__name__
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
-            # workaround for sequential, ConvReLU2d should probably
-            # inherit from Conv2d instead
             if type(mod) == nni.LinearReLU:
                 activation_observer = mod[1].observer
                 mod = mod[0]
