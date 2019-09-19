@@ -265,6 +265,9 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
 IMPLEMENT_UNARY_OP_VEC(abs)
+IMPLEMENT_UNARY_OP_VEC(angle)
+IMPLEMENT_UNARY_OP_VEC(real)
+IMPLEMENT_UNARY_OP_VEC(imag)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
@@ -290,6 +293,9 @@ IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
 
 DEFINE_DISPATCH(abs_stub);
+DEFINE_DISPATCH(angle_stub);
+DEFINE_DISPATCH(real_stub);
+DEFINE_DISPATCH(imag_stub);
 DEFINE_DISPATCH(acos_stub);
 DEFINE_DISPATCH(asin_stub);
 DEFINE_DISPATCH(atan_stub);

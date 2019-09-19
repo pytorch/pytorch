@@ -198,6 +198,15 @@ struct Vec256<int32_t> : public Vec256i {
   Vec256<int32_t> abs() const {
     return _mm256_abs_epi32(values);
   }
+  Vec256<int32_t> angle() const {
+    return _mm256_set1_epi32(0);
+  }
+  Vec256<int32_t> real() const {
+    return *this;
+  }
+  Vec256<int32_t> imag() const {
+    return _mm256_set1_epi32(0);
+  }
   Vec256<int32_t> frac() const;
   Vec256<int32_t> neg() const;
   Vec256<int32_t> operator==(const Vec256<int32_t>& other) const {
@@ -384,6 +393,15 @@ struct Vec256<int16_t> : public Vec256i {
   int16_t& operator[](int idx)  = delete;
   Vec256<int16_t> abs() const {
     return _mm256_abs_epi16(values);
+  }
+  Vec256<int16_t> angle() const {
+    return _mm256_set1_epi16(0);
+  }
+  Vec256<int16_t> real() const {
+    return *this;
+  }
+  Vec256<int16_t> imag() const {
+    return _mm256_set1_epi16(0);
   }
   Vec256<int16_t> frac() const;
   Vec256<int16_t> neg() const;

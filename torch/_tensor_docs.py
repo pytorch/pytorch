@@ -332,6 +332,13 @@ allclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
 See :func:`torch.allclose`
 """)
 
+add_docstr_all('angle',
+               r"""
+angle() -> Tensor
+
+See :func:`torch.angle`
+""")
+
 add_docstr_all('any',
                r"""
 .. function:: any() -> bool
@@ -999,6 +1006,13 @@ flip(dims) -> Tensor
 See :func:`torch.flip`
 """)
 
+add_docstr_all('real',
+               r"""
+real() -> Tensor
+
+See :func:`torch.real`
+""")
+
 add_docstr_all('roll',
                r"""
 roll(shifts, dims) -> Tensor
@@ -1093,6 +1107,13 @@ add_docstr_all('ger',
 ger(vec2) -> Tensor
 
 See :func:`torch.ger`
+""")
+
+add_docstr_all('imag',
+               r"""
+imag() -> Tensor
+
+See :func:`torch.imag`
 """)
 
 add_docstr_all('indices',

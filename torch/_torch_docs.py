@@ -473,6 +473,25 @@ Example::
     True
 """)
 
+add_docstr(torch.angle,
+           r"""
+angle(input, out=None) -> Tensor
+
+Computes the element-wise angle (in radians) of the given :attr:`input` tensor.
+
+.. math::
+    \text{out}_{i} = |\text{input}_{i}|
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.real(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))*180/3.14159
+    tensor([ 135.,  135,  -45])
+""".format(**common_args))
+
 add_docstr(torch.as_strided,
            r"""
 as_strided(input, size, stride, storage_offset=0) -> Tensor
@@ -928,6 +947,25 @@ Example::
     tensor([-0.6341, -1.4208, -1.0900,  0.5826])
     >>> torch.ceil(a)
     tensor([-0., -1., -1.,  1.])
+""".format(**common_args))
+
+add_docstr(torch.real,
+           r"""
+real(input, out=None) -> Tensor
+
+Computes the element-wise real value of the given :attr:`input` tensor.
+
+.. math::
+    \text{out}_{i} = real(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.real(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
+    tensor([ -1,  -2,  3])
 """.format(**common_args))
 
 add_docstr(torch.reciprocal,
@@ -2240,6 +2278,25 @@ Example::
 
     >>> torch.histc(torch.tensor([1., 2, 1]), bins=4, min=0, max=3)
     tensor([ 0.,  2.,  1.,  0.])
+""".format(**common_args))
+
+add_docstr(torch.imag,
+           r"""
+imag(input, out=None) -> Tensor
+
+Computes the element-wise imag value of the given :attr:`input` tensor.
+
+.. math::
+    \text{out}_{i} = imag(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.imag(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
+    tensor([ 1,  2,  -3])
 """.format(**common_args))
 
 add_docstr(torch.index_select,
