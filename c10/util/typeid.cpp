@@ -36,18 +36,6 @@ C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<
   return &detail::_typeMetaDataInstance_uninitialized_;
 }
 
-TypeIdentifier TypeIdentifier::createTypeId() {
-  static std::atomic<TypeIdentifier::underlying_type> counter(
-      TypeMeta::Id<_CaffeHighestPreallocatedTypeId>().underlyingId());
-  const TypeIdentifier::underlying_type new_value = ++counter;
-  if (new_value ==
-      std::numeric_limits<TypeIdentifier::underlying_type>::max()) {
-    throw std::logic_error(
-        "Ran out of available type ids. If you need more than 2^16 CAFFE_KNOWN_TYPEs, we need to increase TypeIdentifier to use more than 16 bit.");
-  }
-  return TypeIdentifier(new_value);
-}
-
 CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(0, uint8_t)
 CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(1, int8_t)
 CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(2, int16_t)
