@@ -15,17 +15,39 @@ struct TORCH_API EmbeddingOptions {
   EmbeddingOptions(int64_t num_embeddings, int64_t embedding_dim);
   /// The size of the dictionary of embeddings.
   TORCH_ARG(int64_t, num_embeddings);
-  /// The size of each embedding vector
+  /// The size of each embedding vector.
   TORCH_ARG(int64_t, embedding_dim);
-  /// If given, pads the output with the embedding vector at `padding_idx (initialized to zeros) whenever it encounters the index.
+  /// If given, pads the output with the embedding vector at `padding_idx` (initialized to zeros) whenever it encounters the index.
   TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
   /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
   TORCH_ARG(c10::optional<float>, max_norm) = c10::nullopt;
-  /// The p of the p-norm to compute for the `max_norm` option. Default ``2``
+  /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
   TORCH_ARG(float, norm_type) = 2.;
   /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``False``.
   TORCH_ARG(bool, scale_grad_by_freq) = false;
-  /// If ``True``, gradient w.r.t. `_weight` matrix will be a sparse tensor.
+  /// If ``True``, gradient w.r.t. `weight` matrix will be a sparse tensor.
+  TORCH_ARG(bool, sparse) = false;
+  /// The learnable weights of the module of shape (num_embeddings, embedding_dim)
+  TORCH_ARG(c10::optional<torch::Tensor>, _weight) = c10::nullopt;
+};
+
+/// Options for the `EmbeddingBag` module.
+struct TORCH_API EmbeddingBagOptions {
+  EmbeddingBagOptions(int64_t num_embeddings, int64_t embedding_dim);
+  /// The size of the dictionary of embeddings.
+  TORCH_ARG(int64_t, num_embeddings);
+  /// The size of each embedding vector.
+  TORCH_ARG(int64_t, embedding_dim);
+  /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
+  TORCH_ARG(c10::optional<float>, max_norm) = c10::nullopt;
+  /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
+  TORCH_ARG(float, norm_type) = 2.;
+  /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``False``.
+  TORCH_ARG(bool, scale_grad_by_freq) = false;
+  /// ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag. ``"sum"`` computes the weighted sum, taking `per_sample_weights`
+  /// into consideration. ``"mean"`` computes the average of the values in the bag, ``"max"`` computes the max value over each bag.
+  TORCH_ARG(string, mode) = "mean";
+  /// If ``True``, gradient w.r.t. `weight` matrix will be a sparse tensor.
   TORCH_ARG(bool, sparse) = false;
   /// The learnable weights of the module of shape (num_embeddings, embedding_dim)
   TORCH_ARG(c10::optional<torch::Tensor>, _weight) = c10::nullopt;
@@ -37,6 +59,7 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
   EmbeddingImpl(int64_t num_embeddings, int64_t embedding_dim)
      : EmbeddingImpl(EmbeddingOptions(num_embeddings, embedding_dim)) {}
   explicit EmbeddingImpl(EmbeddingOptions options);
+
   void reset() override;
 
   /// Pretty prints the `Embedding` module into the given `stream`.
@@ -46,14 +69,39 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
   /// `indices` supplied and returns the result.
   Tensor forward(const Tensor& indices);
 
+  static EmbeddingImpl& from_pretrained(Tensor embeddings, bool freeze = true, c10::optional<int64_t> padding_idx = c10::nullopt,
+          c10::optional<float> max_norm = c10::nullopt, float norm_type = 2., bool scale_grad_by_freq = false, bool sparse = false);
+
   /// The `Options` used to configure this `Embedding` module.
   /// Changes to `EmbeddingOptions` *after construction* have no effect.
   EmbeddingOptions options;
 
-  ///The embedding table
+  /// The embedding table
   Tensor weight;
 };
 
+class TORCH_API EmbeddingBagImpl() : public torch::nn::Cloneable<EmbeddingBagImpl> {
+  public:
+    EmbeddingBagImpl(int64_t num_embeddings, int64_t embedding_dim)
+      : EmbeddingBagImpl(EmbeddingBagOptions(num_embeddings, embedding_dim)) {}
+    explicit EmbeddingBagImpl(EmbeddingBagOptions options);
+
+    void reset() override;
+
+    /// Pretty prints the `EmbeddingBag` module into the given `stream`.
+    void pretty_print(std::ostream& stream) const override;
+
+    std::tuple<Tensor, Tensor, Tensor, Tensor> forward(const Tensor& input, c10::optional<torch::Tensor> offsets = c10::nullopt,
+      c10::optional<torch::Tensor> per_sample_weights = c10::nullopt);
+
+    static EmbeddingBagImpl& EmbeddingBagImpl::from_pretrained(Tensor embeddings, bool freeze = true, c10::optional<float> mex_norm = c10::nullopt,
+       float norm_type = 2., bool scale_grad_by_freq = false, string mode = "sum", bool sparse = false);
+
+    /// The `Options` used to configure this `EmbeddingBag` module.
+    EmbeddingBagOptions options;
+    /// The embedding table
+    Tensor weight;
+};
 /// A `ModuleHolder` subclass for `EmbeddingImpl`.
 /// See the documentation for `EmbeddingImpl` class to learn what methods it
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
