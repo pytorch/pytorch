@@ -3,12 +3,13 @@ import types
 from torch._six import container_abcs
 
 
-def _recommend_init_scale():
-    return torch.cuda.FloatTensor([2.**24])
-
-
+_default_init_scale = 2.**24
 _default_scale_growth_factor = 1.001
 _default_scale_backoff_factor = 0.5
+
+
+def _recommend_init_scale():
+    return torch.full((1,), _default_init_scale, dtype=torch.float32, device="cuda")
 
 
 def scale_outputs(outputs, current_scale, scaling_enabled=True):
@@ -27,8 +28,9 @@ def scale_outputs(outputs, current_scale, scaling_enabled=True):
     if not scaling_enabled:
         return outputs
 
-    if isinstance(current_scale, float):
-        current_scale = torch.cuda.FloatTensor([current_scale])
+    # Not necessary.
+    # if isinstance(current_scale, float):
+    #     current_scale = torch.full((1,), current_scale, dtype=torch.float32, device="cuda")
 
     def scale(val):
         if isinstance(val, torch.Tensor):
@@ -110,29 +112,29 @@ def unscale_and_step(self,
     Returns:
         A tuple ``opt_ret, found_inf, recommended_scale``.  ``found_inf`` is a ``torch.cuda.FloatTensor`` that contains > 0 if an inf/nan was found during unscaling, and 0.0 otherwise.  ``recommended_scale`` is a ``torch.cuda.FloatTensor`` containing the recommended gradient scale to use next iteration.  ``opt_ret`` is the default return value of the underlying ``self.step()`` call.  If ``scaling_enabled=False``, the return values will be ``opt_ret, None, None``.
     """
-    if scaling_enabled:
-        if closure is not None:
-            raise ValueError("Closure use is not currently supported.  It's tricky, but not impossible, and we're trying "
-                             "to decide if it's worth implementing.  If you require closure use, please comment on "
-                             "https://github.com/pytorch/pytorch/issues/25081, which will help us gauge demand.")
+    if not scaling_enabled:
+        return self.step(closure), None, None
 
-        found, recommended_scale = self.unscale(current_scale,
-                                                scale_growth_factor=scale_growth_factor,
-                                                scale_backoff_factor=scale_backoff_factor,
-                                                scale_scheduler=scale_scheduler)
+    if closure is not None:
+        raise ValueError("Closure use is not currently supported.  It's tricky, but not impossible, and we're trying "
+                         "to decide if it's worth implementing.  If you require closure use, please comment on "
+                         "https://github.com/pytorch/pytorch/issues/25081, which will help us gauge demand.")
 
-        if found_inf is None:
-            found_inf = found
+    found, recommended_scale = self.unscale(current_scale,
+                                            scale_growth_factor=scale_growth_factor,
+                                            scale_backoff_factor=scale_backoff_factor,
+                                            scale_scheduler=scale_scheduler)
 
-        if skip_if_inf:
-            if found_inf.item():
-                return None, found_inf, recommended_scale
-            else:
-                return self.step(), found_inf, recommended_scale
+    if found_inf is None:
+        found_inf = found
+
+    if skip_if_inf:
+        if found_inf.item():
+            return None, found_inf, recommended_scale
         else:
             return self.step(), found_inf, recommended_scale
     else:
-        return self.step(closure), None, None
+        return self.step(), found_inf, recommended_scale
 
 
 def _next_recommended_scale(current_scale,
@@ -160,7 +162,7 @@ def unscale(self,
     r"""
     :func:`unscale` is patched onto an optimizer instance by :func:`add_amp_attributes`.  Since :func:`unscale` becomes a method,
     ``self`` is passed automatically.  :func:`unscale` should only be called as an attribute of its optimizer instance
-    (e.g. ``opt.unscale()``), not as a free function. 
+    (e.g. ``opt.unscale()``), not as a free function.
 
     :func:`unscale` divides the optimizer's owned gradients by ``current_scale``, and returns two Tensors indicating whether or not
     the gradients contained infs/nans and a recommended scale to use for next iteration.
@@ -198,30 +200,32 @@ def unscale(self,
     Returns:
         A tuple ``found_inf, recommended_scale``.  ``found_inf`` is a ``torch.cuda.FloatTensor`` that contains > 0 if an inf/nan was found during unscaling, and 0.0 otherwise.  ``recommended_scale`` is a ``torch.cuda.FloatTensor`` containing the recommended gradient scale to use next iteration.  If ``scaling_enabled=False``, the return values will be ``None, None``.
     """
-    if scaling_enabled:
-        found_inf = torch.cuda.FloatTensor([0.0])
-
-        if isinstance(current_scale, float):
-            current_scale = torch.cuda.FloatTensor([current_scale])
-
-        # Eventually, we'd like this to become a multi-tensor apply call dispatched via NestedTensor.
-        for group in self.param_groups:
-            for param in group["params"]:
-                if param.grad is not None:
-                    if param.grad.dtype == torch.float16:
-                        raise ValueError("Attempting to unscale FP16 gradients.  If you want to check for infs/nans without "
-                                         "unscaling, use optimizer.check_infs() instead.")
-                    else:
-                        torch._amp_unscale_inf_check_(param.grad, current_scale, found_inf)
-
-        if scale_scheduler is None:
-            next_recommended_scale = _next_recommended_scale(current_scale, found_inf, scale_growth_factor, scale_backoff_factor)
-        else:
-            next_recommended_scale = scale_scheduler(current_scale, found_inf)
-
-        return found_inf, next_recommended_scale
-    else:
+    if not scaling_enabled:
         return None, None
+
+    # Don't want to use torch.zeros() here because that gives the backend leeway to potentially call memset,
+    # and I've heard ominous rumours memset does not play well with cuda graphs.
+    found_inf = torch.full((1,), 0.0, dtype=torch.float32, device="cuda")
+
+    if isinstance(current_scale, float):
+        current_scale = torch.full((1,), current_scale, dtype=torch.float32, device="cuda")
+
+    # Eventually, we'd like this to become a multi-tensor apply call dispatched via NestedTensor.
+    for group in self.param_groups:
+        for param in group["params"]:
+            if param.grad is not None:
+                if param.grad.dtype == torch.float16:
+                    raise ValueError("Attempting to unscale FP16 gradients.  If you want to check for infs/nans without "
+                                     "unscaling, use optimizer.check_infs() instead.")
+                else:
+                    torch._amp_unscale_inf_check_(param.grad, current_scale, found_inf)
+
+    if scale_scheduler is None:
+        next_recommended_scale = _next_recommended_scale(current_scale, found_inf, scale_growth_factor, scale_backoff_factor)
+    else:
+        next_recommended_scale = scale_scheduler(current_scale, found_inf)
+
+    return found_inf, next_recommended_scale
 
 
 def check_inf(self, scaling_enabled=True):
@@ -241,20 +245,22 @@ def check_inf(self, scaling_enabled=True):
         ``found_inf``, a ``torch.cuda.FloatTensor`` that contains > 0 if an inf/nan is present in the current gradients,
         and 0.0 otherwise.  If ``scaling_enabled=False``, the return value will be ``None``.
     """
-    if scaling_enabled:
-        found_inf = torch.cuda.FloatTensor([0.0])
-
-        # This duplicates code from unscale.  In principle I could just call into unscale(1.0), but that would error
-        # if gradients are fp16, and I want check_inf to be usable on fp16 gradients.  I also don't want to add an argument
-        # to "unscale" that permits unscaling in fp16.
-        for group in self.param_groups:
-            for param in group["params"]:
-                if param.grad is not None:
-                  torch._amp_unscale_inf_check_(param.grad, 1.0, found_inf)
-
-        return found_inf
-    else:
+    if not scaling_enabled:
         return None
+
+    found_inf = torch.full((1,), 0.0, dtype=torch.float32, device="cuda")
+
+    # This duplicates code from unscale.  In principle I could just call into unscale(1.0), but that would error
+    # if gradients are fp16, and I want check_inf to be usable on fp16 gradients.  I also don't want to add an argument
+    # to "unscale" that permits unscaling in fp16.
+    for group in self.param_groups:
+        for param in group["params"]:
+            if param.grad is not None:
+              torch._amp_unscale_inf_check_(param.grad,
+                                            torch.full((1,), 1.0, dtype=torch.float32, device="cuda"),
+                                            found_inf)
+
+    return found_inf
 
 
 def step_after_unscale(self,
@@ -293,21 +299,21 @@ def step_after_unscale(self,
         If ``found_inf`` contains 0.0, :func:`step_after_unscale` returns the default return value of the ``self.step()`` call.
         If ``found_inf`` contains > 0, :func:`step_after_unscale` returns None.
     """
-    if scaling_enabled:
-        if closure is not None:
-            raise ValueError("Closure use is not currently supported.  It's tricky, but not impossible, and we're trying "
-                             "to decide if it's worth implementing.  If you require closure use, please comment on "
-                             "https://github.com/pytorch/pytorch/issues/25081, which will help us gauge demand.")
+    if not scaling_enabled:
+        return self.step(closure)
 
-        if skip_if_inf:
-            if found_inf.item():
-                return None
-            else:
-                return self.step()
+    if closure is not None:
+        raise ValueError("Closure use is not currently supported.  It's tricky, but not impossible, and we're trying "
+                         "to decide if it's worth implementing.  If you require closure use, please comment on "
+                         "https://github.com/pytorch/pytorch/issues/25081, which will help us gauge demand.")
+
+    if skip_if_inf:
+        if found_inf.item():
+            return None
         else:
             return self.step()
     else:
-        return self.step(closure)
+        return self.step()
 
 
 def _add_amp_attributes(optimizer):
@@ -321,7 +327,7 @@ def _add_amp_attributes(optimizer):
         optimizer.unscale = types.MethodType(unscale, optimizer)
 
     if not hasattr(optimizer, "check_inf"):
-        optimizer.unscale = types.MethodType(unscale, optimizer)
+        optimizer.check_inf = types.MethodType(check_inf, optimizer)
 
 
 def add_amp_attributes(optimizers):
@@ -336,7 +342,7 @@ def add_amp_attributes(optimizers):
     Custom implementations of  :func:`unscale`, :func:`check_inf`, :func:`unscale_and_step`,
     and :func:`step_after_unscale`, if present, should have the same interface (arguments + return values)
     as the default implementations described here.  Defining the methods yourself is not required and the
-    default implementations should work with any optimizer that defines ``step``.  
+    default implementations should work with any optimizer that defines ``step``.
 
     Arguments:
         optimizers (torch.optim.Optimizer or iterable of torch.optim.Optimizers):  Optimizer(s) for which to

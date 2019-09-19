@@ -330,11 +330,12 @@ the minimum among these as the scale factor for next iteration::
             output0 = model0(input)
             output1 = model1(input)
             loss0 = loss_fn0(output0, output1, target)
+            loss1 = loss_fn1(output0, output1, target)
 
         # Both losses accumulate into some parameters of model0 and some parameters of model1.
         # They may also be accumulating into many of the same parameters,
         # but that's ok, because they use the same gradient scale.
-        scale_outputs(loss0, S).backward()
+        scale_outputs(loss0, S).backward(retain_graph=True)
         scale_outputs(loss1, S).backward()
 
         _, found_inf0, S0 = optimizer0.unscale_and_step(current_scale=S)
