@@ -482,6 +482,28 @@ class TestNamedTensor(TestCase):
         t = torch.randn(2, 3, names=('N', 'C'))
         self.assertEqual(t.t().names, ['C', 'N'])
 
+    def test_resize(self):
+        for device in torch.testing.get_all_device_types():
+            named = torch.randn(2, names=('N',), device=device)
+            named.resize_([2])
+            self.assertEqual(named.names, ['N'])
+
+            with self.assertRaisesRegex(RuntimeError, "Cannot resize named tensor"):
+                named.resize_([3])
+
+            other_named = torch.randn(2, names=('N',), device=device)
+            named.resize_as_(other_named)
+            self.assertEqual(other_named.names, ['N'])
+
+            unnamed = torch.randn(2, device=device)
+            with self.assertRaisesRegex(
+                    RuntimeError, r'names .* are not the same as the computed output names'):
+                named.resize_as_(unnamed)
+
+            unnamed = torch.randn(1, device=device)
+            unnamed.resize_as_(named)
+            self.assertEqual(unnamed.names, ['N'])
+
     def test_info_smoke(self):
         # Smoke test for info functions / methods / attributes on named tensors.
         tensor = torch.empty(1, 1, names=('N', 'D'))

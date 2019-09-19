@@ -977,6 +977,7 @@
 
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: method
   device_guard: False
   dispatch:
@@ -3029,6 +3030,7 @@
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: function, method
   dispatch:
     CPU: resize_as_cpu_
