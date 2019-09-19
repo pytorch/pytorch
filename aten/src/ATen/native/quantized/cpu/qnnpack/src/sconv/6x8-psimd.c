@@ -10,7 +10,7 @@
 
 #include <qnnpack/sconv.h>
 
-void sconv_ukernel_6x8__psimd(
+void pytorch_sconv_ukernel_6x8__psimd(
     size_t mr,
     size_t nr,
     size_t kc,

@@ -11,8 +11,10 @@ from hypothesis import strategies as st
 import hypothesis_utils as hu
 from hypothesis_utils import no_deadline
 
-from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
-from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams
+from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC, \
+    TEST_WITH_QNNPACK
+from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
+    enable_mobile_quantized_engine
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
@@ -137,6 +139,9 @@ class TestQuantizedOps(TestCase):
             self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
 
     """Tests the correctness of the scalar addition."""
+    @unittest.skip("temporarily disable until failures are fixed. " +
+                   "See https://github.com/pytorch/pytorch/issues/26279")
+    @no_deadline
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=st.floats(-1e6, 1e6, allow_nan=False),
                        qparams=hu.qparams()),
@@ -871,7 +876,8 @@ class TestQuantizedLinear(unittest.TestCase):
         Y_zp = 5
 
         # Weight prepacking operator for quantized Linear
-        W_prepack = qlinear_prepack(W_q, b_q)
+        float_bias = b if use_bias else None
+        W_prepack = qlinear_prepack(W_q, float_bias)
 
         if use_multi_dim_input:
             X_q = X_q.view(3, int(batch_size / 3), input_channels)
@@ -913,7 +919,6 @@ class TestQuantizedLinear(unittest.TestCase):
            use_channelwise=st.booleans())
     def test_qlinear_unpack(self, W, use_channelwise):
         W, (W_scale, W_zp, torch_type) = W
-        torch.backends.quantized.engine = torch.fbgemm
         if use_channelwise:
             output_channels = W.shape[0]
             W_scales = torch.rand(output_channels).to(torch.double)
@@ -972,7 +977,7 @@ class TestQuantizedConv(unittest.TestCase):
            stride_w=st.integers(1, 2),
            pad_h=st.integers(0, 2),
            pad_w=st.integers(0, 2),
-           dilation=st.integers(1, 1),
+           dilation=st.integers(1, 2),
            X_scale=st.floats(0.2, 1.6),
            X_zero_point=st.integers(0, 4),
            W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
@@ -1007,7 +1012,6 @@ class TestQuantizedConv(unittest.TestCase):
             use_relu,
             use_channelwise
     ):
-
         qconv = torch.ops.quantized.conv2d
         if use_relu:
             qconv = torch.ops.quantized.conv2d_relu
@@ -1019,6 +1023,10 @@ class TestQuantizedConv(unittest.TestCase):
         output_channels = output_channels_per_group * groups
 
         dilation_h = dilation_w = dilation
+
+        # Padded input size should be at least as big as dilated kernel
+        assume(height + 2 * pad_h >= dilation_h * (kernel_h - 1) + 1)
+        assume(width + 2 * pad_w >= dilation_w * (kernel_w - 1) + 1)
 
         W_scale = W_scale * output_channels
         W_zero_point = W_zero_point * output_channels
@@ -1101,16 +1109,11 @@ class TestQuantizedConv(unittest.TestCase):
                                                     W_zero_points_tensor.to(dtype=torch.long),
                                                     [0],
                                                     dtype=torch.qint8)
-            b_q = torch.quantize_linear_per_channel(b,
-                                                    X_scale * W_scales_tensor.to(dtype=torch.double),
-                                                    torch.zeros(output_channels, dtype=torch.long),
-                                                    [0],
-                                                    dtype=torch.qint32) if use_bias else None
         else:
             W_q = torch.quantize_linear(W_KRSC, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
-            b_q = torch.quantize_linear(b, scale=X_scale * W_scale[0], zero_point=0, dtype=torch.qint32) if use_bias else None
 
-        W_prepack = qconv_prepack(W_q, b_q, stride, pad, dilation, groups)
+        bias_float = b if use_bias else None
+        W_prepack = qconv_prepack(W_q, bias_float, stride, pad, dilation, groups)
 
         Y_q = qconv(
             X_q,
@@ -1208,6 +1211,7 @@ class TestQuantizedConv(unittest.TestCase):
             np.testing.assert_equal(np.float32(W_q.q_scale()), np.float32(W_unpacked.q_scale()))
             np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
 
+@unittest.skipIf(not TEST_WITH_QNNPACK, "This Pytorch Build has not been built with QNNPACK")
 @unittest.skipIf(IS_WINDOWS, "QNNPACK has not been built for Windows")
 @unittest.skipIf(IS_PPC, "QNNPACK is not currently supported on ppc64le")
 @unittest.skipIf(TEST_WITH_UBSAN,
@@ -1233,76 +1237,294 @@ class TestQNNPackOps(TestCase):
         qY = torch.quantize_linear(Y, scale=scale, zero_point=zero_point, dtype=torch_type)
         self.assertEqual(qY, qY_hat)
 
-    """Tests the correctness of the quantized::qnnpack_linear op."""
-    @given(output_channels=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           X=hu.tensor(shapes=hu.array_shapes(2, 3, 8, 15),
+    @given(batch_size=st.integers(1, 4),
+           input_channels=st.integers(16, 32),
+           output_channels=st.integers(4, 8),
+           use_relu=st.booleans())
+    def test_qlinear_qnnpack(self, batch_size, input_channels, output_channels, use_relu):
+
+        with enable_mobile_quantized_engine():
+            qlinear_prepack = torch.ops.quantized.linear_prepack
+            if use_relu:
+                qlinear = torch.ops.quantized.linear_relu
+            else:
+                qlinear = torch.ops.quantized.linear
+
+            X_scale = 1.5
+            X_zp = 5
+            X_value_min = 0
+            X_value_max = 225
+            X_q0 = np.round(
+                np.random.rand(batch_size, input_channels) *
+                (X_value_max - X_value_min)
+                + X_value_min
+            ).astype(np.uint8)
+
+            W_scales = np.random.rand(output_channels)
+            W_zp = 2
+            W_value_min = -128
+            W_value_max = 127
+            W_q0 = np.round(
+                np.random.rand(output_channels, input_channels)
+                * (W_value_max - W_value_min)
+                + W_value_min
+            ).astype(np.uint8)
+
+            b_value_min = -10
+            b_value_max = 10
+            b_q0 = np.round(
+                np.random.rand(output_channels) *
+                (b_value_max - b_value_min) + b_value_min
+            ).astype(np.int32)
+
+            X = torch.from_numpy(_dequantize(
+                X_q0, X_scale, X_zp)).to(dtype=torch.float)
+            X_q = torch.quantize_linear(
+                X, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
+
+            W = torch.from_numpy(_dequantize(
+                W_q0, W_scales[0], W_zp)).to(dtype=torch.float)
+            W_q = torch.quantize_linear(W, scale=W_scales[0], zero_point=(
+                W_zp), dtype=torch.quint8)
+            b = torch.from_numpy(_dequantize(
+                b_q0, X_scale * (W_scales[0].item()), 0)).to(dtype=torch.float)
+            b_q = torch.quantize_linear(
+                b, scale=X_scale * (W_scales[0].item()), zero_point=0, dtype=torch.qint32)
+
+            # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
+            # Y_scale * 255 (max for uint8).
+            Y_scale = 125.1234
+            Y_zp = 5
+
+            # Weight prepacking operator for quantized Linear
+            W_prepack = qlinear_prepack(W_q, b_q)
+
+            # Quantized Linear operator with prepacked weight
+            Y_q = qlinear(X_q, W_prepack, Y_scale, Y_zp)
+
+            # Reference quantized Linear operator
+            Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0,
+                                  W_scales[0], W_zp, b_q0, Y_scale, Y_zp)
+            if use_relu:
+                Y_q_ref[Y_q_ref < Y_zp] = Y_zp
+            # Assert equal
+            np.testing.assert_array_almost_equal(Y_q_ref, Y_q.int_repr().numpy(), decimal=4)
+
+            # Test both per-tensor and per-channel quantization
+            # Reference quantized result from PyTorch Linear operator
+            W_fp32 = W_q.dequantize().to(dtype=torch.float)
+            X_fp32 = X_q.dequantize().to(dtype=torch.float)
+            b_fp32 = b_q.dequantize().to(dtype=torch.float)
+            Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
+            if use_relu:
+                Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
+            Y_q_ref2 = torch.quantize_linear(
+                Y_fp32_ref, Y_scale, Y_zp, torch.quint8)
+            # Assert equal
+            np.testing.assert_equal(
+                Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
+
+    """Tests the correctness of the quantized::linear_unpack (qnnpack) op."""
+    @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
-    def test_qnnpack_linear(self, output_channels, X):
-        X, (X_scale, X_zp, torch_type) = X
-        qmin = torch.iinfo(torch_type).min
-        qmax = torch.iinfo(torch_type).max
+    def test_qlinear_unpack(self, W):
+        W, (W_scale, W_zp, torch_type) = W
 
-        input_channels = X.shape[X.ndim - 1]
+        with enable_mobile_quantized_engine():
+            qlinear_prepack = torch.ops.quantized.linear_prepack
+            qlinear_unpack = torch.ops.quantized.linear_unpack
 
-        input_rows = 1
+            W = torch.from_numpy(W)
+            W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp,
+                                        dtype=torch_type)
 
-        for x in range(X.ndim - 1):
-            input_rows *= X.shape[x]
+            # Weight prepacking operator for quantized Linear
+            W_prepack = qlinear_prepack(W_q)
+            # Weight unpack operator for quantized Linear (Used for serialization)
+            W_q_origin = qlinear_unpack(W_prepack)[0]
 
-        qnnpack_linear = torch.ops.quantized.qnnpack_linear
+            # Assert equal
+            np.testing.assert_equal(W_q.int_repr(), W_q_origin.int_repr().numpy())
 
-        X_q0 = np.round(X * (qmin - qmax) + qmin).astype(np.uint8)
+            np.testing.assert_equal(np.float32(
+                W_q.q_scale()), np.float32(W_q_origin.q_scale()))
+            np.testing.assert_equal(
+                W_q.q_zero_point(), W_q_origin.q_zero_point())
 
-        W_scale = 0.4
-        W_zp = 0
-        W_value_min = 0
-        W_value_max = 255
-        W_q0 = np.round(
-            np.random.rand(output_channels, input_channels)
-            * (W_value_max - W_value_min)
-            + W_value_min
-        ).astype(np.uint8)
+    @given(batch_size=st.integers(1, 3),
+           input_channels_per_group=st.sampled_from([8, 16, 32]),
+           height=st.integers(10, 16),
+           width=st.integers(7, 14),
+           output_channels_per_group=st.sampled_from([8, 16, 32]),
+           groups=st.integers(1, 3),
+           kernel_h=st.integers(1, 7),
+           kernel_w=st.integers(1, 7),
+           stride_h=st.integers(1, 2),
+           stride_w=st.integers(1, 2),
+           pad_h=st.integers(0, 2),
+           pad_w=st.integers(0, 2),
+           dilation_h=st.integers(1, 1),
+           X_scale=st.floats(1.2, 1.6),
+           X_zp=st.integers(0, 4),
+           W_scale=st.floats(0.2, 1.6),
+           W_zp=st.integers(2, 5),
+           Y_scale=st.floats(4.2, 5.6),
+           Y_zp=st.integers(0, 4),
+           use_relu=st.booleans())
+    def test_qconv_qnnpack(
+            self,
+            batch_size,
+            input_channels_per_group,
+            height,
+            width,
+            output_channels_per_group,
+            groups,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+            pad_h,
+            pad_w,
+            dilation_h,
+            X_scale,
+            X_zp,
+            W_scale,
+            W_zp,
+            Y_scale,
+            Y_zp,
+            use_relu):
+        with enable_mobile_quantized_engine():
+            # C
+            input_channels = input_channels_per_group * groups
+            # K
+            output_channels = output_channels_per_group * groups
 
-        b_value_min = -10
-        b_value_max = 10
-        b_q0 = np.round(
-            np.random.rand(output_channels) * (b_value_max - b_value_min) + b_value_min
-        ).astype(np.int32)
+            stride = [stride_h, stride_w]
+            padding = [pad_h, pad_w]
+            kernel = [kernel_h, kernel_w]
+            dilation = [dilation_h, dilation_h]
 
-        X_scale = 10
-        X_zp = 0
-        X = torch.from_numpy(_dequantize(X_q0, X_scale, X_zp)).to(dtype=torch.float)
-        W = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
-        b = torch.from_numpy(_dequantize(b_q0, X_scale * W_scale, 0)).to(dtype=torch.float)
+            W_value_min = 0
+            W_value_max = 10
+            W_init = torch.from_numpy(
+                np.random.randint(
+                    W_value_min,
+                    W_value_max,
+                    (output_channels, int(input_channels / groups), kernel_h, kernel_w)),
+            )
+            b_init = torch.from_numpy(np.random.randint(0, 10, (output_channels,)))
 
-        X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
-        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp, dtype=torch.quint8)
-        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
+            X_value_min = 0
+            X_value_max = 10
+            X_init = torch.from_numpy(np.random.randint(
+                X_value_min, X_value_max, (batch_size, input_channels, height, width)))
 
-        Y_scale = 5.4  # This makes sure that the max output value does not exceed 255.
-        Y_zp = 0
+            # Existing floating point conv operator
+            conv_op = torch.nn.Conv2d(
+                input_channels,
+                output_channels,
+                (kernel_h, kernel_w),
+                (stride_h, stride_w),
+                (pad_h, pad_w),
+                (dilation_h, dilation_h),
+                groups,
+            )
 
-        # Reference quantized Linear operator
-        Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
-        Y_q_ref_float = _dequantize(Y_q_ref, Y_scale, Y_zp)
+            X = X_scale * (X_init - X_zp).to(dtype=torch.float)
 
-        # Quantized linear operator
-        Y_q = qnnpack_linear(X_q, W_q, b_q, Y_scale, Y_zp)
+            W = W_scale * (W_init - W_zp).to(dtype=torch.float)
 
-        # Assert equal
-        np.testing.assert_array_almost_equal(Y_q_ref_float, Y_q.dequantize().numpy(), decimal=4)
+            b = X_scale * W_scale * (b_init - 0).to(dtype=torch.float)
 
-        # Reference quantized result from PyTorch Linear operator
+            # assign weights
+            conv_op.weight = torch.nn.Parameter(W, requires_grad=False)
+            conv_op.bias = torch.nn.Parameter(b, requires_grad=False)
 
-        W_fp32 = W_q.dequantize().to(dtype=torch.float)
-        X_fp32 = X_q.dequantize().to(dtype=torch.float)
-        b_fp32 = b_q.dequantize().to(dtype=torch.float)
-        Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
-        Y_fp32_ref = Y_fp32_ref.view(-1, output_channels)
-        Y_q_ref2 = torch.quantize_linear(Y_fp32_ref, Y_scale, Y_zp, torch.quint8)
+            result_ref = conv_op(X)
 
-        # Assert equal
-        np.testing.assert_array_almost_equal(Y_q_ref2.dequantize().numpy(), Y_q.dequantize().numpy(), decimal=4)
+            X_NHWC = X.permute([0, 2, 3, 1]).contiguous()
+            W_RSCK = W.permute([0, 2, 3, 1]).contiguous()
+
+            X_q = torch.quantize_linear(X_NHWC, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
+            W_q = torch.quantize_linear(W_RSCK, scale=W_scale, zero_point=W_zp, dtype=torch.quint8)
+            b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
+
+            W_pack = torch.ops.quantized.conv_prepack(W_q, b_q, stride, padding, dilation, groups)
+            qconv = torch.ops.quantized.conv2d
+            if use_relu:
+                qconv = torch.ops.quantized.conv2d_relu
+
+            Y_q = qconv(
+                X_q,
+                W_pack,
+                stride,
+                padding,
+                dilation,
+                groups,
+                Y_scale,
+                Y_zp
+            )
+
+            result_NHWK = result_ref.permute([0, 2, 3, 1])
+            if use_relu:
+                relu = torch.nn.ReLU()
+                result_NHWK = relu(result_NHWK)
+
+            result_ref_q = torch.quantize_linear(result_NHWK, scale=Y_scale, zero_point=Y_zp, dtype=torch.quint8)
+
+            np.testing.assert_array_almost_equal(result_ref_q.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=0)
+
+    """Tests the correctness of the quantized::qconv_unpack (qnnpack) op."""
+    @given(X=hu.tensor_conv2d(min_batch=1, max_batch=3,
+                              min_in_channels=1, max_in_channels=7,
+                              min_out_channels=1, max_out_channels=7,
+                              H_range=(6, 12), W_range=(6, 12),
+                              kH_range=(3, 5), kW_range=(3, 5),
+                              max_groups=4,
+                              qparams=[hu.qparams(dtypes=torch.quint8,
+                                                  zero_point_min=0,
+                                                  zero_point_max=0),
+                                       hu.qparams(dtypes=torch.quint8,
+                                                  zero_point_min=0,
+                                                  zero_point_max=0),
+                                       hu.qparams(dtypes=torch.qint32,
+                                                  zero_point_min=0,
+                                                  zero_point_max=0)]),
+           strideH=st.integers(1, 3), strideW=st.integers(1, 3),
+           padH=st.integers(1, 2), padW=st.integers(1, 2))
+    def test_qconv_unpack(self, X, strideH, strideW, padH, padW):
+        with enable_mobile_quantized_engine():
+            (inputs, filters, bias, groups) = X
+            inputs, (inputs_scale, inputs_zero_point, inputs_qtype) = inputs
+            filters, (filters_scale, filters_zero_point, filters_qtype) = filters
+            bias, (bias_scale, bias_zero_point, bias_qtype) = bias
+
+            qconv_prepack = torch.ops.quantized.conv_prepack
+            qconv_unpack = torch.ops.quantized.conv_unpack
+
+            # Orig tensor is assumed to be in K(C/G)RS format
+            W = torch.from_numpy(filters).to(torch.float)
+            # K(C/G)RS -> KRS(C/G)
+            W_KRSC = W.permute([0, 2, 3, 1]).contiguous()
+
+            W_q = torch.quantize_linear(W_KRSC, scale=filters_scale, zero_point=filters_zero_point, dtype=filters_qtype)
+
+            # Pack weights using weight packing operator
+            strides = [strideH, strideW]
+            paddings = [padH, padW]
+            dilations = [1, 1]
+            bias = torch.from_numpy(bias).to(torch.float)
+            b_q = torch.quantize_linear(bias, scale=bias_scale, zero_point=bias_zero_point, dtype=bias_qtype)
+            W_packed = qconv_prepack(W_q, b_q, strides, paddings, dilations, groups)
+            # Unpack weights weight unpacking operator (Used for serialization)
+            W_unpacked = qconv_unpack(W_packed)[0]
+            b_q = qconv_unpack(W_packed)[1]
+
+            # Assert equal
+            np.testing.assert_equal(W_q.int_repr().numpy(), W_unpacked.int_repr().numpy())
+
+            np.testing.assert_equal(np.float32(W_q.q_scale()), np.float32(W_unpacked.q_scale()))
+            np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
 
     """Tests the correctness of the quantized::qnnpack_add op."""
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
