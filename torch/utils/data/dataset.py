@@ -311,15 +311,22 @@ class ChunkDataset(IterableDataset):
         self._cache = []
         self._batch_size = 1
         self._min_cache = 1000
+        self._is_ready = False
 
     def __iter__(self):
         return self
 
     def __len__(self):
+        # `IterableDataset` classes have unknown dataset size
         raise NotImplementedError
 
     def __next__(self):
         r"""Returns a batch or raises exception when exhausted"""
+
+        # Run once: update global worker rank on each worker process
+        if not self._is_ready:
+            self._update_global_worker_rank()
+        assert self._is_ready, "`_update_global_worker_rank()` must be called before iterating over `ChunkDataset`"
 
         cache_size = 0
         if len(self._cache) > 0:
@@ -365,9 +372,14 @@ class ChunkDataset(IterableDataset):
     def reset(self):
         r"""Resets internal state of ChunkDataset
 
-        Typically will be used before a new epoch starts or
-        during worker initialization process.
+        Typically will be used before a new epoch starts.
         """
+
+        self._chunk_sampler_iter = iter(self.chunk_sampler)
+
+    def _update_global_worker_rank(self):
+        r"""Updates global worker rank for the current process"""
+
         worker_id = 0
         num_workers = 0
         try:
@@ -376,10 +388,11 @@ class ChunkDataset(IterableDataset):
             num_workers = get_worker_info().num_workers
             global_worker_rank = worker_id + self.chunk_sampler.get_global_worker_rank() * num_workers
             self.chunk_sampler.set_global_worker_rank(global_worker_rank)
+            self.reset()
         except AttributeError:
-            # Ignore when DataLoader workers are not used
+            # Ignore when DataLoader num_workers are not used
             pass
-        self._chunk_sampler_iter = iter(self.chunk_sampler)
+        self._is_ready = True
 
     next = __next__  # py2 compatibility
 

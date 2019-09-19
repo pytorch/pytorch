@@ -155,7 +155,7 @@ class DistributedChunkSampler(Sampler):
 
     def __iter__(self):
         r"""Stride logic is implemented here"""
-        # Fecthes all indices
+        # Fetches all indices
         indices = list(self.sampler)
 
         # Create a strided sublist
