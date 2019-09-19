@@ -17,10 +17,15 @@ def check_bc(new_schema_dict):
                 found = True
                 break
         if not found:
-            print('Can NOT find backward compatible schemas after changes'
-                  'for schema {} from the following candidates:\n {}'.format(
+            print('Can NOT find backward compatible schemas after changes '
+                  'for schema {} from the following candidates:\n[\n{}\n]'
+                  .format(
                       str(existing_schema),
                       "\n\t".join(str(s) for s in new_schemas)))
+            print('The PR is introducing backward incompatible changes to the '
+                  'operator library. Please contact PyTorch team to confirm '
+                  'whether this change is wanted or not.')
+            # TODO Print out more details about why candidates don't match.
             return False
     print('Found backward compatible schemas for all existing schemas')
     return True
