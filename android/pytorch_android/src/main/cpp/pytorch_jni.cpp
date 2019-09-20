@@ -590,7 +590,11 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
       inputs.push_back(std::move(atIValue));
     }
-    auto output = module_.forward(std::move(inputs));
+    auto output = [&]() {
+      torch::autograd::AutoGradMode guard(false);
+      at::AutoNonVariableTypeMode non_var_type_mode(true);
+      return module_.forward(std::move(inputs));
+    }();
     return JIValue::newJIValueFromAtIValue(output);
   }
 
@@ -609,7 +613,11 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
       inputs.push_back(std::move(atIValue));
     }
     if (auto method = module_.find_method(methodName)) {
-      auto output = (*method)(std::move(inputs));
+      auto output = [&]() {
+        torch::autograd::AutoGradMode guard(false);
+        at::AutoNonVariableTypeMode non_var_type_mode(true);
+        return (*method)(std::move(inputs));
+      }();
       return JIValue::newJIValueFromAtIValue(output);
     }
 
