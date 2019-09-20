@@ -13,9 +13,8 @@ if not dist.is_available():
 
 from torch.distributed.rpc import RpcBackend
 from common_distributed import MultiProcessTestCase
-from common_utils import load_tests, run_tests
+from common_utils import load_tests, run_tests, TEST_WITH_ASAN
 from os import getenv
-import caffe2.python._import_c_extension as C
 
 BACKEND = getenv('RPC_BACKEND', RpcBackend.PROCESS_GROUP)
 RPC_INIT_URL = getenv('RPC_INIT_URL', '')
@@ -97,7 +96,7 @@ def _wrap_with_rpc(func):
     sys.version_info < (3, 0),
     "Pytorch distributed rpc package " "does not support python2",
 )
-@unittest.skipIf(C.is_asan, "Skip ASAN as torch + multiprocessing spawn have known issues")
+@unittest.skipIf(TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues")
 class RpcTest(MultiProcessTestCase):
     def setUp(self):
         super(RpcTest, self).setUp()
@@ -136,7 +135,7 @@ class RpcTest(MultiProcessTestCase):
             dist.rpc(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
 
     def test_reinit(self):
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(backend="gloo", rank=self.rank,
                                 world_size=self.world_size, store=store)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):

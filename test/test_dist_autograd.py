@@ -8,7 +8,7 @@ from functools import wraps
 import six
 import unittest
 import torch
-import caffe2.python._import_c_extension as C
+from common_utils import TEST_WITH_ASAN
 
 if not dist.is_available():
     print("c10d not available, skipping tests")
@@ -35,7 +35,7 @@ def dist_init(func):
 
 @unittest.skipIf(not six.PY3, "Pytorch distributed autograd package "
                  "does not support python2")
-@unittest.skipIf(C.is_asan, "Skip ASAN as torch + multiprocessing spawn have known issues")
+@unittest.skipIf(TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues")
 class TestDistAutograd(MultiProcessTestCase):
     def setUp(self):
         super(TestDistAutograd, self).setUp()
