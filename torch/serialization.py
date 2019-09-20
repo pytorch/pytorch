@@ -26,7 +26,7 @@ INT_SIZE = struct.Struct('=i').size
 SHORT_SIZE = struct.Struct('=h').size
 
 MAGIC_NUMBER = 0x1950a86a20f9469cfc6c
-PROTOCOL_VERSION = 1001
+PROTOCOL_VERSION = 1002
 STORAGE_KEY_SEPARATOR = ','
 
 
@@ -186,23 +186,30 @@ def storage_to_tensor_type(storage):
     module = _import_dotted_name(storage_type.__module__)
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
-
-class _open_zipfile_like(object):
+class _open_file_like(object):
     def __init__(self, f, mode):
         self.f = f
         self.mode = mode
+
+    def open(self):
+        return open(self.f, self.mode)
 
     def __enter__(self):
         if isinstance(self.f, str) or \
                 (sys.version_info[0] == 2 and isinstance(self.f, unicode)) or \
                 (sys.version_info[0] == 3 and isinstance(self.f, pathlib.Path)):
-            self.fd = zipfile.ZipFile(self.f, self.mode)
+            self.fd = self.open()
             return self.fd
         return self.f
 
     def __exit__(self, *args):
         if hasattr(self, 'fd'):
             self.fd.close()
+
+
+class _open_zipfile_like(_open_file_like):
+    def open(self):
+        return zipfile.ZipFile(self.f, self.mode)
 
 
 def _is_compressed_file(f):
@@ -318,15 +325,15 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
                     view_metadata)
         return None
 
-    sys_info = dict(
-        protocol_version=PROTOCOL_VERSION,
-        little_endian=sys.byteorder == 'little',
-        type_sizes=dict(
-            short=SHORT_SIZE,
-            int=INT_SIZE,
-            long=LONG_SIZE,
-        ),
-    )
+    sys_info = {
+        "protocol_version": PROTOCOL_VERSION,
+        "little_endian": sys.byteorder == 'little',
+        "type_sizes": {
+            "short": SHORT_SIZE,
+            "int": INT_SIZE,
+            "long": LONG_SIZE,
+        }
+    }
 
     metadata = {
         "magic_number": MAGIC_NUMBER,
@@ -419,23 +426,15 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
                 buffer = io.BytesIO(f.read())
         >>> torch.load(buffer)
     """
-    new_fd = False
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)):
-        new_fd = True
-        f = open(f, 'rb')
-    elif (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        new_fd = True
-        f = f.open('rb')
-    try:
-        if _is_zipfile(f):
-            f = zipfile.ZipFile(f, 'r')
-            return _load(f, map_location, pickle_module, **pickle_load_args)
-
+    with _open_file_like(f=f, mode='rb') as f:
         _check_seekable(f)
+        if _is_zipfile(f):
+            with zipfile.ZipFile(f, 'r') as zip_file:
+                return _load(zip_file, map_location, pickle_module, **pickle_load_args)
+
         f_should_read_directly = _should_read_directly(f)
 
-        # Dispatch to a legacy loader if necessary
+        # The file wasn't a zip, so dispatch to a legacy loader
         if f_should_read_directly and f.tell() == 0:
             # _legacy_tar_load requires that f has fileno()
             # only if offset is zero we can attempt the legacy tar file loader
@@ -443,54 +442,8 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
                 return _legacy_tar_load(f, map_location, pickle_module, **pickle_load_args)
             except tarfile.TarError:
                 if _is_legacy_picklefile(f):
-                    f.seek(0)
                     return _legacy_pickle_load(f, map_location, pickle_module, **pickle_load_args)
         raise RuntimeError("Unknown file type (expected a legacy tar file, legacy pickle file, or zip file)")
-    finally:
-        if new_fd:
-            f.close()
-
-
-def _check_container_source(container_type, source_file, original_source):
-    try:
-        current_source = ''.join(get_source_lines_and_file(container_type)[0])
-    except Exception:  # saving the source is optional, so we can ignore any errors
-        warnings.warn("Couldn't retrieve source code for container of "
-                        "type " + container_type.__name__ + ". It won't be checked "
-                        "for correctness upon loading.")
-        return
-    if original_source != current_source:
-        if container_type.dump_patches:
-            file_name = container_type.__name__ + '.patch'
-            diff = difflib.unified_diff(current_source.split('\n'),
-                                        original_source.split('\n'),
-                                        source_file,
-                                        source_file, lineterm="")
-            lines = '\n'.join(diff)
-            try:
-                with open(file_name, 'a+') as f:
-                    file_size = f.seek(0, 2)
-                    f.seek(0)
-                    if file_size == 0:
-                        f.write(lines)
-                    elif file_size != len(lines) or f.read() != lines:
-                        raise IOError
-                msg = ("Saved a reverse patch to " + file_name + ". "
-                        "Run `patch -p0 < " + file_name + "` to revert your "
-                        "changes.")
-            except IOError:
-                msg = ("Tried to save a patch, but couldn't create a "
-                        "writable file " + file_name + ". Make sure it "
-                        "doesn't exist and your working directory is "
-                        "writable.")
-        else:
-            msg = ("you can retrieve the original source code by "
-                    "accessing the object's source attribute or set "
-                    "`torch.nn.Module.dump_patches = True` and use the "
-                    "patch tool to revert the changes.")
-        msg = ("source code of class '{}' has changed. {}"
-                .format(torch.typename(container_type), msg))
-        warnings.warn(msg, SourceChangeWarning)
 
 
 def _get_restore_location(map_location):
@@ -571,6 +524,46 @@ def _legacy_tar_load(f, map_location, pickle_module, **pickle_load_args):
 
 
 def _legacy_pickle_load(f, map_location, pickle_module, **pickle_load_args):
+    def check_container_source(container_type, source_file, original_source):
+        try:
+            current_source = ''.join(get_source_lines_and_file(container_type)[0])
+        except Exception:  # saving the source is optional, so we can ignore any errors
+            warnings.warn("Couldn't retrieve source code for container of "
+                            "type " + container_type.__name__ + ". It won't be checked "
+                            "for correctness upon loading.")
+            return
+        if original_source != current_source:
+            if container_type.dump_patches:
+                file_name = container_type.__name__ + '.patch'
+                diff = difflib.unified_diff(current_source.split('\n'),
+                                            original_source.split('\n'),
+                                            source_file,
+                                            source_file, lineterm="")
+                lines = '\n'.join(diff)
+                try:
+                    with open(file_name, 'a+') as f:
+                        file_size = f.seek(0, 2)
+                        f.seek(0)
+                        if file_size == 0:
+                            f.write(lines)
+                        elif file_size != len(lines) or f.read() != lines:
+                            raise IOError
+                    msg = ("Saved a reverse patch to " + file_name + ". "
+                            "Run `patch -p0 < " + file_name + "` to revert your "
+                            "changes.")
+                except IOError:
+                    msg = ("Tried to save a patch, but couldn't create a "
+                            "writable file " + file_name + ". Make sure it "
+                            "doesn't exist and your working directory is "
+                            "writable.")
+            else:
+                msg = ("you can retrieve the original source code by "
+                        "accessing the object's source attribute or set "
+                        "`torch.nn.Module.dump_patches = True` and use the "
+                        "patch tool to revert the changes.")
+            msg = ("source code of class '{}' has changed. {}"
+                    .format(torch.typename(container_type), msg))
+            warnings.warn(msg, SourceChangeWarning)
     pass
 
 
@@ -599,25 +592,21 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
             raise RuntimeError("Unknown typename for persistent_load, expected"
                 " 'storage', but got: {}".format(typename))
 
-        if typename == 'storage':
-            data_type, key, location, size, view_metadata = data
-            location = maybe_decode_ascii(location)
-            if key not in loaded_storages:
-                obj = data_type(size)
-                obj._torch_load_uninitialized = True
-                loaded_storages[key] = restore_location(obj, location)
-                with zip_file.open('tensors/{}'.format(key), 'r') as tensor_file:
-                    loaded_storages[key]._set_from_file(tensor_file, 0, True)
-            storage = loaded_storages[key]
-            if view_metadata is not None:
-                view_key, offset, view_size = view_metadata
-                if view_key not in loaded_storages:
-                    loaded_storages[view_key] = storage[offset:offset + view_size]
-                return loaded_storages[view_key]
-            else:
-                return storage
+        data_type, key, location, size, view_metadata = data
+        location = maybe_decode_ascii(location)
+        if key not in loaded_storages:
+            obj = data_type(size)
+            loaded_storages[key] = restore_location(obj, location)
+            with zip_file.open('tensors/{}'.format(key), 'r') as tensor_file:
+                loaded_storages[key]._set_from_file(tensor_file, 0, True)
+        storage = loaded_storages[key]
+        if view_metadata is not None:
+            view_key, offset, view_size = view_metadata
+            if view_key not in loaded_storages:
+                loaded_storages[view_key] = storage[offset:offset + view_size]
+            return loaded_storages[view_key]
         else:
-            raise RuntimeError("Unknown saved typename: {}".format(typename))
+            return storage
 
     with zip_file.open('metadata.pkl', 'r') as metadata_file:
         metadata = pickle_module.load(metadata_file, **pickle_load_args)
