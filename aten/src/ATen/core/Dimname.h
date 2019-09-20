@@ -9,21 +9,25 @@
 
 namespace at {
 
-enum class NameType: uint8_t { NORMAL, WILDCARD };
+enum class NameType: uint8_t { BASIC, WILDCARD };
 
 struct CAFFE2_API Dimname {
   static Dimname fromSymbol(Symbol name);
   static Dimname wildcard();
+  static bool isValidName(const std::string& name);
 
   NameType type() const { return type_; }
   Symbol symbol() const { return name_; }
 
-  bool is_normal() const { return type_ == NameType::NORMAL; }
-  bool is_wildcard() const { return type_ == NameType::WILDCARD; }
+  bool isBasic() const { return type_ == NameType::BASIC; }
+  bool isWildcard() const { return type_ == NameType::WILDCARD; }
+
+  bool matches(Dimname other) const;
+  optional<Dimname> unify(Dimname other) const;
 
  private:
   Dimname(Symbol name)
-    : name_(name), type_(NameType::NORMAL) {}
+    : name_(name), type_(NameType::BASIC) {}
   Dimname(Symbol name, NameType type)
     : name_(name), type_(type) {}
 
@@ -34,10 +38,6 @@ struct CAFFE2_API Dimname {
 using DimnameList = c10::ArrayRef<Dimname>;
 
 static Symbol kWildcard = Symbol::dimname("*");
-bool CAFFE2_API is_valid_identifier(const std::string& name);
-
-CAFFE2_API c10::optional<Dimname> unify(Dimname dimname, Dimname other);
-CAFFE2_API bool match(Dimname dimname, Dimname other);
 
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Dimname& dimname);
 
