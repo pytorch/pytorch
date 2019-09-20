@@ -590,17 +590,17 @@ Vec256<int16_t> inline clamp_min(const Vec256<int16_t>& a, const Vec256<int16_t>
 }
 
 template<typename T>
-Vec256<int32_t> inline convert_to_int32(const void* ptr) {
+Vec256<int32_t> inline convert_to_int32(const T* ptr) {
   return Vec256<int32_t>::loadu(ptr);
 }
 
 template<>
-Vec256<int32_t> inline convert_to_int32<int8_t>(const void* ptr) {
+Vec256<int32_t> inline convert_to_int32<int8_t>(const int8_t* ptr) {
   return _mm256_cvtepi8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr)));
 }
 
 template<>
-Vec256<int32_t> inline convert_to_int32<uint8_t>(const void* ptr) {
+Vec256<int32_t> inline convert_to_int32<uint8_t>(const uint8_t* ptr) {
   return _mm256_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr)));
 }
 
