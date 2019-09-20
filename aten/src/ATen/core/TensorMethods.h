@@ -123,6 +123,14 @@ inline int64_t Tensor::output_nr() const {
     return table->getOp<int64_t (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
 #endif
 }
+inline int64_t Tensor::_version() const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::_version(const_cast<Tensor&>(*this));
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::_version(Tensor self) -> int");
+    return table->getOp<int64_t (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
+#endif
+}
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor & Tensor::names_(c10::optional<DimnameList> names) const {
 #ifdef USE_STATIC_DISPATCH
