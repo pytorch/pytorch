@@ -2475,6 +2475,15 @@ graph(%Ra, %Rb):
         does_decompose()
         doesnt_decompose()
 
+    def test_fuse_addmm(self):
+        class AddmmModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.mm(x, x) + x
+
+        x = torch.ones(3, 3)
+        f = io.BytesIO()
+        torch.onnx._export(AddmmModel(), x, f, verbose=False)
+
     def test_index_put(self):
         ten = torch.zeros(3, 3)
         mask = torch.tensor([[True, True, True],
