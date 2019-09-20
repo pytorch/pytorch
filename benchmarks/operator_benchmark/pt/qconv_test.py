@@ -64,12 +64,14 @@ class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
         qX = torch.quantize_linear(
             X, scale=scale, zero_point=zero_point, dtype=torch.quint8
         )
+        # Convert the tensor to NHWC format
+        qX = qX.contiguous(memory_format=torch.channels_last)
         W = torch.randn(OC, IC // G, kernel, kernel, dtype=torch.float32)
         qW = torch.quantize_linear(W, scale=scale, zero_point=0, dtype=torch.qint8)
 
         self.input = qX
         self.qconv2d = nnq.Conv2d(IC, OC, kernel, stride=stride, padding=pad, groups=G)
-        self.qconv2d.weight = qW
+        self.qconv2d.set_weight_bias(qW, None)
         self.qconv2d.scale = torch.tensor([scale], dtype=torch.double)
         self.qconv2d.zero_point = torch.tensor([zero_point], dtype=torch.int)
         self.set_module_name("QConv2d")
