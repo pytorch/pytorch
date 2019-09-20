@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from torch.nn import Module
 from .observer import default_observer, _with_args
-from functools import partial
 
 class FakeQuantize(Module):
     ''' Simulate the quantize and dequantize operations in training time.
