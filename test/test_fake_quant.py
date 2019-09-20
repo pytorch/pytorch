@@ -8,7 +8,8 @@ import hypothesis_utils as hu
 from hypothesis_utils import no_deadline
 from common_utils import run_tests, TestCase
 from torch.quantization import FakeQuantize
-
+from torch.quantization import default_observer
+import io
 # Reference method for fake quantize
 def _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, quant_min, quant_max):
     res = (torch.clamp(torch.round(X * (1.0 / scale) + zero_point), quant_min, quant_max) - zero_point) * scale
@@ -106,7 +107,7 @@ class TestFakeQuantizePerTensorAffine(TestCase):
 
         X = torch.tensor(X).to(dtype=torch.float, device=device)
         X.requires_grad_()
-        fq_module = FakeQuantize(torch_type, torch.per_tensor_affine, quant_min, quant_max)
+        fq_module = FakeQuantize(default_observer(), quant_min, quant_max)
         Y_prime = fq_module(X)
         assert fq_module.scale is not None
         assert fq_module.zero_point is not None
@@ -119,6 +120,25 @@ class TestFakeQuantizePerTensorAffine(TestCase):
         dX = _fake_quantize_per_tensor_affine_grad_reference(dout, X, fq_module.scale, fq_module.zero_point, quant_min, quant_max)
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
+    def test_fq_serializable(self):
+        observer = default_observer()
+        quant_min = 0
+        quant_max = 255
+        fq_module = FakeQuantize(observer, quant_min, quant_max)
+        X = torch.tensor([-5, -3.5, -2, 0, 3, 5, 7], dtype=torch.float32)
+        y_ref = fq_module(X)
+        state_dict = fq_module.state_dict()
+
+        self.assertEqual(state_dict['fake_quant_enabled'], True)
+        self.assertEqual(state_dict['observer_enabled'], True)
+        self.assertEqual(state_dict['scale'], 0.094488)
+        self.assertEqual(state_dict['zero_point'], 53)
+        b = io.BytesIO()
+        torch.save(state_dict, b)
+        b.seek(0)
+        loaded_dict = torch.load(b)
+        for key in state_dict:
+            self.assertEqual(state_dict[key], loaded_dict[key])
 
 if __name__ == '__main__':
     run_tests()

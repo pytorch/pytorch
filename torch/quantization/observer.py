@@ -132,12 +132,27 @@ class ObserverBase(ABC, nn.Module):
 
         return torch.tensor([scale]), torch.tensor([zero_point])
 
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(ObserverBase, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'dtype'] = self.dtype
+        destination[prefix + 'qscheme'] = self.qscheme
+        destination[prefix + 'reduce_range'] = self.reduce_range
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+
+        self.dtype = state_dict.pop(prefix + 'dtype')
+        self.qscheme = state_dict.pop(prefix + 'qscheme')
+        self.reduce_range = state_dict.pop(prefix + 'reduce_range')
+        super(ObserverBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                        missing_keys, unexpected_keys, error_msgs)
+
 
 class MinMaxObserver(ObserverBase):
     r"""Default Observer Module
     A default implementation of the observer module, only works for
     `per_tensor_affine` quantization scheme.  The module will record the
-    running average of max and min value of the observed Tensor and
+     running average of max and min value of the observed Tensor and
     calculate_qparams will calculate scale and zero_point
     """
 
@@ -153,7 +168,7 @@ class MinMaxObserver(ObserverBase):
         #  aten/src/ATen/native/quantized/cpu/qconv.cpp
         #  This is not the optimal choice for non x86 backends as
         #  lose a bit of precision for activations.
-        #
+
         super(MinMaxObserver, self).__init__(**kwargs)
         self.min_val = None
         self.max_val = None
@@ -186,6 +201,19 @@ class MinMaxObserver(ObserverBase):
     @torch.jit.export
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_val, self.max_val)
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(MinMaxObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'min_val'] = self.min_val
+        destination[prefix + 'max_val'] = self.max_val
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+
+        self.min_val = state_dict.pop(prefix + 'min_val')
+        self.max_val = state_dict.pop(prefix + 'max_val')
+        super(MinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                          missing_keys, unexpected_keys, error_msgs)
 
 
 class PerChannelMinMaxObserver(ObserverBase):
@@ -235,6 +263,22 @@ class PerChannelMinMaxObserver(ObserverBase):
 
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(PerChannelMinMaxObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'min_vals'] = self.min_vals
+        destination[prefix + 'max_vals'] = self.max_vals
+        destination[prefix + 'ch_axis'] = self.ch_axis
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+
+        self.min_vals = state_dict.pop(prefix + 'min_vals')
+        self.max_vals = state_dict.pop(prefix + 'max_vals')
+        self.ch_axis = state_dict.pop(prefix + 'ch_axis')
+        super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                                    missing_keys, unexpected_keys, error_msgs)
+
 
 
 
@@ -491,6 +535,23 @@ class HistogramObserver(ObserverBase):
         new_min, new_max = self._non_linear_param_search()
 
         return self._calculate_qparams(new_min.item(), new_max.item())
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(HistogramObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'bins'] = self.bins
+        destination[prefix + 'histogram'] = self.histogram
+        destination[prefix + 'min_val'] = self.min_val
+        destination[prefix + 'max_val'] = self.max_val
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        self.bins = state_dict.pop(prefix + 'bins')
+        self.histogram = state_dict.pop(prefix + 'histogram')
+        self.min_val = state_dict.pop(prefix + 'min_val')
+        self.max_val = state_dict.pop(prefix + 'max_val')
+        super(HistogramObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                             missing_keys, unexpected_keys, error_msgs)
+
 
 
 class TensorObserver(ObserverBase):
