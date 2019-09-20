@@ -223,8 +223,8 @@
   dispatch:
     CPU: add
     CUDA: add
-    SparseCPU: add
-    SparseCUDA: add
+    SparseCPU: add_sparse
+    SparseCUDA: add_sparse
     MkldnnCPU: mkldnn_add
   supports_named_tensor: True
 
@@ -234,8 +234,8 @@
   dispatch:
     CPU: add_
     CUDA: add_
-    SparseCPU: add_
-    SparseCUDA: add_
+    SparseCPU: add_sparse_
+    SparseCUDA: add_sparse_
     MkldnnCPU: mkldnn_add_
   supports_named_tensor: True
 
@@ -243,8 +243,8 @@
   dispatch:
     CPU: add_out
     CUDA: add_out
-    SparseCPU: add_out
-    SparseCUDA: add_out
+    SparseCPU: add_out_sparse_cpu
+    SparseCUDA: add_out_sparse_cuda
     MkldnnCPU: mkldnn_add_out
   supports_named_tensor: True
 
@@ -863,14 +863,29 @@
 - func: div.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: True
   variants: function, method
+  dispatch:
+    CPU: div
+    CUDA: div
+    SparseCPU: div_sparse
+    SparseCUDA: div_sparse
   supports_named_tensor: True
 
 - func: div_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: True
   variants: method
+  dispatch:
+    CPU: div_
+    CUDA: div_
+    SparseCPU: div_sparse_
+    SparseCUDA: div_sparse_
   supports_named_tensor: True
 
 - func: div.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: div_out
+    CUDA: div_out
+    SparseCPU: div_out_sparse_zerodim
+    SparseCUDA: div_out_sparse_zerodim
   supports_named_tensor: True
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
@@ -1798,11 +1813,10 @@
   dispatch:
     CPU: mul
     CUDA: mul
-    SparseCPU: mul
-    SparseCUDA: mul
+    SparseCPU: mul_sparse
+    SparseCUDA: mul_sparse
     MkldnnCPU: mkldnn_mul
   supports_named_tensor: True
-
 
 - func: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: True
@@ -1810,8 +1824,8 @@
   dispatch:
     CPU: mul_
     CUDA: mul_
-    SparseCPU: mul_
-    SparseCUDA: mul_
+    SparseCPU: mul_sparse_
+    SparseCUDA: mul_sparse_
     MkldnnCPU: mkldnn_mul_
   supports_named_tensor: True
 
@@ -1819,8 +1833,8 @@
   dispatch:
     CPU: mul_out
     CUDA: mul_out
-    SparseCPU: mul_out
-    SparseCUDA: mul_out
+    SparseCPU: mul_out_sparse_cpu
+    SparseCUDA: mul_out_sparse_cuda
     MkldnnCPU: mkldnn_mul_out
   supports_named_tensor: True
 
@@ -2395,41 +2409,6 @@
   dispatch:
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
-
-- func: _sparse_add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    SparseCPU: add_out_sparse_cpu
-    SparseCUDA: add_out_sparse_cuda
-
-- func: _sparse_dense_add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: add_out_dense_sparse_cpu
-    CUDA: add_out_dense_sparse_cuda
-
-- func: _sparse_div_zerodim.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    SparseCPU: div_out_sparse_zerodim
-    SparseCUDA: div_out_sparse_zerodim
-
-- func: _sparse_div_scalar.out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    SparseCPU: div_out_sparse_scalar
-    SparseCUDA: div_out_sparse_scalar
-
-- func: _sparse_mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    SparseCPU: mul_out_sparse_cpu
-    SparseCUDA: mul_out_sparse_cuda
-
-- func: _sparse_mul_zerodim.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    SparseCPU: mul_out_sparse_zerodim
-    SparseCUDA: mul_out_sparse_zerodim
-
-- func: _sparse_mul_scalar.out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    SparseCPU: mul_out_sparse_scalar
-    SparseCUDA: mul_out_sparse_scalar
 
 - func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: True
@@ -3064,16 +3043,31 @@
     MkldnnCPU: mkldnn_zero_
 
 - func: sub.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: sub_out
+    CUDA: sub_out
+    SparseCPU: sub_out_sparse
+    SparseCUDA: sub_out_sparse
   supports_named_tensor: True
 
 - func: sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: True
   variants: function, method
+  dispatch:
+    CPU: sub
+    CUDA: sub
+    SparseCPU: sub_sparse
+    SparseCUDA: sub_sparse
   supports_named_tensor: True
 
 - func: sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: True
   variants: method
+  dispatch:
+    CPU: sub_
+    CUDA: sub_
+    SparseCPU: sub_sparse_
+    SparseCUDA: sub_sparse_
   supports_named_tensor: True
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
@@ -3098,37 +3092,40 @@
   variants: function
   supports_named_tensor: True
 
-- func: s_native_addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: s_addmm_out_sparse_dense_cpu
-    CUDA: s_addmm_out_sparse_dense_cuda
-
-- func: s_native_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  use_c10_dispatcher: True
-  dispatch:
-    CPU: s_addmm_sparse_dense_cpu
-    CUDA: s_addmm_sparse_dense_cuda
-
-- func: s_native_addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  use_c10_dispatcher: True
-  dispatch:
-    CPU: s_addmm_sparse_dense_cpu_
-    CUDA: s_addmm_sparse_dense_cuda_
-
+# Functionally the same as addmm, but we give it a different derivative formula
+# that doesn't propagate gradients to non-present entries on sparse.
 - func: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: True
+  named_guard: False
 
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_addmm_out
+    CUDA: legacy::cuda::_th_addmm_out
+    SparseCPU: addmm_out_sparse_dense_cpu
+    SparseCUDA: addmm_out_sparse_dense_cuda
   supports_named_tensor: True
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: True
   variants: function, method
+  dispatch:
+    CPU: legacy::cpu::_th_addmm
+    CUDA: legacy::cuda::_th_addmm
+    SparseCPU: addmm_sparse_dense_cpu
+    SparseCUDA: addmm_sparse_dense_cuda
   supports_named_tensor: True
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: True
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_addmm_
+    CUDA: legacy::cuda::_th_addmm_
+    # Warning!  For whatever reason, the inplace sparse addmm is NON
+    # broadcasting
+    SparseCPU: s_addmm_sparse_dense_cpu_
+    SparseCUDA: s_addmm_sparse_dense_cuda_
   supports_named_tensor: True
 
 
@@ -3291,8 +3288,8 @@
   use_c10_dispatcher: True
   variants: method
   dispatch:
-    CPU: sparse_mask_cpu
-    CUDA: sparse_mask_cuda
+    SparseCPU: sparse_mask_cpu
+    SparseCUDA: sparse_mask_cuda
   requires_tensor: True
 
 
@@ -5185,26 +5182,6 @@
   dispatch:
     CPU: legacy::cpu::_th_std
     CUDA: legacy::cuda::_th_std
-  supports_named_tensor: True
-
-- func: _addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_addmm_out
-    CUDA: legacy::cuda::_th_addmm_out
-  supports_named_tensor: True
-
-- func: _addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  use_c10_dispatcher: True
-  dispatch:
-    CPU: legacy::cpu::_th_addmm
-    CUDA: legacy::cuda::_th_addmm
-  supports_named_tensor: True
-
-- func: _addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  use_c10_dispatcher: True
-  dispatch:
-    CPU: legacy::cpu::_th_addmm_
-    CUDA: legacy::cuda::_th_addmm_
   supports_named_tensor: True
 
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
