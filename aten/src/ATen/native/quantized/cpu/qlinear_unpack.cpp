@@ -69,18 +69,18 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
-    if (ctx.preferredQuantizedEngine() == at::QEngine::FBGEMM) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return fbgemm_linear_unpack(packed_weight);
     }
 #endif
 #ifdef USE_PYTORCH_QNNPACK
-    if (ctx.preferredQuantizedEngine() == at::QEngine::QNNPACK) {
+    if (ctx.qEngine() == at::QEngine::QNNPACK) {
       return qnnpack_linear_unpack(packed_weight);
     }
 #endif
     TORCH_INTERNAL_ASSERT(
         "Didn't find engine for operation quantized::linear_unpack ",
-        toString(ctx.preferredQuantizedEngine()));
+        toString(ctx.qEngine()));
     return std::tuple<at::Tensor, c10::optional<Tensor>>(
         at::Tensor(), at::Tensor());
   }
