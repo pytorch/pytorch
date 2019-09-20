@@ -1084,7 +1084,7 @@ std::string Unpickler::readBytes(size_t length) {
 
 // Pop all the list items off of the stack and append them to the list at
 // the corresponding MARK
-void Unpickler::readList(IValue& list_ivalue) {
+void Unpickler::readList(IValue list_ivalue) {
   size_t start = marks_.back();
   marks_.pop_back();
   auto num_elements = stack_.size() - start;
