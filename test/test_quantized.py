@@ -495,7 +495,7 @@ class TestQuantizedOps(TestCase):
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=5, max_side=10),
-                       qparams=hu.qparams()),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
            kernel=st.sampled_from((3, 5)),
            stride=st.sampled_from((None, 1, 2)),
            padding=st.integers(0, 2),
@@ -552,8 +552,10 @@ class TestQuantizedOps(TestCase):
            divisor_override=st.sampled_from((None, None)))
     def test_avg_pool2d_nhwc(self, X, kernel, stride, padding, ceil_mode, count_include_pad, divisor_override):
         """
-        Note: we currently cannot test the divisor_override, because quantized op will clamp the result
+        Note: 1) we currently cannot test the divisor_override, because quantized op will clamp the result
         within range. However, the float op will not.
+        2) we cannot test the qint32, since the float point precision is much lower than int32 for big number,
+        which will make the test be very flaky.
         """
         X, (scale, zero_point, torch_type) = X
         H, W = X.shape[-2:]
@@ -590,12 +592,13 @@ class TestQuantizedOps(TestCase):
                              X_hat.q_zero_point()))
 
     @no_deadline
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
-                       qparams=hu.qparams()),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
+           permute=st.sampled_from(([0, 1, 2, 3], [0, 2, 3, 1], [0, 3, 1, 2])),
            output_size_h=st.integers(1, 10),
            output_size_w=st.integers(1, 10))
-    def test_adaptive_avg_pool2d(self, X, output_size_h, output_size_w):
+    def test_adaptive_avg_pool2d(self, X, permute, output_size_h, output_size_w):
         X, (scale, zero_point, torch_type) = X
 
         H, W = X.shape[-2:]
@@ -607,7 +610,7 @@ class TestQuantizedOps(TestCase):
             output_size = (output_size_h, output_size_w)
         X = torch.from_numpy(X)
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
-                                   dtype=torch_type)
+                                   dtype=torch_type).permute(permute)
 
         # Run reference on int_repr + round to avoid double rounding error.
         X_ref = torch.nn.functional.adaptive_avg_pool2d(
