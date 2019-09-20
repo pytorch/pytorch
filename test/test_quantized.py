@@ -624,6 +624,7 @@ class TestQuantizedOps(TestCase):
             out = torch.ops.quantized.cat([qX, qY], dim=1, scale=out_scale, zero_point=out_zero_pt)
 
         torch.testing.assert_allclose(out.dequantize(), ref.dequantize())
+        self.assertNotEqual(out.stride(), sorted(out.stride()))
 
     """Tests the correctness of the quantized equal op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
