@@ -1032,18 +1032,19 @@ struct to_ir {
           return CondValue(cond_value, refinements, c10::nullopt);
         }
       } break;
-      case TK_APPLY: {
-        auto apply = Apply(expr);
-        auto callee = Apply(expr).callee();
-        if (callee.kind() == TK_VAR &&
-            Var(callee).name().name() == "isinstance") {
-          checkApplyNumInputs(apply, 2);
-          return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+      default: {
+        if (expr.kind() == TK_APPLY) {
+          auto apply = Apply(expr);
+          auto callee = Apply(expr).callee();
+          if (callee.kind() == TK_VAR &&
+              Var(callee).name().name() == "isinstance") {
+            checkApplyNumInputs(apply, 2);
+            return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+          }
         }
-      } // fallthrough, other applies are handled in the default way
-      default:
         return CondValue(
             emitToBool(emitExpr(expr)), RefinementSet({}), c10::nullopt);
+      } break;
     }
   }
 
