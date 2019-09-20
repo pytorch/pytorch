@@ -192,16 +192,17 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
   constexpr static int kTypeCodeBool = 3;
   constexpr static int kTypeCodeLong = 4;
   constexpr static int kTypeCodeDouble = 5;
-  constexpr static int kTypeCodeTuple = 6;
+  constexpr static int kTypeCodeString = 6;
 
-  constexpr static int kTypeCodeBoolList = 7;
-  constexpr static int kTypeCodeLongList = 8;
-  constexpr static int kTypeCodeDoubleList = 9;
-  constexpr static int kTypeCodeTensorList = 10;
-  constexpr static int kTypeCodeList = 11;
+  constexpr static int kTypeCodeTuple = 7;
+  constexpr static int kTypeCodeBoolList = 8;
+  constexpr static int kTypeCodeLongList = 9;
+  constexpr static int kTypeCodeDoubleList = 10;
+  constexpr static int kTypeCodeTensorList = 11;
+  constexpr static int kTypeCodeList = 12;
 
-  constexpr static int kTypeCodeDictStringKey = 12;
-  constexpr static int kTypeCodeDictLongKey = 13;
+  constexpr static int kTypeCodeDictStringKey = 13;
+  constexpr static int kTypeCodeDictLongKey = 14;
 
   static facebook::jni::local_ref<JIValue> newJIValueFromAtIValue(
       const at::IValue& ivalue) {
@@ -237,6 +238,15 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
               ->getStaticMethod<facebook::jni::local_ref<JIValue>(jdouble)>(
                   "double64");
       return jMethodDouble(JIValue::javaClassStatic(), ivalue.toDouble());
+    } else if (ivalue.isString()) {
+      static auto jMethodString =
+          JIValue::javaClassStatic()
+              ->getStaticMethod<facebook::jni::local_ref<JIValue>(
+                  facebook::jni::alias_ref<
+                      facebook::jni::JString::javaobject>)>("string");
+      return jMethodString(
+          JIValue::javaClassStatic(),
+          facebook::jni::make_jstring(ivalue.toStringRef()));
     } else if (ivalue.isTuple()) {
       auto elementsVec = ivalue.toTuple()->elements();
       static auto jMethodTupleArr =
@@ -411,6 +421,10 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       static const auto jMethodGetDouble =
           JIValue::javaClassStatic()->getMethod<jdouble()>("getDouble");
       return at::IValue{jMethodGetDouble(jivalue)};
+    } else if (JIValue::kTypeCodeString == typeCode) {
+      static const auto jMethodGetString =
+          JIValue::javaClassStatic()->getMethod<jstring()>("getString");
+      return at::IValue{jMethodGetString(jivalue)->toStdString()};
     } else if (JIValue::kTypeCodeTuple == typeCode) {
       static const auto jMethodGetTuple =
           JIValue::javaClassStatic()
