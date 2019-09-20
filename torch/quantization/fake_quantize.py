@@ -4,6 +4,8 @@ from torch.nn import Module
 from .observer import default_observer
 from functools import partial
 
+
+
 class FakeQuantize(Module):
     ''' Simulate the quantize and dequantize operations in training time.
     Args:
@@ -97,3 +99,19 @@ def default_weight_fake_quant(**kwargs):
     kwargs.setdefault('quant_min', -128)
     kwargs.setdefault('quant_max', 127)
     return fake_quant(FakeQuantize, **kwargs)
+
+def disable_fake_quant(mod):
+    if type(mod) == FakeQuantize:
+        mod.disable_fake_quant()
+
+def enable_fake_quant(mod):
+    if type(mod) == FakeQuantize:
+        mod.enable_fake_quant()
+
+def disable_observer(mod):
+    if type(mod) == FakeQuantize:
+        mod.disable_observer()
+
+def enable_observer(mod):
+    if type(mod) == FakeQuantize:
+        mod.disable_observer()
