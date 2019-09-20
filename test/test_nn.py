@@ -1781,7 +1781,7 @@ class TestNN(NNTestCase):
             # Without using `torch.no_grad()`, this will leak CUDA memory.
             # (Issue is filed at https://github.com/pytorch/pytorch/issues/21875)
             mw[0][0] = 5
-        with self.assertRaisesRegex(RuntimeError, "Expected object of backend CPU but got backend CUDA"):
+        with self.assertRaisesRegex(RuntimeError, "Expected object of backend CUDA but got backend CPU"):
             mw[0][0] == mw._base[0][0]
 
         try:
@@ -2935,6 +2935,7 @@ class TestNN(NNTestCase):
         x = torch.tensor([], device=device, dtype=torch.long)
         for sparse in [True, False]:
             Embed = torch.nn.EmbeddingBag(m, n, sparse=sparse)
+            Embed.to(device)
 
             output = Embed(input=x, offsets=torch.tensor([0], device=device, dtype=torch.long))
             self.assertEqual(output, torch.zeros_like(output))
