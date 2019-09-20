@@ -31,7 +31,6 @@ TEST(DimnameTest, wildcardName) {
   Dimname wildcard = Dimname::wildcard();
   ASSERT_EQ(wildcard.type(), NameType::WILDCARD);
   ASSERT_EQ(wildcard.full_name(), Symbol::dimname("*"));
-  ASSERT_EQ(wildcard.untagged_name(), Symbol::dimname("*"));
 }
 
 TEST(DimnameTest, createNormalName) {
@@ -39,22 +38,8 @@ TEST(DimnameTest, createNormalName) {
   auto dimname = Dimname::fromSymbol(foo);
   ASSERT_EQ(dimname.type(), NameType::NORMAL);
   ASSERT_EQ(dimname.full_name(), foo);
-  ASSERT_EQ(dimname.untagged_name(), foo);
-
+  ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname("inva.lid")), c10::Error);
   ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname("invalid1")), c10::Error);
-}
-
-TEST(DimnameTest, createTaggedName) {
-  auto foo_bar = Symbol::dimname("foo.bar");
-  auto foo = Symbol::dimname("foo");
-  auto dimname = Dimname::fromSymbol(foo_bar);
-  ASSERT_EQ(dimname.type(), NameType::TAGGED);
-  ASSERT_EQ(dimname.full_name(), foo_bar);
-  ASSERT_EQ(dimname.untagged_name(), foo);
-
-  ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname(".bar")), c10::Error);
-  ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname("foo.")), c10::Error);
-  ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname("foo.bar.baz")), c10::Error);
 }
 
 static void check_unify_and_match(
@@ -82,13 +67,5 @@ TEST(DimnameTest, unifyAndMatch) {
   check_unify_and_match("*", "a", "a");
   check_unify_and_match("*", "*", "*");
   check_unify_and_match("a", "b", c10::nullopt);
-
-  check_unify_and_match("*", "a.b", "a.b");
-  check_unify_and_match("a", "a.b", "a");
-  check_unify_and_match("c", "a.b", c10::nullopt);
-  check_unify_and_match("a.b", "a.c", "a");
-  check_unify_and_match("a.b", "a.b", "a.b");
-  check_unify_and_match("c.b", "a.b", c10::nullopt);
-  check_unify_and_match("c.b", "a", c10::nullopt);
 }
 #endif
