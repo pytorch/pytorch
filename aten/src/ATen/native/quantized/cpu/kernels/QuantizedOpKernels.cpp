@@ -69,16 +69,16 @@ Tensor qcat_nhwc_kernel(
       zero_point,
       MemoryFormat::ChannelsLast);
 
-  AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&]() {
-    for (int64_t b = 0; b < N; ++b) {
+  AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, N]() {
+    using Vec = Vec256<scalar_t>;
+    for (int64_t batch = 0; batch < N; ++batch) {
       for (int64_t row = 0; row < H; ++row) {
         for (int64_t col = 0; col < W; ++col) {
           // loop over input tensors
           for (int64_t tidx = 0; tidx < Cs_in.size(); ++tidx) {
-            using Vec = Vec256<scalar_t>;
             scalar_t::underlying* optr =
                 reinterpret_cast<scalar_t::underlying*>(output.data_ptr()) +
-                b * H * W * C_out + row * W * C_out + col * C_out +
+                batch * H * W * C_out + row * W * C_out + col * C_out +
                 Cs_sum[tidx];
 
             auto curr_C = Cs_in[tidx];
@@ -87,7 +87,7 @@ Tensor qcat_nhwc_kernel(
 
             scalar_t::underlying* iptr =
                 reinterpret_cast<scalar_t::underlying*>(data_ptrs[tidx]) +
-                b * H * W * curr_C + row * W * curr_C + col * curr_C;
+                batch * H * W * curr_C + row * W * curr_C + col * curr_C;
 
             constexpr int64_t VLEN = Vec::size();
             int64_t c = 0;
