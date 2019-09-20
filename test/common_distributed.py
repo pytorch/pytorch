@@ -138,7 +138,18 @@ class MultiProcessTestCase(TestCase):
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
         return self.id().split(".")[-1]
 
-    def _run_process(self, ctx):
+    def _fork_process(self):
+        self.processes = []
+        for rank in range(int(self.world_size)):
+            process = torch.multiprocessing.Process(
+                target=self.__class__._run,
+                name='process ' + str(rank),
+                args=(rank, self._current_test_name(), self.file_name))
+            process.start()
+            self.processes.append(process)
+
+    def _spawn_process(self):
+        ctx = torch.multiprocessing.get_context('spawn')
         self.processes = []
         for rank in range(int(self.world_size)):
             process = ctx.Process(
@@ -147,12 +158,6 @@ class MultiProcessTestCase(TestCase):
                 args=(rank, self._current_test_name(), self.file_name))
             process.start()
             self.processes.append(process)
-
-    def _fork_process(self):
-        self._run_process(torch.multiprocessing.get_context('fork'))
-
-    def _spawn_process(self):
-        self._run_process(torch.multiprocessing.get_context('spawn'))
 
     @classmethod
     def _run(cls, rank, test_name, file_name):
