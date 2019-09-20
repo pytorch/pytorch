@@ -19,6 +19,7 @@ namespace jit {
   _(CustomOperatorAliasing)            \
   _(IValueKWargs)                      \
   _(CustomFusion)                      \
+  _(SchemaMatching)                    \
   _(Differentiate)                     \
   _(DifferentiateWithRequiresGrad)     \
   _(FromQualString)                    \
@@ -52,6 +53,7 @@ namespace jit {
   _(RecordFunction)                    \
   _(ThreadLocalDebugInfo)              \
   _(SubgraphMatching)                  \
+  _(SubgraphRewriter)                  \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \
