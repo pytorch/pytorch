@@ -1903,7 +1903,7 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
     return g.op("Multinomial", log_input,
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
-  
+
 
 @parse_args('v', 'v', 'v', 'v', 'v')
 def baddbmm(g, self, batch1, batch2, beta, alpha):
