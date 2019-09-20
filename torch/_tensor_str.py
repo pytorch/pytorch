@@ -288,6 +288,7 @@ def _str(self):
         elif self.qscheme() == torch.per_channel_affine or self.qscheme() == torch.per_channel_symmetric:
             suffixes.append('scale=' + str(self.q_per_channel_scales()))
             suffixes.append('zero_point=' + str(self.q_per_channel_zero_points()))
+            suffixes.append('axis=' + ','.join(map(str, self.q_per_channel_axis())))
         tensor_str = _tensor_str(self.dequantize(), indent)
     else:
         if self.numel() == 0 and not self.is_sparse:
