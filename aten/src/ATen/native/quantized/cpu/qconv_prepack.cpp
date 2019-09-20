@@ -179,14 +179,13 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     } else {
       bias_fp32 = at::zeros(out_ch, at::kFloat);
     }
-    auto bias = at::quantize_linear(bias_fp32, 1.0, 0, kQInt32);
     TORCH_CHECK(
-        !bias.defined() || (bias.ndimension() == 1 && bias.size(0) == out_ch),
+        !bias_fp32.defined() || (bias_fp32.ndimension() == 1 && bias_fp32.size(0) == out_ch),
         "quantized::conv_prepack (qnnpack): expected bias to be 1-dimensional with ",
         out_ch,
         " elements",
         ", but got bias of size ",
-        bias.sizes(),
+        bias_fp32.sizes(),
         " instead");
 
     uint32_t stride_h = stride[0];
@@ -210,7 +209,6 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         std::numeric_limits<uint8_t>::max());
 
     auto weight_contig = weight.contiguous(MemoryFormat::ChannelsLast);
-    auto bias_contig = bias.contiguous();
     auto weight_zp = weight.q_zero_point() + 128;
 
     int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
