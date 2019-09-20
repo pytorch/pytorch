@@ -15,8 +15,10 @@
 #include <functional>
 #include <random>
 #include <vector>
+#include <memory>
 
 #include <pytorch_qnnpack.h>
+#include <qnnpack_func.h>
 
 class FullyConnectedOperatorTester {
  public:
@@ -106,7 +108,7 @@ class FullyConnectedOperatorTester {
     return this->iterations_;
   }
 
-  void testQ8() const {
+  void testQ8(bool runtime_quant = false ) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -170,45 +172,77 @@ class FullyConnectedOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
-      pytorch_qnnp_operator_t convolution = nullptr;
+      if (runtime_quant) {
+          auto packW = std::unique_ptr<qnnpack::PackBMatrix>(
+              new qnnpack::PackBMatrix(
+                  inputChannels(),
+                  outputChannels(),
+                  kernelZeroPoint,
+                  1.0f,
+                  kernel.data(),
+                  bias.data()));
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_create_fully_connected_nc_q8(
-              inputChannels(),
-              outputChannels(),
+          const pytorch_qnnp_status runStatus = qnnpack::qnnpackLinear(
+              batchSize() /* batch_size */,
+              inputChannels() /* input_channels */,
+              outputChannels() /* output_channels */,
               inputZeroPoint,
               1.0f /* input scale */,
               kernelZeroPoint,
               1.0f /* kernel scale */,
-              kernel.data(),
-              bias.data(),
               outputZeroPoint,
               outputScale,
               qmin(),
               qmax(),
-              0,
-              &convolution));
-
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_setup_fully_connected_nc_q8(
-              convolution,
-              batchSize(),
               inputPtr,
-              inputStride(),
+              inputChannels() /* input_stride */,
+              packW->getPackedWeights(),
               output.data(),
-              outputStride()));
+              outputStride() /* output_stride */,
+              nullptr /* threadpool */);
+          ASSERT_EQ(pytorch_qnnp_status_success, runStatus);
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_run_operator(convolution, nullptr /* thread pool */));
+      }
+      else {
+        pytorch_qnnp_operator_t convolution = nullptr;
 
-      ASSERT_EQ(
-          pytorch_qnnp_status_success,
-          pytorch_qnnp_delete_operator(convolution));
-      convolution = nullptr;
+        ASSERT_EQ(
+            pytorch_qnnp_status_success,
+            pytorch_qnnp_create_fully_connected_nc_q8(
+                inputChannels(),
+                outputChannels(),
+                inputZeroPoint,
+                1.0f /* input scale */,
+                kernelZeroPoint,
+                1.0f /* kernel scale */,
+                kernel.data(),
+                bias.data(),
+                outputZeroPoint,
+                outputScale,
+                qmin(),
+                qmax(),
+                0,
+                &convolution));
 
+        ASSERT_EQ(
+            pytorch_qnnp_status_success,
+            pytorch_qnnp_setup_fully_connected_nc_q8(
+                convolution,
+                batchSize(),
+                inputPtr,
+                inputStride(),
+                output.data(),
+                outputStride()));
+
+        ASSERT_EQ(
+            pytorch_qnnp_status_success,
+            pytorch_qnnp_run_operator(convolution, nullptr /* thread pool */));
+
+        ASSERT_EQ(
+            pytorch_qnnp_status_success,
+            pytorch_qnnp_delete_operator(convolution));
+        convolution = nullptr;
+      }
       for (size_t i = 0; i < batchSize(); i++) {
         for (size_t c = 0; c < outputChannels(); c++) {
           const double scaledAccumulator =

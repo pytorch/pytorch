@@ -12,5 +12,17 @@ void set_data(const Tensor& self, const Tensor& new_data) {
   AT_ERROR("set_data is not implemented for Tensor");
 }
 
+Tensor data(const Tensor& self) {
+  AT_ERROR("data is not implemented for Tensor");
+}
+
+bool is_leaf(const Tensor& self) {
+  AT_ERROR("is_leaf is not implemented for Tensor");
+}
+
+int64_t output_nr(const Tensor& self) {
+  AT_ERROR("output_nr is not implemented for Tensor");
+}
+
 } // namespace native
 } // namespace at
