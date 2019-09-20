@@ -334,7 +334,7 @@ def swap_module(mod, mapping, dtype=torch.qint8):
         if type(mod) in mapping:
             supported_scalar_types = [torch.qint8, torch.float16]
             if dtype not in supported_scalar_types:
-                 raise RuntimeError('Unsupported dtype: {}'.format(dtype))
+                raise RuntimeError('Unsupported dtype: {}'.format(dtype))
             if dtype == torch.qint8:
                 new_mod = mapping[type(mod)].from_float(mod)
             elif dtype == torch.float16:
