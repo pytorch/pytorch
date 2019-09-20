@@ -327,54 +327,90 @@ class AveragePoolDnnLowPOp final
         }
         break;
       case 3:
+        if (is_same<T, uint8_t>::value) {
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-        for (int n = 0; n < X.dim32(0); ++n) {
-          const T* Xdata_temp = Xdata + n * height * width * depth * channels;
-          T* Ydata_temp = Ydata +
-              n * pooled_height * pooled_width * pooled_depth * channels;
-          for (int ph = 0; ph < pooled_height; ++ph) {
-            int hstart = ph * stride_h() - pad_t();
-            int hend = min(hstart + kernel_h(), height);
-            hstart = max(hstart, 0);
-            for (int pw = 0; pw < pooled_width; ++pw) {
-              int wstart = pw * stride_w() - pad_l();
-              int wend = min(wstart + kernel_w(), width);
-              wstart = max(wstart, 0);
-              for (int pd = 0; pd < pooled_depth; ++pd) {
-                int dstart = pd * stride_[2] - pads_[2];
-                int dend = min(dstart + kernel_[2], depth);
-                dstart = max(dstart, 0);
-                int size = (hend - hstart) * (wend - wstart) * (dend - dstart);
-                float multiplier =
-                    in_qparams_[0].scale / out_qparams_.scale / size;
+          for (int n = 0; n < X.dim32(0); ++n) {
+            average_pool_3d_avx2(
+                reinterpret_cast<const uint8_t*>(Xdata),
+                n,
+                height,
+                width,
+                depth,
+                channels,
+                pooled_height,
+                pooled_width,
+                pooled_depth,
+                kernel_h(),
+                kernel_w(),
+                kernel_[2],
+                stride_h(),
+                stride_w(),
+                stride_[2],
+                pad_t(),
+                pad_l(),
+                pads_[2],
+                reinterpret_cast<uint8_t*>(Ydata),
+                in_qparams_[0].scale,
+                out_qparams_.scale,
+                in_qparams_[0].zero_point,
+                out_qparams_.zero_point,
+                minimum,
+                maximum);
+          }
+        } else {
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+          for (int n = 0; n < X.dim32(0); ++n) {
+            const T* Xdata_temp = Xdata + n * height * width * depth * channels;
+            T* Ydata_temp = Ydata +
+                n * pooled_height * pooled_width * pooled_depth * channels;
+            for (int ph = 0; ph < pooled_height; ++ph) {
+              int hstart = ph * stride_h() - pad_t();
+              int hend = min(hstart + kernel_h(), height);
+              hstart = max(hstart, 0);
+              for (int pw = 0; pw < pooled_width; ++pw) {
+                int wstart = pw * stride_w() - pad_l();
+                int wend = min(wstart + kernel_w(), width);
+                wstart = max(wstart, 0);
+                for (int pd = 0; pd < pooled_depth; ++pd) {
+                  int dstart = pd * stride_[2] - pads_[2];
+                  int dend = min(dstart + kernel_[2], depth);
+                  dstart = max(dstart, 0);
+                  int size =
+                      (hend - hstart) * (wend - wstart) * (dend - dstart);
+                  float multiplier =
+                      in_qparams_[0].scale / out_qparams_.scale / size;
 
-                for (int c = 0; c < channels; ++c) {
-                  const int pool_idx =
-                      ((ph * pooled_width + pw) * pooled_depth + pd) *
-                          channels +
-                      c;
-                  int32_t Yh = -in_qparams_[0].zero_point * size;
-                  for (int h = hstart; h < hend; ++h) {
-                    for (int w = wstart; w < wend; ++w) {
-                      for (int d = dstart; d < dend; ++d) {
-                        const int input_idx =
-                            ((h * width + w) * depth + d) * channels + c;
-                        Yh += Xdata_temp[input_idx];
+                  for (int c = 0; c < channels; ++c) {
+                    const int pool_idx =
+                        ((ph * pooled_width + pw) * pooled_depth + pd) *
+                            channels +
+                        c;
+                    int32_t Yh = -in_qparams_[0].zero_point * size;
+                    for (int h = hstart; h < hend; ++h) {
+                      for (int w = wstart; w < wend; ++w) {
+                        for (int d = dstart; d < dend; ++d) {
+                          const int input_idx =
+                              ((h * width + w) * depth + d) * channels + c;
+                          Yh += Xdata_temp[input_idx];
+                        }
                       }
                     }
-                  }
-                  Ydata_temp[pool_idx] = std::min<int32_t>(
-                      std::max<int32_t>(
-                          nearbyint(Yh * multiplier + out_qparams_.zero_point),
-                          minimum),
-                      maximum);
-                } // channel
-              } // depth
-            } // width
-          } // height
-        } // for each image
+                    Ydata_temp[pool_idx] = std::min<int32_t>(
+                        std::max<int32_t>(
+                            nearbyint(
+                                Yh * multiplier + out_qparams_.zero_point),
+                            minimum),
+                        maximum);
+                  } // channel
+                } // depth
+              } // width
+            } // height
+          } // for each image
+        }
         break;
       default:
         CAFFE_THROW("Unsupported pooling size : ", this->kernel_.size());

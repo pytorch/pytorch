@@ -39,7 +39,7 @@ from test_module.future_div import div_int_future, div_float_future
 from test_module.no_future_div import div_int_nofuture, div_float_nofuture
 
 # Standard library
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
@@ -86,7 +86,6 @@ if torch.cuda.is_available():
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY35 = sys.version_info >= (3, 5)
-WINDOWS = sys.platform == 'win32'
 
 
 def LSTMCellF(input, hx, cx, *params):
@@ -1118,7 +1117,9 @@ graph(%x : Tensor,
                    .run(str(m._c._get_module('conv')._get_method('conv2d_forward').graph))
 
     def test_quant_fusion(self):
-        input_strs = ["""
+        input_strs = [
+            # aten::conv2d --> quantized::conv2d
+            """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
 %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
@@ -1147,9 +1148,36 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         # CHECK: aten::_dequantize_linear
         %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
         return (%r_dequant)""",
-                      """
+            # addmm -> quantized::linear
+            """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype):
+%r_scale, %r_zero_point, %r_dtype, %4):
+        %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
+        # CHECK-NOT: aten::int_repr
+        %a_intrepr = aten::int_repr(%a_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %w_quant = aten::quantize_linear(%w, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::int_repr
+        %w_intrepr = aten::int_repr(%w_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK: aten::t
+        # CHECK: quantized::linear_prepack
+        # CHECK: quantized::linear
+        # CHECK-NOT: aten::addmm
+        %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
+        # CHECK-NOT: aten::quantize_linear
+        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        # CHECK: aten::int_repr
+        %r_intrepr = aten::int_repr(%r_quant)
+        # CHECK: aten::_dequantize_linear
+        %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_dequant)""",
+            # matmul(with bias) -> quantized::linear
+            """
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
+%r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::int_repr
         %a_intrepr = aten::int_repr(%a_quant)
@@ -1161,21 +1189,48 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         # CHECK-NOT: aten::_dequantize_linear
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
         # CHECK-NOT: aten::int_repr
-        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
-        %b_intrepr = aten::int_repr(%b_quant)
         # CHECK-NOT: aten::_dequantize_linear
-        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
-        # CHECK: quantized::fbgemm_linear_prepack
-        # CHECK: quantized::fbgemm_linear
-        # CHECK-NOT: aten::linear
-        %r = aten::linear(%a_dequant, %w_dequant, %b_dequant)
+        # CHECK: aten::t
+        # CHECK: quantized::linear_prepack
+        # CHECK: quantized::linear
+        # CHECK-NOT: aten::addmm
+        %output = aten::matmul(%a_dequant, %w_dequant)
+        %r = aten::add_(%output, %b, %4)
         # CHECK-NOT: aten::quantize_linear
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
         # CHECK: aten::int_repr
         %r_intrepr = aten::int_repr(%r_quant)
         # CHECK: aten::_dequantize_linear
         %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_dequant)"""]
+        return (%r_dequant)""",
+            # matmul(without bias) -> quantized::linear
+            """
+graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
+%r_scale, %r_zero_point, %r_dtype):
+        %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
+        # CHECK-NOT: aten::int_repr
+        %a_intrepr = aten::int_repr(%a_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %w_quant = aten::quantize_linear(%w, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::int_repr
+        %w_intrepr = aten::int_repr(%w_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK: aten::t
+        # CHECK: prim::Constant()
+        # CHECK: quantized::linear_prepack
+        # CHECK: quantized::linear
+        # CHECK-NOT: aten::matmul
+        %r = aten::matmul(%a_dequant, %w_dequant)
+        # CHECK-NOT: aten::quantize_linear
+        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        # CHECK: aten::int_repr
+        %r_intrepr = aten::int_repr(%r_quant)
+        # CHECK: aten::_dequantize_linear
+        %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_dequant)"""
+        ]
         for input_str in input_strs:
             graph = parse_ir(input_str)
             torch._C._jit_pass_quant_fusion(graph)
@@ -1959,7 +2014,6 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: JIT tests not yet supported on windows")
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
     @skipIfRocm
@@ -1969,7 +2023,6 @@ graph(%Ra, %Rb):
         torch._C._jit_run_cpp_tests(run_cuda=False)
         tests_setup.shutdown()
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @skipIfRocm
     def test_cpp_cuda(self):
@@ -1994,7 +2047,6 @@ graph(%Ra, %Rb):
             self.assertEqual(outputs, m(*inputs))
 
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_dropout_cuda(self):
         # Dropout AD is dispatched to _fused_dropout in CUDA case,
         # which is not included in TestJitGeneratedFunctional
@@ -2162,12 +2214,11 @@ graph(%Ra, %Rb):
     def test_ge_unoptimized(self):
         self.run_ge_tests(False, False)
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
     def test_ge_optimized(self):
         self.run_ge_tests(True, False)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_ge_cuda(self):
         self.run_ge_tests(True, True)
@@ -2258,7 +2309,6 @@ graph(%Ra, %Rb):
             self.assertGraphContains(fn.graph, kind='aten::einsum')
             self.assertEqual(fn(x, y), outer(x, y))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")
     def test_traced_module_cuda(self):
         class Model(nn.Module):
@@ -5027,7 +5077,7 @@ a")
         self.assertEqual(cu.test_integral_shape_inference(*inputs), outputs)
 
     @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
     def test_batchnorm_fuser_cpu(self):
         code = '''
@@ -5056,7 +5106,7 @@ a")
         FileCheck().check('sqrtf').run(code)
 
     @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
     def test_fuser_double_float_codegen(self):
         fns = ['log', 'log10', 'log1p', 'log2', 'lgamma', 'exp', 'expm1', 'erf',
@@ -5110,7 +5160,7 @@ a")
             test_dispatch(fn, lookup_c_equivalent_fn(fn) + 'f(', torch.float, binary=True)
 
     @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
     def test_fuser_double_literal_precision(self):
         code = '''
@@ -6375,7 +6425,7 @@ a")
             return ten1
         ''')
 
-        lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]",
+        lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]", "(1, 1)",
                  "torch.jit.annotate(List[int], [])", "[2.5, 2.5]", "[[2], [2]]", "[[-.5], [2.2]]", "[[False], [True]]"]
 
         dtypes = ["", ", dtype=torch.float", ", dtype=torch.double", ", dtype=torch.half",
@@ -9250,7 +9300,6 @@ a")
         m = M()
         self.assertEqual(2, m.call_foo(torch.ones((), dtype=torch.int64)))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_trace_of_script(self):
         @torch.jit.script
         def foo(a, c):
@@ -10278,6 +10327,11 @@ a")
         r = M().create()
         self.assertEqual(r.dtype, torch.float)
         self.assertEqual(torch.zeros([1, 1, 2], dtype=torch.float), r)
+
+        def fn():
+            return torch.zeros((1, 2, 3))
+
+        self.checkScript(fn, ())
 
     def test_vararg_zeros(self):
         def foo():
@@ -16940,7 +16994,7 @@ def add_autograd_test(
             # We enable the CPU fuser during these checks for more consistent
             # behavior. Otherwise, we are going to have to analyze the graph to
             # see if producer values are Dimension
-            @enable_cpu_fuser_if(not (IS_SANDCASTLE or IS_WINDOWS))
+            @enable_cpu_fuser_if(not IS_SANDCASTLE)
             def check(name):
                 set_rng_seed(2)
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
@@ -16975,8 +17029,7 @@ def add_autograd_test(
                             check_against_reference(self, traced_fn,
                                                     fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
-                            # Fuser not supported on windows
-                            if IS_SANDCASTLE or IS_WINDOWS:
+                            if IS_SANDCASTLE:
                                 autodiff_nodes = autodiff_nodes + fusible_nodes
                                 fusible_nodes = []
                             self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
@@ -16987,8 +17040,7 @@ def add_autograd_test(
                                                     fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
 
-                            # Fuser not supported on windows
-                            if IS_SANDCASTLE or IS_WINDOWS:
+                            if IS_SANDCASTLE:
                                 autodiff_nodes = autodiff_nodes + fusible_nodes
                                 fusible_nodes = []
                             self.assertAutodiffNode(script_fn.last_graph,
@@ -17832,6 +17884,66 @@ class TestList(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
             self.checkScript(reassign_nested, (), optimize=False)
 
+    def test_min_bool_list(self):
+        def jit_min_list(a, b):
+            # type: (List[bool], List[bool]) -> List[bool]
+            return min(a, b)
+
+        self.checkScript(jit_min_list, ([True, False], [False, True]))
+
+    def test_min_max_list(self):
+        def jit_min_list(a, b):
+            # type: (List[int], List[int]) -> List[int]
+            return min(a, b)
+
+        def jit_min_list_float(a, b):
+            # type: (List[float], List[float]) -> List[float]
+            return min(a, b)
+
+        def jit_min_list_bool(a, b):
+            # type: (List[bool], List[bool]) -> List[bool]
+            return min(a, b)
+
+        def run_tests(func, a, b):
+            for t in zip(a, b):
+                self.checkScript(func, t)
+
+        args_left_int = [[1, 8, 8], [2, 1, 1], [], [2], [1], [1, 2, 3]]
+        args_right_int = [[2, 1, 1], [1, 8, 8], [], [1], [], [1, 2]]
+        run_tests(jit_min_list, args_left_int, args_right_int)
+
+        args_left_float = [[1., 8., 8.], [2., 1., 1.], [], [2.], [1.], [1., 2., 3.]]
+        args_right_float = [[2., 1., 1.], [1., 8., 8.], [], [1.], [], [1., 2.]]
+        run_tests(jit_min_list_float, args_left_float, args_right_float)
+
+        args_left_bool = [[], [], [], [False], [True], [False, True], [True, True],
+                          [False, False, False], [False, False, True]]
+        args_right_bool = [[], [False], [True], [True], [False], [True, True],
+                           [False, True], [False, False, True], [False, False, False]]
+        run_tests(jit_min_list_bool, args_left_bool, args_right_bool)
+
+        def jit_max_list(a, b):
+            # type: (List[int], List[int]) -> List[int]
+            return max(a, b)
+
+        def jit_max_list_float(a, b):
+            # type: (List[float], List[float]) -> List[float]
+            return max(a, b)
+
+        def jit_max_list_bool(a, b):
+            # type: (List[bool], List[bool]) -> List[bool]
+            return max(a, b)
+
+        args_left_int = [[1, 8, 8], [8, 1, 1], [], [1], [], [1, 2]]
+        args_right_int = [[8, 1, 1], [1, 8, 8], [], [2], [1], [1, 2, 3]]
+        run_tests(jit_max_list, args_left_int, args_right_int)
+
+        args_left_float = [[1., 8., 8.], [8., 1., 1.], [], [1.], [], [1., 2.]]
+        args_right_float = [[8., 1., 1.], [1., 8., 8.], [], [2.], [1.], [1., 2., 3.]]
+        run_tests(jit_max_list_float, args_left_float, args_right_float)
+
+        run_tests(jit_max_list_bool, args_left_bool, args_right_bool)
+
     def test_list_gather(self):
         def index():
             a = [1, 2, 3]
@@ -18442,6 +18554,52 @@ class TestList(JitTestCase):
         for l in [[], [1], [1, 2, 3]]:
             self.assertEqual(copy_list(l), l)
 
+    def test_min_max_single_list(self):
+        def min_intlist(li):
+            # type: (List[int]) -> int
+            return min(li)
+
+        def max_intlist(li):
+            # type: (List[int]) -> int
+            return max(li)
+
+        def min_boollist(li):
+            # type: (List[bool]) -> bool
+            return min(li)
+
+        def max_boollist(li):
+            # type: (List[bool]) -> bool
+            return max(li)
+
+        def min_floatlist(li):
+            # type: (List[float]) -> float
+            return min(li)
+
+        def max_floatlist(li):
+            # type: (List[float]) -> float
+            return max(li)
+
+
+        int_lists = [1], [2, 1, 2], [-3, 4, 2], [-2, -7, 1, 4], [2, 1, 0, 4], []
+
+        def check_list(fn, li):
+            if len(li) == 0:
+                self.checkScriptRaisesRegex(fn, (li,), Exception, "arg is an empty sequence")
+            else:
+                self.checkScript(fn, (li,))
+
+        for int_list in int_lists:
+            check_list(min_intlist, int_list)
+            check_list(max_intlist, int_list)
+
+            bool_li = list(map(lambda x: bool(x), int_list))
+            check_list(min_boollist, bool_li)
+            check_list(max_boollist, bool_li)
+
+            float_li = list(map(lambda x: float(x), int_list))
+            check_list(min_floatlist, float_li)
+            check_list(max_floatlist, float_li)
+
 
 class TestDict(JitTestCase):
     def dict(self):
@@ -18737,6 +18895,36 @@ class TestDict(JitTestCase):
         a_dict = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
         self.checkScript(fn, (a_dict, ('a', 'c')))
 
+    def test_ordered_dict(self):
+        def test_func(fn, inputs):
+            self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
+
+        def repeated_key():
+            return OrderedDict([(1, 2), (2, 3), (1, 4)])
+
+        test_func(repeated_key, ())
+
+        def no_args():
+            a = OrderedDict()
+            a["one"] = torch.tensor(1)
+            a["two"] = torch.tensor(2)
+
+        test_func(no_args, ())
+
+        def test_dict_constructor():
+            a = dict()
+            a["one"] = torch.tensor(1)
+            return a, dict([(1, 2), (2, 3), (1, 4)])  # noqa: C406
+
+        test_func(test_dict_constructor, ())
+
+        def test_dict_error():
+            a = dict()
+            a[1] = 2
+            return a
+
+        with self.assertRaisesRegex(Exception, "Arguments for call are not"):
+            torch.jit.script(test_dict_error)
 
 class TestClassType(JitTestCase):
     def test_get_with_method(self):
@@ -19381,6 +19569,10 @@ class TestClassType(JitTestCase):
                 # type: (int) -> int
                 return other + 1
 
+            def __setitem__(self, idx, val):
+                # type: (int, int) -> None
+                self.x = val * idx
+
         def add():
             return BinOps(4) + 3
         def sub():  # noqa: E306
@@ -19411,8 +19603,13 @@ class TestClassType(JitTestCase):
             return BinOps(4) ^ 3
         def getitem():  # noqa: E306
             return BinOps(4)[1]
+        def setitem():  # noqa: E306
+            a = BinOps(4)
+            a[1] = 5
+            return a.x
 
-        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem]
+        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem, setitem]
+
         if not PY2:
             ops.append(truediv)
         for func in ops:

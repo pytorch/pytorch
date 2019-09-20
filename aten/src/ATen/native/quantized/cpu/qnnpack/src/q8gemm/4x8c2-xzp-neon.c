@@ -10,7 +10,7 @@
 
 #include <qnnpack/q8gemm.h>
 
-void q8gemm_xzp_ukernel_4x8c2__neon(
+void pytorch_q8gemm_xzp_ukernel_4x8c2__neon(
     size_t mr,
     size_t nr,
     size_t k,
