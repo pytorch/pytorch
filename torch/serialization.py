@@ -598,7 +598,9 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
             obj = data_type(size)
             loaded_storages[key] = restore_location(obj, location)
             with zip_file.open('tensors/{}'.format(key), 'r') as tensor_file:
-                loaded_storages[key]._set_from_file(tensor_file, 0, True)
+                offset = None
+                is_real_file = False
+                loaded_storages[key]._set_from_file(tensor_file, offset, is_real_file)
         storage = loaded_storages[key]
         if view_metadata is not None:
             view_key, offset, view_size = view_metadata
