@@ -689,6 +689,11 @@ class ScriptModuleSerializer {
       // instructions
       std::vector<IValue> inss;
       for (const auto& ins : code.instructions()) {
+        TORCH_CHECK(ins.op != CALL, "Instruction CALL is not supported in mobile.");
+        TORCH_CHECK(ins.op != INTERFACE_CALL, "Instruction INTERFACE_CALL is not supported in mobile.");
+        TORCH_CHECK(ins.op != WAIT, "Instruction WAIT is not supported in mobile.");
+        TORCH_CHECK(ins.op != GUARD, "Instruction GUARD is not supported in mobile.");
+        TORCH_CHECK(ins.op != TAIL_CALL, "Instruction TAIL_CALL is not supported in mobile.");
         std::stringstream ss;
         ss << ins.op;
         std::vector<IValue> insv{ss.str(), ins.X, ins.N};
@@ -700,7 +705,9 @@ class ScriptModuleSerializer {
       // operators
       std::vector<IValue> opss;
       for (const auto& opname : code.opname_table()) {
-        opss.emplace_back(c10::ivalue::Tuple::create({opname.name, opname.overload_name}));
+        // Add "_" prefix to work around the double registration both of jit/generated
+        // and here. TODO: remove it when we have separate build for lite interpreter.
+        opss.emplace_back(c10::ivalue::Tuple::create({"_" + opname.name, opname.overload_name}));
       }
       auto operators = c10::ivalue::Tuple::create(std::move(opss));
       auto named_ops = c10::ivalue::Tuple::create({"operators", operators});
@@ -713,7 +720,7 @@ class ScriptModuleSerializer {
       auto named_aggsize = c10::ivalue::Tuple::create({"agg_output_size", code.agg_output_size()});
 
       auto element = c10::ivalue::Tuple::create({named_ins, named_ops, named_consts, named_aggsize});
-      elements.push_back(c10::ivalue::Tuple::create({func.name(), element}));
+      elements.push_back(c10::ivalue::Tuple::create({func.qualname().qualifiedName(), element}));
     }
     auto telements = c10::ivalue::Tuple::create(std::move(elements));
     auto named_elements = c10::ivalue::Tuple::create({"methods", telements});

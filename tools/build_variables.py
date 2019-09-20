@@ -43,7 +43,7 @@ libtorch_sources = [
     "torch/csrc/autograd/functions/accumulate_grad.cpp",
     "torch/csrc/autograd/functions/basic_ops.cpp",
     "torch/csrc/autograd/functions/tensor.cpp",
-    "torch/csrc/autograd/functions/utils.cpp",
+    "torch/csrc/autograd/functions/update_graph_executor_opt.cpp",
     "torch/csrc/autograd/input_buffer.cpp",
     "torch/csrc/autograd/profiler.cpp",
     "torch/csrc/autograd/record_function.cpp",

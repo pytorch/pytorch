@@ -2,7 +2,7 @@
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/lite_interpreter/import_bytecode.h>
-#include <torch/csrc/jit/lite_interpreter/bytecode.h>
+#include <torch/csrc/jit/lite_interpreter/mobile_module.h>
 #include <torch/csrc/jit/import.h>
 
 // Tests go in torch::jit
@@ -30,8 +30,8 @@ void testLiteInterpreter() {
   auto ref = m.run_method("add_it", minput);
 
   std::stringstream ss;
-  m.save_for_mobile(ss);
-  auto bc = load_bytecode(ss);
+  m._save_for_mobile(ss);
+  auto bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;

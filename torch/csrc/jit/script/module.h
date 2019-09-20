@@ -314,11 +314,11 @@ struct TORCH_API Module {
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
-  void save_for_mobile(
+  void _save_for_mobile(
       std::ostream& out,
       const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
-  void save_for_mobile(
+  void _save_for_mobile(
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
