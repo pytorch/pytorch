@@ -42,6 +42,7 @@ struct Quantizer;
 // This is temporary typedef to enable Quantizer in aten native function API
 // we'll remove them when we are actually exposing Quantizer class
 // to frontend
+using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
@@ -274,6 +275,10 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
+  /// If a tensor is a quantized tensor, returns its quantizer
+  /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
+  QuantizerPtr quantizer() const;
+
 #ifdef BUILD_NAMEDTENSOR
   /// Returns if a `Tensor` has any dimension names
   bool has_names() const;
@@ -397,6 +402,7 @@ class CAFFE2_API Tensor {
   void set_data(const Tensor & new_data) const;
   Tensor data() const;
   bool is_leaf() const;
+  int64_t output_nr() const;
   #ifdef BUILD_NAMEDTENSOR
   Tensor & names_(c10::optional<DimnameList> names) const;
   #endif
@@ -737,6 +743,7 @@ class CAFFE2_API Tensor {
   int64_t q_zero_point() const;
   Tensor q_per_channel_scales() const;
   Tensor q_per_channel_zero_points() const;
+  IntArrayRef q_per_channel_axis() const;
   Tensor int_repr() const;
   QScheme qscheme() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
