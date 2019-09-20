@@ -756,6 +756,8 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
   static std::unordered_set<std::pair<const char*, const char*>, OpNameHash, OpNameEquals> ops {
         {"aten::backward", ""},
         {"aten::set_data", ""},
+        {"aten::is_leaf", ""},
+        {"aten::output_nr", ""},
     #ifdef BUILD_NAMEDTENSOR
         {"aten::names_", ""},
     #endif
@@ -767,6 +769,12 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
     #endif
     #ifdef BUILD_NAMEDTENSOR
         {"aten::refine_names", ""},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::unflatten", ""},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::unflatten", ""},
     #endif
         {"aten::_cudnn_rnn", ""},
         {"aten::_cudnn_rnn_backward", ""},
@@ -1157,6 +1165,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::quantize_linear", ""},
         {"aten::quantize_linear_per_channel", ""},
         {"aten::_dequantize_linear", ""},
+        {"aten::q_per_channel_axis", ""},
         {"aten::qscheme", ""},
         {"aten::to", "dtype_layout"},
         {"aten::to", "device"},
