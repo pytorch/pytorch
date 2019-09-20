@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/distributed/rpc/message.h>
-#include <torch/csrc/distributed/rpc/rpc_base.h>
+#include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/pickler.h>
 #include <vector>
@@ -12,7 +12,7 @@ namespace rpc {
 
 // Temporary solution of RRef operations.
 // TODO: Remove all these messages and use rpc + registered functions instead.
-class TORCH_API RRefMessageBase : public RpcBase {
+class TORCH_API RRefMessageBase : public RpcCommandBase {
  public:
   RRefMessageBase(at::IValue value, MessageType type)
       : value_(std::move(value)), type_(type) {}

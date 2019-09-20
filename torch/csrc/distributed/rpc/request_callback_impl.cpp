@@ -11,7 +11,7 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
-#include <torch/csrc/distributed/rpc/script_ret.h>
+#include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/script_rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -21,14 +21,15 @@ namespace rpc {
 
 using namespace torch::distributed::autograd;
 
-std::unique_ptr<RpcBase> RequestCallbackImpl::processRpc(
-    RpcBase* rpc,
+std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
+    RpcCommandBase* rpc,
     MessageType messageType) {
-  // TODO: RpcBase should have an abstract execute() method that we can call
-  // here instead of having another switch statement here. Even better we could
-  // have abstract classes RpcRequest and RpcResp which inherit from RpBase and
-  // RpcRequest declares the abstract method execute() that we can callh here.
-  // RpcResponse could have an abstract method to convert it to a python object.
+  // TODO: RpcCommandBase should have an abstract execute() method that we can
+  // call here instead of having another switch statement here. Even better we
+  // could have abstract classes RpcRequest and RpcResp which inherit from
+  // RpBase and RpcRequest declares the abstract method execute() that we can
+  // callh here. RpcResponse could have an abstract method to convert it to a
+  // python object.
   switch (messageType) {
     case MessageType::SCRIPT_CALL: {
       auto sc = static_cast<ScriptCall*>(rpc);
@@ -44,8 +45,8 @@ std::unique_ptr<RpcBase> RequestCallbackImpl::processRpc(
           "size ",
           stack.size());
 
-      return std::unique_ptr<ScriptRet>(
-          new ScriptRet(std::move(stack.front())));
+      return std::unique_ptr<ScriptResp>(
+          new ScriptResp(std::move(stack.front())));
     }
     case MessageType::PYTHON_CALL: {
       auto pyCall = static_cast<PythonUDFCall*>(rpc);
@@ -136,8 +137,8 @@ std::unique_ptr<RpcBase> RequestCallbackImpl::processRpc(
   }
 }
 
-Message RequestCallbackImpl::processMessage(Message& request) {
-  std::unique_ptr<RpcBase> rpc = deserializeRequest(request);
+Message RequestCallbackImpl::processMessage(const Message& request) {
+  std::unique_ptr<RpcCommandBase> rpc = deserializeRequest(request);
   auto response = processRpc(rpc.get(), request.type());
   if (response == nullptr) {
     return Message();

@@ -2,7 +2,7 @@
 
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/request_callback.h>
-#include <torch/csrc/distributed/rpc/rpc_base.h>
+#include <torch/csrc/distributed/rpc/rpc_command_base.h>
 
 namespace torch {
 namespace distributed {
@@ -10,10 +10,12 @@ namespace rpc {
 
 class TORCH_API RequestCallbackImpl : public RequestCallback {
  public:
-  Message processMessage(Message& request) override;
+  Message processMessage(const Message& request) override;
 
  private:
-  std::unique_ptr<RpcBase> processRpc(RpcBase* rpc, MessageType messageType);
+  std::unique_ptr<RpcCommandBase> processRpc(
+      RpcCommandBase* rpc,
+      MessageType messageType);
 };
 
 } // namespace rpc

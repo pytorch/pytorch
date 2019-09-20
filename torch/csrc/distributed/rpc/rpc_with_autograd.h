@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/distributed/rpc/rpc_base.h>
+#include <torch/csrc/distributed/rpc/rpc_command_base.h>
 
 namespace torch {
 namespace distributed {
@@ -18,21 +18,21 @@ struct TORCH_API AutogradMetadata {
 };
 
 // Represents an RPC that includes autograd information. This class basically
-// wraps another `RpcBase` object which represents the actual RPC and has
+// wraps another `RpcCommandBase` object which represents the actual RPC and has
 // additional autograd information associated with that RPC.
-class TORCH_API RpcWithAutograd final : public RpcBase {
+class TORCH_API RpcWithAutograd final : public RpcCommandBase {
  public:
   RpcWithAutograd(
       MessageType messageType,
       const AutogradMetadata& autogradMetadata,
-      std::unique_ptr<RpcBase> wrappedRpc);
+      std::unique_ptr<RpcCommandBase> wrappedRpc);
 
   // This variant is used when we already have a serialized message for
   // wrappedRpc.
   RpcWithAutograd(
       MessageType messageType,
       const AutogradMetadata& autogradMetadata,
-      std::unique_ptr<RpcBase> wrappedRpc,
+      std::unique_ptr<RpcCommandBase> wrappedRpc,
       MessageType wrappedMessageType,
       std::vector<torch::Tensor> tensors);
 
@@ -48,7 +48,7 @@ class TORCH_API RpcWithAutograd final : public RpcBase {
   const AutogradMetadata& autogradMetadata() const;
 
   // Destructively retrieves the wrapped rpc.
-  std::unique_ptr<RpcBase> moveWrappedRpc();
+  std::unique_ptr<RpcCommandBase> moveWrappedRpc();
 
   // Message type of the wrapped RPC.
   MessageType wrappedMessageType() const;
@@ -58,7 +58,7 @@ class TORCH_API RpcWithAutograd final : public RpcBase {
   MessageType messageType_;
 
   AutogradMetadata autogradMetadata_;
-  std::unique_ptr<RpcBase> wrappedRpc_;
+  std::unique_ptr<RpcCommandBase> wrappedRpc_;
 
   // Serialized message representing wrappedRpc_. Used mostly as a cache to
   // avoid serializing the request twice.

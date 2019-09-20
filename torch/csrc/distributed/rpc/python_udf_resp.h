@@ -1,13 +1,13 @@
 #pragma once
 
-#include <torch/csrc/distributed/rpc/rpc_base.h>
+#include <torch/csrc/distributed/rpc/rpc_command_base.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
 // RPC call representing the response of a Python UDF over RPC.
-class TORCH_API PythonUDFResp final : public RpcBase {
+class TORCH_API PythonUDFResp final : public RpcCommandBase {
  public:
   PythonUDFResp(std::vector<char> pickledPayload);
 

@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/subgraph_matcher.h>
 
+#include <algorithm>
 #include <stack>
 
 namespace torch {
@@ -57,15 +58,74 @@ graph(%self, %input):
     %relu = match::module[name="ReLU"](%self)
     %r = prim::CallMethod[name="forward"](%relu, %output)
     return (%r))";
-  std::vector<std::string> patterns = {conv_functional_relu, conv_relu_module};
+  std::string matmul_add = R"(
+graph(%input, %weight, %bias, %4):
+     %weight_t = aten::t(%weight)
+     %output = aten::matmul(%input, %weight_t)
+     %res = aten::add_(%output, %bias, %4)
+     return (%res))";
+  std::vector<std::string> patterns = {
+      conv_functional_relu, conv_relu_module, matmul_add};
 
   for (const auto& pattern : patterns) {
     findValuesInPattern(*graph, pattern, values_to_skip);
   }
 }
 
-static bool outputsNeedToBeObserved(Node* n) {
-  return n->kind() != prim::Constant;
+std::string getFuncName(const c10::QualifiedName& qname) {
+  const auto& name = qname.qualifiedName();
+  auto rdot_idx = name.rfind('.');
+  if (rdot_idx != std::string::npos) {
+    return name.substr(rdot_idx + 1, name.length());
+  } else {
+    return name;
+  }
+}
+
+bool nodeQuantizable(Node* n) {
+  static std::vector<std::string> call_funcs = {
+      "conv2d",
+      "linear",
+      "relu",
+  };
+  std::vector<Symbol> aten_funcs = {
+      Symbol::aten("addmm"), Symbol::aten("matmul"), Symbol::aten("add_")};
+  std::transform(
+      call_funcs.begin(),
+      call_funcs.end(),
+      std::back_inserter(aten_funcs),
+      [](const std::string& s) { return Symbol::aten(s); });
+  bool is_quantizable =
+      std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
+      aten_funcs.end();
+  if (n->kind() == prim::CallFunction) {
+    auto func_node = n->inputs()[0]->node();
+    auto func = func_node->output()->type()->expect<FunctionType>()->function();
+    auto func_name = getFuncName(func->qualname());
+    if (func_node->kind() == prim::Constant) {
+      is_quantizable |=
+          std::find(call_funcs.begin(), call_funcs.end(), func_name) !=
+          call_funcs.end();
+    }
+  }
+  return is_quantizable;
+}
+
+bool valueNeedsToBeQuantized(Value* v) {
+  if (!v->type()->isSubtypeOf(TensorType::get())) {
+    return false;
+  }
+  // Check whether producer is quantizable
+  if (nodeQuantizable(v->node())) {
+    return true;
+  }
+  // Check whether user is quantizable
+  for (const auto& use : v->uses()) {
+    if (nodeQuantizable(use.user)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 Node* traverseToQuantNode(Node* dq) {
@@ -216,8 +276,7 @@ void InsertObserversImpl(
   Value* self = graph->inputs()[0];
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
-    if (v->type()->isSubtypeOf(TensorType::get()) &&
-        values_to_skip.count(v) == 0) {
+    if (!values_to_skip.count(v) && valueNeedsToBeQuantized(v)) {
       auto qconfig = module_qconfig_map.at(module.module_object());
       if (qconfig) {
         auto observer_node =
@@ -234,16 +293,15 @@ void InsertObserversImpl(
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
-      // Skip nodes that we don't need to observe, e.g. 'prim::Constant' or
-      // observer nodes
-      if (!outputsNeedToBeObserved(n) || observer_for_input.count(n) != 0) {
+      // Skip observer nodes
+      if (observer_for_input.count(n) != 0) {
         continue;
       }
 
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
-        if (values_to_skip.count(v) == 0) {
+        if (!values_to_skip.count(v) && valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
         }
         if (v->node()->kind() == prim::CallMethod) {
@@ -284,9 +342,6 @@ void InsertObserversImpl(
 
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
-    if (!v->type()->isSubtypeOf(TensorType::get())) {
-      continue;
-    }
     // Skip inserting observer for bias
     if (v->node()->kind() == prim::GetAttr &&
         v->node()->s(c10::attr::name) == "bias") {
@@ -375,7 +430,6 @@ class QuantizeHelper {
   IValue getQParams(Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
       Value* child_instance);
-  void quantizeBias(Value* v);
   void quantizeTensor(Value* v, bool insert_after = true);
   void removeObserver(Value* v, const std::string& observer_name);
   void destroyNodes() {
@@ -432,38 +486,6 @@ IValue QuantizeHelper::getQParams(Value* v) {
 
 double getScale(const IValue& qparam) {
   return qparam.toTuple()->elements()[0].toTensor().item().toDouble();
-}
-
-void QuantizeHelper::quantizeBias(Value* v) {
-  // Traverse to the place where this is used
-  std::vector<Symbol> ops_with_bias = {Symbol::aten("conv2d"),
-                                       Symbol::aten("_convolution")};
-  for (const auto& use : v->uses()) {
-    if (std::find(
-            ops_with_bias.begin(), ops_with_bias.end(), use.user->kind()) !=
-        ops_with_bias.end()) {
-      // Make sure there is no observer module for bias
-      auto observer_name = findObserverName(v);
-      TORCH_INTERNAL_ASSERT(!observer_name, "bias should not be observed!");
-      Value* activation = use.user->inputs()[0];
-      Value* weight = use.user->inputs()[1];
-      // Get qparam from activation
-      IValue act_qparam = getQParams(activation);
-      // Get qparam from weight
-      IValue weight_qparam = getQParams(weight);
-      IValue bias_scale = at::scalar_tensor(
-          c10::Scalar(getScale(act_qparam) * getScale(weight_qparam)),
-          at::kDouble);
-      IValue bias_qparam = c10::ivalue::Tuple::create(
-          std::vector<IValue>({bias_scale, at::scalar_tensor(c10::Scalar(0))}),
-          act_qparam.toTuple()->type);
-      Node* dequant = insertQuantDeQuantCall(v, bias_qparam, at::kQInt32);
-      v->replaceAllUsesWith(dequant->output());
-      Node* q = traverseToQuantNode(dequant);
-      TORCH_INTERNAL_ASSERT(q != nullptr);
-      q->replaceInputWith(dequant->output(), v);
-    }
-  }
 }
 
 void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
@@ -548,10 +570,9 @@ void InsertQuantDeQuantImpl(
         }
         if (v->node()->kind() == prim::GetAttr &&
             v->node()->s(c10::attr::name) == "bias") {
-          qh.quantizeBias(v);
-        } else {
-          qh.quantizeTensor(v);
+          continue;
         }
+        qh.quantizeTensor(v);
       }
 
       for (Block* subblock : n->blocks()) {
@@ -604,8 +625,13 @@ void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph) {
-  // First fuse aten::linear op
-  FuseLinear(graph);
+  const std::string quantized_linear_with_bias =
+      R"(
+graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+        %w_quant_t = aten::t(%w_quant)
+        %packed_params = quantized::linear_prepack(%w_quant_t, %b)
+        %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
+        return (%r))";
   const std::unordered_map<std::string, std::string> pattern_and_replacements =
       {// quantized::conv2d
        {R"(
@@ -633,32 +659,46 @@ graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale,
         %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
         %r_perm = aten::permute(%r, %out_param)
         return (%r_perm))"},
-       // quantized::linear
+       // addmm -> quantized::linear
        {R"(
-graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype):
+graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_intrepr = aten::int_repr(%a_quant)
         %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
         %w_intrepr = aten::int_repr(%w_quant)
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
-        %b_intrepr = aten::int_repr(%b_quant)
-        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
-        %r = aten::linear(%a_dequant, %w_dequant, %b_dequant)
+        %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
+        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant))",
+        quantized_linear_with_bias},
+       // matmul(with bias) -> quantized::linear
+       {R"(
+graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+        %a_intrepr = aten::int_repr(%a_quant)
+        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %w_intrepr = aten::int_repr(%w_quant)
+        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        %output = aten::matmul(%a_dequant, %w_dequant)
+        %r = aten::add_(%output, %b, %4)
+        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant))",
+        quantized_linear_with_bias},
+       // matmul(without bias) -> quantized::linear
+       {R"(
+graph(%a_quant, %w_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype):
+        %a_intrepr = aten::int_repr(%a_quant)
+        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %w_intrepr = aten::int_repr(%w_quant)
+        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        %r = aten::matmul(%a_dequant, %w_dequant)
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))",
         R"(
-graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype):
-        %0 : int = prim::Constant[value=0]()
-        %1 : int = prim::Constant[value=1]()
-        %2 : int = prim::Constant[value=2]()
-        %3 : int = prim::Constant[value=3]()
-        %in_param : int[] = prim::ListConstruct(%0, %2, %3, %1)
-        %a_perm : Tensor = aten::permute(%a_quant, %in_param)
-        %w_perm : Tensor = aten::permute(%w_quant, %in_param)
-        %w_packed = quantized::fbgemm_linear_prepack(%w_perm)
-        %r = quantized::fbgemm_linear(%a_perm, %w_packed, %b_quant, %r_scale, %r_zero_point)
-        %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
-        %r_perm = aten::permute(%r, %out_param)
-        return (%r_perm))"}};
+graph(%a_quant, %w_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype):
+        %w_quant_t = aten::t(%w_quant)
+        %bias: Tensor? = prim::Constant()
+        %packed_params = quantized::linear_prepack(%w_quant_t, %bias)
+        %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
+        return (%r))"}};
   for (const auto& item : pattern_and_replacements) {
     SubgraphRewriter rewriter;
     rewriter.RegisterRewritePattern(item.first, item.second);
@@ -829,7 +869,6 @@ graph(%self, %x):
 void FoldQuantizeCallIntoBuffer(
     script::Module& module,
     const std::string& method_name) {
-  // TODO: extra filter on scale/zero_point/dtype to make sure they are Constant
   const std::string pattern = R"(
 graph(%self, %scale, %zero_point, %dtype):
    %weight = prim::GetAttr[name="weight"](%self)
@@ -841,9 +880,22 @@ graph(%self, %scale, %zero_point, %dtype):
   auto method = module.get_method(method_name);
   auto graph = method.graph();
   auto matches = findPatternMatches(pattern_graph, *graph);
+  // Extra filter on scale/zero_point/dtype to make sure they are Constant
+  auto filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto scale_node = match_vmap.at(vmap.at("scale"))->node();
+    auto zero_point_node = match_vmap.at(vmap.at("zero_point"))->node();
+    auto dtype_node = match_vmap.at(vmap.at("dtype"))->node();
+    return scale_node->kind() == prim::Constant &&
+        zero_point_node->kind() == prim::Constant &&
+        dtype_node->kind() == prim::Constant;
+  };
   for (const auto& match : matches) {
+    if (!filter(match, vmap)) {
+      continue;
+    }
     auto match_vmap = match.values_map;
-    auto* weight = match_vmap.at(vmap.at("weight"));
     auto float_weight = module.get_parameter("weight").variable_data();
     auto scale = toIValue(match_vmap.at(vmap.at("scale"))).value().toDouble();
     auto zero_point =
@@ -861,7 +913,7 @@ graph(%self, %scale, %zero_point, %dtype):
     return (%weight_quant))";
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(pattern, replacement);
-  rewriter.runOnGraph(graph);
+  rewriter.runOnGraph(graph, filter);
 }
 } // namespace jit
 } // namespace torch

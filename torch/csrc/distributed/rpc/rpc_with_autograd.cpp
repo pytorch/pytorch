@@ -17,7 +17,7 @@ AutogradMetadata::AutogradMetadata(
 RpcWithAutograd::RpcWithAutograd(
     MessageType messageType,
     const AutogradMetadata& autogradMetadata,
-    std::unique_ptr<RpcBase> wrappedRpc)
+    std::unique_ptr<RpcCommandBase> wrappedRpc)
     : messageType_(messageType),
       autogradMetadata_(autogradMetadata),
       wrappedRpc_(std::move(wrappedRpc)) {
@@ -33,7 +33,7 @@ RpcWithAutograd::RpcWithAutograd(
 RpcWithAutograd::RpcWithAutograd(
     MessageType messageType,
     const AutogradMetadata& autogradMetadata,
-    std::unique_ptr<RpcBase> wrappedRpc,
+    std::unique_ptr<RpcCommandBase> wrappedRpc,
     MessageType wrappedMessageType,
     std::vector<torch::Tensor> tensors)
     : messageType_(messageType),
@@ -125,7 +125,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   Message wrappedMessage(
       std::move(payload), std::move(tensors), wrappedMessageType, message.id());
 
-  std::unique_ptr<RpcBase> wrappedRpc;
+  std::unique_ptr<RpcCommandBase> wrappedRpc;
   if (message.type() == MessageType::MESSAGE_WITH_AUTOGRAD_REQ) {
     wrappedRpc = std::move(deserializeRequest(wrappedMessage));
   } else {
@@ -148,7 +148,7 @@ const AutogradMetadata& RpcWithAutograd::autogradMetadata() const {
   return autogradMetadata_;
 }
 
-std::unique_ptr<RpcBase> RpcWithAutograd::moveWrappedRpc() {
+std::unique_ptr<RpcCommandBase> RpcWithAutograd::moveWrappedRpc() {
   return std::move(wrappedRpc_);
 }
 

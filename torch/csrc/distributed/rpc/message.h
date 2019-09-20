@@ -40,7 +40,7 @@ enum MessageType {
 //                  request and response. Other implementation can ignore it
 //                  if they have their own ways to do matching.
 //
-// Layers above ``RpcAgent`` only converts ScriptCall, ScriptRet, PythonCall,
+// Layers above ``RpcAgent`` only converts ScriptCall, ScriptResp, PythonCall,
 // and PythonRet into a Message, and it is up to the RpcAgent
 // implementation to determine how to serialize a message.
 class TORCH_API Message final {

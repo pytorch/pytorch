@@ -463,7 +463,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
               // the machine's hostname and returns a device instance
               // associated with the address that the hostname resolves to.
               options.devices.push_back(
-                  ::c10d::ProcessGroupGloo::createDeviceForHostname(""));
+                  ::c10d::ProcessGroupGloo::createDefaultDevice());
             }
 
             options.timeout = timeout;

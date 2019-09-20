@@ -9,7 +9,8 @@ constexpr int kAutoIncrementBits = 48;
 constexpr int64_t kAutoIncrementMask = (1LL << kAutoIncrementBits) - 1;
 constexpr int kMaxWorkerId = 65535;
 
-thread_local int64_t DistAutogradContainer::current_context_id_ = -1;
+// Each thread has a single autograd_context_id valid at any point in time.
+static thread_local int64_t current_context_id_ = -1;
 
 DistAutogradContainer::DistAutogradContainer()
     : next_context_id_(0),
