@@ -7,6 +7,7 @@
 #include <ATen/cpu/vec256/vec256_double.h>
 #include <ATen/cpu/vec256/vec256_int.h>
 #include <ATen/cpu/vec256/vec256_qint.h>
+#include <ATen/cpu/vec256/vec256_complex_double_riri.h>
 
 #include <algorithm>
 #include <cstddef>
