@@ -261,7 +261,7 @@ template <> Vec256<std::complex<double>> inline operator*(const Vec256<std::comp
   return ret;
 }
 
-template <> Vec256<std::complex<double>> inline operator/(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) __ubsan_ignore_float_divide_by_zero__ {
+template <> Vec256<std::complex<double>> inline operator/(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
   auto mask = _mm256_setr_pd(0.0, 1.0, 0.0, 1.0);
   Vec256<std::complex<double>> abs = Vec256<std::complex<double>>(_mm256_div_pd(a.abs_(), _mm256_add_pd(b.abs_(), mask)));
   Vec256<std::complex<double>> i_angle = Vec256<std::complex<double>>(_mm256_sub_pd(a.angle_(), b.angle_()));
