@@ -220,6 +220,8 @@ class TestTypePromotion(TestCase):
 
     def test_result_type(self):
         self.assertEqual(torch.result_type(torch.tensor(1, dtype=torch.int), 1), torch.int)
+        self.assertEqual(torch.result_type(1, torch.tensor(1, dtype=torch.int)), torch.int)
+        self.assertEqual(torch.result_type(1, 1.), torch.get_default_dtype())
         self.assertEqual(torch.result_type(torch.tensor(1), 1.), torch.get_default_dtype())
         self.assertEqual(torch.result_type(torch.tensor(1, dtype=torch.long), torch.tensor([1, 1], dtype=torch.int)), torch.int)
         self.assertEqual(torch.result_type(torch.tensor([1., 1.], dtype=torch.float), 1.), torch.float)
