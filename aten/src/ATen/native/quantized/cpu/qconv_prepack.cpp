@@ -173,20 +173,19 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     const uint32_t kernel_h = weight.size(2);
     const uint32_t kernel_w = weight.size(3);
 
-    Tensor bias;
+    Tensor bias_fp32;
     if (bias_in.has_value()) {
-      bias = bias_in.value();
+      bias_fp32 = bias_in.value();
     } else {
-      bias = at::empty(out_ch, at::kFloat);
-      bias = at::quantize_linear(bias, 1.0, 0, kQInt32);
+      bias_fp32 = at::zeros(out_ch, at::kFloat);
     }
     TORCH_CHECK(
-        !bias.defined() || (bias.ndimension() == 1 && bias.size(0) == out_ch),
+        !bias_fp32.defined() || (bias_fp32.ndimension() == 1 && bias_fp32.size(0) == out_ch),
         "quantized::conv_prepack (qnnpack): expected bias to be 1-dimensional with ",
         out_ch,
         " elements",
         ", but got bias of size ",
-        bias.sizes(),
+        bias_fp32.sizes(),
         " instead");
 
     uint32_t stride_h = stride[0];
@@ -210,18 +209,30 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         std::numeric_limits<uint8_t>::max());
 
     auto weight_contig = weight.contiguous(MemoryFormat::ChannelsLast);
-    auto bias_contig = bias.contiguous();
-    auto wt_ptr =
-        guts::make_unique<PackedConvWeightsQnnp>(PackedConvWeightsQnnp{
-            guts::make_unique<qnnpack::PrePackConvWeights>(
-                conv_p,
-                (uint8_t*)weight_contig.data_ptr<c10::quint8>(),
-                (int32_t*)bias_contig.data_ptr<c10::qint32>()),
-            weight_contig,
-            bias_contig,
-            {kernel_h, kernel_w},
-            weight.q_scale(),
-            weight.q_zero_point()});
+    auto weight_zp = weight.q_zero_point() + 128;
+
+    int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
+    Tensor qnnp_weight = at::_empty_affine_quantized(
+        weight_contig.sizes(),
+        at::device(kCPU).dtype(kQUInt8),
+        weight.q_scale(),
+        weight_zp);
+    auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
+    for (int i = 0; i < weight_contig.numel(); ++i) {
+      qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
+    }
+    // We set the pre-packed conv weights to nullptr below as we call pre-pack
+    // during the first invocation of operator run. Refer to qconv.cpp for more
+    // details. TODO Update to actually call pre-pack here once bias is removed
+    // from pre-packing step.
+    auto wt_ptr = guts::make_unique<PackedConvWeightsQnnp>(
+        PackedConvWeightsQnnp{nullptr, /* PrePackConvWeights */
+                              weight_contig, /* int8_t weight */
+                              bias_fp32.contiguous(), /* fp32 bias */
+                              c10::nullopt, /* input_scale */
+                              {kernel_h, kernel_w},
+                              weight.q_scale(),
+                              weight_zp});
 
     return cpp_custom_type_hack::create(std::move(wt_ptr), weight.options());
   }
