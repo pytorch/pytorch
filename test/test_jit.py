@@ -2962,6 +2962,70 @@ graph(%Ra, %Rb):
         self.assertEqual(model_loaded(), model())
 
 class TestScript(JitTestCase):
+
+    # def test_merge(self):
+    #     def f(x, y):
+    #         return x + y
+    
+    #     a = torch.randn(5, 5, device='cuda')
+    #     b = torch.randn(5, 5, device='cpu')
+
+    #     a1 = torch.ones(5, 5, dtype=torch.float32)
+    #     b1 = torch.ones(5, 5, dtype=torch.int32)
+
+    #     print(f(a1, b1))
+
+    # def test_undef(self):
+    #     def f(x):
+    #         return (x + 1) * x
+
+    #     b = torch.randn(5, 5, requires_grad=True)
+    #     a = torch.randn(5, 5, requires_grad=True)
+    #     s = self.checkScript(f, (a,), profiling = False)
+    #     c = s(a)        
+    #     (dx,) = torch.autograd.grad(c, a, torch.ones_like(c), create_graph=True)
+    #     #import pdb; pdb.set_trace();
+    #     print("printing dx begin")
+    #     print(dx)
+    #     print("printing dx begin")
+    #     #loss_grads = grad(loss, model.parameters(), create_graph=True)
+    #     print("double backward")
+    #     t = (torch.autograd.grad(dx.sum(), a, create_graph=True))
+    #     print("last tupe")
+    #     print(t[0])
+    #     print(t[1])
+
+    # def test_disp(self):
+
+    #     x = torch.ones(5)
+    #     import pdb; pdb.set_trace();
+    #     torch.sigmoid(x)
+
+    # def test_sss(self):
+    #     @torch.jit.script
+    #     def printme(x):
+    #         print(x)
+
+    #     print(str(printme))
+    #     print(isinstance(printme, torch.jit.ScriptModule))
+
+    # def test_sss2(self):
+    #     class Foo(torch.jit.ScriptModule):
+    #         def __init__(self, m):
+    #             super(Foo, self).__init__()
+    #             self.m = m
+
+    #         @torch.jit.script_method
+    #         def forward(self, input):
+    #             self.m(input)
+
+    #     @torch.jit.script
+    #     def printme(x):
+    #         print(x)
+
+    #     f = Foo(printme)
+
+
     def test_sequence_parsing(self):
         tests = [
             ("return [x, x,]", True),

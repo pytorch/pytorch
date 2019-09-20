@@ -15,6 +15,7 @@ struct C10_API UndefinedTensorImpl final : public TensorImpl {
 #else
   static constexpr inline TensorImpl * singleton() {
 #endif
+
     return &_singleton;
   }
   IntArrayRef sizes() const override;
