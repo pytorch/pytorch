@@ -515,10 +515,67 @@ class TensorObserver(ObserverBase):
     def get_tensor_value(self):
         return self.tensor_val
 
+class PerChannelMinMaxObserver(ObserverBase):
+    r"""Per Channel Observer Module
+    The module will record the running average of max and min value for each
+    channel of the observed Tensor and calculate_qparams will calculate
+    scales and zero_points for each channel
+    """
+
+    __annotations__ = {
+        "min_vals": Optional[torch.Tensor],
+        "max_vals": Optional[torch.Tensor],
+    }
+
+    def __init__(self, ch_axis=0, **kwargs):
+        super(PerChannelMinMaxObserver, self).__init__(**kwargs)
+        self.ch_axis = ch_axis
+        self.min_vals = None
+        self.max_vals = None
+
+    def forward(self, x):
+        min_vals = self.min_vals
+        max_vals = self.max_vals
+        x_dim = x.size()
+
+        x2 = torch.reshape(x, (x_dim[self.ch_axis] , int(torch.numel(x)/x_dim[self.ch_axis])))
+        if min_vals is None or max_vals is None:
+            min_vals = torch.min(x2, 1)[0]
+            max_vals = torch.max(x2, 1)[0]
+        else:
+            min_vals = torch.min(torch.min(x2, 1)[0], min_vals)
+            max_vals = torch.max(torch.max(x2, 1)[0], max_vals)
+        self.min_vals = min_vals
+        self.max_vals = max_vals
+        return x
+
+    @torch.jit.export
+    def calculate_qparams(self):
+        min_vals = self.min_vals
+        max_vals = self.max_vals
+        if min_vals is None or max_vals is None:
+            scales = torch.ones(1)
+            zero_points = torch.zeros(1)
+        else:
+            scales = torch.ones(min_vals.size())
+            zero_points = torch.ones(min_vals.size())
+            for i in range(len(scales)):
+                scales[i], zero_points[i] = self._calculate_qparams(
+                    min_vals[i].item(), max_vals[i].item()
+                )
+        return scales, zero_points
+
+    @torch.jit.export
+    def extra_repr(self):
+        return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
 
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)
 
+def default_per_channel_weight_observer(**kwargs):
+    kwargs.setdefault('dtype', torch.qint8)
+    kwargs.setdefault('qscheme', torch.per_tensor_symmetric)
+    return observer(PerChannelMinMaxObserver, **kwargs)
 
 def default_observer(**kwargs):
     # Restrict activations to be in the range (0,127)

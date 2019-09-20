@@ -76,6 +76,8 @@ class Conv2d(torch.nn.Module):
         self.padding_mode = padding_mode
         # Initialize as NCHW. set_weight will internally transpose to
         # NHWC
+        self.debug = False
+        self.debug_quantize_activations = False
         qweight = torch._empty_affine_quantized(
             [out_channels, in_channels // self.groups, self.kernel_size[0],
                 self.kernel_size[1]],
@@ -85,7 +87,7 @@ class Conv2d(torch.nn.Module):
         if bias:
             bias_float = torch.zeros(out_channels, dtype=torch.float)
 
-        self.set_weight_bias(qweight, bias_float)
+#        self.set_weight_bias(qweight, bias_float)
         self.scale = 1.0
         self.zero_point = 0
 
@@ -106,7 +108,10 @@ class Conv2d(torch.nn.Module):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
         self._packed_params = torch.ops.quantized.conv_prepack(
             w, b, self.stride, self.padding, self.dilation, self.groups)
-        self.weight_scale = w.q_scale()
+        if w.qscheme() == torch.per_channel_affine:
+            self.weight_scale = w.q_per_channel_scales()
+        else:
+            self.weight_scale = w.q_scale()
 
     def _weight_bias(self):
         return torch.ops.quantized.conv_unpack(self._packed_params)
@@ -119,16 +124,33 @@ class Conv2d(torch.nn.Module):
         (w, b) = torch.ops.quantized.conv_unpack(self._packed_params)
         return b
 
+    def _debug_forward(self, input):
+        (qwt, bias) = torch.ops.quantized.conv_unpack(self._packed_params)
+        flt_wt = qwt.dequantize()
+        flt_wt = flt_wt.permute([0, 3, 1, 2])
+        if input.is_quantized:
+            input = input.dequantize()
+        output = torch.nn.functional.conv2d(input, flt_wt, bias.dequantize(),
+                                             self.stride, self.padding,
+                                             self.dilation, self.groups)
+        if self.debug_quantize_activations:
+            output = torch.quantize_linear(output, self.scale, self.zero_point, torch.quint8)
+        return output
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
+
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
-        return ops.quantized.conv2d(input,
-                                    self._packed_params,
-                                    self.stride, self.padding,
-                                    self.dilation, self.groups,
-                                    self.scale, self.zero_point)
+        if self.debug:
+            return self._debug_forward(input)
+        else:
+            return ops.quantized.conv2d(input,
+                                        self._packed_params,
+                                        self.stride, self.padding,
+                                        self.dilation, self.groups,
+                                        self.scale, self.zero_point)
+
 
     # ===== Serialization methods =====
     # The special consideration here is that we have to unpack the weights into their
@@ -224,8 +246,10 @@ class Conv2d(torch.nn.Module):
             # workaround for sequential, ConvReLU2d should probably
             # inherit from Conv2d instead
             if type(mod) == nni.ConvReLU2d:
+                print('ConvRelu2d: From_float')
                 activation_observer = mod[1].observer
                 mod = mod[0]
+                print('ConvRelu2d: Observer', mod.qconfig.weight())
             else:
                 activation_observer = mod.observer
             weight_observer = mod.qconfig.weight()
@@ -233,15 +257,28 @@ class Conv2d(torch.nn.Module):
         act_scale, act_zp = activation_observer.calculate_qparams()
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have a dtype of qint8'
         wt_scale, wt_zp = weight_observer.calculate_qparams()
+        wt_float = mod.weight.float()
 
-        qweight = torch.quantize_linear(
-            mod.weight.float(),
-            float(wt_scale), int(wt_zp), torch.qint8)
+        if torch.numel(wt_scale) == 1:
+            qweight = torch.quantize_linear(
+                wt_float,
+                float(wt_scale), int(wt_zp), torch.qint8)
+        else:
+            qweight = torch.quantize_linear_per_channel(
+                wt_float,
+                wt_scale.to(torch.double), wt_zp.to(torch.int64), [0], torch.qint8)
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
+        qconv.debug = False
+        qconv.debug_quantize_activations = False
+        if hasattr(activation_observer, 'debug_forward'):
+            print('SQNR(wt)' , 20*torch.log10(torch.norm(wt_float)/torch.norm(qweight.dequantize()-wt_float)))
+            qconv.debug = activation_observer.debug_forward
+        if hasattr(activation_observer, 'debug_quantize_activations'):
+            qconv.debug_quantize_activations = activation_observer.debug_quantize_activations
 
         return qconv
