@@ -20,7 +20,7 @@ def _with_args(cls_or_self, **kwargs):
         Foo.with_args(x=1).with_args(y=2)
     """
     r = partial(cls_or_self, **kwargs)
-    setattr(r, 'with_args', _with_args)
+    r.with_args = _with_args
     return r
 
 
