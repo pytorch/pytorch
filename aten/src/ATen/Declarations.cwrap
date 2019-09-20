@@ -1220,7 +1220,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - function
@@ -1235,7 +1234,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   cname: lgamma
   variants: function

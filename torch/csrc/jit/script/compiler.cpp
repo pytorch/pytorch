@@ -72,8 +72,8 @@ struct RefinementSet {
     // if the result is false, either a or b could have been false,
     // so we take their intersection.
     return RefinementSet(
-        unionList(true_refinements_, rhs.true_refinements_),
-        intersectList(false_refinements_, rhs.false_refinements_));
+        unionSet(true_refinements_, rhs.true_refinements_),
+        intersectSet(false_refinements_, rhs.false_refinements_));
   }
   RefinementSet Or(const RefinementSet& rhs) const {
     // if the result of an OR is true, either a & b could have been true,
@@ -81,8 +81,8 @@ struct RefinementSet {
     // if the result is false, both a and b had to be false,
     // so we take their union.
     return RefinementSet(
-        intersectList(true_refinements_, rhs.true_refinements_),
-        unionList(false_refinements_, rhs.false_refinements_));
+        intersectSet(true_refinements_, rhs.true_refinements_),
+        unionSet(false_refinements_, rhs.false_refinements_));
   }
 
   RefinementSet Not() const {
@@ -96,7 +96,7 @@ struct RefinementSet {
   static bool sameVar(const Refinement& a, const Refinement& b) {
     return a.identifier() == b.identifier();
   }
-  static Refinements unionList(const Refinements& a, const Refinements& b) {
+  static Refinements unionSet(const Refinements& a, const Refinements& b) {
     Refinements result = a;
     for (const Refinement& r : b) {
       auto it =
@@ -114,7 +114,7 @@ struct RefinementSet {
     }
     return result;
   }
-  static Refinements intersectList(const Refinements& a, const Refinements& b) {
+  static Refinements intersectSet(const Refinements& a, const Refinements& b) {
     Refinements result;
     for (const Refinement& r : a) {
       auto it = std::find_if(b.begin(), b.end(), [&](const Refinement& e) {
@@ -962,14 +962,15 @@ struct to_ir {
     // and (2) only enable this OPTIONAL_NONE when loading newer
     // graphs because it is incompatible with older graphs.
     // Refinement none(name, RefinementKind::OPTIONAL_NONE);
-
-    Refinement present(
-        name, lhs_value->type()->expect<OptionalType>()->getElementType());
-    if (tok == TK_IS) {
-      return RefinementSet({}, {present});
-    } else { // TK_ISNOT
-      return RefinementSet({present}, {});
+    if (auto optional_type = lhs_value->type()->cast<OptionalType>()) {
+      Refinement present(name, optional_type->getElementType());
+      if (tok == TK_IS) {
+        return RefinementSet({}, {present});
+      } else { // TK_ISNOT
+        return RefinementSet({present}, {});
+      }
     }
+    return RefinementSet();
   }
 
   CondValue emitCondExpr(const Expr& expr) {
@@ -1175,7 +1176,7 @@ struct to_ir {
       new_result = emitIfExpr(loc, lhs, get_continue_expr, get_const_expr);
       refinements = lhs.refinements().And(rhs->refinements());
       if (lhs.staticIf() && rhs->staticIf()) {
-        static_if = *lhs.staticIf() || *rhs->staticIf();
+        static_if = *lhs.staticIf() && *rhs->staticIf();
       }
     }
     return CondValue(new_result, std::move(*refinements), static_if);
