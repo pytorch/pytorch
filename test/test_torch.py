@@ -1385,6 +1385,12 @@ class _TestTorchMixin(object):
             res2[i] = math.pow(3, m1[i][4])
         self.assertEqual(res1, res2)
 
+        # resize behavior for exp == 1
+        m1 = torch.randn(2, 2)
+        out = torch.randn([0])
+        torch.pow(m1, 1, out=out)
+        self.assertEqual(out, m1)
+
     def _test_cop(self, torchfn, mathfn):
         def reference_implementation(res2):
             for i, j in iter_indices(sm1):
