@@ -25,6 +25,11 @@ struct type_index final : IdWrapper<type_index, uint64_t> {
 
 namespace detail {
 
+#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 5
+// Getting __PRETTY_FUNCTION__ at compile time only works with GCC >= 5
+#error "You're running a too old version of GCC. We need GCC 5 or later."
+#endif
+
 template<typename T>
 constexpr uint64_t type_index_impl() noexcept {
   // Idea: __PRETTY_FUNCTION__ (or __FUNCSIG__ on msvc) contains a qualified name
