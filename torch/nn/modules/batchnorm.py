@@ -87,7 +87,7 @@ class _BatchNorm(Module):
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         self.num_batches_tracked.fill_(self.num_batches_tracked_scalar)
-        return super(_BatchNorm, self).(destination, prefix, keep_vars)
+        return super(_BatchNorm, self).state_dict(destination, prefix, keep_vars)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         self.num_batches_tracked.fill_(self.num_batches_tracked_scalar)
