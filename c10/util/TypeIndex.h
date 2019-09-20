@@ -41,12 +41,19 @@ constexpr uint64_t type_index_impl() noexcept {
 
 template<typename T>
 constexpr type_index get_type_index() noexcept {
-  // To enforce that this is really computed at compile time, we pass the crc
-  // checksum through std::integral_constant.
-  return type_index{std::integral_constant<
-      uint64_t,
-      detail::type_index_impl<guts::remove_cv_t<guts::decay_t<T>>>()
-  >::value};
+  #if defined(__CUDACC__)
+    // To enforce that this is really computed at compile time, we pass the crc
+    // checksum through std::integral_constant.
+    return type_index{std::integral_constant<
+        uint64_t,
+        detail::type_index_impl<guts::remove_cv_t<guts::decay_t<T>>>()
+    >::value};
+  #else
+    // nvcc unfortunately doesn't like this being constexpr, let's try without
+    return type_index{
+        detail::type_index_impl<guts::remove_cv_t<guts::decay_t<T>>>()
+    };
+  #endif
 }
 
 }
