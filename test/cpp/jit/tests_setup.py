@@ -16,7 +16,8 @@ class FileSetup(object):
 
     def shutdown(self):
         if os.path.exists(self.path):
-            os.remove(self.path)
+            # os.remove(self.path)
+            pass
 
 
 class EvalModeForLoadedModule(FileSetup):
@@ -39,11 +40,13 @@ class EvalModeForLoadedModule(FileSetup):
 
 
 class SerializationInterop(FileSetup):
-    path = 'ivalue.pt'
+    def __init__(self, device):
+        self.device = device
+        self.path = 'ivalue_{}.pt'.format(device)
 
     def setup(self):
-        ones = torch.ones(2, 2)
-        twos = torch.ones(3, 5) * 2
+        ones = torch.ones(2, 2, device=self.device)
+        twos = torch.ones(3, 5, device=self.device) * 2
 
         value = (ones, twos)
 
@@ -52,7 +55,8 @@ class SerializationInterop(FileSetup):
 
 tests = [
     EvalModeForLoadedModule(),
-    SerializationInterop()
+    SerializationInterop('cpu'),
+    SerializationInterop('cuda'),
 ]
 
 def setup():

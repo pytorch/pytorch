@@ -62,14 +62,6 @@ TORCH_API std::vector<char> pickle(
 ///
 /// \endrst
 TORCH_API std::vector<char> pickle_save(const IValue& ivalue);
-  std::ifstream input("my_tensor.pt");
-  torch::IValue ivalue = torch::pickle_load([&](char* buffer, size_t len) {
-    if (!input.good()) {
-      return false;
-    }
-    input.read(buffer, len);
-    return input.good();
-  });
 
 /// Load a `torch::IValue` from a pickle file. The pickle file can be one
 /// produced by `torch.save()` (for the values supported by IValue) or

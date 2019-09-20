@@ -84,6 +84,7 @@ TH_FORALL_TESTS_CUDA(DECLARE_JIT_TEST)
 // torch_python_test.cpp
 void testEvalModeForLoadedModule();
 void testSerializationInterop();
+void testCUDASerializationInterop();
 
 } // namespace jit
 } // namespace torch

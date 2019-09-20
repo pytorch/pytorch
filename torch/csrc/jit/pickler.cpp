@@ -838,7 +838,7 @@ PickleOpCode Unpickler::readInstruction() {
       if (list_value.isGenericList()) {
         list_value.toGenericList().push_back(value);
       } else {
-        AT_ERROR("APPPEN is not implemented for ", list_value.tagKind());
+        AT_ERROR("APPPEND is not implemented for ", list_value.tagKind());
       }
     } break;
     case PickleOpCode::SETITEMS: {
@@ -1040,7 +1040,8 @@ PickleOpCode Unpickler::readInstruction() {
         storage = at::Storage(
             at::CPU(type).typeMeta(),
             numel,
-            /*allocator=*/at::GetAllocator(device.type()),
+            /*allocator=*/at::GetCPUAllocator(),
+            // /*allocator=*/at::GetCPUAllocator(device.type()),
             /*resizable=*/false);
       } else {
         at::DataPtr storage_ptr = read_record_(key);

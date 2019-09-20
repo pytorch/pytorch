@@ -93,10 +93,21 @@ IValue pickle_load(const std::function<bool(char*, size_t)>& reader) {
   // by the binary storage of each tensor storage.
 
   // Read the magic number
-  Unpickler(reader, nullptr, nullptr).parse_ivalue();
+  std::string magic_number =
+      Unpickler(reader, nullptr, nullptr).parse_ivalue().to<std::string>();
+  TORCH_CHECK(
+      magic_number == torch_save_magic_number,
+      "The magic number read from the file was not correct");
 
   // Read the version number
-  Unpickler(reader, nullptr, nullptr).parse_ivalue();
+  uint64_t version =
+      Unpickler(reader, nullptr, nullptr).parse_ivalue().to<int64_t>();
+  TORCH_CHECK(
+      version == protocol_version,
+      "Protocol version was incorrect, expected ",
+      protocol_version,
+      " but got ",
+      version);
 
   // Read the system metadata number
   Unpickler(reader, nullptr, nullptr).parse_ivalue();
