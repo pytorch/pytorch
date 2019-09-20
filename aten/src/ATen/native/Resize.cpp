@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/ResizeCommon.h>
 
 namespace at { namespace native {
 
