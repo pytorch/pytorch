@@ -868,9 +868,8 @@ class TestNamedTensor(TestCase):
             for out in output:
                 self.assertEqual(out.names, expected_names)
 
-        def test_simple_reduce(op_name, device):
+        def test_simple_reduce(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            op = getattr(torch, op_name)
             check_output(op(t, 1), ['N', 'L'])
             check_output(op(t, -1), ['N', 'C'])
             check_output(op(t, 'C'), ['N', 'L'])
@@ -879,14 +878,12 @@ class TestNamedTensor(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Name \'H\' not found'):
                 op(t, 'H')
 
-        def test_complete_reduce(op_name, device):
+        def test_complete_reduce(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            op = getattr(torch, op_name)
             check_output(op(t), [])
 
-        def test_multidim_reduce(op_name, device):
+        def test_multidim_reduce(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            op = getattr(torch, op_name)
 
             check_output(op(t, [1, 2]), ['N'])
             check_output(op(t, [0, -1]), ['C'])
@@ -894,26 +891,29 @@ class TestNamedTensor(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
                 op(t, [None, 'C'])
 
-        def test_out_variant(op_name, output_lambda, device):
+        def test_out_variant(op, output_lambda, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
             if output_lambda:
                 out = output_lambda(t)
             else:
                 out = torch.empty([0], device=device)
-            getattr(torch, op_name)(t, 'C', out=out)
+            op(t, 'C', out=out)
             check_output(out, ['N', 'L'])
 
-        def test_keepdim(op_name, device):
+        def test_keepdim(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            op = getattr(torch, op_name)
             check_output(op(t, 'C', keepdim=True), ['N', 'C', 'L'])
 
-        def get_minmax_output(t):
+        def values_and_indices(t):
             return (torch.empty([0], device=t.device),
                     torch.empty([0], device=t.device, dtype=torch.long))
 
+        def kthvalue_wrapper(tensor, *args, **kwargs):
+            # Return the 0-th value
+            return torch.kthvalue(tensor, 1, *args, **kwargs)
+
         Case = namedtuple('Case', [
-            'op_name',
+            'op',
             'supports_complete_reduce',
             'supports_multidim_reduce',
             'supports_out_variant',
@@ -922,30 +922,34 @@ class TestNamedTensor(TestCase):
         ])
 
         tests = [
-            Case('sum', True, True, True, True, None),
-            Case('prod', True, False, True, True, None),
-            Case('mean', True, True, True, True, None),
-            Case('var', True, True, True, True, None),
-            Case('std', True, True, True, True, None),
-            Case('std_mean', True, True, False, True, None),
-            Case('var_mean', True, True, False, True, None),
-            Case('min', True, False, True, True, get_minmax_output),
-            Case('max', True, False, True, True, get_minmax_output),
-            Case('unbind', False, False, False, False, None),
+            Case(torch.sum, True, True, True, True, None),
+            Case(torch.prod, True, False, True, True, None),
+            Case(torch.mean, True, True, True, True, None),
+            Case(torch.var, True, True, True, True, None),
+            Case(torch.std, True, True, True, True, None),
+            Case(torch.std_mean, True, True, False, True, None),
+            Case(torch.var_mean, True, True, False, True, None),
+            Case(torch.min, True, False, True, True, values_and_indices),
+            Case(torch.max, True, False, True, True, values_and_indices),
+            Case(torch.unbind, False, False, False, False, None),
+            Case(torch.logsumexp, False, True, True, True, None),
+            Case(torch.mode, False, False, True, True, values_and_indices),
+            Case(kthvalue_wrapper, False, False, True, True, values_and_indices),
+            Case(torch.median, False, False, True, True, values_and_indices),
         ]
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
-            op_name = testcase.op_name
-            test_simple_reduce(op_name, device)
+            op = testcase.op
+            test_simple_reduce(op, device)
 
             if testcase.supports_keepdim:
-                test_keepdim(op_name, device)
+                test_keepdim(op, device)
             if testcase.supports_out_variant:
-                test_out_variant(op_name, testcase.output_lambda, device)
+                test_out_variant(op, testcase.output_lambda, device)
             if testcase.supports_complete_reduce:
-                test_complete_reduce(op_name, device)
+                test_complete_reduce(op, device)
             if testcase.supports_multidim_reduce:
-                test_multidim_reduce(op_name, device)
+                test_multidim_reduce(op, device)
 
     def test_masked_select(self):
         # simple

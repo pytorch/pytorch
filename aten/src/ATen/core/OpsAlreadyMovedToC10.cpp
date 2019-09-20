@@ -907,6 +907,12 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::instance_norm", ""},
         {"aten::inverse", "out"},
         {"aten::kthvalue", "values"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::kthvalue", "names"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::kthvalue", "out_names"},
+    #endif
         {"aten::layer_norm", ""},
         {"aten::native_layer_norm", ""},
         {"aten::native_layer_norm_backward", ""},
@@ -979,6 +985,12 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::miopen_rnn_backward", ""},
         {"aten::mm", "out"},
         {"aten::mode", "values"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::mode", "names"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::mode", "out_names"},
+    #endif
         {"aten::mul", "out"},
         {"aten::mv", "out"},
         {"aten::native_batch_norm", ""},

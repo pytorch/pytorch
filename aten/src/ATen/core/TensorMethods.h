@@ -1339,6 +1339,16 @@ inline std::tuple<Tensor,Tensor> Tensor::kthvalue(int64_t k, int64_t dim, bool k
         .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool>(const_cast<Tensor&>(*this), k, dim, keepdim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline std::tuple<Tensor,Tensor> Tensor::kthvalue(int64_t k, Dimname dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::kthvalue(const_cast<Tensor&>(*this), k, dim, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::kthvalue.names(Tensor self, int k, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)");
+    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, int64_t, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), k, dim, keepdim);
+#endif
+}
+#endif
 inline Tensor Tensor::log() const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::log(const_cast<Tensor&>(*this));
@@ -1650,6 +1660,16 @@ inline std::tuple<Tensor,Tensor> Tensor::mode(int64_t dim, bool keepdim) const {
         .callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline std::tuple<Tensor,Tensor> Tensor::mode(Dimname dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::mode(const_cast<Tensor&>(*this), dim, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::mode.names(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)");
+    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
+#endif
+}
+#endif
 inline Tensor Tensor::mul(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {

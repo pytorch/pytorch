@@ -145,7 +145,17 @@ std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
     indices.resize_({}).fill_(0);
     return std::forward_as_tuple(values, indices);
   } else {
-    return at::_mode_out(values, indices, self, dim, keepdim);
+    auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+      NoNamesGuard guard;
+#endif
+      return at::_mode_out(values, indices, self, dim, keepdim);
+    }();
+#ifdef BUILD_NAMEDTENSOR
+    namedinference::propagate_names_for_reduction(std::get<0>(result), self, dim, keepdim);
+    namedinference::propagate_names_for_reduction(std::get<1>(result), self, dim, keepdim);
+#endif
+    return result;
   }
 }
 
@@ -301,6 +311,13 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
 std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
                                       const Tensor& self, Dimname dim, bool keepdim) {
   return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
+}
+std::tuple<Tensor, Tensor> mode(const Tensor& self, Dimname dim, bool keepdim) {
+  return at::mode(self, dimname_to_position(self, dim), keepdim);
+}
+std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
+                                       const Tensor& self, Dimname dim, bool keepdim) {
+  return at::mode_out(values, indices, self, dimname_to_position(self, dim), keepdim);
 }
 #endif
 

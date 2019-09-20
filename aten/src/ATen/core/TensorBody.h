@@ -536,6 +536,9 @@ class CAFFE2_API Tensor {
   bool is_same_size(const Tensor & other) const;
   bool is_signed() const;
   std::tuple<Tensor,Tensor> kthvalue(int64_t k, int64_t dim=-1, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  std::tuple<Tensor,Tensor> kthvalue(int64_t k, Dimname dim, bool keepdim=false) const;
+  #endif
   Tensor log() const;
   Tensor & log_() const;
   Tensor log10() const;
@@ -582,6 +585,9 @@ class CAFFE2_API Tensor {
   #endif
   Tensor mm(const Tensor & mat2) const;
   std::tuple<Tensor,Tensor> mode(int64_t dim=-1, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  std::tuple<Tensor,Tensor> mode(Dimname dim, bool keepdim=false) const;
+  #endif
   Tensor mul(const Tensor & other) const;
   Tensor & mul_(const Tensor & other) const;
   Tensor mul(Scalar other) const;

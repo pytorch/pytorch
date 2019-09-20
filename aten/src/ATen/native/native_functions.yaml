@@ -1391,12 +1391,21 @@
 
 - func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: function, method
 
 - func: kthvalue.values(Tensor self, int k, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  supports_named_tensor: True
   dispatch:
     CPU: kthvalue_out_cpu
     CUDA: kthvalue_out_cuda
+
+- func: kthvalue.names(Tensor self, int k, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  supports_named_tensor: True
+  variants: function, method
+
+- func: kthvalue.out_names(Tensor self, int k, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  supports_named_tensor: True
 
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
 
@@ -1569,14 +1578,18 @@
 
 - func: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: function, method
 
 - func: logsumexp.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
 
 - func: logsumexp.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
+  supports_named_tensor: True
   variants: function, method
 
 - func: logsumexp.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
 
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
   use_c10_dispatcher: True
@@ -1666,14 +1679,18 @@
 
 - func: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: function, method
 
 - func: median.dim_values(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  supports_named_tensor: True
 
 - func: median.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  supports_named_tensor: True
   variants: function, method
 
 - func: median.names_dim_values(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  supports_named_tensor: True
 
 - func: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: True
@@ -1811,9 +1828,18 @@
 
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: function, method
 
 - func: mode.values(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  supports_named_tensor: True
+
+- func: mode.names(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  supports_named_tensor: True
+  variants: function, method
+
+- func: mode.out_names(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  supports_named_tensor: True
 
 - func: mul.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: True
