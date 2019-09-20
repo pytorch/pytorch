@@ -287,7 +287,7 @@ TCPStore::TCPStore(
         new TCPStoreDaemon(masterListenSocket_));
   }
   // Connect to the daemon
-  storeSocket_ = tcputil::connect(tcpStoreAddr_, tcpStorePort_);
+  storeSocket_ = tcputil::connect(tcpStoreAddr_, tcpStorePort_, true, timeout_);
 
   waitForWorkers_();
 }
