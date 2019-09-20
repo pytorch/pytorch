@@ -112,7 +112,7 @@ inline bool Tensor::is_leaf() const {
     return TypeDefault::is_leaf(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::is_leaf(Tensor self) -> bool");
-    return table->getOp<bool (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+    return table->getOp<bool (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
 #endif
 }
 inline int64_t Tensor::output_nr() const {
@@ -120,7 +120,7 @@ inline int64_t Tensor::output_nr() const {
     return TypeDefault::output_nr(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::output_nr(Tensor self) -> int");
-    return table->getOp<int64_t (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+    return table->getOp<int64_t (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -1128,13 +1128,7 @@ inline Tensor Tensor::floor() const {
 }
 inline Tensor & Tensor::floor_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::floor_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("floor_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::floor_(const_cast<Tensor&>(*this));
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::floor_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)))
@@ -3245,6 +3239,20 @@ inline Tensor Tensor::q_per_channel_zero_points() const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::q_per_channel_zero_points", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)))
         .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+#endif
+}
+inline IntArrayRef Tensor::q_per_channel_axis() const {
+#ifdef USE_STATIC_DISPATCH
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::q_per_channel_axis(const_cast<Tensor&>(*this));
+            break;
+        default:
+            AT_ERROR("q_per_channel_axis not implemented for ", at::toString(type_set()));
+    }
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::q_per_channel_axis(Tensor self) -> int[]");
+    return table->getOp<IntArrayRef (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::int_repr() const {

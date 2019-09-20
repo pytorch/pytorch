@@ -992,6 +992,7 @@
 
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: method
   device_guard: False
   dispatch:
@@ -1152,15 +1153,12 @@
   use_c10_dispatcher: True
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _floor__cpu
-    CUDA: _floor__cuda
 
 - func: floor.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _floor_out_cpu
-    CUDA: _floor_out_cuda
+    CPU: floor_out
+    CUDA: floor_out
 
 - func: frac(Tensor self) -> Tensor
   use_c10_dispatcher: True
@@ -3008,6 +3006,7 @@
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: function, method
   dispatch:
     CPU: resize_as_cpu_
@@ -3016,6 +3015,7 @@
     SparseCUDA: resize_as_sparse_
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
   dispatch:
     CPU: pow_out
     CUDA: pow_out
@@ -3025,6 +3025,7 @@
 - func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
   use_c10_dispatcher: True
   variants: function, method
+  supports_named_tensor: True
   dispatch:
     CPU: pow
     CUDA: pow
@@ -3534,6 +3535,11 @@
   variants: function, method
   dispatch:
     QuantizedCPU: q_per_channel_zero_points_quant
+
+- func: q_per_channel_axis(Tensor self) -> int[]
+  variants: function, method
+  dispatch:
+    QuantizedCPU: q_per_channel_axis_quant
 
 - func: int_repr(Tensor self) -> Tensor
   use_c10_dispatcher: True
@@ -4097,7 +4103,7 @@
   supports_named_tensor: True
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_lgamma_
+    CPU: _lgamma__cpu
     CUDA: legacy::cuda::_th_lgamma_
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -4137,6 +4143,7 @@
 
 - func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: method
   dispatch:
     CPU: pow_
@@ -4144,6 +4151,7 @@
 
 - func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: method
   dispatch:
     CPU: pow_
@@ -4794,7 +4802,7 @@
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: legacy::cpu::_th_lgamma_out
+    CPU: _lgamma_out_cpu
     CUDA: legacy::cuda::_th_lgamma_out
 
 - func: lgamma(Tensor self) -> Tensor
@@ -4802,7 +4810,7 @@
   supports_named_tensor: True
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_lgamma
+    CPU: lgamma
     CUDA: legacy::cuda::_th_lgamma
 
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -5059,11 +5067,13 @@
     QuantizedCPU: quantized_equal
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
   dispatch:
     CPU: pow_out
     CUDA: pow_out
 
 - func: pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
+  supports_named_tensor: True
   use_c10_dispatcher: True
   variants: method, function
   dispatch:
@@ -5071,11 +5081,13 @@
     CUDA: pow
 
 - func: pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
   dispatch:
     CPU: pow_out
     CUDA: pow_out
 
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
+  supports_named_tensor: True
   use_c10_dispatcher: True
   dispatch:
     CPU: pow
