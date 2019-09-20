@@ -216,7 +216,7 @@ TEST_F(ModulesTest, Linear) {
 
 TEST_F(ModulesTest, Fold) {
   Fold model(FoldOptions({4, 5}, {2, 2}));
-  auto x = torch::randn({1, 3 * 2 * 2, 12});
+  auto x = torch::randn({1, 3 * 2 * 2, 12}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
 
@@ -240,7 +240,7 @@ TEST_F(ModulesTest, SimpleContainer) {
   x = l2(x).clamp_min(0);
   x = l3(x).clamp_min(0);
 
-  x.backward();
+  x.backward(torch::ones_like(x));
   ASSERT_EQ(x.ndimension(), 2);
   ASSERT_EQ(x.size(0), 1000);
   ASSERT_EQ(x.size(1), 100);
@@ -288,7 +288,7 @@ TEST_F(ModulesTest, Dropout) {
   torch::Tensor x = torch::ones(100, torch::requires_grad());
   torch::Tensor y = dropout(x);
 
-  y.backward();
+  y.backward(torch::ones_like(y));
   ASSERT_EQ(y.ndimension(), 1);
   ASSERT_EQ(y.size(0), 100);
   ASSERT_LT(y.sum().item<float>(), 130); // Probably
@@ -449,6 +449,37 @@ TEST_F(ModulesTest, L1Loss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, CosineSimilarity) {
+  CosineSimilarity cos(CosineSimilarityOptions().dim(1));
+  float data1[] = {1, 2, 3, 4, 5, 6};
+  auto input1 = torch::from_blob(data1, {2, 3}, torch::requires_grad());
+  float data2[] = {1, 8, 3, 2, 1, 6};
+  auto input2 = torch::from_blob(data2, {2, 3}, torch::requires_grad());
+  auto output = cos->forward(input1, input2);
+  float data3[] = {0.8078, 0.8721};
+  auto expected = torch::from_blob(data3, {2});
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input1.sizes(), input1.grad().sizes());
+}
+
+TEST_F(ModulesTest, PairwiseDistance) {
+  PairwiseDistance dist(PairwiseDistanceOptions(1));
+  float data1[] = {1, 2, 3, 4, 5, 6};
+  auto input1 = torch::from_blob(data1, {2, 3}, torch::requires_grad());
+  float data2[] = {1, 8, 3, 2, 1, 6};
+  auto input2 = torch::from_blob(data2, {2, 3}, torch::requires_grad());
+  auto output = dist->forward(input1, input2);
+  auto expected = torch::full({2}, 6);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input1.sizes(), input1.grad().sizes());
+}
+
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in=3, out=4, with_bias=true)");
@@ -530,6 +561,24 @@ TEST_F(ModulesTest, PrettyPrintEmbedding) {
   ASSERT_EQ(
       c10::str(Embedding(10, 2)),
       "torch::nn::Embedding(count=10, dimension=2)");
+}
+
+TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
+  ASSERT_EQ(
+      c10::str(CosineSimilarity()),
+      "torch::nn::CosineSimilarity(dim=1, eps=1e-08)");
+  ASSERT_EQ(
+      c10::str(CosineSimilarity(CosineSimilarityOptions().dim(0).eps(0.5))),
+      "torch::nn::CosineSimilarity(dim=0, eps=0.5)");
+}
+
+TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {
+  ASSERT_EQ(
+      c10::str(PairwiseDistance()),
+      "torch::nn::PairwiseDistance(p=2, eps=1e-06, keepdim=false)");
+  ASSERT_EQ(
+      c10::str(PairwiseDistance(PairwiseDistanceOptions(3).eps(0.5).keepdim(true))),
+      "torch::nn::PairwiseDistance(p=3, eps=0.5, keepdim=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintNestedModel) {
