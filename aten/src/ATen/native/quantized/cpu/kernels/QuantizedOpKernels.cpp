@@ -69,7 +69,7 @@ Tensor qcat_nhwc_kernel(
       zero_point,
       MemoryFormat::ChannelsLast);
 
-  AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, N]() {
+  AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, N, H, W]() {
     using Vec = Vec256<scalar_t>;
     for (int64_t batch = 0; batch < N; ++batch) {
       for (int64_t row = 0; row < H; ++row) {
