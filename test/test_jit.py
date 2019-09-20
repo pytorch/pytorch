@@ -39,7 +39,7 @@ from test_module.future_div import div_int_future, div_float_future
 from test_module.no_future_div import div_int_nofuture, div_float_nofuture
 
 # Standard library
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
@@ -86,6 +86,23 @@ if torch.cuda.is_available():
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY35 = sys.version_info >= (3, 5)
+
+def default_tensor_type(type):
+    type_str = torch.typename(type)
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            old_type = torch.Tensor().type()
+            torch.set_default_tensor_type(type_str)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                torch.set_default_tensor_type(old_type)
+
+        return wrapper
+
+    return decorator
 
 
 def LSTMCellF(input, hx, cx, *params):
@@ -1121,7 +1138,7 @@ graph(%x : Tensor,
             # aten::conv2d --> quantized::conv2d
             """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
+%r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::int_repr
         %a_intrepr = aten::int_repr(%a_quant)
@@ -1132,15 +1149,10 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %w_intrepr = aten::int_repr(%w_quant)
         # CHECK-NOT: aten::_dequantize_linear
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
-        %b_intrepr = aten::int_repr(%b_quant)
-        # CHECK-NOT: aten::_dequantize_linear
-        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
         # CHECK: quantized::conv_prepack
         # CHECK: quantized::conv2d
         # CHECK-NOT: aten::conv2d
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b_dequant, %c, %d, %e, %f)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %c, %d, %e, %f)
         # CHECK-NOT: aten::quantize_linear
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
         # CHECK: aten::int_repr
@@ -1151,7 +1163,7 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
             # addmm -> quantized::linear
             """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+%r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::int_repr
         %a_intrepr = aten::int_repr(%a_quant)
@@ -1162,16 +1174,11 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %w_intrepr = aten::int_repr(%w_quant)
         # CHECK-NOT: aten::_dequantize_linear
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
-        %b_intrepr = aten::int_repr(%b_quant)
-        # CHECK-NOT: aten::_dequantize_linear
-        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
         # CHECK: aten::t
         # CHECK: quantized::linear_prepack
         # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
-        %r = aten::addmm(%b_dequant, %a_dequant, %w_dequant, %4, %4)
+        %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
         # CHECK-NOT: aten::quantize_linear
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
         # CHECK: aten::int_repr
@@ -1182,7 +1189,7 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
             # matmul(with bias) -> quantized::linear
             """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+%r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::int_repr
         %a_intrepr = aten::int_repr(%a_quant)
@@ -1194,16 +1201,13 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         # CHECK-NOT: aten::_dequantize_linear
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
         # CHECK-NOT: aten::int_repr
-        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
-        %b_intrepr = aten::int_repr(%b_quant)
         # CHECK-NOT: aten::_dequantize_linear
-        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
         # CHECK: aten::t
         # CHECK: quantized::linear_prepack
         # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
         %output = aten::matmul(%a_dequant, %w_dequant)
-        %r = aten::add_(%output, %b_dequant, %4)
+        %r = aten::add_(%output, %b, %4)
         # CHECK-NOT: aten::quantize_linear
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
         # CHECK: aten::int_repr
@@ -6404,7 +6408,7 @@ a")
             return ten1
         ''')
 
-        lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]",
+        lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]", "(1, 1)",
                  "torch.jit.annotate(List[int], [])", "[2.5, 2.5]", "[[2], [2]]", "[[-.5], [2.2]]", "[[False], [True]]"]
 
         dtypes = ["", ", dtype=torch.float", ", dtype=torch.double", ", dtype=torch.half",
@@ -7673,13 +7677,13 @@ a")
         self._test_binary_op_shape(['mul', 'div', 'add', 'sub'], 0)
         self._test_binary_op_shape(['mul', 'div', 'add', 'sub'], 3)
 
+    @default_tensor_type(torch.FloatTensor)
     def test_wrapped_number(self):
         # Scalar's get converted to 'wrapped' tensors of default tensor type.
         # Wrapped tensors behave differently in certain promotion operations:
         # float_tensor * double -> float but wrapped_float * double -> double.
         # This can cause issues in check-trace if not handled correctly in
         # `aten::isclose()`.
-        torch.set_default_tensor_type('torch.FloatTensor')
 
         def foobar():
             x = -10000.0
@@ -10306,6 +10310,11 @@ a")
         r = M().create()
         self.assertEqual(r.dtype, torch.float)
         self.assertEqual(torch.zeros([1, 1, 2], dtype=torch.float), r)
+
+        def fn():
+            return torch.zeros((1, 2, 3))
+
+        self.checkScript(fn, ())
 
     def test_vararg_zeros(self):
         def foo():
@@ -18869,6 +18878,36 @@ class TestDict(JitTestCase):
         a_dict = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
         self.checkScript(fn, (a_dict, ('a', 'c')))
 
+    def test_ordered_dict(self):
+        def test_func(fn, inputs):
+            self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
+
+        def repeated_key():
+            return OrderedDict([(1, 2), (2, 3), (1, 4)])
+
+        test_func(repeated_key, ())
+
+        def no_args():
+            a = OrderedDict()
+            a["one"] = torch.tensor(1)
+            a["two"] = torch.tensor(2)
+
+        test_func(no_args, ())
+
+        def test_dict_constructor():
+            a = dict()
+            a["one"] = torch.tensor(1)
+            return a, dict([(1, 2), (2, 3), (1, 4)])  # noqa: C406
+
+        test_func(test_dict_constructor, ())
+
+        def test_dict_error():
+            a = dict()
+            a[1] = 2
+            return a
+
+        with self.assertRaisesRegex(Exception, "Arguments for call are not"):
+            torch.jit.script(test_dict_error)
 
 class TestClassType(JitTestCase):
     def test_get_with_method(self):

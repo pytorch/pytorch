@@ -186,6 +186,7 @@ def instantiate_configs():
 
         distro_name = fc.find_prop("distro_name")
         compiler_name = fc.find_prop("compiler_name")
+        compiler_version = fc.find_prop("compiler_version")
         is_xla = fc.find_prop("is_xla") or False
         parms_list_ignored_for_docker_image = []
 
@@ -245,6 +246,20 @@ def instantiate_configs():
 
         if cuda_version == "9" and python_version == "3.6":
             c.dependent_tests = gen_dependent_configs(c)
+
+        if (compiler_name == "gcc"
+                and compiler_version == "5.4"
+                and not is_namedtensor):
+            bc_breaking_check = Conf(
+                "backward-compatibility-check",
+                [],
+                is_xla=False,
+                restrict_phases=["test"],
+                is_namedtensor=False,
+                is_important=True,
+                parent_build=c,
+            )
+            c.dependent_tests.append(bc_breaking_check)
 
         config_list.append(c)
 
