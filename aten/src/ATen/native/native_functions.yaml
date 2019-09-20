@@ -3507,10 +3507,10 @@
   dispatch:
     QuantizedCPU: dequantize_quant
 
-- func: _dequantize_linear(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
+- func: _dequantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
-    CPU: dequantize_linear_cpu
+    CPU: dequantize_per_tensor_cpu
 
 - func: q_scale(Tensor self) -> float
   use_c10_dispatcher: True
