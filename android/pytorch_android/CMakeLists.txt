@@ -45,6 +45,7 @@ import_static_lib(libc10)
 import_static_lib(libnnpack)
 import_static_lib(libqnnpack)
 import_static_lib(libpytorch_qnnpack)
+import_static_lib(libeigen_blas)
 import_static_lib(libcpuinfo)
 import_static_lib(libclog)
 
@@ -58,6 +59,7 @@ target_link_libraries(pytorch
     libnnpack
     libqnnpack
     libpytorch_qnnpack
+    libeigen_blas
     libcpuinfo
     libclog
 )
