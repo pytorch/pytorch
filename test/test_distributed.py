@@ -240,8 +240,7 @@ class Barrier(object):
 
     @classmethod
     def sync(cls, wait_for=None, timeout=5):
-        if wait_for is None:
-            wait_for = dist.get_world_size()
+        if wait_for is None:wait_for = dist.get_world_size()
         cls.barrier_id += 1
         barrier_dir = os.path.join(TEMP_DIR, "barrier")
         pid = str(os.getpid())
