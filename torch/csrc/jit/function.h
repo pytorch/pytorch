@@ -88,13 +88,12 @@ struct TORCH_API Function {
 
   GraphExecutor& get_executor() {
     ensure_defined();
-    if (executor_initialized_) {
+    if (executor_) {
       return executor_;
     }
     std::lock_guard<std::mutex> lock(compile_mutex);
     check_single_output();
     executor_ = GraphExecutor(graph());
-    executor_initialized_ = true;
     return executor_;
   }
 
@@ -107,8 +106,6 @@ struct TORCH_API Function {
   mutable std::mutex compile_mutex;
 
   GraphExecutor executor_; // for execution
-
-  bool executor_initialized_ = false;
 
   // an optional function that actually creates the method when
   // ensure_defined() is called. This is used by the compiler so
