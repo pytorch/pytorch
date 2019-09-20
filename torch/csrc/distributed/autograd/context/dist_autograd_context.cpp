@@ -12,16 +12,15 @@ int64_t DistAutogradContext::context_id() const {
   return context_id_;
 }
 
-DistAutogradContext::known_worker_set_type DistAutogradContext::
-    getKnownWorkerIds() const {
-  return knownWorkerIDs_;
+std::unordered_set<rpc::worker_id_t> DistAutogradContext::getKnownWorkerIds()
+    const {
+  std::lock_guard<std::mutex> guard(lock_);
+  return knownWorkerIds_;
 };
 
-void DistAutogradContext::addKnownWorkerID(const rpc::WorkerId& workerId) {
+void DistAutogradContext::addKnownWorkerId(const rpc::WorkerId& workerId) {
   std::lock_guard<std::mutex> guard(lock_);
-
-  auto id = workerId.id_;
-  knownWorkerIDs_.set(id);
+  knownWorkerIds_.insert(workerId.id_);
 }
 
 void DistAutogradContext::addSendFunction(

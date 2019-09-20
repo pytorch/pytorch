@@ -3,7 +3,6 @@
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <bitset>
 #include <cstdint>
 
 namespace torch {
@@ -42,22 +41,17 @@ class TORCH_API DistAutogradContext {
   DistAutogradContext(DistAutogradContext&&) = delete;
   DistAutogradContext& operator=(DistAutogradContext&&) = delete;
 
-  static_assert(
-      std::numeric_limits<rpc::worker_id_t>::max() <=
-          std::numeric_limits<int16_t>::max(),
-      "Range of possible workerIDs exceeds int16_t limit. This could cause "
-      "memory issues at runtime. Consider changing known_worker_set_type from "
-      "std::bitset to std::unordered_map");
-  using known_worker_set_type =
-      std::bitset<std::numeric_limits<rpc::worker_id_t>::max()>;
-  known_worker_set_type getKnownWorkerIds() const;
-  void addKnownWorkerID(const rpc::WorkerId& workerId);
+  void addKnownWorkerId(const rpc::WorkerId& workerId);
+
+  std::unordered_set<rpc::worker_id_t> getKnownWorkerIds() const;
 
  private:
   const int64_t context_id_;
 
-  // Bitset containing known worker IDs, used in cleaning up autograd context.
-  known_worker_set_type knownWorkerIDs_;
+  // Set containing known worker IDs, used in cleaning up autograd context.
+  // Whenever a sendRpcBackward is attached to the autograd graph for this
+  // context, the destination is added here.
+  std::unordered_set<rpc::worker_id_t> knownWorkerIds_;
 
   // Map from autograd_message_id to appropriate 'send' autograd function.
   std::unordered_map<int64_t, std::shared_ptr<SendRpcBackward>>

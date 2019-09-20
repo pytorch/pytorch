@@ -35,7 +35,7 @@ void addSendRpcBackward(
 
   // Record the workerID
   if (dst.id_ != -1) {
-    autogradContext.addKnownWorkerID(dst);
+    autogradContext.addKnownWorkerId(dst);
   }
 }
 
