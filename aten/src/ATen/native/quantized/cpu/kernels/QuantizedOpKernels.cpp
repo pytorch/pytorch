@@ -61,6 +61,7 @@ Tensor qcat_nhwc_kernel(
   const int64_t N = qx0.size(0);
   const int64_t H = qx0.size(2);
   const int64_t W = qx0.size(3);
+  float inv_scale = 1.0 / scale;
 
   auto output = at::_empty_affine_quantized(
       {N, C_out, H, W},
@@ -99,7 +100,6 @@ Tensor qcat_nhwc_kernel(
               auto curr_scale_vec = Vec256<float>(curr_scale);
               auto curr_zero_pt_vec = Vec256<float>((float)curr_zero_pt);
               auto scale_neg_zp_premul = curr_scale_vec * curr_zero_pt_vec.neg();
-              float inv_scale = 1.0f / scale;
               for (; c + VLEN <= curr_C; c += VLEN) {
                 auto inp_vec = Vec::loadu(iptr + c);
                 auto float_values = inp_vec.dequantize(
