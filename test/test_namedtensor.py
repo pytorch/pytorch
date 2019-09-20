@@ -636,6 +636,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('div'),
             fn_method_and_inplace('mul'),
             fn_method_and_inplace('sub'),
+            fn_method_and_inplace('pow'),
             method('copy_'),
         ]
         tests = flatten(tests)
@@ -644,6 +645,22 @@ class TestNamedTensor(TestCase):
             test_basic(op)
             test_wildcard(op)
             test_mixed_unnamed_named(op, is_inplace=name.endswith('_'))
+
+    def test_pow_special(self):
+        # There are a few pow cases that don't go through TensorIterator.
+        # Test them here.
+        for device in torch.testing.get_all_device_types():
+            named = torch.randn(2, 3, names=('N', 'C'), device=device)
+            unnamed = torch.randn([0], device=device)
+
+            result = torch.pow(named, 0, out=unnamed.clone())
+            self.assertEqual(result.names, named.names)
+
+            result = torch.pow(named, 1, out=unnamed.clone())
+            self.assertEqual(result.names, named.names)
+
+            result = torch.pow(1, named, out=unnamed.clone())
+            self.assertEqual(result.names, named.names)
 
     def test_out_fn_semantics(self):
         out_fn = torch.abs

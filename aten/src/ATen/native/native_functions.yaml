@@ -3039,6 +3039,7 @@
     SparseCUDA: resize_as_sparse_
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
   dispatch:
     CPU: pow_out
     CUDA: pow_out
@@ -3048,6 +3049,7 @@
 - func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
   use_c10_dispatcher: True
   variants: function, method
+  supports_named_tensor: True
   dispatch:
     CPU: pow
     CUDA: pow
@@ -4147,6 +4149,7 @@
 
 - func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: method
   dispatch:
     CPU: pow_
@@ -4154,6 +4157,7 @@
 
 - func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: method
   dispatch:
     CPU: pow_
@@ -5069,11 +5073,13 @@
     QuantizedCPU: quantized_equal
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
   dispatch:
     CPU: pow_out
     CUDA: pow_out
 
 - func: pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
+  supports_named_tensor: True
   use_c10_dispatcher: True
   variants: method, function
   dispatch:
@@ -5081,11 +5087,13 @@
     CUDA: pow
 
 - func: pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
   dispatch:
     CPU: pow_out
     CUDA: pow_out
 
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
+  supports_named_tensor: True
   use_c10_dispatcher: True
   dispatch:
     CPU: pow
