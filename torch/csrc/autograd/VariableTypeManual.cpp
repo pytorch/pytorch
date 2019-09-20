@@ -93,6 +93,18 @@ void VariableType::set_data(const Tensor & self, const Tensor & new_data) {
   as_variable_ref(self).set_data(new_data);
 }
 
+Tensor VariableType::data(const Tensor & self) {
+  return as_variable_ref(self).variable_data();
+}
+
+bool VariableType::is_leaf(const Tensor & self) {
+  return as_variable_ref(self).is_leaf();
+}
+
+int64_t VariableType::output_nr(const Tensor & self) {
+  return as_variable_ref(self).output_nr();
+}
+
 // We don't have an outplace copy, so this can't be generated automatically
 Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;

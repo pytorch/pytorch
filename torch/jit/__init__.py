@@ -1633,6 +1633,15 @@ if _enabled:
         def graph_for(self, *args, **kwargs):
             return self.forward.graph_for(*args, **kwargs)
 
+        def extra_repr(self):
+            return 'original_name={}'.format(self.original_name)
+
+        @property
+        def original_name(self):
+            if type(self) == self._c.name:
+                return ''
+            return self._c.name
+
 else:
     class ScriptModule(torch.nn.Module):
         def __init__(self):
@@ -1859,6 +1868,8 @@ _builtin_ops = [
     (_unwrap_optional, "aten::_unwrap_optional"),
     (_wait, 'aten::wait'),
     (is_scripting, "aten::is_scripting"),
+    (OrderedDict, "aten::dict"),
+    (dict, "aten::dict"),
     (cudnn.is_acceptable, "aten::cudnn_is_acceptable"),
     (math.ceil, "aten::ceil"),
     (math.copysign, "aten::copysign"),
@@ -1985,7 +1996,7 @@ def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_
     return fn
 
 def _check_no_signature(func):
-    signature = torch.jit.annotations.get_signature(func)
+    signature = torch.jit.annotations.get_signature(func, None, None)
     if signature is None:
         qual_name = _qualified_name(func)
         raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))
