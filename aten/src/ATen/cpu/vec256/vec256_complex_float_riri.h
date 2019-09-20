@@ -15,14 +15,14 @@ namespace {
 
 template <> class Vec256<std::complex<float>> {
 private:
-  __m256d values;
+  __m256 values;
 public:
   using value_type = std::complex<float>;
   static constexpr int size() {
     return 4;
   }
   Vec256() {}
-  Vec256(__m256d v) : values(v) {}
+  Vec256(__m256 v) : values(v) {}
   Vec256(std::complex<float> val) {
     float real_value = std::real(val);
     float imag_value = std::imag(val);
@@ -39,7 +39,7 @@ public:
                             std::real(val4), std::imag(val4)
                             );
   }
-  operator __m256d() const {
+  operator __m256() const {
     return values;
   }
   template <int64_t mask>
@@ -136,11 +136,11 @@ public:
     }
     return loadu(tmp);
   }
-  __m256d abs_2_() const {
+  __m256 abs_2_() const {
     auto val_2 = _mm256_mul_ps(values, values);     // a*a     b*b
     return _mm256_hadd_ps(val_2, val_2);            // a*a+b*b a*a+b*b
   }
-  __m256d abs_() const {
+  __m256 abs_() const {
     auto abs = _mm256_sqrt_ps(abs_2_());            // abs     abs
     auto mask = _mm256_setr_ps(1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0);
     return _mm256_mul_ps(abs, mask);                // abs     0
@@ -148,7 +148,7 @@ public:
   Vec256<std::complex<float>> abs() const {
    return abs_();     // abs     0
   }
-  __m256d angle_() const {
+  __m256 angle_() const {
     auto b_a = _mm256_permute_ps(values, 0x55);      //b        a
     auto angle = Sleef_atan2f8_u10(values, b_a);     //-angle   angle
     auto mask = _mm256_setr_ps(0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
@@ -157,14 +157,14 @@ public:
   Vec256<std::complex<float>> angle() const {
     return _mm256_permute_ps(angle_(), 0x55);        // angle     0
   }
-  __m256d real_() const {
+  __m256 real_() const {
     auto mask = _mm256_setr_ps(1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0);
     return _mm256_mul_ps(values, mask);
   }
   Vec256<std::complex<float>> real() const {
     return real_();
   }
-  __m256d imag_() const {
+  __m256 imag_() const {
     auto mask = _mm256_setr_ps(0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
     return _mm256_mul_ps(values, mask);
     }
