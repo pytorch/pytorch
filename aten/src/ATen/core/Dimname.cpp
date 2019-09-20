@@ -15,7 +15,7 @@ std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {
   return out;
 }
 
-bool is_valid_identifier(const std::string& name) {
+bool Dimname::isValidName(const std::string& name) {
   if (name.length() == 0) {
     return false;
   }
@@ -30,7 +30,7 @@ bool is_valid_identifier(const std::string& name) {
 
 static void check_valid_identifier(const std::string& name) {
   TORCH_CHECK(
-      is_valid_identifier(name),
+      Dimname::isValidName(name),
       "Invalid name: a valid identifier must contain alphabetical characters and/or underscore, got: '",
       name, "'.");
 }
@@ -49,21 +49,21 @@ Dimname Dimname::wildcard() {
   return result;
 }
 
-optional<Dimname> unify(Dimname dimname, Dimname other) {
+optional<Dimname> Dimname::unify(Dimname other) const {
   if (other.type() == NameType::WILDCARD) {
-    return dimname;
+    return *this;
   }
-  if (dimname.type() == NameType::WILDCARD) {
+  if (type_ == NameType::WILDCARD) {
     return other;
   }
-  if (dimname.symbol() == other.symbol()) {
-    return dimname;
+  if (name_ == other.symbol()) {
+    return *this;
   }
   return c10::nullopt;
 }
 
-bool match(Dimname dimname, Dimname other) {
-  return unify(dimname, other).has_value();
+bool Dimname::matches(Dimname other) const {
+  return unify(other).has_value();
 }
 
 } // namespace at
