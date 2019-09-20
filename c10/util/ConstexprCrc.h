@@ -98,7 +98,7 @@ inline constexpr uint64_t crc64impl(uint64_t accumulator, const char* data, size
 struct crc64_t final : IdWrapper<crc64_t, uint64_t> {
   constexpr crc64_t(uint64_t checksum) : IdWrapper(checksum) {}
   constexpr uint64_t checksum() const {
-    return underlyingId();
+    return this->underlyingId();
   }
 };
 

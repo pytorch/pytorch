@@ -5,10 +5,6 @@ from cimodel.lib.conf_tree import Ver
 
 
 CONFIG_TREE_DATA = [
-    (Ver("ubuntu", "14.04"), [
-        (Ver("gcc", "4.8"), [X("py2")]),
-        (Ver("gcc", "4.9"), [X("py2")]),
-    ]),
     (Ver("ubuntu", "16.04"), [
         (Ver("cuda", "9.0"), [
             # TODO make explicit that this is a "secret TensorRT build"
@@ -57,7 +53,6 @@ class TreeConfigNode(ConfigNode):
         if str(self.find_prop("language_version")) == "onnx_py3.6":
             return False
         return str(self.find_prop("compiler_version")) in [
-            "gcc4.9",
             "clang3.8",
             "clang3.9",
             "clang7",
