@@ -243,8 +243,8 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
         >>> dist.init_model_parallel("worker0")
         >>> worker1 = dist.get_worker_id("worker1")
-        >>> fut1 = dist.rpc(worker1, torch.add, args=(torch.ones(2), 3), async_call=True)
-        >>> fut2 = dist.rpc(worker1, min, args=(1, 2), async_call=True)
+        >>> fut1 = dist.rpc_async(worker1, torch.add, args=(torch.ones(2), 3), async_call=True)
+        >>> fut2 = dist.rpc_async(worker1, min, args=(1, 2), async_call=True)
         >>> result = fut1.wait() + fut2.wait()
         >>> dist.join_rpc()
 
