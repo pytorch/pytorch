@@ -1291,16 +1291,11 @@ inline Tensor Tensor::lgamma() const {
 }
 inline Tensor & Tensor::lgamma_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::lgamma_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("lgamma_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::lgamma_(const_cast<Tensor&>(*this));
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::lgamma_(Tensor(a!) self) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::lgamma_", ""}).value();
+    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::log() const {
@@ -5020,16 +5015,11 @@ inline Tensor Tensor::erfinv() const {
 }
 inline Tensor & Tensor::erfinv_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::erfinv_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("erfinv_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::erfinv_(const_cast<Tensor&>(*this));
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::erfinv_(Tensor(a!) self) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::erfinv_", ""}).value();
+    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+        .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::sign() const {

@@ -65,9 +65,17 @@ Tensor& ceil_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
 Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 
+Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, erfinv_stub); }
+Tensor erfinv(const Tensor& self) { return unary_op_impl(self, at::erfinv_out); }
+Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
+
 Tensor& round_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, round_stub); }
 Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
 Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
+
+Tensor& lgamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, lgamma_stub); }
+Tensor lgamma(const Tensor& self) { return unary_op_impl(self, lgamma_out); }
+Tensor& lgamma_(Tensor& self) { return unary_op_impl_(self, lgamma_out); }
 
 Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, digamma_stub); }
 Tensor digamma(const Tensor& self) { return unary_op_impl(self, digamma_out); }
@@ -264,12 +272,10 @@ IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
-IMPLEMENT_UNARY_OP_VEC(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC(expm1)
 IMPLEMENT_UNARY_OP_VEC(floor)
 IMPLEMENT_UNARY_OP_VEC(frac)
-IMPLEMENT_UNARY_OP_VEC(lgamma)
 IMPLEMENT_UNARY_OP_VEC(log)
 IMPLEMENT_UNARY_OP_VEC(log10)
 IMPLEMENT_UNARY_OP_VEC(log1p)

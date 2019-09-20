@@ -1439,17 +1439,12 @@
   variants: function, method
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: function, method
-  dispatch:
-    CPU: _lgamma__cpu
-    CUDA: _lgamma__cuda
 
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
-  dispatch:
-    CPU: _lgamma_out_cpu
-    CUDA: _lgamma_out_cuda
 
 - func: log(Tensor self) -> Tensor
   use_c10_dispatcher: True
@@ -4823,17 +4818,12 @@
   variants: method, function
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: True
   named_guard: False
   variants: method
-  dispatch:
-    CPU: _erfinv__cpu
-    CUDA: _erfinv__cuda
 
 - func: erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
-  dispatch:
-    CPU: _erfinv_out_cpu
-    CUDA: _erfinv_out_cuda
 
 - func: sign(Tensor self) -> Tensor
   use_c10_dispatcher: True

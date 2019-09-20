@@ -65,7 +65,7 @@ ops.sort()
 
 # atan2, div, fmod, lerp, add, mul, mvlgamma, pow, reminder
 
-ops = [op for op in ops if op[0] in ['exp', 'erfinv']]
+ops = [op for op in ops if op[0] in ['exp', 'erfinv', 'lgamma']]
 
 def cut(line, width=150):
     if len(line) > width:
