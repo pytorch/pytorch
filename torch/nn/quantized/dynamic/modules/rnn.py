@@ -184,12 +184,19 @@ class RNNBase(torch.nn.Module):
             self._orig_weight_values,
         )
 
-        dynamic_vals = torch.jit.annotate(List[Tuple[torch.Tensor, Optional[torch.Tensor]]],
-                                          [])
+        if self.dtype == torch.qint8:
+            dynamic_vals = torch.jit.annotate(List[Tuple[torch.Tensor, Optional[torch.Tensor]]],
+                                              [])
 
-        for i in range(len(self._all_weight_names)):
-            dynamic_vals.append(torch.ops.quantized.linear_unpack(self._all_weight_values[i]))
-        return vals, dynamic_vals
+            for i in range(len(self._all_weight_names)):
+                dynamic_vals.append(torch.ops.quantized.linear_unpack(self._all_weight_values[i]))
+
+            return vals, dynamic_vals
+        else:
+            dynamic_vals_fp16 = torch.jit.annotate(List[torch.Tensor], [])
+            for i in range(len(self._all_weight_names)):
+                dynamic_vals_fp16.append(self._all_weight_values[i])
+            return vals, dynamic_vals_fp16
 
     @torch.jit.export
     def __setstate__(self, state):
@@ -209,8 +216,12 @@ class RNNBase(torch.nn.Module):
         self._orig_weight_values = vals[12]
 
         self._all_weight_values = []
-        for i in range(len(self._all_weight_names)):
-            self._all_weight_values.append(torch.ops.quantized.linear_prepack(*dynamic_vals[i]))
+        if self.dtype == torch.qint8:
+            for i in range(len(self._all_weight_names)):
+                self._all_weight_values.append(torch.ops.quantized.linear_prepack(*dynamic_vals[i]))
+        else:
+            for i in range(len(self._all_weight_names)):
+                self._all_weight_values.append(torch.torch.fbgemm_pack_gemm_matrix_fp16(*dynamic_vals[i]))
 
     @classmethod
     def from_float(cls, mod, dtype=torch.qint8):
@@ -218,7 +229,8 @@ class RNNBase(torch.nn.Module):
         assert hasattr(
             mod, 'qconfig'), 'Input float module must have qconfig defined'
 
-        if dtype != torch.qint8 and dtype != torch.float16:
+        supported_scalar_types = [torch.qint8, torch.float16]
+        if dtype not in supported_scalar_types:
             raise RuntimeError('Unsupported dtype: {}'.format(dtype))
 
         # When dtype = torch.float16, we don't need weight_observer

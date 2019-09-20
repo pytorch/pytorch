@@ -332,11 +332,12 @@ def swap_module(mod, mapping, dtype=torch.qint8):
     new_mod = mod
     if hasattr(mod, 'qconfig') and mod.qconfig is not None:
         if type(mod) in mapping:
-            if dtype != torch.qint8 and dtype != torch.float16:
-                 raise RuntimeError('Unsupported dtype: {}'.format(dtype))
-            if (dtype == torch.qint8):
+            supported_scalar_types = [torch.qint8, torch.float16]
+            if dtype not in supported_scalar_types:
+                raise RuntimeError('Unsupported dtype: {}'.format(dtype))
+            if dtype == torch.qint8:
                 new_mod = mapping[type(mod)].from_float(mod)
-            elif (dtype == torch.float16):
+            elif dtype == torch.float16:
                 # We want to support float16 dynamic quantization
                 new_mod = mapping[type(mod)].from_float(mod, dtype)
     return new_mod

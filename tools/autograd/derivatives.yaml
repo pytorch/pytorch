@@ -205,8 +205,7 @@
   self: cholesky_backward(grad, upper, result)
 
 - name: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
-  self: not_implemented("cholesky_solve")
-  input2: not_implemented("cholesky_solve")
+  self, input2: cholesky_solve_backward(grad, self, input2, result, upper)
 
 - name: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   self: not_implemented("cholesky_inverse")
