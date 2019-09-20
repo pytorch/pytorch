@@ -67,7 +67,7 @@ class ProcessGroupAgent : public RpcAgent {
   void listenLoop();
 
   int64_t nextId() {
-    return nextId_++;
+    return ++nextId_;
   }
 
   std::shared_ptr<c10d::ProcessGroup> pg_;
@@ -90,7 +90,8 @@ class ProcessGroupAgent : public RpcAgent {
   //         This is just a temporary solution for (2).
   ThreadPool threadPool_;
   std::unordered_map<int64_t, std::shared_ptr<FutureMessage>> futures_;
-  std::mutex futureMutex_;
+  mutable std::mutex futureMutex_;
+  mutable std::condition_variable futureCV_;
 };
 
 } // namespace rpc

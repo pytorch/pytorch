@@ -33,7 +33,6 @@ std::shared_ptr<FutureMessage> RpcAgent::send(
     auto& currentContext = autogradContainer.currentContext();
     currentContext.addSendFunction(grad_fn);
   }
-
   return sendImpl(to, std::forward<Message>(message));
 }
 } // namespace rpc

@@ -10,12 +10,13 @@ namespace rpc {
 
 namespace {
 
-constexpr int RFD_TUPLE_SIZE = 5; // number of RRefForkData fields in py::tuple
+constexpr int RFD_TUPLE_SIZE = 6; // number of RRefForkData fields in py::tuple
 constexpr int OWNER_IDX = 0; // index of ownerId in the tuple
 constexpr int RREFID_ON_IDX = 1; // index of RRefId.createdOn_ in the tuple
 constexpr int RREFID_ID_IDX = 2; // index of RRefId.localId_ in the tuple
 constexpr int FORKID_ON_IDX = 3; // index of ForkId.createdOn_ in the tuple
 constexpr int FORKID_ID_IDX = 4; // index of ForkId.localId_ in the tuple
+constexpr int PARENT_IDX = 5; // index of parent in the tuple
 
 } // namespace
 
@@ -26,12 +27,17 @@ std::atomic<local_id_t> RRefContext::nextLocalId_{0};
 RRefForkData::RRefForkData(
     worker_id_t ownerId,
     const RRefId& rrefId,
-    const ForkId& forkId)
-    : ownerId_(ownerId), rrefId_(rrefId), forkId_(forkId) {}
+    const ForkId& forkId,
+    worker_id_t parent)
+    : ownerId_(ownerId), rrefId_(rrefId), forkId_(forkId), parent_(parent) {}
 
 at::IValue RRefForkData::toIValue() const {
-  return c10::ivalue::Tuple::create(
-      {(int64_t)ownerId_, rrefId_.toIValue(), forkId_.toIValue()});
+  return c10::ivalue::Tuple::create({
+        static_cast<int64_t>(ownerId_),
+        rrefId_.toIValue(),
+        forkId_.toIValue(),
+        static_cast<int64_t>(parent_)
+  });
 }
 
 py::tuple RRefForkData::toPyTuple() const {
@@ -40,13 +46,14 @@ py::tuple RRefForkData::toPyTuple() const {
       rrefId_.createdOn_,
       rrefId_.localId_,
       forkId_.createdOn_,
-      forkId_.localId_);
+      forkId_.localId_,
+      parent_);
 }
 
 RRefForkData RRefForkData::fromPyTuple(py::tuple t) {
   TORCH_INTERNAL_ASSERT(
       t.size() == RFD_TUPLE_SIZE,
-      "Pickled RRefForkData must contain 5 numbers.");
+      "Pickled RRefForkData must contain 6 numbers.");
   worker_id_t ownerId = t[OWNER_IDX].cast<worker_id_t>();
   RRefId rrefId = RRefId(
       t[RREFID_ON_IDX].cast<worker_id_t>(),
@@ -54,16 +61,17 @@ RRefForkData RRefForkData::fromPyTuple(py::tuple t) {
   RRefId forkId = RRefId(
       t[FORKID_ON_IDX].cast<worker_id_t>(),
       t[FORKID_ID_IDX].cast<local_id_t>());
-  return RRefForkData(ownerId, rrefId, forkId);
+  worker_id_t parent = t[PARENT_IDX].cast<worker_id_t>();
+  return RRefForkData(ownerId, rrefId, forkId, parent);
 }
 
 RRefForkData RRefForkData::fromIValue(const at::IValue& ivalue) {
   auto ivalues = ivalue.toTuple()->elements();
 
   TORCH_INTERNAL_ASSERT(
-      ivalues.size() == 3,
+      ivalues.size() == 4,
       "Constructing RRefForkData from ivalue "
-      "expects a GenericList of 3 elements, but got ",
+      "expects a GenericList of 4 elements, but got ",
       ivalues.size());
 
   int64_t ownerId = ivalues[0].toInt();
@@ -75,7 +83,12 @@ RRefForkData RRefForkData::fromIValue(const at::IValue& ivalue) {
   RRefId rrefId = RRefId::fromIValue(ivalues[1]);
   ForkId forkId = ForkId::fromIValue(ivalues[2]);
 
-  return RRefForkData(ownerId, rrefId, forkId);
+  int64_t parent = ivalues[3].toInt();
+  TORCH_INTERNAL_ASSERT(
+      parent < std::numeric_limits<worker_id_t>::max(),
+      "RRefId createdOn out of range, got ",
+      parent);
+  return RRefForkData(ownerId, rrefId, forkId, parent);
 }
 
 //////////////////////////////  RRef  /////////////////////////////////////
@@ -84,8 +97,13 @@ RRef::RRef(worker_id_t ownerId, const RRefId& rrefId)
     : ownerId_(ownerId), rrefId_(rrefId) {}
 
 RRefForkData RRef::fork() const {
+  auto& ctx = RRefContext::getInstance();
   return RRefForkData(
-      ownerId_, rrefId_, RRefContext::getInstance()->genGloballyUniqueId());
+      ownerId_,
+      rrefId_,
+      ctx->genGloballyUniqueId(),
+      ctx->getWorkerId()
+  );
   // NB: does not support sharing RRefs between users
   // TODO: notify the owner
 }
@@ -159,7 +177,7 @@ template class UserRRef<py::object>;
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
 template <typename T>
-T OwnerRRef<T>::getValue() const {
+const T& OwnerRRef<T>::getValue() const {
   // TODO: use callback to make this non-blocking
   std::unique_lock<std::mutex> lock(mutex_);
   valueCV_.wait(lock, [this] { return value_.has_value(); });

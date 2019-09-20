@@ -52,13 +52,12 @@ class RpcAgent;
 
 // RpcAgent implementation should invoke ``RequestCallback`` to process received
 // requests. There is no restriction on the implementation's threading model.
-// This function takes the source ``WorkerInfo`` and an rvalue reference of the
-// Message object.
+// This function takes an rvalue reference of the Message object.
 // It is expected to return the response message or message containing an
 // exception. Different rpc agent implementations are expected to ensure
 // delivery of the response/exception based on their implementation specific
 // mechanisms.
-using RequestCallback = std::function<Message(const WorkerInfo&, Message&&)>;
+using RequestCallback = std::function<Message(Message&&)>;
 
 class RpcAgent {
  public:

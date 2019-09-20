@@ -24,7 +24,7 @@ Message createException(const Message& request, const std::exception& e) {
       request.id());
 }
 
-Message processRequestBlocking(const WorkerInfo& from, Message&& request) {
+Message processRequestBlocking(Message&& request) {
   try {
     switch (request.type()) {
       case MessageType::SCRIPT_CALL: {
@@ -43,8 +43,7 @@ Message processRequestBlocking(const WorkerInfo& from, Message&& request) {
         return ScriptRet(std::move(stack.front())).toMessage();
       }
       case MessageType::PYTHON_CALL: {
-        auto payload =
-            PythonRpcHandler::generatePythonUDFResult(request, from.id_);
+        auto payload = PythonRpcHandler::generatePythonUDFResult(request);
         return Message(
             std::move(payload),
             std::vector<torch::Tensor>(),
@@ -52,7 +51,6 @@ Message processRequestBlocking(const WorkerInfo& from, Message&& request) {
       }
       case MessageType::SCRIPT_REMOTE_CALL: {
         ScriptRemoteCall src = ScriptRemoteCall::fromMessage(request);
-
         auto& ctx = RRefContext::getInstance();
 
         auto ownerRRef = ctx->getOrCreateOwnerRRef<IValue>(src.retRRefId());
@@ -69,7 +67,6 @@ Message processRequestBlocking(const WorkerInfo& from, Message&& request) {
             stack.size());
 
         ownerRRef->setValue(std::move(stack.front()));
-
         ctx->addForkOfOwner(src.retRRefId(), src.retForkId());
         return RemoteRet(src.retRRefId(), src.retForkId()).toMessage();
       }
@@ -82,7 +79,6 @@ Message processRequestBlocking(const WorkerInfo& from, Message&& request) {
 
         auto ownerRRef = ctx->getOrCreateOwnerRRef<py::object>(rrefId);
         ownerRRef->setValue(PythonRpcHandler::runPythonUDF(prc.udf()));
-
         ctx->addForkOfOwner(rrefId, forkId);
         return RemoteRet(rrefId, forkId).toMessage();
       }
@@ -100,20 +96,20 @@ Message processRequestBlocking(const WorkerInfo& from, Message&& request) {
         std::shared_ptr<OwnerRRef<py::object>> rref =
             RRefContext::getInstance()->getOrCreateOwnerRRef<py::object>(
                 prf.rrefId());
-        return RRefFetchRet(
-                   PythonRpcHandler::serialize(rref->getValue(), from.id_))
+        return RRefFetchRet(PythonRpcHandler::serialize(rref->getValue()))
             .toMessage();
       }
       case MessageType::RREF_USER_ACCEPT: {
         RRefUserAccept rua = RRefUserAccept::fromMessage(request);
         auto& ctx = RRefContext::getInstance();
-        ctx->finishUserRRef(rua.rrefId(), rua.forkId());
+        ctx->delPendingUser(rua.forkId());
         return Message({}, {}, MessageType::ACK);
       }
       case MessageType::RREF_USER_DELETE: {
         RRefUserDelete rud = RRefUserDelete::fromMessage(request);
         auto deletedRRef = RRefContext::getInstance()->delForkOfOwner(
             rud.rrefId(), rud.forkId());
+
         {
           // Need GIL here as this could trigger deletion on py::object
           AutoGIL ag;
@@ -121,11 +117,17 @@ Message processRequestBlocking(const WorkerInfo& from, Message&& request) {
         }
         return Message({}, {}, MessageType::ACK);
       }
-      case MessageType::RREF_FORK_NOTIFY: {
-        RRefForkNotify rfn = RRefForkNotify::fromMessage(request);
+      case MessageType::RREF_CHILD_ACCEPT: {
+        RRefChildAccept rca = RRefChildAccept::fromMessage(request);
         auto& ctx = RRefContext::getInstance();
-        return ctx->acceptForkRequest(
-            rfn.rrefId(), rfn.forkId(), rfn.forkDst());
+        ctx->delPendingChild(rca.forkId());
+        return Message({}, {}, MessageType::ACK);
+      }
+      case MessageType::RREF_FORK_REQUEST: {
+        RRefForkRequest rfr = RRefForkRequest::fromMessage(request);
+        auto& ctx = RRefContext::getInstance();
+        ctx->addForkOfOwner(rfr.rrefId(), rfr.forkId());
+        return Message({}, {}, MessageType::ACK);
       }
       default: {
         AT_ERROR("Request type ", request.type(), " not supported.");

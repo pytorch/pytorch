@@ -146,7 +146,7 @@ def remote(to, func, args=None, kwargs=None):
             _agent, to, qualified_name, *args, **kwargs)
     else:
         rref = invoke_remote_python_udf(
-            _agent, to, serialize(PythonUDF(func, args, kwargs), to.id))
+            _agent, to, serialize(PythonUDF(func, args, kwargs)))
 
         return rref
 
@@ -227,7 +227,7 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         fut = invoke_rpc_builtin(_agent, to, qualified_name, *args, **kwargs)
     else:
         fut = invoke_rpc_python_udf(
-            _agent, to, serialize(PythonUDF(func, args, kwargs), to.id))
+            _agent, to, serialize(PythonUDF(func, args, kwargs)))
 
     if async_call:
         return fut

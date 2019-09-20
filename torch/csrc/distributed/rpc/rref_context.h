@@ -50,20 +50,25 @@ class RRefContext {
   template <typename T>
   std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId);
 
-  RRefForkData forkTo(const std::shared_ptr<RRef>&, worker_id_t forkDst);
-
   Message acceptUserRRef(const RRefId& rrefId, const ForkId& forkId);
-  Message acceptForkRequest(
-      const RRefId& rrefId,
-      const ForkId& forkId,
-      const worker_id_t forkDst);
-  void finishForkRequest(const ForkId& forkId);
-  void finishUserRRef(const RRefId& rrefId, const ForkId& forkId);
+  void finishForkRequest(const ForkId& forkId, worker_id_t parent);
 
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
   std::shared_ptr<RRef> delForkOfOwner(
       const RRefId& rrefId,
       const ForkId& forkId);
+
+
+  RRefForkData prepareChildFork(const std::shared_ptr<RRef>& rref);
+  // forkId is necessary here as the rref could be an OwnerRRef
+  void notifyOwnerAndParentOfFork(
+      const ForkId& forkId, worker_id_t parent, std::shared_ptr<RRef> rref);
+
+  void addPendingChild(const ForkId& forkId, std::shared_ptr<RRef> rref);
+  void delPendingChild(const ForkId& forkId);
+
+  void addPendingUser(const ForkId& forkId, std::shared_ptr<RRef> rref);
+  void delPendingUser(const ForkId& forkId);
 
  private:
   RRefContext(std::shared_ptr<RpcAgent>);
@@ -71,11 +76,6 @@ class RRefContext {
   template <typename T>
   std::shared_ptr<UserRRef<T>> createUserRRef(
       worker_id_t ownerId,
-      const RRefId& rrefId,
-      const ForkId& forkId);
-
-  void addForkOfOwnerNoLock(const RRefId& rrefId, const ForkId& forkId);
-  std::shared_ptr<RRef> delForkOfOwnerNoLock(
       const RRefId& rrefId,
       const ForkId& forkId);
 
@@ -99,29 +99,19 @@ class RRefContext {
   //
   // (1) A UserRRef has not been accepted by owner yet.
   //
-  //     It can be used or shared, but cannot be deleted, and hence in this map.
-  //     A message of type RREF_USER_ACCEPT will remove the corresponding RRef
-  //     from this map.
+  //     It can be used or shared, but cannot be deleted, and hence kept alive
+  //     in this map. A message of type RREF_USER_ACCEPT will remove the
+  //     corresponding RRef from this map.
   std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash> pendingUsers_;
 
-  // (2) A UserRRef has pending fork requests that are not accepted by the owner
-  //     yet.
+  // (2) A UserRRef has forked a child UserRRef which has not been accepted by
+  //     the owner yet.
   //
-  //     This is case, this UserRRef cannot send out RREF_USER_DELETE message,
-  //     because it is not guaranteed communications are FIFO between any pair
-  //     of worker (due to thread pool and potentially new RpcAgent
-  //     implementations). As a result, RREF_USER_DELETE might be processed
-  //     by the owner before previous RREF_FORK_NOTIFY messages, which would
-  //     mess up RRef reference counts.
+  //     In this case, this UserRRef cannot send out RREF_USER_DELETE message,
+  //     as it could potentially trigger the OwnerRRef been deleted before the
+  //     owner learns about the forked child.
   std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash>
-      pendingForkRequests_;
-
-  std::unordered_set<ForkId, ForkId::Hash> expectingForkReqeusts_;
-
-  // RREF_USER_ACCEPT message arrives before the UserRRef was created. This may
-  // occur as the RREF_USER_ACCEPT is sent from owner to the callee UserRRef,
-  // while the UserRRef is created when the message from caller UserRRef arrives
-  std::unordered_set<ForkId, ForkId::Hash> pendingAcceptedUsers_;
+      pendingChildren_;
 };
 
 } // namespace rpc

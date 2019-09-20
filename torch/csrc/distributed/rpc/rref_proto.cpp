@@ -131,46 +131,24 @@ RemoteRet RemoteRet::fromMessage(const Message& message) {
   return RemoteRet(pair.first, pair.second);
 }
 
-worker_id_t RRefForkNotify::forkDst() const {
-  return forkDst_;
-}
-
-Message RRefForkNotify::toMessage() const {
-  return fromIValues(
-      {rrefId_.toIValue(), forkId_.toIValue(), IValue(forkDst_)},
-      MessageType::RREF_FORK_NOTIFY);
-}
-
-RRefForkNotify RRefForkNotify::fromMessage(const Message& message) {
-  auto values = toIValues(message, MessageType::RREF_FORK_NOTIFY);
-
-  TORCH_INTERNAL_ASSERT(values.size() == 3, "Expect 3 IValues from message.");
-  auto forkDst = values.back().toInt();
-  TORCH_INTERNAL_ASSERT(
-      forkDst < std::numeric_limits<worker_id_t>::max(),
-      "Fork destination worker id out of bound ",
-      forkDst);
-  values.pop_back();
-  RRefId rrefId = RRefId::fromIValue(values.back());
-  values.pop_back();
-  ForkId forkId = ForkId::fromIValue(values.back());
-
-  return RRefForkNotify(rrefId, forkId, forkDst);
-}
-
-const ForkId& RRefForkAccept::forkId() const {
+const ForkId& RRefChildAccept::forkId() const {
   return forkId_;
 }
 
-Message RRefForkAccept::toMessage() {
-  return fromIValues({forkId_.toIValue()}, MessageType::RREF_FORK_ACCEPT);
+Message RRefChildAccept::toMessage() {
+  return fromIValues({forkId_.toIValue()}, MessageType::RREF_CHILD_ACCEPT);
 }
 
-RRefForkAccept RRefForkAccept::fromMessage(const Message& message) {
-  auto values = toIValues(message, MessageType::RREF_FORK_ACCEPT);
+RRefChildAccept RRefChildAccept::fromMessage(const Message& message) {
+  auto values = toIValues(message, MessageType::RREF_CHILD_ACCEPT);
   TORCH_INTERNAL_ASSERT(values.size() == 1, "Expect 1 IValues from message.");
 
-  return RRefForkAccept(ForkId::fromIValue(values.back()));
+  return RRefChildAccept(ForkId::fromIValue(values.back()));
+}
+
+RRefForkRequest RRefForkRequest::fromMessage(const Message& message) {
+  auto pair = ForkMessageBase::fromMessage(message, MessageType::RREF_FORK_REQUEST);
+  return RRefForkRequest(pair.first, pair.second);
 }
 
 } // namespace rpc

@@ -20,8 +20,8 @@ enum MessageType {
   RREF_FETCH_RET = 9, // An OwnerRRef sends value to user
   RREF_USER_ACCEPT = 10, // An OwnerRRef accepts a user
   RREF_USER_DELETE = 11, // A UserRRef tells the owner to deref
-  RREF_FORK_NOTIFY = 12, // A UserRRef tells the owner on fork
-  RREF_FORK_ACCEPT = 13, // An OwnerRRef accepts a fork request
+  RREF_FORK_REQUEST = 12, // A child UserRRef tells the owner about itself
+  RREF_CHILD_ACCEPT = 13, // A child UserRRef tells parent that owner knows it
   SHUTDOWN = 14,
   EXCEPTION = 15,
   ACK = 16,

@@ -102,38 +102,30 @@ class TORCH_API RemoteRet final : public ForkMessageBase {
   static RemoteRet fromMessage(const Message& message);
 };
 
-// A UserRRef uses this message to notify owner on fork.
-class TORCH_API RRefForkNotify final : public ForkMessageBase {
- public:
-  RRefForkNotify(
-      const RRefId& rrefId,
-      const ForkId& forkId,
-      worker_id_t forkDst)
-      : ForkMessageBase(rrefId, forkId, MessageType::RREF_FORK_NOTIFY),
-        forkDst_(forkDst) {}
-
-  worker_id_t forkDst() const;
-
-  Message toMessage() const;
-  static RRefForkNotify fromMessage(const Message& message);
-
- private:
-  const worker_id_t forkDst_;
-};
-
 // The OwnerRRef uses this message to a UserRRef that its fork request has been
 // accepted. A UserRRef cannot be deleted if it has any pending fork requests.
-class TORCH_API RRefForkAccept final {
+
+class TORCH_API RRefChildAccept final {
  public:
-  RRefForkAccept(const ForkId& forkId) : forkId_(forkId) {}
+  RRefChildAccept(const ForkId& forkId) : forkId_(forkId) {}
 
   const ForkId& forkId() const;
 
   Message toMessage();
-  static RRefForkAccept fromMessage(const Message& message);
+  static RRefChildAccept fromMessage(const Message& message);
 
  private:
   const ForkId forkId_;
+};
+
+class TORCH_API RRefForkRequest final : public ForkMessageBase {
+ public:
+  RRefForkRequest(
+      const RRefId& rrefId,
+      const ForkId& forkId)
+      : ForkMessageBase(rrefId, forkId, MessageType::RREF_FORK_REQUEST) {}
+
+  static RRefForkRequest fromMessage(const Message& message);
 };
 
 } // namespace rpc

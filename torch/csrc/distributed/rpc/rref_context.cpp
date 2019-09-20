@@ -34,6 +34,15 @@ RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
     : agent_(std::move(agent)) {}
 
 RRefContext::~RRefContext() {
+  if (!forks_.empty()) {
+    for (auto& entry: forks_) {
+      const RRefId& rrefId = entry.first;
+      for (const auto& forkId: entry.second) {
+        VLOG(1) << "Leaking RRef " << rrefId
+                << " with fork Id " << forkId << std::endl;
+      }
+    }
+  }
   AutoGIL ag;
   owners_.clear();
 }
@@ -62,22 +71,7 @@ std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(
   // constructor of UserRRef is private
   auto userRRef =
       std::shared_ptr<UserRRef<T>>(new UserRRef<T>(ownerId, rrefId, forkId));
-
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    TORCH_CHECK(
-        pendingUsers_.find(forkId) == pendingUsers_.end(),
-        "Inconsistent state, attempt to create the same UserRRef twice.")
-
-    auto iter = pendingAcceptedUsers_.find(forkId);
-    if (iter == pendingAcceptedUsers_.end()) {
-      // UserRRef created before receiving RREF_USER_ACCEPT message
-      pendingUsers_[forkId] = userRRef;
-    } else {
-      // RREF_USER_ACCEPT arrives before UserRRef is created, remove it
-      pendingAcceptedUsers_.erase(iter);
-    }
-  }
+  addPendingUser(forkId, userRRef);
   return userRRef;
 }
 
@@ -98,27 +92,7 @@ std::shared_ptr<RRef> RRefContext::getOrCreateRRef(const RRefForkData& rfd) {
   auto& rrefId = rfd.rrefId_;
   auto& forkId = rfd.forkId_;
   if (ownerId == getWorkerId()) {
-    auto ownerRRef = getOrCreateOwnerRRef<T>(rrefId);
-    // See Note [Fork Request]
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto rrefIter = forks_.find(rrefId);
-    // Although we know that someone (either a UserRRef or a OwnerRRef) has
-    // sent a fork request RREF_FORK_NOTIFY from somewhere, this could still be
-    // the first time the owner sees this rrefId, as there is no order
-    // guarantee on message delivery. Hence, the owner might not know about the
-    // forkId either. However, we know that (1) there will be an
-    // RREF_FORK_NOTIFY message arriving in the future, or (2) the message might
-    // have already arrived.
-    if (rrefIter != forks_.end() &&
-        rrefIter->second.find(forkId) != rrefIter->second.end()) {
-      // scenario (2): fork request arrived before rpc/remote request/response
-      delForkOfOwnerNoLock(rrefId, forkId);
-    } else {
-      // scenario (1): fork request will arrive after rpc/remote
-      // request/response
-      expectingForkReqeusts_.insert(forkId);
-    }
-    return ownerRRef;
+    return getOrCreateOwnerRRef<T>(rrefId);
   } else {
     return createUserRRef<T>(ownerId, rrefId, forkId);
   }
@@ -148,7 +122,7 @@ std::shared_ptr<OwnerRRef<T>> RRefContext::getOrCreateOwnerRRef(
 
   } else {
     // Scenario (3) retrieving an existing RRef
-    return std::dynamic_pointer_cast<OwnerRRef<T>>(iter->second);
+    return std::static_pointer_cast<OwnerRRef<T>>(iter->second);
   }
 }
 
@@ -158,63 +132,70 @@ template std::shared_ptr<OwnerRRef<IValue>> RRefContext::getOrCreateOwnerRRef<
 template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
     getOrCreateOwnerRRef<py::object>(const RRefId& rrefId);
 
-RRefForkData RRefContext::forkTo(
-    const std::shared_ptr<RRef>& rref,
-    worker_id_t forkDst) {
-  auto forkRequest = rref->fork();
-  // Note [Fork Request]
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~
-  //
-  // Forked UserRRef needs to be tracked properly, regardless if the destination
-  // is the owner or not. If the destination is a user, it is obvious that, the
-  // RRef needs to be kept alive on owner. If the destination is the owner, we
-  // still need the fork request. Because:
-  //
-  // (1) As we use ThreadPool on both sender and receiver, there is no guarantee
-  //     on message delivery order. It is possible that the delete message is
-  //     processed before some earlier rpc/remote calls which use this RRef as
-  //     an argument, and the delete message might have triggered the deletion
-  //     of the OwnerRRef.
-  //
-  // (2) Similar problem exist if the RRef is involved in the response from a
-  //     user to the owner.
-  //
-  // Therefore, the RRefForkNotify message is always sent no matter if the owner
-  // is the destination or not. If the owner is the destination, the owner will
-  // not create any UserRRefs using the ForkId. Instead, it only adds the ForkId
-  // into forks_, which will later be dropped in getOrCreateRRef(...).
-  // Otherwise, if the destination is a user, the callee user will use the
-  // ForkId to create a UserRRef and that UserRRef will control the lifetime of
-  // the ForkId on owner.
+RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
+  auto rfd = rref->fork();
   if (rref->isOwner()) {
-    // fork from owner
-    auto fm = agent_->send(
-        agent_->getWorkerInfo(forkDst),
-        acceptUserRRef(forkRequest.rrefId_, forkRequest.forkId_));
-
-    fm->addCallback([](const Message& message) { handleException(message); });
+    addForkOfOwner(rfd.rrefId_, rfd.forkId_);
   } else {
-    // fork from user, rref cannot be destructed until the fork request is
-    // accepted by the owner
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      pendingForkRequests_[forkRequest.forkId_] = rref;
-    }
-    // notify owner
-    auto fm = agent_->send(
-        agent_->getWorkerInfo(rref->owner()),
-        RRefForkNotify(forkRequest.rrefId_, forkRequest.forkId_, forkDst)
-            .toMessage());
-
-    fm->addCallback([this](const Message& message) {
-      handleException(message);
-      auto rfa = RRefForkAccept::fromMessage(message);
-      this->finishForkRequest(rfa.forkId());
-    });
+    addPendingChild(rfd.forkId_, rref);
   }
-  return forkRequest;
+  return rfd;
 }
 
+void RRefContext::notifyOwnerAndParentOfFork(
+    const ForkId& forkId, worker_id_t parent, std::shared_ptr<RRef> rref) {
+  if (parent != rref->owner()) {
+    if (rref->isOwner()) {
+      auto fm = agent_->send(
+        agent_->getWorkerInfo(parent),
+        RRefChildAccept(forkId).toMessage()
+      );
+      fm->addCallback([](const Message& message){
+        handleException(message);
+      });
+    } else {
+      auto fm = agent_->send(
+        agent_->getWorkerInfo(rref->owner()),
+        RRefForkRequest(rref->rrefId(), forkId).toMessage()
+      );
+
+      fm->addCallback([this, forkId, parent](const Message& message){
+        handleException(message);
+        this->finishForkRequest(forkId, parent);
+      });
+    }
+  }
+}
+
+void RRefContext::addPendingChild(const ForkId& forkId, std::shared_ptr<RRef> rref) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  TORCH_INTERNAL_ASSERT(pendingChildren_.find(forkId) == pendingChildren_.end(),
+      "Inconsistent states: attempt to add the same child fork twice.");
+  pendingChildren_[forkId] = rref;
+}
+
+void RRefContext::delPendingChild(const ForkId& forkId) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto iter = pendingChildren_.find(forkId);
+  TORCH_INTERNAL_ASSERT(iter != pendingChildren_.end(),
+      "Inconsistent states: attempt to delete a non-exist child fork.");
+  pendingChildren_.erase(iter);
+}
+
+void RRefContext::addPendingUser(const ForkId& forkId, std::shared_ptr<RRef> rref) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  TORCH_INTERNAL_ASSERT(pendingUsers_.find(forkId) == pendingUsers_.end(),
+      "Inconsistent states: attempt to add the same UserRRef twice.");
+  pendingUsers_[forkId] = rref;
+}
+
+void RRefContext::delPendingUser(const ForkId& forkId) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto iter = pendingUsers_.find(forkId);
+  TORCH_INTERNAL_ASSERT(iter != pendingUsers_.end(),
+      "Inconsistent states: attempt to delete a non-exist UserRRef.");
+  pendingUsers_.erase(iter);
+}
 Message RRefContext::acceptUserRRef(
     const RRefId& rrefId,
     const ForkId& forkId) {
@@ -222,76 +203,20 @@ Message RRefContext::acceptUserRRef(
   return RRefUserAccept(rrefId, forkId).toMessage();
 }
 
-Message RRefContext::acceptForkRequest(
-    const RRefId& rrefId,
-    const ForkId& forkId,
-    const worker_id_t forkDst) {
-  if (forkDst == getWorkerId()) {
-    // forking to the owner
-    // See Note [Fork Request]
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto iter = expectingForkReqeusts_.find(forkId);
-    if (iter == expectingForkReqeusts_.end()) {
-      // fork request arrives before the rpc/remote request/response
-      addForkOfOwnerNoLock(rrefId, forkId);
-    } else {
-      // rpc/remote request/response arrives before the fork request
-      expectingForkReqeusts_.erase(iter);
-    }
-  } else {
-    // forking to a user
-    auto fm = agent_->send(
-        agent_->getWorkerInfo(forkDst), acceptUserRRef(rrefId, forkId));
+void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
+  delPendingUser(forkId);
+  auto fm = agent_->send(
+    agent_->getWorkerInfo(parent),
+    RRefChildAccept(forkId).toMessage()
+  );
 
-    fm->addCallback([](const Message& message) { handleException(message); });
-  }
-  // notify fork caller UserRRef
-  return RRefForkAccept(forkId).toMessage();
-}
-
-void RRefContext::finishForkRequest(const ForkId& forkId) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  auto iter = pendingForkRequests_.find(forkId);
-  TORCH_INTERNAL_ASSERT(
-      iter != pendingForkRequests_.end(),
-      "Cannot finish a non-exist fork request.");
-  pendingForkRequests_.erase(iter);
-}
-
-void RRefContext::finishUserRRef(const RRefId& rrefId, const ForkId& forkId) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  TORCH_INTERNAL_ASSERT(
-      pendingAcceptedUsers_.find(forkId) == pendingAcceptedUsers_.end(),
-      "Inconsistent state, attempt to accept the same UserRRef twice.")
-
-  auto iter = pendingUsers_.find(forkId);
-  if (iter != pendingUsers_.end()) {
-    TORCH_INTERNAL_ASSERT(
-        iter->second->rrefId() == rrefId,
-        "Attempt to accept a fork with incorrect RRefId.");
-    // UserRRef created before receiving RREF_USER_ACCEPT message
-    pendingUsers_.erase(iter);
-  } else {
-    // RREF_USER_ACCEPT arrives before UserRRef is created, remove it
-    pendingAcceptedUsers_.insert(forkId);
-  }
+  fm->addCallback([](const Message& message){
+    handleException(message);
+  });
 }
 
 void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
-  addForkOfOwnerNoLock(rrefId, forkId);
-}
-
-std::shared_ptr<RRef> RRefContext::delForkOfOwner(
-    const RRefId& rrefId,
-    const ForkId& forkId) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return delForkOfOwnerNoLock(rrefId, forkId);
-}
-
-void RRefContext::addForkOfOwnerNoLock(
-    const RRefId& rrefId,
-    const ForkId& forkId) {
   auto& rrefForks = forks_[rrefId];
   TORCH_INTERNAL_ASSERT(
       rrefForks.find(forkId) == rrefForks.end(),
@@ -300,9 +225,10 @@ void RRefContext::addForkOfOwnerNoLock(
   rrefForks.insert(forkId);
 }
 
-std::shared_ptr<RRef> RRefContext::delForkOfOwnerNoLock(
+std::shared_ptr<RRef> RRefContext::delForkOfOwner(
     const RRefId& rrefId,
     const ForkId& forkId) {
+  std::lock_guard<std::mutex> lock(mutex_);
   auto rrefIter = forks_.find(rrefId);
   TORCH_INTERNAL_ASSERT(
       rrefIter != forks_.end(),

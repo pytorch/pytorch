@@ -151,6 +151,9 @@ void ProcessGroupAgent::join() {
   // 2. A GLOO process cannot send message to itself. (there is an ongoing
   //    effort to fix this problem).
   sync();
+  std::unique_lock<std::mutex> lock(futureMutex_);
+  futureCV_.wait(lock, [this] { return futures_.empty(); });
+  pg_->barrier()->wait();
   int dst = (pg_->getRank() + 1) % pg_->getSize();
   enqueueSend(
       SendWork(workerInfos_[dst], Message({}, {}, MessageType::SHUTDOWN)));
@@ -262,7 +265,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
 
         if (message.isRequest()) {
           auto id = message.id();
-          Message response = cb_(work.from_, std::move(message));
+          Message response = cb_(std::move(message));
           response.setId(id);
           send(work.from_, std::move(response));
         } else if (message.isResponse()) {
@@ -271,9 +274,15 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
           {
             std::lock_guard<std::mutex> lock{futureMutex_};
             fm = futures_[id];
+          }
+          // Not holding lock on markCompleted as this could run callbacks that
+          // call agent_->send
+          fm->markCompleted(std::move(message));
+          {
+            std::lock_guard<std::mutex> lock{futureMutex_};
             futures_.erase(id);
           }
-          fm->markCompleted(std::move(message));
+          futureCV_.notify_all();
         } else {
           // TODO: pass the error back to the caller instead of crashing here.
           AT_ERROR("unrecognized message type ", message.type());

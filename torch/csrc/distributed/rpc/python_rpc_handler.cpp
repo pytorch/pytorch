@@ -30,14 +30,12 @@ void init() {
   }
 }
 
-std::vector<char> generatePythonUDFResult(
-    const Message& message,
-    worker_id_t dst) {
+std::vector<char> generatePythonUDFResult(const Message& message) {
   AutoGIL ag;
   auto pickledPythonUDF =
       py::bytes(message.payload().data(), message.payload().size());
   py::object res = runUDFFunction_(pickledPythonUDF);
-  const auto& presStr = static_cast<std::string>(serialize(res, dst));
+  const auto& presStr = static_cast<std::string>(serialize(res));
   std::vector<char> payload(presStr.begin(), presStr.end());
   return payload;
 }
@@ -47,9 +45,9 @@ py::object runPythonUDF(const std::string& pickledPythonUDF) {
   return runUDFFunction_(py::bytes(pickledPythonUDF));
 }
 
-std::string serialize(const py::object& obj, worker_id_t dst) {
+std::string serialize(const py::object& obj) {
   AutoGIL ag;
-  return static_cast<std::string>((py::bytes)serializeFunction_(obj, dst));
+  return static_cast<std::string>((py::bytes)serializeFunction_(obj));
 }
 
 py::object deserialize(const std::string& serializedObj) {

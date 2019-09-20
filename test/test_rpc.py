@@ -524,6 +524,7 @@ class RpcTest(MultiProcessTestCase):
             )
             self.assertEqual(rref_c.to_here(), torch.ones(n, n) * 4 + i)
 
+
     @_wrap_with_rpc
     def test_py_rpc_rref_args(self):
         n = self.rank + 1
@@ -539,11 +540,13 @@ class RpcTest(MultiProcessTestCase):
                 torch.add,
                 args=(torch.ones(n, n), i)
             )
+
             c = dist.rpc(
                 'worker{}'.format(dst_rank),
                 my_rref_function,
                 args=(rref_a, rref_b)
             )
+
             self.assertEqual(c, torch.ones(n, n) * 4 + i)
 
     @_wrap_with_rpc
