@@ -187,22 +187,22 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
 
-def _with_file_like(f, mode, body, opener):
-    """
-    Executes a body function with a file object for f, opening
-    it in 'mode' if it is a string filename.
-    """
-    new_fd = False
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        new_fd = True
-        f = opener(f, mode)
-    try:
-        return body(f)
-    finally:
-        if new_fd:
-            f.close()
+class _open_zipfile_like(object):
+    def __init__(self, f, mode):
+        self.f = f
+        self.mode = mode
+
+    def __enter__(self):
+        if isinstance(self.f, str) or \
+                (sys.version_info[0] == 2 and isinstance(self.f, unicode)) or \
+                (sys.version_info[0] == 3 and isinstance(self.f, pathlib.Path)):
+            self.fd = zipfile.ZipFile(self.f, self.mode)
+            return self.fd
+        return self.f
+
+    def __exit__(self, *args):
+        if hasattr(self, 'fd'):
+            self.fd.close()
 
 
 def _is_compressed_file(f):
@@ -281,12 +281,9 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
                    'write method does not return the number of bytes written. '
                    'Please use something like io.BytesIO for torch.save instead.')
             raise RuntimeError(msg)
-    return _with_file_like(
-        f,
-        "w",
-        body=lambda f: _save(obj, f, pickle_module, pickle_protocol),
-        opener=lambda f, mode: zipfile.ZipFile(f, 'w'),
-        )
+
+    with _open_zipfile_like(f=f, mode='w') as f:
+        return _save(obj, f, pickle_module, pickle_protocol)
 
 
 def _save(obj, zip_file, pickle_module, pickle_protocol):
