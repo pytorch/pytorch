@@ -102,25 +102,21 @@ class ChunkDataReader(object):
 class DistributedChunkSampler(Sampler):
     r"""This sampler introduces distributed sampling without padding and dataset dependency.
 
-    This sampler is very similar to the `DistributedSampler`, however avoid padding and
+    This sampler is very similar to the `DistributedSampler`, however without padding and
     the dependency on the size of the dataset. With two levels of sampling, the
     `DistributedChunkSampler` is used by the dataset and hence run by a dataloader worker.
-    To distinguish workers from the same node and distribute data among all participating workers,
-    each sampler needs to be configured with :attr:`rank` using a worker initialization function.
 
     Python DataLoader uses multi-processing instead of
     multi-threading for parallelism, therefore, each worker
     is a separate process with an identical copy of sampler.
     Because of that, on a distributed environment, different processes
     could read the same portion of the dataset. This sampler uses strides,
-    based on the global worker rank concept, to coordinate parallel reading of chunks of data.
+    based on the rank concept, to coordinate parallel reading of chunks of data.
 
     For example, assume 2 workers reading the same `ChunkDataset` dataset.
     Each worker process needs to configure their `DistributedChunkSampler`
     so that one of them reads all even batches (e.g. `rank` 0)
     while the other process reads all odd batches (e.g. `rank` 1).
-
-    If :attr:`shuffle` is ``True``, sampler will shuffle the indicies
 
     Args:
         num_replicas (int): Number of processes participating in the data reading.
