@@ -3258,7 +3258,7 @@ inline IntArrayRef Tensor::q_per_channel_axis() const {
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::q_per_channel_axis(Tensor self) -> int[]");
-    return table->getOp<IntArrayRef (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+    return table->getOp<IntArrayRef (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::int_repr() const {
