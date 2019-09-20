@@ -12,7 +12,8 @@ class Tensor;
 namespace c10 {
 struct IValue;
 struct OperatorName;
-}
+} // namespace c10
+
 namespace torch {
 namespace jit {
 

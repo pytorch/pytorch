@@ -9,6 +9,28 @@
 #include <string>
 #include <vector>
 
+// The import process to serialize the bytecode package.
+// An example for bytecode.pkl of a small mobile_module looks like:
+//  (('__torch__.m.add_it',
+//    (('instructions',
+//      (('STOREN', 1, 2),
+//       ('MOVE', 1, 0),
+//       ('GET_ATTR', 0, 0),
+//       ('MOVE', 2, 0),
+//       ('LOADC', 0, 0),
+//       ('OP', 0, 0),
+//       ('LOADC', 1, 0),
+//       ('LOADC', 0, 0),
+//       ('OP', 1, 0),
+//       ('RET', 0, 0))),
+//     ('operators', (('_aten::add', 'Tensor'), ('_aten::add', 'Scalar'))),
+//     ('constants', (1, 4)),
+//     ('agg_output_size', 2))),)
+
+// Note that currently the backward compatibility is not supported by bytecode.
+// This format and process need to be revisted and redesigned if we want to
+// suppot backward compatibility in future.
+
 namespace torch {
 namespace jit {
 using caffe2::serialize::PyTorchStreamReader;
@@ -92,15 +114,9 @@ BytecodeDeserializer::BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> 
 
 mobile::Module BytecodeDeserializer::deserialize(c10::optional<at::Device> device) {
   device_ = device;
-  // vals[0]: methods.
   auto bvals = readArchive("bytecode").toTuple()->elements();
-  auto mvals = bvals[0].toTuple()->elements();
-  TORCH_CHECK(mvals.size() == 2,
-              "Methods has \"methods\": tuple format.");
-  TORCH_CHECK(mvals[0].toString()->string() == "methods",
-              "Field of \"methods\" is expected.");
   auto mcu = std::make_shared<mobile::CompilationUnit>();
-  parseMethods(mvals[1].toTuple()->elements(), mcu);
+  parseMethods(bvals, mcu);
 
   return mobile::Module(readArchive("data").toObject(), mcu);
 }
