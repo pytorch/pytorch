@@ -4,7 +4,7 @@
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/variable_tensor_list.h>
-#include <torch/csrc/jit/utils.h>
+#include <torch/csrc/jit/update_graph_executor_opt.h>
 #include <memory>
 
 namespace torch {

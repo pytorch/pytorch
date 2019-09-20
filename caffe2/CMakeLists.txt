@@ -387,7 +387,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/symbolic_script.cpp
     ${TORCH_SRC_DIR}/csrc/jit/profiling_record.cpp
     ${TORCH_SRC_DIR}/csrc/jit/profiling_graph_executor_impl.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/utils.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/update_graph_executor_opt.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/bailout_graph.cpp
@@ -461,11 +461,12 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
     )
 
-  if (BUILD_TEST AND NOT INTERN_BUILD_MOBILE)
+  if (NOT INTERN_BUILD_MOBILE)
     set (LITE_INTERPRETER_SRCS
         ${TORCH_SRC_DIR}/csrc/jit/lite_interpreter/import_bytecode.cpp
-        ${TORCH_SRC_DIR}/csrc/jit/lite_interpreter/bytecode.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/lite_interpreter/mobile_module.cpp
         ${TORCH_SRC_DIR}/csrc/jit/lite_interpreter/register_ins_ops.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/lite_interpreter/lite_interpreter.cpp
         )
     list (APPEND TORCH_SRCS ${LITE_INTERPRETER_SRCS})
   endif()

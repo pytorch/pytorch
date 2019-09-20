@@ -2,7 +2,7 @@
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/lite_interpreter/import_bytecode.h>
-#include <torch/csrc/jit/lite_interpreter/bytecode.h>
+#include <torch/csrc/jit/lite_interpreter/mobile_module.h>
 #include <torch/csrc/jit/import.h>
 
 // Tests go in torch::jit
@@ -35,9 +35,9 @@ void testLiteInterpreter() {
 //  std::cout << outputref.slice(/*dim=*/1, /*start=*/0, /*end=*/5);
 
   std::stringstream ss;
-  m.save_for_mobile(ss);
+  m._save_for_mobile(ss);
   at::Tensor res;
-  auto bc = load_bytecode(ss);
+  auto bc = _load_for_mobile(ss);
 
   std::cout << "ref slots: \n";
   printSlots(m.module_object());

@@ -18,16 +18,13 @@ at::Tensor optional_to_tensor(c10::optional<at::Tensor> v) {
 }
 
 static auto registry0 = torch::RegisterOperators().op(
-  "aten::matmul",
-  torch::RegisterOperators::options().kernel<decltype(at::matmul), &at::matmul>(c10::TensorTypeId::CPUTensorId)
-).op(
-  "aten::add.Tensor",
+  "_aten::add.Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
   [](at::Tensor a, at::Tensor b, at::Scalar c) ->at::Tensor {
     return at::add(a, b, c);
   })
 ).op(
-  "aten::add.Scalar",
+  "_aten::add.Scalar",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
   [](at::Tensor a, at::Scalar b, at::Scalar c) ->at::Tensor {
     return at::add(a, b, c);

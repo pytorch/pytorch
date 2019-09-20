@@ -1,67 +1,30 @@
-#include "bytecode.h"
+#include "lite_interpreter.h"
+#include <ATen/core/operator_name.h>
 #include <aten/src/ATen/core/dispatch/Dispatcher.h>
-#include <torch/csrc/jit/script/jit_exception.h>
-#include <iostream>
 
-namespace torch {
-namespace jit {
-
-std::ostream& operator<<(std::ostream& out, Instruction inst);
-template <typename dtype> // int64_t, bool, double
-void ListConstructFunc(int64_t num_inputs, Stack& stack) {
-  auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-  c10::List<dtype> vals =
-      c10::impl::toList(fmap(inputs, [](const IValue& v) {
-        return v.to<dtype>(); }));
-  drop(stack, num_inputs);
-  push(stack, std::move(vals));
-}
-
+namespace torch{
+namespace jit{
 namespace mobile {
-
-const std::string& Method::name() const {
-  return name_;
+InterpreterState::InterpreterState(const Bytecode& bytecode)
+    : instructions_(bytecode.instructions_),
+      op_names_(bytecode.op_names_),
+      constants_(bytecode.constants_),
+      register_size_(bytecode.agg_size_) {
+  registers_.resize(register_size_);
 }
 
-void Method::set_name(const std::string& name) {
-  name_ = name;
-}
-
-void Method::append_instruction(OpCode op, int N, int X) {
-  instructions_.emplace_back(op, N, X);
-}
-
-void Method::append_opname(const std::string& name,
-                           const std::string& overload_name) {
-  op_names_.emplace_back(name, overload_name);
-}
-
-void Method::append_constant(const c10::IValue& constant) {
-  constants_.push_back(constant);
-}
-
-void Method::resize_registers(int size) {
-  registers_.resize(size);
-}
-
-IValue& Method::reg(size_t reg) {
-  return *(registers_.end() - reg);
-}
-
-bool Method::run(Stack& stack) {
+bool InterpreterState::run(Stack& stack) {
   size_t pc = 0;
   while (true) {
-    std::cout << "RUNNING " << pc << " " << instructions_[pc];
-    std::cout << std::endl;
-    for (auto val : stack) {
-      if (val.isTensor()) {
-        std::cout << val.toTensor().sizes() << std::endl;
-      } else {
-        std::cout << val << std::endl;
-      }
-    }
-    if (pc == 125)
-      int debugint = 0;
+    //    std::cout << "RUNNING " << pc << " " << instructions_[pc];
+    //    std::cout << std::endl;
+    //    for (auto val : stack) {
+    //      if (val.isTensor()) {
+    //        std::cout << val.toTensor().sizes() << std::endl;
+    //      } else {
+    //        std::cout << val << std::endl;
+    //      }
+    //    }
     Instruction inst = instructions_[pc];
     switch (inst.op) {
       case OP: {
@@ -198,26 +161,8 @@ bool Method::run(Stack& stack) {
   return false;
 }
 
-void Bytecode::append_method(const Method& method) {
-  methods_.push_back(method);
-}
-
-IValue Bytecode::run_method(const std::string& method_name, Stack& stack) {
-  auto m = find_method(method_name);
-  stack.insert(stack.begin(), object_);
-  m.run(stack);
-  return stack.front();
-}
-
-void Bytecode::set_object(const c10::intrusive_ptr<c10::ivalue::Object>& object) {
-  object_ = object;
-}
-
-Method Bytecode::find_method(const std::string& name) {
-  for (auto m : methods_) {
-    if (m.name() == name) return m;
-  }
-  AT_ERROR("Method '", name, "' is not defined.");
+IValue& InterpreterState::reg(size_t reg) {
+  return *(registers_.end() - reg);
 }
 
 } // namespace mobile

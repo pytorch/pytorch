@@ -95,11 +95,11 @@ void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
 #endif
 }
 
-void Module::save_for_mobile(std::ostream& out, const ExtraFilesMap& extra_files) const {
+void Module::_save_for_mobile(std::ostream& out, const ExtraFilesMap& extra_files) const {
   ExportModule(*this, out, extra_files, true);
 }
 
-void Module::save_for_mobile(const std::string& filename, const ExtraFilesMap& extra_files)
+void Module::_save_for_mobile(const std::string& filename, const ExtraFilesMap& extra_files)
     const {
   ExportModule(*this, filename, extra_files, true);
 }
