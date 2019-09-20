@@ -44,11 +44,8 @@ public:
         return _mm256_blend_pd(a.values, b.values, 0x3);
       case 2:
         return _mm256_blend_pd(a.values, b.values, 0xc);
-      case 3:
-        return b;
-      default:
-        AT_ERROR("unsupported Vec256<complex> blend mask");
     }
+    return b;
   }
   static Vec256<std::complex<double>> blendv(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b,
                                const Vec256<std::complex<double>>& mask) {
