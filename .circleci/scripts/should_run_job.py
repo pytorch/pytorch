@@ -54,6 +54,8 @@ default_set = set([
     'pytorch-ios-10.2.1-x86_64_build',
     'pytorch-ios-10.2.1-arm64_build',
 
+    # Pytorch backward compatibility check
+    'pytorch-linux-backward-compatibility-check-test',
 
     # XLA
     'pytorch-xla-linux-xenial-py3.6-clang7',
