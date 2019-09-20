@@ -10376,7 +10376,7 @@ class TestTorchDeviceType(TestCase):
                                 expected = brute_cdist(x, y, p=p)
                                 self.assertTrue(torch.allclose(expected, actual))
                         else:
-                            actual = torch.cdist(x, y, p=p, compute_mode=cm)
+                            actual = torch.cdist(x, y, p=p)
                             expected = brute_cdist(x, y, p=p)
                             self.assertTrue(torch.allclose(expected, actual))
 

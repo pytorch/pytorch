@@ -653,7 +653,7 @@ def cdist(x1, x2, p=2, compute_mode='use_mm_for_euclid_dist_if_necessary'):
         return torch._C._VariableFunctions.cdist(x1, x2, p, None)
     elif compute_mode == 'use_mm_for_euclid_dist':
         return torch._C._VariableFunctions.cdist(x1, x2, p, 1)
-    elif compute_mode == 'use_mm_for_euclid_dist':
+    elif compute_mode == 'donot_use_mm_for_euclid_dist':
         return torch._C._VariableFunctions.cdist(x1, x2, p, 2)
     else:
         raise ValueError("{} is not a valid value for compute_mode".format(compute_mode))
