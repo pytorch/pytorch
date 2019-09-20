@@ -14499,6 +14499,26 @@ a")
             m = M({char : torch.ones(1) + ord(char) - ord("a") for char in "abcdefg"})
             self.assertEqual(m("c"), torch.tensor([103]))
 
+    def test_module_const_attrs(self):
+        class M(torch.nn.Module):
+            __constants__ = ['i', 'non']
+            def __init__(self):
+                super(M, self).__init__()
+                self.i = 10
+                self.non = None
+
+            def forward(self, x):
+                # type: (int) -> int
+                if self.non is None:
+                    return x + self.i
+                else:
+                    return -1
+
+        m = torch.jit.script(M())
+        self.assertEqual(m(5), 15)
+        self.assertTrue(m._c._has_attribute('i'))
+        self.assertFalse(m._c._has_attribute('non'))
+
     def test_tensor_import_export(self):
         @torch.jit.script
         def foo(x):
