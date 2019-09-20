@@ -20,21 +20,10 @@ int64_t dimname_to_position(const Tensor& tensor, Dimname dim) {
       "Name ", dim, " not found in ", toDimnameRepr(tensor), ".");
   const auto names = tensor.names();
 
-  const auto it = std::find_if(
-      names.begin(), names.end(),
-      [&dim](const Dimname& candidate) { return dim.can_refer_to(candidate); });
+  const auto it = std::find(names.begin(), names.end(), dim);
   TORCH_CHECK(it != names.end(),
       "Name ", dim, " not found in ", toDimnameRepr(tensor), ".");
 
-  // Check that it can't refer to another dimension
-  const auto dup = std::find_if(
-      it + 1, names.end(),
-      [&dim](const Dimname& candidate) { return dim.can_refer_to(candidate); });
-  TORCH_CHECK(
-      dup == names.end(),
-      "Name ", dim, " could refer to multiple dimensions in ",
-      toDimnameRepr(tensor), ". Please disambiguate by using a more ",
-      "specific name like ", *it, " or ", dup, ".");
   return std::distance(names.begin(), it);
 }
 
@@ -68,8 +57,7 @@ static void check_for_misalignment(
   if (name.is_wildcard()) {
     return;
   }
-  auto it = std::find_if(other_names.begin(), other_names.end(),
-      [&](const Dimname& candidate) { return name.can_refer_to(candidate); });
+  auto it = std::find(other_names.begin(), other_names.end(), name);
   // TODO(zou3519): Can improve message by checking if names are alignable and suggesting workarounds
   TORCH_CHECK(it == other_names.end(),
       "Misaligned dims when attempting to ", action, " dims ", names, " and dims ",
@@ -93,11 +81,6 @@ std::vector<Dimname> unify_from_right(
   while (names_it != names.rend() || other_it != other_names.rend()) {
     const auto& name = names_it == names.rend() ? wildcard : *names_it;
     const auto& other_name = other_it == other_names.rend() ? wildcard : *other_it;
-
-    // TODO(zou3519): Don't support tagged names for now. They're a little weird.
-    if (name.is_tagged() || other_name.is_tagged()) {
-      TORCH_INTERNAL_ASSERT("unify_from_right: NYI: tagged names.");
-    }
 
     // Step 1: Check that the names match
     const auto maybeName = unify(name, other_name);

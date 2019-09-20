@@ -10,7 +10,7 @@ std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {
   if (dimname.type() == NameType::WILDCARD) {
     out << "None";
   } else {
-    out << "'" << dimname.full_name().toUnqualString() << "'";
+    out << "'" << dimname.symbol().toUnqualString() << "'";
   }
   return out;
 }
@@ -28,20 +28,6 @@ bool is_valid_identifier(const std::string& name) {
   return true;
 }
 
-bool Dimname::can_refer_to(const Dimname& other) const {
-  switch (type()) {
-    case NameType::WILDCARD:
-      return false;
-
-    // "C" can be used to refer to "C" or "C.in".
-    case NameType::NORMAL:
-      return untagged_name() == other.untagged_name();
-
-    default:
-      return full_name() == other.full_name();
-  }
-}
-
 static void check_valid_identifier(const std::string& name) {
   TORCH_CHECK(
       is_valid_identifier(name),
@@ -49,17 +35,17 @@ static void check_valid_identifier(const std::string& name) {
       name, "'.");
 }
 
-Dimname Dimname::fromSymbol(Symbol full_name) {
-  TORCH_INTERNAL_ASSERT(full_name.is_dimname());
-  if (full_name == kWildcard) {
+Dimname Dimname::fromSymbol(Symbol name) {
+  TORCH_INTERNAL_ASSERT(name.is_dimname());
+  if (name == kWildcard) {
     return Dimname::wildcard();
   }
-  check_valid_identifier(full_name.toUnqualString());
-  return Dimname(full_name);
+  check_valid_identifier(name.toUnqualString());
+  return Dimname(name);
 }
 
 Dimname Dimname::wildcard() {
-  static Dimname result(NameType::WILDCARD, kWildcard, kWildcard);
+  static Dimname result(kWildcard, NameType::WILDCARD);
   return result;
 }
 
@@ -70,11 +56,8 @@ optional<Dimname> unify(Dimname dimname, Dimname other) {
   if (dimname.type() == NameType::WILDCARD) {
     return other;
   }
-  if (dimname.full_name() == other.full_name()) {
+  if (dimname.symbol() == other.symbol()) {
     return dimname;
-  }
-  if (dimname.untagged_name() == other.untagged_name()) {
-    return Dimname::fromSymbol(dimname.untagged_name());
   }
   return c10::nullopt;
 }
