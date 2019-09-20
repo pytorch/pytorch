@@ -1,7 +1,8 @@
 import sys
 import torch
 import torch._C as _C
-from torch.namedtensor import _update_names, _check_serializing_named_tensor, _resolve_glob
+from torch._namedtensor_internals import update_names, check_serializing_named_tensor, resolve_ellipsis
+from torch._namedtensor_internals import unzip_namedshape
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
@@ -37,7 +38,7 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
-        _check_serializing_named_tensor(self)
+        check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         if self.is_quantized:
@@ -486,11 +487,15 @@ class Tensor(torch._C._TensorBase):
         return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=1)
 
     def refine_names(self, *names):
-        names = _resolve_glob(names, self.names, 'refine_names')
+        names = resolve_ellipsis(names, self.names, 'refine_names')
         return super(Tensor, self).refine_names(names)
 
     def align_to(self, *names):
-        return super(Tensor, self).align_to(_resolve_glob(names, self.names, 'align_to'))
+        return super(Tensor, self).align_to(resolve_ellipsis(names, self.names, 'align_to'))
+
+    def unflatten(self, dim, namedshape):
+        names, sizes = unzip_namedshape(namedshape)
+        return super(Tensor, self).unflatten(dim, sizes, names)
 
     def names_(self, *names, **rename_map):
         # Note [names_ / renamed API]
@@ -498,11 +503,11 @@ class Tensor(torch._C._TensorBase):
         # 1) tensor.renamed(*names) takes a vararglist of names
         # 2) tensor.renamed(**rename_map) takes a map of names to rename.
         # C++ is static, making it difficult to implement similar behavior.
-        return _update_names(self, names, rename_map, inplace=True)
+        return update_names(self, names, rename_map, inplace=True)
 
     def renamed(self, *names, **rename_map):
         # See Note [names_ / renamed API]
-        return _update_names(self, names, rename_map, inplace=False)
+        return update_names(self, names, rename_map, inplace=False)
 
     def _update_names(self, names, inplace):
         # See Note [names_ / renamed API]

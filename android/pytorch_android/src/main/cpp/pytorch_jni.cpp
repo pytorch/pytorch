@@ -10,11 +10,12 @@
 
 namespace pytorch_jni {
 
-constexpr static int kTensorDTypeByte = 1;
-constexpr static int kTensorDTypeInt32 = 2;
-constexpr static int kTensorDTypeFloat32 = 3;
-constexpr static int kTensorDTypeLong64 = 4;
-constexpr static int kTensorDTypeDouble64 = 5;
+constexpr static int kTensorDTypeUInt8 = 1;
+constexpr static int kTensorDTypeInt8 = 2;
+constexpr static int kTensorDTypeInt32 = 3;
+constexpr static int kTensorDTypeFloat32 = 4;
+constexpr static int kTensorDTypeInt64 = 5;
+constexpr static int kTensorDTypeFloat64 = 6;
 
 template <typename K = jobject, typename V = jobject>
 struct JHashMap
@@ -64,15 +65,18 @@ static at::Tensor newAtTensor(
   } else if (kTensorDTypeInt32 == jdtype) {
     dataElementSizeBytes = 4;
     typeMeta = caffe2::TypeMeta::Make<int32_t>();
-  } else if (kTensorDTypeByte == jdtype) {
+  } else if (kTensorDTypeInt8 == jdtype) {
     dataElementSizeBytes = 1;
     typeMeta = caffe2::TypeMeta::Make<int8_t>();
-  } else if (kTensorDTypeLong64 == jdtype) {
-    dataElementSizeBytes = 8;
-    typeMeta = caffe2::TypeMeta::Make<int64_t>();
-  } else if (kTensorDTypeDouble64 == jdtype) {
+  } else if (kTensorDTypeUInt8 == jdtype) {
+    dataElementSizeBytes = 1;
+    typeMeta = caffe2::TypeMeta::Make<uint8_t>();
+  } else if (kTensorDTypeFloat64 == jdtype) {
     dataElementSizeBytes = 8;
     typeMeta = caffe2::TypeMeta::Make<double>();
+  } else if (kTensorDTypeInt64 == jdtype) {
+    dataElementSizeBytes = 8;
+    typeMeta = caffe2::TypeMeta::Make<int64_t>();
   } else {
     facebook::jni::throwNewJavaException(
         facebook::jni::gJavaLangIllegalArgumentException,
@@ -123,11 +127,13 @@ class JTensor : public facebook::jni::JavaClass<JTensor> {
     } else if (at::kInt == scalarType) {
       jdtype = kTensorDTypeInt32;
     } else if (at::kByte == scalarType) {
-      jdtype = kTensorDTypeByte;
+      jdtype = kTensorDTypeUInt8;
+    } else if (at::kChar == scalarType) {
+      jdtype = kTensorDTypeInt8;
     } else if (at::kLong == scalarType) {
-      jdtype = kTensorDTypeLong64;
+      jdtype = kTensorDTypeInt64;
     } else if (at::kDouble == scalarType) {
-      jdtype = kTensorDTypeDouble64;
+      jdtype = kTensorDTypeFloat64;
     } else {
       facebook::jni::throwNewJavaException(
           facebook::jni::gJavaLangIllegalArgumentException,
@@ -318,7 +324,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       return jMethodListArr(JIValue::javaClassStatic(), jArray);
     } else if (ivalue.isGenericDict()) {
       auto dict = ivalue.toGenericDict();
-      const auto keyType = dict._keyType();
+      const auto keyType = dict.keyType();
 
       if (!keyType) {
         facebook::jni::throwNewJavaException(
@@ -326,7 +332,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
             "Unknown IValue-Dict key type");
       }
 
-      const auto keyTypeKind = keyType.value()->kind();
+      const auto keyTypeKind = keyType->kind();
       if (c10::TypeKind::StringType == keyTypeKind) {
         static auto jMethodDictStringKey =
             JIValue::javaClassStatic()
@@ -415,17 +421,12 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
 
       std::vector<at::IValue> elements;
       elements.reserve(n);
-      std::vector<c10::TypePtr> types;
-      types.reserve(n);
       for (auto i = 0; i < n; ++i) {
         auto jivalue_element = jarray->getElement(i);
         auto element = JIValue::JIValueToAtIValue(jivalue_element);
-        c10::TypePtr typePtr = c10::attemptToRecoverType(element);
         elements.push_back(std::move(element));
-        types.push_back(std::move(typePtr));
       }
-      return c10::ivalue::Tuple::create(
-          std::move(elements), c10::TupleType::create(std::move(types)));
+      return c10::ivalue::Tuple::create(std::move(elements));
     } else if (JIValue::kTypeCodeBoolList == typeCode) {
       static const auto jMethodGetBoolList =
           JIValue::javaClassStatic()->getMethod<jbooleanArray()>("getBoolList");
@@ -589,7 +590,11 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
       inputs.push_back(std::move(atIValue));
     }
-    auto output = module_.forward(std::move(inputs));
+    auto output = [&]() {
+      torch::autograd::AutoGradMode guard(false);
+      at::AutoNonVariableTypeMode non_var_type_mode(true);
+      return module_.forward(std::move(inputs));
+    }();
     return JIValue::newJIValueFromAtIValue(output);
   }
 
@@ -608,7 +613,11 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
       inputs.push_back(std::move(atIValue));
     }
     if (auto method = module_.find_method(methodName)) {
-      auto output = (*method)(std::move(inputs));
+      auto output = [&]() {
+        torch::autograd::AutoGradMode guard(false);
+        at::AutoNonVariableTypeMode non_var_type_mode(true);
+        return (*method)(std::move(inputs));
+      }();
       return JIValue::newJIValueFromAtIValue(output);
     }
 
