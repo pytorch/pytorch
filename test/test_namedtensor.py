@@ -670,7 +670,7 @@ class TestNamedTensor(TestCase):
         # Implemented via TensorIterator, so just check that each version
         # (out-of-place, inplace, out=) propagates names.
         def zeros(*args, **kwargs):
-            return torch.zeros(*args, **kwargs, dtype=torch.bool)
+            return torch.zeros(*args, dtype=torch.bool, **kwargs)
 
         self._test_name_inference(
             torch.logical_xor,
@@ -686,8 +686,6 @@ class TestNamedTensor(TestCase):
             lambda out, x, y: torch.logical_xor(x, y, out=out),
             (create('0', zeros), create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
             expected_names=['N', 'C'])
-
-
 
     def test_pow_special(self):
         # There are a few pow cases that don't go through TensorIterator.
