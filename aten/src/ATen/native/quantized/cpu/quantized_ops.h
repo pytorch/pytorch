@@ -25,12 +25,19 @@ using qmaxpool_2d_fn =
              int64_t dW, // dilation
              Tensor &qy
             );
+using qcat_nhwc_fn = Tensor (*)(
+    const c10::List<Tensor>& qxs,
+    int64_t dim,
+    double scale,
+    int64_t zero_point);
 
 DECLARE_DISPATCH(qrelu_fn, qrelu_stub);
 DECLARE_DISPATCH(qrelu_fn, qrelu6_stub);
 DECLARE_DISPATCH(qadd_fn, qadd_stub);
 DECLARE_DISPATCH(qadd_fn, qadd_relu_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
+DECLARE_DISPATCH(qcat_nhwc_fn, qcat_nhwc_stub);
+DECLARE_DISPATCH(qcat_nhwc_fn, qcat_relu_nhwc_stub);
 
 } // namespace native
 } // namespace at
