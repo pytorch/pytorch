@@ -3491,10 +3491,10 @@
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
   use_c10_dispatcher: True
 
-- func: quantize_linear(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
+- func: quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
-    CPU: quantize_linear_cpu
+    CPU: quantize_per_tensor_cpu
 
 - func: quantize_linear_per_channel(Tensor self, Tensor scales, Tensor zero_points, int[] axis, ScalarType dtype) -> Tensor
   variants: function
