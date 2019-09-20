@@ -258,6 +258,14 @@ private:
         return *catchall_kernel_;
       }
 
+      if (!dispatch_key.has_value() || *dispatch_key == TensorTypeId::UndefinedTensorId) {
+        TORCH_CHECK(false,
+              "There were no tensor arguments to this function (e.g., you passed an "
+              "empty list of Tensors), but no fallback function is registered for schema ", operator_name_,
+              ".  This usually means that this function requires a non-empty list of Tensors.  "
+              "Available functions are ", listAllDispatchKeys())
+      }
+
       const std::string dispatch_key_str = dispatch_key.has_value() ? toString(*dispatch_key) : "None";
       TORCH_CHECK(false, "Didn't find kernel to dispatch to for operator '", operator_name_,
                "'. Tried to look up kernel for dispatch key '", dispatch_key_str,
