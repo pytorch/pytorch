@@ -324,7 +324,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       return jMethodListArr(JIValue::javaClassStatic(), jArray);
     } else if (ivalue.isGenericDict()) {
       auto dict = ivalue.toGenericDict();
-      const auto keyType = dict._keyType();
+      const auto keyType = dict.keyType();
 
       if (!keyType) {
         facebook::jni::throwNewJavaException(
@@ -332,7 +332,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
             "Unknown IValue-Dict key type");
       }
 
-      const auto keyTypeKind = keyType.value()->kind();
+      const auto keyTypeKind = keyType->kind();
       if (c10::TypeKind::StringType == keyTypeKind) {
         static auto jMethodDictStringKey =
             JIValue::javaClassStatic()
@@ -421,17 +421,12 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
 
       std::vector<at::IValue> elements;
       elements.reserve(n);
-      std::vector<c10::TypePtr> types;
-      types.reserve(n);
       for (auto i = 0; i < n; ++i) {
         auto jivalue_element = jarray->getElement(i);
         auto element = JIValue::JIValueToAtIValue(jivalue_element);
-        c10::TypePtr typePtr = c10::attemptToRecoverType(element);
         elements.push_back(std::move(element));
-        types.push_back(std::move(typePtr));
       }
-      return c10::ivalue::Tuple::create(
-          std::move(elements), c10::TupleType::create(std::move(types)));
+      return c10::ivalue::Tuple::create(std::move(elements));
     } else if (JIValue::kTypeCodeBoolList == typeCode) {
       static const auto jMethodGetBoolList =
           JIValue::javaClassStatic()->getMethod<jbooleanArray()>("getBoolList");
@@ -595,7 +590,11 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
       inputs.push_back(std::move(atIValue));
     }
-    auto output = module_.forward(std::move(inputs));
+    auto output = [&]() {
+      torch::autograd::AutoGradMode guard(false);
+      at::AutoNonVariableTypeMode non_var_type_mode(true);
+      return module_.forward(std::move(inputs));
+    }();
     return JIValue::newJIValueFromAtIValue(output);
   }
 
@@ -614,7 +613,11 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
       inputs.push_back(std::move(atIValue));
     }
     if (auto method = module_.find_method(methodName)) {
-      auto output = (*method)(std::move(inputs));
+      auto output = [&]() {
+        torch::autograd::AutoGradMode guard(false);
+        at::AutoNonVariableTypeMode non_var_type_mode(true);
+        return (*method)(std::move(inputs));
+      }();
       return JIValue::newJIValueFromAtIValue(output);
     }
 
