@@ -52,7 +52,7 @@ static bool dimnames_equal(at::DimnameList names, at::DimnameList other) {
   for (auto i = 0; i < names.size(); i++) {
     const auto& name = names[i];
     const auto& other_name = other[i];
-    if (name.type() != other_name.type() || name.full_name() != other_name.full_name()) {
+    if (name.type() != other_name.type() || name.symbol() != other_name.symbol()) {
       return false;
     }
   }
