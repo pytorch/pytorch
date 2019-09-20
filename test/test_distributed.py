@@ -235,8 +235,7 @@ class Barrier(object):
     def init(cls):
         cls.barrier_id = 0
         barrier_dir = os.path.join(TEMP_DIR, "barrier")
-        for f_name in os.listdir(barrier_dir):
-            os.unlink(os.path.join(barrier_dir, f_name))
+        for f_name in os.listdir(barrier_dir):os.unlink(os.path.join(barrier_dir, f_name))
 
     @classmethod
     def sync(cls, wait_for=None, timeout=5):
