@@ -52,13 +52,13 @@ namespace jit {
   _(RecordFunction)                    \
   _(ThreadLocalDebugInfo)              \
   _(SubgraphMatching)                  \
+  _(SubgraphRewriter)                  \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \
   _(ProfiledTensorTypeHashing)         \
   _(ScriptObject)                      \
   _(SaveExtraFilesHook)                \
-  _(InsertConstant)                    \
   _(DCE)                               \
   _(CustomFusionNestedBlocks)          \
   _(ImportTooNew)                      \

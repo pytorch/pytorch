@@ -323,7 +323,7 @@ struct Environment {
             << value->kind() << " and " << name
             << " is not a first-class value.  Only reassignments to first-class values are allowed";
       }
-      
+
       auto parent_type = unshapedType(simple_parent->type());
       as_simple_value = tryConvertToType(
           loc,
@@ -502,7 +502,7 @@ static Value* materializeConstant(
   }
 
   WithInsertPoint guard(graph.block()->nodes().front());
-  auto new_constant = graph.insertConstant(val, nullptr, r);
+  auto new_constant = graph.insertConstant(val, r);
   map[val] = new_constant;
 
   return new_constant;
@@ -829,13 +829,15 @@ struct to_ir {
       if (!result_type) {
         result_type = result->type();
       }
-      if (!unifyTypes(result_type, result->type())) {
+      auto merged_result_type = unifyTypes(result_type, result->type());
+      if (!merged_result_type) {
         throw ErrorReport(stmt.range())
             << "Previous return statement returned a value of type "
             << result_type->python_str()
             << " but this return statement returns a value of type "
             << result->type()->python_str();
       }
+      result_type = merged_result_type.value();
     }
     AT_ASSERT(result_type);
     def_stack_.back().merged_return_type_ = result_type;
@@ -1020,11 +1022,11 @@ struct to_ir {
     // if it's an OR the first expr is emitted in the true branch
     // and the second expr in the false branch, if it's an AND the opposite
     if (is_or) {
-      first_value_returned = graph->insertConstant(true, nullptr, loc);
+      first_value_returned = graph->insertConstant(true, loc);
       first_expr_refinements = &first_bool_info.true_refinements_;
       second_expr_refinements = &first_bool_info.false_refinements_;
     } else {
-      first_value_returned = graph->insertConstant(false, nullptr, loc);
+      first_value_returned = graph->insertConstant(false, loc);
       first_expr_refinements = &first_bool_info.false_refinements_;
       second_expr_refinements = &first_bool_info.true_refinements_;
     }
@@ -1266,6 +1268,59 @@ struct to_ir {
     return expr.kind() == TK_IS || expr.kind() == TK_ISNOT;
   }
 
+  Value* emitIsInstance(Expr obj, Expr classinfo) {
+    // turn (float, (int, tuple)) into a flat list of types and type kind
+    // category checks: tuple_check = true, types = {float, int}
+    struct GatheredTypes {
+      GatheredTypes(ScriptTypeParser parser) : typeParser_(std::move(parser)) {}
+      void gather(Expr classinfo) {
+        if (classinfo.kind() == TK_TUPLE_LITERAL) {
+          for (Expr e : TupleLiteral(classinfo).inputs()) {
+            gather(e);
+          }
+          return;
+        }
+        if (classinfo.kind() == TK_VAR) {
+          // Special casing for list and tuple since isinstance(x, list) and
+          // isinstance(x, tuple) does not accept List[int] / Tuple[int] like
+          // subscript type annotation in python
+          auto name = Var(classinfo).name().name();
+          if (name == "tuple") {
+            tuple_check = true;
+            return;
+          } else if (name == "list") {
+            list_check = true;
+            return;
+          }
+        }
+        TypePtr type = typeParser_.parseTypeFromExpr(classinfo);
+        types.emplace_back(type);
+      }
+      ScriptTypeParser typeParser_;
+      bool list_check = false;
+      bool tuple_check = false;
+      std::vector<TypePtr> types;
+    };
+    GatheredTypes gathered(typeParser_);
+    gathered.gather(classinfo);
+    auto val = emitExpr(obj);
+    if (val->type()->kind() == OptionalType::Kind) {
+      throw ErrorReport(obj.range())
+          << "Optional isinstance check is not supported, "
+          << "consider use is/is not None instead";
+    }
+    if ((gathered.list_check && val->type()->kind() == ListType::Kind) ||
+        (gathered.tuple_check && val->type()->kind() == TupleType::Kind)) {
+      return graph->insertConstant(true, obj.range());
+    }
+    for (const TypePtr& typ : gathered.types) {
+      if (val->type()->isSubtypeOf(typ)) {
+        return graph->insertConstant(true, obj.range());
+      }
+    }
+    return graph->insertConstant(false, obj.range());
+  }
+
   void emitIf(const If& stmt) {
     // NOTE: emitIf checks on If stmt condition to see if the cond AST is
     // a potential none check with is/is not, or an isinstance check.
@@ -1383,7 +1438,7 @@ struct to_ir {
         out = emitCond(cond.value());
       } else {
         WithInsertPoint insert(n);
-        out = graph->insertConstant(true, nullptr, range);
+        out = graph->insertConstant(true, range);
       }
       condition_block->registerOutput(out);
       popFrame();
@@ -1483,7 +1538,7 @@ struct to_ir {
   // We ignore the expression following raise
   void emitRaise(const SourceRange& loc) {
     const std::string exception = "Exception";
-    auto string_input = insertConstant(*graph, exception, nullptr, loc);
+    auto string_input = insertConstant(*graph, exception, loc);
     graph->insert(prim::RaiseException, {string_input}, {}, loc);
     exit_blocks.insert(environment_stack->block());
   }
@@ -1797,25 +1852,26 @@ struct to_ir {
         graph->insert(
             aten::index_put_, {slicedArg, indices, rhs}, {}, stmtRange);
       }
-
-      // Otherwise, this is a list. Dispatch to aten::_set_item to both select
-      // and assign
+      // Otherwise, this is a list or a classtype.
+      // Dispatch to aten::_set_item to both select and assign
     } else {
       const auto subscript = lhs.subscript_exprs();
       if (subscript.size() != 1 || subscript[0].kind() == TK_SLICE_EXPR) {
         throw ErrorReport(subscript)
             << "Sliced expression not yet supported for"
-            << " subscripted list assignment. "
+            << " subscripted assignment. "
             << "File a bug if you want this";
       }
 
       std::vector<NamedValue> args;
-      args.emplace_back(lhs.value().range(), "list", sliceable);
+      args.emplace_back(lhs.value().range(), "self", sliceable);
       args.emplace_back(
           lhs.subscript_exprs().range(), "idx", emitExpr(subscript[0]));
       args.push_back(rhs);
-
-      graph->insert(aten::_set_item, args, {}, stmtRange);
+      makeMagic(
+          "__setitem__",
+          std::make_shared<BuiltinFunction>(aten::_set_item, at::nullopt))
+          ->call(stmtRange, method, args, {}, 0);
     }
   }
 
@@ -2124,10 +2180,8 @@ struct to_ir {
     });
   }
 
-  void checkApplyExpr(
-      Apply& apply,
-      SourceRange& loc,
-      size_t expected_inputs = 2) {
+  void checkApplyNumInputs(Apply& apply, size_t expected_inputs) {
+    const SourceRange& loc = apply.range();
     if (apply.inputs().size() != expected_inputs) {
       throw ErrorReport(loc)
           << Var(apply.callee()).name().name() << " expected exactly "
@@ -2154,7 +2208,7 @@ struct to_ir {
       auto attributes = emitAttributes(apply.attributes());
       return emitForkExpr(loc, forked, inputs, attributes);
     } else if (auto annotate_value = dynamic_cast<AnnotateValue*>(sv.get())) {
-      checkApplyExpr(apply, loc);
+      checkApplyNumInputs(apply, 2);
       TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
       Value* expr = tryConvertToType(
           apply.range(),
@@ -2163,26 +2217,29 @@ struct to_ir {
           emitExpr(apply.inputs()[1], type),
           /*allow_conversions=*/true);
 
-      // This is to ensure even if user forgets to call annotate None with the
-      // Optional wrapper type, we still generate the correct value with the
-      // Optional type. e.g. it makes annoate(Tensor, None) to behave the same
-      // with annotate(Optional[Tensor], None). It also maintains the backward
-      // compatibility of exported model on Optional undefined tensor/None
-      auto opt_type = expr->type()->cast<OptionalType>();
-      bool forget_opt_annotate =
-          opt_type && *opt_type->getElementType() == *type;
-
       std::stringstream why_not;
-      if (!forget_opt_annotate &&
-          !expr->type()->isSubtypeOfExt(type, &why_not)) {
+      if (!expr->type()->isSubtypeOfExt(type, &why_not)) {
         throw ErrorReport(apply.inputs())
             << "expected an expression of type " << type->python_str()
             << " but found " << expr->type()->python_str() << "\n"
             << why_not.str();
       }
+
+      // None is a subtype of Optional[T], but we want to remember what T is,
+      // after annotation so that variables assigned to this None will still
+      // get the right type. To do this, we make a None constant that
+      // has the type Optional[T]
+      if (type->kind() == OptionalType::Kind &&
+          expr->type()->isSubtypeOf(NoneType::get())) {
+        Node* none = graph->createNone();
+        none->output()->setType(type);
+        graph->insertNode(none);
+        expr = none->output();
+      }
+
       return std::make_shared<SimpleValue>(expr);
     } else if (auto getattr = dynamic_cast<GetAttrValue*>(sv.get())) {
-      checkApplyExpr(apply, loc);
+      checkApplyNumInputs(apply, 2);
       auto obj = emitSugaredExpr(apply.inputs()[0], 1);
       auto selector = apply.inputs()[1];
       if (selector.kind() != TK_STRINGLITERAL) {
@@ -2194,13 +2251,13 @@ struct to_ir {
     } else if (
         auto uninitialized_value =
             dynamic_cast<UninitializedValue*>(sv.get())) {
-      checkApplyExpr(apply, loc, 1);
+      checkApplyNumInputs(apply, 1);
       TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
       auto out = graph->insertNode(graph->createUninitialized(type))
                      ->setSourceRange(loc);
       return std::make_shared<SimpleValue>(out->output());
     } else if (auto tuple_call = dynamic_cast<TupleCallValue*>(sv.get())) {
-      checkApplyExpr(apply, loc, /*expected_inputs*/ 1);
+      checkApplyNumInputs(apply, 1);
       auto arg = emitSugaredExpr(apply.inputs()[0], 1);
       auto inputs = arg->asTuple(apply.range(), method);
       auto inp_values = fmap(inputs, [&](const SugaredValuePtr& sv) {
@@ -2212,48 +2269,9 @@ struct to_ir {
       // NOTE: for `isinstance` builtin call in JIT, we only check the static
       // types on the inputs to evaluate, and insert the corresponding constant
       // node
-      std::function<bool(Expr, Expr)> isInstanceCheck = [&](Expr obj,
-                                                            Expr classinfo) {
-        if (classinfo.kind() == TK_TUPLE_LITERAL) {
-          // handle the case for recursive tuple classinfo
-          // return true if obj is an instance of any of the types
-          for (Expr e : TupleLiteral(classinfo).inputs()) {
-            if (isInstanceCheck(obj, e)) {
-              return true;
-            }
-          }
-          return false;
-        }
-        auto type_name = typeParser_.parseBaseTypeName(classinfo);
-        if (!type_name) {
-          throw ErrorReport(classinfo.range())
-              << "type must be a type identifier";
-        }
-        auto val = emitExpr(obj);
-        // Special casing for list and tuple since isinstance(x, list) and
-        // isinstance(x, tuple) does not accept List[int] / Tuple[int] like
-        // subscript type annotation in python
-        if (*type_name == "list" && val->type()->cast<ListType>()) {
-          return true;
-        } else if (*type_name == "tuple" && val->type()->cast<TupleType>()) {
-          return true;
-        } else if (val->type()->cast<OptionalType>()) {
-          throw ErrorReport(loc)
-              << "Optional isinstance check is not supported, "
-              << "consider use is/isnot None instead";
-        } else {
-          TypePtr type = typeParser_.parseTypeFromExpr(classinfo);
-          if (val->type()->isSubtypeOf(type)) {
-            return true;
-          }
-        }
-        return false;
-      };
-      checkApplyExpr(apply, loc);
-      bool is_instance_val =
-          isInstanceCheck(apply.inputs()[0], apply.inputs()[1]);
-      return std::make_shared<SimpleValue>(
-          graph->insertConstant(is_instance_val, nullptr, loc));
+      checkApplyNumInputs(apply, 2);
+      auto result = emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+      return std::make_shared<SimpleValue>(result);
     } else if (auto classNew = dynamic_cast<ClassNewMethod*>(sv.get())) {
       if (apply.inputs().size() != 1) {
         throw ErrorReport(loc) << "Only one argument to __new__ allowed";
@@ -2400,7 +2418,7 @@ struct to_ir {
     stack.push_back(*maybe_constant_input);
     op(stack);
     AT_ASSERT(stack.size() == 1);
-    return graph->insertConstant(stack[0], nullptr, tree->range());
+    return graph->insertConstant(stack[0], tree->range());
   }
 
 
@@ -2589,21 +2607,13 @@ struct to_ir {
         return emitConst(Const(tree));
       } break;
       case TK_TRUE: {
-        return graph->insertConstant(true, nullptr, tree->range());
+        return graph->insertConstant(true, tree->range());
       } break;
       case TK_FALSE: {
-        return graph->insertConstant(false, nullptr, tree->range());
+        return graph->insertConstant(false, tree->range());
       } break;
       case TK_NONE: {
-        // A None can be inserted even if the type_hint is not an Optional or
-        // None (e.g. `torch.jit.annotate(Tensor, None)`)
-        TypePtr hint = type_hint;
-        if (hint != nullptr && !hint->isSubtypeOf(NoneType::get()) &&
-            hint->kind() != TypeKind::OptionalType) {
-          // Implicitly wrap in an Optional if necessary
-          hint = OptionalType::create(hint);
-        }
-        return graph->insertConstant(IValue(), hint, tree->range());
+        return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_SUBSCRIPT: {
         return emitSubscript(Subscript(tree));
@@ -2706,7 +2716,7 @@ struct to_ir {
   }
 
   Value* emitStringLiteral(const StringLiteral& c) {
-    return insertConstant(*graph, c.text(), nullptr, c.range());
+    return insertConstant(*graph, c.text(), c.range());
   }
 
   // Desugars select indexing: tensor[i] -> tensor.select(dim, i)
@@ -2812,7 +2822,7 @@ struct to_ir {
     std::vector<Value*> tensor_indices;
 
     auto insert_value_for_dim = [&](int64_t dim) {
-      return graph->insertConstant(dim, nullptr, loc);
+      return graph->insertConstant(dim, loc);
     };
     std::vector<int64_t> dims(subscript_exprs.size());
     std::vector<c10::optional<Value*>> exprs(
@@ -2913,8 +2923,7 @@ struct to_ir {
     // create None node with optional tensor output type and pass to at::index.
     for (auto& index : tensor_indices) {
       if (index == nullptr) {
-        index =
-            graph->insertNode(graph->createNone(TensorType::get()))->output();
+        index = graph->insertNode(graph->createNone())->output();
       }
     }
     return std::make_pair(sliceable, tensor_indices);
@@ -2972,7 +2981,7 @@ struct to_ir {
     Value* maybe_dim = nullptr;
     if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
-      maybe_dim = graph->insertConstant(0, nullptr, loc);
+      maybe_dim = graph->insertConstant(0, loc);
     }
     return emitSlice(loc, sliceable, maybe_dim, slice_exp);
   }

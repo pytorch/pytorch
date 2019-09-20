@@ -74,7 +74,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPGenerator_getState(THPGenerator *self)
+static PyObject * THPGenerator_getState(THPGenerator *self, PyObject *noargs)
 {
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
@@ -134,7 +134,7 @@ static PyObject * THPGenerator_manualSeed(THPGenerator *self, PyObject *seed)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPGenerator_seed(THPGenerator *self)
+static PyObject * THPGenerator_seed(THPGenerator *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   // See Note [Acquire lock when using random generators]
@@ -144,14 +144,14 @@ static PyObject * THPGenerator_seed(THPGenerator *self)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPGenerator_initialSeed(THPGenerator *self)
+static PyObject * THPGenerator_initialSeed(THPGenerator *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return THPUtils_packUInt64(self->cdata->current_seed());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPGenerator_get_device(THPGenerator *self) {
+static PyObject * THPGenerator_get_device(THPGenerator *self, void *unused) {
   HANDLE_TH_ERRORS
   return THPDevice_New(self->cdata->device());
   END_HANDLE_TH_ERRORS

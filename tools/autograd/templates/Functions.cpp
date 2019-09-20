@@ -65,7 +65,7 @@ Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
   bool is_one = false;
   if (s.isFloatingPoint()) {
     is_one = s.toDouble() == 1;
-  } else if(s.isIntegral()) {
+  } else if(s.isIntegral(true)) {
     is_one = s.toLong() == 1;
   }
 
@@ -1980,6 +1980,27 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
     grad_a = grad_a.add(grad_m);
   }
   return std::tuple<Tensor, Tensor>{grad_b, grad_a};
+}
+
+std::tuple<Tensor, Tensor> cholesky_solve_backward(
+    const Tensor& grad_x, const Tensor& self,
+    const Tensor& input2, const Tensor& result, const bool upper) {
+  Tensor grad_self, grad_input2;
+  if (grad_x.defined()) {
+    grad_self = grad_x.cholesky_solve(input2, /*upper=*/upper);
+  } else {
+    grad_self = at::zeros({1}, self.options()).expand_as(self);
+  }
+
+  Tensor common_term = at::matmul(grad_self, result.transpose(-2, -1));
+  common_term = common_term + common_term.transpose(-2, -1);
+
+  if (upper) {
+    grad_input2 = -at::matmul(input2, common_term);
+  } else {
+    grad_input2 = -at::matmul(common_term, input2);
+  }
+  return std::tuple<Tensor, Tensor>{grad_self, grad_input2};
 }
 
 // Generally speaking, fft's backward is ifft.
