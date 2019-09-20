@@ -154,18 +154,6 @@ class TestNamedTensor(TestCase):
             names65 = ['A' * i for i in range(1, 66)]
             x = factory([1] * 65, names=names64, device=device)
 
-        # Tests for tagged names
-        x = factory(2, 3, 1, names=('C.in', 'H', 'C.out'), device=device)
-        self.assertEqual(x.names, ('C.in', 'H', 'C.out'))
-
-        with self.assertRaisesRegex(RuntimeError, 'construct a tensor with duplicate names'):
-            x = factory(2, 1, 1, names=('C.in', 'H', 'C.in'), device=device)
-
-        with self.assertRaisesRegex(
-                RuntimeError,
-                'with duplicate names unless they are tagged and have different tags'):
-            x = factory(2, 1, 1, names=('C.in', 'H', 'C'), device=device)
-
     def test_has_names(self):
         unnamed = torch.empty(2, 3)
         none_named = torch.empty(2, 3, names=(None, None))
@@ -1104,23 +1092,6 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(
                 RuntimeError, 'Please look up dimensions by name'):
             y = x.select(None, 1)
-
-        with self.assertRaisesRegex(
-                RuntimeError, 'Name \'C.in\' not found in'):
-            y = x.select('C.in', 1)
-
-        x = torch.empty(2, 3, 4, 5, names=('N', 'C.in', 'H', 'W'), device=device)
-        y = x.select('C', 1)
-        self.assertEqual(y.names, ('N', 'H', 'W'))
-
-        x = torch.empty(2, 3, 4, 5, names=('C.out', 'C.in', 'H', 'W'), device=device)
-        y = x.select('C.in', 1)
-        self.assertEqual(y.names, ('C.out', 'H', 'W'))
-
-        with self.assertRaisesRegex(
-                RuntimeError, 'Name \'C\' could refer to multiple dimensions'):
-            y = x.select('C', 1)
-
 
     def test_select(self):
         self._test_select('cpu')
