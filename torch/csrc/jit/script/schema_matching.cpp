@@ -130,8 +130,8 @@ static Value* tryMatchArgument(
   }
 
   // Resolve VarType variables
-  const MatchTypeReturn matched =
-      matchTypeVariables(arg.type(), value->type(), type_env);
+  const MatchTypeReturn matched = matchTypeVariables(
+      arg.type(), value->type(), type_env);
   if (!matched.success()) {
     if (failure_messages) {
       err() << "Could not match type " << value->type()->python_str() << " to "
@@ -242,11 +242,16 @@ static bool varargsCanBeUsedAsList(
   // The formal must be a list
   bool argument_is_list = arg.type()->kind() == TypeKind::ListType;
 
+  // matching varargs of typevar list nyi
+  bool typevar_list = argument_is_list &&
+      arg.type()->cast<ListType>()->getElementType()->cast<VarType>();
+
   // it must not be a broadcasting list like int[3],
   // otherwise a single int is a valid input
   bool arg_is_broadcasting_list = bool(arg.N());
 
-  return is_last_argument && argument_is_list & !arg_is_broadcasting_list;
+  return is_last_argument && argument_is_list & !arg_is_broadcasting_list &&
+      !typevar_list;
 }
 
 c10::optional<MatchedSchema> tryMatchSchema(
