@@ -248,30 +248,15 @@ class QLinearInt8 final : public torch::OperatorKernel {
           bias_fp32, kernel_scale * input_scale, 0, kQInt32);
       // Update the input scale to not pack again.
       pack_ptr.input_scale = input_scale;
-      auto wt_ptr =
-          guts::make_unique<PackedLinearWeightsQnnp>(PackedLinearWeightsQnnp{
-              guts::make_unique<qnnpack::PackBMatrix>(
-                  cols_w /* input_channels */,
-                  rows_w /* output_channels */,
-                  kernel_zp,
-                  kernel_scale,
-                  (uint8_t*)qnnp_w_data,
-                  (int32_t*)bias.data_ptr<c10::qint32>()),
-              weight_contig,
-              bias_fp32, /* fp32 bias */
-              input_scale, /* input_scale */
-              kernel_scale,
-              kernel_zp});
-      void* raw_ptr = wt_ptr.release();
-      at::DataPtr at_ptr(
-          raw_ptr,
-          raw_ptr,
-          caffe2::TypeMeta::Make<PackedLinearWeightsQnnp>().deleteFn(),
-          at::kCPU);
-      packed_weight.storage().set_data_ptr(std::move(at_ptr));
-      auto& pack_ptr_new =
-          cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(packed_weight);
-      packB = pack_ptr_new.w.get();
+      pack_ptr.w.reset();
+      pack_ptr.w = guts::make_unique<qnnpack::PackBMatrix>(
+          cols_w /* input_channels */,
+          rows_w /* output_channels */,
+          kernel_zp,
+          kernel_scale,
+          (uint8_t*)qnnp_w_data,
+          (int32_t*)bias.data_ptr<c10::qint32>());
+      packB = pack_ptr.w.get();
     }
 
     size_t rows_input = 1;
