@@ -53,6 +53,9 @@
 - func: output_nr(Tensor self) -> int
   variants: method
 
+- func: _version(Tensor self) -> int
+  variants: method
+
 - func: names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
