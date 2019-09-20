@@ -15,6 +15,13 @@
 
 namespace at {
 
+// Note: this is not a native function as Quantizer is not exposed to python yet
+QuantizerPtr Tensor::quantizer() const {
+  // This is a terrible hack to emulate what VariableType is doing
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  return get_qtensorimpl(*this)->quantizer();
+}
+
 void checkFloatCPUTensor(std::string fn_name, Tensor t) {
   TORCH_CHECK(
       t.scalar_type() == kFloat,

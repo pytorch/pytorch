@@ -144,7 +144,7 @@ class Pickler {
   const std::vector<WriteableTensorData>& tensorData() {
     return tensor_data_;
   }
-
+  void pushEmptyDict();
   void pushDict(const IValue& ivalue);
   void pushInt(int64_t value);
   void pushLong(const std::string& data);
@@ -275,7 +275,7 @@ class Unpickler {
   PickleOpCode readInstruction();
   PickleOpCode readOpCode();
   std::string readString();
-  void readList();
+  void readList(IValue list_ivalue);
   void setInput(size_t memo_id);
   void run();
 
