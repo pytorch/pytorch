@@ -50,24 +50,34 @@ class RRefContext {
   template <typename T>
   std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId);
 
-  Message acceptUserRRef(const RRefId& rrefId, const ForkId& forkId);
-  void finishForkRequest(const ForkId& forkId, worker_id_t parent);
-
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
   std::shared_ptr<RRef> delForkOfOwner(
       const RRefId& rrefId,
       const ForkId& forkId);
 
+  // Invoked when pickling an RRef to setup child/fork properly
   RRefForkData prepareChildFork(const std::shared_ptr<RRef>& rref);
-  // forkId is necessary here as the rref could be an OwnerRRef
+  // Invoked when unpickling an RRef to send RREF_FORK_REQUEST to owner and
+  // send RREF_CHILD_ACCEPT to the parent.
+  // NB: forkId is necessary here as the rref could be an OwnerRRef
   void notifyOwnerAndParentOfFork(
       const ForkId& forkId,
       worker_id_t parent,
       const std::shared_ptr<RRef>& rref);
 
+  // When a UserRRef is forked to another worker (user or owner), it is added
+  // into pendingChildren_ to be held alive until it receives RREF_CHILD_ACCEPT
+  // from the child.
+  // NB: This is necessary for both user and owner child. As we do not have FIFO
+  // communication between workers, we need this strategy to make sure that all
+  // previously submitted rpc/remote calls are acked before sending out the
+  // RREF_USER_DELETE message. Otherwise, the OwnerRRef could be deleted too
+  // soon.
   void addPendingChild(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
   void delPendingChild(const ForkId& forkId);
 
+  // When a UserRRef is created, it is added into pendingUsers_ to be held alive
+  // until it receives RREF_USER_ACCEPT from the owner.
   void addPendingUser(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
   void delPendingUser(const ForkId& forkId);
 
@@ -79,6 +89,8 @@ class RRefContext {
       worker_id_t ownerId,
       const RRefId& rrefId,
       const ForkId& forkId);
+
+  void finishForkRequest(const ForkId& forkId, worker_id_t parent);
 
   static std::unique_ptr<RRefContext> context_;
   static std::atomic<local_id_t> nextLocalId_;

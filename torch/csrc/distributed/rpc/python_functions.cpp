@@ -53,15 +53,12 @@ std::shared_ptr<Operator> matchBuiltinOp(
       ", kwargs: ",
       kwargs,
       ") to a builtin operator");
-
-  // builtin operators.
 }
 
 void finishAcceptUserRRef(const Message& message) {
   RRefContext::handleException(message);
   RemoteRet rr = RemoteRet::fromMessage(message);
   auto& ctx = RRefContext::getInstance();
-  // ctx->finishUserRRef(rr.rrefId(), rr.forkId());
   ctx->delPendingUser(rr.forkId());
 }
 

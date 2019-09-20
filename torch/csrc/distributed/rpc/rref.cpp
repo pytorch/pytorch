@@ -98,8 +98,6 @@ RRefForkData RRef::fork() const {
   auto& ctx = RRefContext::getInstance();
   return RRefForkData(
       ownerId_, rrefId_, ctx->genGloballyUniqueId(), ctx->getWorkerId());
-  // NB: does not support sharing RRefs between users
-  // TODO: notify the owner
 }
 
 //////////////////////////  UserRRef  /////////////////////////////////////
@@ -110,16 +108,11 @@ UserRRef<T>::UserRRef(
     const RRefId& rrefId,
     const ForkId& forkId)
     : RRef(ownerId, rrefId), forkId_(forkId) {
-  TORCH_INTERNAL_ASSERT(
-      !(forkId_ == rrefId_),
-      "User RRef's fork ID should not be the same as its rref Id");
   // Do nothing,
-  // (1) If this UserRRef is shared from another UserRRef x, x should
-  // notified the owner on my behalf.
-  // (2) If this UserRRef is shared from the OwnerRRef, the OwnerRRef already
-  // knows this UserRRef.
-  // (3) If this the creator UserRRef, ScriptRemoteCall will properly notify
-  // the owner.
+  // (1) If this UserRRef is a fork of an existing RRef, RRefContext will send
+  //     a RREF_FORK_REQUEST message to the owner.
+  // (2) If this the creator UserRRef, ScriptRemoteCall or PythonRemoteCall will
+  //     properly notify the owner.
 }
 
 template <typename T>

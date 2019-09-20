@@ -201,12 +201,6 @@ void RRefContext::delPendingUser(const ForkId& forkId) {
       "Inconsistent states: attempt to delete a non-exist UserRRef.");
   pendingUsers_.erase(iter);
 }
-Message RRefContext::acceptUserRRef(
-    const RRefId& rrefId,
-    const ForkId& forkId) {
-  addForkOfOwner(rrefId, forkId);
-  return RRefUserAccept(rrefId, forkId).toMessage();
-}
 
 void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   delPendingUser(forkId);
