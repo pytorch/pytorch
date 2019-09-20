@@ -35,11 +35,11 @@ RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
 
 RRefContext::~RRefContext() {
   if (!forks_.empty()) {
-    for (auto& entry: forks_) {
+    for (auto& entry : forks_) {
       const RRefId& rrefId = entry.first;
-      for (const auto& forkId: entry.second) {
-        VLOG(1) << "Leaking RRef " << rrefId
-                << " with fork Id " << forkId << std::endl;
+      for (const auto& forkId : entry.second) {
+        VLOG(1) << "Leaking RRef " << rrefId << " with fork Id " << forkId
+                << std::endl;
       }
     }
   }
@@ -143,23 +143,20 @@ RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
 }
 
 void RRefContext::notifyOwnerAndParentOfFork(
-    const ForkId& forkId, worker_id_t parent, std::shared_ptr<RRef> rref) {
+    const ForkId& forkId,
+    worker_id_t parent,
+    const std::shared_ptr<RRef>& rref) {
   if (parent != rref->owner()) {
     if (rref->isOwner()) {
       auto fm = agent_->send(
-        agent_->getWorkerInfo(parent),
-        RRefChildAccept(forkId).toMessage()
-      );
-      fm->addCallback([](const Message& message){
-        handleException(message);
-      });
+          agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
+      fm->addCallback([](const Message& message) { handleException(message); });
     } else {
       auto fm = agent_->send(
-        agent_->getWorkerInfo(rref->owner()),
-        RRefForkRequest(rref->rrefId(), forkId).toMessage()
-      );
+          agent_->getWorkerInfo(rref->owner()),
+          RRefForkRequest(rref->rrefId(), forkId).toMessage());
 
-      fm->addCallback([this, forkId, parent](const Message& message){
+      fm->addCallback([this, forkId, parent](const Message& message) {
         handleException(message);
         this->finishForkRequest(forkId, parent);
       });
@@ -167,9 +164,12 @@ void RRefContext::notifyOwnerAndParentOfFork(
   }
 }
 
-void RRefContext::addPendingChild(const ForkId& forkId, std::shared_ptr<RRef> rref) {
+void RRefContext::addPendingChild(
+    const ForkId& forkId,
+    const std::shared_ptr<RRef>& rref) {
   std::lock_guard<std::mutex> lock(mutex_);
-  TORCH_INTERNAL_ASSERT(pendingChildren_.find(forkId) == pendingChildren_.end(),
+  TORCH_INTERNAL_ASSERT(
+      pendingChildren_.find(forkId) == pendingChildren_.end(),
       "Inconsistent states: attempt to add the same child fork twice.");
   pendingChildren_[forkId] = rref;
 }
@@ -177,14 +177,18 @@ void RRefContext::addPendingChild(const ForkId& forkId, std::shared_ptr<RRef> rr
 void RRefContext::delPendingChild(const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto iter = pendingChildren_.find(forkId);
-  TORCH_INTERNAL_ASSERT(iter != pendingChildren_.end(),
+  TORCH_INTERNAL_ASSERT(
+      iter != pendingChildren_.end(),
       "Inconsistent states: attempt to delete a non-exist child fork.");
   pendingChildren_.erase(iter);
 }
 
-void RRefContext::addPendingUser(const ForkId& forkId, std::shared_ptr<RRef> rref) {
+void RRefContext::addPendingUser(
+    const ForkId& forkId,
+    const std::shared_ptr<RRef>& rref) {
   std::lock_guard<std::mutex> lock(mutex_);
-  TORCH_INTERNAL_ASSERT(pendingUsers_.find(forkId) == pendingUsers_.end(),
+  TORCH_INTERNAL_ASSERT(
+      pendingUsers_.find(forkId) == pendingUsers_.end(),
       "Inconsistent states: attempt to add the same UserRRef twice.");
   pendingUsers_[forkId] = rref;
 }
@@ -192,7 +196,8 @@ void RRefContext::addPendingUser(const ForkId& forkId, std::shared_ptr<RRef> rre
 void RRefContext::delPendingUser(const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto iter = pendingUsers_.find(forkId);
-  TORCH_INTERNAL_ASSERT(iter != pendingUsers_.end(),
+  TORCH_INTERNAL_ASSERT(
+      iter != pendingUsers_.end(),
       "Inconsistent states: attempt to delete a non-exist UserRRef.");
   pendingUsers_.erase(iter);
 }
@@ -206,13 +211,9 @@ Message RRefContext::acceptUserRRef(
 void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   delPendingUser(forkId);
   auto fm = agent_->send(
-    agent_->getWorkerInfo(parent),
-    RRefChildAccept(forkId).toMessage()
-  );
+      agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
 
-  fm->addCallback([](const Message& message){
-    handleException(message);
-  });
+  fm->addCallback([](const Message& message) { handleException(message); });
 }
 
 void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {

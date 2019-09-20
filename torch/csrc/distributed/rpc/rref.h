@@ -22,7 +22,7 @@ struct RRefForkData {
   at::IValue toIValue() const;
 
   py::tuple toPyTuple() const;
-  static RRefForkData fromPyTuple(py::tuple obj);
+  static RRefForkData fromPyTuple(const py::tuple& obj);
 
   const worker_id_t ownerId_;
   const RRefId rrefId_;

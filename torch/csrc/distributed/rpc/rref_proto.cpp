@@ -147,7 +147,8 @@ RRefChildAccept RRefChildAccept::fromMessage(const Message& message) {
 }
 
 RRefForkRequest RRefForkRequest::fromMessage(const Message& message) {
-  auto pair = ForkMessageBase::fromMessage(message, MessageType::RREF_FORK_REQUEST);
+  auto pair =
+      ForkMessageBase::fromMessage(message, MessageType::RREF_FORK_REQUEST);
   return RRefForkRequest(pair.first, pair.second);
 }
 

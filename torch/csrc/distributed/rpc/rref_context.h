@@ -58,16 +58,17 @@ class RRefContext {
       const RRefId& rrefId,
       const ForkId& forkId);
 
-
   RRefForkData prepareChildFork(const std::shared_ptr<RRef>& rref);
   // forkId is necessary here as the rref could be an OwnerRRef
   void notifyOwnerAndParentOfFork(
-      const ForkId& forkId, worker_id_t parent, std::shared_ptr<RRef> rref);
+      const ForkId& forkId,
+      worker_id_t parent,
+      const std::shared_ptr<RRef>& rref);
 
-  void addPendingChild(const ForkId& forkId, std::shared_ptr<RRef> rref);
+  void addPendingChild(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
   void delPendingChild(const ForkId& forkId);
 
-  void addPendingUser(const ForkId& forkId, std::shared_ptr<RRef> rref);
+  void addPendingUser(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
   void delPendingUser(const ForkId& forkId);
 
  private:

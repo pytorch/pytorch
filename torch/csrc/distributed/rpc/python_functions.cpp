@@ -61,7 +61,7 @@ void finishAcceptUserRRef(const Message& message) {
   RRefContext::handleException(message);
   RemoteRet rr = RemoteRet::fromMessage(message);
   auto& ctx = RRefContext::getInstance();
-  //ctx->finishUserRRef(rr.rrefId(), rr.forkId());
+  // ctx->finishUserRRef(rr.rrefId(), rr.forkId());
   ctx->delPendingUser(rr.forkId());
 }
 

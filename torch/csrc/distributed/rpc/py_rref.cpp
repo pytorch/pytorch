@@ -61,7 +61,8 @@ py::object PyRRef::localValue() {
   }
 
   if (rref_->isPyObj()) {
-    auto& value = std::dynamic_pointer_cast<OwnerRRef<py::object>>(rref_)->getValue();
+    auto& value =
+        std::dynamic_pointer_cast<OwnerRRef<py::object>>(rref_)->getValue();
     AutoGIL ag;
     return value;
   } else {

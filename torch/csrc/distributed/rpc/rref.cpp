@@ -32,12 +32,10 @@ RRefForkData::RRefForkData(
     : ownerId_(ownerId), rrefId_(rrefId), forkId_(forkId), parent_(parent) {}
 
 at::IValue RRefForkData::toIValue() const {
-  return c10::ivalue::Tuple::create({
-        static_cast<int64_t>(ownerId_),
-        rrefId_.toIValue(),
-        forkId_.toIValue(),
-        static_cast<int64_t>(parent_)
-  });
+  return c10::ivalue::Tuple::create({static_cast<int64_t>(ownerId_),
+                                     rrefId_.toIValue(),
+                                     forkId_.toIValue(),
+                                     static_cast<int64_t>(parent_)});
 }
 
 py::tuple RRefForkData::toPyTuple() const {
@@ -50,7 +48,7 @@ py::tuple RRefForkData::toPyTuple() const {
       parent_);
 }
 
-RRefForkData RRefForkData::fromPyTuple(py::tuple t) {
+RRefForkData RRefForkData::fromPyTuple(const py::tuple& t) {
   TORCH_INTERNAL_ASSERT(
       t.size() == RFD_TUPLE_SIZE,
       "Pickled RRefForkData must contain 6 numbers.");
@@ -99,11 +97,7 @@ RRef::RRef(worker_id_t ownerId, const RRefId& rrefId)
 RRefForkData RRef::fork() const {
   auto& ctx = RRefContext::getInstance();
   return RRefForkData(
-      ownerId_,
-      rrefId_,
-      ctx->genGloballyUniqueId(),
-      ctx->getWorkerId()
-  );
+      ownerId_, rrefId_, ctx->genGloballyUniqueId(), ctx->getWorkerId());
   // NB: does not support sharing RRefs between users
   // TODO: notify the owner
 }

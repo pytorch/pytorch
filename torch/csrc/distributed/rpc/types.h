@@ -32,7 +32,9 @@ struct TORCH_API GloballyUniqueId final {
   const local_id_t localId_;
 };
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const GloballyUniqueId& globalId);
+TORCH_API std::ostream& operator<<(
+    std::ostream& os,
+    const GloballyUniqueId& globalId);
 
 using RRefId = GloballyUniqueId;
 using ForkId = GloballyUniqueId;

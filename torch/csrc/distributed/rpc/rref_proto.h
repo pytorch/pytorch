@@ -120,9 +120,7 @@ class TORCH_API RRefChildAccept final {
 
 class TORCH_API RRefForkRequest final : public ForkMessageBase {
  public:
-  RRefForkRequest(
-      const RRefId& rrefId,
-      const ForkId& forkId)
+  RRefForkRequest(const RRefId& rrefId, const ForkId& forkId)
       : ForkMessageBase(rrefId, forkId, MessageType::RREF_FORK_REQUEST) {}
 
   static RRefForkRequest fromMessage(const Message& message);

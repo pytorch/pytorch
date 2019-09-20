@@ -72,8 +72,7 @@ bool Message::isRequest() const {
 bool Message::isResponse() const {
   return MessageType::PYTHON_RET == type_ || MessageType::REMOTE_RET == type_ ||
       MessageType::RREF_FETCH_RET == type_ ||
-      MessageType::SCRIPT_RET == type_ ||
-      MessageType::ACK == type_ ||
+      MessageType::SCRIPT_RET == type_ || MessageType::ACK == type_ ||
       MessageType::REMOTE_RET == type_;
 }
 
