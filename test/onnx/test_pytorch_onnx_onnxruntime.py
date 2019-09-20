@@ -146,6 +146,55 @@ class TestONNXRuntime(unittest.TestCase):
     def test_index_2d_neg_slice(self):
         self._test_index_generic(lambda input: input[0:-1, :])
 
+    def test_clamp(self):
+        class ClampModel(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(-0.5, 0.5)
+
+        x = torch.randn(3, 4)
+        self.run_test(ClampModel(), x)
+
+        class ClampMinModel(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(min=-0.5)
+
+        x = torch.randn(3, 4)
+        self.run_test(ClampMinModel(), x)
+
+        class ClampMaxModel(torch.nn.Module):
+            def forward(self, x):
+                return x.clamp(max=0.5)
+
+        x = torch.randn(3, 4)
+        self.run_test(ClampMaxModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_clamp_dyn(self):
+        class ClampMaxModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x.clamp(None, x.size(0))
+
+        x = torch.arange(16).view(4, 4).float()
+        self.run_test(ClampMaxModel(), x)
+
+
+        class ClampMinModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x.clamp(x.size(0), None)
+
+        x = torch.arange(16).view(4, 4).float()
+        self.run_test(ClampMinModel(), x)
+
+        class ClampMinMaxModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x.clamp(x.size(0), x.size(1))
+
+        x = torch.arange(16).view(2, 8).float()
+        self.run_test(ClampMinMaxModel(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_full_trace(self):
         class FullModel(torch.nn.Module):
@@ -789,6 +838,52 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 16, 4, 3, requires_grad=True)
         self.run_test(PixelShuffle(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_scalar_type(self):
+        class ArithmeticModel(torch.nn.Module):
+            def forward(self, x):
+                return x.size(0) * 2 * x
+
+        x = torch.ones(2, 3, dtype=torch.float32)
+        self.run_test(ArithmeticModel(), x)
+
+        class ReciprocalModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.reciprocal(x)
+
+        x = torch.tensor([2.0, 4.0], dtype=torch.double)
+        self.run_test(ReciprocalModel(), x)
+
+        class ComparisonModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x.ge(0.5) & y.le(2)
+
+        x = torch.ones(2, 3, dtype=torch.int32)
+        y = torch.ones(2, 3, dtype=torch.float32)
+        self.run_test(ComparisonModel(), (x, y))
+
+        # TODO: re-enable the two tests after https://github.com/pytorch/pytorch/issues/26328 is resolved.
+        class MatMulModel(torch.nn.Module):
+            def forward(self, x):
+                return (torch.mm(x, x) + x + torch.mm(x, x) + x)
+
+        x = torch.ones(3, 3)
+        # self.run_test(MatMulModel(), x)
+
+        class AddMMModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.mm(x, x) + x
+
+        x = torch.ones(3, 3)
+        # self.run_test(AddMMModel(), x)
+
+        class FullModel(torch.nn.Module):
+            # add is used for exporting full
+            def forward(self, x):
+                return torch.full((3, 4), x)
+        x = torch.tensor(12)
+        self.run_test(FullModel(), x)
+
     def test_frobenius_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -804,6 +899,15 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_gelu(self):
+        class GeluModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.gelu(x)
+
+        x = torch.randn(2, 4, 5, 6, requires_grad=True)
+        self.run_test(GeluModel(), x)
 
     def test_rsqrt(self):
         class RsqrtModel(torch.nn.Module):
