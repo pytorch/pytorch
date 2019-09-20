@@ -810,6 +810,8 @@ class QuantizationDebugTest(QuantizationTestCase):
         self.assertTrue('fc1.module.observer' in observer_dict.keys(),
                         'observer is not recorded in the dict')
         self.assertEqual(len(observer_dict['fc1.module.observer'].get_tensor_value()), 2 * len(self.calib_data))
+        self.assertEqual(observer_dict['fc1.module.observer'].get_tensor_value()[0], model(self.calib_data[0][0]))
+
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
