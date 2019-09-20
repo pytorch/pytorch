@@ -515,7 +515,7 @@ class ModuleAPITest(QuantizationTestCase):
 
         X = torch.randn(N, C, H, W, dtype=torch.float32)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                   dtype=torch.quint8)
+                                       dtype=torch.quint8)
         qX_expect = torch.nn.functional.max_pool2d(qX, **kwargs)
 
         pool_under_test = torch.nn.quantized.MaxPool2d(**kwargs)

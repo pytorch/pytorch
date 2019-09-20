@@ -90,10 +90,10 @@ class TestQuantizedOps(TestCase):
         Y = X.copy()
         Y[Y < 0] = 0
         qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
-                                   zero_point=zero_point, dtype=torch_type)
+                                       zero_point=zero_point, dtype=torch_type)
         X = torch.from_numpy(X)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                   dtype=torch_type)
+                                       dtype=torch_type)
 
         ops_under_test = {
             'native': torch.relu,
@@ -124,10 +124,10 @@ class TestQuantizedOps(TestCase):
         Y[Y < 0] = 0
         Y[Y > 6.0] = 6.0
         qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
-                                   zero_point=zero_point, dtype=torch_type)
+                                       zero_point=zero_point, dtype=torch_type)
         X = torch.from_numpy(X)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                   dtype=torch_type)
+                                       dtype=torch_type)
 
         ops_under_test = {
             'ops.quantized': torch.ops.quantized.relu6,
@@ -188,9 +188,9 @@ class TestQuantizedOps(TestCase):
             scale = 2.0
             zero_point = 127
             qA = torch.quantize_per_tensor(A, scale=scale, zero_point=zero_point,
-                                       dtype=dtype)
+                                           dtype=dtype)
             qB = torch.quantize_per_tensor(B, scale=scale, zero_point=zero_point,
-                                       dtype=dtype)
+                                           dtype=dtype)
 
             # Add ReLU ground truth
             C = (qA.dequantize() + qB.dequantize()).numpy()
@@ -248,9 +248,9 @@ class TestQuantizedOps(TestCase):
             zero_point_C = 5
 
             qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,
-                                       dtype=dtype)
+                                           dtype=dtype)
             qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point_B,
-                                       dtype=dtype)
+                                           dtype=dtype)
 
             # Add ground truth
             C = (qA.dequantize() + qB.dequantize()).numpy()
@@ -297,9 +297,9 @@ class TestQuantizedOps(TestCase):
         scale = 2.0
         zero_point = 127
         qA = torch.quantize_per_tensor(A, scale=scale, zero_point=zero_point,
-                                   dtype=torch.quint8)
+                                       dtype=torch.quint8)
         qB = torch.quantize_per_tensor(B, scale=scale, zero_point=zero_point,
-                                   dtype=torch.quint8)
+                                       dtype=torch.quint8)
 
         # mul ReLU ground truth
         C = (qA.dequantize() * qB.dequantize()).numpy()
@@ -357,9 +357,9 @@ class TestQuantizedOps(TestCase):
         zero_point_C = 5
 
         qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,
-                                   dtype=torch.quint8)
+                                       dtype=torch.quint8)
         qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point_B,
-                                   dtype=torch.quint8)
+                                       dtype=torch.quint8)
 
         # mul ground truth
         C = (qA.dequantize() * qB.dequantize()).numpy()
@@ -412,10 +412,10 @@ class TestQuantizedOps(TestCase):
                                                 stride=stride,
                                                 padding=padding, dilation=dilation)
         a_ref = torch.quantize_per_tensor(a_pool, scale=scale,
-                                      zero_point=zero_point, dtype=torch_type)
+                                          zero_point=zero_point, dtype=torch_type)
         a_ref = a_ref.dequantize()
         qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
-                                   dtype=torch_type)
+                                       dtype=torch_type)
 
         ops_under_test = {
             "torch": torch.max_pool2d,
@@ -467,10 +467,10 @@ class TestQuantizedOps(TestCase):
                                                 stride=stride,
                                                 padding=padding, dilation=dilation)
         a_ref = torch.quantize_per_tensor(a_pool, scale=scale,
-                                      zero_point=zero_point, dtype=torch_type)
+                                          zero_point=zero_point, dtype=torch_type)
         a_ref = a_ref.dequantize()
         qa = torch.quantize_per_tensor(torch.from_numpy(X_nchw), scale=scale, zero_point=zero_point,
-                                   dtype=torch_type).permute([0, 3, 1, 2])
+                                       dtype=torch_type).permute([0, 3, 1, 2])
         self.assertTrue(qa.stride() != sorted(qa.stride()))
 
         ops_under_test = {
@@ -512,7 +512,7 @@ class TestQuantizedOps(TestCase):
 
         X = torch.from_numpy(X)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                   dtype=torch_type)
+                                       dtype=torch_type)
 
         # Run reference on int_repr + round to avoid double rounding error.
         X_ref = torch.nn.functional.adaptive_avg_pool2d(
@@ -553,7 +553,7 @@ class TestQuantizedOps(TestCase):
         new_shape[dim] = 0
         for idx in range(num):
             tensors_q.append(torch.quantize_per_tensor(X, scale, zero_point,
-                                                   torch_type))
+                                                       torch_type))
             tensors_ref.append(X)
             new_shape[dim] += tensors_ref[-1].shape[dim]
 
@@ -619,7 +619,7 @@ class TestQuantizedOps(TestCase):
         else:
             X_scheme = 'per_tensor'
             qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
+                                           dtype=torch_type)
         X2 = torch.from_numpy(X2)
         if X2_per_channel:
             X2_scheme = 'per_channel'
@@ -633,7 +633,7 @@ class TestQuantizedOps(TestCase):
         else:
             X2_scheme = 'per_tensor'
             qX2 = torch.quantize_per_tensor(X2, scale=scale2, zero_point=zero_point2,
-                                        dtype=torch_type2)
+                                            dtype=torch_type2)
 
         def equal_ref(qX, qX2):
             if qX.qscheme() != qX2.qscheme():
@@ -935,7 +935,7 @@ class TestQuantizedLinear(unittest.TestCase):
                 W, W_scales, W_zps, [0], dtype=torch_type)
         else:
             W_q = torch.quantize_per_tensor(W, scale=W_scale, zero_point=W_zp,
-                                        dtype=torch_type)
+                                            dtype=torch_type)
 
         # Weight prepacking operator for quantized Linear
         W_prepack = qlinear_prepack(W_q)
@@ -1332,7 +1332,7 @@ class TestQNNPackOps(TestCase):
 
             W = torch.from_numpy(W)
             W_q = torch.quantize_per_tensor(W, scale=W_scale, zero_point=W_zp,
-                                        dtype=torch_type)
+                                            dtype=torch_type)
 
             # Weight prepacking operator for quantized Linear
             W_prepack = qlinear_prepack(W_q)
@@ -1538,9 +1538,9 @@ class TestQNNPackOps(TestCase):
 
             zero_point_C = 127
             qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point,
-                                       dtype=torch.quint8)
+                                           dtype=torch.quint8)
             qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
-                                       dtype=torch.quint8)
+                                           dtype=torch.quint8)
 
             # Add ground truth
             C = (qA.dequantize() + qB.dequantize()).numpy()
@@ -1554,7 +1554,7 @@ class TestQNNPackOps(TestCase):
 
             A = torch.ones((0, 2), dtype=torch.float32)
             qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,
-                                       dtype=torch.quint8)
+                                           dtype=torch.quint8)
             qC = torch.ops.quantized.add(qA, qA, scale_C, zero_point_C)
             np.testing.assert_equal(qC.size(), qA.size(),
                                     "Quantized addition with batch size 0 failed.")
@@ -1593,7 +1593,7 @@ class TestQNNPackOps(TestCase):
 
             a = scale * (X - zero_point).to(dtype=torch.float)
             qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
+                                           dtype=torch_type)
 
             a_ref = qa.dequantize()
 
@@ -1609,7 +1609,7 @@ class TestQNNPackOps(TestCase):
 
             A = torch.ones((0, 2, 4, 4), dtype=torch.float32)
             qa = torch.quantize_per_tensor(A, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
+                                           dtype=torch_type)
             qc = q_max_pool(qa, k, s, p, d)
             oH = pool_output_shape(4, kernel, padding, stride, dilation)
             oW = pool_output_shape(4, kernel, padding, stride, dilation)
@@ -1631,9 +1631,9 @@ class TestComparatorOps(TestCase):
         tB = torch.from_numpy(B)
 
         qA = torch.quantize_per_tensor(tA, scale=scale_a, zero_point=zero_point_a,
-                                   dtype=dtype_a)
+                                       dtype=dtype_a)
         qB = torch.quantize_per_tensor(tB, scale=scale_b, zero_point=zero_point_b,
-                                   dtype=dtype_b)
+                                       dtype=dtype_b)
         dqA = qA.dequantize()
         dqB = qB.dequantize()
 
@@ -1660,7 +1660,7 @@ class TestComparatorOps(TestCase):
         tA = torch.from_numpy(A)
 
         qA = torch.quantize_per_tensor(tA, scale=scale_a, zero_point=zero_point_a,
-                                   dtype=dtype_a)
+                                       dtype=dtype_a)
         dqA = qA.dequantize()
 
         ops_under_test_reversible = ('__eq__', '__ne__', '__ge__', '__le__',
