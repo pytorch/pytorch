@@ -39,7 +39,7 @@ from test_module.future_div import div_int_future, div_float_future
 from test_module.no_future_div import div_int_nofuture, div_float_nofuture
 
 # Standard library
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
@@ -1151,7 +1151,7 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
             # addmm -> quantized::linear
             """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+%r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::int_repr
         %a_intrepr = aten::int_repr(%a_quant)
@@ -1162,16 +1162,11 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %w_intrepr = aten::int_repr(%w_quant)
         # CHECK-NOT: aten::_dequantize_linear
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
-        %b_intrepr = aten::int_repr(%b_quant)
-        # CHECK-NOT: aten::_dequantize_linear
-        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
         # CHECK: aten::t
         # CHECK: quantized::linear_prepack
         # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
-        %r = aten::addmm(%b_dequant, %a_dequant, %w_dequant, %4, %4)
+        %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
         # CHECK-NOT: aten::quantize_linear
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
         # CHECK: aten::int_repr
@@ -1182,7 +1177,7 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
             # matmul(with bias) -> quantized::linear
             """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+%r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::int_repr
         %a_intrepr = aten::int_repr(%a_quant)
@@ -1194,16 +1189,13 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         # CHECK-NOT: aten::_dequantize_linear
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
         # CHECK-NOT: aten::int_repr
-        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
-        %b_intrepr = aten::int_repr(%b_quant)
         # CHECK-NOT: aten::_dequantize_linear
-        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
         # CHECK: aten::t
         # CHECK: quantized::linear_prepack
         # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
         %output = aten::matmul(%a_dequant, %w_dequant)
-        %r = aten::add_(%output, %b_dequant, %4)
+        %r = aten::add_(%output, %b, %4)
         # CHECK-NOT: aten::quantize_linear
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
         # CHECK: aten::int_repr
@@ -6404,7 +6396,7 @@ a")
             return ten1
         ''')
 
-        lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]",
+        lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]", "(1, 1)",
                  "torch.jit.annotate(List[int], [])", "[2.5, 2.5]", "[[2], [2]]", "[[-.5], [2.2]]", "[[False], [True]]"]
 
         dtypes = ["", ", dtype=torch.float", ", dtype=torch.double", ", dtype=torch.half",
@@ -10306,6 +10298,11 @@ a")
         r = M().create()
         self.assertEqual(r.dtype, torch.float)
         self.assertEqual(torch.zeros([1, 1, 2], dtype=torch.float), r)
+
+        def fn():
+            return torch.zeros((1, 2, 3))
+
+        self.checkScript(fn, ())
 
     def test_vararg_zeros(self):
         def foo():
@@ -18869,6 +18866,36 @@ class TestDict(JitTestCase):
         a_dict = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
         self.checkScript(fn, (a_dict, ('a', 'c')))
 
+    def test_ordered_dict(self):
+        def test_func(fn, inputs):
+            self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
+
+        def repeated_key():
+            return OrderedDict([(1, 2), (2, 3), (1, 4)])
+
+        test_func(repeated_key, ())
+
+        def no_args():
+            a = OrderedDict()
+            a["one"] = torch.tensor(1)
+            a["two"] = torch.tensor(2)
+
+        test_func(no_args, ())
+
+        def test_dict_constructor():
+            a = dict()
+            a["one"] = torch.tensor(1)
+            return a, dict([(1, 2), (2, 3), (1, 4)])  # noqa: C406
+
+        test_func(test_dict_constructor, ())
+
+        def test_dict_error():
+            a = dict()
+            a[1] = 2
+            return a
+
+        with self.assertRaisesRegex(Exception, "Arguments for call are not"):
+            torch.jit.script(test_dict_error)
 
 class TestClassType(JitTestCase):
     def test_get_with_method(self):
@@ -19513,6 +19540,10 @@ class TestClassType(JitTestCase):
                 # type: (int) -> int
                 return other + 1
 
+            def __setitem__(self, idx, val):
+                # type: (int, int) -> None
+                self.x = val * idx
+
         def add():
             return BinOps(4) + 3
         def sub():  # noqa: E306
@@ -19543,8 +19574,13 @@ class TestClassType(JitTestCase):
             return BinOps(4) ^ 3
         def getitem():  # noqa: E306
             return BinOps(4)[1]
+        def setitem():  # noqa: E306
+            a = BinOps(4)
+            a[1] = 5
+            return a.x
 
-        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem]
+        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem, setitem]
+
         if not PY2:
             ops.append(truediv)
         for func in ops:

@@ -288,6 +288,7 @@ IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
+IMPLEMENT_UNARY_OP_VEC(lgamma)
 
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(acos_stub);
@@ -326,5 +327,6 @@ DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
 DEFINE_DISPATCH(trunc_stub);
+DEFINE_DISPATCH(lgamma_stub);
 }
 } // namespace at
