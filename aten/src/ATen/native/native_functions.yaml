@@ -992,6 +992,7 @@
 
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: method
   device_guard: False
   dispatch:
@@ -3004,6 +3005,7 @@
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: function, method
   dispatch:
     CPU: resize_as_cpu_
@@ -3012,6 +3014,7 @@
     SparseCUDA: resize_as_sparse_
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
   dispatch:
     CPU: pow_out
     CUDA: pow_out
@@ -3021,6 +3024,7 @@
 - func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
   use_c10_dispatcher: True
   variants: function, method
+  supports_named_tensor: True
   dispatch:
     CPU: pow
     CUDA: pow
@@ -4138,6 +4142,7 @@
 
 - func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: method
   dispatch:
     CPU: pow_
@@ -4145,6 +4150,7 @@
 
 - func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
   use_c10_dispatcher: True
+  supports_named_tensor: True
   variants: method
   dispatch:
     CPU: pow_
@@ -5060,11 +5066,13 @@
     QuantizedCPU: quantized_equal
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
   dispatch:
     CPU: pow_out
     CUDA: pow_out
 
 - func: pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
+  supports_named_tensor: True
   use_c10_dispatcher: True
   variants: method, function
   dispatch:
@@ -5072,11 +5080,13 @@
     CUDA: pow
 
 - func: pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
   dispatch:
     CPU: pow_out
     CUDA: pow_out
 
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
+  supports_named_tensor: True
   use_c10_dispatcher: True
   dispatch:
     CPU: pow
@@ -5718,7 +5728,6 @@
     CPU: adaptive_avg_pool2d_out_cpu
     CUDA: adaptive_avg_pool2d_out_cuda
     MkldnnCPU: mkldnn_adaptive_avg_pool2d_out
-    QuantizedCPU: quantized_adaptive_avg_pool2d_out
 
 - func: adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   use_c10_dispatcher: True
@@ -5840,6 +5849,7 @@
     CPU: avg_pool2d_cpu
     CUDA: avg_pool2d_cuda
     MkldnnCPU: mkldnn_avg_pool2d
+    QuantizedCPU: quantized_avg_pool2d
 
 - func: avg_pool2d_backward.grad_input(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
