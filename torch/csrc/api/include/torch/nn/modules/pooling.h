@@ -93,18 +93,8 @@ class TORCH_API MaxPoolImpl : public torch::nn::Cloneable<Derived> {
   /// Pretty prints the `MaxPool{1,2,3}d` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
-  /// Returns the indices of the max values if `options.return_indices()` is `true`.
-  const Tensor& max_indices() const {
-    TORCH_CHECK(options.return_indices(),
-      "To obtain max indices with `.max_indices()`, the module must be constructed with `return_indices` option set to `true`");
-    return *max_indices_;
-  }
-
   /// The options with which this `Module` was constructed.
   MaxPoolOptions<D> options;
-
- protected:
-  c10::optional<Tensor> max_indices_;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MaxPool1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -116,6 +106,10 @@ class TORCH_API MaxPool1dImpl : public MaxPoolImpl<1, MaxPool1dImpl> {
  public:
   using MaxPoolImpl<1, MaxPool1dImpl>::MaxPoolImpl;
   Tensor forward(const Tensor& input);
+
+  /// Returns the outputs and the indices of the max values.
+  /// Useful for `torch::nn::MaxUnpool1d` later.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `MaxPool1dImpl`.
@@ -133,6 +127,10 @@ class TORCH_API MaxPool2dImpl : public MaxPoolImpl<2, MaxPool2dImpl> {
  public:
   using MaxPoolImpl<2, MaxPool2dImpl>::MaxPoolImpl;
   Tensor forward(const Tensor& input);
+
+  /// Returns the outputs and the indices of the max values.
+  /// Useful for `torch::nn::MaxUnpool2d` later.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `MaxPool2dImpl`.
@@ -150,6 +148,10 @@ class TORCH_API MaxPool3dImpl : public MaxPoolImpl<3, MaxPool3dImpl> {
  public:
   using MaxPoolImpl<3, MaxPool3dImpl>::MaxPoolImpl;
   Tensor forward(const Tensor& input);
+
+  /// Returns the outputs and the indices of the max values.
+  /// Useful for `torch::nn::MaxUnpool3d` later.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `MaxPool3dImpl`.

@@ -59,33 +59,27 @@ void MaxPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
 }
 
 Tensor MaxPool1dImpl::forward(const Tensor& input) {
-  if (options.return_indices()) {
-    torch::Tensor output;
-    std::tie(output, max_indices_) = F::max_pool1d_with_indices(input, options);
-    return output;
-  } else {
-    return F::max_pool1d(input, options);
-  }
+  return F::max_pool1d(input, options);
+}
+
+std::tuple<Tensor, Tensor> MaxPool1dImpl::forward_with_indices(const Tensor& input) {
+  return F::max_pool1d_with_indices(input, options);
 }
 
 Tensor MaxPool2dImpl::forward(const Tensor& input) {
-  if (options.return_indices()) {
-    torch::Tensor output;
-    std::tie(output, max_indices_) = F::max_pool2d_with_indices(input, options);
-    return output;
-  } else {
-    return F::max_pool2d(input, options);
-  }
+  return F::max_pool2d(input, options);
+}
+
+std::tuple<Tensor, Tensor> MaxPool2dImpl::forward_with_indices(const Tensor& input) {
+  return F::max_pool2d_with_indices(input, options);
 }
 
 Tensor MaxPool3dImpl::forward(const Tensor& input) {
-  if (options.return_indices()) {
-    torch::Tensor output;
-    std::tie(output, max_indices_) = F::max_pool3d_with_indices(input, options);
-    return output;
-  } else {
-    return F::max_pool3d(input, options);
-  }
+  return F::max_pool3d(input, options);
+}
+
+std::tuple<Tensor, Tensor> MaxPool3dImpl::forward_with_indices(const Tensor& input) {
+  return F::max_pool3d_with_indices(input, options);
 }
 
 template class MaxPoolImpl<1, MaxPool1dImpl>;

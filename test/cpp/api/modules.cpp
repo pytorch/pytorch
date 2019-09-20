@@ -109,25 +109,17 @@ TEST_F(ModulesTest, MaxPool1d) {
 }
 
 TEST_F(ModulesTest, MaxPool1dReturnIndices) {
-  {
-    MaxPool1d model(MaxPool1dOptions(3).stride(2).return_indices(true));
-    auto x = torch::ones({1, 1, 5}, torch::requires_grad());
-    auto y = model(x);
+  MaxPool1d model(MaxPool1dOptions(3).stride(2));
+  auto x = torch::ones({1, 1, 5}, torch::requires_grad());
+  torch::Tensor y, indices;
+  std::tie(y, indices) = model->forward_with_indices(x);
 
-    ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1 ,2})));
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1 ,2})));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 
-    ASSERT_TRUE(torch::allclose(model->max_indices(), torch::tensor({{{0, 2}}}, torch::kLong)));
-    ASSERT_EQ(model->max_indices().sizes(), torch::IntArrayRef({1, 1, 2}));
-  }
-  {
-    MaxPool1d model(MaxPool1dOptions(3).stride(2).return_indices(false));
-    auto x = torch::ones({1, 1, 5}, torch::requires_grad());
-    auto y = model(x);
-    ASSERT_THROWS_WITH(model->max_indices(),
-      "must be constructed with `return_indices` option set to `true`");
-  }
+  ASSERT_TRUE(torch::allclose(indices, torch::tensor({{{0, 2}}}, torch::kLong)));
+  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({1, 1, 2}));
 }
 
 TEST_F(ModulesTest, MaxPool2dEven) {
@@ -157,29 +149,21 @@ TEST_F(ModulesTest, MaxPool2dUneven) {
 }
 
 TEST_F(ModulesTest, MaxPool2dReturnIndices) {
-  {
-    MaxPool2d model(MaxPool2dOptions(3).stride(2).return_indices(true));
-    auto x = torch::ones({2, 5, 5}, torch::requires_grad());
-    auto y = model(x);
+  MaxPool2d model(MaxPool2dOptions(3).stride(2));
+  auto x = torch::ones({2, 5, 5}, torch::requires_grad());
+  torch::Tensor y, indices;
+  std::tie(y, indices) = model->forward_with_indices(x);
 
-    ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2 ,2})));
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
-    ASSERT_TRUE(torch::allclose(
-      model->max_indices(),
-      torch::tensor({{{ 0,  2},
-                      {10, 12}},
-                     {{ 0,  2},
-                      {10, 12}}}, torch::kLong)));
-    ASSERT_EQ(model->max_indices().sizes(), torch::IntArrayRef({2, 2, 2}));
-  }
-  {
-    MaxPool2d model(MaxPool2dOptions(3).stride(2).return_indices(false));
-    auto x = torch::ones({2, 5, 5}, torch::requires_grad());
-    auto y = model(x);
-    ASSERT_THROWS_WITH(model->max_indices(),
-      "must be constructed with `return_indices` option set to `true`");
-  }
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2 ,2})));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
+  ASSERT_TRUE(torch::allclose(
+    indices,
+    torch::tensor({{{ 0,  2},
+                    {10, 12}},
+                   {{ 0,  2},
+                    {10, 12}}}, torch::kLong)));
+  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({2, 2, 2}));
 }
 
 TEST_F(ModulesTest, MaxPool3d) {
@@ -196,34 +180,26 @@ TEST_F(ModulesTest, MaxPool3d) {
 }
 
 TEST_F(ModulesTest, MaxPool3dReturnIndices) {
-  {
-    MaxPool3d model(MaxPool3dOptions(3).stride(2).return_indices(true));
-    auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
-    auto y = model(x);
+  MaxPool3d model(MaxPool3dOptions(3).stride(2));
+  auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
+  torch::Tensor y, indices;
+  std::tie(y, indices) = model->forward_with_indices(x);
 
-    ASSERT_EQ(y.ndimension(), 4);
-    ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
 
-    ASSERT_TRUE(torch::allclose(
-      model->max_indices(),
-      torch::tensor({{{{ 0,  2},
-                       {10, 12}},
-                      {{50, 52},
-                       {60, 62}}},
-                     {{{ 0,  2},
-                       {10, 12}},
-                      {{50, 52},
-                       {60, 62}}}}, torch::kLong)));
-    ASSERT_EQ(model->max_indices().sizes(), torch::IntArrayRef({2, 2, 2, 2}));
-  }
-  {
-    MaxPool3d model(MaxPool3dOptions(3).stride(2).return_indices(false));
-    auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
-    auto y = model(x);
-    ASSERT_THROWS_WITH(model->max_indices(),
-      "must be constructed with `return_indices` option set to `true`");
-  }
+  ASSERT_TRUE(torch::allclose(
+    indices,
+    torch::tensor({{{{ 0,  2},
+                     {10, 12}},
+                    {{50, 52},
+                     {60, 62}}},
+                   {{{ 0,  2},
+                     {10, 12}},
+                    {{50, 52},
+                     {60, 62}}}}, torch::kLong)));
+  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
 }
 
 TEST_F(ModulesTest, AvgPool1d) {
