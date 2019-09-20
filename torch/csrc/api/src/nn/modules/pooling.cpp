@@ -60,9 +60,8 @@ void MaxPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
 
 Tensor MaxPool1dImpl::forward(const Tensor& input) {
   if (options.return_indices()) {
-    torch::Tensor output, max_indices;
-    std::tie(output, max_indices) = F::max_pool1d_with_indices(input, options);
-    max_indices_ = max_indices;
+    torch::Tensor output;
+    std::tie(output, max_indices_) = F::max_pool1d_with_indices(input, options);
     return output;
   } else {
     return F::max_pool1d(input, options);
@@ -71,9 +70,8 @@ Tensor MaxPool1dImpl::forward(const Tensor& input) {
 
 Tensor MaxPool2dImpl::forward(const Tensor& input) {
   if (options.return_indices()) {
-    torch::Tensor output, max_indices;
-    std::tie(output, max_indices) = F::max_pool2d_with_indices(input, options);
-    max_indices_ = max_indices;
+    torch::Tensor output;
+    std::tie(output, max_indices_) = F::max_pool2d_with_indices(input, options);
     return output;
   } else {
     return F::max_pool2d(input, options);
@@ -82,9 +80,8 @@ Tensor MaxPool2dImpl::forward(const Tensor& input) {
 
 Tensor MaxPool3dImpl::forward(const Tensor& input) {
   if (options.return_indices()) {
-    torch::Tensor output, max_indices;
-    std::tie(output, max_indices) = F::max_pool3d_with_indices(input, options);
-    max_indices_ = max_indices;
+    torch::Tensor output;
+    std::tie(output, max_indices_) = F::max_pool3d_with_indices(input, options);
     return output;
   } else {
     return F::max_pool3d(input, options);
