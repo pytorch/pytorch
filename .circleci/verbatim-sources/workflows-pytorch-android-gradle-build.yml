@@ -1,8 +1,10 @@
       - pytorch_android_gradle_build-x86_32:
+          name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32
           requires:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
 
       - pytorch_android_gradle_build:
+          name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
           requires:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build

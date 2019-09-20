@@ -12,7 +12,7 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
   TORCH_CHECK(mask.is_coalesced(), "sparse_mask: mask is uncoalesced");
   TORCH_CHECK(mask.sizes().equals(t.sizes()), "sparse_mask: operands have incompatible sizes; self has size ",
       t.sizes(), " but mask has size ", mask.sizes());
-  AT_ASSERT(t.is_cuda());  // dispatch argument
+  TORCH_CHECK(t.is_cuda(), "sparse_mask: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(mask.is_cuda(), "sparse_mask: expected 'mask' to be CUDA, but got CPU");
   TORCH_CHECK(r.is_cuda(), "sparse_mask: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(cuda::check_device({r, t, mask}),
