@@ -10,9 +10,8 @@
 #include <numeric>
 #include <vector>
 #include <limits>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
+#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 namespace native {
@@ -28,8 +27,13 @@ static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
   TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "Invalid argument passed to lu");
   auto n = self.size(-1);
   auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs).sum(-1, /*keepdim=*/false, /*dtype=*/self.scalar_type()).fmod_(2);
-  return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1),
-                                    lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1));
+  auto u_diagonal = lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+
+  // We have to manually set the diagonal to 0 due to an issue with MAGMA's getrf_batched routine
+  if (self.dim() > 2 && self.is_cuda()) {
+    u_diagonal.index_put_(infos.nonzero_numpy(), at::zeros({}, self.options()));
+  }
+  return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1), u_diagonal);
 }
 
 Tensor det(const Tensor& self) {
@@ -79,18 +83,20 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 }
 
 Tensor pinverse(const Tensor& self, double rcond) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
-           "pinverse(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() >= 2,
+           "pinverse(", self.type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
            "of floating types");
   if (self.numel() == 0) {
     // Match NumPy
-    return at::empty({self.size(1), self.size(0)}, self.options());
+    auto self_sizes = self.sizes().vec();
+    std::swap(self_sizes[self.dim() - 1], self_sizes[self.dim() - 2]);
+    return at::empty(self_sizes, self.options());
   }
   Tensor U, S, V;
   std::tie(U, S, V) = self.svd();
-  Tensor max_val = S[0];
+  Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);
   Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, self.options()));
-  return V.mm(S_pseudoinv.diag().mm(U.t()));
+  return at::matmul(V, at::matmul(S_pseudoinv.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1), U.transpose(-2, -1)));
 }
 
 static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
@@ -301,7 +307,7 @@ Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) 
   }
   namedinference::propagate_names(
       result,
-      std::move(namedinference::compute_bmm_outnames(result, batch1, batch2)),
+      namedinference::compute_bmm_outnames(result, batch1, batch2),
       /*validate_names=*/false);
 #endif
   return result;

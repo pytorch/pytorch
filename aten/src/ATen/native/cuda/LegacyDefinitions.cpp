@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 namespace at { namespace native {
 
@@ -35,13 +36,14 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & val
   if (mask.dtype() == at::ScalarType::Byte) {
     AT_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
-    return legacy::cuda::_th_masked_fill_(self, mask, value);
+    legacy::cuda::_th_masked_fill_(self, mask, value);
   } else {
-    return legacy::cuda::_th_masked_fill_bool_(self, mask, value);
+    legacy::cuda::_th_masked_fill_bool_(self, mask, value);
   }
 #ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(self, std::move(outnames), /*validate_names=*/false);
 #endif
+  return self;
 }
 
 Tensor & masked_scatter__cuda(Tensor& self, const Tensor & mask, const Tensor & source) {

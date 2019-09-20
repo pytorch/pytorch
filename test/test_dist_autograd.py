@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import sys
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
-from multiprocessing_test_case import MultiProcessTestCase
+from common_distributed import MultiProcessTestCase
 from functools import wraps
 import six
 import unittest
@@ -37,6 +37,9 @@ def dist_init(func):
                  "does not support python2")
 @unittest.skipIf(C.is_asan, "Skip ASAN as torch + multiprocessing spawn have known issues")
 class TestDistAutograd(MultiProcessTestCase):
+    def setUp(self):
+        super(TestDistAutograd, self).setUp()
+        self._spawn_process()
 
     @property
     def world_size(self):

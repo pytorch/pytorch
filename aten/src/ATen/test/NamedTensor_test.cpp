@@ -1,11 +1,12 @@
-#ifdef BUILD_NAMEDTENSOR
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
+#include <ATen/core/EnableNamedTensor.h>
 
+#ifdef BUILD_NAMEDTENSOR
 using at::Dimname;
 using at::DimnameList;
 using at::NamedTensorMeta;

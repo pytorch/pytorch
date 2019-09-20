@@ -17,9 +17,8 @@
 #include <TH/THAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
 #include <cctype>
@@ -230,7 +229,11 @@ Tensor empty_like(
   }
 
 #ifdef BUILD_NAMEDTENSOR
-  return at::empty(self.sizes(), self.opt_names(), options, use_memory_format);
+  if (self.opt_names()) {
+    return at::empty(self.sizes(), self.opt_names(), options, use_memory_format);
+  } else {
+    return at::empty(self.sizes(), options, use_memory_format);
+  }
 #else
   return at::empty(self.sizes(), options, use_memory_format);
 #endif

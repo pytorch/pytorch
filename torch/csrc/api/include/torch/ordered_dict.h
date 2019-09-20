@@ -146,6 +146,10 @@ class OrderedDict {
   /// `other` is already present in this `OrderedDict`, an exception is thrown.
   void update(const OrderedDict& other);
 
+  /// Removes the item that has `key` from this `OrderedDict` if exists and if
+  /// it doesn't an exception is thrown.
+  void erase(const Key& key);
+
   /// Removes all items from this `OrderedDict`.
   void clear();
 
@@ -221,14 +225,14 @@ class OrderedDict<Key, Value>::Item {
   }
 
   /// Returns a `(key, value)` pair.
-  const std::pair<const Key, Value>& pair() const noexcept {
+  const std::pair<Key, Value>& pair() const noexcept {
     return pair_;
   }
 
  private:
   /// This is stored as an std::pair because it will make Python binding a lot,
   /// lot easier.
-  ::std::pair<const Key, Value> pair_;
+  ::std::pair<Key, Value> pair_;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ OrderedDict ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -399,6 +403,20 @@ const Value* OrderedDict<Key, Value>::find(const Key& key) const noexcept {
     return nullptr;
   }
   return &items_[iterator->second].value();
+}
+
+template <typename Key, typename Value>
+void OrderedDict<Key, Value>::erase(const Key& key) {
+  auto it = index_.find(key);
+  TORCH_CHECK(it != index_.end(), "Key '", key, "' doesn't exist");
+
+  auto index = it->second;
+  index_.erase(it);
+  items_.erase(items_.begin() + index);
+
+  for (auto& pair : index_)
+    if (pair.second > index)
+      --pair.second;
 }
 
 template <typename Key, typename Value>

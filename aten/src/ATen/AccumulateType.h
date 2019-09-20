@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/Config.h>
 #include <c10/util/Half.h>
+#include <c10/util/BFloat16.h>
 
 // Defines the accumulation type for a scalar type.
 // Example:
@@ -31,6 +32,7 @@ template <> struct AccumulateType<char, true> { using type = int64_t; };
 template <> struct AccumulateType<int16_t, true> { using type = int64_t; };
 template <> struct AccumulateType<int32_t, true> { using type = int64_t; };
 template <> struct AccumulateType<int64_t, true> { using type = int64_t; };
+template <> struct AccumulateType<BFloat16, false> { using type = float; };
 template <> struct AccumulateType<float, false> { using type = double; };
 template <> struct AccumulateType<double, false> { using type = double; };
 template <> struct AccumulateType<int8_t, false> { using type = int64_t; };

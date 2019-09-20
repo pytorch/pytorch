@@ -8,6 +8,7 @@
 #include <ATen/native/cpu/TensorCompareKernel.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 namespace {
 template <typename scalar_t>
@@ -51,8 +52,22 @@ bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol,
 
 Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   // TODO: use bitwise operator overloads once we add them
+
+  TORCH_CHECK(self.scalar_type() == other.scalar_type(), self.scalar_type(), " did not match ", other.scalar_type())
+
   auto actual_error = (self - other).abs();
   auto max_error = atol + rtol * other.abs();
+
+  // `max_error` could be a float or double depending on the type of the input
+  // tensors.
+  // Specifically, if other is an int tensor, multiplying by rtol results in
+  // float tensor.
+  // It is also possible for parameters to be 'wrapped_number's, in which case
+  // max_error could be promoted to double when actual error is still a float.
+  if (actual_error.scalar_type() != max_error.scalar_type()) {
+    actual_error = actual_error.to(max_error.scalar_type());
+  }
+
   auto close = actual_error <= max_error;
 
   if (isFloatingType(self.scalar_type()) && isFloatingType(other.scalar_type())) {
@@ -84,8 +99,10 @@ bool is_nonzero(const Tensor& self) {
   Scalar localScalar = self.item();
   if (localScalar.isFloatingPoint()) {
     return localScalar.to<double>() != 0;
-  } else if (localScalar.isIntegral()){
+  } else if (localScalar.isIntegral(false)){
     return localScalar.to<int64_t>() != 0;
+  } else if (localScalar.isBoolean()) {
+    return localScalar.to<bool>();
   }
   AT_ERROR("expected non-Tensor backed scalar");
 }

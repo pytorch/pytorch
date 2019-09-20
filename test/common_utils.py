@@ -22,7 +22,7 @@ import subprocess
 import time
 from collections import OrderedDict
 from contextlib import contextmanager
-from functools import wraps, partial
+from functools import wraps
 from itertools import product
 from copy import deepcopy
 from numbers import Number
@@ -43,7 +43,7 @@ import torch.backends.mkl
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
-torch.backends.cudnn.disable_global_flags()
+torch.backends.disable_global_flags()
 
 
 parser = argparse.ArgumentParser(add_help=False)
@@ -120,6 +120,7 @@ PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
 
 IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
@@ -184,7 +185,7 @@ TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
 TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
-
+TEST_WITH_QNNPACK = os.getenv('PYTORCH_TEST_WITH_QNNPACK', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -213,52 +214,6 @@ def _test_function(fn, device):
     def run_test_function(self):
         return fn(self, device)
     return run_test_function
-
-
-class torchtest():
-    """Allows to generate and run per-device unittests.
-
-    This decorator class allows to generate and run per-device unittest.
-
-    Example:
-
-    class _TestTorchMixin(torchtest):
-
-        @torchtest.for_all_device_types()
-        def test_zeros_like(self, device):
-            expected = torch.zeros((100, 100,), device=device)
-
-    Will execute:
-
-        test_zeros_like (__main__.TestTorch) ... skipped 'Look at test_zeros_like_cpu, test_zeros_like_cuda results.'
-        test_zeros_like_cpu (__main__.TestTorch) ... ok
-        test_zeros_like_cuda (__main__.TestTorch) ... ok
-
-    To work properly, test class should be inherited from `torchtest`.
-    for_all_device_types decorator does not guarantee proper functionality in
-    combination with other decorators.
-
-    Please do not extend this decorator to support other cases (such as dtype,
-    layouts, etc) without consulting with bigger group. Devices is the special
-    case as build flags control additions/removals (see
-    https://github.com/pytorch/pytorch/pull/23824 for the reference).
-    """
-    @classmethod
-    def for_all_device_types(cls):
-        def wrapper(fn):
-            test_names = []
-
-            for device in torch.testing.get_all_device_types():
-                test_name = fn.__name__ + '_' + device
-                assert not hasattr(cls, test_name), "Duplicated test name: " + test_name
-                setattr(cls, test_name, _test_function(fn, device))
-                test_names.append(test_name)
-
-            @wraps(fn)
-            def empty_test(*args, **kwargs):
-                raise unittest.SkipTest("Look at {} results.".format(", ".join(test_names)))
-            return empty_test
-        return wrapper
 
 
 def skipIfNoLapack(fn):
@@ -459,6 +414,65 @@ class CudaMemoryLeakCheck():
                     warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
                         self.name, after - before, i), RuntimeWarning)
 
+#  "min_satisfying_examples" setting has been deprecated in hypythesis
+#  3.56.0 and removed in hypothesis 4.x
+try:
+    import hypothesis
+    if hypothesis.version.__version_info__ >= (3, 56, 0):
+        hypothesis.settings.register_profile(
+            "pytorch_ci",
+            hypothesis.settings(
+                derandomize=True,
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=100))
+        hypothesis.settings.register_profile(
+            "dev",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=10,
+                verbosity=hypothesis.Verbosity.verbose))
+        hypothesis.settings.register_profile(
+            "debug",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=1000,
+                verbosity=hypothesis.Verbosity.verbose))
+    else:
+        hypothesis.settings.register_profile(
+            "pytorch_ci",
+            hypothesis.settings(
+                derandomize=True,
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=100,
+                min_satisfying_examples=1))
+        hypothesis.settings.register_profile(
+            "dev",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=10,
+                min_satisfying_examples=1,
+                verbosity=hypothesis.Verbosity.verbose))
+        hypothesis.settings.register_profile(
+            "debug",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=1000,
+                min_satisfying_examples=1,
+                verbosity=hypothesis.Verbosity.verbose))
+
+    hypothesis.settings.load_profile(
+        "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
+                                                     'dev')
+    )
+except ImportError:
+    print('Fail to import hypothesis in common_utils, tests are not derandomized')
+
 class TestCase(expecttest.TestCase):
     precision = 1e-5
     maxDiff = None
@@ -477,7 +491,7 @@ class TestCase(expecttest.TestCase):
 
         # Wraps the tested method if we should enforce non default CUDA stream.
         self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
-        if self._do_cuda_non_default_stream and not IS_WINDOWS:
+        if self._do_cuda_non_default_stream and not IS_WINDOWS and not TEST_WITH_ROCM:
             self.wrap_with_cuda_policy(method_name, self.enforceNonDefaultStream)
 
     def assertLeaksNoCudaTensors(self, name=None):
@@ -1014,9 +1028,9 @@ def random_symmetric_psd_matrix(l, *batches):
     return torch.matmul(A, A.transpose(-2, -1))
 
 
-def random_symmetric_pd_matrix(l, *batches):
-    A = torch.randn(*(batches + (l, l)))
-    return torch.matmul(A, A.transpose(-2, -1)) + torch.eye(l) * 1e-5
+def random_symmetric_pd_matrix(matrix_size, *batch_dims):
+    A = torch.randn(*(batch_dims + (matrix_size, matrix_size)))
+    return torch.matmul(A, A.transpose(-2, -1)) + torch.eye(matrix_size) * 1e-5
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
@@ -1048,29 +1062,35 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims, **k
     return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).matmul(v.transpose(-2, -1)))
 
 
-def random_linalg_solve_processed_inputs(A_dims, b_dims, gen_fn, transform_fn, cast_fn):
-    """
-    For solve methods, this returns the following values:
-    RHS tensor: generated using torch.randn
-    LHS tensor: generated using gen_fn
-    Transformed LHS tensor(s): returned after calling transform_fn.
-                               This can be a tuple or a single tensor depending on transform_fn
-                               For instance, if transform_fn == torch.cholesky, then the return value
-                               is a single tensor. If transform_fn == torch.lu, then the return value
-                               is a tuple of tensors
-    """
-    RHS = cast_fn(torch.randn(*b_dims))
-    LHS = cast_fn(gen_fn(*A_dims))
-    transformed_LHS = transform_fn(LHS)
-    return RHS, LHS, transformed_LHS
-
-
 def lu_solve_test_helper(self, A_dims, b_dims, cast, pivot):
-    b, A, (LU_data, LU_pivots, info) = random_linalg_solve_processed_inputs(
-        A_dims, b_dims, random_fullrank_matrix_distinct_singular_value,
-        partial(torch.lu, get_infos=True, pivot=pivot), cast)
+    b = cast(torch.randn(*b_dims))
+    A = cast(random_fullrank_matrix_distinct_singular_value(*A_dims))
+    LU_data, LU_pivots, info = torch.lu(A, get_infos=True, pivot=pivot)
     self.assertEqual(info, torch.zeros_like(info))
     return b, A, LU_data, LU_pivots
+
+
+def cholesky_solve_test_helper(A_dims, b_dims, cast, upper):
+    b = cast(torch.randn(*b_dims))
+    A = cast(random_symmetric_pd_matrix(*A_dims))
+    L = torch.cholesky(A, upper=upper)
+    return b, A, L
+
+
+def triangular_solve_test_helper(A_dims, b_dims, cast, upper, unitriangular):
+    triangle_function = torch.triu if upper else torch.tril
+    b = cast(torch.randn(*b_dims))
+    A = cast(torch.randn(*A_dims))
+    A_triangular = triangle_function(A)
+    if unitriangular:
+        A_triangular.diagonal(dim1=-2, dim2=-1).fill_(1.)
+    return b, A_triangular
+
+
+def solve_test_helper(A_dims, b_dims, cast):
+    b = cast(torch.randn(*b_dims))
+    A = cast(random_fullrank_matrix_distinct_singular_value(*A_dims))
+    return b, A
 
 
 def brute_pdist(inp, p=2):

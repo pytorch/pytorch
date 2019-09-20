@@ -1,6 +1,7 @@
 #pragma once
-#ifdef BUILD_NAMEDTENSOR
+#include <ATen/core/EnableNamedTensor.h>
 
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/interned_strings.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
