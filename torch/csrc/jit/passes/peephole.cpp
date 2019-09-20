@@ -152,8 +152,8 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
               }
             }
 
-            auto* addmm_node = graph->insertNode(graph->create(aten::addmm, 1));
             auto* cOne = graph->insertConstant(1);
+            auto* addmm_node = graph->insertNode(graph->create(aten::addmm, 1));
             addmm_node->addInput(add_mat);
             addmm_node->addInput(mat1);
             addmm_node->addInput(mat2);
