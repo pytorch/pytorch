@@ -3403,6 +3403,7 @@ def foo(x):
                 def invalid_prefix_annotation3(a):
                     #     type: (Int) -> Int
                     return a + 2
+
     def test_is_optional(self):
         ann = Union[List[int], List[float]]
         torch._jit_internal.is_optional(ann)
