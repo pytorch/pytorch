@@ -37,6 +37,7 @@ test/cpp/api/mnist
 test/custom_operator/model.pt
 test/data/legacy_modules.t7
 test/data/*.pt
+test/backward_compatibility/new_schemas.txt
 dropout_model.pt
 test/generated_type_hints_smoketest.py
 test/htmlcov
