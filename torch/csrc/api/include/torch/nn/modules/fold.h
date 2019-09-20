@@ -16,7 +16,7 @@ class TORCH_API FoldImpl : public torch::nn::Cloneable<FoldImpl> {
  public:
   FoldImpl(ExpandingArray<2> output_size, ExpandingArray<2> kernel_size)
       : FoldImpl(FoldOptions(output_size, kernel_size)) {}
-  explicit FoldImpl(const FoldOptions& options_) : options(options_) {}
+  explicit FoldImpl(const FoldOptions& options_);
 
   void reset() override {}
 
