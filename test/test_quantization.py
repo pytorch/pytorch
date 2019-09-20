@@ -492,11 +492,19 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             torch.nn.LSTM: torch.nn.quantized.dynamic.LSTM,
         }
         model_int8 = quantize_dynamic(
-            model, qconfig_dynamic_dict, default_dynamic_module_mapping
+            model=model, qconfig_dict=qconfig_dynamic_dict, mapping=default_dynamic_module_mapping,
+            dtype=torch.qint8
+        )
+        model_fp16 = quantize_dynamic(
+            model=model, qconfig_dict=qconfig_dynamic_dict, mapping=default_dynamic_module_mapping,
+            dtype=torch.float16
         )
         cell_int8 = model_int8.lstm
+        cell_fp16 = model_fp16.lstm
 
         assert type(cell_int8) == torch.nn.quantized.dynamic.LSTM, \
+            'torch.nn.LSTM should be converted to torch.nn.quantized.dynamic.LSTM after quantize_dynamic'
+        assert type(cell_fp16) == torch.nn.quantized.dynamic.LSTM, \
             'torch.nn.LSTM should be converted to torch.nn.quantized.dynamic.LSTM after quantize_dynamic'
 
         niter = 10
@@ -549,6 +557,13 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         for loaded_val, ref_val in zip(out_loaded, ref_out):
             torch.testing.assert_allclose(loaded_val, ref_val)
 
+        # Compare fp16 quantized to unquantized
+        output_fp16, final_hiddens_fp16 = cell_fp16(x, hiddens)
+
+        torch.testing.assert_allclose(output_fp16, ref_out)
+        self.assertEqual(output_fp16, ref_out)
+        for out, ref in zip(final_hiddens_fp16, ref_hid):
+            torch.testing.assert_allclose(out, ref)
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
