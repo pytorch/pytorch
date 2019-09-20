@@ -56,7 +56,6 @@ class FunctionalAPITest(QuantizationTestCase):
         dilation = (1, 1)
 
         X = torch.randn(N, iC, H, W, dtype=torch.float32)
-        X = X.permute([0, 2, 3, 1]).contiguous()
         qX = torch.quantize_linear(X, scale=scale, zero_point=128, dtype=torch.quint8)
 
         w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
@@ -64,7 +63,7 @@ class FunctionalAPITest(QuantizationTestCase):
         qw = torch.quantize_linear(w, scale=scale, zero_point=0, dtype=torch.qint8)
 
         b = torch.randn(oC, dtype=torch.float32) if use_bias else None
-        q_filters_ref = torch.ops.quantized.conv_prepack(qw.permute([0, 2, 3, 1]),
+        q_filters_ref = torch.ops.quantized.conv_prepack(qw,
                                                          b,
                                                          stride,
                                                          i_padding,
@@ -72,10 +71,10 @@ class FunctionalAPITest(QuantizationTestCase):
                                                          g)
 
 
-        ref_result = torch.ops.quantized.conv2d(qX.permute([0, 2, 3, 1]), q_filters_ref,
+        ref_result = torch.ops.quantized.conv2d(qX, q_filters_ref,
                                                 stride,
                                                 i_padding, dilation,
-                                                g, scale, zero_point).permute([0, 3, 1, 2])
+                                                g, scale, zero_point)
 
         q_result = torch.nn.quantized.functional.conv2d(qX,
                                                         qw,
@@ -348,7 +347,6 @@ class ModuleAPITest(QuantizationTestCase):
         scale, zero_point = 1.0 / 255, 128
 
         X = torch.randn(N, iC, H, W, dtype=torch.float32)
-        X = X.permute([0, 2, 3, 1]).contiguous()
         qX = torch.quantize_linear(X, scale=scale, zero_point=128, dtype=torch.quint8)
 
         w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
