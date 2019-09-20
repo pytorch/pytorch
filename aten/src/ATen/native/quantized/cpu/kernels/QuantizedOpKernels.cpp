@@ -262,11 +262,11 @@ void qadaptive_avg_pool2d_nhwc_kernel(
         // For int8 or uint8quantization, we implicitly use int32 as
         // accumulation Or else, it will go to the slow path
         // TODO: support 16bit, 32bit, and etc.
-        constexpr auto vec_width = Vec256<scalar_t>::size() / 4;
         auto* internal_i_p = i_p + istartH * istrideH + istartW * istrideW;
 
         // TODO: more vectorization with loop interleaving
-#ifdef __AVX2__
+#if defined(__AVX2__)
+        constexpr auto vec_width = Vec256<scalar_t>::size() / 4;
         if (vec_width == 8) {
           for (; c + vec_width <= sizeD; c += vec_width) {
             int64_t tcntr = 0;
@@ -371,9 +371,9 @@ void qavg_pool2d_nhwc_kernel(
         // For int8 quantization, we implicitly use int32 as accumulation
         // Or else, it will go to the slow path
         // TODO: support 16bit, 32bit, and etc.
-        constexpr auto vec_width = Vec256<scalar_t>::size() / 4;
         float multiplier = qx.q_scale() / qy.q_scale() / divide_factor;
-#ifdef __AVX2__
+#if defined(__AVX2__)
+        constexpr auto vec_width = Vec256<scalar_t>::size() / 4;
         if (vec_width == 8) {
           for (; c + vec_width <= nInputPlane; c += vec_width) {
             int64_t tcntr = 0;
