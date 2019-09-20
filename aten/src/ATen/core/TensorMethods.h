@@ -128,7 +128,7 @@ inline int64_t Tensor::_version() const {
     return TypeDefault::_version(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::_version(Tensor self) -> int");
-    return table->getOp<int64_t (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+    return table->getOp<int64_t (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -1352,7 +1352,7 @@ inline Tensor Tensor::lgamma() const {
     return TypeDefault::lgamma(const_cast<Tensor&>(*this));
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::lgamma", ""}).value();
-    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)))
         .callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
@@ -1361,7 +1361,7 @@ inline Tensor & Tensor::lgamma_() const {
     return TypeDefault::lgamma_(const_cast<Tensor&>(*this));
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::lgamma_", ""}).value();
-    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)))
         .callUnboxed<Tensor &, Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
