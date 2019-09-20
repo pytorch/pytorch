@@ -4577,13 +4577,6 @@ workflows:
   # These jobs are all idempotent and very lightweight; they just upload html
   # files that track what binaries are available and what their sizes are.
   update_s3_htmls:
-    triggers:
-      - schedule:
-          cron: "0 9 * * *"
-          filters:
-            branches:
-              only:
-                - master
     jobs:
       - setup
       - update_s3_htmls_for_nightlies:
