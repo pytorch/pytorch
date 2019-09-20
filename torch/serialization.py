@@ -294,7 +294,6 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
 
 
 def _save(obj, zip_file, pickle_module, pickle_protocol):
-    import torch.nn as nn
     serialized_storages = {}
 
     def persistent_id(obj):
@@ -529,8 +528,8 @@ def _legacy_pickle_load(f, map_location, pickle_module, **pickle_load_args):
             current_source = ''.join(get_source_lines_and_file(container_type)[0])
         except Exception:  # saving the source is optional, so we can ignore any errors
             warnings.warn("Couldn't retrieve source code for container of "
-                            "type " + container_type.__name__ + ". It won't be checked "
-                            "for correctness upon loading.")
+                          "type " + container_type.__name__ + ". It won't be checked "
+                          "for correctness upon loading.")
             return
         if original_source != current_source:
             if container_type.dump_patches:
@@ -549,20 +548,20 @@ def _legacy_pickle_load(f, map_location, pickle_module, **pickle_load_args):
                         elif file_size != len(lines) or f.read() != lines:
                             raise IOError
                     msg = ("Saved a reverse patch to " + file_name + ". "
-                            "Run `patch -p0 < " + file_name + "` to revert your "
-                            "changes.")
+                           "Run `patch -p0 < " + file_name + "` to revert your "
+                           "changes.")
                 except IOError:
                     msg = ("Tried to save a patch, but couldn't create a "
-                            "writable file " + file_name + ". Make sure it "
-                            "doesn't exist and your working directory is "
-                            "writable.")
+                           "writable file " + file_name + ". Make sure it "
+                           "doesn't exist and your working directory is "
+                           "writable.")
             else:
                 msg = ("you can retrieve the original source code by "
-                        "accessing the object's source attribute or set "
-                        "`torch.nn.Module.dump_patches = True` and use the "
-                        "patch tool to revert the changes.")
+                       "accessing the object's source attribute or set "
+                       "`torch.nn.Module.dump_patches = True` and use the "
+                       "patch tool to revert the changes.")
             msg = ("source code of class '{}' has changed. {}"
-                    .format(torch.typename(container_type), msg))
+                   .format(torch.typename(container_type), msg))
             warnings.warn(msg, SourceChangeWarning)
     pass
 
@@ -590,7 +589,7 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
 
         if typename != 'storage':
             raise RuntimeError("Unknown typename for persistent_load, expected"
-                " 'storage', but got: {}".format(typename))
+                               " 'storage', but got: {}".format(typename))
 
         data_type, key, location, size, view_metadata = data
         location = maybe_decode_ascii(location)
