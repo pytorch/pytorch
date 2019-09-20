@@ -608,7 +608,8 @@ class TestQuantizedOps(TestCase):
         qX = torch.quantize_linear(X, scale, zero_point, torch_type).permute([0, 3, 1, 2])
         qY = torch.quantize_linear(Y, scale, zero_point, torch_type).permute([0, 3, 1, 2])
 
-        out_scale, out_zero_point, _ = out_qparams
+        out_scale, out_zero_pt, out_torch_type = out_qparams
+        assume(out_torch_type == torch_type)
 
         ref = torch.cat([qX.dequantize(), qY.dequantize()], dim=1)
         if relu:
