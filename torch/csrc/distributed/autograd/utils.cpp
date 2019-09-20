@@ -31,11 +31,11 @@ void addSendRpcBackward(
     // Record the send autograd function in our current context.
     autogradContext.addSendFunction(
         grad_fn, autogradMetadata.autogradMessageId);
-  }
 
-  // Record the workerID
-  if (dst.id_ != -1) {
-    autogradContext.addKnownWorkerId(dst);
+    // Record the workerID
+    if (dst.id_ != -1) {
+      autogradContext.addKnownWorkerId(dst);
+    }
   }
 }
 
