@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/utils/memory.h>
+#include <mutex>
 
 namespace torch {
 namespace jit {
@@ -87,10 +88,13 @@ struct TORCH_API Function {
 
   GraphExecutor& get_executor() {
     ensure_defined();
-    std::call_once(executor_init_, [&] {
-      check_single_output();
-      executor_ = GraphExecutor(graph());
-    });
+    if (executor_initialized_) {
+      return executor_;
+    }
+    std::lock_guard<std::mutex> lock(compile_mutex);
+    check_single_output();
+    executor_ = GraphExecutor(graph());
+    executor_initialized_ = true;
     return executor_;
   }
 
@@ -98,9 +102,13 @@ struct TORCH_API Function {
   c10::QualifiedName name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
 
+  // Functions are invokable from multiple threads, so this lock needs to be
+  // held when we're initializing graph executor for the first time.
+  mutable std::mutex compile_mutex;
+
   GraphExecutor executor_; // for execution
 
-  std::once_flag executor_init_;
+  bool executor_initialized_ = false;
 
   // an optional function that actually creates the method when
   // ensure_defined() is called. This is used by the compiler so
