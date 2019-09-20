@@ -4,13 +4,12 @@
 
 #include <c10/macros/Macros.h>
 #include <ATen/detail/FunctionTraits.h>
+#include <ATen/NumericUtils.h>
 #if defined(__CUDACC__)
 #include <THC/THCDeviceUtils.cuh>
-#include <THC/THCNumerics.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
 #elif defined(__HIPCC__)
 #include <THH/THHDeviceUtils.cuh>
-#include <THH/THHNumerics.cuh>
 #include <ATen/native/hip/DeviceSqrt.cuh>
 #endif
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -18,7 +17,6 @@
 #include <thrust/pair.h>
 #else
 #include <cmath>
-#include <ATen/NumericUtils.h>
 #define device_sqrt std::sqrt
 #endif
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -258,31 +256,21 @@ namespace detail {
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 template <typename T1, typename T2> using pair = thrust::pair<T1, T2>;
-
-template <typename scalar_t>
-bool C10_DEVICE isnan(scalar_t x) {
-  return THCNumerics<scalar_t>::isnan(x);
-}
 #else
 template <typename T1, typename T2> using pair = std::pair<T1, T2>;
-
-template <typename scalar_t>
-bool isnan(scalar_t x) {
-  return at::_isnan(x);
-}
 #endif
 
 template <typename scalar_t>
 struct LessOrNan {
   C10_DEVICE bool operator () (scalar_t a, scalar_t b) const {
-    return isnan(a) || a < b;
+    return at::_isnan(a) || a < b;
   }
 };
 
 template <typename scalar_t>
 struct GreaterOrNan {
   C10_DEVICE bool operator () (scalar_t a, scalar_t b) const {
-    return isnan(a) || a > b;
+    return at::_isnan(a) || a > b;
   }
 };
 
