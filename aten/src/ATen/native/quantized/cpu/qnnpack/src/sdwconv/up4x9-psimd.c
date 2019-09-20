@@ -10,7 +10,7 @@
 
 #include <qnnpack/sdwconv.h>
 
-void sdwconv_ukernel_up4x9__psimd(
+void pytorch_sdwconv_ukernel_up4x9__psimd(
     size_t channels,
     size_t output_width,
     const float** input,
