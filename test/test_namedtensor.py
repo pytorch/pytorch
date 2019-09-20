@@ -223,7 +223,7 @@ class TestNamedTensor(TestCase):
                                   [None, None, 'C', 'H'])
 
     def test_repr(self):
-        named_tensor = torch.zeros(2, 3).names_('N', 'C')
+        named_tensor = torch.zeros(2, 3).rename_('N', 'C')
         expected = "tensor([[0., 0., 0.],\n        [0., 0., 0.]], names=('N', 'C'))"
         self.assertEqual(repr(named_tensor), expected)
 
@@ -231,7 +231,7 @@ class TestNamedTensor(TestCase):
         expected = "tensor([[0., 0., 0.],\n        [0., 0., 0.]])"
         self.assertEqual(repr(unnamed_tensor), expected)
 
-        none_named_tensor = torch.zeros(2, 3).names_(None, None)
+        none_named_tensor = torch.zeros(2, 3).rename_(None, None)
         self.assertEqual(repr(none_named_tensor), expected)
 
     def test_no_save_support(self):
@@ -262,28 +262,28 @@ class TestNamedTensor(TestCase):
     def test_noncontig_contiguous(self):
         # This type of contiguous is special-cased and therefore needs its own test
         for device in torch.testing.get_all_device_types():
-            x = torch.randn(2, 3, device=device).t().names_('N', 'C')
+            x = torch.randn(2, 3, device=device).t().rename_('N', 'C')
             self.assertEqual(x.contiguous().names, ('N', 'C'))
 
     def test_copy_transpose(self):
         # This type of copy is special-cased and therefore needs its own test
         def _test(self_names, other_names, expected_names):
             x = torch.empty(2, 5, names=self_names)
-            y = torch.empty(5, 2).t().names_(*other_names)
+            y = torch.empty(5, 2).t().rename_(*other_names)
             x.copy_(y)
             self.assertEqual(x.names, expected_names)
 
         _test(('N', 'C'), ('N', 'C'), ('N', 'C'))
         _test(None, ('N', 'C'), ('N', 'C'))
 
-    def test_names_(self):
+    def test_rename_(self):
         tensor = torch.empty(1, 1, names=('N', 'C'))
-        self.assertEqual(tensor.names_(None).names, (None, None))
-        self.assertEqual(tensor.names_('H', 'W').names, ('H', 'W'))
+        self.assertEqual(tensor.rename_(None).names, (None, None))
+        self.assertEqual(tensor.rename_('H', 'W').names, ('H', 'W'))
         with self.assertRaisesRegex(RuntimeError, 'Number of names'):
-            tensor.names_('N', 'C', 'W')
+            tensor.rename_('N', 'C', 'W')
         with self.assertRaisesRegex(RuntimeError, 'duplicate names'):
-            tensor.names_('N', 'N')
+            tensor.rename_('N', 'N')
 
     def test_renamed(self):
         tensor = torch.empty(1, 1, names=('N', 'C'))
@@ -389,7 +389,7 @@ class TestNamedTensor(TestCase):
             result = factory(1, 2, 3, names=names, device=device)
 
             torch.manual_seed(0)
-            expected = factory(1, 2, 3, device=device).names_(*names)
+            expected = factory(1, 2, 3, device=device).rename_(*names)
 
             self.assertTensorDataAndNamesEqual(result, expected)
 
@@ -407,7 +407,7 @@ class TestNamedTensor(TestCase):
         for device in torch.testing.get_all_device_types():
             names = ('N', 'T', 'D')
             result = torch.full([1, 2, 3], 2, names=names, device=device)
-            expected = torch.full([1, 2, 3], 2, device=device).names_(*names)
+            expected = torch.full([1, 2, 3], 2, device=device).rename_(*names)
             self.assertTensorDataAndNamesEqual(result, expected)
 
     def test_tensor_from_lists(self):
