@@ -93,8 +93,7 @@ struct ConstantPropagator {
     const auto& tuple_elements = tuple.toTuple()->elements();
     std::vector<Value*> inputs;
     for (size_t i = 0; i < type_elements.size(); ++i) {
-      auto inp =
-          tryInsertConstant(*graph_, tuple_elements[i], type_elements[i]);
+      auto inp = tryInsertConstant(*graph_, tuple_elements[i]);
       if (inp) {
         inputs.push_back(*inp);
       } else {
@@ -213,7 +212,7 @@ struct ConstantPropagator {
       auto maybe_const = toIValue(t_out);
       auto eq = EqualNode();
       if (maybe_const && eq(t_out->node(), f_out->node())) {
-        auto new_const = graph->insertConstant(*maybe_const, t_out->type());
+        auto new_const = graph->insertConstant(*maybe_const);
         replaceAndRemoveIfOutput(n, i, new_const);
         continue;
       }

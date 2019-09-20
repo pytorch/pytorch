@@ -10,6 +10,7 @@
 #include <ATen/native/Copy.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
+#include <c10/util/BFloat16.h>
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
@@ -236,6 +237,7 @@ public:
     return map([](T x) -> T { return -x; });
   }
   Vec256<T> round() const {
+    // We do not use std::round because we would like to round midway numbers to the nearest even integer.
     return map(std::nearbyint);
   }
   Vec256<T> sin() const {
@@ -252,6 +254,9 @@ public:
   }
   Vec256<T> trunc() const {
     return map(std::trunc);
+  }
+  Vec256<T> lgamma() const {
+    return map(std::lgamma);
   }
   Vec256<T> sqrt() const {
     return map(std::sqrt);
