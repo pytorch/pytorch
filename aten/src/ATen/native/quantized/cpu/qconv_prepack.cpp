@@ -223,18 +223,18 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     for (int i = 0; i < weight_contig.numel(); ++i) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
-    auto wt_ptr =
-        guts::make_unique<PackedConvWeightsQnnp>(PackedConvWeightsQnnp{
-            guts::make_unique<qnnpack::PrePackConvWeights>(
-                conv_p,
-                (uint8_t*)qnnp_w_data,
-                (int32_t*)bias_contig.data_ptr<c10::qint32>()),
-            weight_contig, /* int8_t weight */
-            bias_fp32.contiguous(), /* fp32 bias */
-            c10::nullopt, /* input_scale */
-            {kernel_h, kernel_w},
-            weight.q_scale(),
-            weight_zp});
+    // We set the pre-packed conv weights to nullptr below as we call pre-pack
+    // during the first invocation of operator run. Refer to qconv.cpp for more
+    // details. TODO Update to actually call pre-pack here once bias is removed
+    // from pre-packing step.
+    auto wt_ptr = guts::make_unique<PackedConvWeightsQnnp>(
+        PackedConvWeightsQnnp{nullptr, /* PrePackConvWeights */
+                              weight_contig, /* int8_t weight */
+                              bias_fp32.contiguous(), /* fp32 bias */
+                              c10::nullopt, /* input_scale */
+                              {kernel_h, kernel_w},
+                              weight.q_scale(),
+                              weight_zp});
 
     return cpp_custom_type_hack::create(std::move(wt_ptr), weight.options());
   }
