@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
+import torch
 import torch.nn as nn
 import torch.nn._intrinsic as nni
 import torch.nn._intrinsic.quantized as nniq
@@ -260,7 +261,7 @@ DEFAULT_QCONFIG_DICT = {
     nn.LSTM : default_dynamic_qconfig,
 }
 
-def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):
+def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING, dtype=torch.qint8):
     r"""Converts a float model to dynamic quantized model.
 
     Perform dynamic training and output a quantized model.
@@ -268,7 +269,7 @@ def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_D
     model = copy.deepcopy(model)
     model.eval()
     propagate_qconfig(model, qconfig_dict)
-    convert(model, mapping)
+    convert(model, mapping, dtype)
     return model
 
 def prepare_qat(model):
@@ -294,7 +295,7 @@ def quantize_qat(model, run_fn, run_args):
     convert(model)
     return model
 
-def convert(module, mapping=DEFAULT_MODULE_MAPPING):
+def convert(module, mapping=DEFAULT_MODULE_MAPPING, dtype=torch.qint8):
     r"""Converts the float module with observers(where we can get quantization
     parameters) to a quantized module.
     Args:
@@ -311,13 +312,13 @@ def convert(module, mapping=DEFAULT_MODULE_MAPPING):
 
     for name, mod in module.named_children():
         if type(mod) not in SWAPPABLE_MODULES:
-            convert(mod, mapping)
-        reassign[name] = swap_module(mod, mapping)
+            convert(mod, mapping, dtype)
+        reassign[name] = swap_module(mod, mapping, dtype)
 
     for key, value in reassign.items():
         module._modules[key] = value
 
-def swap_module(mod, mapping):
+def swap_module(mod, mapping, dtype=torch.qint8):
     r"""Swaps the module if it has a quantized counterpart and it has an
     `observer` attached.
 
@@ -331,7 +332,14 @@ def swap_module(mod, mapping):
     new_mod = mod
     if hasattr(mod, 'qconfig') and mod.qconfig is not None:
         if type(mod) in mapping:
-            new_mod = mapping[type(mod)].from_float(mod)
+            supported_scalar_types = [torch.qint8, torch.float16]
+            if dtype not in supported_scalar_types:
+                raise RuntimeError('Unsupported dtype: {}'.format(dtype))
+            if dtype == torch.qint8:
+                new_mod = mapping[type(mod)].from_float(mod)
+            elif dtype == torch.float16:
+                # We want to support float16 dynamic quantization
+                new_mod = mapping[type(mod)].from_float(mod, dtype)
     return new_mod
 
 def dump_tensor(mod, target_dict, prefix=""):
