@@ -506,7 +506,7 @@ PyObject *THPModule_supportedQEngines(PyObject */* unused */)
 {
   auto qengines = at::globalContext().supportedQEngines();
   auto list = THPObjectPtr(PyList_New(qengines.size()));
-  for (auto i = 0; i < qengines.size(); ++i) {
+  for (size_t i = 0; i < qengines.size(); ++i) {
     PyObject *i64 = THPUtils_packInt64(static_cast<int>(qengines[i]));
     if (!i64) {
       throw python_error();

@@ -3370,6 +3370,22 @@ def foo(x):
             else:
                 cu.define(full)
 
+    def test_namedtuple_python(self):
+        MyTuple = namedtuple('MyTuple', ['a'])
+
+        @torch.jit.unused
+        def fn():
+            # type: () -> MyTuple
+            return MyTuple(1)
+
+        # Only check compilation
+        @torch.jit.script
+        def fn2():
+            # type: () -> MyTuple
+            return fn()
+
+        FileCheck().check("NamedTuple").run(fn2.graph)
+
     def test_inherit_method(self):
         class A(torch.jit.ScriptModule):
             def __init__(self):
