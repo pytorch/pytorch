@@ -1903,7 +1903,9 @@ add_docstr_all('q_per_channel_scales',
 q_per_channel_scales() -> Tensor
 
 Given a Tensor quantized by linear (affine) per-channel quantization,
-returns a Tensor of scales of the underlying quantizer().
+returns a Tensor of scales of the underlying quantizer. It has the number of
+elements that matches the corresponding dimensions (from q_per_channel_axis) of
+the tensor.
 """)
 
 add_docstr_all('q_per_channel_zero_points',
@@ -1911,7 +1913,18 @@ add_docstr_all('q_per_channel_zero_points',
 q_per_channel_zero_points() -> Tensor
 
 Given a Tensor quantized by linear (affine) per-channel quantization,
-returns a tensor of zero_points of the underlying quantizer().
+returns a tensor of zero_points of the underlying quantizer. It has the number of
+elements that matches the corresponding dimensions (from q_per_channel_axis) of
+the tensor.
+""")
+
+add_docstr_all('q_per_channel_axis',
+               r"""
+q_per_channel_axis() -> tuple of ints
+
+Given a Tensor quantized by linear (affine) per-channel quantization,
+returns a indices of dimensions on which per-channel quantization is applied.
+In the most commmon case there is only one such dimension.
 """)
 
 add_docstr_all('random_',
