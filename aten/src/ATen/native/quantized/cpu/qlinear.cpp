@@ -225,8 +225,8 @@ class QLinearInt8 final : public torch::OperatorKernel {
     auto packB = pack_ptr.w.get();
     auto kernel_zp = pack_ptr.w_zp;
     auto kernel_scale = pack_ptr.w_scale;
-    size_t rows_w = packB->getOutputChannels();
-    size_t cols_w = packB->getInputChannels();
+    size_t rows_w = pack_ptr.bias.size(0);
+    size_t cols_w = input_contig.size(input_contig.dim() - 1);
     auto input_scale = input_contig.q_scale();
 
     if (!pack_ptr.input_scale.has_value()) {
@@ -288,6 +288,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
         ? activationLimits(output_scale, output_zero_point, Activation::RELU)
               .second
         : std::numeric_limits<uint8_t>::max();
+    TORCH_INTERNAL_ASSERT(packB != nullptr, "Packed Weights are NULL");
     const pytorch_qnnp_status runStatus = qnnpack::qnnpackLinear(
         rows_input /* batch_size */,
         cols_input /* input_channels */,

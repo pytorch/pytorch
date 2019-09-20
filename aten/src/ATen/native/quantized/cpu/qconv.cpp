@@ -291,7 +291,9 @@ class QConv2dInt8 final : public c10::OperatorKernel {
 
     const uint32_t kernel_h = kernel[0];
     const uint32_t kernel_w = kernel[1];
-    const auto out_ch = packB->getOutputChannels();
+    // TODO Can be replaced with packB->getOutputChannels() when update pre-pack
+    // to actually do the packing.
+    const auto out_ch = pack_ptr.bias.size(0);
     // inputs are in semantic NCHW format
     int N = act.size(0);
     int in_ch = act.size(1);
@@ -338,7 +340,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     auto input_scale = input_contig.q_scale();
 
     // Re-quantizing the bias based on input scale and weight scale.
-    if (!pack_ptr.input_scale.has_value()) {
+    if (!pack_ptr.input_scale.has_value() ||
+        pack_ptr.input_scale.value() != input_scale) {
       // Get the original weight and adjust it to uint8 from int8
       auto weight_contig =
           pack_ptr.orig_weight.contiguous(MemoryFormat::ChannelsLast);
@@ -366,7 +369,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
           (int32_t*)bias.data_ptr<c10::qint32>());
       packB = pack_ptr.w.get();
     }
-
+    TORCH_INTERNAL_ASSERT(packB != nullptr, "Packed Weights are NULL");
     auto outShape =
         convOutputShape(N, K, H, W, kernel, stride, padding, dilation);
     TORCH_CHECK(
