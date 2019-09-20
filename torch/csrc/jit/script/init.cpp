@@ -994,6 +994,12 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("_get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
 
+  m.def(
+      "_resolve_type",
+      [](const std::string& name, SourceRange range, ResolutionCallback rcb) {
+        return pythonResolver(rcb)->resolveType(name, range);
+      });
+
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");
   py::enum_<logging::LockingLogger::AggregationType>(m, "AggregationType")
