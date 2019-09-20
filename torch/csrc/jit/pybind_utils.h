@@ -499,6 +499,8 @@ inline IValue toIValue(
       AT_ERROR("Capsule Values aren't supported");
     case TypeKind::AnyType:
       AT_ERROR("AnyType Values aren't supported");
+    case TypeKind::ScalarTypeType:
+      AT_ERROR("ScalarType Values aren't supported");
   }
   AT_ERROR(
       "Missing cases in toIValue for type: ",
