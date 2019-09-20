@@ -26,6 +26,7 @@ INT_SIZE = struct.Struct('=i').size
 SHORT_SIZE = struct.Struct('=h').size
 
 MAGIC_NUMBER = 0x1950a86a20f9469cfc6c
+LEGACY_PICKLE_PROTOCOL_VERSION = 1001
 PROTOCOL_VERSION = 1002
 STORAGE_KEY_SEPARATOR = ','
 
@@ -522,7 +523,50 @@ def _legacy_tar_load(f, map_location, pickle_module, **pickle_load_args):
         return result
 
 
+def _maybe_decode_ascii(bytes_str):
+    # When using encoding='bytes' in Py3, some **internal** keys stored as
+    # strings in Py2 are loaded as bytes. This function decodes them with
+    # ascii encoding, one that Py3 uses by default.
+    #
+    # NOTE: This should only be used on internal keys (e.g., `typename` and
+    #       `location` in `persistent_load` below!
+    if isinstance(bytes_str, bytes):
+        return bytes_str.decode('ascii')
+    return bytes_str
+
+
 def _legacy_pickle_load(f, map_location, pickle_module, **pickle_load_args):
+    deserialized_objects = {}
+    restore_location = _get_restore_location(map_location)
+
+    def persistent_load(saved_id):
+        assert isinstance(saved_id, tuple)
+        typename = _maybe_decode_ascii(saved_id[0])
+        data = saved_id[1:]
+
+        if typename == 'module':
+            # Ignore containers that don't have any sources saved
+            if all(data[1:]):
+                check_container_source(*data)
+            return data[0]
+        elif typename == 'storage':
+            data_type, root_key, location, size, view_metadata = data
+            location = _maybe_decode_ascii(location)
+            if root_key not in deserialized_objects:
+                obj = data_type(size)
+                obj._torch_load_uninitialized = True
+                deserialized_objects[root_key] = restore_location(obj, location)
+            storage = deserialized_objects[root_key]
+            if view_metadata is not None:
+                view_key, offset, view_size = view_metadata
+                if view_key not in deserialized_objects:
+                    deserialized_objects[view_key] = storage[offset:offset + view_size]
+                return deserialized_objects[view_key]
+            else:
+                return storage
+        else:
+            raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
+
     def check_container_source(container_type, source_file, original_source):
         try:
             current_source = ''.join(get_source_lines_and_file(container_type)[0])
@@ -563,7 +607,31 @@ def _legacy_pickle_load(f, map_location, pickle_module, **pickle_load_args):
             msg = ("source code of class '{}' has changed. {}"
                    .format(torch.typename(container_type), msg))
             warnings.warn(msg, SourceChangeWarning)
-    pass
+
+    f_should_read_directly = _should_read_directly(f)
+
+    magic_number = pickle_module.load(f, **pickle_load_args)
+    if magic_number != MAGIC_NUMBER:
+        raise RuntimeError("Invalid magic number; corrupt file?")
+    protocol_version = pickle_module.load(f, **pickle_load_args)
+    if protocol_version != LEGACY_PICKLE_PROTOCOL_VERSION:
+        raise RuntimeError("Invalid protocol version: %s" % protocol_version)
+
+    _sys_info = pickle_module.load(f, **pickle_load_args)
+    unpickler = pickle_module.Unpickler(f, **pickle_load_args)
+    unpickler.persistent_load = persistent_load
+    result = unpickler.load()
+
+    deserialized_storage_keys = pickle_module.load(f, **pickle_load_args)
+
+    offset = f.tell() if f_should_read_directly else None
+    for key in deserialized_storage_keys:
+        assert key in deserialized_objects
+        deserialized_objects[key]._set_from_file(f, offset, f_should_read_directly)
+        if offset is not None:
+            offset = f.tell()
+
+    return result
 
 
 def _load(zip_file, map_location, pickle_module, **pickle_load_args):
@@ -571,20 +639,9 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
 
     loaded_storages = {}
 
-    def maybe_decode_ascii(bytes_str):
-        # When using encoding='bytes' in Py3, some **internal** keys stored as
-        # strings in Py2 are loaded as bytes. This function decodes them with
-        # ascii encoding, one that Py3 uses by default.
-        #
-        # NOTE: This should only be used on internal keys (e.g., `typename` and
-        #       `location` in `persistent_load` below!
-        if isinstance(bytes_str, bytes):
-            return bytes_str.decode('ascii')
-        return bytes_str
-
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
-        typename = maybe_decode_ascii(saved_id[0])
+        typename = _maybe_decode_ascii(saved_id[0])
         data = saved_id[1:]
 
         if typename != 'storage':
@@ -592,7 +649,7 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
                                " 'storage', but got: {}".format(typename))
 
         data_type, key, location, size, view_metadata = data
-        location = maybe_decode_ascii(location)
+        location = _maybe_decode_ascii(location)
         if key not in loaded_storages:
             obj = data_type(size)
             loaded_storages[key] = restore_location(obj, location)
