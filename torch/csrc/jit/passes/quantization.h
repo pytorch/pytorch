@@ -116,5 +116,12 @@ TORCH_API void FoldConvBatchNorm2d(const script::Module& module);
 TORCH_API void FoldQuantizeCallIntoBuffer(script::Module& module, const std::string& method_name);
 
 
+TORCH_API void FoldPrepackedWeightIntoModule(
+    script::Module& module,
+    const std::string& method_name,
+    const script::Module& wrapper_module);
+
+
+
 } // namespace jit
 } // namespace torch

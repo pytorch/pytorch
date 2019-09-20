@@ -1410,6 +1410,75 @@ graph(%input, %weight):
                    .check('GetAttr[name="_quantized_weight"]') \
                    .run(m._c._get_method('forward').graph)
 
+    @_tmp_donotuse_dont_inline_everything
+    def test_fold_prepack(self):
+        # TODO: move to torch/quantization
+        class PackedParams(torch.nn.Module):
+            def __init__(self):
+                super(PackedParams, self).__init__()
+                w = torch.rand((5, 5), dtype=torch.float)
+                wq = torch.quantize_linear(w, 2.0, 0, torch.qint8)
+                self.set_weight_bias(wq, torch.rand(5))
+
+            @torch.jit.export
+            def set_weight_bias(self, weight, bias):
+                # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+                self._packed_params = torch.ops.quantized.linear_prepack(weight, bias)
+
+            @torch.jit.export
+            def _weight_bias(self):
+                return torch.ops.quantized.linear_unpack(self._packed_params)
+
+            def forward(self, x):
+                return x
+
+            @torch.jit.export
+            def __getstate__(self):
+                return self._weight_bias()
+
+            @torch.jit.export
+            def __setstate__(self, state):
+                self.set_weight_bias(state[0], state[1])
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                w = torch.rand((5, 5), dtype=torch.float)
+                self._quantized_weight = torch.quantize_linear(w, 0.3, 0, torch.qint8)
+                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
+
+            def forward(self, x):
+                xq = torch.quantize_linear(x, 0.2, 1, torch.quint8)
+                params = torch.ops.quantized.linear_prepack(torch.t(self._quantized_weight), self.bias)
+                return torch.ops.quantized.linear(xq, params, 3.0, 1)
+
+
+        m = torch.jit.script(M())
+        data = torch.randn((5, 5), dtype=torch.float)
+        ref_res = m._c._get_method('forward')(data)
+        print(m._c._get_method('forward').graph)
+        torch._C._jit_pass_fold_prepack(m._c, 'forward', torch.jit.script(PackedParams())._c)
+        res = m._c._get_method('forward')(data)
+        # check attribute and graph
+        self.assertTrue(m._c._has_module('_packed_linear_weight_bias'))
+        FileCheck().check_not('GetAttr[name="_quantized_weight"]') \
+                   .check('GetAttr[name="_packed_linear_weight_bias"]') \
+                   .check('GetAttr[name="_packed_params"]') \
+                   .run(m._c._get_method('forward').graph)
+        # check values
+        ref_w =  m._c._get_attribute('_quantized_weight')
+        ref_b = m._c._get_parameter('bias')
+        w, b = m._c._get_module('_packed_linear_weight_bias')._get_method('_weight_bias')()
+        self.assertEqual(ref_w, w)
+        self.assertEqual(ref_b, b)
+        self.assertEqual(ref_res, res)
+
+
+
+
+
+        m._c._dump(True, False, False)
+
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
         # --> mulmul(mulmul(x,y,z), x, y)

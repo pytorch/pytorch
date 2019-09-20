@@ -174,6 +174,7 @@ void initJITBindings(PyObject* module) {
            [](script::Module& module, const std::string& method_name) {
              FoldQuantizeCallIntoBuffer(module, method_name);
            })
+      .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
       .def(
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })

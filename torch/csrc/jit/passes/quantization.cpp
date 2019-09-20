@@ -910,5 +910,50 @@ graph(%self, %scale, %zero_point, %dtype):
   rewriter.RegisterRewritePattern(pattern, replacement);
   rewriter.runOnGraph(graph, filter);
 }
+
+void FoldPrepackedWeightIntoModule(
+    script::Module& module,
+    const std::string& method_name,
+    const script::Module& wrapper_module) {
+  const std::string pattern = R"(
+graph(%self, %a_quant, %r_scale, %r_zero_point):
+   %b = prim::GetAttr[name="bias"](%self)
+   %w_quant = prim::GetAttr[name="_quantized_weight"](%self)
+   %w_quant_t = aten::t(%w_quant)
+   %packed_params = quantized::linear_prepack(%w_quant_t, %b)
+   %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
+   return (%r))";
+  Graph pattern_graph;
+  std::unordered_map<std::string, Value*> vmap;
+  script::parseIR(pattern, &pattern_graph, vmap);
+  auto method = module.get_method(method_name);
+  auto graph = method.graph();
+  auto matches = findPatternMatches(pattern_graph, *graph);
+  TORCH_CHECK(
+      matches.size() <= 1, "We only support at most one match right now");
+  for (const auto& match : matches) {
+    auto w_quant_t = module.get_attribute("_quantized_weight").toTensor();
+    auto b = module.get_parameter("bias").variable_data();
+    auto wrapper = wrapper_module.clone();
+    auto set_weight_bias = wrapper.get_method("set_weight_bias");
+    set_weight_bias(std::vector<IValue>{IValue(w_quant_t), IValue(b)});
+    module.register_module(
+        "_packed_linear_weight_bias",
+        wrapper
+    );
+  }
+
+  std::string replacement = R"(
+graph(%self, %a_quant, %r_scale, %r_zero_point):
+   %m = prim::GetAttr[name="_packed_linear_weight_bias"](%self)
+   %packed_params = prim::GetAttr[name="_packed_params"](%m)
+   %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
+   return (%r))";
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(pattern, replacement);
+  rewriter.runOnGraph(graph);
+}
+
 } // namespace jit
 } // namespace torch
