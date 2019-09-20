@@ -1,21 +1,16 @@
 #!/usr/bin/env python3
 
+from . import invoke_rpc_builtin, invoke_rpc_python_udf, invoke_remote_builtin
+from . import init_rref_context
+from . import ProcessGroupAgent
+from . import WorkerId
+from .internal_rpc_utils import serialize, PythonUDF
+from .rpc_backend_handler import is_backend_registered, registered_init_rpc
+
 import sys
 import warnings
-from enum import Enum
-
 import torch
-
-from . import (
-    ProcessGroupAgent,
-    WorkerId,
-    init_rref_context,
-    invoke_remote_builtin,
-    invoke_rpc_builtin,
-    invoke_rpc_python_udf,
-)
-from .internal_rpc_utils import PythonUDF, serialize
-from .rpc_backend_handler import is_backend_registered, registered_init_rpc
+from enum import Enum
 
 
 _agent = None
@@ -24,11 +19,9 @@ _agent = None
 def _require_initialized(func):
     def wrapper(*args, **kwargs):
         if _agent is None:
-            raise RuntimeError(
-                "RPC has not been initialized. " "Call init_rpc(name) first."
-            )
+            raise RuntimeError("RPC has not been initialized. "
+                               "Call init_rpc(name) first.")
         return func(*args, **kwargs)
-
     return wrapper
 
 
@@ -56,19 +49,16 @@ def sync_rpc():
 
     _agent.sync()
 
-
 class RpcBackend(Enum):
     PROCESS_GROUP = 1
 
 
 # TODO: add a context manager to wrap _init_rpc and join_rpc
-def _init_rpc(
-    backend=RpcBackend.PROCESS_GROUP,
-    self_name=None,
-    self_rank=-1,
-    init_method=None,
-    num_send_recv_threads=4,
-):
+def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
+              self_name=None,
+              self_rank=-1,
+              init_method=None,
+              num_send_recv_threads=4):
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
 
@@ -82,18 +72,16 @@ def _init_rpc(
 
         group = _get_default_group()
         if (self_rank != -1) and (self_rank != group.rank()):
-            raise RuntimeError(
-                "self_rank argument {} doesn't match pg rank {}".format(
-                    self_rank, group.rank()
-                )
-            )
+            raise RuntimeError("self_rank argument {} doesn't match pg rank {}".format(
+                               self_rank, group.rank()))
         # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
         init_rref_context(_agent)
     elif is_backend_registered(rpc_backend):
-        _agent = registered_init_rpc(
-            rpc_backend, self_rank=self_rank, self_name=self_name, init_url=init_method
-        )
+        _agent = registered_init_rpc(rpc_backend,
+                                     self_rank=self_rank,
+                                     self_name=self_name,
+                                     init_url=init_method)
         init_rref_context(_agent)
     else:
         raise RuntimeError("Unrecognized RPC backend ", rpc_backend)
@@ -168,8 +156,7 @@ def remote(to, func, args=None, kwargs=None):
     kwargs = kwargs if kwargs else {}
 
     return invoke_remote_builtin(
-        _agent, _to_worker_id(to), qualified_name, *args, **kwargs
-    )
+        _agent, _to_worker_id(to), qualified_name, *args, **kwargs)
 
 
 def _invoke_rpc(to, func, args=None, kwargs=None):
