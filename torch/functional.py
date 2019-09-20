@@ -8,6 +8,7 @@ __all__ = [
     'align_tensors',  # BUILD_NAMEDTENSOR only
     'broadcast_tensors',
     'cartesian_prod',
+    'cdist',
     'chain_matmul',
     'einsum',
     'gels',
@@ -631,8 +632,23 @@ def cdist(x1, x2, p=2, compute_mode='use_mm_for_euclid_dist_if_necessary'):
     if :math:`p \in (0, \infty)`. When :math:`p = 0` it is equivalent to
     `scipy.spatial.distance.cdist(input, 'hamming') * M`. When :math:`p = \infty`, the closest
     scipy function is `scipy.spatial.distance.cdist(xn, lambda x, y: np.abs(x - y).max())`.
-    """
+    
+    Example:
 
+    >>> a = torch.tensor([[0.9041,  0.0196], [-0.3108, -2.4423], [-0.4821,  1.059]])
+    >>> a
+    tensor([[ 0.9041,  0.0196],
+            [-0.3108, -2.4423],
+            [-0.4821,  1.0590]])
+    >>> b = torch.tensor([[-2.1763, -0.4713], [-0.6986,  1.3702]])
+    >>> b
+    tensor([[-2.1763, -0.4713],
+            [-0.6986,  1.3702]])
+    >>> torch.cdist(a, b, p=2)
+    tensor([[3.1193, 2.0959],
+            [2.7138, 3.8322],
+            [2.2830, 0.3791]])
+    """
     if compute_mode == 'use_mm_for_euclid_dist_if_necessary':
         return torch._C._VariableFunctions.cdist(x1, x2, p, None)
     elif compute_mode == 'use_mm_for_euclid_dist':
