@@ -4,10 +4,20 @@ package org.pytorch;
 
 import com.facebook.jni.HybridData;
 
+/**
+ * Java holder for torch::jit::script::Module which owns it on jni side.
+ */
 public class Module {
 
   private NativePeer mNativePeer;
 
+  /**
+   * Loads serialized torchscript module from the specified absolute path on the disk.
+   *
+   * @param modelAbsolutePath absolute path to file that contains the serialized torchscript module.
+   * @return new {@link org.pytorch.Module} object which owns torch::jit::script::Module on jni
+   * side.
+   */
   public static Module load(final String modelAbsolutePath) {
     return new Module(modelAbsolutePath);
   }
@@ -16,10 +26,23 @@ public class Module {
     this.mNativePeer = new NativePeer(moduleAbsolutePath);
   }
 
+  /**
+   * Runs 'forward' method of loaded torchscript module with specified arguments.
+   *
+   * @param inputs arguments for torchscript module 'forward' method.
+   * @return result of torchscript module 'forward' method evaluation
+   */
   public IValue forward(IValue... inputs) {
     return mNativePeer.forward(inputs);
   }
 
+  /**
+   * Runs specified method of loaded torchscript module with specified arguments.
+   *
+   * @param methodName torchscript module method to run
+   * @param inputs     arguments that will be specified to torchscript module method call
+   * @return result of torchscript module specified method evaluation
+   */
   public IValue runMethod(String methodName, IValue... inputs) {
     return mNativePeer.runMethod(methodName, inputs);
   }
