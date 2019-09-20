@@ -129,17 +129,6 @@ TEST(NamedTensorTest, dimnameToPosition) {
 
   tensor = at::empty({1, 1, 1, 1}, names);
   ASSERT_EQ(dimname_to_position(tensor, H), 2);
-
-  auto Cin = dimnameFromString("C.in");
-  auto Cout = dimnameFromString("C.out");
-  tensor = at::empty({1, 1, 1, 1}, names);
-  ASSERT_THROW(dimname_to_position(tensor, Cin), c10::Error);
-
-  tensor = at::empty({1, 1}, std::vector<Dimname>({ Cin, Cout }));
-  ASSERT_THROW(dimname_to_position(tensor, C), c10::Error);
-
-  tensor = at::empty({1, 1}, std::vector<Dimname>({ Cin, N }));
-  ASSERT_EQ(dimname_to_position(tensor, C), 0);
 }
 
 static void check_unify(
