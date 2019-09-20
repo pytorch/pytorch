@@ -41,7 +41,7 @@ class TORCH_API DistAutogradContext {
   DistAutogradContext(DistAutogradContext&&) = delete;
   DistAutogradContext& operator=(DistAutogradContext&&) = delete;
 
-  void addKnownWorkerId(const rpc::WorkerId& workerId);
+  void addKnownWorkerId(const rpc::worker_id_t workerId);
 
   std::unordered_set<rpc::worker_id_t> getKnownWorkerIds() const;
 

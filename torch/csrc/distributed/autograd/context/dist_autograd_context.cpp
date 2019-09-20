@@ -18,9 +18,9 @@ std::unordered_set<rpc::worker_id_t> DistAutogradContext::getKnownWorkerIds()
   return knownWorkerIds_;
 };
 
-void DistAutogradContext::addKnownWorkerId(const rpc::WorkerId& workerId) {
+void DistAutogradContext::addKnownWorkerId(const rpc::worker_id_t workerId) {
   std::lock_guard<std::mutex> guard(lock_);
-  knownWorkerIds_.insert(workerId.id_);
+  knownWorkerIds_.insert(workerId);
 }
 
 void DistAutogradContext::addSendFunction(
