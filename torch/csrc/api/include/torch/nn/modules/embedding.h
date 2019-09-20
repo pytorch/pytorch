@@ -53,6 +53,12 @@ struct TORCH_API EmbeddingBagOptions {
   TORCH_ARG(c10::optional<torch::Tensor>, _weight) = c10::nullopt;
 };
 
+class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
+public:
+    using torch::nn::ModuleHolder<EmbeddingImpl>::ModuleHolder;
+    static Embedding from_pretrained(Tensor embeddings, EmbeddingOptions options, bool freeze= true);
+}
+
 /// Performs a lookup in a fixed size embedding table.
 class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
  public:
@@ -68,9 +74,6 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
   /// Performs a lookup on the embedding table stored in `weight` using the
   /// `indices` supplied and returns the result.
   Tensor forward(const Tensor& indices);
-
-  static EmbeddingImpl& from_pretrained(Tensor embeddings, bool freeze = true, c10::optional<int64_t> padding_idx = c10::nullopt,
-          c10::optional<float> max_norm = c10::nullopt, float norm_type = 2., bool scale_grad_by_freq = false, bool sparse = false);
 
   /// The `Options` used to configure this `Embedding` module.
   /// Changes to `EmbeddingOptions` *after construction* have no effect.
@@ -94,14 +97,18 @@ class TORCH_API EmbeddingBagImpl() : public torch::nn::Cloneable<EmbeddingBagImp
     std::tuple<Tensor, Tensor, Tensor, Tensor> forward(const Tensor& input, c10::optional<torch::Tensor> offsets = c10::nullopt,
       c10::optional<torch::Tensor> per_sample_weights = c10::nullopt);
 
-    static EmbeddingBagImpl& EmbeddingBagImpl::from_pretrained(Tensor embeddings, bool freeze = true, c10::optional<float> mex_norm = c10::nullopt,
-       float norm_type = 2., bool scale_grad_by_freq = false, string mode = "sum", bool sparse = false);
-
     /// The `Options` used to configure this `EmbeddingBag` module.
     EmbeddingBagOptions options;
     /// The embedding table
     Tensor weight;
 };
+
+class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
+public:
+    using torch::nn::ModuleHolder<EmbeddingBagImpl>::ModuleHolder;
+    static EmbeddingBag from_pretrained(Tensor embeddings, EmbeddingBagOptions options, bool freeze= true);
+}
+
 /// A `ModuleHolder` subclass for `EmbeddingImpl`.
 /// See the documentation for `EmbeddingImpl` class to learn what methods it
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
