@@ -51,7 +51,7 @@ SourceRange getPythonInterpreterSourceRange() {
 
 std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     const py::function& func,
-    TypedStack trace_inputs,
+    Stack trace_inputs,
     const py::function& var_name_lookup_fn,
     bool force_outplace,
     script::Module* self) {
@@ -78,7 +78,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
           "The traced function didn't return any values! Side-effects are not "
           "captured in traces, so it would be a no-op.");
     }
-    tracer::exit({toIValue(out)});
+    tracer::exit({toTypeInferredIValue(out)});
     if (script::getInlineEverythingMode()) {
       Inline(*graph);
     }
@@ -161,10 +161,10 @@ void initPythonTracerBindings(PyObject* module) {
 
   m.def("_tracer_warn_use_python", []() { tracer::setWarn(pythonWarn); });
   m.def("_tracer_enter", [](py::args trace_inputs) {
-    return tracer::enter(toTypedStack(trace_inputs));
+    return tracer::enter(toTraceableStack(trace_inputs));
   });
   m.def("_tracer_exit", [](py::tuple var_outputs) {
-    tracer::exit(toStack(var_outputs));
+    tracer::exit(toTraceableStack(var_outputs));
   });
   m.def("_tracer_abandon", []() { tracer::abandon(); });
   m.def("_get_tracing_state", []() { return getTracingState(); });

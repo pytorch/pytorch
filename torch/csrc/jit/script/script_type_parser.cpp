@@ -269,21 +269,31 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
     auto decl_arg = *it;
 
     TypePtr type;
-    c10::optional<int32_t> N;
+    c10::optional<int32_t> N = c10::nullopt;
     bool is_inferred_type = false;
     if (!decl_arg.type().present()) {
       // If this param doesn't have a type, default to "tensor"
       is_inferred_type = true;
       type = TensorType::get();
-      N = c10::nullopt;
     } else {
       // BroadcastList list can only appear at the argument level
-      if (auto maybe_broad_list = parseBroadcastList(decl_arg.type().get())) {
+      Expr type_expr = decl_arg.type().get();
+      if (auto maybe_broad_list = parseBroadcastList(type_expr)) {
         type = maybe_broad_list->first;
         N = maybe_broad_list->second;
+      } else if (
+          type_expr.kind() == TK_VAR && Var(type_expr).name().name() == "Any") {
+        // Any type can only appear as an argument. More specifically Any should
+        // never appear in a named type like a class, namedtuple or interface.
+        // If it does, then dynamic type information will be lost in the
+        // Pickler, leading to hard-to-track-down bugs that will only occur
+        // after saving or loading a model. This is because we rely on the
+        // static types in named types to reconstruct type tags of loaded
+        // values. Lifting this restriction requires solving the serialization
+        // problem first.
+        type = AnyType::get();
       } else {
         type = parseTypeFromExpr(decl_arg.type().get());
-        N = c10::nullopt;
       }
     }
     c10::optional<IValue> default_value = c10::nullopt;

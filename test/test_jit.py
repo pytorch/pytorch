@@ -6622,6 +6622,16 @@ a")
         self.assertEqual(foo2(4, None), 0)
 
 
+        @torch.jit.script
+        def any_refinement(a, b):
+            # type: (Any, Any) -> int
+            if isinstance(a, int) and isinstance(b, int):
+                return a + b
+            return 0
+
+        self.assertEqual(any_refinement(3, 4), 7)
+        self.assertEqual(any_refinement(3, "hi"), 0)
+
 
     def test_isinstance(self):
         # test isinstance operator for static type checking
