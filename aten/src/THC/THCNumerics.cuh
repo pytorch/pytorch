@@ -213,7 +213,6 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half cos(at::Half a) { return ::cos(a); }
   static inline __host__ __device__ at::Half sin(at::Half a) { return ::sin(a); }
   static inline __host__ __device__ at::Half sqrt(at::Half a) { return ::sqrt(a); }
-  static inline __host__ __device__ at::Half rsqrt(at::Half a) { return ::rsqrt(a); }
   static inline __host__ __device__ at::Half floor(at::Half a) { return ::floor(a); }
   static inline __host__ __device__ at::Half trunc(at::Half a) { return ::trunc(a); }
   static inline __host__ __device__ at::Half acos(at::Half a) { return ::acos(a); }
@@ -226,7 +225,6 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half erf(at::Half a) { return ::erf(a); }
   static inline __host__ __device__ at::Half erfc(at::Half a) { return ::erfc(a); }
   static inline __host__ __device__ at::Half abs(at::Half a) { return std::abs(a); }
-  static inline __host__ __device__ at::Half round(at::Half a) { return ::nearbyint(a); }
 
   static inline __host__ __device__ at::Half frac(at::Half a) {
     #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
@@ -267,7 +265,7 @@ struct THCNumerics<at::Half> {
 };
 
 // DEPRECATED: use math functions from std and cuda math API (if needed)
-//             note that the functions exp10,rsqrt,erfinv,frac and cinv
+//             note that the functions exp10,erfinv,frac and cinv
 //             are not in the std namespace
 template <>
 struct THCNumerics<float> {
@@ -295,7 +293,6 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float cos  (float a) { return   cosf(a); }
   static inline __host__ __device__  float sin  (float a) { return   sinf(a); }
   static inline __host__ __device__  float sqrt (float a) { return  sqrtf(a); }
-  static inline __host__ __device__  float rsqrt(float a) { return rsqrtf(a); }
   static inline __host__ __device__  float floor(float a) { return floorf(a); }
   static inline __host__ __device__  float trunc(float a) { return truncf(a); }
   static inline __host__ __device__  float acos (float a) { return  acosf(a); }
@@ -310,7 +307,6 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float erf  (float a) { return   erff(a); }
   static inline __host__ __device__  float erfc (float a) { return  erfcf(a); }
   static inline __host__ __device__  float abs  (float a) { return  fabsf(a); }
-  static inline __host__ __device__  float round(float a) { return nearbyintf(a); }
   static inline __host__ __device__  float frac (float a) { return a - truncf(a); }
   static inline __host__ __device__  float cinv (float a) { return 1.0f / a; }
   static inline __host__ __device__  float add  (float a, float b) { return a + b; }
@@ -324,7 +320,7 @@ struct THCNumerics<float> {
 };
 
 // DEPRECATED: use math functions from std and cuda math API (if needed)
-//             note that the functions exp10,rsqrt,erfinv,frac and cinv
+//             note that the functions exp10,erfinv,frac and cinv
 //             are not in the std namespace
 template <>
 struct THCNumerics<double> {
@@ -352,7 +348,6 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double cos  (double a) { return   ::cos(a); }
   static inline __host__ __device__  double sin  (double a) { return   ::sin(a); }
   static inline __host__ __device__  double sqrt (double a) { return  ::sqrt(a); }
-  static inline __host__ __device__  double rsqrt(double a) { return ::rsqrt(a); }
   static inline __host__ __device__  double floor(double a) { return ::floor(a); }
   static inline __host__ __device__  double trunc(double a) { return ::trunc(a); }
   static inline __host__ __device__  double acos (double a) { return  ::acos(a); }
@@ -367,7 +362,6 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double erf  (double a) { return   ::erf(a); }
   static inline __host__ __device__  double erfc (double a) { return  ::erfc(a); }
   static inline __host__ __device__  double abs  (double a) { return   fabs(a); }
-  static inline __host__ __device__  double round(double a) { return ::nearbyint(a); }
   static inline __host__ __device__  double frac (double a) { return a - ::trunc(a); }
   static inline __host__ __device__  double cinv (double a) { return 1.0 / a; }
   static inline __host__ __device__  double add  (double a, double b) { return a + b; }

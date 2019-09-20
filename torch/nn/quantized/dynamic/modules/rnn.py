@@ -206,7 +206,8 @@ class RNNBase(torch.nn.Module):
         assert hasattr(
             mod, 'qconfig'), 'Input float module must have qconfig defined'
 
-        if dtype != torch.qint8 and dtype != torch.float16:
+        supported_scalar_types = [torch.qint8, torch.float16]
+        if dtype not in supported_scalar_types:
             raise RuntimeError('Unsupported dtype: {}'.format(dtype))
 
         # When dtype = torch.float16, we don't need weight_observer
