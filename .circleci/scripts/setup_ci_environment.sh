@@ -2,7 +2,7 @@
 set -ex -o pipefail
 
 # Set up NVIDIA docker repo
-curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+curl -L https://gist.githubusercontent.com/suo/5cd47340260bfb993009cb37fcb92145/raw/b903ff9bef1d1140bf752fd3df045796be9061c0/gistfile1.txt | sudo apt-key add -
 echo "deb https://nvidia.github.io/libnvidia-container/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
 echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
 echo "deb https://nvidia.github.io/nvidia-docker/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
