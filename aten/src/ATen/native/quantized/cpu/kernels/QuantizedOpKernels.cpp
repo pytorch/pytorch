@@ -69,6 +69,8 @@ Tensor qcat_nhwc_kernel(
       zero_point,
       MemoryFormat::ChannelsLast);
 
+  // N, H, and W are explicitly captured here because there's a bug in GCC5
+  // which causes an internal compiler error if they're not
   AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, N, H, W]() {
     using Vec = Vec256<scalar_t>;
     for (int64_t batch = 0; batch < N; ++batch) {
