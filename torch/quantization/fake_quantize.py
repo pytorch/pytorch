@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 from torch.nn import Module
-from .observer import default_observer
+from .observer import default_observer, _with_args
 from functools import partial
 
 class FakeQuantize(Module):
@@ -50,10 +50,11 @@ class FakeQuantize(Module):
                 self.quant_max)
         return X
 
+    with_args = classmethod(_with_args)
+
 default_fake_quant = FakeQuantize
 
-default_weight_fake_quant = partial(FakeQuantize,
-                                    dtype=torch.qint8,
-                                    qscheme=torch.per_tensor_symmetric,
-                                    quant_min=-128,
-                                    quant_max=127)
+default_weight_fake_quant = FakeQuantize.with_args(dtype=torch.qint8,
+                                                   qscheme=torch.per_tensor_symmetric,
+                                                   quant_min=-128,
+                                                   quant_max=127)

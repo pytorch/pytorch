@@ -94,8 +94,10 @@ Tensor q_per_channel_zero_points_quant(const Tensor& self) {
       self.options().dtype(at::kLong));
 }
 
-Quantizer* quantizer(const Tensor& self) {
-  return get_qtensorimpl(self)->quantizer().get();
+IntArrayRef q_per_channel_axis_quant(const Tensor& self) {
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+  TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
+  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->axis();
 }
 
 Tensor int_repr_quant(const Tensor& self) {
@@ -183,6 +185,10 @@ Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
 }
 
 Tensor quantized_clone(const Tensor& self) {
+  // TODO: add per channel support
+  TORCH_INTERNAL_ASSERT(
+      self.qscheme() == at::kPerTensorAffine,
+      "clone for quantized Tensor only works for PerTensorAffine scheme right now");
   Tensor dst = at::_empty_affine_quantized(
       self.sizes(), self.options(), self.q_scale(), self.q_zero_point());
 

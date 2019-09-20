@@ -10,6 +10,20 @@ import torch.nn as nn
 from torch._jit_internal import List, Optional
 
 
+def _with_args(cls_or_self, **kwargs):
+    """
+    Wrapper around functools.partial that allows chaining.
+
+    Often you want to assign it to a class as a class method:
+
+        Foo.with_args = classmethod(_with_args)
+        Foo.with_args(x=1).with_args(y=2)
+    """
+    r = partial(cls_or_self, **kwargs)
+    setattr(r, 'with_args', _with_args)
+    return r
+
+
 ABC = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
 
 
@@ -131,6 +145,8 @@ class ObserverBase(ABC, nn.Module):
                 zero_point = int(zero_point)
 
         return torch.tensor([scale]), torch.tensor([zero_point])
+
+    with_args = classmethod(_with_args)
 
 
 class MinMaxObserver(ObserverBase):
@@ -517,6 +533,6 @@ class TensorObserver(ObserverBase):
 
 
 # Restrict activations to be in the range (0,127)
-default_observer = partial(MinMaxObserver, reduce_range=True)
+default_observer = MinMaxObserver.with_args(reduce_range=True)
 default_debug_observer = TensorObserver
-default_weight_observer = partial(MinMaxObserver, dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)
+default_weight_observer = MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)
