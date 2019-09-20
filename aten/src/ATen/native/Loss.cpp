@@ -192,4 +192,35 @@ Tensor smooth_l1_loss_backward(const Tensor& grad_output, const Tensor& input, c
   return at::smooth_l1_loss_backward_out(grad_input, grad_output, input, target, reduction);
 }
 
+Tensor mse_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto loss = input.sub(target).pow_(2);
+  return apply_loss_reduction(loss, reduction);
+}
+
+Tensor& mse_loss_out(Tensor&result, const Tensor& input, const Tensor& target, int64_t reduction) {
+  if (reduction != Reduction::None) {
+    auto loss = input.sub(target).pow_(2);
+    if (reduction == Reduction::Mean) {
+      at::mean_out(result, loss, 0);
+    } else {
+      at::sum_out(result, loss, 0);
+    }
+  } else {
+    at::sub_out(result, input, target).pow_(2);
+  }
+  return result;
+}
+
+Tensor mse_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  Tensor grad_input = at::zeros_like(input);
+  return at::mse_loss_backward_out(grad_input, grad_output, input, target, reduction);
+}
+
+Tensor& mse_loss_backward_out(Tensor& grad_input, const Tensor& grad_output,
+    const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto norm = reduction == Reduction::Mean ? 2. / input.numel() : 2.;
+  at::sub_out(grad_input, input, target).mul_(norm).mul_(grad_output);
+  return grad_input;
+}
+
 }}  // namespace at::native
