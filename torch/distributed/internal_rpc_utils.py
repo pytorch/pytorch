@@ -19,7 +19,7 @@ def _tensor_receiver(tensor_index):
     global _thread_local_tensor_tables
     return _thread_local_tensor_tables.recv_tables[tensor_index]
 
-def tensor_reducer(obj):
+def _tensor_reducer(obj):
     global _thread_local_tensor_tables
     _thread_local_tensor_tables.send_tables.append(obj)
     tensor_index = len(_thread_local_tensor_tables.send_tables) - 1
@@ -27,19 +27,23 @@ def tensor_reducer(obj):
 
 if sys.version_info >= (3, 0):
     _dispatch_table = copyreg.dispatch_table.copy()
-    _dispatch_table[torch.Tensor] = tensor_reducer
+    _dispatch_table[torch.Tensor] = _tensor_reducer
 
 def serialize(obj):
     f = io.BytesIO()
     p = pickle.Pickler(f)
+    global _dispatch_table
     p.dispatch_table = _dispatch_table
     global _thread_local_tensor_tables
     _thread_local_tensor_tables.send_tables = []
     p.dump(obj)
     return f.getvalue()
 
-
+# internal python function will be imported and executed in C++ land
+# it unpickles pickled python udf strings and tensors and run the python
+# udf, return serialized result and tensor tables
 def run_python_udf_internal(pickled_python_udf, tensors):
+    global _thread_local_tensor_tables
     _thread_local_tensor_tables.recv_tables = tensors
     python_udf = pickle.loads(pickled_python_udf)
     try:
@@ -50,8 +54,10 @@ def run_python_udf_internal(pickled_python_udf, tensors):
         result = RemoteException(except_str)
     return (serialize(result), _thread_local_tensor_tables.send_tables)
 
-
+# internal python function will be imported and executed in C++ land
+# it unpickled pickled python udf result and tensor tables, return python object
 def load_python_udf_result_internal(pickled_python_result, tensors):
+    global _thread_local_tensor_tables
     _thread_local_tensor_tables.recv_tables = tensors
     result = pickle.loads(pickled_python_result)
     if isinstance(result, RemoteException):

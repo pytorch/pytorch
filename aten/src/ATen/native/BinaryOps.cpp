@@ -171,7 +171,7 @@ Tensor& atan2_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor atan2(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty_like(self);
+  Tensor result = at::empty({0}, self.options());
   return native::atan2_out(result, self, other);
 }
 

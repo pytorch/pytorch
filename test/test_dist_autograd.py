@@ -8,6 +8,7 @@ from functools import wraps
 import six
 import unittest
 import torch
+from common_utils import TEST_WITH_ASAN
 
 if not dist.is_available():
     print("c10d not available, skipping tests")
@@ -23,7 +24,7 @@ def dist_init(func):
     @wraps(func)
     def wrapper(self):
         self.worker_id = self.rank
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(backend='gloo', rank=self.rank,
                                 world_size=self.world_size, store=store)
         dist.init_model_parallel('worker%d' % self.rank)
@@ -34,7 +35,11 @@ def dist_init(func):
 
 @unittest.skipIf(not six.PY3, "Pytorch distributed autograd package "
                  "does not support python2")
+@unittest.skipIf(TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues")
 class TestDistAutograd(MultiProcessTestCase):
+    def setUp(self):
+        super(TestDistAutograd, self).setUp()
+        self._spawn_process()
 
     @property
     def world_size(self):
