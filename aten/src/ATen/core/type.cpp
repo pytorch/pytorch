@@ -136,6 +136,10 @@ ListTypePtr ListType::ofBools() {
   static auto value = ListType::create(BoolType::get());
   return value;
 }
+ScalarTypeTypePtr ScalarTypeType::get() {
+  static auto value = ScalarTypeType::create();
+  return value;
+}
 
 // why incomplete? You cannot completely recover a type from
 // an IValue, List[List[int]] and List[List[Tensor]] will both

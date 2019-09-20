@@ -66,6 +66,8 @@ TypePtr IValue::type() const {
       return CapsuleType::get();
     case Tag::Tuple:
       return toTuple()->type();
+    case Tag::ScalarType:
+      return ScalarTypeType::get();
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");

@@ -16,7 +16,7 @@ namespace nn {
 class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
  public:
   LinearImpl(int64_t in, int64_t out) : LinearImpl(LinearOptions(in, out)) {}
-  explicit LinearImpl(LinearOptions options);
+  explicit LinearImpl(const LinearOptions& options_);
 
   void reset() override;
 

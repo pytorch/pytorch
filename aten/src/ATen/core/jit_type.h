@@ -49,7 +49,8 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(FunctionType)           \
   _(ClassType)              \
   _(CapsuleType)            \
-  _(InterfaceType)
+  _(InterfaceType)          \
+  _(ScalarTypeType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1137,6 +1138,28 @@ private:
   CapsuleType()
   : Type(TypeKind::CapsuleType) {}
 };
+
+struct ScalarTypeType;
+using ScalarTypeTypePtr = std::shared_ptr<ScalarTypeType>;
+// This type represents a dtype / ScalarType
+struct CAFFE2_API ScalarTypeType : public Type {
+  static ScalarTypeTypePtr create() {
+    return ScalarTypeTypePtr(new ScalarTypeType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "ScalarType";
+  }
+  static const TypeKind Kind = TypeKind::ScalarTypeType;
+  // global singleton
+  static ScalarTypeTypePtr get();
+private:
+  ScalarTypeType()
+  : Type(TypeKind::ScalarTypeType) {}
+};
+
 
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Type& t);
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const VaryingShape& t);
