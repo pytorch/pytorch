@@ -454,7 +454,7 @@ TEST_F(ModulesTest, CosineSimilarity) {
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
   auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::requires_grad());
   auto output = cos->forward(input1, input2);
-  auto expected = torch::tensor({0.8078, 0.8721});
+  auto expected = torch::tensor({0.8078, 0.8721}, torch::kFloat);
   auto s = output.sum();
   s.backward();
 
@@ -467,7 +467,7 @@ TEST_F(ModulesTest, PairwiseDistance) {
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
   auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::requires_grad());
   auto output = dist->forward(input1, input2);
-  auto expected = torch::tensor({6, 6});
+  auto expected = torch::tensor({6, 6}, torch::kFloat);
   auto s = output.sum();
   s.backward();
 
