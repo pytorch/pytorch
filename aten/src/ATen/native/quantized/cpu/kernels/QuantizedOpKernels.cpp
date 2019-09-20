@@ -123,6 +123,9 @@ Tensor qcat_nhwc_kernel(
                   curr_scale,
                   curr_zero_pt,
                   reinterpret_cast<scalar_t*>(iptr)[c]);
+              if (ReLUFused) {
+                float_val = std::max(0.0f, float_val);
+              }
               optr[c] =
                   at::quantize_val<scalar_t>(scale, zero_point, float_val).val_;
             } // for c
