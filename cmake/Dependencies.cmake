@@ -187,18 +187,10 @@ set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
   CACHE PATH "Confu-style dependencies binary directory")
 
 # ---[ Eigen BLAS for Mobile
-if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+if(INTERN_BUILD_MOBILE AND INTERN_USE_EIGEN_BLAS)
   set(USE_BLAS 1)
-  if(NOT DEFINED EIGEN_BLAS_SOURCE_DIR)
-    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-    set(EIGEN_BLAS_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/eigen/blas" CACHE STRING "eigen blas source directory")
-  endif()
-  IF(NOT TARGET blas)
-    ADD_SUBDIRECTORY(
-      "${EIGEN_BLAS_SOURCE_DIR}"
-      "${CONFU_DEPENDENCIES_BINARY_DIR}/eigen/blas")
-  ENDIF()
-  list(APPEND Caffe2_DEPENDENCY_LIBS eigen_blas_static)
+  include(${CMAKE_CURRENT_LIST_DIR}/External/EigenBLAS.cmake)
+  list(APPEND Caffe2_DEPENDENCY_LIBS eigen_blas)
 endif()
 
 # ---[ pthreadpool
