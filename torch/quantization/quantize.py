@@ -75,7 +75,7 @@ def _observer_forward_hook(self, input, output):
     """
     return self.observer(output)
 
-def add_observer(module):
+def add_observer(module, module_skip_list =None):
     r"""Add observer for the leaf child of the module.
 
     This function insert observer module to all leaf child module that
@@ -94,15 +94,18 @@ def add_observer(module):
             if hasattr(child, 'qconfig') and child.qconfig is not None:
                 child.observer = child.qconfig.activation()
         else:
-            add_observer(child)
+            add_observer(child, module_skip_list)
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
     if hasattr(module, 'qconfig') and module.qconfig is not None and \
        len(module._modules) == 0:
         # observer and hook will be gone after we swap the module
-        module.add_module('observer', module.qconfig.activation())
-        module.register_forward_hook(_observer_forward_hook)
+        if module_skip_list is None or type(module) not in set(module_skip_list):
+            module.add_module('observer', module.qconfig.activation())
+            module.register_forward_hook(_observer_forward_hook)
+        else:
+            print('Skipping for DeQuantStub')
 
 class QuantWrapper(nn.Module):
     r"""A wrapper class that wraps the input module, adds QuantStub and
@@ -229,6 +232,8 @@ DEFAULT_DYNAMIC_MODULE_MAPPING = {
     nn.Linear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
 }
+# List of modules for which we do not need FakeQuant for activations
+DEFAULT_QAT_SKIP_MODULE_LIST = [DeQuantStub]
 
 def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
     r"""Converts a float model to quantized model.
@@ -272,7 +277,8 @@ def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_D
     return model
 
 def prepare_qat(model):
-    prepare(model)
+    propagate_qconfig(model)
+    add_observer(model, DEFAULT_QAT_SKIP_MODULE_LIST)
     convert(model, DEFAULT_QAT_MODULE_MAPPING)
 
 def quantize_qat(model, run_fn, run_args):
