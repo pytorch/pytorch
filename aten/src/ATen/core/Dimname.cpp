@@ -54,26 +54,8 @@ Dimname Dimname::fromSymbol(Symbol full_name) {
   if (full_name == kWildcard) {
     return Dimname::wildcard();
   }
-  const std::string delimiter = ".";
-  const std::string str(full_name.toUnqualString());
-  auto it = str.find(delimiter);
-
-  // Check for normal name
-  if (it == std::string::npos) {
-    check_valid_identifier(str);
-    return Dimname(full_name);
-  }
-
-  // Check for tagged name
-  auto second_dot = str.find(delimiter, it + 1);
-  TORCH_CHECK(
-      second_dot == std::string::npos,
-      "Invalid name '", str, "': A tagged name can only contain one '.'");
-  auto untagged_name = str.substr(0, it);
-  auto tag = str.substr(it + 1);
-  check_valid_identifier(untagged_name); 
-  check_valid_identifier(tag);
-  return Dimname(NameType::TAGGED, full_name, Symbol::dimname(untagged_name));
+  check_valid_identifier(full_name.toUnqualString());
+  return Dimname(full_name);
 }
 
 Dimname Dimname::wildcard() {
