@@ -87,6 +87,23 @@ RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY35 = sys.version_info >= (3, 5)
 
+def default_tensor_type(type):
+    type_str = torch.typename(type)
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            old_type = torch.Tensor().type()
+            torch.set_default_tensor_type(type_str)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                torch.set_default_tensor_type(old_type)
+
+        return wrapper
+
+    return decorator
+
 
 def LSTMCellF(input, hx, cx, *params):
     return LSTMCell(input, (hx, cx), *params)
@@ -1121,7 +1138,7 @@ graph(%x : Tensor,
             # aten::conv2d --> quantized::conv2d
             """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
+%r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::int_repr
         %a_intrepr = aten::int_repr(%a_quant)
@@ -1132,15 +1149,10 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %w_intrepr = aten::int_repr(%w_quant)
         # CHECK-NOT: aten::_dequantize_linear
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
-        %b_intrepr = aten::int_repr(%b_quant)
-        # CHECK-NOT: aten::_dequantize_linear
-        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
         # CHECK: quantized::conv_prepack
         # CHECK: quantized::conv2d
         # CHECK-NOT: aten::conv2d
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b_dequant, %c, %d, %e, %f)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %c, %d, %e, %f)
         # CHECK-NOT: aten::quantize_linear
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
         # CHECK: aten::int_repr
@@ -3357,6 +3369,22 @@ def foo(x):
                     cu.define(full)
             else:
                 cu.define(full)
+
+    def test_namedtuple_python(self):
+        MyTuple = namedtuple('MyTuple', ['a'])
+
+        @torch.jit.unused
+        def fn():
+            # type: () -> MyTuple
+            return MyTuple(1)
+
+        # Only check compilation
+        @torch.jit.script
+        def fn2():
+            # type: () -> MyTuple
+            return fn()
+
+        FileCheck().check("NamedTuple").run(fn2.graph)
 
     def test_inherit_method(self):
         class A(torch.jit.ScriptModule):
@@ -7665,13 +7693,13 @@ a")
         self._test_binary_op_shape(['mul', 'div', 'add', 'sub'], 0)
         self._test_binary_op_shape(['mul', 'div', 'add', 'sub'], 3)
 
+    @default_tensor_type(torch.FloatTensor)
     def test_wrapped_number(self):
         # Scalar's get converted to 'wrapped' tensors of default tensor type.
         # Wrapped tensors behave differently in certain promotion operations:
         # float_tensor * double -> float but wrapped_float * double -> double.
         # This can cause issues in check-trace if not handled correctly in
         # `aten::isclose()`.
-        torch.set_default_tensor_type('torch.FloatTensor')
 
         def foobar():
             x = -10000.0

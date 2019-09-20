@@ -190,6 +190,7 @@ def add_torch_libs():
         "torch/csrc/api/src/nn/modules/batchnorm.cpp",
         "torch/csrc/api/src/nn/modules/conv.cpp",
         "torch/csrc/api/src/nn/modules/dropout.cpp",
+        "torch/csrc/api/src/nn/modules/distance.cpp",
         "torch/csrc/api/src/nn/modules/embedding.cpp",
         "torch/csrc/api/src/nn/modules/fold.cpp",
         "torch/csrc/api/src/nn/modules/linear.cpp",
