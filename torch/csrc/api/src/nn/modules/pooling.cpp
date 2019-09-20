@@ -8,8 +8,8 @@ namespace torch {
 namespace nn {
 
 template <size_t D, typename Derived>
-AvgPoolImpl<D, Derived>::AvgPoolImpl(AvgPoolOptions<D> options)
-    : options(std::move(options)) {}
+AvgPoolImpl<D, Derived>::AvgPoolImpl(const AvgPoolOptions<D>& options_)
+    : options(options_) {}
 
 template <size_t D, typename Derived>
 void AvgPoolImpl<D, Derived>::reset() {}
@@ -40,8 +40,8 @@ template class AvgPoolImpl<3, AvgPool3dImpl>;
 // ============================================================================
 
 template <size_t D, typename Derived>
-MaxPoolImpl<D, Derived>::MaxPoolImpl(MaxPoolOptions<D> options)
-    : options(std::move(options)) {}
+MaxPoolImpl<D, Derived>::MaxPoolImpl(const MaxPoolOptions<D>& options_)
+    : options(options_) {}
 
 template <size_t D, typename Derived>
 void MaxPoolImpl<D, Derived>::reset() {}
