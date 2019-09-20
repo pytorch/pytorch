@@ -1152,15 +1152,12 @@
   use_c10_dispatcher: True
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _floor__cpu
-    CUDA: _floor__cuda
 
 - func: floor.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _floor_out_cpu
-    CUDA: _floor_out_cuda
+    CPU: floor_out
+    CUDA: floor_out
 
 - func: frac(Tensor self) -> Tensor
   use_c10_dispatcher: True
