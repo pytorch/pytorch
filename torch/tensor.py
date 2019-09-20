@@ -506,11 +506,11 @@ class Tensor(torch._C._TensorBase):
         return update_names(self, names, rename_map, inplace=True)
 
     def rename(self, *names, **rename_map):
-        # See Note [names_ / rename API]
+        # See Note [rename_ / rename API]
         return update_names(self, names, rename_map, inplace=False)
 
     def _update_names(self, names, inplace):
-        # See Note [names_ / rename API]
+        # See Note [rename_ / rename API]
         if inplace:
             return super(Tensor, self).rename_(names)
         else:
