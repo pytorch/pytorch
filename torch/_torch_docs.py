@@ -874,10 +874,10 @@ add_docstr(torch.cdist,
            r"""
 cdist(x1, x2, p=2) -> Tensor
 
-Computes the p-norm distance between each pair of the two collections of row vectors.
+Computes batched the p-norm distance between each pair of the two collections of row vectors.
 
-If x1 has shape :math:`P \times M` and x2 has shape :math:`R \times M` then the 
-output will have shape :math:`P \times R`.
+If x1 has shape :math:`B \times P \times M` and x2 has shape :math:`B \times R \times M` then the 
+output will have shape :math:`B \times P \times R`.
 
 This function is equivalent to `scipy.spatial.distance.cdist(input,'minkowski', p=p)` 
 if :math:`p \in (0, \infty)`. When :math:`p = 0` it is equivalent to 
