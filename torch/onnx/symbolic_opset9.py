@@ -1212,10 +1212,8 @@ def slice(g, self, dim, start, end, step):
         _unimplemented("slice", "step!=1 is currently not supported")
     if start.node().kind() != 'onnx::Constant' or \
             end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant':
-        start_unsqueezed = g.op("Unsqueeze", start, axes_i=[0])
-        end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
-        dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
-        return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
+        _unimplemented("DynamicSlice", "DynamicSlice experimental op in opset 9 is not supported by ONNXRuntime " +
+                       "anymore. Please use statically allocated variables or upgrade to a higher ONNX version.")
     else:
         start = _parse_arg(start, 'i')
         end = _parse_arg(end, 'i')
