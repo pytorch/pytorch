@@ -44,29 +44,6 @@ void atan2_kernel(TensorIterator& iter) {
   });
 }
 
-void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) {
-  add_kernel(iter, -alpha_scalar);
-}
-
-void mul_kernel(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
-    cpu_kernel(iter, [=](bool a, bool b) -> bool { return a && b; });
-  } else if (isComplexType(iter.dtype())) {
-      AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "mul_cpu", [&]() {
-        cpu_kernel(iter,
-          [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; });
-     });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "mul_cpu", [&]() {
-      cpu_kernel_vec(iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-          return a * b;
-        });
-    });
-  }
-}
-
 void div_kernel(TensorIterator& iter) {
   if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
     // There's no SIMD integer division, so don't try to vectorize it.
@@ -96,6 +73,25 @@ void div_kernel(TensorIterator& iter) {
   }
 }
 
+void mul_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    cpu_kernel(iter, [=](bool a, bool b) -> bool { return a && b; });
+  } else if (isComplexType(iter.dtype())) {
+      AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "mul_cpu", [&]() {
+        cpu_kernel(iter,
+          [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; });
+     });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "mul_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+          return a * b;
+        });
+    });
+  }
+}
+
 void logical_xor_kernel(TensorIterator& iter) {
   cpu_kernel(iter,
     [](bool a, bool b) -> bool {
@@ -103,14 +99,30 @@ void logical_xor_kernel(TensorIterator& iter) {
     });
 }
 
+void remainder_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "remainder_cpu", [&]() {
+    cpu_kernel_vec(iter,
+    [=](scalar_t a, scalar_t b) -> scalar_t {
+        return std::remainder(a, b);
+    },
+    [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        return a.remainder(b);
+    });
+  });
+}
+
+void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) {
+  add_kernel(iter, -alpha_scalar);
+}
+
 } // anonymous namespace
 
-
 REGISTER_DISPATCH(add_stub, &add_kernel);
-REGISTER_DISPATCH(sub_stub, &sub_kernel);
-REGISTER_DISPATCH(mul_stub, &mul_kernel);
-REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
+REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
+REGISTER_DISPATCH(mul_stub, &mul_kernel);
+REGISTER_DISPATCH(remainder_stub, &remainder_kernel);
+REGISTER_DISPATCH(sub_stub, &sub_kernel);
 
 }} // namespace at::native
