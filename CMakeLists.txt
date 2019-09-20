@@ -587,7 +587,7 @@ endif()
 if (USE_CUDA)
   # TODO: check if we should include other cuda dependency libraries
   # to the interface as well.
-  if(${FIND_CUDA_MODULE_DEPRECATED})
+  if(FIND_CUDA_MODULE_DEPRECATED)
     enable_language(CUDA)
   endif()
 endif()
