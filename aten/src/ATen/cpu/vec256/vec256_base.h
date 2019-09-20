@@ -192,6 +192,9 @@ public:
     }
     return ret;
   }
+  Vec256<T> digamma() const {
+    return map(calc_digamma);
+  }
   Vec256<T> erf() const {
     return map(std::erf);
   }
