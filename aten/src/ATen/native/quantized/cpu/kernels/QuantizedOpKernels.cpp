@@ -70,12 +70,12 @@ Tensor qcat_nhwc_kernel(
       MemoryFormat::ChannelsLast);
 
   AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&]() {
-    using Vec = Vec256<scalar_t>;
     for (int64_t b = 0; b < N; ++b) {
       for (int64_t row = 0; row < H; ++row) {
         for (int64_t col = 0; col < W; ++col) {
           // loop over input tensors
           for (int64_t tidx = 0; tidx < Cs_in.size(); ++tidx) {
+            using Vec = Vec256<scalar_t>;
             scalar_t::underlying* optr =
                 reinterpret_cast<scalar_t::underlying*>(output.data_ptr()) +
                 b * H * W * C_out + row * W * C_out + col * C_out +
