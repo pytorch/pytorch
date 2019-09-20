@@ -1215,6 +1215,7 @@ RegisterOperators reg(
            TypePtr value_type = dt->getValueType();
            return [=](Stack& stack) {
              auto vals = c10::impl::GenericDict(key_type, value_type);
+             vals.reserve(num_inputs / 2);
              for (size_t i = 0; i < num_inputs; i += 2) {
                auto val = pop(stack);
                auto key = pop(stack);
@@ -1225,6 +1226,16 @@ RegisterOperators reg(
            };
          },
          aliasAnalysisSpecialCase()),
+     Operator(
+         "aten::dict() -> Dict(str, Tensor)",
+         [](const Node* node) -> Operation {
+           return [](Stack& stack) {
+             auto dict =
+                 c10::impl::GenericDict(StringType::get(), TensorType::get());
+             push(stack, dict);
+             return 0;
+           };
+         }),
      Operator(
          "aten::_unwrap_optional(t(a)? optional) -> t(a)",
          [](Stack& stack) {
@@ -2209,6 +2220,26 @@ int dictCopy(Stack& stack) {
   return 0;
 }
 
+Operation dictConstructFromList(const Node* node) {
+  TypePtr output_type = node->outputs()[0]->type();
+  TypePtr key_type =
+      static_cast<const DictType*>(output_type.get())->getKeyType();
+  TypePtr value_type =
+      static_cast<const DictType*>(output_type.get())->getValueType();
+  return [key_type, value_type](Stack& stack) {
+    auto input_list = pop(stack);
+    auto list_ref = input_list.toGenericListRef();
+    auto dict = c10::impl::GenericDict(key_type, value_type);
+    dict.reserve(list_ref.size());
+    for (const auto& input : list_ref) {
+      const auto tup = input.toTuple()->elements();
+      dict.insert_or_assign(tup[0], tup[1]);
+    }
+    push(stack, dict);
+    return 0;
+  };
+}
+
 template <typename T>
 int hashValue(Stack& stack) {
   auto value = pop(stack);
@@ -2976,6 +3007,11 @@ RegisterOperators reg2({
           "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \
           " idx, t(b -> *) v) -> ()",                                         \
           dictSetItem,                                                        \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::dict((" key_type ", tVal)[] inputs) -> Dict(" key_type       \
+          ", tVal)",                                                          \
+          dictConstructFromList,                                              \
           aliasAnalysisFromSchema())
 
     CREATE_DICT_OPS("str"),

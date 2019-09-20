@@ -16,11 +16,11 @@ Tensor FoldImpl::forward(const Tensor& input) {
 
   return torch::col2im(
       input,
-      options.output_size_,
-      options.kernel_size_,
-      options.dilation_,
-      options.padding_,
-      options.stride_);
+      options.output_size(),
+      options.kernel_size(),
+      options.dilation(),
+      options.padding(),
+      options.stride());
 }
 
 } // namespace nn
