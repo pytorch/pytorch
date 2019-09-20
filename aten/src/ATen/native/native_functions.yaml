@@ -50,6 +50,9 @@
 - func: is_leaf(Tensor self) -> bool
   variants: method
 
+- func: output_nr(Tensor self) -> int
+  variants: method
+
 - func: names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
@@ -3535,6 +3538,11 @@
   dispatch:
     QuantizedCPU: q_per_channel_zero_points_quant
 
+- func: q_per_channel_axis(Tensor self) -> int[]
+  variants: function, method
+  dispatch:
+    QuantizedCPU: q_per_channel_axis_quant
+
 - func: int_repr(Tensor self) -> Tensor
   use_c10_dispatcher: True
   variants: function, method
@@ -4097,7 +4105,7 @@
   supports_named_tensor: True
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_lgamma_
+    CPU: _lgamma__cpu
     CUDA: legacy::cuda::_th_lgamma_
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -4794,7 +4802,7 @@
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: legacy::cpu::_th_lgamma_out
+    CPU: _lgamma_out_cpu
     CUDA: legacy::cuda::_th_lgamma_out
 
 - func: lgamma(Tensor self) -> Tensor
@@ -4802,7 +4810,7 @@
   supports_named_tensor: True
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_lgamma
+    CPU: lgamma
     CUDA: legacy::cuda::_th_lgamma
 
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
