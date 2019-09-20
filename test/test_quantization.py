@@ -7,10 +7,10 @@ import torch.nn._intrinsic as nni
 import torch.nn._intrinsic.quantized as nniq
 import torch.nn._intrinsic.qat as nniqat
 from torch.quantization import \
-    QConfig_dynamic, default_weight_observer, dump_tensor,\
+    QConfig_dynamic, default_weight_observer, get_observer_dict,\
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
-    default_dynamic_qconfig, HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver, TensorObserver, QuantWrapper
+    default_dynamic_qconfig, HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver, RecordingObserver, QuantWrapper
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
@@ -872,25 +872,26 @@ class ObserverTest(QuantizationTestCase):
                  ' well with UBSAN at the moment, so we skip the test if'
                  ' we are in a UBSAN environment.')
 class QuantizationDebugTest(QuantizationTestCase):
-    def test_tensor_observer(self):
+    def test_record_observer(self):
         model = SingleLayerLinearModel()
         model.qconfig = default_debug_qconfig
         prepare(model)
         # run the evaluation and dump all tensors
         test_only_eval_fn(model, self.calib_data)
         test_only_eval_fn(model, self.calib_data)
-        tensor_dict = {}
-        dump_tensor(model, tensor_dict)
+        observer_dict = {}
+        get_observer_dict(model, observer_dict)
 
-        # we can torch,save() and torch_load() in bento for further analysis
-        self.assertTrue('fc1.module.activation' in tensor_dict.keys(),
-                        'activation is not recorded in the dict')
-        self.assertEqual(len(tensor_dict['fc1.module.activation']), 2 * len(self.calib_data))
+        self.assertTrue('fc1.module.observer' in observer_dict.keys(),
+                        'observer is not recorded in the dict')
+        self.assertEqual(len(observer_dict['fc1.module.observer'].get_tensor_value()), 2 * len(self.calib_data))
+        self.assertEqual(observer_dict['fc1.module.observer'].get_tensor_value()[0], model(self.calib_data[0][0]))
+
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
-    def test_tensor_observer_scriptable(self, qdtype, qscheme):
-        obs = TensorObserver(dtype=qdtype, qscheme=qscheme)
+    def test_observer_observer_scriptable(self, qdtype, qscheme):
+        obs = RecordingObserver(dtype=qdtype, qscheme=qscheme)
         scripted = torch.jit.script(obs)
 
         x = torch.rand(3, 4)
