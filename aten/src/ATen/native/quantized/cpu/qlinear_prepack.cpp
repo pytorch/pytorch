@@ -136,28 +136,24 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
         "quantized::linear_prepack (qnnpack) only supports Per Tensor Quantization Scheme")
 
     int64_t rows_w = weight.size(0);
-    int64_t cols_w = weight.size(1);
     Tensor bias_fp32;
     if (bias_in.has_value()) {
       bias_fp32 = bias_in.value();
     } else {
       bias_fp32 = at::zeros(rows_w, at::kFloat);
     }
-    // FP32 bias. Temporary quantization that will be replaced later
-    auto bias = at::quantize_linear(bias_fp32, 1.0, 0, kQInt32);
     TORCH_CHECK(
-        !bias.defined() || (bias.ndimension() == 1 && bias.size(0) == rows_w),
+        !bias_fp32.defined() || (bias_fp32.ndimension() == 1 && bias_fp32.size(0) == rows_w),
         "quantized::linear_prepack (qnnpack): Given weight of size ",
         weight.sizes(),
         ", expected bias to be 1-dimensional with ",
         rows_w,
         " elements",
         ", but got bias of size ",
-        bias.sizes(),
+        bias_fp32.sizes(),
         " instead");
 
     Tensor weight_contig = weight.contiguous();
-    Tensor bias_contig = bias.contiguous();
     auto weight_zp = weight.q_zero_point() + 128;
 
     int8_t* inp_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
