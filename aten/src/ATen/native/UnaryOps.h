@@ -49,7 +49,6 @@ DECLARE_DISPATCH(unary_fn, tan_stub);
 DECLARE_DISPATCH(unary_fn, tanh_stub);
 DECLARE_DISPATCH(unary_fn, trigamma_stub);
 DECLARE_DISPATCH(unary_fn, trunc_stub);
-DECLARE_DISPATCH(unary_fn, lgamma_stub);
 
 DECLARE_DISPATCH(void(*)(Tensor&, const double, Generator *), bernoulli_mkl_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, const int64_t), polygamma_stub);
@@ -58,7 +57,6 @@ DECLARE_DISPATCH(void(*)(Tensor&, const Tensor&, int64_t, bool, Generator *), mu
 
 // Missing unary functions
 // digamma
-// erfinv
 // clone
 // contiguous
 // clamp/_min/_max
