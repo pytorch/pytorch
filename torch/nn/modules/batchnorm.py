@@ -48,6 +48,7 @@ class _BatchNorm(Module):
 
     def reset_parameters(self):
         self.reset_running_stats()
+        self.num_batches_tracked_scalar = int(self.num_batches_tracked)
         if self.affine:
             init.ones_(self.weight)
             init.zeros_(self.bias)
@@ -58,7 +59,7 @@ class _BatchNorm(Module):
     def forward(self, input):
         self._check_input_dim(input)
 
-        # exponential_average_factor is set to self.momentum 
+        # exponential_average_factor is set to self.momentum
         # (when it is available) only so that if gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
@@ -69,9 +70,9 @@ class _BatchNorm(Module):
         if self.training and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
             if self.num_batches_tracked is not None:
-                self.num_batches_tracked += 1
+                self.num_batches_tracked_scalar = self.num_batches_tracked_scalar + 1
                 if self.momentum is None:  # use cumulative moving average
-                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
+                    exponential_average_factor = 1.0 / float(self.num_batches_tracked_scalar)
                 else:  # use exponential moving average
                     exponential_average_factor = self.momentum
 
@@ -83,6 +84,15 @@ class _BatchNorm(Module):
     def extra_repr(self):
         return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
                'track_running_stats={track_running_stats}'.format(**self.__dict__)
+
+    def state_dict(self, destination=None, prefix='', keep_vars=False):
+        self.num_batches_tracked.fill_(self.num_batches_tracked_scalar)
+        return super(_BatchNorm, self).(destination, prefix, keep_vars)
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        self.num_batches_tracked.fill_(self.num_batches_tracked_scalar)
+        super(_BatchNorm, self)._save_to_state_dict(
+            destination, prefix, keep_vars)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
@@ -98,6 +108,7 @@ class _BatchNorm(Module):
         super(_BatchNorm, self)._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
+        self.num_batches_tracked_scalar = int(self.num_batches_tracked)
 
 
 class BatchNorm1d(_BatchNorm):
@@ -428,7 +439,7 @@ class SyncBatchNorm(_BatchNorm):
 
         self._check_input_dim(input)
 
-        # exponential_average_factor is set to self.momentum 
+        # exponential_average_factor is set to self.momentum
         # (when it is available) only so that if gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
@@ -437,9 +448,9 @@ class SyncBatchNorm(_BatchNorm):
             exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
-            self.num_batches_tracked += 1
+            self.num_batches_tracked_scalar = self.num_batches_tracked_scalar + 1
             if self.momentum is None:  # use cumulative moving average
-                exponential_average_factor = 1.0 / self.num_batches_tracked.item()
+                exponential_average_factor = 1.0 / float(self.num_batches_tracked_scalar)
             else:  # use exponential moving average
                 exponential_average_factor = self.momentum
 
