@@ -85,7 +85,7 @@ Tensor qnnpack_relu(Tensor input) {
 
 Tensor quantized_relu(const Tensor& qx) {
   #ifdef USE_PYTORCH_QNNPACK
-  if (at::globalContext().preferredQuantizedEngine() == at::QEngine::QNNPACK) {
+  if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
     return qnnpack_relu(qx);
   }
   #endif

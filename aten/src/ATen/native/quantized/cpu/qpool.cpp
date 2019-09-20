@@ -379,7 +379,7 @@ class QMaxPool2D_arr_args final : public torch::OperatorKernel {
       std::vector<int64_t> padding,
       std::vector<int64_t> dilation) {
     #ifdef USE_PYTORCH_QNNPACK
-    if (at::globalContext().preferredQuantizedEngine() == at::QEngine::QNNPACK) {
+    if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
       return qnnpack_maxpool(qx, kernel_size, stride, padding, dilation);
     }
     #endif

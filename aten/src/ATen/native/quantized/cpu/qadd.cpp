@@ -142,7 +142,7 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   Tensor operator()(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
     check_inputs(qa, qb);
     #ifdef USE_PYTORCH_QNNPACK
-    if (at::globalContext().preferredQuantizedEngine() == at::QEngine::QNNPACK) {
+    if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
       return qnnpack_add(qa, qb, scale, zero_point);
     }
     #endif
