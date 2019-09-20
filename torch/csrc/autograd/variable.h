@@ -292,21 +292,6 @@ struct TORCH_API Variable : public at::Tensor {
   const std::vector<std::shared_ptr<FunctionPreHook>>& hooks() const noexcept;
   void clear_hooks();
 
-  template <typename T>
-  using hook_return_void_t = c10::guts::enable_if_t<std::is_void<typename std::result_of<T&(Variable)>::type>::value, unsigned>;
-  template <typename T>
-  using hook_return_var_t = c10::guts::enable_if_t<std::is_same<typename std::result_of<T&(Variable)>::type, Variable>::value, unsigned>;
-  // Remove hook at given position
-  void remove_hook(unsigned pos);
-
-  // Returns the index of the hook in the list which can be used to remove hook
-  // Register a hook with no return value
-  template <typename T>
-  hook_return_void_t<T> register_hook(T&& hook);
-  // Register a hook with variable return value
-  template <typename T>
-  hook_return_var_t<T> register_hook(T&& hook);
-
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -395,6 +380,18 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   const Variable& grad() const override {
     return grad_;
   }
+
+  void clear_hooks();
+
+  void add_hook(std::shared_ptr<FunctionPreHook> hook);
+
+  void create_cpp_hook();
+
+  void remove_hook(unsigned pos) override;
+
+  unsigned register_hook(std::function<void(at::Tensor)> hook) override;
+
+  unsigned register_hook(std::function<at::Tensor(at::Tensor)> hook) override;
 
   AutogradMeta(
     at::TensorImpl* self_impl,
@@ -673,7 +670,7 @@ inline const c10::VariableVersion& Variable::version_counter() const noexcept {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline void Variable::add_hook(std::shared_ptr<FunctionPreHook> hook) {
-  get_autograd_meta()->hooks_.push_back(std::move(hook));
+  get_autograd_meta()->add_hook(hook);
 }
 
 inline const std::vector<std::shared_ptr<FunctionPreHook>>& Variable::hooks()
@@ -683,37 +680,6 @@ inline const std::vector<std::shared_ptr<FunctionPreHook>>& Variable::hooks()
 
 inline void Variable::clear_hooks() {
   get_autograd_meta()->hooks_.clear();
-}
-
-template <typename T>
-auto Variable::register_hook(T&& hook) -> Variable::hook_return_void_t<T> {
-  TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
-                           "doesn't require gradient");
-  auto &list = get_autograd_meta()->cpp_hooks_list;
-  if(!list) {
-    create_cpp_hook();
-  }
-  unsigned idx = list->size();
-  // Return the grad argument in case of a hook with void return type to have an
-  // std::function with Variable return type
-  std::function<void(Variable)> fn(hook);
-  list->emplace_back([fn](Variable grad){
-   fn(grad);
-    return Variable();});
-  return idx;
-}
-
-template <typename T>
-auto Variable::register_hook(T&& hook) -> Variable::hook_return_var_t<T> {
-  TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
-                           "doesn't require gradient");
-  auto &list = get_autograd_meta()->cpp_hooks_list;
-  if(!list) {
-    create_cpp_hook();
-  }
-  unsigned idx = list->size();
-  list->push_back(hook);
-  return idx;
 }
 
 // View Variables

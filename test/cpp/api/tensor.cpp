@@ -513,3 +513,34 @@ TEST(TensorTest, RequiresGradInplace) {
   ASSERT_THROWS_WITH(y.requires_grad_(false),
     "requires_grad_ is not implemented for Tensor");
 }
+
+TEST(TensorTest, RegisterHook) {
+  using torch::autograd::Variable;
+  using torch::Tensor;
+
+  std::function<Tensor(Tensor)> plusOneT([](Tensor grad){
+    return grad + 1;
+  });
+  std::function<Variable(Variable)> plusOneV([](Variable grad){
+    return grad + 1;
+  });
+
+  std::function<void(Tensor)> plusOneT_void([](Tensor grad) {
+  });
+  std::function<void(Variable)> plusOneV_void([](Variable grad) {
+  });
+
+  auto x = torch::tensor({5.0}, torch::requires_grad());
+  x.register_hook(plusOneT);
+  x.register_hook(plusOneV);
+  x.register_hook(plusOneT_void);
+  x.register_hook(plusOneV_void);
+
+  x = at::tensor({5.0}, torch::requires_grad());
+
+  const auto message =  "register_hook is not implemented for Tensor";
+  ASSERT_THROWS_WITH(x.register_hook(plusOneT), message);
+  ASSERT_THROWS_WITH(x.register_hook(plusOneV), message);
+  ASSERT_THROWS_WITH(x.register_hook(plusOneT_void), message);
+  ASSERT_THROWS_WITH(x.register_hook(plusOneV_void), message);
+}

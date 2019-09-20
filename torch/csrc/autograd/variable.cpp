@@ -34,6 +34,61 @@ Variable::AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_gr
       "requires_grad should be false if grad_fn is set");
 }
 
+void Variable::AutogradMeta::clear_hooks() {
+  hooks_.clear();
+}
+
+void Variable::AutogradMeta::add_hook(std::shared_ptr<FunctionPreHook> hook) {
+  hooks_.push_back(std::move(hook));
+}
+
+void Variable::AutogradMeta::create_cpp_hook() {
+  auto &list = cpp_hooks_list;
+  list.reset(new hooks_list());
+  std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, output_nr_));
+  clear_hooks();
+  add_hook(std::make_shared<CppFunctionPreHook>(list, 0));
+  auto fn = grad_fn_;
+  if (fn) {
+    fn->add_pre_hook(std::move(hook_ptr));
+  }
+}
+
+void Variable::AutogradMeta::remove_hook(unsigned pos) {
+  auto &list = cpp_hooks_list;
+  TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
+  // Hook will be ignored
+  (*list)[pos] = nullptr;
+}
+
+unsigned Variable::AutogradMeta::register_hook(std::function<void(at::Tensor)> hook) {
+  TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
+                           "doesn't require gradient");
+  auto &list = cpp_hooks_list;
+  if(!list) {
+    create_cpp_hook();
+  }
+  unsigned idx = list->size();
+  // Return the grad argument in case of a hook with void return type to have an
+  // std::function with Variable return type
+  list->emplace_back([hook](Tensor grad){
+   hook(grad);
+    return Variable();});
+  return idx;
+}
+
+unsigned Variable::AutogradMeta::register_hook(std::function<at::Tensor(at::Tensor)> hook) {
+  TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
+                           "doesn't require gradient");
+  auto &list = cpp_hooks_list;
+  if(!list) {
+    create_cpp_hook();
+  }
+  unsigned idx = list->size();
+  list->push_back(hook);
+  return idx;
+}
+
 std::shared_ptr<Node> Variable::grad_accumulator() const {
   auto autograd_meta = get_autograd_meta();
   if (autograd_meta->grad_fn_) {
@@ -171,22 +226,7 @@ void Variable::rebase_history(Edge gradient_edge) {
 }
 
 void Variable::create_cpp_hook() {
-  auto &list = get_autograd_meta()->cpp_hooks_list;
-  list.reset(new hooks_list());
-  std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, output_nr()));
-  clear_hooks();
-  add_hook(std::make_shared<CppFunctionPreHook>(list, 0));
-  auto fn = grad_fn();
-  if (fn) {
-    fn->add_pre_hook(std::move(hook_ptr));
-  }
-}
-
-void Variable::remove_hook(unsigned pos) {
-  auto &list = get_autograd_meta()->cpp_hooks_list;
-  TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
-  // Hook will be ignored
-  (*list)[pos] = nullptr;
+  get_autograd_meta()->create_cpp_hook();
 }
 
 }} // namespace torch::autograd

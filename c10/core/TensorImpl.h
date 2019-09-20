@@ -135,6 +135,9 @@ struct C10_API AutogradMetaInterface {
   virtual bool requires_grad() const = 0;
   virtual at::Tensor& grad() = 0;
   virtual const at::Tensor& grad() const = 0;
+  virtual void remove_hook(unsigned pos) = 0;
+  virtual unsigned register_hook(std::function<void(at::Tensor)> hook) = 0;
+  virtual unsigned register_hook(std::function<at::Tensor(at::Tensor)> hook) = 0;
   virtual ~AutogradMetaInterface();
 };
 
@@ -566,6 +569,30 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [Tensor versus Variable in C++].
    */
   const at::Tensor& grad() const;
+
+  void remove_hook(unsigned pos) {
+    if (autograd_meta()) {
+      return autograd_meta()->remove_hook(pos);
+    } else {
+      AT_ERROR("remove_hook is not implemented for Tensor");
+    }
+  }
+
+  unsigned register_hook_void(std::function<void(at::Tensor)> hook) {
+    if (autograd_meta()) {
+      return autograd_meta()->register_hook(hook);
+    } else {
+      AT_ERROR("register_hook is not implemented for Tensor");
+    }
+  }
+
+  unsigned register_hook_val(std::function<at::Tensor(at::Tensor)> hook) {
+    if (autograd_meta()) {
+      return autograd_meta()->register_hook(hook);
+    } else {
+      AT_ERROR("register_hook is not implemented for Tensor");
+    }
+  }
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.

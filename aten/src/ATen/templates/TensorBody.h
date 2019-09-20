@@ -393,6 +393,27 @@ class CAFFE2_API Tensor {
     return impl_->grad();
   }
 
+  template <typename T>
+  using hook_return_void_t = c10::guts::enable_if_t<std::is_void<typename std::result_of<T&(at::Tensor)>::type>::value, unsigned>;
+  template <typename T>
+  using hook_return_var_t = c10::guts::enable_if_t<std::is_base_of<at::Tensor, typename std::result_of<T&(at::Tensor)>::type>::value, unsigned>;
+  // Remove hook at given position
+  void remove_hook(unsigned pos) {
+    impl_->remove_hook(pos);
+  }
+
+  // Returns the index of the hook in the list which can be used to remove hook
+  // Register a hook with no return value
+  template <typename T>
+  hook_return_void_t<T> register_hook(T&& hook) {
+    return impl_->register_hook_void(hook);
+  }
+  // Register a hook with variable return value
+  template <typename T>
+  hook_return_var_t<T> register_hook(T&& hook) {
+    return impl_->register_hook_val(hook);
+  }
+
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.
 
