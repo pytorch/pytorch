@@ -2,49 +2,41 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-typedef NS_ENUM(NSUInteger, TorchIValueType) {
-    TorchIValueTypeNone,
-    TorchIValueTypeTensor,
-    TorchIValueTypeBool,
-    TorchIValueTypeDouble,
-    TorchIValueTypeInt,
-    TorchIValueTypeBoolList,
-    TorchIValueTypeIntList,
-    TorchIValueTypeDoubleList,
-    TorchIValueTypeTensorList,
-};
-
 @class TorchTensor;
 
 @interface TorchIValue : NSObject
 
-@property(nonatomic,assign, readonly) TorchIValueType type;
++ (instancetype)newWithTensor:(TorchTensor*)tensor;
++ (instancetype)newWithBoolValue:(bool)value;
++ (instancetype)newWithDoubleValue:(double)value;
++ (instancetype)newWithIntValue:(int64_t)value;
++ (instancetype)newWithStringValue:(NSString*)value;
++ (instancetype)newWithBoolList:(NSArray<NSNumber*>*)value;
++ (instancetype)newWithIntList:(NSArray<NSNumber*>*)value;
++ (instancetype)newWithDoubleList:(NSArray<NSNumber*>*)value;
++ (instancetype)newWithTensorList:(NSArray<TorchTensor*>*)value;
 
-+ (instancetype) newWithNone;
-+ (instancetype) newWithTensor:(TorchTensor* )tensor;
-+ (instancetype) newWithBool:(NSNumber* )value;
-+ (instancetype) newWithDouble:(NSNumber* )value;
-+ (instancetype) newWithInt:(NSNumber* )value;
-+ (instancetype) newWithBoolList:(NSArray<NSNumber*>* )value;
-+ (instancetype) newWithIntList:(NSArray<NSNumber*>* )value;
-+ (instancetype) newWithDoubleList:(NSArray<NSNumber*>* )value;
-+ (instancetype) newWithTensorList:(NSArray<TorchTensor*>* )value;
-
-/** Unavailable. */
 - (instancetype)init NS_UNAVAILABLE;
 
-@end
+- (BOOL)isTensor;
+- (BOOL)isBool;
+- (BOOL)isDouble;
+- (BOOL)isInt;
+- (BOOL)isString;
+- (BOOL)isBoolList;
+- (BOOL)isDoubleList;
+- (BOOL)isIntList;
+- (BOOL)isTensorList;
 
-@interface TorchIValue (Type)
-
-- (TorchTensor* )toTensor;
-- (NSNumber* )toBool;
-- (NSNumber* )toInt;
-- (NSNumber* )toDouble;
-- (NSArray<NSNumber*>*)  toBoolList;
-- (NSArray<NSNumber*>*)  toIntList;
-- (NSArray<NSNumber*>*)  toDoubleList;
-- (NSArray<TorchTensor*>*) toTensorList;
+- (TorchTensor*)toTensor;
+- (bool)toBool;
+- (int64_t)toInt;
+- (double)toDouble;
+- (NSString*)toString;
+- (NSArray<NSNumber*>*)toBoolList;
+- (NSArray<NSNumber*>*)toIntList;
+- (NSArray<NSNumber*>*)toDoubleList;
+- (NSArray<TorchTensor*>*)toTensorList;
 
 @end
 

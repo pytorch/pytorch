@@ -14,8 +14,6 @@ from torch.nn.utils import fuse_conv_bn_weights
 from torch._ops import ops
 from torch.nn.modules.utils import _pair
 
-from torch._jit_internal import Optional
-
 class Conv2d(torch.nn.Module):
     r"""Applies a 2D convolution over a quantized input signal composed of
     several quantized input planes.
@@ -54,7 +52,6 @@ class Conv2d(torch.nn.Module):
     """
 
     _FLOAT_MODULE = nn.Conv2d
-    __annotations__ = {'bias' : Optional[torch.Tensor]}
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
@@ -84,14 +81,11 @@ class Conv2d(torch.nn.Module):
                 self.kernel_size[1]],
             scale=1, zero_point=0, dtype=torch.qint8)
         self.weight_scale = 1.0
-        self.set_weight(qweight)
+        bias_float = None
         if bias:
-            self.bias = torch._empty_affine_quantized([out_channels],
-                                                      scale=1.0, zero_point=0,
-                                                      dtype=torch.qint32)
-        else:
-            self.bias = None
+            bias_float = torch.zeros(out_channels, dtype=torch.float)
 
+        self.set_weight_bias(qweight, bias_float)
         self.scale = 1.0
         self.zero_point = 0
 
@@ -104,35 +98,37 @@ class Conv2d(torch.nn.Module):
             s += ', dilation={dilation}'
         if self.groups != 1:
             s += ', groups={groups}'
-        if self.bias is None:
+        if self.bias() is None:
             s += ', bias=False'
         return s.format(**self.__dict__)
 
-    def set_weight(self, w):
-        self._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(
-            w.permute([0, 2, 3, 1]), self.stride, self.padding, self.dilation, self.groups)
+    def set_weight_bias(self, w, b):
+        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+        self._packed_params = torch.ops.quantized.conv_prepack(
+            w, b, self.stride, self.padding, self.dilation, self.groups)
         self.weight_scale = w.q_scale()
 
+    def _weight_bias(self):
+        return torch.ops.quantized.conv_unpack(self._packed_params)
+
     def weight(self):
-        return torch.ops.quantized.fbgemm_conv_unpack(
-            self._packed_weight).permute([0, 3, 1, 2])
+        (w, b) = torch.ops.quantized.conv_unpack(self._packed_params)
+        return w
+
+    def bias(self):
+        (w, b) = torch.ops.quantized.conv_unpack(self._packed_params)
+        return b
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
-        # Temporary work around for bias
-        # see Issue:https://github.com/pytorch/pytorch/issues/23874
-        bias = self.bias
-        if bias is not None:
-            bias = torch.quantize_linear(bias.dequantize(), self.weight_scale * input.q_scale(), 0, torch.qint32)
-        output = ops.quantized.fbgemm_conv2d(input.permute([0, 2, 3, 1]),
-                                             self._packed_weight, bias,
-                                             self.stride, self.padding,
-                                             self.dilation, self.groups,
-                                             self.scale, self.zero_point)
-        return output.permute([0, 3, 1, 2])
+        return ops.quantized.conv2d(input,
+                                    self._packed_params,
+                                    self.stride, self.padding,
+                                    self.dilation, self.groups,
+                                    self.scale, self.zero_point)
 
     # ===== Serialization methods =====
     # The special consideration here is that we have to unpack the weights into their
@@ -141,13 +137,15 @@ class Conv2d(torch.nn.Module):
     # from the QTensor weight.
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(Conv2d, self)._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'weight'] = self.weight()
+        (w, b) = self._weight_bias()
+        destination[prefix + 'weight'] = w
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
-        destination[prefix + 'bias'] = self.bias
+        destination[prefix + 'bias'] = b
 
     @torch.jit.export
     def __getstate__(self):
+        (w, b) = self._weight_bias()
         return (
             self.in_channels,
             self.out_channels,
@@ -159,8 +157,8 @@ class Conv2d(torch.nn.Module):
             self.output_padding,
             self.groups,
             self.padding_mode,
-            self.weight(),
-            self.bias,
+            w,
+            b,
             self.scale,
             self.zero_point
         )
@@ -170,10 +168,8 @@ class Conv2d(torch.nn.Module):
     # weight into its packed format for use by the FBGEMM ops.
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        self.set_weight(state_dict[prefix + 'weight'])
+        self.set_weight_bias(state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
         state_dict.pop(prefix + 'weight')
-
-        self.bias = state_dict[prefix + 'bias']
         state_dict.pop(prefix + 'bias')
 
 
@@ -199,8 +195,7 @@ class Conv2d(torch.nn.Module):
         self.output_padding = state[7]
         self.groups = state[8]
         self.padding_mode = state[9]
-        self.set_weight(state[10])
-        self.bias = state[11]
+        self.set_weight_bias(state[10], state[11])
         self.scale = state[12]
         self.zero_point = state[13]
 
@@ -238,9 +233,6 @@ class Conv2d(torch.nn.Module):
         act_scale, act_zp = activation_observer.calculate_qparams()
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have a dtype of qint8'
         wt_scale, wt_zp = weight_observer.calculate_qparams()
-        # Scale bias to activation_scale/2^16, this quantizes bias
-        # to about 24 bits of precision
-        bias_scale = float(act_scale / (2**16))
 
         qweight = torch.quantize_linear(
             mod.weight.float(),
@@ -248,12 +240,7 @@ class Conv2d(torch.nn.Module):
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
-        qconv.set_weight(qweight)
-        if mod.bias is not None:
-            qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
-        else:
-            qbias = None
-        qconv.bias = qbias
+        qconv.set_weight_bias(qweight, mod.bias)
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
 

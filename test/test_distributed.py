@@ -1236,6 +1236,29 @@ class _DistTestBase(object):
 
         self._barrier()
 
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    def test_scatter_checks(self):
+        group, group_id, rank = self._init_global_test()
+        one = torch.ones([1])
+
+        # Specify scatter_list argument only on source rank.
+        output = one.clone() * -1
+        if rank == 0:
+            scatter_list = [one.clone() * i for i in group]
+            dist.scatter(output, src=0, scatter_list=scatter_list)
+        else:
+            dist.scatter(output, src=0)
+        self.assertEqual(output, one * rank)
+
+        # Don't specify src argument.
+        output = one.clone() * -1
+        if rank == 0:
+            scatter_list = [one.clone() * i for i in group]
+            dist.scatter(output, scatter_list=scatter_list)
+        else:
+            dist.scatter(output)
+        self.assertEqual(output, one * rank)
+
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support scatter")
     def test_scatter(self):
         group, group_id, rank = self._init_global_test()
@@ -1266,6 +1289,29 @@ class _DistTestBase(object):
                     self.assertEqual(t1, t2)
 
         self._barrier()
+
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    def test_gather_checks(self):
+        group, group_id, rank = self._init_global_test()
+        one = torch.ones([1])
+
+        # Specify gather_list argument only on destination rank.
+        if rank == 0:
+            gather_list = [one.clone() for _ in group]
+            dist.gather(one * rank, dst=0, gather_list=gather_list)
+            for i in group:
+                self.assertEqual(gather_list[i], one * i)
+        else:
+            dist.gather(one * rank, dst=0)
+
+        # Don't specify dst argument.
+        if rank == 0:
+            gather_list = [one.clone() for _ in group]
+            dist.gather(one * rank, gather_list=gather_list)
+            for i in group:
+                self.assertEqual(gather_list[i], one * i)
+        else:
+            dist.gather(one * rank)
 
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_gather(self):

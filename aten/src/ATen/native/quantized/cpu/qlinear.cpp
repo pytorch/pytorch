@@ -2,6 +2,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/quantized/cpu/qnnpack_utils.h>
 
 #include <algorithm>
 #include <string>
@@ -14,10 +15,9 @@ template <bool ReluFused>
 class QLinearInt8 final : public torch::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
-  at::Tensor operator()(
+  at::Tensor fbgemm_linear(
       at::Tensor input,
       at::Tensor packed_weight,
-      c10::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point) {
     // uint8 * int8 -> uint8 (no quantization/dequantization)
@@ -58,22 +58,23 @@ class QLinearInt8 final : public torch::OperatorKernel {
     int32_t input_zero_point_int32 = input.q_zero_point();
 
     std::vector<float> output_multiplier_float(1, 0.0);
+    std::vector<float> act_times_w_scale(1, 0.0);
     TORCH_CHECK(
         pack_ptr.w_scale.size() == pack_ptr.w_zp.size(),
         "Weight scales and zero points vectors should have the same size.");
-    // quantization scheme is PerTensorAffine if the number of scales is
-    // 1 and it's kPerChannelAffine if the number of scales is equal to
-    // N (output channels)
     if (pack_ptr.q_scheme == kPerTensorAffine) {
       // Process the per tensor quantization.
-      output_multiplier_float[0] = (input_scale_float * pack_ptr.w_scale[0]) /
-          static_cast<float>(output_scale);
+      act_times_w_scale[0] = (input_scale_float * pack_ptr.w_scale[0]);
+      output_multiplier_float[0] =
+          act_times_w_scale[0] / static_cast<float>(output_scale);
     } else if (pack_ptr.q_scheme == kPerChannelAffine) {
       // Process the per channel quantization.
       output_multiplier_float.resize(N, 0.0);
+      act_times_w_scale.resize(N, 1.0f);
       for (int i = 0; i < N; ++i) {
-        output_multiplier_float[i] = (input_scale_float * pack_ptr.w_scale[i]) /
-            static_cast<float>(output_scale);
+        act_times_w_scale[i] = (input_scale_float * pack_ptr.w_scale[i]);
+        output_multiplier_float[i] =
+            act_times_w_scale[i] / static_cast<float>(output_scale);
       }
     }
     int32_t output_zero_point_int32 = static_cast<int32_t>(output_zero_point);
@@ -107,17 +108,16 @@ class QLinearInt8 final : public torch::OperatorKernel {
     // This is the end of the pipeline, pass the resulting matrix through.
     fbgemm::DoNothing<> doNothingObj{};
 
-    const int32_t* bias_ptr = nullptr;
-    if (bias.has_value()) {
-      Tensor bias_vec = bias.value();
-      TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
+    const float* bias_ptr = nullptr;
+    at::Tensor bias;
+    if (pack_ptr.bias.has_value()) {
+      bias = pack_ptr.bias.value();
+      bias = bias.contiguous();
+      TORCH_CHECK(bias.dim() == 1, "bias should be a vector (1D Tensor)");
       TORCH_CHECK(
-          bias_vec.size(0) == N,
+          bias.size(0) == N,
           "bias should have N elements: " + std::to_string(N));
-      // TODO: contiguous is called for further jit optimizations.
-      auto bias_contig = bias_vec.contiguous();
-      bias_ptr =
-          reinterpret_cast<int32_t*>(bias_contig.data_ptr<c10::qint32>());
+      bias_ptr = reinterpret_cast<float*>(bias.data_ptr<float>());
     }
 
     // The resulting matrix here is 2-D, let's view it with the original
@@ -143,16 +143,22 @@ class QLinearInt8 final : public torch::OperatorKernel {
       //  1) Add in row and column offsets to the rows and columns,
       //  respectively.
       //  2) Add in the bias term.
-      fbgemm::ReQuantizeOutput<ReluFused> outputProcObj(
-          /*nextop=*/doNothingObj,
-          /*C_multiplier=*/output_multiplier_float.data(),
-          /*C_zero_point=*/output_zero_point_int32,
-          /*Aq_zero_point=*/input_zero_point_int32,
-          /*Bq_zero_point=*/pack_ptr.w_zp.data(),
-          /*row_offsets=*/packA.getRowOffsetBuffer(),
-          /*col_offsets=*/col_offsets.data(),
-          /*bias=*/bias_ptr,
-          /*nCol=*/N);
+      fbgemm::ReQuantizeOutput<
+          ReluFused,
+          fbgemm::QuantizationGranularity::TENSOR,
+          float>
+          outputProcObj(
+              doNothingObj,
+              output_multiplier_float.data(),
+              output_zero_point_int32,
+              input_zero_point_int32,
+              pack_ptr.w_zp.data(),
+              packA.getRowOffsetBuffer(),
+              col_offsets.data(),
+              bias_ptr,
+              N, /* nCol */
+              1 /* groups */,
+              act_times_w_scale.data());
 
       // Do the GEMM
       fbgemm::fbgemmPacked(
@@ -174,17 +180,20 @@ class QLinearInt8 final : public torch::OperatorKernel {
       //  2) Add in the bias term.
       fbgemm::ReQuantizeOutput<
           ReluFused,
-          fbgemm::QuantizationGranularity::OUT_CHANNEL>
+          fbgemm::QuantizationGranularity::OUT_CHANNEL,
+          float>
           outputProcObj(
-              /*nextop=*/doNothingObj,
-              /*C_multiplier=*/output_multiplier_float.data(),
-              /*C_zero_point=*/output_zero_point_int32,
-              /*Aq_zero_point=*/input_zero_point_int32,
-              /*Bq_zero_point=*/pack_ptr.w_zp.data(),
-              /*row_offsets=*/packA.getRowOffsetBuffer(),
-              /*col_offsets=*/col_offsets.data(),
-              /*bias=*/bias_ptr,
-              /*nCol=*/N);
+              doNothingObj,
+              output_multiplier_float.data(),
+              output_zero_point_int32,
+              input_zero_point_int32,
+              pack_ptr.w_zp.data(),
+              packA.getRowOffsetBuffer(),
+              col_offsets.data(),
+              bias_ptr,
+              N, /*nCol=*/
+              1, /* groups*/
+              act_times_w_scale.data());
 
       // Do the GEMM
       fbgemm::fbgemmPacked(
@@ -197,31 +206,116 @@ class QLinearInt8 final : public torch::OperatorKernel {
           /*thread_id=*/0,
           /*num_threads=*/1);
     }
+    return output;
+  }
+#endif
+#ifdef USE_PYTORCH_QNNPACK
+  at::Tensor qnnpack_linear(
+      at::Tensor input,
+      at::Tensor packed_weight,
+      double output_scale,
+      int64_t output_zero_point) {
+    TORCH_CHECK(
+        input.dim() >= 2,
+        "quantized::linear(): Input tensor rank should be >= 2");
+    auto input_contig = input.contiguous();
+
+    auto& pack_ptr =
+        cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(packed_weight);
+    auto packB = pack_ptr.w.get();
+    auto kernel_zp = pack_ptr.w_zp;
+    auto kernel_scale = pack_ptr.w_scale;
+
+    size_t rows_input = 1;
+    size_t cols_input = input_contig.size(input_contig.dim() - 1);
+    for (size_t i = 0; i < input_contig.dim() - 1; ++i) {
+      rows_input *= input_contig.size(i);
+    }
+
+    size_t rows_w = packB->getOutputChannels();
+    size_t cols_w = packB->getInputChannels();
+
+    TORCH_CHECK(
+        cols_input == cols_w,
+        "quantized::linear(): input size does not match weight dimension 1 size: \
+         got ",
+        cols_input,
+        " but expected ",
+        cols_w);
+
+    // Allocate output Tensor and a buffer for QNNPACK to use
+    Tensor output = at::_empty_affine_quantized(
+        {static_cast<long>(rows_input), static_cast<long>(rows_w)},
+        input.options(),
+        output_scale,
+        output_zero_point);
+
+    auto output_min = ReluFused
+        ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+              .first
+        : std::numeric_limits<uint8_t>::min();
+    auto output_max = ReluFused
+        ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+              .second
+        : std::numeric_limits<uint8_t>::max();
+    const pytorch_qnnp_status runStatus = qnnpack::qnnpackLinear(
+        rows_input /* batch_size */,
+        cols_input /* input_channels */,
+        rows_w /* output_channels */,
+        input_contig.q_zero_point(),
+        input_contig.q_scale(),
+        kernel_zp,
+        kernel_scale,
+        output_zero_point,
+        output_scale,
+        output_min,
+        output_max,
+        (uint8_t*)input_contig.data_ptr<c10::quint8>(),
+        cols_input /* input_stride */,
+        packB->getPackedWeights(),
+        (uint8_t*)output.data_ptr<c10::quint8>(),
+        rows_w /* output_stride */,
+        nullptr /* threadpool */);
+
+    TORCH_INTERNAL_ASSERT(
+        runStatus == pytorch_qnnp_status_success,
+        "failed to run QNNPACK Linear operator");
 
     return output;
   }
-#else // USE_FBGEMM
+#endif
   at::Tensor operator()(
-      at::Tensor /* input */,
-      at::Tensor /* packed_weight */,
-      c10::optional<Tensor> /* bias */,
-      double /* output_scale */,
-      int64_t /* output_zero_point */) {
-    // We make a strong guarantee that models using these operators will have
-    // the same numerics across different machines. Therefore, we do not provide
-    // a fallback path and rather fail loudly if we cannot run FBGEMM.
-    TORCH_CHECK(
-        false, "This PyTorch installation was not built with FBGEMM operators");
+      at::Tensor input,
+      at::Tensor packed_weight,
+      double output_scale,
+      int64_t output_zero_point) {
+    auto& ctx = at::globalContext();
+
+#ifdef USE_FBGEMM
+    if (ctx.qEngine() == at::QEngine::FBGEMM) {
+      return fbgemm_linear(
+          input, packed_weight, output_scale, output_zero_point);
+    }
+#endif
+#ifdef USE_PYTORCH_QNNPACK
+    if (ctx.qEngine() == at::QEngine::QNNPACK) {
+      return qnnpack_linear(
+          input, packed_weight, output_scale, output_zero_point);
+    }
+#endif
+    TORCH_INTERNAL_ASSERT(
+        "Didn't find engine for operation quantized::linear ",
+        toString(ctx.qEngine()));
+    return at::Tensor();
   }
-#endif // USE_FBGEMM
 };
 
 static auto registry =
     torch::RegisterOperators()
-        .op("quantized::fbgemm_linear(Tensor X, Tensor W_prepack, Tensor? b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
+        .op("quantized::linear(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<false>>(
                 TensorTypeId::QuantizedCPUTensorId))
-        .op("quantized::fbgemm_linear_relu(Tensor X, Tensor W_prepack, Tensor? b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
+        .op("quantized::linear_relu(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<true>>(
                 TensorTypeId::QuantizedCPUTensorId));
 } // namespace

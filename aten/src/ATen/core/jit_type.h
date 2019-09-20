@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
+#include <ATen/core/TensorBody.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
@@ -12,6 +12,7 @@
 #include <iostream>
 #include <memory>
 #include <type_traits>
+#include <array>
 
 struct ClassType;
 namespace torch {
@@ -29,6 +30,7 @@ struct FunctionSchema;
 using OptNameList = c10::optional<std::vector<std::string>>;
 
 #define C10_FORALL_TYPES(_) \
+  _(AnyType)                \
   _(TensorType)             \
   _(TupleType)              \
   _(ListType)               \
@@ -72,7 +74,7 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
 
   // subtyping relation. By default, we return true for the case
   // when the type is exactly equal or if this <: T where rhs = Optional[T]
-  
+
   // if this returns false and the why_not stream is non-null, it contains
   // additional details that describe why this is not a subtype of 'rhs'.
   // This additional information should only contain details that are not obvious
@@ -163,6 +165,29 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
   }
 };
 
+struct AnyType;
+using AnyTypePtr = std::shared_ptr<AnyType>;
+// Any is the top of the type hierarchy, all other types are subtypes
+// T <: Any, forall T
+struct CAFFE2_API AnyType : public Type {
+  static AnyTypePtr create() {
+    return AnyTypePtr(
+        new AnyType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Any";
+  }
+  static const TypeKind Kind = TypeKind::AnyType;
+  // global singleton
+  static AnyTypePtr get();
+
+ private:
+  AnyType() : Type(TypeKind::AnyType) {}
+};
+
 inline std::string toString(TypePtr typePtr) {
   return typePtr->str();
 }
@@ -208,13 +233,9 @@ using OptionalTypePtr = std::shared_ptr<OptionalType>;
 // This type represents an optional type, for each element type.
 // Optional[T] can accept both T and None(nullopt in C++)
 // Subtype hierarchy for Optional:
-// 1. Optional[T] isSubtypeOf Optional[R] iff T isSubtypeOf R
-// 2. T isSubtypeOf Optional[R] if T isSubtypeOf R
-// Note: NoneType is NOT a subtype of any optional.
-// instead NoneType is convertable in schema matching to any Optional[T]
-// it is handled this way because it is not possible to match None to
-// Optional[T] and extract T. Intead, we always create a None constant
-// instruction with a particular type: v: Optional[int] = None()
+// 1. Optional[T] <: Optional[R] iff T <: R
+// 2. T <: Optional[R] if T <: R
+// 3. None <: Optional[T] for all T
 struct CAFFE2_API OptionalType
     : public SingleElementType<TypeKind::OptionalType, OptionalType> {
   static OptionalTypePtr create(TypePtr element) {
@@ -312,8 +333,8 @@ struct CAFFE2_API VaryingShape {
     return dims.size();
   }
 
-  const c10::optional<ListOfOptionalInts>& sizes() const { 
-    return dims_; 
+  const c10::optional<ListOfOptionalInts>& sizes() const {
+    return dims_;
   }
 
   VaryingShape merge(const VaryingShape& other) const;
@@ -551,7 +572,7 @@ struct CAFFE2_API TensorType : public Type {
         sizes_(tensor.sizes().size()),
         strides_(tensor.sizes().size()),
         requires_grad_(tensor.requires_grad()) {
-          if (!tensor.is_mkldnn()) {
+          if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
             sizes_ = tensor.sizes().vec();
             strides_ = tensor.strides().vec();
           }
@@ -586,16 +607,16 @@ struct CAFFE2_API TensorType : public Type {
     }
     return strides;
   }
-  
+
   c10::optional<at::ScalarType> scalar_type_;
   c10::optional<at::Device> device_;
   VaryingShape sizes_;
   VaryingStrides strides_;
   c10::optional<bool> requires_grad_;
-  // we exploit the fact certain tensors must be zero in the autograd to 
+  // we exploit the fact certain tensors must be zero in the autograd to
   // optimize gradient computation. If true, this means that this tensor
   // must only contain zeros. Normally this will be nullopt, meaning
-  // the tensor may or may not contain only zeros. If false, 
+  // the tensor may or may not contain only zeros. If false,
   // this means the tensor must have some non-zero elements.
   c10::optional<bool> autograd_zero_;
 };
@@ -612,7 +633,7 @@ struct CAFFE2_API ListType
     return ListTypePtr(
         new ListType(std::forward<T>(all)...)); // NOLINT(modernize-make-shared)
   }
-  
+
   std::string str() const override {
     std::stringstream ss;
     ss << getElementType()->str() << "[]";
@@ -645,6 +666,7 @@ struct CAFFE2_API DictType : public Type {
 
   static DictTypePtr create(TypePtr key, TypePtr value) {
     switch (key->kind()) {
+      case TypeKind::AnyType:
       case TypeKind::IntType:
       case TypeKind::FloatType:
       case TypeKind::StringType:
@@ -782,7 +804,7 @@ struct CAFFE2_API TupleType : public NamedType {
         std::move(name),
         std::move(schema))); // NOLINT(modernize-make-shared)
   }
-  
+
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
   }
@@ -1010,6 +1032,12 @@ struct CAFFE2_API NoneType : public Type {
   std::string str() const override {
     return "None";
   }
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream *why_not) const override {
+    if (rhs->kind() == OptionalType::Kind) {
+      return true;
+    }
+    return Type::isSubtypeOfExt(rhs, why_not);
+  }
   static const TypeKind Kind = TypeKind::NoneType;
   // global singleton
   static NoneTypePtr get();
@@ -1130,13 +1158,13 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
   } else if (typ->isSubtypeOf(BoolType::get())) {
     return TensorType::createContiguous(at::kLong, at::kCPU, {});
   }
-  AT_ERROR("unknown number type", typ->str());
+  TORCH_CHECK(false, "Unknown number type: ", typ->str());
 }
 inline TypePtr TensorType::fromBoolType() {
   return TensorType::createContiguous(at::kLong, at::kCPU, {});
 }
 
-inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
+inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePtr & type) {
   if (type == FloatType::get()) {
     return at::ScalarType::Double;
   } else if (type == IntType::get()) {
@@ -1144,10 +1172,16 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   } else if (type == BoolType::get()) {
     return at::ScalarType::Bool;
   }
+  return c10::nullopt;
+}
+
+inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
+  auto result = tryScalarTypeFromJitType(type);
   AT_ASSERTM(
-      0,
+      result,
       "Add new condition, expected Float, Int, or Bool but got",
       type->str());
+  return *result;
 }
 
 // Attempt to find the correct supertype of t1 and t2. If none is found then
@@ -1229,6 +1263,13 @@ struct getTypePtr_<c10::List<T>> final {
     return type;
   }
 };
+template <class T, size_t N>
+struct getTypePtr_<std::array<T, N>> final {
+  static TypePtr call() {
+    static auto type = ListType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
 template <class K, class V>
 struct getTypePtr_<std::unordered_map<K, V>> final {
   static TypePtr call() {
@@ -1266,17 +1307,36 @@ CAFFE2_API bool isSubvalueOf(const IValue& input_ivalue, TypePtr type);
 
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
 struct MatchTypeReturn {
-  MatchTypeReturn(TypePtr type) : type(type) {}
-  MatchTypeReturn(std::string errMsg) : errMsg(std::move(errMsg)) {}
+  MatchTypeReturn(std::string reason) : reason_(std::move(reason)) {}
+  static MatchTypeReturn Success() {
+    return MatchTypeReturn();
+  }
+  bool success() const {
+    return !reason_.has_value();
+  }
+  const std::string& reason() const {
+    return reason_.value();
+  }
 
-  c10::optional<TypePtr> type; // nullopt if there is no match
-  std::string errMsg; // is there is no match, this contains the reason
+ private:
+  MatchTypeReturn()
+  : reason_(c10::nullopt) {}
+  c10::optional<std::string> reason_; // is there is no match, this contains the reason
 };
 
+// attempt to match the type variables in formal to actual, adding them to type_env.
+// If no match is possible this returns a MatchTypeReturn with r.success() == false
+// and a r.reason() that describes why it could not match.
+// note: It is possible to successfully match a formal, but for type variables
+// in the formal to still not be defined. In particular, None matches Optional[T]
+// but does not define the value of T.
 CAFFE2_API MatchTypeReturn
 matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 
-CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv& type_env);
+// replace type variables appearing in `type` with the values in
+// `type_env`. Returns nullptr if a variable used in `type`
+// does not appear in `type_env`
+CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
 /**
  * User Defined Types
@@ -1472,7 +1532,6 @@ using ::torch::jit::Function;
 // Interfaces are a list of abstract methods that a class might meet.
 // If a class provides those methods, it implicitly meets the interface.
 struct CAFFE2_API InterfaceType : public NamedType {
-  friend struct ClassType; // for isSubclassOf
   static InterfaceTypePtr create(
       QualifiedName qualifiedName);
 
@@ -1490,7 +1549,7 @@ struct CAFFE2_API InterfaceType : public NamedType {
   std::string python_str() const override {
     return name()->qualifiedName();
   }
-  
+
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
 
   // try to find a method of this interface,
@@ -1505,7 +1564,7 @@ struct CAFFE2_API InterfaceType : public NamedType {
  private:
   InterfaceType(QualifiedName name);
 
-  // shared_ptr so that this header does not have to depend on 
+  // shared_ptr so that this header does not have to depend on
   // FunctionSchema.h
   std::shared_ptr<std::vector<FunctionSchema>> methods_;
 };

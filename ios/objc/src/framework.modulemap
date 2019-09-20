@@ -1,0 +1,4 @@
+framework module LibTorchObjC {
+    umbrella header "LibTorchObjC.h"
+    export *
+}

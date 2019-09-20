@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/variadic.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -115,6 +116,12 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     RECORD_FUNCTION(
         this, std::vector<c10::IValue>(inputs.begin(), inputs.end()));
 
+#ifdef BUILD_NAMEDTENSOR
+    // In the first iteration of named tensors, autograd ignores names and
+    // operates on unnamed tensors. In the long term, autograd should
+    // probably operate with names.
+    at::NoNamesGuard no_names_guard;
+#endif
     return apply(std::move(inputs));
   }
 
@@ -157,6 +164,23 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   const InputMetadata& input_metadata(size_t index) const {
     return input_metadata_[index];
+  }
+
+  /**
+   * Note: Function Streams
+   * A function's stream (for a given device type) is the stream of the first
+   * element of its input buffer on a device of that type.
+   *
+   * If all elements are on the same device they MUST share a stream. If
+   * elements are on different devices (across multiple GPUs, for example)
+   * they may have different streams.
+   */
+  c10::optional<c10::Stream> stream(const c10::DeviceType device_type) {
+    for (const auto& metadata : input_metadata_) {
+      if (metadata.device().type() == device_type) return metadata.stream();
+    }
+
+    return c10::nullopt;
   }
 
   void clear_input_metadata() {
