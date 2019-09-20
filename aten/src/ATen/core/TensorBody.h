@@ -397,6 +397,7 @@ class CAFFE2_API Tensor {
   void set_data(const Tensor & new_data) const;
   Tensor data() const;
   bool is_leaf() const;
+  int64_t output_nr() const;
   #ifdef BUILD_NAMEDTENSOR
   Tensor & names_(c10::optional<DimnameList> names) const;
   #endif
