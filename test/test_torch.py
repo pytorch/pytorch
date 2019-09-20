@@ -244,8 +244,8 @@ class _TestTorchMixin(object):
                        'sparse_resize_and_clear_',
                        'align_to',  # BUILD_NAMEDTENSOR only
                        'align_as',  # BUILD_NAMEDTENSOR only
-                       'renamed',  # BUILD_NAMEDTENSOR only
-                       'names_',  # BUILD_NAMEDTENSOR only
+                       'rename',  # BUILD_NAMEDTENSOR only
+                       'rename_',  # BUILD_NAMEDTENSOR only
                        'has_names',  # BUILD_NAMEDTENSOR only
                        'rename',  # BUILD_NAMEDTENSOR only
                        'refine_names',  # BUILD_NAMEDTENSOR only
