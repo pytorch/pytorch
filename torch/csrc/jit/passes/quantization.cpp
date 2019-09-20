@@ -244,14 +244,10 @@ void fillQConfigMap(
 
 void propagateWeightValues(
     Node* n,
-    const script::Module& module,
-    const std::string& module_method_name,
+    std::shared_ptr<Graph>& graph,
     std::unordered_set<Value*>& weight_values) {
-  auto method = module.get_method(module_method_name);
-  auto graph = method.graph();
   for (auto i = 1; i < n->inputs().size(); ++i) {
     if (weight_values.count(n->inputs()[i])) {
-      std::cout << "adding value " << i << " " << graph->inputs()[i] << std::endl;
       weight_values.emplace(graph->inputs()[i]);
     }
   }
@@ -331,41 +327,34 @@ void InsertObserversImpl(
           auto module_method_name = v->node()->s(attr::name);
           // TODO: looks like this block is not related to v? maybe we should
           // move this outside
+          script::Module callee_module;
           if (module_instance->node()->kind() == prim::GetAttr) {
             auto child_module_name = module_instance->node()->s(attr::name);
             auto child_module = module.find_module(child_module_name);
             TORCH_INTERNAL_ASSERT(
                 child_module,
                 "Child module " + child_module_name + " does not exist");
-            propagateWeightValues(
-                v->node(),
-                child_module.value(),
-                module_method_name,
-                weight_values);
-            // Recursively insert observer for the forward function of child
-            // module
-            InsertObserversImpl(
-                child_module.value(),
-                module_method_name,
-                module_qconfig_map,
-                values_to_skip,
-                weight_values);
+            callee_module = child_module.value();
           } else {
             TORCH_INTERNAL_ASSERT(
                 module_instance == graph->inputs()[0],
                 "We only support call method either on %self"
                 "or child instance in insert_observers_pass right now");
-            std::cout << "propagate values for " << module_method_name << std::endl;
-            std::cout << "weight values: " << weight_values.size() << std::endl;
-            propagateWeightValues(
-                v->node(), module, module_method_name, weight_values);
-            InsertObserversImpl(
-                module,
-                module_method_name,
-                module_qconfig_map,
-                values_to_skip,
-                weight_values);
+            callee_module = module;
           }
+          auto method_graph = callee_module.get_method(module_method_name).graph();
+          propagateWeightValues(
+              v->node(),
+              method_graph,
+              weight_values);
+          // Recursively insert observer for the forward function of child
+          // module
+          InsertObserversImpl(
+              callee_module,
+              module_method_name,
+              module_qconfig_map,
+              values_to_skip,
+              weight_values);
         }
       }
 
@@ -657,7 +646,7 @@ void PropagateQuantInfo(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
 
-void QuantLinting(std::shared_ptr<Graph>& graph) {
+void QuantLinting(std::shared_ptr<Graph>& graphw) {
   throw std::runtime_error("Pass not implemented yet!");
 }
 
