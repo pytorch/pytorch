@@ -229,7 +229,8 @@ class QLinearInt8 final : public torch::OperatorKernel {
     size_t cols_w = input_contig.size(input_contig.dim() - 1);
     auto input_scale = input_contig.q_scale();
 
-    if (!pack_ptr.input_scale.has_value()) {
+    if (!pack_ptr.input_scale.has_value() ||
+        pack_ptr.input_scale.value() != input_scale) {
       // Get the original weight and adjust it to uint8 from int8
       auto weight_contig = pack_ptr.orig_weight;
       auto bias_fp32 = pack_ptr.bias;

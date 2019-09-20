@@ -172,8 +172,8 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     }
     initQNNPACK();
 
-    // We set the pre-packed conv weights to nullptr below as we call pre-pack
-    // during the first invocation of operator run. Refer to qconv.cpp for more
+    // We set the pre-packed linear weights to nullptr below as we call pre-pack
+    // during the first invocation of operator run. Refer to qlinear.cpp for more
     // details. TODO Update to actually call pre-pack here once bias is removed
     // from pre-packing step.
     auto wt_ptr = guts::make_unique<PackedLinearWeightsQnnp>(
