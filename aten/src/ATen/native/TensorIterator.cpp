@@ -4,6 +4,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/EnableNamedTensor.h>
+#include <ATen/native/TypeProperties.h>
 
 namespace at {
 
@@ -91,7 +92,7 @@ static std::tuple<Device, ScalarType> compute_common_type_(at::ArrayRef<OperandI
   std::vector<Tensor> tensors;
   std::transform(std::begin(operands), std::end(operands), std::back_inserter(tensors),
                   [](const OperandInfo& op) { return op.tensor; });
-  auto dtype = at::_result_type(tensors);
+  auto dtype = at::native::result_type(tensors);
   auto result = std::make_tuple(device, dtype);
   TORCH_INTERNAL_ASSERT(dtype != ScalarType::Undefined);
   return result;

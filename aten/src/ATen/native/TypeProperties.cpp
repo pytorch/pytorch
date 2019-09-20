@@ -68,7 +68,7 @@ static inline ScalarType combine_categories(ScalarType higher, ScalarType lower)
   return lower;
 }
 
-ScalarType _result_type(TensorList tensors) {
+ScalarType result_type(TensorList tensors) {
   auto dimResult = ScalarType::Undefined;
   auto zeroResult = ScalarType::Undefined;
   auto wrappedResult = ScalarType::Undefined;
@@ -93,14 +93,24 @@ ScalarType _result_type(TensorList tensors) {
 
 ScalarType result_type(const Tensor &tensor, const Tensor &other) {
   std::vector<Tensor> tensors({tensor, other});
-  return at::_result_type(tensors);
+  return native::result_type(tensors);
 }
 
 ScalarType result_type(const Tensor &tensor, const Scalar other) {
   auto tensor2 = scalar_to_tensor(other);
   tensor2.unsafeGetTensorImpl()->set_wrapped_number(true);
   std::vector<Tensor> tensors({tensor, tensor2});
-  return at::_result_type(tensors);
+  return native::result_type(tensors);
+}
+
+ScalarType result_type(const Scalar scalar, const Tensor &tensor) {
+  return at::result_type(tensor, scalar);
+}
+
+ScalarType result_type(const Scalar scalar1, const Scalar scalar2) {
+  auto tensor1 = scalar_to_tensor(scalar1);
+  tensor1.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return at::result_type(tensor1, scalar2);
 }
 
 }} // namespace at::native
