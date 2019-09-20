@@ -8,7 +8,7 @@ from hypothesis import strategies as st
 from hypothesis.extra import numpy as stnp
 from hypothesis.searchstrategy import SearchStrategy
 
-from common_quantized import _calculate_dynamic_qparams
+from common_quantized import _calculate_dynamic_qparams, _calculate_dynamic_per_channel_qparams
 
 # Setup for the hypothesis tests.
 # The tuples are (torch_quantized_dtype, zero_point_enforce), where the last
@@ -170,6 +170,31 @@ def tensor(draw, shapes=None, elements=None, qparams=None):
     X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
     # Recompute the scale and zero_points according to the X statistics.
     scale, zp = _calculate_dynamic_qparams(X, qparams[2])
+    enforced_zp = _ENFORCED_ZERO_POINT.get(qparams[2], None)
+    if enforced_zp is not None:
+        zp = enforced_zp
+    return X, (scale, zp, qparams[2])
+
+@st.composite
+def per_channel_tensor(draw, shapes=None, elements=None, qparams=None):
+    if isinstance(shapes, SearchStrategy):
+        _shape = draw(shapes)
+    else:
+        _shape = draw(st.sampled_from(shapes))
+    if qparams is None:
+        if elements is None:
+            elements = st.floats(-1e6, 1e6, allow_nan=False)
+        X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
+        assume(not (np.isnan(X).any() or np.isinf(X).any()))
+        return X, None
+    qparams = draw(qparams)
+    if elements is None:
+        min_value, max_value = _get_valid_min_max(qparams)
+        elements = st.floats(min_value, max_value, allow_infinity=False,
+                             allow_nan=False)
+    X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
+    # Recompute the scale and zero_points according to the X statistics.
+    scale, zp = _calculate_dynamic_per_channel_qparams(X, qparams[2])
     enforced_zp = _ENFORCED_ZERO_POINT.get(qparams[2], None)
     if enforced_zp is not None:
         zp = enforced_zp

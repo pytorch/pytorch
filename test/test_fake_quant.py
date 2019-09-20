@@ -23,6 +23,27 @@ def _fake_quantize_per_tensor_affine_grad_reference(dY, X, scale, zero_point, qu
     res[mask] = dY[mask]
     return res
 
+# Reference method for fake quantize
+def _fake_quantize_per_channel_affine_reference(X, per_channel_scale, per_channel_zero_point, quant_min, quant_max):
+    res = torch.zeros_like(X)
+    for i in range(X.size()[0]):
+        res[i] = (torch.clamp(torch.round(X[i] * (1.0 / per_channel_scale[i]) +
+                  per_channel_zero_point[i]), quant_min, quant_max) - per_channel_zero_point[i]) * per_channel_scale[i]
+    return res
+
+
+# Reference method for the gradient of the fake quantize operator
+def _fake_quantize_per_channel_affine_grad_reference(dY, X, per_channel_scale, per_channel_zero_point, quant_min, quant_max):
+    Xq = torch.zeros_like(X)
+    for i in range(X.size()[0]):
+        Xq[i] = torch.round(X[i] * (1.0 / per_channel_scale[i]) +
+                            per_channel_zero_point[i])
+
+    mask = (Xq >= quant_min) * (Xq <= quant_max)
+    res = torch.zeros_like(dY)
+    res[mask] = dY[mask]
+    return res
+
 NP_RANDOM_SEED = 19
 tolerance = 1e-6
 
@@ -37,7 +58,7 @@ class TestFakeQuantizePerTensorAffine(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
-    def test_forward(self, device, X):
+    def test_forward_per_tensor(self, device, X):
         r"""Tests the forward path of the FakeQuantizePerTensorAffine op.
         """
         np.random.seed(NP_RANDOM_SEED)
@@ -55,7 +76,7 @@ class TestFakeQuantizePerTensorAffine(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
-    def test_backward(self, device, X):
+    def test_backward_per_tensor(self, device, X):
         r"""Tests the backward method. Note that this runs the reference quantization
         and thus the errors might be originating there.
         """
@@ -74,6 +95,52 @@ class TestFakeQuantizePerTensorAffine(TestCase):
             dout, X, scale, zero_point, quant_min, quant_max)
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
+
+    @no_deadline
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+           qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_forward_per_channel(self, device, X):
+        r"""Tests the forward path of the FakeQuantizePerTensorAffine op.
+        """
+        np.random.seed(NP_RANDOM_SEED)
+        X, (scale, zero_point, torch_type) = X
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
+        X = torch.tensor(X).to(dtype=torch.float, device=device)
+        scale = torch.tensor(scale).to(dtype=torch.double, device=device)
+        zero_point = torch.tensor(zero_point).to(dtype=torch.int64, device=device)
+        Y = _fake_quantize_per_channel_affine_reference(X.cpu(), scale.cpu(), zero_point.cpu(), quant_min, quant_max)
+        Y_prime = torch.fake_quantize_per_channel_affine(
+            X, scale, zero_point, quant_min, quant_max)
+        np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
+
+    @no_deadline
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+           qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_backward_per_channel(self, device, X):
+        r"""Tests the backward method. Note that this runs the reference quantization
+        and thus the errors might be originating there.
+        """
+        np.random.seed(NP_RANDOM_SEED)
+        X, (scale, zero_point, torch_type) = X
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
+        X = torch.tensor(X).to(dtype=torch.float, device=device)
+        scale = torch.tensor(scale).to(dtype=torch.double, device=device)
+        zero_point = torch.tensor(zero_point).to(dtype=torch.int64, device=device)
+        X.requires_grad_()
+#        Y = _fake_quantize_per_channel_affine_reference(X.cpu(), scale.cpu(), zero_point.cpu(), quant_min, quant_max)
+        Y_prime = torch.fake_quantize_per_channel_affine(
+            X, scale, zero_point, quant_min, quant_max)
+        dout = torch.rand(X.shape, dtype=torch.float).to(device)
+        dX = _fake_quantize_per_channel_affine_grad_reference(
+            dout, X, scale, zero_point, quant_min, quant_max)
+        Y_prime.backward(dout)
+        np.testing.assert_allclose(dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
     @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
@@ -117,7 +184,7 @@ class TestFakeQuantizePerTensorAffine(TestCase):
         dout = torch.rand(X.shape, dtype=torch.float, device=device)
         Y_prime.backward(dout)
         dX = _fake_quantize_per_tensor_affine_grad_reference(dout, X, fq_module.scale, fq_module.zero_point, quant_min, quant_max)
-        np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
+        np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
 
 if __name__ == '__main__':
