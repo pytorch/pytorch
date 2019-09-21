@@ -89,7 +89,7 @@ public:
 
     // TODO Remove this function once all kernels support a boxed variant
 
-    if (unboxed_kernel_func_ != nullptr) {
+    if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
       using ActualSignature = Return (OperatorKernel*, Args...);
       ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func_);
       return (*func)(getFunctor_(), std::forward<Args>(args)...);
@@ -123,7 +123,7 @@ public:
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
 
-    if (unboxed_kernel_func_ != nullptr) {
+    if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
       using ActualSignature = Return (OperatorKernel*, Args...);
       ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func_);
       return (*func)(getFunctor_(), std::forward<Args>(args)...);
