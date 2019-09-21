@@ -40,7 +40,7 @@
 // when using AVX/AVX2 code resolves this.
 #if defined(__AVX__) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
 #define DL_RUNTIME_BUG(op, type)                  \
-  using value_t = typename ztype<type>::value_t;  \
+  using value_t = typename at::native::ztype<type>::value_t;  \
   volatile value_t x = (value_t)(1);        \
   x = std::op(x);                                 \
   _mm256_zeroall();
