@@ -273,7 +273,6 @@ void InsertObserversImpl(
   // prim::Param nodes do not belong to the graph. Hence the Insert
   // point is the beginning of graph node. This also safe guards against
   // observing a potentially mutated value due to some in-place operation
-  Value* self = graph->inputs()[0];
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (!values_to_skip.count(v) && valueNeedsToBeQuantized(v)) {
@@ -482,10 +481,6 @@ IValue QuantizeHelper::getQParams(Value* v) {
       observer_module.value().get_method("calculate_qparams");
   IValue qparams = calculate_qparams(std::vector<IValue>());
   return qparams;
-}
-
-double getScale(const IValue& qparam) {
-  return qparam.toTuple()->elements()[0].toTensor().item().toDouble();
 }
 
 void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
