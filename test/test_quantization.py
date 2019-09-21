@@ -9,9 +9,8 @@ import torch.nn._intrinsic.qat as nniqat
 from torch.quantization import \
     QConfig, QConfig_dynamic, default_weight_observer, get_observer_dict,\
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
-    quantize_script, \
+    quantize_script, default_observer, \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
-    default_observer, default_weight_observer, \
     default_dynamic_qconfig, HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver, RecordingObserver, QuantWrapper
 
 from common_utils import run_tests
@@ -669,8 +668,8 @@ class ScriptabilityTest(QuantizationTestCase):
         self.qmodel_under_test = self.qmodel_under_test.from_float(
             self.model_under_test)
         self.x = torch.rand(10)
-        self.qx = torch.quantize_linear(self.x.to(torch.float), scale=1.0,
-                                        zero_point=0, dtype=torch.qint32)
+        self.qx = torch.quantize_per_tensor(self.x.to(torch.float), scale=1.0,
+                                            zero_point=0, dtype=torch.qint32)
 
     def test_scriptability_serialization(self):
         # test serialization of quantized functional modules
@@ -684,7 +683,7 @@ class ScriptabilityTest(QuantizationTestCase):
                         'zero point not in state dict for functional modules')
 
         x = torch.rand(10, 1, dtype=torch.float)
-        xq = torch.quantize_linear(x, 1.0, 0, torch.qint8)
+        xq = torch.quantize_per_tensor(x, 1.0, 0, torch.qint8)
         self.checkScriptable(self.qmodel_under_test, [(xq, xq)], check_save_load=True)
         self.checkScriptable(self.model_under_test, [(xq.dequantize(), xq.dequantize())], check_save_load=True)
 

@@ -149,7 +149,7 @@ Value* insertScalarType(Node* ins_node, at::ScalarType t) {
 
 // Create Quant Node
 Node* createQuantNode(Value* v, Graph* g) {
-  Node* quant = g->create(at::Symbol::fromQualString("aten::quantize_linear"));
+  Node* quant = g->create(at::Symbol::fromQualString("aten::quantize_per_tensor"));
   TORCH_INTERNAL_ASSERT(quant != nullptr, "Failed to create quant node");
   quant->output()->setDebugName(v->debugName() + ".quant");
   return quant;
@@ -511,10 +511,6 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
   return std::make_tuple(qparams, scalar_type);
 }
 
-double getScale(const IValue& qparam) {
-  return qparam.toTuple()->elements()[0].toTensor().item().toDouble();
-}
-
 void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
   auto observer_name = findObserverName(v);
   if (!observer_name) {
@@ -671,7 +667,7 @@ graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_ze
         %w_intrepr = aten::int_repr(%w_quant)
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
-        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))",
         R"(
 graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
@@ -692,7 +688,7 @@ graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_ze
         %w_intrepr = aten::int_repr(%w_quant)
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
         %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
-        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))",
         quantized_linear_with_bias},
        // matmul(with bias) -> quantized::linear
@@ -704,7 +700,7 @@ graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_ze
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
         %output = aten::matmul(%a_dequant, %w_dequant)
         %r = aten::add_(%output, %b, %4)
-        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))",
         quantized_linear_with_bias},
        // matmul(without bias) -> quantized::linear
@@ -715,7 +711,7 @@ graph(%a_quant, %w_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_p
         %w_intrepr = aten::int_repr(%w_quant)
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
         %r = aten::matmul(%a_dequant, %w_dequant)
-        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))",
         R"(
 graph(%a_quant, %w_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype):
@@ -897,7 +893,7 @@ void FoldQuantizeCallIntoBuffer(
   const std::string pattern = R"(
 graph(%self, %scale, %zero_point, %dtype):
    %weight = prim::GetAttr[name="weight"](%self)
-   %weight_quant = aten::quantize_linear(%weight, %scale, %zero_point, %dtype)
+   %weight_quant = aten::quantize_per_tensor(%weight, %scale, %zero_point, %dtype)
    return (%weight_quant))";
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
@@ -929,7 +925,7 @@ graph(%self, %scale, %zero_point, %dtype):
         toIValue(match_vmap.at(vmap.at("dtype"))).value().toScalarType();
     module.register_buffer(
         "_quantized_weight",
-        at::quantize_linear(float_weight, scale, zero_point, dtype));
+        at::quantize_per_tensor(float_weight, scale, zero_point, dtype));
   }
 
   std::string replacement = R"(

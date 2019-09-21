@@ -403,6 +403,7 @@ class CAFFE2_API Tensor {
   Tensor data() const;
   bool is_leaf() const;
   int64_t output_nr() const;
+  int64_t _version() const;
   #ifdef BUILD_NAMEDTENSOR
   Tensor & names_(c10::optional<DimnameList> names) const;
   #endif
