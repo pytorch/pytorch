@@ -69,6 +69,10 @@ Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_ou
 Tensor erfinv(const Tensor& self) { return unary_op_impl(self, at::erfinv_out); }
 Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
 
+Tensor& floor_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, floor_stub); }
+Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
+Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
+
 Tensor& round_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, round_stub); }
 Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
 Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
@@ -278,7 +282,6 @@ IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC(expm1)
-IMPLEMENT_UNARY_OP_VEC(floor)
 IMPLEMENT_UNARY_OP_VEC(frac)
 IMPLEMENT_UNARY_OP_VEC(log)
 IMPLEMENT_UNARY_OP_VEC(log10)
@@ -292,6 +295,7 @@ IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
+IMPLEMENT_UNARY_OP_VEC(lgamma)
 
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(angle_stub);
@@ -333,5 +337,6 @@ DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
 DEFINE_DISPATCH(trunc_stub);
+DEFINE_DISPATCH(lgamma_stub);
 }
 } // namespace at
