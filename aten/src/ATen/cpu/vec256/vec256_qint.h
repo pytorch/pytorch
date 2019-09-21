@@ -884,7 +884,7 @@ struct Vec256<c10::qint32> : public Vec256QuantizedConverter<
 };
 
 template <typename T>
-inline void __attribute__((always_inline)) QuantizeAvx2(
+inline void QuantizeAvx2(
     const float* src,
     typename T::underlying* dst,
     int len,
