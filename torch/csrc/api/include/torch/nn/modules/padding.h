@@ -130,5 +130,33 @@ class TORCH_API ReplicationPad3dImpl : public ReplicationPadImpl<3, ReplicationP
 /// module storage semantics.
 TORCH_MODULE(ReplicationPad3d);
 
+// ============================================================================
+
+/// Applies ZeroPad over a 2-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ZeroPad2d to learn
+/// about the exact behavior of this module.
+class TORCH_API ZeroPad2dImpl : public Cloneable<ZeroPad2dImpl> {
+ public:
+  ZeroPad2dImpl(ExpandingArray<4> padding)
+      : ZeroPad2dImpl(ZeroPad2dOptions(padding)) {}
+  explicit ZeroPad2dImpl(const ZeroPad2dOptions& options_);
+
+  void reset() override;
+
+  /// Pretty prints the `ZeroPad2d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input);
+
+  /// The options with which this `Module` was constructed.
+  ZeroPad2dOptions options;
+};
+
+/// A `ModuleHolder` subclass for `ZeroPad2dImpl`.
+/// See the documentation for `ZeroPad2dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(ZeroPad2d);
+
 } // namespace nn
 } // namespace torch

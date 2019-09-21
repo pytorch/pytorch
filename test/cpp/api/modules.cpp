@@ -628,6 +628,33 @@ TEST_F(ModulesTest, ReplicationPad3d) {
   }
 }
 
+TEST_F(ModulesTest, ZeroPad2d) {
+  {
+    ZeroPad2d m(ZeroPad2dOptions(2));
+    auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{0., 0., 0., 0., 0., 0., 0.},
+                                     {0., 0., 0., 0., 0., 0., 0.},
+                                     {0., 0., 0., 1., 2., 0., 0.},
+                                     {0., 0., 3., 4., 5., 0., 0.},
+                                     {0., 0., 6., 7., 8., 0., 0.},
+                                     {0., 0., 0., 0., 0., 0., 0.},
+                                     {0., 0., 0., 0., 0., 0., 0.}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ZeroPad2d m(ZeroPad2dOptions({1, 1, 2, 0}));
+    auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{0., 0., 0., 0., 0.},
+                                     {0., 0., 0., 0., 0.},
+                                     {0., 0., 1., 2., 0.},
+                                     {0., 3., 4., 5., 0.},
+                                     {0., 6., 7., 8., 0.}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in=3, out=4, with_bias=true)");

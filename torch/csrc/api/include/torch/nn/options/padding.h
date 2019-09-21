@@ -67,5 +67,17 @@ using ReplicationPad2dOptions = ReplicationPadOptions<2>;
 /// `ReplicationPadOptions` specialized for 3-D ReplicationPad.
 using ReplicationPad3dOptions = ReplicationPadOptions<3>;
 
+// ============================================================================
+
+/// Options for a ZeroPad2d module.
+struct TORCH_API ZeroPad2dOptions {
+  ZeroPad2dOptions(ExpandingArray<4> padding) : padding_(padding) {}
+
+  /// The size of the padding.
+  /// - If it is `int`, uses the same padding in all boundaries.
+  /// - If it is a 4-`tuple` (for ZeroPad2d), uses (padding_left, padding_right, padding_top, padding_bottom).
+  TORCH_ARG(ExpandingArray<4>, padding);
+};
+
 } // namespace nn
 } // namespace torch
