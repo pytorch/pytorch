@@ -151,8 +151,8 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     ${static_dispatch_method_body}
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
-    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(${inferred_type_set}))
-        .callUnboxed<${formals_types_with_return}>(${method_actuals});
+    return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
+        op, impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -183,8 +183,8 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${name}", "${overload_name}"}).value();
-    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(${inferred_type_set}))
-        .callUnboxed<${formals_types_with_return}>(${native_actuals});
+    return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
+        op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -587,6 +587,7 @@ FunctionOption = TypedDict('FunctionOption', {
     # TypeExtendedInterface
     'extended_method': bool,
     'method_actuals': List[str],
+    'method_actuals_with_comma_prefix': str,
     'method_formals_with_defaults': List[str],
     'method_formals': List[str],
     'method_prefix_derived': str,
@@ -1128,6 +1129,10 @@ def create_generic(top_env, declarations):
         # be const_casted to be accepted as native function's non-const argument
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
+        if len(option['method_actuals']) == 0:
+            option['method_actuals_with_comma_prefix'] = ''
+        else:
+            option['method_actuals_with_comma_prefix'] = ', ' + ', '.join(option['method_actuals'])
 
         def find_formal(formal_name, formals):
             for formal in formals:
