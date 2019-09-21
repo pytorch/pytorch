@@ -49,7 +49,6 @@ libtorch_sources = [
     "torch/csrc/autograd/record_function.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
-    "torch/csrc/byte_order.cpp",
     "torch/csrc/distributed/autograd/utils.cpp",
     "torch/csrc/distributed/autograd/context/dist_autograd_container.cpp",
     "torch/csrc/distributed/autograd/context/dist_autograd_context.cpp",
@@ -152,8 +151,6 @@ libtorch_sources = [
     "torch/csrc/jit/script/builtin_functions.cpp",
     "torch/csrc/jit/script/module.cpp",
     "torch/csrc/jit/tracer.cpp",
-    "torch/csrc/utils/tensor_flatten.cpp",
-    "torch/csrc/utils/variadic.cpp",
     "torch/csrc/jit/fuser/kernel_cache.cpp",
     "torch/csrc/jit/fuser/compiler.cpp",
     "torch/csrc/jit/fuser/executor.cpp",
@@ -162,6 +159,9 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
     "torch/csrc/jit/function.cpp",
+    "torch/csrc/utils/byte_order.cpp",
+    "torch/csrc/utils/tensor_flatten.cpp",
+    "torch/csrc/utils/variadic.cpp",
 ]
 
 libtorch_cuda_sources = [
@@ -197,6 +197,7 @@ def add_torch_libs():
         "torch/csrc/api/src/nn/modules/batchnorm.cpp",
         "torch/csrc/api/src/nn/modules/conv.cpp",
         "torch/csrc/api/src/nn/modules/dropout.cpp",
+        "torch/csrc/api/src/nn/modules/distance.cpp",
         "torch/csrc/api/src/nn/modules/embedding.cpp",
         "torch/csrc/api/src/nn/modules/fold.cpp",
         "torch/csrc/api/src/nn/modules/linear.cpp",

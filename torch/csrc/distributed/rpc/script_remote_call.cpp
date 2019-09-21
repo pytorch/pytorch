@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
+#include <c10/util/C++17.h>
 #include <torch/csrc/jit/pickle.h>
 
 namespace torch {
@@ -52,8 +53,8 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
   values.pop_back();
 
   auto op = ScriptCall::fromIValues(values);
-  return std::unique_ptr<ScriptRemoteCall>(new ScriptRemoteCall(
-      op, std::move(values), std::move(retRRefId), std::move(retForkId)));
+  return c10::guts::make_unique<ScriptRemoteCall>(
+      op, std::move(values), std::move(retRRefId), std::move(retForkId));
 }
 
 } // namespace rpc

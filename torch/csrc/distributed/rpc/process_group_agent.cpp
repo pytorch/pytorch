@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
+#include <c10/util/C++17.h>
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 
@@ -92,7 +93,7 @@ ProcessGroupAgent::ProcessGroupAgent(
     int numSendRecvThreads)
     : RpcAgent(
           WorkerId(std::move(workerName), pg->getRank()),
-          std::unique_ptr<RequestCallback>(new RequestCallbackImpl())),
+          c10::guts::make_unique<RequestCallbackImpl>()),
       pg_(std::move(pg)),
       nextId_(0),
       sendMutexes_(pg_->getSize()),

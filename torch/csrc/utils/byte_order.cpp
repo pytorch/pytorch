@@ -1,10 +1,12 @@
-#include <torch/csrc/byte_order.h>
+#include <torch/csrc/utils/byte_order.h>
 #include <c10/util/BFloat16.h>
 #include <cstring>
 
 #if defined(_MSC_VER)
 #include <stdlib.h>
 #endif
+
+namespace {
 
 static inline void swapBytes16(void *ptr)
 {
@@ -99,6 +101,11 @@ static inline uint64_t decodeUInt64BE(const uint8_t *data) {
   return output;
 }
 
+} // anonymous namespace
+
+namespace torch {
+namespace utils {
+
 THPByteOrder THP_nativeByteOrder()
 {
   uint32_t x = 1;
@@ -108,7 +115,8 @@ THPByteOrder THP_nativeByteOrder()
 void THP_decodeInt16Buffer(int16_t* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
   for (size_t i = 0; i < len; i++) {
-    dst[i] = (int16_t) (order == THP_BIG_ENDIAN ? decodeUInt16BE(src) : decodeUInt16LE(src));
+    dst[i] = (int16_t)(
+        order == THP_BIG_ENDIAN ? decodeUInt16BE(src) : decodeUInt16LE(src));
     src += sizeof(int16_t);
   }
 }
@@ -116,7 +124,8 @@ void THP_decodeInt16Buffer(int16_t* dst, const uint8_t* src, THPByteOrder order,
 void THP_decodeInt32Buffer(int32_t* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
   for (size_t i = 0; i < len; i++) {
-    dst[i] = (int32_t) (order == THP_BIG_ENDIAN ? decodeUInt32BE(src) : decodeUInt32LE(src));
+    dst[i] = (int32_t)(
+        order == THP_BIG_ENDIAN ? decodeUInt32BE(src) : decodeUInt32LE(src));
     src += sizeof(int32_t);
   }
 }
@@ -124,7 +133,8 @@ void THP_decodeInt32Buffer(int32_t* dst, const uint8_t* src, THPByteOrder order,
 void THP_decodeInt64Buffer(int64_t* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
   for (size_t i = 0; i < len; i++) {
-    dst[i] = (int64_t) (order == THP_BIG_ENDIAN ? decodeUInt64BE(src) : decodeUInt64LE(src));
+    dst[i] = (int64_t)(
+        order == THP_BIG_ENDIAN ? decodeUInt64BE(src) : decodeUInt64LE(src));
     src += sizeof(int64_t);
   }
 }
@@ -143,7 +153,8 @@ void THP_decodeHalfBuffer(THHalf* dst, const uint8_t* src, THPByteOrder order, s
 void THP_decodeBFloat16Buffer(at::BFloat16* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
   for (size_t i = 0; i < len; i++) {
-    uint16_t x = (order == THP_BIG_ENDIAN ? decodeUInt16BE(src) : decodeUInt16LE(src));
+    uint16_t x =
+        (order == THP_BIG_ENDIAN ? decodeUInt16BE(src) : decodeUInt16LE(src));
     std::memcpy(&dst[i], &x, sizeof(dst[i]));
     src += sizeof(uint16_t);
   }
@@ -232,3 +243,6 @@ void THP_encodeDoubleBuffer(uint8_t* dst, const double* src, THPByteOrder order,
     }
   }
 }
+
+} // namespace utils
+} // namespace torch

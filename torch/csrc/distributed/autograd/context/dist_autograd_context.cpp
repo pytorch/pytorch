@@ -38,11 +38,13 @@ void DistAutogradContext::addRecvFunction(
 
 std::unordered_map<int64_t, std::shared_ptr<SendRpcBackward>>
 DistAutogradContext::sendFunctions() const {
+  std::lock_guard<std::mutex> guard(lock_);
   return sendAutogradFunctions_;
 }
 
 std::unordered_map<int64_t, std::shared_ptr<RecvRpcBackward>>
 DistAutogradContext::recvFunctions() const {
+  std::lock_guard<std::mutex> guard(lock_);
   return recvAutogradFunctions_;
 }
 

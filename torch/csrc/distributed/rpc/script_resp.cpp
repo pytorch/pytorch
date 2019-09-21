@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/script_resp.h>
+#include <c10/util/C++17.h>
 #include <torch/csrc/jit/pickle.h>
 
 namespace torch {
@@ -31,7 +32,7 @@ std::unique_ptr<ScriptResp> ScriptResp::fromMessage(const Message& message) {
   auto payload_size = message.payload().size();
   auto value =
       jit::unpickle(payload, payload_size, nullptr, &message.tensors());
-  return std::unique_ptr<ScriptResp>(new ScriptResp(std::move(value)));
+  return c10::guts::make_unique<ScriptResp>(std::move(value));
 }
 
 } // namespace rpc
