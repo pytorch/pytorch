@@ -60,7 +60,6 @@ static std::vector<int64_t> aligned_size(
   ptrdiff_t dim = (ptrdiff_t)tensor_sizes.size() - 1;
   ptrdiff_t idx = (ptrdiff_t)aligned_names.size() - 1;
   for (; idx >= 0 && dim >= 0; --idx) {
-    TORCH_INTERNAL_ASSERT(!tensor_names[dim].is_tagged() && !aligned_names[idx].is_tagged(), "Tagged names NYI");
     if (tensor_names[dim] != aligned_names[idx]) {
       continue;
     }
@@ -74,7 +73,7 @@ static std::vector<int64_t> aligned_size(
     //       *, a
     // [*, a] is a subsequence of [*, c, a, b], but in order to align them,
     // we'd have to move the * to create [*, c: 1, a, b: 1]
-    if (tensor_names[dim].is_wildcard() &&
+    if (tensor_names[dim].isWildcard() &&
         tensor_sizes.size() - dim != aligned_names.size() - idx) {
       report_moving_unnamed_dim_error(
           tensor_names, aligned_names, /*is_aligning_two_tensors=*/false);
@@ -101,10 +100,10 @@ Tensor refine_names(const Tensor& self, DimnameList names) {
   for (size_t idx = 0; idx < self_names.size(); idx++) {
     const auto& self_name = self_names[idx];
     const auto& out_name = names[idx];
-    if (self_name == out_name || self_name.is_wildcard()) {
+    if (self_name == out_name || self_name.isWildcard()) {
       continue;
     }
-    if (out_name.is_wildcard()) {
+    if (out_name.isWildcard()) {
       TORCH_CHECK(false,
           "refine_names: cannot coerse Tensor", self_names, " to Tensor", names,
           " because ", self_name, " is more specific than ", out_name, " at index ",
@@ -151,7 +150,7 @@ Tensor align_to(const Tensor& tensor, DimnameList names) {
 
   for (auto idx = 0; idx < tensor_names.size(); ++idx) {
     const auto& dim = tensor_names[idx];
-    TORCH_CHECK(dim.is_normal(),
+    TORCH_CHECK(dim.isBasic(),
         "align_to: All input dims must be named. Found unnamed dim at index ",
         dim, " of Tensor", tensor_names);
     auto it = std::find(names.begin(), names.end(), dim);
@@ -191,6 +190,46 @@ std::vector<Tensor> align_tensors(TensorList tensors) {
         return a.dim() < b.dim();
       });
   return align_tensors_to(tensors, longest_dim->names());
+}
+
+static int64_t cumprod(IntArrayRef sizes) {
+  int64_t result = 1;
+  for (auto size : sizes) {
+    result *= size;
+  }
+  return result;
+}
+
+Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, DimnameList names) {
+  // unflatten is implemented only as a python method on tensor right now.
+  // The following asserts should be checked by the python method.
+  TORCH_INTERNAL_ASSERT(names.size() == sizes.size());
+  TORCH_INTERNAL_ASSERT(sizes.size() > 0);
+  TORCH_CHECK(
+      cumprod(sizes) == self.size(dim),
+      "unflatten: Provided names ", names, " and sizes ", sizes, " but sizes don't multiply "
+      "up to the size of dim ", dim, " (", self.names()[dim], ": ", self.size(dim),
+      ") in Tensor", self.names());
+
+  auto outnames = self.names().vec();
+  outnames.erase(outnames.begin() + dim);
+  outnames.insert(outnames.begin() + dim, names.begin(), names.end());
+
+  auto new_sizes = self.sizes().vec();
+  new_sizes.erase(new_sizes.begin() + dim);
+  new_sizes.insert(new_sizes.begin() + dim, sizes.begin(), sizes.end());
+
+  Tensor result;
+  {
+    NoNamesGuard guard;
+    result = self.view(new_sizes);
+  }
+  at::internal_set_names_inplace(result, outnames);
+  return result;
+}
+
+Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
+  return native::unflatten(self, dimname_to_position(self, dim), sizes, names);
 }
 
 }}  // namespace at::native
