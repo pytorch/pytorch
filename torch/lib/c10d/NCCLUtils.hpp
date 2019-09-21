@@ -16,10 +16,24 @@
     if (error != ncclSuccess) {                                           \
       std::string err = "NCCL error in: " + std::string(__FILE__) + ":" + \
           std::to_string(__LINE__) + ", " +                               \
-          std::string(ncclGetErrorString(error));                         \
+          std::string(ncclGetErrorString(error)) + ", NCCL version " +    \
+          getNcclVersion();                                               \
       throw std::runtime_error(err);                                      \
     }                                                                     \
   } while (0)
+
+inline std::string getNcclVersion() {
+  int version;
+  ncclResult_t status = ncclGetVersion(&version);
+  if (status != ncclSuccess) {
+    return "Unknown NCCL version";
+  }
+  auto ncclMajor = version / 1000;
+  auto ncclMinor = (version % 1000) / 100;
+  auto ncclPatch = version % (ncclMajor * 1000 + ncclMinor * 100);
+  return std::to_string(ncclMajor) + "." + std::to_string(ncclMinor) + "." +
+      std::to_string(ncclPatch);
+}
 
 namespace c10d {
 
