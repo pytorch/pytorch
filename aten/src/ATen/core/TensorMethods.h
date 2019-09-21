@@ -231,7 +231,7 @@ inline Tensor Tensor::angle() const {
     return TypeDefault::angle(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::angle(Tensor self) -> Tensor");
-    return table->getOp<Tensor (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+    return table->getOp<Tensor (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::real() const {
@@ -239,7 +239,7 @@ inline Tensor Tensor::real() const {
     return TypeDefault::real(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::real(Tensor self) -> Tensor");
-    return table->getOp<Tensor (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+    return table->getOp<Tensor (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::imag() const {
@@ -247,7 +247,7 @@ inline Tensor Tensor::imag() const {
     return TypeDefault::imag(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::imag(Tensor self) -> Tensor");
-    return table->getOp<Tensor (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
+    return table->getOp<Tensor (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::acos() const {
