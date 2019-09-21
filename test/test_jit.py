@@ -1121,7 +1121,7 @@ graph(%x : Tensor,
         }
         torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
         assert m._c._get_module('conv')._get_module('observer_for_input.1')._get_attribute('dtype') != \
-            m._c._get_module('conv')._get_module('observer_for_weight.1')._get_attribute('dtype') == 12
+            m._c._get_module('conv')._get_module('observer_for_weight.1')._get_attribute('dtype')
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_quant_dequant(self):
@@ -2520,6 +2520,15 @@ graph(%Ra, %Rb):
 
         does_decompose()
         doesnt_decompose()
+
+    def test_fuse_addmm(self):
+        class AddmmModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.mm(x, x) + x
+
+        x = torch.ones(3, 3)
+        f = io.BytesIO()
+        torch.onnx._export(AddmmModel(), x, f, verbose=False)
 
     def test_index_put(self):
         ten = torch.zeros(3, 3)
