@@ -14502,6 +14502,7 @@ a")
     def test_module_const_attrs(self):
         class M(torch.nn.Module):
             __constants__ = ['i', 'non']
+
             def __init__(self):
                 super(M, self).__init__()
                 self.i = 10
