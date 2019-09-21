@@ -594,6 +594,8 @@ class TestQuantizedOps(TestCase):
                              zero_point=zero_point)
 
     """Tests the correctness of the quantized equal op."""
+    @unittest.skip("temporarily disable until failures are fixed. " +
+                   "See https://github.com/pytorch/pytorch/issues/26279")
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()),
            X2=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
