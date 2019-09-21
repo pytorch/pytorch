@@ -66,7 +66,7 @@ public:
   void callBoxed(Stack* stack) const {
     if (C10_UNLIKELY(boxed_kernel_func_ == nullptr)) {
       if (unboxed_kernel_func_ == nullptr) {
-        TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callBoxed() on an uninitizliaed KernelFunction.");
+        TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callBoxed() on an uninitialized KernelFunction.");
       } else {
         // TODO We want to introduce the invariant that all kernels must be callable in a boxed way, then this case should be impossible.
         TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::callUnboxed().");
@@ -103,7 +103,7 @@ public:
     TORCH_INTERNAL_ASSERT(!signature_hash_.has_value() || (detail::hashFunctionSignature<Return (Args...)>() == *signature_hash_),
       "Called KernelFunction::callUnboxedOnly with wrong argument types");
 
-    if (unboxed_kernel_func_ != nullptr) {
+    if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
       using ActualSignature = Return (OperatorKernel*, Args...);
       ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func_);
       return (*func)(getFunctor_(), std::forward<Args>(args)...);
@@ -140,7 +140,7 @@ public:
     TORCH_INTERNAL_ASSERT(!signature_hash_.has_value() || (detail::hashFunctionSignature<Return (Args...)>() == *signature_hash_),
       "Called KernelFunction::callUnboxed with wrong argument types");
 
-    if (unboxed_kernel_func_ != nullptr) {
+    if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
       using ActualSignature = Return (OperatorKernel*, Args...);
       ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func_);
       return (*func)(getFunctor_(), std::forward<Args>(args)...);

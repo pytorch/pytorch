@@ -955,6 +955,12 @@ class _TestTorchMixin(object):
         test((10,))
         test((5, 5))
 
+    def test_where_bool_tensor(self):
+        for d in torch.testing.get_all_device_types():
+            a = torch.tensor([True, False], device=d)
+            res = torch.where(a > 0)
+            self.assertEqual(1, len(res))
+
     def test_all_any_with_dim(self):
         def test(x):
             r1 = x.prod(dim=0, keepdim=False).byte()
@@ -1378,6 +1384,12 @@ class _TestTorchMixin(object):
         for i in range(res2.size(0)):
             res2[i] = math.pow(3, m1[i][4])
         self.assertEqual(res1, res2)
+
+        # resize behavior for exp == 1
+        m1 = torch.randn(2, 2)
+        out = torch.randn([0])
+        torch.pow(m1, 1, out=out)
+        self.assertEqual(out, m1)
 
     def _test_cop(self, torchfn, mathfn):
         def reference_implementation(res2):
@@ -3931,7 +3943,7 @@ class _TestTorchMixin(object):
             self.assertTensorsSlowEqual(byte_tensor, byte_tensor.abs(), 1e-16)
 
         # Checking that the right abs function is called for LongTensor
-        bignumber = 2 ^ 31 + 1
+        bignumber = 2 ** 31 + 1
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
 
@@ -7290,7 +7302,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(res1, empty)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    'expected a non-empty list of Tensors'):
+                                    'non-empty list of Tensors'):
             torch.cat([], dim=1)
 
     def test_cat_empty(self, device):
@@ -11783,7 +11795,7 @@ class TestTorchDeviceType(TestCase):
             ("expm1", doubles, True, True, 'cpu'),
             ("expm1", doubles, False, True, 'cuda'),
             ("floor", doubles, True, True, 'cpu'),
-            ("floor", doubles, False, True, 'cuda'),
+            ("floor", doubles, True, True, 'cuda'),
             ("frac", doubles, True, True, 'cpu'),
             ("frac", doubles, False, True, 'cuda'),
             ("log", positives, True, True, 'cpu'),
