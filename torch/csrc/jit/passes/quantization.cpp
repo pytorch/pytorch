@@ -609,22 +609,26 @@ void InsertQuantDeQuantImpl(
 }
 } // namespace
 
-TORCH_API void InsertObservers(
-    script::Module& module,
+TORCH_API script::Module InsertObservers(
+    script::Module& input_module,
     const std::string& method_name,
-    const QConfigDict& qconfig_dict) {
+    const QConfigDict& qconfig_dict,
+    bool inplace) {
+  script::Module module = inplace ? input_module : input_module.clone();
   ModuleQConfigMap module_qconfig_map;
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   std::unordered_set<Value*> values_to_skip;
   std::unordered_set<Value*> weight_values;
   InsertObserversImpl(
       module, method_name, module_qconfig_map, values_to_skip, weight_values);
+  return module;
 }
 
 script::Module InsertQuantDeQuant(
     script::Module& input_module,
-    const std::string& method_name) {
-  script::Module module = input_module.clone();
+    const std::string& method_name,
+    bool inplace) {
+  script::Module module = inplace ? input_module : input_module.clone();
   InsertQuantDeQuantImpl(module, method_name);
 
   // NOTE: Remove observer module does not work right now, we'll return
