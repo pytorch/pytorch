@@ -26,10 +26,12 @@ public:
   Vec256(std::complex<double> val) {
     double real_value = std::real(val);
     double imag_value = std::imag(val);
-    values = _mm256_setr_pd(real_value, imag_value, real_value, imag_value);
+    values = _mm256_setr_pd(real_value, imag_value,
+                            real_value, imag_value);
   }
   Vec256(std::complex<double> val1, std::complex<double> val2) {
-    values = _mm256_setr_pd(std::real(val1), std::imag(val1), std::real(val2), std::imag(val2));
+    values = _mm256_setr_pd(std::real(val1), std::imag(val1),
+                            std::real(val2), std::imag(val2));
   }
   operator __m256d() const {
     return values;
@@ -41,9 +43,9 @@ public:
       case 0:
         return a;
       case 1:
-        return _mm256_blend_pd(a.values, b.values, 0x3);
+        return _mm256_blend_pd(a.values, b.values, 0x03);
       case 2:
-        return _mm256_blend_pd(a.values, b.values, 0xc);
+        return _mm256_blend_pd(a.values, b.values, 0x0c);
     }
     return b;
   }
@@ -55,7 +57,8 @@ public:
 
   }
   static Vec256<std::complex<double>> arange(std::complex<double> base = 0., std::complex<double> step = 1.) {
-    return Vec256<std::complex<double>>(base, base + step);
+    return Vec256<std::complex<double>>(base,
+                                        base + step);
   }
   static Vec256<std::complex<double>> set(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b,
                             int64_t count = size()) {
@@ -110,13 +113,13 @@ public:
    return abs_();     // abs     0
   }
   __m256d angle_() const {
-    auto b_a = _mm256_permute_pd(values, 0x5);      //b        a
+    auto b_a = _mm256_permute_pd(values, 0x05);      //b        a
     auto angle = Sleef_atan2d4_u10(values, b_a);    //-angle   angle
     auto mask = _mm256_setr_pd(0.0, 1.0, 0.0, 1.0);
     return _mm256_mul_pd(angle, mask);              //0        angle
   }
   Vec256<std::complex<double>> angle() const {
-    return _mm256_permute_pd(angle_(), 0x5);        // angle     0
+    return _mm256_permute_pd(angle_(), 0x05);        // angle     0
   }
   __m256d real_() const {
     auto mask = _mm256_setr_pd(1.0, 0.0, 1.0, 0.0);
@@ -130,7 +133,7 @@ public:
     return _mm256_mul_pd(values, mask);
     }
   Vec256<std::complex<double>> imag() const {
-    return _mm256_permute_pd(imag_(), 0x5);        //b        a
+    return _mm256_permute_pd(imag_(), 0x05);        //b        a
   }
   Vec256<std::complex<double>> acos() const {
     return map(std::acos);
@@ -205,9 +208,7 @@ public:
   Vec256<std::complex<double>> sqrt() const {
     return map(std::sqrt);
   }
-  Vec256<std::complex<double>> reciprocal() const {
-    return map([](const std::complex<double> &x) { return (std::complex<double>)(1)/x; });
-  }
+  Vec256<std::complex<double>> reciprocal() const;
   Vec256<std::complex<double>> rsqrt() const {
     return map([](const std::complex<double> &x) { return (std::complex<double>)(1)/std::sqrt(x); });
   }
@@ -250,7 +251,7 @@ template <> Vec256<std::complex<double>> inline operator*(const Vec256<std::comp
   auto neg = _mm256_setr_pd(1.0, -1.0, 1.0, -1.0);
   auto ac_bd = _mm256_mul_pd(a, b);         //ac       bd
 
-  auto d_c = _mm256_permute_pd(b, 0x5);     //d        c
+  auto d_c = _mm256_permute_pd(b, 0x05);    //d        c
   d_c = _mm256_mul_pd(neg, d_c);            //d       -c
   auto ad_bc = _mm256_mul_pd(a, d_c);       //ad      -bc
 
@@ -262,6 +263,14 @@ template <> Vec256<std::complex<double>> inline operator/(const Vec256<std::comp
   auto mask = _mm256_setr_pd(0.0, 1.0, 0.0, 1.0);
   Vec256<std::complex<double>> abs = Vec256<std::complex<double>>(_mm256_div_pd(a.abs_(), _mm256_add_pd(b.abs_(), mask)));
   Vec256<std::complex<double>> i_angle = Vec256<std::complex<double>>(_mm256_sub_pd(a.angle_(), b.angle_()));
+  return abs*i_angle.exp();
+}
+
+// reciprocal. Implement this here so we can use multiplication.
+Vec256<std::complex<double>> Vec256<std::complex<double>>::reciprocal() const{
+  auto mask = _mm256_setr_pd(0.0, -1.0, 0.0, -1.0);
+  Vec256<std::complex<double>> abs = Vec256<std::complex<double>>(_mm256_div_pd(_mm256_permute_pd(mask, 0x05), _mm256_add_pd(abs_(), mask)));
+  Vec256<std::complex<double>> i_angle = Vec256<std::complex<double>>(angle_());
   return abs*i_angle.exp();
 }
 

@@ -244,9 +244,7 @@ public:
   Vec256<std::complex<float>> sqrt() const {
     return map(std::sqrt);
   }
-  Vec256<std::complex<float>> reciprocal() const {
-    return map([](const std::complex<float> &x) { return (std::complex<float>)(1)/x; });
-  }
+  Vec256<std::complex<float>> reciprocal() const;
   Vec256<std::complex<float>> rsqrt() const {
     return map([](const std::complex<float> &x) { return (std::complex<float>)(1)/std::sqrt(x); });
   }
@@ -289,7 +287,7 @@ template <> Vec256<std::complex<float>> inline operator*(const Vec256<std::compl
   auto neg = _mm256_setr_ps(1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0);
   auto ac_bd = _mm256_mul_ps(a, b);         //ac       bd
 
-  auto d_c = _mm256_permute_ps(b, 0x55);     //d        c
+  auto d_c = _mm256_permute_ps(b, 0x55);    //d        c
   d_c = _mm256_mul_ps(neg, d_c);            //d       -c
   auto ad_bc = _mm256_mul_ps(a, d_c);       //ad      -bc
 
@@ -301,6 +299,14 @@ template <> Vec256<std::complex<float>> inline operator/(const Vec256<std::compl
   auto mask = _mm256_setr_ps(0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
   Vec256<std::complex<float>> abs = Vec256<std::complex<float>>(_mm256_div_ps(a.abs_(), _mm256_add_ps(b.abs_(), mask)));
   Vec256<std::complex<float>> i_angle = Vec256<std::complex<float>>(_mm256_sub_ps(a.angle_(), b.angle_()));
+  return abs*i_angle.exp();
+}
+
+// reciprocal. Implement this here so we can use multiplication.
+Vec256<std::complex<float>> Vec256<std::complex<float>>::reciprocal() const {
+  auto mask = _mm256_setr_ps(0.0, -1.0, 0.0, -1.0, 0.0, -1.0, 0.0, -1.0);
+  Vec256<std::complex<float>> abs = Vec256<std::complex<float>>(_mm256_div_ps(_mm256_permute_ps(mask, 0x55), _mm256_add_ps(abs_(), mask)));
+  Vec256<std::complex<float>> i_angle = Vec256<std::complex<float>>(angle_());
   return abs*i_angle.exp();
 }
 

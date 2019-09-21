@@ -39,18 +39,6 @@
 // https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280. Calling zeroall
 // when using AVX/AVX2 code resolves this.
 #if defined(__AVX__) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
-template <typename TYPE>
-struct ztype {
-  using value_t = TYPE;
-};
-template <>
-struct ztype<std::complex<double>> {
-  using value_t = double;
-};
-template <>
-struct ztype<std::complex<float>> {
-  using value_t = float;
-};
 #define DL_RUNTIME_BUG(op, type)                  \
   using value_t = typename ztype<type>::value_t;  \
   volatile value_t x = (value_t)(1);        \
@@ -110,32 +98,32 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
     });                                                                 \
   }
 
-IMPLEMENT_VML(abs)
-IMPLEMENT_VML(acos)
-IMPLEMENT_VML(asin)
-IMPLEMENT_VML(atan)
-IMPLEMENT_VML(ceil)
-IMPLEMENT_VML(cos)
-// IMPLEMENT_VML(cosh)
-IMPLEMENT_VML(erf)
-IMPLEMENT_VML(erfc)
-IMPLEMENT_VML(exp)
-IMPLEMENT_VML(expm1)
-IMPLEMENT_VML(floor)
+IMPLEMENT_VML_BUG(abs)
+IMPLEMENT_VML_BUG(acos)
+IMPLEMENT_VML_BUG(asin)
+IMPLEMENT_VML_BUG(atan)
+IMPLEMENT_VML_BUG(ceil)
+IMPLEMENT_VML_BUG(cos)
+// IMPLEMENT_VML_BUG(cosh)
+IMPLEMENT_VML_BUG(erf)
+IMPLEMENT_VML_BUG(erfc)
+IMPLEMENT_VML_BUG(exp)
+IMPLEMENT_VML_BUG(expm1)
+IMPLEMENT_VML_BUG(floor)
 IMPLEMENT_VML(reciprocal)
-IMPLEMENT_VML(log)
-IMPLEMENT_VML(log10)
-IMPLEMENT_VML(log1p)
-IMPLEMENT_VML(log2)
+IMPLEMENT_VML_BUG(log)
+IMPLEMENT_VML_BUG(log10)
+IMPLEMENT_VML_BUG(log1p)
+IMPLEMENT_VML_BUG(log2)
 IMPLEMENT_VML(neg)
-IMPLEMENT_VML(sin)
-// IMPLEMENT_VML(sinh)
-IMPLEMENT_VML(sqrt)
-IMPLEMENT_VML(round)
+IMPLEMENT_VML_BUG(sin)
+// IMPLEMENT_VML_BUG(sinh)
+IMPLEMENT_VML_BUG(sqrt)
+IMPLEMENT_VML_BUG(round)
 IMPLEMENT_VML(rsqrt)
-IMPLEMENT_VML(tan)
-IMPLEMENT_VML(tanh)
-IMPLEMENT_VML(trunc)
+IMPLEMENT_VML_BUG(tan)
+IMPLEMENT_VML_BUG(tanh)
+IMPLEMENT_VML_BUG(trunc)
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 
