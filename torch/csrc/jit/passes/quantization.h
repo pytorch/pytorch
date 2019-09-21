@@ -107,10 +107,10 @@ TORCH_API void FoldConvBatchNorm2d(const script::Module& module);
 
 /** \brief Fold quantize function call into module
  *
- *  For the graph in the specified method of module, if we find a quantize_linear
+ *  For the graph in the specified method of module, if we find a quantize_per_tensor
  *  call on an attribute("weight") of the module, we'll quantize the attribute directly
  *  and register a new buffer "_quantized_weight" on the module and remove the
- *  quantize_linear call and replace the use of the quantized weight with
+ *  quantize_per_tensor call and replace the use of the quantized weight with
  *  "_quantized_weight".
  */
 TORCH_API void FoldQuantizeCallIntoBuffer(script::Module& module, const std::string& method_name);
