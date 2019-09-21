@@ -178,10 +178,10 @@ Node* insertObserver(
     Value* v,
     Graph* g,
     script::Module& module,
-    const QConfig& qconfig) {
+    const QConfig& qconfig,
+    const std::unordered_set<Value*>& weight_values) {
   script::Module observer_module;
-  if (v->node()->kind() == prim::GetAttr &&
-      v->node()->s(attr::name) == "weight") {
+  if (weight_values.count(v)) {
     observer_module = std::get<1>(qconfig);
   } else {
     observer_module = std::get<0>(qconfig);
@@ -242,12 +242,24 @@ void fillQConfigMap(
   }
 }
 
+void propagateWeightValues(
+    Node* n,
+    std::shared_ptr<Graph>& graph,
+    std::unordered_set<Value*>& weight_values) {
+  for (auto i = 1; i < n->inputs().size(); ++i) {
+    if (weight_values.count(n->inputs()[i])) {
+      weight_values.emplace(graph->inputs()[i]);
+    }
+  }
+}
+
 void InsertObserversImpl(
     script::Module& module,
     const std::string& method_name,
     const ModuleQConfigMap& module_qconfig_map,
-    std::unordered_set<Value*>& values_to_skip) {
-  if (module_qconfig_map.count(module.module_object()) == 0) {
+    std::unordered_set<Value*>& values_to_skip,
+    std::unordered_set<Value*>& weight_values) {
+  if (!module_qconfig_map.count(module.module_object())) {
     // the module is added by us, e.g.: observer module
     return;
   }
@@ -278,8 +290,8 @@ void InsertObserversImpl(
     if (!values_to_skip.count(v) && valueNeedsToBeQuantized(v)) {
       auto qconfig = module_qconfig_map.at(module.module_object());
       if (qconfig) {
-        auto observer_node =
-            insertObserver(v, v->owningGraph(), module, qconfig.value());
+        auto observer_node = insertObserver(
+            v, v->owningGraph(), module, qconfig.value(), weight_values);
         if (observer_node) {
           observer_for_input.emplace(observer_node);
         }
@@ -303,33 +315,46 @@ void InsertObserversImpl(
         if (!values_to_skip.count(v) && valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
         }
+        if (v->node()->kind() == prim::GetAttr &&
+            v->node()->s(attr::name) == "weight") {
+          weight_values.emplace(v);
+        }
         if (v->node()->kind() == prim::CallMethod) {
           // If we find a call to a method of a child module,
           // we'll recursively insert observers for the forward function to
           // the child module.
           auto module_instance = v->node()->inputs()[0];
           auto module_method_name = v->node()->s(attr::name);
+          // TODO: looks like this block is not related to v? maybe we should
+          // move this outside
+          script::Module callee_module;
           if (module_instance->node()->kind() == prim::GetAttr) {
             auto child_module_name = module_instance->node()->s(attr::name);
             auto child_module = module.find_module(child_module_name);
             TORCH_INTERNAL_ASSERT(
                 child_module,
                 "Child module " + child_module_name + " does not exist");
-            // Recursively insert observer for the forward function of child
-            // module
-            InsertObserversImpl(
-                child_module.value(),
-                module_method_name,
-                module_qconfig_map,
-                values_to_skip);
+            callee_module = child_module.value();
           } else {
             TORCH_INTERNAL_ASSERT(
                 module_instance == graph->inputs()[0],
                 "We only support call method either on %self"
                 "or child instance in insert_observers_pass right now");
-            InsertObserversImpl(
-                module, module_method_name, module_qconfig_map, values_to_skip);
+            callee_module = module;
           }
+          auto method_graph = callee_module.get_method(module_method_name).graph();
+          propagateWeightValues(
+              v->node(),
+              method_graph,
+              weight_values);
+          // Recursively insert observer for the forward function of child
+          // module
+          InsertObserversImpl(
+              callee_module,
+              module_method_name,
+              module_qconfig_map,
+              values_to_skip,
+              weight_values);
         }
       }
 
@@ -349,7 +374,8 @@ void InsertObserversImpl(
     auto qconfig = module_qconfig_map.at(module.module_object());
     // Skip inserting observer if no qconfig is specified
     if (qconfig) {
-      insertObserver(v, v->owningGraph(), module, qconfig.value());
+      insertObserver(
+          v, v->owningGraph(), module, qconfig.value(), weight_values);
     }
   }
 }
@@ -357,7 +383,7 @@ void InsertObserversImpl(
 Node* insertQuantDeQuantCall(
     Value* v,
     const IValue& qparams,
-    at::ScalarType t,
+    const IValue& scalar_type,
     bool insert_after = true) {
   Graph* g = v->node()->owningGraph();
   Node* quant = createQuantNode(v, g);
@@ -397,7 +423,7 @@ Node* insertQuantDeQuantCall(
   dequant->addInput(scale_val);
   dequant->addInput(zero_point_val);
 
-  Value* scalar_type_val = insertScalarType(quant, t);
+  Value* scalar_type_val = insertScalarType(quant, scalar_type.toScalarType());
   TORCH_INTERNAL_ASSERT(scalar_type_val != nullptr);
   quant->addInput(scalar_type_val);
   dequant->addInput(scalar_type_val);
@@ -426,7 +452,8 @@ c10::optional<std::string> findObserverName(Value* v) {
 class QuantizeHelper {
  public:
   QuantizeHelper(const script::Module& m) : module_(m) {}
-  IValue getQParams(Value* v);
+  // quantization parameters and scalar type
+  std::tuple<IValue, IValue> getQParams(Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
       Value* child_instance);
   void quantizeTensor(Value* v, bool insert_after = true);
@@ -463,7 +490,7 @@ void QuantizeHelper::removeObserver(
   }
 }
 
-IValue QuantizeHelper::getQParams(Value* v) {
+std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
   TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
@@ -477,10 +504,11 @@ IValue QuantizeHelper::getQParams(Value* v) {
       "getQParams expects the corresponding observer for ",
       v->debugName(),
       " exists.");
-  auto calculate_qparams =
-      observer_module.value().get_method("calculate_qparams");
+  auto om = observer_module.value();
+  auto calculate_qparams = om.get_method("calculate_qparams");
   IValue qparams = calculate_qparams(std::vector<IValue>());
-  return qparams;
+  auto scalar_type = om.get_attribute("dtype");
+  return std::make_tuple(qparams, scalar_type);
 }
 
 void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
@@ -488,15 +516,12 @@ void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
   if (!observer_name) {
     return;
   }
-  IValue qparams = getQParams(v);
+  auto tp = getQParams(v);
+  auto qparams = std::get<0>(tp);
+  auto scalar_type = std::get<1>(tp);
   removeObserver(v, observer_name.value());
   Node* dequant;
-  if (v->node()->kind() == prim::GetAttr &&
-      v->node()->s(c10::attr::name) == "weight") {
-    dequant = insertQuantDeQuantCall(v, qparams, at::kQInt8);
-  } else {
-    dequant = insertQuantDeQuantCall(v, qparams, at::kQUInt8, insert_after);
-  }
+  dequant = insertQuantDeQuantCall(v, qparams, scalar_type, insert_after);
   v->replaceAllUsesWith(dequant->output());
   Node* q = traverseToQuantNode(dequant);
   TORCH_INTERNAL_ASSERT(q);
@@ -591,7 +616,9 @@ TORCH_API void InsertObservers(
   ModuleQConfigMap module_qconfig_map;
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   std::unordered_set<Value*> values_to_skip;
-  InsertObserversImpl(module, method_name, module_qconfig_map, values_to_skip);
+  std::unordered_set<Value*> weight_values;
+  InsertObserversImpl(
+      module, method_name, module_qconfig_map, values_to_skip, weight_values);
 }
 
 script::Module InsertQuantDeQuant(
@@ -889,7 +916,7 @@ graph(%self, %scale, %zero_point, %dtype):
     auto float_weight = module.get_parameter("weight").variable_data();
     auto scale = toIValue(match_vmap.at(vmap.at("scale"))).value().toDouble();
     auto zero_point =
-        toIValue(match_vmap.at(vmap.at("zero_point"))).value().toInt();
+      toIValue(match_vmap.at(vmap.at("zero_point"))).value().toInt();
     auto dtype =
         toIValue(match_vmap.at(vmap.at("dtype"))).value().toScalarType();
     module.register_buffer(
