@@ -635,27 +635,22 @@ graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_ze
   const std::unordered_map<std::string, std::string> pattern_and_replacements =
       {// quantized::conv2d
        {R"(
-graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
+graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %a_intrepr = aten::int_repr(%a_quant)
         %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
         %w_intrepr = aten::int_repr(%w_quant)
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
-        %b_intrepr = aten::int_repr(%b_quant)
-        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b_dequant, %c, %d, %e, %f)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))",
         R"(
-graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
+graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
+        %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %r = quantized::conv2d(%a_quant, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
         %0 : int = prim::Constant[value=0]()
         %1 : int = prim::Constant[value=1]()
         %2 : int = prim::Constant[value=2]()
         %3 : int = prim::Constant[value=3]()
-        %in_param : int[] = prim::ListConstruct(%0, %2, %3, %1)
-        %a_perm : Tensor = aten::permute(%a_quant, %in_param)
-        %w_perm : Tensor = aten::permute(%w_quant, %in_param)
-        %w_packed = quantized::conv_prepack(%w_perm, %stride, %padding, %dilation, %groups)
-        %r = quantized::conv2d(%a_perm, %w_packed, %b_quant, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
         %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
         %r_perm = aten::permute(%r, %out_param)
         return (%r_perm))"},
