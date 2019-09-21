@@ -10840,7 +10840,7 @@ class TestTorchDeviceType(TestCase):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
             x_clone = x.clone()
-            if ('cuda' in device  and dt == torch.bfloat16):
+            if ('cuda' in device and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: copy(x))
                 continue
             y = copy(x)
@@ -10886,7 +10886,7 @@ class TestTorchDeviceType(TestCase):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor((1, 1), dtype=dt, device=device)
             y = x.clone()
-            if ('cuda' in device  and dt == torch.bfloat16):
+            if ('cuda' in device and dt == torch.bfloat16):
                 # `x - y` is used inside of the assertEqual
                 self.assertRaises(RuntimeError, lambda: x - y)
                 continue
@@ -10895,7 +10895,7 @@ class TestTorchDeviceType(TestCase):
     def test_cat_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
-            if ('cuda' in device  and dt == torch.bfloat16):
+            if ('cuda' in device and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: torch.cat((x, x), 0))
                 continue
 
@@ -12340,7 +12340,7 @@ class TestTorchDeviceType(TestCase):
         run_test(device, torch.long)
         run_test(device, torch.uint8)
 
-    @multidevice (2)
+    @multidevice(2)
     @onlyCUDA
     def test_reverse_binary_ops_multiple_device(self, devices):
         self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to(devices[1]))    # __radd__
