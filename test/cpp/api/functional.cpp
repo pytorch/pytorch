@@ -65,16 +65,16 @@ TEST_F(FunctionalTest, AvgPool3d) {
 }
 
 TEST_F(FunctionalTest, CosineSimilarity) {
-  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}});
-  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}});
+  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::kFloat);
+  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::kFloat);
   auto output = F::cosine_similarity(input1, input2, CosineSimilarityOptions().dim(1));
   auto expected = torch::tensor({0.8078, 0.8721}, torch::kFloat);
   ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
 
 TEST_F(FunctionalTest, PairwiseDistance) {
-  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}});
-  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}});
+  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::kFloat);
+  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::kFloat);
   auto output = F::pairwise_distance(input1, input2, PairwiseDistanceOptions(1));
   auto expected = torch::tensor({6, 6}, torch::kFloat);
   ASSERT_TRUE(output.allclose(expected));
