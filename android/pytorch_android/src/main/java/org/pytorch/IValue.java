@@ -16,16 +16,17 @@ public class IValue {
   private static final int TYPE_CODE_BOOL = 3;
   private static final int TYPE_CODE_LONG = 4;
   private static final int TYPE_CODE_DOUBLE = 5;
+  private static final int TYPE_CODE_STRING = 6;
 
-  private static final int TYPE_CODE_TUPLE = 6;
-  private static final int TYPE_CODE_BOOL_LIST = 7;
-  private static final int TYPE_CODE_LONG_LIST = 8;
-  private static final int TYPE_CODE_DOUBLE_LIST = 9;
-  private static final int TYPE_CODE_TENSOR_LIST = 10;
-  private static final int TYPE_CODE_LIST = 11;
+  private static final int TYPE_CODE_TUPLE = 7;
+  private static final int TYPE_CODE_BOOL_LIST = 8;
+  private static final int TYPE_CODE_LONG_LIST = 9;
+  private static final int TYPE_CODE_DOUBLE_LIST = 10;
+  private static final int TYPE_CODE_TENSOR_LIST = 11;
+  private static final int TYPE_CODE_LIST = 12;
 
-  private static final int TYPE_CODE_DICT_STRING_KEY = 12;
-  private static final int TYPE_CODE_DICT_LONG_KEY = 13;
+  private static final int TYPE_CODE_DICT_STRING_KEY = 13;
+  private static final int TYPE_CODE_DICT_LONG_KEY = 14;
 
   private final int mTypeCode;
   private Object mData;
@@ -52,6 +53,10 @@ public class IValue {
 
   public boolean isDouble() {
     return TYPE_CODE_DOUBLE == this.mTypeCode;
+  }
+
+  public boolean isString() {
+    return TYPE_CODE_STRING == this.mTypeCode;
   }
 
   public boolean isTuple() {
@@ -122,6 +127,15 @@ public class IValue {
    */
   public static IValue double64(double value) {
     final IValue iv = new IValue(TYPE_CODE_DOUBLE);
+    iv.mData = value;
+    return iv;
+  }
+
+  /**
+   * Creates new IValue instance of torchscript str type.
+   */
+  public static IValue string(String value) {
+    final IValue iv = new IValue(TYPE_CODE_STRING);
     iv.mData = value;
     return iv;
   }
@@ -213,6 +227,11 @@ public class IValue {
     return (Tensor) mData;
   }
 
+  public boolean getBool() {
+    preconditionType(TYPE_CODE_BOOL, mTypeCode);
+    return (boolean) mData;
+  }
+
   public long getLong() {
     preconditionType(TYPE_CODE_LONG, mTypeCode);
     return (long) mData;
@@ -223,9 +242,9 @@ public class IValue {
     return (double) mData;
   }
 
-  public boolean getBool() {
-    preconditionType(TYPE_CODE_BOOL, mTypeCode);
-    return (boolean) mData;
+  public String getString() {
+    preconditionType(TYPE_CODE_STRING, mTypeCode);
+    return (String) mData;
   }
 
   public boolean[] getBoolList() {
