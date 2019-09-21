@@ -12,6 +12,13 @@
 namespace at {
 namespace native {
 
+// Currently internal-only.
+//
+// This implementation assumes the quantizer for the input and the out-
+// put are the same.
+//
+// If we want to support this publicly, we need to add
+// a requantization step to the kernel.
 std::tuple<Tensor&, Tensor&> quantized_topk_out_cpu(
     Tensor& values,
     Tensor& indices,
@@ -37,6 +44,11 @@ std::tuple<Tensor, Tensor> quantized_topk_cpu(
     int64_t dim,
     bool largest,
     bool sorted) {
+  auto qscheme = self.qscheme();
+  TORCH_CHECK(
+      qscheme == QScheme::PER_TENSOR_AFFINE ||
+          qscheme == QScheme::PER_TENSOR_SYMMETRIC,
+      "Top-K is only supported on per-tensor quantization");
   Tensor values = at::_empty_affine_quantized(
     {0},
     self.options(),
