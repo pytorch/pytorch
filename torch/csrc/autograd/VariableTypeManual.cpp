@@ -105,6 +105,10 @@ int64_t VariableType::output_nr(const Tensor & self) {
   return as_variable_ref(self).output_nr();
 }
 
+int64_t VariableType::_version(const Tensor & self) {
+  return as_variable_ref(self).current_version();
+}
+
 // We don't have an outplace copy, so this can't be generated automatically
 Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;

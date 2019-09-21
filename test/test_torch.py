@@ -3943,7 +3943,7 @@ class _TestTorchMixin(object):
             self.assertTensorsSlowEqual(byte_tensor, byte_tensor.abs(), 1e-16)
 
         # Checking that the right abs function is called for LongTensor
-        bignumber = 2 ^ 31 + 1
+        bignumber = 2 ** 31 + 1
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
 
@@ -11795,7 +11795,7 @@ class TestTorchDeviceType(TestCase):
             ("expm1", doubles, True, True, 'cpu'),
             ("expm1", doubles, False, True, 'cuda'),
             ("floor", doubles, True, True, 'cpu'),
-            ("floor", doubles, False, True, 'cuda'),
+            ("floor", doubles, True, True, 'cuda'),
             ("frac", doubles, True, True, 'cpu'),
             ("frac", doubles, False, True, 'cuda'),
             ("log", positives, True, True, 'cpu'),

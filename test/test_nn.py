@@ -936,6 +936,16 @@ class TestNN(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
                 module(input)
 
+    def test_mismatch_shape_conv2d(self):
+        x = torch.randn(1, 10, 1, 28, 28)
+        w = torch.randn(6, 1, 5, 5)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r'Expected 4-dimensional input for 4-dimensional weight 6 1 5 5,' +
+                                    r' but got 5-dimensional input of size \[1, 10, 1, 28, 28\] instead'):
+
+            F.conv2d(x, w)
+
     def test_invalid_conv2d(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:
             module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2).to(dtype)
