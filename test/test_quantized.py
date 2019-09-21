@@ -518,7 +518,7 @@ class TestQuantizedOps(TestCase):
 
         X = torch.from_numpy(X)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                   dtype=torch_type)
+                                       dtype=torch_type)
 
         # Run reference on int_repr + round to avoid double rounding error.
         X_ref = torch.nn.functional.avg_pool2d(
@@ -566,7 +566,7 @@ class TestQuantizedOps(TestCase):
         X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
         X = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
         qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw), scale=scale,
-                                   zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
+                                       zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
 
         # Run reference on int_repr + round to avoid double rounding error.
         X_ref = torch.nn.functional.avg_pool2d(
@@ -656,7 +656,7 @@ class TestQuantizedOps(TestCase):
         X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
         X = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
         qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw), scale=scale,
-                                   zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
+                                       zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
 
         # Run reference on int_repr + round to avoid double rounding error.
         X_ref = torch.nn.functional.adaptive_avg_pool2d(qX.int_repr().to(torch.double), output_size).round()
