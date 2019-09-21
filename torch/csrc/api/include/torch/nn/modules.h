@@ -16,5 +16,6 @@
 #include <torch/nn/modules/fold.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/loss.h>
+#include <torch/nn/modules/padding.h>
 #include <torch/nn/modules/pooling.h>
 #include <torch/nn/modules/rnn.h>

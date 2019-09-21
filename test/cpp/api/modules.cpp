@@ -480,6 +480,52 @@ TEST_F(ModulesTest, PairwiseDistance) {
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
 }
 
+TEST_F(ModulesTest, ReflectionPad1d) {
+  {
+    ReflectionPad1d m(ReflectionPad1dOptions(2));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
+    auto output = m(input);
+    auto expected = torch::tensor({{{2., 1., 0., 1., 2., 3., 2., 1.},
+                                    {6., 5., 4., 5., 6., 7., 6., 5.}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ReflectionPad1d m(ReflectionPad1dOptions({3, 1}));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
+    auto output = m(input);
+    auto expected = torch::tensor({{{3., 2., 1., 0., 1., 2., 3., 2.},
+                                    {7., 6., 5., 4., 5., 6., 7., 6.}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
+TEST_F(ModulesTest, ReflectionPad2d) {
+  {
+    ReflectionPad2d m(ReflectionPad2dOptions(2));
+    auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{8., 7., 6., 7., 8., 7., 6.},
+                                     {5., 4., 3., 4., 5., 4., 3.},
+                                     {2., 1., 0., 1., 2., 1., 0.},
+                                     {5., 4., 3., 4., 5., 4., 3.},
+                                     {8., 7., 6., 7., 8., 7., 6.},
+                                     {5., 4., 3., 4., 5., 4., 3.},
+                                     {2., 1., 0., 1., 2., 1., 0.}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ReflectionPad2d m(ReflectionPad2dOptions({1, 1, 2, 0}));
+    auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{7., 6., 7., 8., 7.},
+                                     {4., 3., 4., 5., 4.},
+                                     {1., 0., 1., 2., 1.},
+                                     {4., 3., 4., 5., 4.},
+                                     {7., 6., 7., 8., 7.}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in=3, out=4, with_bias=true)");
@@ -579,6 +625,72 @@ TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {
   ASSERT_EQ(
       c10::str(PairwiseDistance(PairwiseDistanceOptions(3).eps(0.5).keepdim(true))),
       "torch::nn::PairwiseDistance(p=3, eps=0.5, keepdim=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintReflectionPad) {
+  ASSERT_EQ(
+      c10::str(ReflectionPad1d(ReflectionPad1dOptions(2))),
+      "torch::nn::ReflectionPad1d(padding=[2, 2])");
+  ASSERT_EQ(
+      c10::str(ReflectionPad1d(ReflectionPad1dOptions({3, 1}))),
+      "torch::nn::ReflectionPad1d(padding=[3, 1])");
+  ASSERT_EQ(
+      c10::str(ReflectionPad2d(ReflectionPad2dOptions(2))),
+      "torch::nn::ReflectionPad2d(padding=[2, 2, 2, 2])");
+  ASSERT_EQ(
+      c10::str(ReflectionPad2d(ReflectionPad2dOptions({1, 1, 2, 0}))),
+      "torch::nn::ReflectionPad2d(padding=[1, 1, 2, 0])");
+}
+
+TEST_F(ModulesTest, PrettyPrintReplicationPad) {
+  ASSERT_EQ(
+      c10::str(ReplicationPad1d(ReplicationPad1dOptions(2))),
+      "torch::nn::ReplicationPad1d(padding=[2, 2])");
+  ASSERT_EQ(
+      c10::str(ReplicationPad1d(ReplicationPad1dOptions({3, 1}))),
+      "torch::nn::ReplicationPad1d(padding=[3, 1])");
+  ASSERT_EQ(
+      c10::str(ReplicationPad2d(ReplicationPad2dOptions(2))),
+      "torch::nn::ReplicationPad2d(padding=[2, 2, 2, 2])");
+  ASSERT_EQ(
+      c10::str(ReplicationPad2d(ReplicationPad2dOptions({1, 1, 2, 0}))),
+      "torch::nn::ReplicationPad2d(padding=[1, 1, 2, 0])");
+  ASSERT_EQ(
+      c10::str(ReplicationPad3d(ReplicationPad3dOptions(1))),
+      "torch::nn::ReplicationPad3d(padding=[1, 1, 1, 1, 1, 1])");
+  ASSERT_EQ(
+      c10::str(ReplicationPad3d(ReplicationPad3dOptions({1, 2, 1, 2, 1, 2}))),
+      "torch::nn::ReplicationPad3d(padding=[1, 2, 1, 2, 1, 2])");
+}
+
+TEST_F(ModulesTest, PrettyPrintZeroPad2d) {
+  ASSERT_EQ(
+      c10::str(ZeroPad2d(ZeroPad2dOptions(2))),
+      "torch::nn::ZeroPad2d(padding=[2, 2, 2, 2])");
+  ASSERT_EQ(
+      c10::str(ZeroPad2d(ZeroPad2dOptions({1, 1, 2, 0}))),
+      "torch::nn::ZeroPad2d(padding=[1, 1, 2, 0])");
+}
+
+TEST_F(ModulesTest, PrettyPrintConstantPad) {
+  ASSERT_EQ(
+      c10::str(ConstantPad1d(ConstantPad1dOptions(2, 3.5))),
+      "torch::nn::ConstantPad1d(padding=[2, 2], value=3.5)");
+  ASSERT_EQ(
+      c10::str(ConstantPad1d(ConstantPad1dOptions({3, 1}, 3.5))),
+      "torch::nn::ConstantPad1d(padding=[3, 1], value=3.5)");
+  ASSERT_EQ(
+      c10::str(ConstantPad2d(ConstantPad2dOptions(2, 3.5))),
+      "torch::nn::ConstantPad2d(padding=[2, 2, 2, 2], value=3.5)");
+  ASSERT_EQ(
+      c10::str(ConstantPad2d(ConstantPad2dOptions({3, 0, 2, 1}, 3.5))),
+      "torch::nn::ConstantPad2d(padding=[3, 0, 2, 1], value=3.5)");
+  ASSERT_EQ(
+      c10::str(ConstantPad3d(ConstantPad3dOptions(1, 3.5))),
+      "torch::nn::ConstantPad3d(padding=[1, 1, 1, 1, 1, 1], value=3.5)");
+  ASSERT_EQ(
+      c10::str(ConstantPad3d(ConstantPad3dOptions({1, 2, 1, 2, 1, 2}, 3.5))),
+      "torch::nn::ConstantPad3d(padding=[1, 2, 1, 2, 1, 2], value=3.5)");
 }
 
 TEST_F(ModulesTest, PrettyPrintNestedModel) {
