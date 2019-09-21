@@ -883,6 +883,16 @@ struct Vec256<c10::qint32> : public Vec256QuantizedConverter<
   Vec256() {}
 };
 
+template <typename T>
+inline void __attribute__((always_inline)) QuantizeAvx2(
+    const float* src,
+    typename T::underlying* dst,
+    int len,
+    float inverse_scale,
+    int64_t zero_point) {
+  at::quantize_vec<T>(
+      1.0f / inverse_scale, zero_point, src, reinterpret_cast<T*>(dst), len);
+}
 template <>
 Vec256<c10::qint32> inline maximum(const Vec256<c10::qint32>& a, const Vec256<c10::qint32>& b) {
   return a.maximum(b);
