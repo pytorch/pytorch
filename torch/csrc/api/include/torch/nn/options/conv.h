@@ -10,7 +10,7 @@ namespace nn {
 
 /// Options for a `D`-dimensional convolution module.
 template <size_t D>
-struct ConvOptions {
+struct TORCH_API ConvOptions {
   ConvOptions(
       int64_t input_channels,
       int64_t output_channels,
