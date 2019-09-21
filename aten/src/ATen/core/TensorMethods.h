@@ -123,14 +123,6 @@ inline int64_t Tensor::output_nr() const {
     return table->getOp<int64_t (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
 #endif
 }
-inline int64_t Tensor::_version() const {
-#ifdef USE_STATIC_DISPATCH
-    return TypeDefault::_version(const_cast<Tensor&>(*this));
-#else
-    static auto table = globalATenDispatch().getOpTable("aten::_version(Tensor self) -> int");
-    return table->getOp<int64_t (const Tensor &)>(type_set())(const_cast<Tensor&>(*this));
-#endif
-}
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor & Tensor::names_(c10::optional<DimnameList> names) const {
 #ifdef USE_STATIC_DISPATCH
@@ -1136,13 +1128,7 @@ inline Tensor Tensor::floor() const {
 }
 inline Tensor & Tensor::floor_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::floor_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("floor_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::floor_(const_cast<Tensor&>(*this));
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::floor_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)))
