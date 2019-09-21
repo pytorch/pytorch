@@ -12437,11 +12437,9 @@ class TestTorchDeviceType(TestCase):
     def test_device_guard(self, devices):
         # verify that all operators with `device_guard: False` behave properly with multiple devices.
         # TODO: if we had operator introspection we could figure out this set of operators automatically...
-        current_device = torch.cuda.current_device()
-        device = torch.device('cuda:1') if current_device == 0 else torch.device('cuda:0')
-        x = torch.randn((1, 2, 3), device=device)
-        y = torch.zeros((1, 3, 2), device=device)
-        scalar = torch.tensor(5, device=device)
+        x = torch.randn((1, 2, 3), device=devices[1])
+        y = torch.zeros((1, 3, 2), device=devices[1])
+        scalar = torch.tensor(5, device=devices[1])
 
         # property ops
         torch.cudnn_is_acceptable(x)
@@ -12473,7 +12471,7 @@ class TestTorchDeviceType(TestCase):
 
         # in-place ops
         def inplace():
-            return torch.randn((1, 2, 3), device=device)
+            return torch.randn((1, 2, 3), device=devices[1])
         inplace().as_strided_(y.size(), y.stride())
         inplace().resize_(y.size())
         inplace().squeeze_()
