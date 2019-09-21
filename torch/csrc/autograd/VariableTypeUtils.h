@@ -106,6 +106,11 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
   if (base_var.is_view()) {
     base_var = base_var.base();
   }
+
+  if (!GradMode::is_enabled()) {
+    is_differentiable = false;
+  }
+
   return make_variable_view(std::move(base_var), std::move(tensor), is_differentiable);
 }
 
@@ -116,6 +121,11 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tens
   if (base_var.is_view()) {
     base_var = base_var.base();
   }
+
+  if (!GradMode::is_enabled()) {
+    is_differentiable = false;
+  }
+
   for(Tensor &tensor : tensors) {
     tensor = make_variable_view(base_var, std::move(tensor), is_differentiable);
   }
