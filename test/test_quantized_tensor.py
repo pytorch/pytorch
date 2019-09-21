@@ -149,7 +149,7 @@ class TestQuantizedTensor(TestCase):
                 for j in range(2):
                     res[i][j] = np.clip(np.round(data[i][j] / scales[j]) + zero_points[j], quant_min, quant_max)
             return res
-        qr = torch.quantize_linear_per_channel(r, scales, zero_points, axis, torch.quint8)
+        qr = torch.quantize_per_channel(r, scales, zero_points, axis, torch.quint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(qr.int_repr(), quantize_c(r, scales, zero_points)))
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
@@ -191,7 +191,7 @@ class TestQuantizedTensor(TestCase):
         r = torch.rand(20, 10, 2, 2, dtype=torch.float) * 4 - 2
         scales = torch.rand(10) * 0.02 + 0.01
         zero_points = torch.round(torch.rand(10) * 2 - 1).to(torch.long)
-        qr = torch.quantize_linear_per_channel(r, scales, zero_points, [1], torch.qint8)
+        qr = torch.quantize_per_channel(r, scales, zero_points, [1], torch.qint8)
 
         # we can't reorder the axis
         with self.assertRaises(RuntimeError):
