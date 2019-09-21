@@ -79,5 +79,33 @@ struct TORCH_API ZeroPad2dOptions {
   TORCH_ARG(ExpandingArray<4>, padding);
 };
 
+// ============================================================================
+
+/// Options for a `D`-dimensional ConstantPad module.
+template <size_t D>
+struct TORCH_API ConstantPadOptions {
+  ConstantPadOptions(ExpandingArray<D*2> padding, double value) : padding_(padding), value_(value) {}
+
+  /// The size of the padding.
+  /// - If it is `int`, uses the same padding in all boundaries.
+  /// - If it is a 2-`tuple` (for ConstantPad1d), uses (padding_left, padding_right).
+  /// - If it is a 4-`tuple` (for ConstantPad2d), uses (padding_left, padding_right, padding_top, padding_bottom).
+  /// - If it is a 6-`tuple` (for ConstantPad3d), uses
+  ///   (padding_left, padding_right, padding_top, padding_bottom, padding_front, padding_back).
+  TORCH_ARG(ExpandingArray<D*2>, padding);
+
+  /// Fill value for constant padding.
+  TORCH_ARG(double, value);
+};
+
+/// `ConstantPadOptions` specialized for 1-D ConstantPad.
+using ConstantPad1dOptions = ConstantPadOptions<1>;
+
+/// `ConstantPadOptions` specialized for 2-D ConstantPad.
+using ConstantPad2dOptions = ConstantPadOptions<2>;
+
+/// `ConstantPadOptions` specialized for 3-D ConstantPad.
+using ConstantPad3dOptions = ConstantPadOptions<3>;
+
 } // namespace nn
 } // namespace torch

@@ -158,5 +158,75 @@ class TORCH_API ZeroPad2dImpl : public Cloneable<ZeroPad2dImpl> {
 /// module storage semantics.
 TORCH_MODULE(ZeroPad2d);
 
+// ============================================================================
+
+/// Base class for all (dimension-specialized) ConstantPad modules.
+template <size_t D, typename Derived>
+class TORCH_API ConstantPadImpl : public torch::nn::Cloneable<Derived> {
+ public:
+  ConstantPadImpl(ExpandingArray<D*2> padding, double value)
+      : ConstantPadImpl(ConstantPadOptions<D>(padding, value)) {}
+  explicit ConstantPadImpl(const ConstantPadOptions<D>& options_);
+
+  void reset() override;
+
+  /// Pretty prints the `ConstantPad{1,2}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  ConstantPadOptions<D> options;
+};
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ConstantPad1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies ConstantPad over a 1-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConstantPad1d to learn
+/// about the exact behavior of this module.
+class TORCH_API ConstantPad1dImpl : public ConstantPadImpl<1, ConstantPad1dImpl> {
+ public:
+  using ConstantPadImpl<1, ConstantPad1dImpl>::ConstantPadImpl;
+  Tensor forward(const Tensor& input);
+};
+
+/// A `ModuleHolder` subclass for `ConstantPad1dImpl`.
+/// See the documentation for `ConstantPad1dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(ConstantPad1d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ConstantPad2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies ConstantPad over a 2-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConstantPad2d to learn
+/// about the exact behavior of this module.
+class TORCH_API ConstantPad2dImpl : public ConstantPadImpl<2, ConstantPad2dImpl> {
+ public:
+  using ConstantPadImpl<2, ConstantPad2dImpl>::ConstantPadImpl;
+  Tensor forward(const Tensor& input);
+};
+
+/// A `ModuleHolder` subclass for `ConstantPad2dImpl`.
+/// See the documentation for `ConstantPad2dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(ConstantPad2d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ConstantPad3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies ConstantPad over a 3-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConstantPad3d to learn
+/// about the exact behavior of this module.
+class TORCH_API ConstantPad3dImpl : public ConstantPadImpl<3, ConstantPad3dImpl> {
+ public:
+  using ConstantPadImpl<3, ConstantPad3dImpl>::ConstantPadImpl;
+  Tensor forward(const Tensor& input);
+};
+
+/// A `ModuleHolder` subclass for `ConstantPad3dImpl`.
+/// See the documentation for `ConstantPad3dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(ConstantPad3d);
+
 } // namespace nn
 } // namespace torch
