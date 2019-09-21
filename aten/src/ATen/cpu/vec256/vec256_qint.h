@@ -37,7 +37,7 @@ namespace at {
 namespace vec256 {
 namespace {
 
-#if defined(__AVX__) && !defined(_MSC_VER)
+#if (defined(__AVX__) || defined(__AVX2__)) && !defined(_MSC_VER)
 
 #if defined(__AVX2__) && defined(__FMA__)
 template <typename T>
@@ -330,7 +330,7 @@ struct Vec256<c10::quint8> {
 
  private:
     __m256i vals __attribute__((aligned(64)));
- 
+
  public:
     // Broadcast constructor
     Vec256(const c10::quint8& val) {
