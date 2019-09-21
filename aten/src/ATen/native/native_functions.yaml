@@ -4106,7 +4106,7 @@
   variants: method
   dispatch:
     CPU: _lgamma__cpu
-    CUDA: legacy::cuda::_th_lgamma_
+    CUDA: _lgamma__cuda
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
@@ -4805,7 +4805,7 @@
   supports_named_tensor: True
   dispatch:
     CPU: _lgamma_out_cpu
-    CUDA: legacy::cuda::_th_lgamma_out
+    CUDA: _lgamma_out_cuda
 
 - func: lgamma(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -4813,7 +4813,7 @@
   variants: method, function
   dispatch:
     CPU: lgamma
-    CUDA: legacy::cuda::_th_lgamma
+    CUDA: lgamma
 
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
