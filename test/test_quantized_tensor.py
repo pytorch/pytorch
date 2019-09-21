@@ -18,7 +18,7 @@ class TestQuantizedTensor(TestCase):
         r = torch.ones(num_elements, dtype=torch.float)
         scale = 1.0
         zero_point = 2
-        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
+        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.quint8)
         self.assertEqual(qr.q_scale(), scale)
         self.assertEqual(qr.q_zero_point(), zero_point)
         self.assertTrue(qr.is_quantized)
@@ -38,7 +38,7 @@ class TestQuantizedTensor(TestCase):
         # Scalar Tensor
         # item
         r = torch.ones(1, dtype=torch.float)
-        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
+        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.quint8)
         self.assertEqual(qr.item(), 1)
         self.assertEqual(qr[0].item(), 1)
         # assignment
@@ -55,7 +55,7 @@ class TestQuantizedTensor(TestCase):
                          "quantization_scheme=torch.per_tensor_affine, " +
                          "scale=1.0, zero_point=2)")
         empty_r = torch.ones((0, 1), dtype=torch.float)
-        empty_qr = torch.quantize_linear(empty_r, scale, zero_point, torch.quint8)
+        empty_qr = torch.quantize_per_tensor(empty_r, scale, zero_point, torch.quint8)
         self.assertEqual(' '.join(str(empty_qr).split()),
                          "tensor([], size=(0, 1), dtype=torch.quint8, " +
                          "quantization_scheme=torch.per_tensor_affine, " +
@@ -65,7 +65,7 @@ class TestQuantizedTensor(TestCase):
         r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
         scale = 0.02
         zero_point = 2
-        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
+        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.quint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
@@ -118,13 +118,13 @@ class TestQuantizedTensor(TestCase):
         r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
         scale = 0.2
         zero_point = 2
-        qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
+        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
+        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.quint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-        qr = torch.quantize_linear(r, scale, zero_point, torch.qint32)
+        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint32)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
@@ -158,13 +158,13 @@ class TestQuantizedTensor(TestCase):
         r = torch.rand(10, 30, 2, 2, dtype=torch.float) * 4 - 2
         scale = 0.02
         zero_point = 1
-        qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
+        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint8)
         qr = qr.transpose(0, 1)
         rqr = qr.dequantize()
         # compare transpose + dequantized result with orignal transposed result
         self.assertTrue(np.allclose(r.numpy().transpose([1, 0, 2, 3]), rqr.numpy(), atol=2 / scale))
 
-        qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
+        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint8)
         qr1 = qr.permute([1, 0, 2, 3])
         qr2 = qr.transpose(0, 1)
         # compare int representation after transformations
@@ -213,7 +213,7 @@ class TestQuantizedTensor(TestCase):
         zero_point = 10
         r = torch.ones(15, dtype=torch.float) * 2
         for dtype in [torch.quint8, torch.qint8, torch.qint32]:
-            qr = torch.quantize_linear(r, scale, zero_point, dtype)
+            qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
             with tempfile.NamedTemporaryFile() as f:
                 # Serializing and Deserializing Tensor
                 torch.save(qr, f)
