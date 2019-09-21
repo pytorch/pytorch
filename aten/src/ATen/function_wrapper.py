@@ -175,7 +175,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op, impl::dispatchTypeId(type_set())${method_actuals_with_comma_prefix});
+        op, impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
 #endif
 }
 """)
