@@ -15,7 +15,7 @@ Tensor quantize_per_tensor_cpu(
   return quantizer->quantize(self);
 }
 
-Tensor quantize_linear_per_channel_cpu(
+Tensor quantize_per_channel_cpu(
     const Tensor& self,
     const Tensor& scales,
     const Tensor& zero_points,
