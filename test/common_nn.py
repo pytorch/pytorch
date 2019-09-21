@@ -1223,7 +1223,8 @@ new_module_tests = [
         constructor_args=(4, 5, 3),
         input_size=(0, 4, 10),
         cudnn=True,
-        desc='zero_batch'
+        desc='zero_batch',
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv1d_dilated',
@@ -1321,6 +1322,7 @@ new_module_tests = [
         cudnn=True,
         desc='zero_batch',
         check_with_long_tensor=True,
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv2d_groups',
@@ -1581,6 +1583,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         desc='zero_batch',
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv3d_groups',

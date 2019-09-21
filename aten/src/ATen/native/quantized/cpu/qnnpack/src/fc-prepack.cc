@@ -2,6 +2,7 @@
 #include <qnnpack/pack.h>
 #include <qnnpack_func.h>
 #include <cstring>
+#include <cstdlib>
 
 namespace qnnpack {
 PackBMatrix::PackBMatrix(
@@ -28,7 +29,7 @@ PackBMatrix::PackBMatrix(
   input_channels_ = input_channels;
   output_channels_ = output_channels;
   packed_weights_ =
-      malloc( n_stride * (k_stride * sizeof(uint8_t) + sizeof(int32_t)));
+      malloc(n_stride * (k_stride * sizeof(uint8_t) + sizeof(int32_t)));
   if (packed_weights_ == NULL) {
     pytorch_qnnp_log_error(
         "failed to allocate %zu bytes for packed weights",

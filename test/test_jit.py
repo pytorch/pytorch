@@ -39,7 +39,7 @@ from test_module.future_div import div_int_future, div_float_future
 from test_module.no_future_div import div_int_nofuture, div_float_nofuture
 
 # Standard library
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
@@ -86,6 +86,23 @@ if torch.cuda.is_available():
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY35 = sys.version_info >= (3, 5)
+
+def default_tensor_type(type):
+    type_str = torch.typename(type)
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            old_type = torch.Tensor().type()
+            torch.set_default_tensor_type(type_str)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                torch.set_default_tensor_type(old_type)
+
+        return wrapper
+
+    return decorator
 
 
 def LSTMCellF(input, hx, cx, *params):
@@ -1121,7 +1138,7 @@ graph(%x : Tensor,
             # aten::conv2d --> quantized::conv2d
             """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
+%r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::int_repr
         %a_intrepr = aten::int_repr(%a_quant)
@@ -1132,15 +1149,10 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %w_intrepr = aten::int_repr(%w_quant)
         # CHECK-NOT: aten::_dequantize_linear
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
-        %b_intrepr = aten::int_repr(%b_quant)
-        # CHECK-NOT: aten::_dequantize_linear
-        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
         # CHECK: quantized::conv_prepack
         # CHECK: quantized::conv2d
         # CHECK-NOT: aten::conv2d
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b_dequant, %c, %d, %e, %f)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %c, %d, %e, %f)
         # CHECK-NOT: aten::quantize_linear
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
         # CHECK: aten::int_repr
@@ -1151,7 +1163,7 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
             # addmm -> quantized::linear
             """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+%r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::int_repr
         %a_intrepr = aten::int_repr(%a_quant)
@@ -1162,16 +1174,11 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %w_intrepr = aten::int_repr(%w_quant)
         # CHECK-NOT: aten::_dequantize_linear
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
-        %b_intrepr = aten::int_repr(%b_quant)
-        # CHECK-NOT: aten::_dequantize_linear
-        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
         # CHECK: aten::t
-        # CHECK: quantized::fbgemm_linear_prepack
-        # CHECK: quantized::fbgemm_linear
+        # CHECK: quantized::linear_prepack
+        # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
-        %r = aten::addmm(%b_dequant, %a_dequant, %w_dequant, %4, %4)
+        %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
         # CHECK-NOT: aten::quantize_linear
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
         # CHECK: aten::int_repr
@@ -1182,7 +1189,7 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
             # matmul(with bias) -> quantized::linear
             """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+%r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::int_repr
         %a_intrepr = aten::int_repr(%a_quant)
@@ -1194,16 +1201,13 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         # CHECK-NOT: aten::_dequantize_linear
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
         # CHECK-NOT: aten::int_repr
-        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
-        %b_intrepr = aten::int_repr(%b_quant)
         # CHECK-NOT: aten::_dequantize_linear
-        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
         # CHECK: aten::t
-        # CHECK: quantized::fbgemm_linear_prepack
-        # CHECK: quantized::fbgemm_linear
+        # CHECK: quantized::linear_prepack
+        # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
         %output = aten::matmul(%a_dequant, %w_dequant)
-        %r = aten::add_(%output, %b_dequant, %4)
+        %r = aten::add_(%output, %b, %4)
         # CHECK-NOT: aten::quantize_linear
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
         # CHECK: aten::int_repr
@@ -1226,9 +1230,9 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
         # CHECK-NOT: aten::_dequantize_linear
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
         # CHECK: aten::t
-        # CHECK: quantized::fbgemm_linear_prepack
         # CHECK: prim::Constant()
-        # CHECK: quantized::fbgemm_linear
+        # CHECK: quantized::linear_prepack
+        # CHECK: quantized::linear
         # CHECK-NOT: aten::matmul
         %r = aten::matmul(%a_dequant, %w_dequant)
         # CHECK-NOT: aten::quantize_linear
@@ -1239,7 +1243,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
         %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
         return (%r_dequant)"""
         ]
-        for input_str in input_strs[1:]:
+        for input_str in input_strs:
             graph = parse_ir(input_str)
             torch._C._jit_pass_quant_fusion(graph)
             FileCheck().run(input_str, graph)
@@ -2471,6 +2475,15 @@ graph(%Ra, %Rb):
         does_decompose()
         doesnt_decompose()
 
+    def test_fuse_addmm(self):
+        class AddmmModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.mm(x, x) + x
+
+        x = torch.ones(3, 3)
+        f = io.BytesIO()
+        torch.onnx._export(AddmmModel(), x, f, verbose=False)
+
     def test_index_put(self):
         ten = torch.zeros(3, 3)
         mask = torch.tensor([[True, True, True],
@@ -3365,6 +3378,22 @@ def foo(x):
                     cu.define(full)
             else:
                 cu.define(full)
+
+    def test_namedtuple_python(self):
+        MyTuple = namedtuple('MyTuple', ['a'])
+
+        @torch.jit.unused
+        def fn():
+            # type: () -> MyTuple
+            return MyTuple(1)
+
+        # Only check compilation
+        @torch.jit.script
+        def fn2():
+            # type: () -> MyTuple
+            return fn()
+
+        FileCheck().check("NamedTuple").run(fn2.graph)
 
     def test_inherit_method(self):
         class A(torch.jit.ScriptModule):
@@ -6404,7 +6433,7 @@ a")
             return ten1
         ''')
 
-        lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]",
+        lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]", "(1, 1)",
                  "torch.jit.annotate(List[int], [])", "[2.5, 2.5]", "[[2], [2]]", "[[-.5], [2.2]]", "[[False], [True]]"]
 
         dtypes = ["", ", dtype=torch.float", ", dtype=torch.double", ", dtype=torch.half",
@@ -7673,13 +7702,13 @@ a")
         self._test_binary_op_shape(['mul', 'div', 'add', 'sub'], 0)
         self._test_binary_op_shape(['mul', 'div', 'add', 'sub'], 3)
 
+    @default_tensor_type(torch.FloatTensor)
     def test_wrapped_number(self):
         # Scalar's get converted to 'wrapped' tensors of default tensor type.
         # Wrapped tensors behave differently in certain promotion operations:
         # float_tensor * double -> float but wrapped_float * double -> double.
         # This can cause issues in check-trace if not handled correctly in
         # `aten::isclose()`.
-        torch.set_default_tensor_type('torch.FloatTensor')
 
         def foobar():
             x = -10000.0
@@ -10306,6 +10335,11 @@ a")
         r = M().create()
         self.assertEqual(r.dtype, torch.float)
         self.assertEqual(torch.zeros([1, 1, 2], dtype=torch.float), r)
+
+        def fn():
+            return torch.zeros((1, 2, 3))
+
+        self.checkScript(fn, ())
 
     def test_vararg_zeros(self):
         def foo():
@@ -17858,6 +17892,66 @@ class TestList(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
             self.checkScript(reassign_nested, (), optimize=False)
 
+    def test_min_bool_list(self):
+        def jit_min_list(a, b):
+            # type: (List[bool], List[bool]) -> List[bool]
+            return min(a, b)
+
+        self.checkScript(jit_min_list, ([True, False], [False, True]))
+
+    def test_min_max_list(self):
+        def jit_min_list(a, b):
+            # type: (List[int], List[int]) -> List[int]
+            return min(a, b)
+
+        def jit_min_list_float(a, b):
+            # type: (List[float], List[float]) -> List[float]
+            return min(a, b)
+
+        def jit_min_list_bool(a, b):
+            # type: (List[bool], List[bool]) -> List[bool]
+            return min(a, b)
+
+        def run_tests(func, a, b):
+            for t in zip(a, b):
+                self.checkScript(func, t)
+
+        args_left_int = [[1, 8, 8], [2, 1, 1], [], [2], [1], [1, 2, 3]]
+        args_right_int = [[2, 1, 1], [1, 8, 8], [], [1], [], [1, 2]]
+        run_tests(jit_min_list, args_left_int, args_right_int)
+
+        args_left_float = [[1., 8., 8.], [2., 1., 1.], [], [2.], [1.], [1., 2., 3.]]
+        args_right_float = [[2., 1., 1.], [1., 8., 8.], [], [1.], [], [1., 2.]]
+        run_tests(jit_min_list_float, args_left_float, args_right_float)
+
+        args_left_bool = [[], [], [], [False], [True], [False, True], [True, True],
+                          [False, False, False], [False, False, True]]
+        args_right_bool = [[], [False], [True], [True], [False], [True, True],
+                           [False, True], [False, False, True], [False, False, False]]
+        run_tests(jit_min_list_bool, args_left_bool, args_right_bool)
+
+        def jit_max_list(a, b):
+            # type: (List[int], List[int]) -> List[int]
+            return max(a, b)
+
+        def jit_max_list_float(a, b):
+            # type: (List[float], List[float]) -> List[float]
+            return max(a, b)
+
+        def jit_max_list_bool(a, b):
+            # type: (List[bool], List[bool]) -> List[bool]
+            return max(a, b)
+
+        args_left_int = [[1, 8, 8], [8, 1, 1], [], [1], [], [1, 2]]
+        args_right_int = [[8, 1, 1], [1, 8, 8], [], [2], [1], [1, 2, 3]]
+        run_tests(jit_max_list, args_left_int, args_right_int)
+
+        args_left_float = [[1., 8., 8.], [8., 1., 1.], [], [1.], [], [1., 2.]]
+        args_right_float = [[8., 1., 1.], [1., 8., 8.], [], [2.], [1.], [1., 2., 3.]]
+        run_tests(jit_max_list_float, args_left_float, args_right_float)
+
+        run_tests(jit_max_list_bool, args_left_bool, args_right_bool)
+
     def test_list_gather(self):
         def index():
             a = [1, 2, 3]
@@ -18468,6 +18562,52 @@ class TestList(JitTestCase):
         for l in [[], [1], [1, 2, 3]]:
             self.assertEqual(copy_list(l), l)
 
+    def test_min_max_single_list(self):
+        def min_intlist(li):
+            # type: (List[int]) -> int
+            return min(li)
+
+        def max_intlist(li):
+            # type: (List[int]) -> int
+            return max(li)
+
+        def min_boollist(li):
+            # type: (List[bool]) -> bool
+            return min(li)
+
+        def max_boollist(li):
+            # type: (List[bool]) -> bool
+            return max(li)
+
+        def min_floatlist(li):
+            # type: (List[float]) -> float
+            return min(li)
+
+        def max_floatlist(li):
+            # type: (List[float]) -> float
+            return max(li)
+
+
+        int_lists = [1], [2, 1, 2], [-3, 4, 2], [-2, -7, 1, 4], [2, 1, 0, 4], []
+
+        def check_list(fn, li):
+            if len(li) == 0:
+                self.checkScriptRaisesRegex(fn, (li,), Exception, "arg is an empty sequence")
+            else:
+                self.checkScript(fn, (li,))
+
+        for int_list in int_lists:
+            check_list(min_intlist, int_list)
+            check_list(max_intlist, int_list)
+
+            bool_li = list(map(lambda x: bool(x), int_list))
+            check_list(min_boollist, bool_li)
+            check_list(max_boollist, bool_li)
+
+            float_li = list(map(lambda x: float(x), int_list))
+            check_list(min_floatlist, float_li)
+            check_list(max_floatlist, float_li)
+
 
 class TestDict(JitTestCase):
     def dict(self):
@@ -18763,6 +18903,36 @@ class TestDict(JitTestCase):
         a_dict = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
         self.checkScript(fn, (a_dict, ('a', 'c')))
 
+    def test_ordered_dict(self):
+        def test_func(fn, inputs):
+            self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
+
+        def repeated_key():
+            return OrderedDict([(1, 2), (2, 3), (1, 4)])
+
+        test_func(repeated_key, ())
+
+        def no_args():
+            a = OrderedDict()
+            a["one"] = torch.tensor(1)
+            a["two"] = torch.tensor(2)
+
+        test_func(no_args, ())
+
+        def test_dict_constructor():
+            a = dict()
+            a["one"] = torch.tensor(1)
+            return a, dict([(1, 2), (2, 3), (1, 4)])  # noqa: C406
+
+        test_func(test_dict_constructor, ())
+
+        def test_dict_error():
+            a = dict()
+            a[1] = 2
+            return a
+
+        with self.assertRaisesRegex(Exception, "Arguments for call are not"):
+            torch.jit.script(test_dict_error)
 
 class TestClassType(JitTestCase):
     def test_get_with_method(self):
@@ -19407,6 +19577,10 @@ class TestClassType(JitTestCase):
                 # type: (int) -> int
                 return other + 1
 
+            def __setitem__(self, idx, val):
+                # type: (int, int) -> None
+                self.x = val * idx
+
         def add():
             return BinOps(4) + 3
         def sub():  # noqa: E306
@@ -19437,8 +19611,13 @@ class TestClassType(JitTestCase):
             return BinOps(4) ^ 3
         def getitem():  # noqa: E306
             return BinOps(4)[1]
+        def setitem():  # noqa: E306
+            a = BinOps(4)
+            a[1] = 5
+            return a.x
 
-        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem]
+        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem, setitem]
+
         if not PY2:
             ops.append(truediv)
         for func in ops:
