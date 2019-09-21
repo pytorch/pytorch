@@ -227,7 +227,7 @@ void qmaxpool_2d_nhwc_kernel(
 }
 
 template <typename T>
-inline void do_avg_pool_on_AVX2(
+void do_avg_pool_on_AVX2(
     typename T::underlying* i_p,
     typename T::underlying* o_p,
     int64_t& c,
@@ -243,7 +243,7 @@ inline void do_avg_pool_on_AVX2(
     int64_t stride_D,
     int64_t stride_H,
     int64_t stride_W) {
-#if defined(__AVX2__) and !defined(_MSC_VER)
+#if defined(__AVX2__) && !defined(_MSC_VER)
   constexpr auto vec_width = Vec256<T>::size() / 4;
   if (vec_width == 8) {
     for (; c + vec_width <= channel_size; c += vec_width) {
