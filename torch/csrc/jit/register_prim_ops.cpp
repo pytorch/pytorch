@@ -2514,6 +2514,15 @@ RegisterOperators reg2({
     // NOTE: this must be after the other list specializations so that operator
     // resolution doesn't pick this up first
     CREATE_MUTABLE_LIST_OPS("t", IValue),
+
+    // TODO: remove once tests that rely on
+    // https://github.com/pytorch/pytorch/issues/24856
+    // behavior have been fixed
+    Operator(
+      "aten::append(str[](a!) self, str? el) -> str[](a!)",
+      listAppend<std::string>,
+      aliasAnalysisFromSchema()),
+
 #undef CREATE_IMMUTABLE_LIST_OPS
 #undef CREATE_MUTABLE_LIST_OPS
 

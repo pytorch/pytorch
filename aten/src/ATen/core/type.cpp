@@ -351,14 +351,6 @@ MatchTypeReturn matchTypeVariables(
       type_env[vt->name()] = actual;
       return MatchTypeReturn::Success();
     } else if (auto unified = unifyTypes(it->second, actual)) {
-      // TODO: remove once tests that rely on old behavior have been fixed
-      if (it->second->isSubtypeOf(StringType::get())) {
-        if (auto opt_actual = actual->cast<OptionalType>()) {
-          if (opt_actual->getElementType()->isSubtypeOf(StringType::get())) {
-            type_env[vt->name()] = *unified;
-          }
-        }
-      }
       // note: unifyTypes allows subtyping in either direction, so actual
       // may be a supertype of the current binding. we're not responsible
       // for reporting the error, only for keeping type_env stable
