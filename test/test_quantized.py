@@ -517,7 +517,7 @@ class TestQuantizedOps(TestCase):
         assume(oW > 0)
 
         X = torch.from_numpy(X)
-        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                    dtype=torch_type)
 
         # Run reference on int_repr + round to avoid double rounding error.
@@ -565,7 +565,7 @@ class TestQuantizedOps(TestCase):
 
         X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
         X = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
-        qX = torch.quantize_linear(torch.from_numpy(X_nchw), scale=scale,
+        qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw), scale=scale,
                                    zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
 
         # Run reference on int_repr + round to avoid double rounding error.
@@ -655,7 +655,7 @@ class TestQuantizedOps(TestCase):
 
         X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
         X = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
-        qX = torch.quantize_linear(torch.from_numpy(X_nchw), scale=scale,
+        qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw), scale=scale,
                                    zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
 
         # Run reference on int_repr + round to avoid double rounding error.
