@@ -451,22 +451,27 @@ class ModForWrapping(torch.nn.Module):
         if quantized:
             self.mycat = nnq.QFunctional()
             self.myadd = nnq.QFunctional()
+            self.myadd_relu = nnq.QFunctional()
         else:
             self.mycat = nnq.FloatFunctional()
             self.myadd = nnq.FloatFunctional()
+            self.myadd_relu = nnq.FloatFunctional()
             self.mycat.observer = DummyObserver()
             self.myadd.observer = DummyObserver()
+            self.myadd_relu.observer = DummyObserver()
 
     def forward(self, x):
         y = self.mycat.cat([x, x, x])
         z = self.myadd.add(y, y)
-        return z
+        w = self.myadd_relu.add_relu(z, z)
+        return w
 
     @classmethod
     def from_float(cls, mod):
         new_mod = cls(quantized=True)
         new_mod.mycat = new_mod.mycat.from_float(mod.mycat)
         new_mod.myadd = new_mod.myadd.from_float(mod.myadd)
+        new_mod.myadd_relu = new_mod.myadd_relu.from_float(mod.myadd_relu)
         return new_mod
 
 class ResNetBase(torch.nn.Module):

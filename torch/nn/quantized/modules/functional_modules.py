@@ -24,6 +24,7 @@ class FloatFunctional(torch.nn.Module):
         - add
         - cat
         - mul
+        - add_relu
     """
     def __init__(self):
         super(FloatFunctional, self).__init__()
@@ -70,6 +71,14 @@ class FloatFunctional(torch.nn.Module):
         r = self.observer(r)
         return r
 
+    r"""Operation equivalent to ``relu(torch.add(x,y))``"""
+    def add_relu(self, x, y):
+        # type: (Tensor, Tensor) -> Tensor
+        r = torch.add(x, y)
+        r = torch.nn.functional.relu(r)
+        r = self.observer(r)
+        return r
+
 
 class QFunctional(torch.nn.Module):
     r"""Wrapper class for quantized operatitons.
@@ -93,6 +102,7 @@ class QFunctional(torch.nn.Module):
         - add
         - cat
         - mul
+        -add_relu
     """
     def __init__(self):
         super(QFunctional, self).__init__()
@@ -145,6 +155,12 @@ class QFunctional(torch.nn.Module):
         # type: (List[Tensor], int) -> Tensor
         return ops.quantized.cat(x, scale=self.scale,
                                  zero_point=self.zero_point, dim=dim)
+
+    r"""Operation equivalent to ``torch.ops.quantized.add_relu``"""
+    def add_relu(self, x, y):
+        # type: (Tensor, Tensor) -> Tensor
+        return ops.quantized.add_relu(x, y, scale=self.scale,
+                                      zero_point=self.zero_point)
 
     @classmethod
     def from_float(cls, mod):

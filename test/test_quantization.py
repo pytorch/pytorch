@@ -630,7 +630,11 @@ class ScriptabilityTest(QuantizationTestCase):
         self.assertEqual(self.qmodel_under_test.myadd.zero_point, loaded.myadd.zero_point)
         state_dict = self.qmodel_under_test.state_dict()
         self.assertTrue('myadd.zero_point' in state_dict.keys(),
-                        'zero point not in state dict for functional modules')
+                        'zero point not in state dict for myadd functional module')
+        self.assertTrue('mycat.zero_point' in state_dict.keys(),
+                        'zero point not in state dict for mycat functional module')
+        self.assertTrue('myadd_relu.scale' in state_dict.keys(),
+                        'scale not in state dict for myadd_relu functional module')
 
         x = torch.rand(10, 1, dtype=torch.float)
         xq = torch.quantize_linear(x, 1.0, 0, torch.qint8)
