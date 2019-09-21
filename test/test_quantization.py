@@ -634,7 +634,7 @@ class ScriptabilityTest(QuantizationTestCase):
             self.model_under_test)
         self.x = torch.rand(10)
         self.qx = torch.quantize_per_tensor(self.x.to(torch.float), scale=1.0,
-                                        zero_point=0, dtype=torch.qint32)
+                                            zero_point=0, dtype=torch.qint32)
 
     def test_scriptability_serialization(self):
         # test serialization of quantized functional modules
