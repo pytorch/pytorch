@@ -896,6 +896,7 @@ graph(%x : Tensor,
         class Observer(torch.nn.Module):
             def __init__(self):
                 super(Observer, self).__init__()
+                self.dtype = torch.quint8
 
             def forward(self, x):
                 return x
@@ -952,6 +953,7 @@ graph(%x : Tensor,
         class Observer(torch.nn.Module):
             def __init__(self):
                 super(Observer, self).__init__()
+                self.dtype = torch.quint8
 
             def forward(self, x):
                 return x
@@ -1024,6 +1026,7 @@ graph(%x : Tensor,
         class Observer(torch.nn.Module):
             def __init__(self):
                 super(Observer, self).__init__()
+                self.dtype = torch.quint8
 
             def forward(self, x):
                 return x
@@ -1079,10 +1082,53 @@ graph(%x : Tensor,
         test_module(M2, 'prim::CallMethod[name="forward"]', 0)
 
     @_tmp_donotuse_dont_inline_everything
+    def test_insert_observers_weight_dtype(self):
+        class Observer(torch.nn.Module):
+            def __init__(self, dtype=torch.quint8):
+                super(Observer, self).__init__()
+                self.dtype = dtype
+
+            def forward(self, x):
+                return x
+
+            @torch.jit.export
+            def calculate_qparams(self):
+                return torch.tensor([2.0]), torch.tensor([3])
+
+        class WeightObserver(Observer):
+            def __init__(self):
+                super(WeightObserver, self).__init__(torch.qint8)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 5, 3)
+
+            def forward(self, x):
+                return F.relu(self.conv(x))
+
+        def get_forward(m):
+            return m._c._get_method("forward")
+
+        m = torch.jit.script(M())
+        observer = torch.jit.script(Observer())
+        weight_observer = torch.jit.script(WeightObserver())
+        qconfig_dict = {
+            '':
+            QConfig(
+                activation=observer._c,
+                weight=weight_observer._c)
+        }
+        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+        assert m._c._get_module('conv')._get_module('observer_for_input.1')._get_attribute('dtype') != \
+            m._c._get_module('conv')._get_module('observer_for_weight.1')._get_attribute('dtype')
+
+    @_tmp_donotuse_dont_inline_everything
     def test_insert_quant_dequant(self):
         class Observer(torch.nn.Module):
             def __init__(self):
                 super(Observer, self).__init__()
+                self.dtype = torch.quint8
 
             def forward(self, x):
                 return x
