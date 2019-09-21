@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 import torch.cuda
-from torch.utils.checkpoint import checkpoint, checkpoint_sequential
+from torch.utils.checkpoint import CheckpointFunction, checkpoint, checkpoint_sequential
 import torch.hub as hub
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
@@ -281,6 +281,21 @@ class TestCheckpoint(TestCase):
         input_var = torch.randn(1, 100, requires_grad=True)
         out = checkpoint(run_fn, input_var, None)
         out.sum().backward()
+
+    def test_checkpoint_inplace_after_view(self):
+        # See https://github.com/pytorch/pytorch/issues/26546
+        def run_fn(input):
+            out = input + 1    # add a grad_fn
+            out = out.t()      # make a view
+            out = out.add_(0)  # apply in-place op
+            return out
+
+        input_var = torch.rand(1, requires_grad=True)
+        out = checkpoint(run_fn, input_var)
+        out.backward()
+
+        assert input_var.grad is not None
+        assert out.grad_fn.__class__ is CheckpointFunction._backward_cls
 
 
 class TestDataLoader(TestCase):
