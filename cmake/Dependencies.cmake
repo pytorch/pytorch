@@ -186,6 +186,13 @@ set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
 set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
   CACHE PATH "Confu-style dependencies binary directory")
 
+# ---[ Eigen BLAS for Mobile
+if(INTERN_BUILD_MOBILE AND INTERN_USE_EIGEN_BLAS)
+  set(USE_BLAS 1)
+  include(${CMAKE_CURRENT_LIST_DIR}/External/EigenBLAS.cmake)
+  list(APPEND Caffe2_DEPENDENCY_LIBS eigen_blas)
+endif()
+
 # ---[ pthreadpool
 # QNNPACK and NNPACK both depend on pthreadpool, but when building with libtorch
 # they should use the pthreadpool implementation under caffe2/utils/threadpool

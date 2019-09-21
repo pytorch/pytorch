@@ -10,15 +10,20 @@ struct QnnpackOperatorDeleter {
   }
 };
 
-// PackedWeight struct stores the original Weight and Bias as QNNPACK currently
-// does not support an unpack function.
-// Possible optimiation - For PyTorch Mobile, once the model is scripted and
-// serialized we don't need to call unpack, so we can save some memory by
-// checking for this case.
+// PackedWeight struct for QNNPACK stores the original Weight and Bias as
+// QNNPACK currently does not support an unpack function. Possible optimiation -
+// For PyTorch Mobile, once the model is scripted and serialized we don't need
+// to call unpack, so we can save some memory by checking for this case.
+// Input scale is set to null in pre-pack step. QNNPACK needs bias quantized with
+// input scale which is available at runtime in pytorch. During runtime if input
+// scale value changes then we requantize bias with the updated scale.
+// For inference we expect the graph to be static so the input scale should
+// not change across consecutive inference calls.
 struct PackedLinearWeightsQnnp {
   std::unique_ptr<qnnpack::PackBMatrix> w;
   at::Tensor orig_weight;
   at::Tensor bias;
+  c10::optional<double> input_scale;
   double w_scale;
   int64_t w_zp;
 };
@@ -27,6 +32,7 @@ struct PackedConvWeightsQnnp {
   std::unique_ptr<qnnpack::PrePackConvWeights> w;
   at::Tensor orig_weight;
   at::Tensor bias;
+  c10::optional<double> input_scale;
   std::vector<int64_t> kernel;
   double w_scale;
   int64_t w_zp;
