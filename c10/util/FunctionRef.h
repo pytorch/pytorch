@@ -50,7 +50,7 @@ function_ref(Callable &&callable,
                                 function_ref>::value>::type * = nullptr,
             typename std::enable_if<
                  std::is_convertible<
-                   decltype(callable(std::declval<Params>()...)),
+                   typename std::result_of<Callable&&(Params&&...)>::type,
                    Ret>::value>::type * = nullptr)
     : callback(callback_fn<typename std::remove_reference<Callable>::type>),
         callable(reinterpret_cast<intptr_t>(&callable)) {}
