@@ -1538,9 +1538,9 @@ class TestQNNPackOps(TestCase):
 
             zero_point_C = 127
             qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point,
-                                       dtype=torch.quint8)
+                                           dtype=torch.quint8)
             qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
-                                       dtype=torch.quint8)
+                                           dtype=torch.quint8)
 
             # Add ground truth
             C = (qA.dequantize() + qB.dequantize()).numpy()
@@ -1554,7 +1554,7 @@ class TestQNNPackOps(TestCase):
 
             A = torch.ones((0, 2), dtype=torch.float32)
             qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,
-                                       dtype=torch.quint8)
+                                           dtype=torch.quint8)
             qC = torch.ops.quantized.add(qA, qA, scale_C, zero_point_C)
             np.testing.assert_equal(qC.size(), qA.size(),
                                     "Quantized addition with batch size 0 failed.")
