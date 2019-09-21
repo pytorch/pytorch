@@ -6,7 +6,7 @@
 namespace at {
 namespace native {
 
-Tensor quantize_linear_cpu(
+Tensor quantize_per_tensor_cpu(
     const Tensor& self,
     double scale,
     int64_t zero_point,
