@@ -10,7 +10,7 @@ namespace nn {
 
 /// Options for a `D`-dimensional avgpool functional and module.
 template <size_t D>
-struct AvgPoolOptions {
+struct TORCH_API AvgPoolOptions {
   AvgPoolOptions(ExpandingArray<D> kernel_size)
       : kernel_size_(kernel_size), stride_(kernel_size) {}
 
@@ -46,7 +46,7 @@ using AvgPool3dOptions = AvgPoolOptions<3>;
 
 /// Options for a `D`-dimensional maxpool functional and module.
 template <size_t D>
-struct MaxPoolOptions {
+struct TORCH_API MaxPoolOptions {
   MaxPoolOptions(ExpandingArray<D> kernel_size)
       : kernel_size_(kernel_size), stride_(kernel_size) {}
 

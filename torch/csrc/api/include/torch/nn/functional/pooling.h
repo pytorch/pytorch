@@ -3,7 +3,7 @@
 #include <torch/nn/options/pooling.h>
 
 namespace torch {
-namespace nn{
+namespace nn {
 namespace functional {
 
 inline Tensor avg_pool1d(const Tensor& input, const AvgPool1dOptions& options) {
