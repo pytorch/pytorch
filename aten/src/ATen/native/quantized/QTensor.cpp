@@ -42,7 +42,7 @@ Tensor dequantize_quant(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
-Tensor dequantize_linear_cpu(
+Tensor dequantize_per_tensor_cpu(
     const Tensor& self,
     double scale,
     int64_t zero_point,
