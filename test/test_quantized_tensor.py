@@ -128,11 +128,11 @@ class TestQuantizedTensor(TestCase):
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
-    def test_qtensor_dequantize_linear(self):
+    def test_qtensor_dequantize_per_tensor(self):
         t = torch.arange(-10, 10, dtype=torch.int8)
         scale = 3
         zero_point = 2
-        qt = torch._dequantize_linear(t, scale, zero_point, torch.qint8)
+        qt = torch._dequantize_per_tensor(t, scale, zero_point, torch.qint8)
         qt2 = torch._per_tensor_affine_qtensor(t, scale, zero_point)
         self.assertEqual(qt, qt2.dequantize())
 
