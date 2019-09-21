@@ -526,6 +526,108 @@ TEST_F(ModulesTest, ReflectionPad2d) {
   }
 }
 
+TEST_F(ModulesTest, ReplicationPad1d) {
+  {
+    ReplicationPad1d m(ReplicationPad1dOptions(2));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
+    auto output = m(input);
+    auto expected = torch::tensor({{{0., 0., 0., 1., 2., 3., 3., 3.},
+                                    {4., 4., 4., 5., 6., 7., 7., 7.}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ReplicationPad1d m(ReplicationPad1dOptions({3, 1}));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
+    auto output = m(input);
+    auto expected = torch::tensor({{{0., 0., 0., 0., 1., 2., 3., 3.},
+                                    {4., 4., 4., 4., 5., 6., 7., 7.}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
+TEST_F(ModulesTest, ReplicationPad2d) {
+  {
+    ReplicationPad2d m(ReplicationPad2dOptions(2));
+    auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{0., 0., 0., 1., 2., 2., 2.},
+                                     {0., 0., 0., 1., 2., 2., 2.},
+                                     {0., 0., 0., 1., 2., 2., 2.},
+                                     {3., 3., 3., 4., 5., 5., 5.},
+                                     {6., 6., 6., 7., 8., 8., 8.},
+                                     {6., 6., 6., 7., 8., 8., 8.},
+                                     {6., 6., 6., 7., 8., 8., 8.}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ReplicationPad2d m(ReplicationPad2dOptions({1, 1, 2, 0}));
+    auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{0., 0., 1., 2., 2.},
+                                     {0., 0., 1., 2., 2.},
+                                     {0., 0., 1., 2., 2.},
+                                     {3., 3., 4., 5., 5.},
+                                     {6., 6., 7., 8., 8.}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
+TEST_F(ModulesTest, ReplicationPad3d) {
+  {
+    ReplicationPad3d m(ReplicationPad3dOptions(1));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{{0., 0., 1., 1.},
+                                      {0., 0., 1., 1.},
+                                      {2., 2., 3., 3.},
+                                      {2., 2., 3., 3.}},
+                                     {{0., 0., 1., 1.},
+                                      {0., 0., 1., 1.},
+                                      {2., 2., 3., 3.},
+                                      {2., 2., 3., 3.}},
+                                     {{4., 4., 5., 5.},
+                                      {4., 4., 5., 5.},
+                                      {6., 6., 7., 7.},
+                                      {6., 6., 7., 7.}},
+                                     {{4., 4., 5., 5.},
+                                      {4., 4., 5., 5.},
+                                      {6., 6., 7., 7.},
+                                      {6., 6., 7., 7.}}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ReplicationPad3d m(ReplicationPad3dOptions({1, 2, 1, 2, 1, 2}));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{{0., 0., 1., 1., 1.},
+                                      {0., 0., 1., 1., 1.},
+                                      {2., 2., 3., 3., 3.},
+                                      {2., 2., 3., 3., 3.},
+                                      {2., 2., 3., 3., 3.}},
+                                     {{0., 0., 1., 1., 1.},
+                                      {0., 0., 1., 1., 1.},
+                                      {2., 2., 3., 3., 3.},
+                                      {2., 2., 3., 3., 3.},
+                                      {2., 2., 3., 3., 3.}},
+                                     {{4., 4., 5., 5., 5.},
+                                      {4., 4., 5., 5., 5.},
+                                      {6., 6., 7., 7., 7.},
+                                      {6., 6., 7., 7., 7.},
+                                      {6., 6., 7., 7., 7.}},
+                                     {{4., 4., 5., 5., 5.},
+                                      {4., 4., 5., 5., 5.},
+                                      {6., 6., 7., 7., 7.},
+                                      {6., 6., 7., 7., 7.},
+                                      {6., 6., 7., 7., 7.}},
+                                     {{4., 4., 5., 5., 5.},
+                                      {4., 4., 5., 5., 5.},
+                                      {6., 6., 7., 7., 7.},
+                                      {6., 6., 7., 7., 7.},
+                                      {6., 6., 7., 7., 7.}}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in=3, out=4, with_bias=true)");

@@ -31,5 +31,36 @@ Tensor ReflectionPad2dImpl::forward(const Tensor& input) {
 template class ReflectionPadImpl<1, ReflectionPad1dImpl>;
 template class ReflectionPadImpl<2, ReflectionPad2dImpl>;
 
+// ============================================================================
+
+template <size_t D, typename Derived>
+ReplicationPadImpl<D, Derived>::ReplicationPadImpl(const ReplicationPadOptions<D>& options_)
+    : options(options_) {}
+
+template <size_t D, typename Derived>
+void ReplicationPadImpl<D, Derived>::reset() {}
+
+template <size_t D, typename Derived>
+void ReplicationPadImpl<D, Derived>::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::ReplicationPad" << D << "d"
+         << "(padding=" << options.padding() << ")";
+}
+
+Tensor ReplicationPad1dImpl::forward(const Tensor& input) {
+  return F::pad(input, PadOptions(options.padding()).mode("replicate"));
+}
+
+Tensor ReplicationPad2dImpl::forward(const Tensor& input) {
+  return F::pad(input, PadOptions(options.padding()).mode("replicate"));
+}
+
+Tensor ReplicationPad3dImpl::forward(const Tensor& input) {
+  return F::pad(input, PadOptions(options.padding()).mode("replicate"));
+}
+
+template class ReplicationPadImpl<1, ReplicationPad1dImpl>;
+template class ReplicationPadImpl<2, ReplicationPad2dImpl>;
+template class ReplicationPadImpl<3, ReplicationPad3dImpl>;
+
 } // namespace nn
 } // namespace torch
