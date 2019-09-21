@@ -1456,7 +1456,6 @@ graph(%input, %weight):
         m = torch.jit.script(M())
         data = torch.randn((5, 5), dtype=torch.float)
         ref_res = m._c._get_method('forward')(data)
-        print(m._c._get_method('forward').graph)
         torch._C._jit_pass_fold_prepack(m._c, 'forward', torch.jit.script(PackedParams())._c)
         res = m._c._get_method('forward')(data)
         # check attribute and graph
@@ -1472,12 +1471,6 @@ graph(%input, %weight):
         self.assertEqual(ref_w, w)
         self.assertEqual(ref_b, b)
         self.assertEqual(ref_res, res)
-
-
-
-
-
-        m._c._dump(True, False, False)
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->

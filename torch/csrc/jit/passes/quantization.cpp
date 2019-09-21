@@ -916,13 +916,12 @@ void FoldPrepackedWeightIntoModule(
     const std::string& method_name,
     const script::Module& wrapper_module) {
   const std::string pattern = R"(
-graph(%self, %a_quant, %r_scale, %r_zero_point):
+graph(%self):
    %b = prim::GetAttr[name="bias"](%self)
    %w_quant = prim::GetAttr[name="_quantized_weight"](%self)
    %w_quant_t = aten::t(%w_quant)
    %packed_params = quantized::linear_prepack(%w_quant_t, %b)
-   %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
-   return (%r))";
+   return (%packed_params))";
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
   script::parseIR(pattern, &pattern_graph, vmap);
@@ -944,11 +943,10 @@ graph(%self, %a_quant, %r_scale, %r_zero_point):
   }
 
   std::string replacement = R"(
-graph(%self, %a_quant, %r_scale, %r_zero_point):
+graph(%self):
    %m = prim::GetAttr[name="_packed_linear_weight_bias"](%self)
    %packed_params = prim::GetAttr[name="_packed_params"](%m)
-   %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
-   return (%r))";
+   return (%packed_params))";
 
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(pattern, replacement);
