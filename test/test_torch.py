@@ -1385,6 +1385,12 @@ class _TestTorchMixin(object):
             res2[i] = math.pow(3, m1[i][4])
         self.assertEqual(res1, res2)
 
+        # resize behavior for exp == 1
+        m1 = torch.randn(2, 2)
+        out = torch.randn([0])
+        torch.pow(m1, 1, out=out)
+        self.assertEqual(out, m1)
+
     def _test_cop(self, torchfn, mathfn):
         def reference_implementation(res2):
             for i, j in iter_indices(sm1):
@@ -7296,7 +7302,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(res1, empty)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    'expected a non-empty list of Tensors'):
+                                    'non-empty list of Tensors'):
             torch.cat([], dim=1)
 
     def test_cat_empty(self, device):
@@ -11789,7 +11795,7 @@ class TestTorchDeviceType(TestCase):
             ("expm1", doubles, True, True, 'cpu'),
             ("expm1", doubles, False, True, 'cuda'),
             ("floor", doubles, True, True, 'cpu'),
-            ("floor", doubles, False, True, 'cuda'),
+            ("floor", doubles, True, True, 'cuda'),
             ("frac", doubles, True, True, 'cpu'),
             ("frac", doubles, False, True, 'cuda'),
             ("log", positives, True, True, 'cpu'),

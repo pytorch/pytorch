@@ -153,10 +153,17 @@ ${return_type} VariableType::${api_name}(${type_method_formals}) {
 }
 """)
 
-WRAPPER_REGISTRATION = CodeTemplate("""\
+UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
   .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
+
+WRAPPER_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .kernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
@@ -463,8 +470,12 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
             body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body))
-        wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
-            declaration, formal_types=formal_types))
+        if declaration['use_c10_dispatcher'] == 'full':
+            wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+                declaration, formal_types=formal_types))
+        else:
+            wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                declaration, formal_types=formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,
