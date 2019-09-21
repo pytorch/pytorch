@@ -621,7 +621,7 @@
   pdist: not_implemented("_pdist_backward")
 
 - name: cdist(Tensor x1, Tensor x2, float p=2) -> Tensor
-  x1: _cdist_backward(grad, x1, x2, p, result)
+  x1: _cdist_backward(grad.contiguous(), x1, x2, p, result)
   x2: _cdist_backward(grad.transpose(-1, -2).contiguous(), x2, x1, p, result.transpose(-1, -2).contiguous())
 
 - name: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
