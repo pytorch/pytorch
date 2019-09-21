@@ -3112,7 +3112,7 @@ class TestNN(NNTestCase):
         self._test_EmbeddingBag_per_sample_weights_and_no_offsets(self)
 
     @unittest.skip("temporarily disable until failures are fixed.")
-    #@unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    # @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_EmbeddingBag_per_sample_weights_and_no_offsets_cuda(self):
         self._test_EmbeddingBag_per_sample_weights_and_no_offsets(self, device='cuda')
 
