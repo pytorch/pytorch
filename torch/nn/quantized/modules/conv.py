@@ -105,16 +105,15 @@ class Conv2d(torch.nn.Module):
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
         self._packed_params = torch.ops.quantized.conv_prepack(
-            w.permute([0, 2, 3, 1]), b, self.stride, self.padding, self.dilation, self.groups)
+            w, b, self.stride, self.padding, self.dilation, self.groups)
         self.weight_scale = w.q_scale()
 
     def _weight_bias(self):
-        (w, b) = torch.ops.quantized.conv_unpack(self._packed_params)
-        return (w.permute([0, 3, 1, 2]), b)
+        return torch.ops.quantized.conv_unpack(self._packed_params)
 
     def weight(self):
         (w, b) = torch.ops.quantized.conv_unpack(self._packed_params)
-        return w.permute([0, 3, 1, 2])
+        return w
 
     def bias(self):
         (w, b) = torch.ops.quantized.conv_unpack(self._packed_params)
@@ -125,12 +124,11 @@ class Conv2d(torch.nn.Module):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
-        output = ops.quantized.conv2d(input.permute([0, 2, 3, 1]),
-                                      self._packed_params,
-                                      self.stride, self.padding,
-                                      self.dilation, self.groups,
-                                      self.scale, self.zero_point)
-        return output.permute([0, 3, 1, 2])
+        return ops.quantized.conv2d(input,
+                                    self._packed_params,
+                                    self.stride, self.padding,
+                                    self.dilation, self.groups,
+                                    self.scale, self.zero_point)
 
     # ===== Serialization methods =====
     # The special consideration here is that we have to unpack the weights into their
