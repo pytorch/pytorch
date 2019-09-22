@@ -170,6 +170,7 @@ class MinMaxObserver(ObserverBase):
         #  aten/src/ATen/native/quantized/cpu/qconv.cpp
         #  This is not the optimal choice for non x86 backends as
         #  lose a bit of precision for activations.
+        self.averaging_constant = kwargs.pop('averaging_constant', 0.01)
 
         super(MinMaxObserver, self).__init__(**kwargs)
         self.min_val = None
@@ -190,8 +191,10 @@ class MinMaxObserver(ObserverBase):
             min_val = torch.min(x)
             max_val = torch.max(x)
         else:
-            min_val = torch.min(torch.min(x), min_val)
-            max_val = torch.max(torch.max(x), max_val)
+            min_val = torch.min(x)
+            max_val = torch.max(x)
+            min_val = self.min_val + self.averaging_constant * (min_val - self.min_val)
+            max_val = self.max_val + self.averaging_constant * (max_val - self.max_val)
         self.min_val = min_val
         self.max_val = max_val
         return x
@@ -226,6 +229,8 @@ class PerChannelMinMaxObserver(ObserverBase):
     """
 
     def __init__(self, ch_axis=0, **kwargs):
+        self.averaging_constant = kwargs.pop('averaging_constant', 0.01)
+
         super(PerChannelMinMaxObserver, self).__init__(**kwargs)
         self.ch_axis = ch_axis
         self.min_vals = None
@@ -254,8 +259,10 @@ class PerChannelMinMaxObserver(ObserverBase):
                 min_vals = torch.min(y, 1)[0]
                 max_vals = torch.max(y, 1)[0]
             else:
-                min_vals = torch.min(torch.min(y, 1)[0], min_vals)
-                max_vals = torch.max(torch.max(y, 1)[0], max_vals)
+                min_vals = torch.min(y, 1)[0]
+                max_vals = torch.max(y, 1)[0]
+                min_vals = self.min_vals + self.averaging_constant * (min_vals - self.min_vals)
+                max_vals = self.max_vals + self.averaging_constant * (max_vals - self.max_vals)
             self.min_vals = min_vals
             self.max_vals = max_vals
             return x
@@ -298,6 +305,7 @@ class HistogramObserver(ObserverBase):
 
     def __init__(self, bins=2048, **kwargs):
         # bins: The number of bins used for histogram calculation.
+        self.averaging_constant = kwargs.pop('averaging_constant', 0.01)
         super(HistogramObserver, self).__init__(**kwargs)
         self.bins = bins
         self.histogram = None
@@ -499,13 +507,13 @@ class HistogramObserver(ObserverBase):
                 new_histogram = torch.histc(x, self.bins, min=new_min, max=new_max)
                 # combine the existing histogram and new histogram into 1 histogram
                 combined_histogram = torch.zeros_like(self.histogram)
-                combined_min = torch.min(new_min, self.min_val)
-                combined_max = torch.max(new_max, self.max_val)
+                combined_min = self.min_val + self.averaging_constant * (new_min - self.min_val)
+                combined_max = self.max_val + self.averaging_constant * (new_max - self.max_val)
                 self._combine_histograms(
                     combined_histogram,
                     combined_min.item(),
                     combined_max.item(),
-                    self.histogram,
+                    self.histogram * (1-self.averaging_constant),
                     self.min_val.item(),
                     self.max_val.item(),
                 )
@@ -513,7 +521,7 @@ class HistogramObserver(ObserverBase):
                     combined_histogram,
                     combined_min.item(),
                     combined_max.item(),
-                    new_histogram,
+                    self.averaging_constant * new_histogram,
                     new_min.item(),
                     new_max.item(),
                 )
