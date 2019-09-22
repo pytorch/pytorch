@@ -1153,8 +1153,8 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::unbind", "Dimname"},
     #endif
         {"aten::quantize_per_tensor", ""},
-        {"aten::quantize_linear_per_channel", ""},
-        {"aten::_dequantize_linear", ""},
+        {"aten::quantize_per_channel", ""},
+        {"aten::_dequantize_per_tensor", ""},
         {"aten::q_per_channel_axis", ""},
         {"aten::qscheme", ""},
         {"aten::to", "dtype_layout"},
