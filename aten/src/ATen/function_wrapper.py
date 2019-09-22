@@ -713,7 +713,7 @@ def named_guard(option, tensors, tensorlists):
 if ({named_conditions}) {{
     AT_ERROR(
         "{op} is not yet supported with named tensors. Please drop names via "
-        "`tensor = tensor.renamed(None)`, call the op with an unnamed tensor, "
+        "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
         "and set names on the result of the operation.");
 }}""".format(named_conditions=' || '.join(named_conditions), op=option['name']))
 

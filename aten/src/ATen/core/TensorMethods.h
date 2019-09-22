@@ -132,21 +132,21 @@ inline int64_t Tensor::_version() const {
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
-inline Tensor & Tensor::names_(c10::optional<DimnameList> names) const {
+inline Tensor & Tensor::rename_(c10::optional<DimnameList> names) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::names_(const_cast<Tensor&>(*this), names);
+    return TypeDefault::rename_(const_cast<Tensor&>(*this), names);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)");
+    static auto table = globalATenDispatch().getOpTable("aten::rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, c10::optional<DimnameList>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), names);
 #endif
 }
 #endif
 #ifdef BUILD_NAMEDTENSOR
-inline Tensor Tensor::renamed(c10::optional<DimnameList> names) const {
+inline Tensor Tensor::rename(c10::optional<DimnameList> names) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::renamed(const_cast<Tensor&>(*this), names);
+    return TypeDefault::rename(const_cast<Tensor&>(*this), names);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::renamed(Tensor(a) self, Dimname[]? names) -> Tensor(a)");
+    static auto table = globalATenDispatch().getOpTable("aten::rename(Tensor(a) self, Dimname[]? names) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, c10::optional<DimnameList>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), names);
 #endif
 }
