@@ -148,17 +148,18 @@ namespace test_reverse_iteration {
 }
 
 namespace test_random_access {
-  static_assert('h' == string_view("hello")[0], "");
-  static_assert('e' == string_view("hello")[1], "");
-  static_assert('l' == string_view("hello")[2], "");
-  static_assert('l' == string_view("hello")[3], "");
-  static_assert('o' == string_view("hello")[4], "");
+  constexpr string_view hello = "hello";
+  static_assert('h' == hello[0], "");
+  static_assert('e' == hello[1], "");
+  static_assert('l' == hello[2], "");
+  static_assert('l' == hello[3], "");
+  static_assert('o' == hello[4], "");
 
-  static_assert('h' == string_view("hello").at(0), "");
-  static_assert('e' == string_view("hello").at(1), "");
-  static_assert('l' == string_view("hello").at(2), "");
-  static_assert('l' == string_view("hello").at(3), "");
-  static_assert('o' == string_view("hello").at(4), "");
+  static_assert('h' == hello.at(0), "");
+  static_assert('e' == hello.at(1), "");
+  static_assert('l' == hello.at(2), "");
+  static_assert('l' == hello.at(3), "");
+  static_assert('o' == hello.at(4), "");
 
   TEST(StringViewTest, whenCallingAccessOperatorOutOfRange_thenThrows) {
     expectThrows<std::out_of_range>([] {
@@ -221,14 +222,22 @@ namespace test_empty {
 }
 
 namespace test_remove_prefix {
-  constexpr string_view remove_prefix(string_view input, size_t len) {
+  AT_CPP14_CONSTEXPR string_view remove_prefix(string_view input, size_t len) {
     input.remove_prefix(len);
     return input;
   }
 
-  static_assert(remove_prefix(string_view("hello"), 0) == string_view("hello"), "");
-  static_assert(remove_prefix(string_view("hello"), 1) == string_view("ello"), "");
-  static_assert(remove_prefix(string_view("hello"), 5) == string_view(""), "");
+  TEST(StringViewTest, whenRemovingValidPrefix_thenWorks) {
+    #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
+      static_assert(remove_prefix(string_view("hello"), 0) == string_view("hello"), "");
+      static_assert(remove_prefix(string_view("hello"), 1) == string_view("ello"), "");
+      static_assert(remove_prefix(string_view("hello"), 5) == string_view(""), "");
+    #endif
+
+    EXPECT_EQ(remove_prefix(string_view("hello"), 0), string_view("hello"));
+    EXPECT_EQ(remove_prefix(string_view("hello"), 1), string_view("ello"));
+    EXPECT_EQ(remove_prefix(string_view("hello"), 5), string_view(""));
+  }
 
   TEST(StringViewTest, whenRemovingTooLargePrefix_thenThrows) {
     expectThrows<std::out_of_range>([] {
@@ -238,14 +247,22 @@ namespace test_remove_prefix {
 }
 
 namespace test_remove_suffix {
-  constexpr string_view remove_suffix(string_view input, size_t len) {
+  AT_CPP14_CONSTEXPR string_view remove_suffix(string_view input, size_t len) {
     input.remove_suffix(len);
     return input;
   }
 
-  static_assert(remove_suffix(string_view("hello"), 0) == string_view("hello"), "");
-  static_assert(remove_suffix(string_view("hello"), 1) == string_view("hell"), "");
-  static_assert(remove_suffix(string_view("hello"), 5) == string_view(""), "");
+  TEST(StringViewTest, whenRemovingValidSuffix_thenWorks) {
+    #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
+      static_assert(remove_suffix(string_view("hello"), 0) == string_view("hello"), "");
+      static_assert(remove_suffix(string_view("hello"), 1) == string_view("hell"), "");
+      static_assert(remove_suffix(string_view("hello"), 5) == string_view(""), "");
+    #endif
+
+    EXPECT_EQ(remove_suffix(string_view("hello"), 0), string_view("hello"));
+    EXPECT_EQ(remove_suffix(string_view("hello"), 1), string_view("hell"));
+    EXPECT_EQ(remove_suffix(string_view("hello"), 5), string_view(""));
+  }
 
   TEST(StringViewTest, whenRemovingTooLargeSuffix_thenThrows) {
     expectThrows<std::out_of_range>([] {
@@ -255,25 +272,39 @@ namespace test_remove_suffix {
 }
 
 namespace test_swap_function {
-  constexpr std::pair<string_view, string_view> get() {
+  AT_CPP14_CONSTEXPR std::pair<string_view, string_view> get() {
     string_view first = "first";
     string_view second = "second";
     swap(first, second);
     return std::make_pair(first, second);
   }
-  static_assert(string_view("second") == get().first, "");
-  static_assert(string_view("first") == get().second, "");
+  TEST(StringViewTest, testSwapFunction) {
+    #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
+      static_assert(string_view("second") == get().first, "");
+      static_assert(string_view("first") == get().second, "");
+    #endif
+
+    EXPECT_EQ(string_view("second"), get().first);
+    EXPECT_EQ(string_view("first"), get().second);
+  }
 }
 
 namespace test_swap_method {
-  constexpr std::pair<string_view, string_view> get() {
+  AT_CPP14_CONSTEXPR std::pair<string_view, string_view> get() {
     string_view first = "first";
     string_view second = "second";
     first.swap(second);
     return std::make_pair(first, second);
   }
-  static_assert(string_view("second") == get().first, "");
-  static_assert(string_view("first") == get().second, "");
+  TEST(StringViewTest, testSwapMethod) {
+    #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
+      static_assert(string_view("second") == get().first, "");
+      static_assert(string_view("first") == get().second, "");
+    #endif
+
+    EXPECT_EQ(string_view("second"), get().first);
+    EXPECT_EQ(string_view("first"), get().second);
+  }
 }
 
 namespace test_copy {

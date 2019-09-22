@@ -32,9 +32,13 @@ namespace detail {
 #endif
 
 inline constexpr string_view extract(string_view prefix, string_view suffix, string_view str) {
+#if !defined(__CUDA_ARCH__)  // CUDA doesn't like std::logic_error in device code
   return (!str.starts_with(prefix) || !str.ends_with(suffix))
     ? throw std::logic_error("Invalid pattern")
     : str.substr(prefix.size(), str.size() - prefix.size() - suffix.size());
+#else
+  return str.substr(prefix.size(), str.size() - prefix.size() - suffix.size());
+#endif
 }
 
 template<typename T>
@@ -61,8 +65,8 @@ inline C10_HOST_CONSTEXPR uint64_t type_index_impl() {
 template<typename T>
 inline C10_HOST_CONSTEXPR type_index get_type_index() noexcept {
   #if !defined(__CUDA_ARCH__)
-    // To enforce that this is really computed at compile time, we pass the crc
-    // checksum through std::integral_constant.
+    // To enforce that this is really computed at compile time, we pass the
+    // type index through std::integral_constant.
     return type_index{std::integral_constant<
         uint64_t,
         detail::type_index_impl<guts::remove_cv_t<guts::decay_t<T>>>()
