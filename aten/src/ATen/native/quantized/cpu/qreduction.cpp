@@ -8,7 +8,7 @@ namespace native {
 Tensor &quantized_mean_out_cpu(Tensor &result, const Tensor &self, IntArrayRef dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
   auto self_dequantized = self.dequantize();
-  auto result_dequantized = at::native::mean_cpu(self_dequantized, dim, keepdim, opt_dtype);
+  auto result_dequantized = at::native::mean_cpu_gpu(self_dequantized, dim, keepdim, opt_dtype);
   result = at::quantize_per_tensor(result_dequantized, self.q_scale(), self.q_zero_point(), opt_dtype.value_or(self.scalar_type()));
   return result;
 }
