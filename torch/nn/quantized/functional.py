@@ -101,8 +101,8 @@ def conv2d(input, weight, bias,
         >>> scale, zero_point = 1.0, 0
         >>> dtype = torch.quint8
         >>>
-        >>> q_filters = torch.quantize_linear(filters, scale, zero_point, dtype)
-        >>> q_inputs = torch.quantize_linear(inputs, scale, zero_point, dtype)
+        >>> q_filters = torch.quantize_per_tensor(filters, scale, zero_point, dtype)
+        >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype)
         >>> qF.conv2d(q_inputs, q_filters, bias, scale, zero_point, padding=1)
     """  # noqa: E501
     if padding_mode != 'zeros':
