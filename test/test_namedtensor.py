@@ -470,6 +470,28 @@ class TestNamedTensor(TestCase):
         t = torch.randn(2, 3, names=('N', 'C'))
         self.assertEqual(t.t().names, ['C', 'N'])
 
+    def test_resize(self):
+        for device in torch.testing.get_all_device_types():
+            named = torch.randn(2, names=('N',), device=device)
+            named.resize_([2])
+            self.assertEqual(named.names, ['N'])
+
+            with self.assertRaisesRegex(RuntimeError, "Cannot resize named tensor"):
+                named.resize_([3])
+
+            other_named = torch.randn(2, names=('N',), device=device)
+            named.resize_as_(other_named)
+            self.assertEqual(other_named.names, ['N'])
+
+            unnamed = torch.randn(2, device=device)
+            with self.assertRaisesRegex(
+                    RuntimeError, r'names .* are not the same as the computed output names'):
+                named.resize_as_(unnamed)
+
+            unnamed = torch.randn(1, device=device)
+            unnamed.resize_as_(named)
+            self.assertEqual(unnamed.names, ['N'])
+
     def test_info_smoke(self):
         # Smoke test for info functions / methods / attributes on named tensors.
         tensor = torch.empty(1, 1, names=('N', 'D'))
@@ -602,6 +624,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('div'),
             fn_method_and_inplace('mul'),
             fn_method_and_inplace('sub'),
+            fn_method_and_inplace('pow'),
             method('copy_'),
         ]
         tests = flatten(tests)
@@ -610,6 +633,22 @@ class TestNamedTensor(TestCase):
             test_basic(op)
             test_wildcard(op)
             test_mixed_unnamed_named(op, is_inplace=name.endswith('_'))
+
+    def test_pow_special(self):
+        # There are a few pow cases that don't go through TensorIterator.
+        # Test them here.
+        for device in torch.testing.get_all_device_types():
+            named = torch.randn(2, 3, names=('N', 'C'), device=device)
+            unnamed = torch.randn([0], device=device)
+
+            result = torch.pow(named, 0, out=unnamed.clone())
+            self.assertEqual(result.names, named.names)
+
+            result = torch.pow(named, 1, out=unnamed.clone())
+            self.assertEqual(result.names, named.names)
+
+            result = torch.pow(1, named, out=unnamed.clone())
+            self.assertEqual(result.names, named.names)
 
     def test_out_fn_semantics(self):
         out_fn = torch.abs
@@ -892,9 +931,12 @@ class TestNamedTensor(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
                 op(t, [None, 'C'])
 
-        def test_out_variant(op_name, device):
+        def test_out_variant(op_name, output_lambda, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            out = torch.empty([0], device=device)
+            if output_lambda:
+                out = output_lambda(t)
+            else:
+                out = torch.empty([0], device=device)
             getattr(torch, op_name)(t, 'C', out=out)
             check_output(out, ['N', 'L'])
 
@@ -902,6 +944,10 @@ class TestNamedTensor(TestCase):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
             op = getattr(torch, op_name)
             check_output(op(t, 'C', keepdim=True), ['N', 'C', 'L'])
+
+        def get_minmax_output(t):
+            return (torch.empty([0], device=t.device),
+                    torch.empty([0], device=t.device, dtype=torch.long))
 
         Case = namedtuple('Case', [
             'op_name',
@@ -920,6 +966,8 @@ class TestNamedTensor(TestCase):
             Case('std', True, True, True, True, None),
             Case('std_mean', True, True, False, True, None),
             Case('var_mean', True, True, False, True, None),
+            Case('min', True, False, True, True, get_minmax_output),
+            Case('max', True, False, True, True, get_minmax_output),
             Case('unbind', False, False, False, False, None),
         ]
 
@@ -930,7 +978,7 @@ class TestNamedTensor(TestCase):
             if testcase.supports_keepdim:
                 test_keepdim(op_name, device)
             if testcase.supports_out_variant:
-                test_out_variant(op_name, device)
+                test_out_variant(op_name, testcase.output_lambda, device)
             if testcase.supports_complete_reduce:
                 test_complete_reduce(op_name, device)
             if testcase.supports_multidim_reduce:
