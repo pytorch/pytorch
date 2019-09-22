@@ -64,22 +64,24 @@ class ObserverBase(ABC, nn.Module):
                 "must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point "
             )
-            return torch.tensor([1.0]), torch.tensor([0])
+            return torch.tensor([1.0], dtype = torch.double), torch.tensor([0], dtype = torch.long)
 
         for i in range(len(min_vals)):
             assert (
                 min_vals[i] <= max_vals[i]
             ), "min {} should be less than max {}".format(min_vals[i], max_vals[i])
 
-        scales = torch.ones(min_vals.size())
-        zero_points = torch.ones(min_vals.size())
+        scales = torch.ones(min_vals.size(), dtype=torch.double)
+        zero_points = torch.ones(min_vals.size(), dtype=torch.long)
         for i in range(len(scales)):
             qparam = self._calculate_qparams(
                 min_vals[i], max_vals[i]
             )
-            scales[i] = float(qparam[0])
+            scales[i] = qparam[0]
             zero_points[i] = int(qparam[1])
-
+        # Needed to ensure that floating point numerics match for fake-quantization numerics
+        # test_fake_quant.py: test_numerical_consistency_per_channel
+        scales = scales.to(torch.float).to(torch.double)
         return scales, zero_points
 
     def _calculate_qparams(self, min_val, max_val):
@@ -591,13 +593,11 @@ def default_observer(**kwargs):
 
 def default_l2_observer(**kwargs):
     # Restrict activations to be in the range (0,127)
-    print(kwargs)
     kwargs.setdefault("reduce_range", True)
     return observer(HistogramObserver, **kwargs)
 
 def default_debug_observer(**kwargs):
     return observer(TensorObserver, **kwargs)
-
 
 def default_weight_observer(**kwargs):
     kwargs.setdefault("dtype", torch.qint8)
