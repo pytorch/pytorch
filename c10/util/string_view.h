@@ -45,7 +45,7 @@ public:
   /* implicit */ constexpr basic_string_view(const_pointer str)
   : basic_string_view(str, strlen_(str)) {}
 
-  /* implicit */ basic_string_view(const ::std::string& str)
+  /* implicit */ basic_string_view(const ::std::basic_string<CharT>& str)
   : basic_string_view(str.data(), str.size()) {}
 
   constexpr basic_string_view(const basic_string_view&) noexcept = default;
@@ -53,8 +53,8 @@ public:
   // implicitly constexpr
   basic_string_view& operator=(const basic_string_view&) noexcept = default;
 
-  explicit operator ::std::string() const {
-    return std::string(data(), size());
+  explicit operator ::std::basic_string<CharT>() const {
+    return ::std::basic_string<CharT>(data(), size());
   }
 
   constexpr const_iterator begin() const noexcept {
@@ -281,7 +281,7 @@ public:
   }
 
   friend constexpr inline bool operator>(basic_string_view lhs, basic_string_view rhs) noexcept {
-    return lhs.compare(rhs) > 0;
+    return rhs < lhs;
   }
 
   friend constexpr inline bool operator<=(basic_string_view lhs, basic_string_view rhs) noexcept {
@@ -347,9 +347,7 @@ public:
   }
 
   constexpr size_type find(CharT ch, size_type pos = 0) const noexcept {
-    return find_first_if_(pos, [ch] (CharT actual) {
-      return ch == actual;
-    });
+    return find_first_if_(pos, charIsEqual_{ch});
   }
 
   constexpr size_type find(const_pointer s, size_type pos, size_type count) const {
@@ -394,9 +392,7 @@ public:
   }
 
   constexpr size_type rfind(CharT ch, size_type pos = npos) const noexcept {
-    return find_last_if_(pos, [ch] (CharT actual) {
-      return ch == actual;
-    });
+    return find_last_if_(pos, charIsEqual_{ch});
   }
 
   constexpr size_type rfind(const_pointer s, size_type pos, size_type count) const {
@@ -408,15 +404,11 @@ public:
   }
 
   constexpr size_type find_first_of(basic_string_view v, size_type pos = 0) const noexcept {
-    return find_first_if_(pos, [v] (CharT ch) {
-      return npos != v.find(ch);
-    });
+    return find_first_if_(pos, stringViewContainsChar_{v});
   }
 
   constexpr size_type find_first_of(CharT ch, size_type pos = 0) const noexcept {
-    return find_first_if_(pos, [ch] (CharT actual) {
-      return ch == actual;
-    });
+    return find_first_if_(pos, charIsEqual_{ch});
   }
 
   constexpr size_type find_first_of(const_pointer s, size_type pos, size_type count) const {
@@ -428,15 +420,11 @@ public:
   }
 
   constexpr size_type find_last_of(basic_string_view v, size_type pos = npos) const noexcept {
-    return find_last_if_(pos, [v] (CharT ch) {
-      return npos != v.find(ch);
-    });
+    return find_last_if_(pos, stringViewContainsChar_{v});
   }
 
   constexpr size_type find_last_of(CharT ch, size_type pos = npos) const noexcept {
-    return find_last_if_(pos, [ch] (CharT actual) {
-      return ch == actual;
-    });
+    return find_last_if_(pos, charIsEqual_{ch});
   }
 
   constexpr size_type find_last_of(const_pointer s, size_type pos, size_type count) const {
@@ -448,15 +436,11 @@ public:
   }
 
   constexpr size_type find_first_not_of(basic_string_view v, size_type pos = 0) const noexcept {
-    return find_first_if_(pos, [v] (CharT ch) {
-      return npos == v.find(ch);
-    });
+    return find_first_if_(pos, stringViewDoesNotContainChar_{v});
   }
 
   constexpr size_type find_first_not_of(CharT ch, size_type pos = 0) const noexcept {
-    return find_first_if_(pos, [ch] (CharT actual) {
-      return ch != actual;
-    });
+    return find_first_if_(pos, charIsNotEqual_{ch});
   }
 
   constexpr size_type find_first_not_of(const_pointer s, size_type pos, size_type count) const {
@@ -468,15 +452,11 @@ public:
   }
 
   constexpr size_type find_last_not_of(basic_string_view v, size_type pos = npos) const noexcept {
-    return find_last_if_(pos, [v] (CharT ch) {
-      return npos == v.find(ch);
-    });
+    return find_last_if_(pos, stringViewDoesNotContainChar_{v});
   }
 
   constexpr size_type find_last_not_of(CharT ch, size_type pos = npos) const noexcept {
-    return find_last_if_(pos, [ch] (CharT actual) {
-      return ch != actual;
-    });
+    return find_last_if_(pos, charIsNotEqual_{ch});
   }
 
   constexpr size_type find_last_not_of(const_pointer s, size_type pos, size_type count) const {
@@ -567,6 +547,34 @@ private:
     #endif
   }
 
+  struct charIsEqual_ final {
+    CharT expected;
+    constexpr bool operator()(CharT actual) const noexcept {
+      return expected == actual;
+    }
+  };
+
+  struct charIsNotEqual_ final {
+    CharT expected;
+    constexpr bool operator()(CharT actual) const noexcept {
+      return expected != actual;
+    }
+  };
+
+  struct stringViewContainsChar_ final {
+    basic_string_view expected;
+    constexpr bool operator()(CharT ch) const noexcept {
+      return npos != expected.find(ch);
+    }
+  };
+
+  struct stringViewDoesNotContainChar_ final {
+    basic_string_view expected;
+    constexpr bool operator()(CharT ch) const noexcept {
+      return npos == expected.find(ch);
+    }
+  };
+
   const_pointer begin_;
   size_type size_;
 };
@@ -576,7 +584,7 @@ inline std::basic_ostream<CharT>& operator<<(std::basic_ostream<CharT>& stream, 
   // The rules for operator<< are quite complex, but std::string has the same.
   // Let's just rely on the std::string implementation. This might be a bit
   // slower, but I don't think performance matters here.
-  return stream << std::string(sv);
+  return stream << ::std::basic_string<CharT>(sv);
 }
 
 template<class CharT>
@@ -589,16 +597,16 @@ using string_view = basic_string_view<char>;
 }
 
 namespace std {
-template <>
-struct hash<::c10::string_view> {
-  size_t operator()(::c10::string_view x) const {
+template <class CharT>
+struct hash<::c10::basic_string_view<CharT>> {
+  size_t operator()(::c10::basic_string_view<CharT> x) const {
     // The standard says that std""string_view hashing must do the same as
     // std::string hashing but leaves the details of std::string hashing
     // up to the implementer. So, to be conformant, we need to have the same
     // behavior as the implementer-defined std::string hasher of the STL
     // we're built against. Let's just call it. This is probably slow
     // but the only way to be conformant.
-    return std::hash<std::string>()(std::string(x));
+    return std::hash<::std::basic_string<CharT>>()(::std::basic_string<CharT>(x));
   }
 };
 }
