@@ -268,10 +268,11 @@ template <> Vec256<std::complex<double>> inline operator/(const Vec256<std::comp
 
 // reciprocal. Implement this here so we can use multiplication.
 Vec256<std::complex<double>> Vec256<std::complex<double>>::reciprocal() const{
-  auto mask = _mm256_setr_pd(0.0, -1.0, 0.0, -1.0);
-  Vec256<std::complex<double>> abs = Vec256<std::complex<double>>(_mm256_div_pd(_mm256_permute_pd(mask, 0x05), _mm256_add_pd(abs_(), mask)));
+  auto mask = _mm256_setr_pd(0.0, 1.0, 0.0, 1.0);
+  auto ones = _mm256_permute_pd(mask, 0x05);
+  Vec256<std::complex<double>> abs = Vec256<std::complex<double>>(_mm256_div_pd(ones, _mm256_add_pd(abs_(), mask)));
   Vec256<std::complex<double>> i_angle = Vec256<std::complex<double>>(angle_());
-  return abs*i_angle.exp();
+  return abs*i_angle.neg().exp();
 }
 
 template <>
