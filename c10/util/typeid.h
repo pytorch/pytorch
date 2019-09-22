@@ -74,7 +74,7 @@ class C10_API TypeIdentifier final
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  static constexpr TypeIdentifier Get() noexcept {
+  static C10_HOST_CONSTEXPR TypeIdentifier Get() noexcept {
     return TypeIdentifier(c10::util::get_type_index<T>());
   }
 
@@ -122,7 +122,7 @@ struct TypeMetaData final {
   using Delete = void(void*);
 
   TypeMetaData() = delete;
-  constexpr TypeMetaData(
+  TypeMetaData(
       size_t itemsize,
       New* newFn,
       PlacementNew* placementNew,
@@ -130,7 +130,7 @@ struct TypeMetaData final {
       PlacementDelete* placementDelete,
       Delete* deleteFn,
       TypeIdentifier id,
-      c10::string_view name) noexcept
+      std::string name) noexcept
       : itemsize_(itemsize),
         new_(newFn),
         placementNew_(placementNew),
@@ -138,7 +138,7 @@ struct TypeMetaData final {
         placementDelete_(placementDelete),
         delete_(deleteFn),
         id_(id),
-        name_(name) {}
+        name_(std::move(name)) {}
 
   size_t itemsize_;
   New* new_;
@@ -147,7 +147,7 @@ struct TypeMetaData final {
   PlacementDelete* placementDelete_;
   Delete* delete_;
   TypeIdentifier id_;
-  c10::string_view name_;
+  std::string name_;
 };
 
 // Mechanism for throwing errors which can't be prevented at compile time
@@ -290,7 +290,7 @@ inline constexpr TypeMetaData::Delete* _PickDelete() noexcept {
 }
 
 template <class T>
-inline constexpr TypeMetaData _makeTypeMetaDataInstance() {
+inline TypeMetaData _makeTypeMetaDataInstance() {
   return {sizeof(T),
           _PickNew<T>(),
           _PickPlacementNew<T>(),
@@ -298,7 +298,7 @@ inline constexpr TypeMetaData _makeTypeMetaDataInstance() {
           _PickPlacementDelete<T>(),
           _PickDelete<T>(),
           TypeIdentifier::Get<T>(),
-          c10::util::get_fully_qualified_type_name<T>()};
+          std::string(c10::util::get_fully_qualified_type_name<T>())};
 }
 
 class _Uninitialized final {};
@@ -383,7 +383,7 @@ class C10_API TypeMeta {
   /**
    * Returns a printable name for the type.
    */
-  constexpr c10::string_view name() const noexcept {
+  c10::string_view name() const noexcept {
     return data_->name_;
   }
 
