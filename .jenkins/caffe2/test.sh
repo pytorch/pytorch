@@ -98,7 +98,7 @@ fi
 ##############################
 # TensorRT integration tests #
 ##############################
-if [[ $BUILD_ENVIRONMENT == *pytorch-linux-xenial-cuda9-cudnn7-py3-slow-test* ]]; then
+if [[ $BUILD_ENVIRONMENT == *pytorch-linux-xenial-cuda9-cudnn7-py3-test* ]]; then
   pip install -q --user torchvision
 else
   ignore_tests+=( --ignore $caffe2_pypath/python/trt/test_pt_onnx_trt.py )
