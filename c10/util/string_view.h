@@ -50,7 +50,8 @@ public:
 
   constexpr basic_string_view(const basic_string_view&) noexcept = default;
 
-  constexpr basic_string_view& operator=(const basic_string_view&) noexcept = default;
+  // implicitly constexpr
+  basic_string_view& operator=(const basic_string_view&) noexcept = default;
 
   explicit operator ::std::string() const {
     return std::string(data(), size());
@@ -101,10 +102,14 @@ public:
   }
 
   constexpr const_reference at(size_type pos) const {
+#if !defined(__CUDA_ARCH__) // CUDA doesn't like std::out_of_range in device code
     return
       C10_UNLIKELY(pos >= size_)
       ? throw std::out_of_range("string_view::operator[] or string_view::at() out of range. Index: " + c10::guts::to_string(pos) + ", size: " + c10::guts::to_string(size()))
       : at_(pos);
+#else
+    return at_(pos);
+#endif
   }
 
   constexpr const_reference front() const{
@@ -170,9 +175,13 @@ public:
   }
 
   constexpr basic_string_view substr(size_type pos = 0, size_type count = npos) const {
+#if !defined(__CUDA_ARCH__) // CUDA doesn't like std::out_of_range in device code
     return (pos > size_)
       ? throw std::out_of_range("basic_string_view::substr parameter out of bounds. Index: " + c10::guts::to_string(pos) + ", size: " + c10::guts::to_string(size()))
       : substr_(pos, count);
+#else
+    return substr_(pos, count);
+#endif
   }
 
   constexpr int compare(basic_string_view rhs) const noexcept {

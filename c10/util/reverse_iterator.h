@@ -56,15 +56,16 @@
  */
 
 #include <iterator>
+#include <c10/util/C++17.h>
 
 namespace c10 {
 
 template<typename _Iterator>
 class reverse_iterator
   : public std::iterator<typename std::iterator_traits<_Iterator>::iterator_category,
-	                       typename std::iterator_traits<_Iterator>::value_type,
-	                       typename std::iterator_traits<_Iterator>::difference_type,
-	                       typename std::iterator_traits<_Iterator>::pointer,
+                         typename std::iterator_traits<_Iterator>::value_type,
+                         typename std::iterator_traits<_Iterator>::difference_type,
+                         typename std::iterator_traits<_Iterator>::pointer,
                          typename std::iterator_traits<_Iterator>::reference> {
 protected:
   _Iterator current;
@@ -86,7 +87,8 @@ public:
   constexpr reverse_iterator(const reverse_iterator& __x)
     : current(__x.current) {}
 
-  constexpr reverse_iterator& operator=(const reverse_iterator&) = default;
+  // implicitly constexpr
+  reverse_iterator& operator=(const reverse_iterator&) = default;
 
   template<typename _Iter>
   constexpr reverse_iterator(const reverse_iterator<_Iter>& __x)
@@ -96,34 +98,33 @@ public:
     return current;
   }
 
-  constexpr reference operator*() const {
-    _Iterator __tmp = current;
-    return *--__tmp;
+  AT_CPP14_CONSTEXPR reference operator*() const {
+    _Iterator iter = current;
+    return *--iter;
   }
 
-  constexpr pointer operator->() const {
-    _Iterator __tmp = current;
-    --__tmp;
-    return _S_to_pointer(__tmp);
+  AT_CPP14_CONSTEXPR pointer operator->() const {
+    _Iterator iter = current;
+    return _S_to_pointer(--iter);
   }
 
-  constexpr reverse_iterator& operator++() {
+  AT_CPP14_CONSTEXPR reverse_iterator& operator++() {
     --current;
     return *this;
   }
 
-  constexpr reverse_iterator operator++(int) {
+  AT_CPP14_CONSTEXPR reverse_iterator operator++(int) {
     reverse_iterator __tmp = *this;
     --current;
     return __tmp;
   }
 
-  constexpr reverse_iterator& operator--() {
+  AT_CPP14_CONSTEXPR reverse_iterator& operator--() {
     ++current;
     return *this;
   }
 
-  constexpr reverse_iterator operator--(int) {
+  AT_CPP14_CONSTEXPR reverse_iterator operator--(int) {
     reverse_iterator __tmp = *this;
     ++current;
     return __tmp;
@@ -133,7 +134,7 @@ public:
     return reverse_iterator(current - __n);
   }
 
-  constexpr reverse_iterator& operator+=(difference_type __n) {
+  AT_CPP14_CONSTEXPR reverse_iterator& operator+=(difference_type __n) {
     current -= __n;
     return *this;
   }
@@ -142,7 +143,7 @@ public:
     return reverse_iterator(current + __n);
   }
 
-  constexpr reverse_iterator& operator-=(difference_type __n) {
+  AT_CPP14_CONSTEXPR reverse_iterator& operator-=(difference_type __n) {
     current += __n;
     return *this;
   }
