@@ -3501,10 +3501,10 @@
   dispatch:
     CPU: quantize_per_tensor_cpu
 
-- func: quantize_linear_per_channel(Tensor self, Tensor scales, Tensor zero_points, int[] axis, ScalarType dtype) -> Tensor
+- func: quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int[] axis, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
-    CPU: quantize_linear_per_channel_cpu
+    CPU: quantize_per_channel_cpu
 
 - func: dequantize(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -3512,10 +3512,10 @@
   dispatch:
     QuantizedCPU: dequantize_quant
 
-- func: _dequantize_linear(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
+- func: _dequantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
-    CPU: dequantize_linear_cpu
+    CPU: dequantize_per_tensor_cpu
 
 - func: q_scale(Tensor self) -> float
   use_c10_dispatcher: full
@@ -5734,7 +5734,6 @@
     CPU: adaptive_avg_pool2d_out_cpu
     CUDA: adaptive_avg_pool2d_out_cuda
     MkldnnCPU: mkldnn_adaptive_avg_pool2d_out
-    QuantizedCPU: quantized_adaptive_avg_pool2d_out
 
 - func: adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   use_c10_dispatcher: unboxed_only
@@ -5856,6 +5855,7 @@
     CPU: avg_pool2d_cpu
     CUDA: avg_pool2d_cuda
     MkldnnCPU: mkldnn_avg_pool2d
+    QuantizedCPU: quantized_avg_pool2d
 
 - func: avg_pool2d_backward.grad_input(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
