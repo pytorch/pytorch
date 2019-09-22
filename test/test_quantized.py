@@ -593,6 +593,45 @@ class TestQuantizedOps(TestCase):
             cat_q = q_cat_op(tensors_q, dim=ch_axis, scale=scale,
                              zero_point=zero_point)
 
+
+    """Tests adaptive average pool operation on NHWC quantized tensors."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
+                                              min_side=5, max_side=10),
+                       qparams=hu.qparams()),
+           size=st.sampled_from((1, 3, 5, 10)),
+           scale_factor=st.sampled_from((None, 1.5, 2.0)))
+    def test_interpolate_nearest2d(self, X, size, scale_factor):
+        """
+        This test cover upsample_nearest2d
+        """
+        X, (scale, zero_point, torch_type) = X
+        H, W = X.shape[-2:]
+        X = torch.from_numpy(X)
+        if scale_factor is not  None:
+            size = None
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        X_ref = torch.nn.functional.interpolate(
+            qX.int_repr().to(torch.float), size=size, scale_factor=scale_factor,
+            mode="nearest", align_corners=None)
+
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.interpolate,
+            "nn.quantized.functional": torch.nn.quantized.functional.interpolate
+        }
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+        for name, op in ops_under_test.items():
+            qX_hat = op(qX, size=size, scale_factor=scale_factor,
+                        mode="nearest", align_corners=None)
+
+            self.assertEqual(X_ref, qX_hat.int_repr(), prec=1.0,
+                             message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+            self.assertEqual(scale, qX_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+            self.assertEqual(zero_point, qX_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                                                          qX_hat.q_zero_point()))
+
     """Tests the correctness of the quantized equal op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()),
