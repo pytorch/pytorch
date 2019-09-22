@@ -24,7 +24,7 @@ static_assert(get_type_index<int*>() != get_type_index<int**>(), "");
 static_assert(get_type_index<int(double&, double)>() != get_type_index<int(double, double)>(), "");
 
 
-struct Dummy{} final {};
+struct Dummy final {};
 struct Functor final {
   int64_t operator()(uint32_t, Dummy&&, const Dummy&) const;
 };
