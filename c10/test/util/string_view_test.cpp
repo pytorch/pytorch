@@ -199,11 +199,11 @@ namespace test_random_access {
     }, "string_view::operator[] or string_view::at() out of range. Index: 100, size: 5");
 
     expectThrows<std::out_of_range>([] {
-      string_view("hello")[-1];
+      string_view("hello")[string_view::npos];
     }, "string_view::operator[] or string_view::at() out of range. Index: 18446744073709551615, size: 5");
 
     expectThrows<std::out_of_range>([] {
-      string_view("hello").at(-1);
+      string_view("hello").at(string_view::npos);
     }, "string_view::operator[] or string_view::at() out of range. Index: 18446744073709551615, size: 5");
   }
 }
@@ -232,13 +232,13 @@ namespace test_empty {
 }
 
 namespace test_remove_prefix {
-  AT_CPP14_CONSTEXPR string_view remove_prefix(string_view input, size_t len) {
+  CONSTEXPR_EXCEPT_GCC5 string_view remove_prefix(string_view input, size_t len) {
     input.remove_prefix(len);
     return input;
   }
 
   TEST(StringViewTest, whenRemovingValidPrefix_thenWorks) {
-    #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
+    #if IS_NOT_GCC5_CONSTEXPR
       static_assert(remove_prefix(string_view("hello"), 0) == string_view("hello"), "");
       static_assert(remove_prefix(string_view("hello"), 1) == string_view("ello"), "");
       static_assert(remove_prefix(string_view("hello"), 5) == string_view(""), "");
@@ -257,13 +257,13 @@ namespace test_remove_prefix {
 }
 
 namespace test_remove_suffix {
-  AT_CPP14_CONSTEXPR string_view remove_suffix(string_view input, size_t len) {
+  CONSTEXPR_EXCEPT_GCC5 string_view remove_suffix(string_view input, size_t len) {
     input.remove_suffix(len);
     return input;
   }
 
   TEST(StringViewTest, whenRemovingValidSuffix_thenWorks) {
-    #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
+    #if IS_NOT_GCC5_CONSTEXPR
       static_assert(remove_suffix(string_view("hello"), 0) == string_view("hello"), "");
       static_assert(remove_suffix(string_view("hello"), 1) == string_view("hell"), "");
       static_assert(remove_suffix(string_view("hello"), 5) == string_view(""), "");
@@ -282,14 +282,14 @@ namespace test_remove_suffix {
 }
 
 namespace test_swap_function {
-  AT_CPP14_CONSTEXPR std::pair<string_view, string_view> get() {
+  CONSTEXPR_EXCEPT_GCC5 std::pair<string_view, string_view> get() {
     string_view first = "first";
     string_view second = "second";
     swap(first, second);
     return std::make_pair(first, second);
   }
   TEST(StringViewTest, testSwapFunction) {
-    #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
+    #if IS_NOT_GCC5_CONSTEXPR
       static_assert(string_view("second") == get().first, "");
       static_assert(string_view("first") == get().second, "");
     #endif
@@ -300,14 +300,14 @@ namespace test_swap_function {
 }
 
 namespace test_swap_method {
-  AT_CPP14_CONSTEXPR std::pair<string_view, string_view> get() {
+  CONSTEXPR_EXCEPT_GCC5 std::pair<string_view, string_view> get() {
     string_view first = "first";
     string_view second = "second";
     first.swap(second);
     return std::make_pair(first, second);
   }
   TEST(StringViewTest, testSwapMethod) {
-    #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
+    #if IS_NOT_GCC5_CONSTEXPR
       static_assert(string_view("second") == get().first, "");
       static_assert(string_view("first") == get().second, "");
     #endif

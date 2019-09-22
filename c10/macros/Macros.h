@@ -228,11 +228,14 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
     (__CUDACC_VER_MAJOR__ >= 10 || (__CUDACC_VER_MAJOR__ == 9 && __CUDACC_VER_MINOR__ >= 2))
 // workaround: CUDA >= v9.2 compiler cannot compile correctly on Windows.
 #  define AT_CPP14_CONSTEXPR
+#  define AT_IS_CPP14_CONSTEXPR 0
 #else
 #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
 #  define AT_CPP14_CONSTEXPR constexpr
+#  define AT_IS_CPP14_CONSTEXPR 1
 #else
 #  define AT_CPP14_CONSTEXPR
+#  define AT_IS_CPP14_CONSTEXPR 0
 #endif
 #endif
 
@@ -257,6 +260,15 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #else
 #define C10_HOST_CONSTEXPR constexpr
 #define C10_CPP14_HOST_CONSTEXPR AT_CPP14_CONSTEXPR
+#endif
+
+
+#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 6
+#define CONSTEXPR_EXCEPT_GCC5
+#define IS_NOT_GCC5_CONSTEXPR 0
+#else
+#define CONSTEXPR_EXCEPT_GCC5 AT_CPP14_CONSTEXPR
+#define IS_NOT_GCC5_CONSTEXPR AT_IS_CPP14_CONSTEXPR
 #endif
 
 #endif // C10_MACROS_MACROS_H_

@@ -87,8 +87,9 @@ public:
   constexpr reverse_iterator(const reverse_iterator& __x)
     : current(__x.current) {}
 
-  // implicitly constexpr
-  reverse_iterator& operator=(const reverse_iterator&) = default;
+  AT_CPP14_CONSTEXPR reverse_iterator& operator=(const reverse_iterator& rhs) noexcept {
+    current = rhs.current;
+  }
 
   template<typename _Iter>
   constexpr reverse_iterator(const reverse_iterator<_Iter>& __x)

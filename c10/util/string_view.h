@@ -51,8 +51,11 @@ public:
 
   constexpr basic_string_view(const basic_string_view&) noexcept = default;
 
-  // implicitly constexpr
-  basic_string_view& operator=(const basic_string_view&) noexcept = default;
+  AT_CPP14_CONSTEXPR basic_string_view& operator=(const basic_string_view& rhs) noexcept {
+      begin_ = rhs.begin_;
+      size_ = rhs.size_;
+      return *this;
+  }
 
   explicit operator ::std::basic_string<CharT>() const {
     return ::std::basic_string<CharT>(data(), size());
@@ -106,7 +109,7 @@ public:
 #if !defined(__CUDA_ARCH__) // CUDA doesn't like std::out_of_range in device code
     return
       C10_UNLIKELY(pos >= size_)
-      ? throw std::out_of_range("string_view::operator[] or string_view::at() out of range. Index: " + c10::guts::to_string(pos) + ", size: " + c10::guts::to_string(size()))
+      ? (throw std::out_of_range("string_view::operator[] or string_view::at() out of range. Index: " + std::to_string(pos) + ", size: " + std::to_string(size())), at_(0))
       : at_(pos);
 #else
     return at_(pos);
@@ -141,7 +144,7 @@ public:
     return size() == 0;
   }
 
-  AT_CPP14_CONSTEXPR void remove_prefix(size_type n) {
+  CONSTEXPR_EXCEPT_GCC5 void remove_prefix(size_type n) {
     if (n > size()) {
       throw std::out_of_range("basic_string_view::remove_prefix: out of range. PrefixLength: " + c10::guts::to_string(n) + ", size: " + c10::guts::to_string(size()));
     }
@@ -149,14 +152,14 @@ public:
     size_ -= n;
   }
 
-  AT_CPP14_CONSTEXPR void remove_suffix(size_type n) {
+  CONSTEXPR_EXCEPT_GCC5 void remove_suffix(size_type n) {
     if (n > size()) {
       throw std::out_of_range("basic_string_view::remove_suffix: out of range. SuffixLength: " + c10::guts::to_string(n) + ", size: " + c10::guts::to_string(size()));
     }
     size_ -= n;
   }
 
-  AT_CPP14_CONSTEXPR void swap(basic_string_view& sv) noexcept {
+  CONSTEXPR_EXCEPT_GCC5 void swap(basic_string_view& sv) noexcept {
     auto tmp = *this;
     *this = sv;
     sv = tmp;
@@ -176,7 +179,7 @@ public:
   constexpr basic_string_view substr(size_type pos = 0, size_type count = npos) const {
 #if !defined(__CUDA_ARCH__) // CUDA doesn't like std::out_of_range in device code
     return (pos > size_)
-      ? throw std::out_of_range("basic_string_view::substr parameter out of bounds. Index: " + c10::guts::to_string(pos) + ", size: " + c10::guts::to_string(size()))
+      ? (throw std::out_of_range("basic_string_view::substr parameter out of bounds. Index: " + std::to_string(pos) + ", size: " + std::to_string(size())), substr_())
       : substr_(pos, count);
 #else
     return substr_(pos, count);
@@ -587,7 +590,7 @@ inline std::basic_ostream<CharT>& operator<<(std::basic_ostream<CharT>& stream, 
 }
 
 template<class CharT>
-AT_CPP14_CONSTEXPR inline void swap(basic_string_view<CharT>& lhs, basic_string_view<CharT>& rhs) {
+CONSTEXPR_EXCEPT_GCC5 inline void swap(basic_string_view<CharT>& lhs, basic_string_view<CharT>& rhs) {
   lhs.swap(rhs);
 }
 
