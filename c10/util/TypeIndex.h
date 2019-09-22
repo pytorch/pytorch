@@ -68,10 +68,9 @@ inline C10_HOST_CONSTEXPR type_index get_type_index() noexcept {
         detail::type_index_impl<guts::remove_cv_t<guts::decay_t<T>>>()
     >::value};
   #else
-    // nvcc unfortunately doesn't like this being constexpr in device code
-    return type_index{
-        detail::type_index_impl<guts::remove_cv_t<guts::decay_t<T>>>()
-    };
+    // There's nothing in theory preventing us from running this on device code
+    // except for nvcc throwing a compiler error if we enable it.
+    TORCH_INTERNAL_ASSERT(false, "This should not be called on device code");
   #endif
 }
 
