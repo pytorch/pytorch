@@ -5,9 +5,9 @@
 #include <stdexcept>
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
+#include <c10/util/reverse_iterator.h>
 
 namespace c10 {
-namespace util {
 
 /**
  * Reimplementation of std::string_view for C++11.
@@ -29,7 +29,7 @@ public:
   using const_reference = const CharT&;
   using const_iterator = const CharT*;
   using iterator = const_iterator;
-  using const_reverse_iterator = std::reverse_iterator<const_iterator>;
+  using const_reverse_iterator = c10::reverse_iterator<const_iterator>;
   using reverse_iterator = const_reverse_iterator;
   using size_type = std::size_t;
   using difference_type = std::ptrdiff_t;
@@ -159,14 +159,14 @@ public:
   }
 
   size_type copy(pointer dest, size_type count, size_type pos = 0) const {
-  	if (pos > size_) {
+    if (pos > size_) {
       throw std::out_of_range("basic_string_view::copy: out of range. Index: " + c10::guts::to_string(pos) + ", size: " + c10::guts::to_string(size()));
     }
-  	size_type copy_length = c10::guts::min(count, size_ - pos);
+    size_type copy_length = c10::guts::min(count, size_ - pos);
     for (auto iter = begin() + pos, end = iter + copy_length; iter != end;) {
       *(dest++) = *(iter++);
     }
-  	return copy_length;
+    return copy_length;
   }
 
   constexpr basic_string_view substr(size_type pos = 0, size_type count = npos) const {
@@ -313,16 +313,16 @@ public:
     #if __cpp_constexpr >= 201304
       // if we are in C++14, write it iteratively. This is faster.
       if (v.size() == 0) {
-      	return pos <= size() ? pos : npos;
+        return pos <= size() ? pos : npos;
       }
 
       if (pos + v.size() <= size()) {
-    	  for (size_type cur = pos, end = size() - v.size(); cur <= end; ++cur) {
-    	    if (v.at_(0) == at_(cur) && v.substr_(1) == substr_(cur + 1, v.size() - 1)) {
-    	      return cur;
+        for (size_type cur = pos, end = size() - v.size(); cur <= end; ++cur) {
+          if (v.at_(0) == at_(cur) && v.substr_(1) == substr_(cur + 1, v.size() - 1)) {
+            return cur;
           }
         }
-    	}
+      }
       return npos;
     #else
       // if we are in C++11, we need to do it recursively because of constexpr restrictions.
@@ -578,12 +578,11 @@ AT_CPP14_CONSTEXPR inline void swap(basic_string_view<CharT>& lhs, basic_string_
 using string_view = basic_string_view<char>;
 
 }
-}
 
 namespace std {
 template <>
-struct hash<::c10::util::string_view> {
-  size_t operator()(::c10::util::string_view x) const {
+struct hash<::c10::string_view> {
+  size_t operator()(::c10::string_view x) const {
     // The standard says that std""string_view hashing must do the same as
     // std::string hashing but leaves the details of std::string hashing
     // up to the implementer. So, to be conformant, we need to have the same

@@ -2,7 +2,7 @@
 
 #include <gmock/gmock.h>
 
-using c10::util::string_view;
+using c10::string_view;
 
 namespace {
 namespace testutils {
@@ -55,21 +55,21 @@ namespace test_default_constructor {
 }
 
 namespace test_constchar_constructor {
-  static_assert(string_view("").size() == 0);
+  static_assert(string_view("").size() == 0, "");
   constexpr string_view hello = "hello";
-  static_assert(5 == hello.size());
+  static_assert(5 == hello.size(), "");
   static_assert(string_equal("hello", hello.data(), hello.size()), "");
 }
 
 namespace test_sized_constructor {
-  static_assert(string_view("", 0).size() == 0);
+  static_assert(string_view("", 0).size() == 0, "");
   constexpr string_view hell("hello", 4);
-  static_assert(4 == hell.size());
+  static_assert(4 == hell.size(), "");
   static_assert(string_equal("hell", hell.data(), hell.size()), "");
 }
 
 namespace test_string_constructor {
-  void test_conversion_is_implicit(std::string_view a) {}
+  void test_conversion_is_implicit(string_view a) {}
   TEST(StringViewTest, testStringConstructor) {
     std::string empty;
     EXPECT_EQ(0, string_view(empty).size());
@@ -84,7 +84,7 @@ namespace test_string_constructor {
 
 namespace test_conversion_to_string {
   TEST(StringViewTest, testConversionToString) {
-    std::string_view empty;
+    string_view empty;
     EXPECT_EQ(0, std::string(empty).size());
     string_view hello_sv = "hello";
     std::string hello_str(hello_sv);
@@ -96,7 +96,7 @@ namespace test_conversion_to_string {
 namespace test_copy_constructor {
   constexpr string_view hello = "hello";
   constexpr string_view copy = hello;
-  static_assert(5 == copy.size());
+  static_assert(5 == copy.size(), "");
   static_assert(string_equal("hello", copy.data(), copy.size()), "");
 }
 
@@ -125,6 +125,26 @@ namespace test_iterators {
   static_assert('o' == *string_view("hello").crbegin(), "");
   static_assert('h' == *(string_view("hello").rend() - 1), "");
   static_assert('h' == *(string_view("hello").crend() - 1), "");
+}
+
+namespace test_forward_iteration {
+  constexpr string_view hello = "hello";
+  static_assert('h' == *(hello.begin() + 0), "");
+  static_assert('e' == *(hello.begin() + 1), "");
+  static_assert('l' == *(hello.begin() + 2), "");
+  static_assert('l' == *(hello.begin() + 3), "");
+  static_assert('o' == *(hello.begin() + 4), "");
+  static_assert(hello.end() == hello.begin() + 5, "");
+}
+
+namespace test_reverse_iteration {
+  constexpr string_view hello = "hello";
+  static_assert('o' == *(hello.rbegin() + 0), "");
+  static_assert('l' == *(hello.rbegin() + 1), "");
+  static_assert('l' == *(hello.rbegin() + 2), "");
+  static_assert('e' == *(hello.rbegin() + 3), "");
+  static_assert('h' == *(hello.rbegin() + 4), "");
+  static_assert(hello.rend() == hello.rbegin() + 5, "");
 }
 
 namespace test_random_access {
@@ -176,8 +196,8 @@ namespace test_random_access {
 }
 
 namespace test_front_back {
-  static_assert('h' == string_view("hello").front());
-  static_assert('o' == string_view("hello").back());
+  static_assert('h' == string_view("hello").front(), "");
+  static_assert('o' == string_view("hello").back(), "");
 }
 
 namespace test_data {
@@ -532,10 +552,10 @@ namespace test_starts_with {
   static_assert(!string_view("hi").starts_with("hi2"), "");
   static_assert(!string_view("hi").starts_with("ha"), "");
 
-  static_assert(!string_view("").starts_with('a'));
-  static_assert(!string_view("").starts_with('\0'));
-  static_assert(!string_view("hello").starts_with('a'));
-  static_assert(string_view("hello").starts_with('h'));
+  static_assert(!string_view("").starts_with('a'), "");
+  static_assert(!string_view("").starts_with('\0'), "");
+  static_assert(!string_view("hello").starts_with('a'), "");
+  static_assert(string_view("hello").starts_with('h'), "");
 }
 
 namespace test_ends_with {
@@ -555,10 +575,10 @@ namespace test_ends_with {
   static_assert(!string_view("i2").ends_with("hi2"), "");
   static_assert(!string_view("hi").ends_with("ha"), "");
 
-  static_assert(!string_view("").ends_with('a'));
-  static_assert(!string_view("").ends_with('\0'));
-  static_assert(!string_view("hello").ends_with('a'));
-  static_assert(string_view("hello").ends_with('o'));
+  static_assert(!string_view("").ends_with('a'), "");
+  static_assert(!string_view("").ends_with('\0'), "");
+  static_assert(!string_view("hello").ends_with('a'), "");
+  static_assert(string_view("hello").ends_with('o'), "");
 }
 
 namespace test_find_overload1 {
