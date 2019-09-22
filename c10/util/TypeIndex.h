@@ -34,7 +34,7 @@ namespace detail {
 inline constexpr string_view extract(string_view prefix, string_view suffix, string_view str) {
 #if !defined(__CUDA_ARCH__)  // CUDA doesn't like std::logic_error in device code
   return (!str.starts_with(prefix) || !str.ends_with(suffix))
-    ? throw std::logic_error("Invalid pattern")
+    ? (throw std::logic_error("Invalid pattern"), string_view())
     : str.substr(prefix.size(), str.size() - prefix.size() - suffix.size());
 #else
   return str.substr(prefix.size(), str.size() - prefix.size() - suffix.size());
@@ -61,6 +61,7 @@ inline C10_HOST_CONSTEXPR uint64_t type_index_impl() {
 }
 
 } // namespace _detail
+
 
 template<typename T>
 inline C10_HOST_CONSTEXPR type_index get_type_index() noexcept {

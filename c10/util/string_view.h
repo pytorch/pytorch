@@ -239,54 +239,27 @@ public:
     return substr(pos1, count1).compare(basic_string_view(s, count2));
   }
 
-  friend constexpr inline bool operator==(basic_string_view lhs, basic_string_view rhs) noexcept {
-    // We don't use string_view::compare() here but implement it manually because
-    // only looking at equality allows for more optimized code.
-    #if __cpp_constexpr >= 201304
-      // if we are in C++14, write it iteratively. This is faster.
-      if (lhs.size() != rhs.size()) {
-        return false;
-      }
-      // Yes, memcmp would be laster than this loop, but memcmp isn't constexpr
-      // and I didn't feel like implementing a constexpr memcmp variant.
-      // TODO At some point this should probably be done, including tricks
-      // like comparing one machine word instead of a byte per iteration.
-      for (size_type pos = 0; pos < lhs.size(); ++pos) {
-        if (lhs.at_(pos) != rhs.at_(pos)) {
-          return false;
-        }
-      }
-      return true;
-    #else
-      // if we are in C++11, we need to do it recursively because of constexpr restrictions.
-      return
-        (lhs.size() != rhs.size())
-        ? false
-        : (lhs.size() == 0)
-        ? true
-        : (lhs.front() != rhs.front())
-        ? false
-        : (lhs.substr_(1) == rhs.substr_(1));
-    #endif
+  friend constexpr bool operator==(basic_string_view lhs, basic_string_view rhs) noexcept {
+    return lhs.equals_(rhs);
   }
 
-  friend constexpr inline bool operator!=(basic_string_view lhs, basic_string_view rhs) noexcept {
+  friend constexpr bool operator!=(basic_string_view lhs, basic_string_view rhs) noexcept {
     return !(lhs == rhs);
   }
 
-  friend constexpr inline bool operator<(basic_string_view lhs, basic_string_view rhs) noexcept {
+  friend constexpr bool operator<(basic_string_view lhs, basic_string_view rhs) noexcept {
     return lhs.compare(rhs) < 0;
   }
 
-  friend constexpr inline bool operator>=(basic_string_view lhs, basic_string_view rhs) noexcept {
+  friend constexpr bool operator>=(basic_string_view lhs, basic_string_view rhs) noexcept {
     return !(lhs < rhs);
   }
 
-  friend constexpr inline bool operator>(basic_string_view lhs, basic_string_view rhs) noexcept {
+  friend constexpr bool operator>(basic_string_view lhs, basic_string_view rhs) noexcept {
     return rhs < lhs;
   }
 
-  friend constexpr inline bool operator<=(basic_string_view lhs, basic_string_view rhs) noexcept {
+  friend constexpr bool operator<=(basic_string_view lhs, basic_string_view rhs) noexcept {
     return !(lhs > rhs);
   }
 
@@ -294,7 +267,7 @@ public:
     return
       (prefix.size() > size())
       ? false
-      : prefix == substr_(0, prefix.size());
+      : prefix.equals_(substr_(0, prefix.size()));
   }
 
   constexpr bool starts_with(CharT prefix) const noexcept {
@@ -309,7 +282,7 @@ public:
     return
       (suffix.size() > size())
       ? false
-      : suffix == substr_(size() - suffix.size(), suffix.size());
+      : suffix.equals_(substr_(size() - suffix.size(), suffix.size()));
   }
 
   constexpr bool ends_with(CharT suffix) const noexcept {
@@ -329,7 +302,7 @@ public:
 
       if (pos + v.size() <= size()) {
         for (size_type cur = pos, end = size() - v.size(); cur <= end; ++cur) {
-          if (v.at_(0) == at_(cur) && v.substr_(1) == substr_(cur + 1, v.size() - 1)) {
+          if (v.at_(0) == at_(cur) && v.substr_(1).equals_(substr_(cur + 1, v.size() - 1))) {
             return cur;
           }
         }
@@ -342,7 +315,7 @@ public:
         ? (pos <= size() ? pos : npos)
         : (pos + v.size() > size())
         ? npos
-        : (v.at_(0) == at_(pos) && v.substr_(1) == substr_(pos + 1, v.size() - 1))
+        : (v.at_(0) == at_(pos) && v.substr_(1).equals_(substr_(pos + 1, v.size() - 1)))
         ? pos
         : find(v, pos + 1);
     #endif
@@ -370,7 +343,7 @@ public:
       if (v.size() <= size()) {
         pos = c10::guts::min(size() - v.size(), pos);
         do {
-          if (v.at_(0) == at_(pos) && v.substr_(1) == substr_(pos + 1, v.size() - 1)) {
+          if (v.at_(0) == at_(pos) && v.substr_(1).equals_(substr_(pos + 1, v.size() - 1))) {
             return pos;
           }
         } while (pos-- > 0);
@@ -385,7 +358,7 @@ public:
         ? npos
         : (size() - v.size() < pos)
         ? rfind(v, size() - v.size())
-        : (v.at_(0) == at_(pos) && v.substr_(1) == substr_(pos + 1, v.size() - 1))
+        : (v.at_(0) == at_(pos) && v.substr_(1).equals_(substr_(pos + 1, v.size() - 1)))
         ? pos
         : (pos == 0)
         ? npos
@@ -487,7 +460,7 @@ private:
     #endif
   }
 
-  constexpr const_reference at_(size_type pos) const {
+  constexpr const_reference at_(size_type pos) const noexcept {
     return *(begin_ + pos);
   }
 
@@ -546,6 +519,37 @@ private:
         : (pos == 0)
         ? npos
         : find_last_if_(pos - 1, std::forward<Condition>(condition));
+    #endif
+  }
+
+  constexpr bool equals_(basic_string_view rhs) const {
+    // We don't use string_view::compare() here but implement it manually because
+    // only looking at equality allows for more optimized code.
+    #if __cpp_constexpr >= 201304
+      // if we are in C++14, write it iteratively. This is faster.
+      if (size() != rhs.size()) {
+        return false;
+      }
+      // Yes, memcmp would be laster than this loop, but memcmp isn't constexpr
+      // and I didn't feel like implementing a constexpr memcmp variant.
+      // TODO At some point this should probably be done, including tricks
+      // like comparing one machine word instead of a byte per iteration.
+      for (typename basic_string_view<CharT>::size_type pos = 0; pos < size(); ++pos) {
+        if (at_(pos) != rhs.at_(pos)) {
+          return false;
+        }
+      }
+      return true;
+    #else
+      // if we are in C++11, we need to do it recursively because of constexpr restrictions.
+      return
+        (size() != rhs.size())
+        ? false
+        : (size() == 0)
+        ? true
+        : (front() != rhs.front())
+        ? false
+        : (substr_(1).equals_(rhs.substr_(1)));
     #endif
   }
 
