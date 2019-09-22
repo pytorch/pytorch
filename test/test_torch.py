@@ -2115,12 +2115,11 @@ class _TestTorchMixin(object):
 
     def test_qengnie(self):
         qengines = torch._C._supported_qengines()
-        # [TODO] Enable after the interface change
-        # original_qe = torch._C._get_qengine()
-        # for qe in qengines:
-        #     torch._C._set_qengine(qe)
-        #     assert torch._C._get_qengine() == qe, 'qengine not set successfully'
-        # torch._C._set_qengine(original_qe)
+        original_qe = torch._C._get_qengine()
+        for qe in qengines:
+             torch._C._set_qengine(qe)
+             assert torch._C._get_qengine() == qe, 'qengine not set successfully'
+        torch._C._set_qengine(original_qe)
 
     def test_new_tensor(self):
         expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
