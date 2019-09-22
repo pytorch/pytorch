@@ -3,6 +3,7 @@
 #include <c10/util/ConstexprCrc.h>
 #include <c10/util/C++17.h>
 #include <c10/util/IdWrapper.h>
+#include <c10/util/string_view.h>
 #include <cinttypes>
 #include <functional>
 
@@ -30,16 +31,29 @@ namespace detail {
 #error "You're running a too old version of GCC. We need GCC 5 or later."
 #endif
 
+inline constexpr string_view extract(string_view prefix, string_view suffix, string_view str) {
+  return (!str.starts_with(prefix) || !str.ends_with(suffix))
+    ? throw std::logic_error("Invalid pattern")
+    : str.substr(prefix.size(), str.size() - prefix.size() - suffix.size());
+}
+
 template<typename T>
-inline C10_HOST_CONSTEXPR uint64_t type_index_impl() noexcept {
+inline C10_HOST_CONSTEXPR string_view fully_qualified_type_name_impl() noexcept {
   // Idea: __PRETTY_FUNCTION__ (or __FUNCSIG__ on msvc) contains a qualified name
   // of this function, including its template parameter, i.e. including the
   // type we want an id for. We use this name and run crc64 on it to get a type id.
   #if defined(_MSC_VER)
-    return crc64(__FUNCSIG__, sizeof(__FUNCSIG__)).checksum();
-  #else
-    return crc64(__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__)).checksum();
+      return extract("class c10::string_view __cdecl c10::util::detail::fully_qualified_type_name_impl<", ">(void)", __FUNCSIG__);
+  #elif defined(__clang__)
+      return extract("c10::string_view c10::util::detail::fully_qualified_type_name_impl() [T = ", "]", __PRETTY_FUNCTION__);
+  #elif defined(__GNUC__)
+      return extract("constexpr c10::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ", "]", __PRETTY_FUNCTION__);
   #endif
+}
+
+template<typename T>
+inline C10_HOST_CONSTEXPR uint64_t type_index_impl() {
+  return crc64(fully_qualified_type_name_impl<T>()).checksum();
 }
 
 } // namespace _detail
@@ -59,6 +73,11 @@ inline C10_HOST_CONSTEXPR type_index get_type_index() noexcept {
         detail::type_index_impl<guts::remove_cv_t<guts::decay_t<T>>>()
     };
   #endif
+}
+
+template<typename T>
+inline C10_HOST_CONSTEXPR string_view get_fully_qualified_type_name() noexcept {
+  return detail::fully_qualified_type_name_impl<T>();
 }
 
 }
