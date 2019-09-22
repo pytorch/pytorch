@@ -74,7 +74,7 @@ class C10_API TypeIdentifier final
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  static constexpr TypeIdentifier Get() noexcept {
+  static C10_HOST_CONSTEXPR TypeIdentifier Get() noexcept {
     return TypeIdentifier(c10::util::get_type_index<T>());
   }
 
