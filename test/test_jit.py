@@ -1799,7 +1799,7 @@ graph(%Ra, %Rb):
             for i in range(4):
                 results.append(x[:, i:, x.size(2) - 5])
             return tuple(results)
-        
+
         x = torch.randn(5, 6, 7, requires_grad=requires_grad)
         y = torch.randn(7, 8, 9, requires_grad=requires_grad)
 

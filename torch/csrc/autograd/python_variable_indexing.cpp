@@ -109,8 +109,10 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
 }
 
 static Variable applySelect(const Variable& self, int64_t dim, PyObject* index, int64_t real_dim=0) {
-  auto& var = THPVariable_Unpack(index);
-  jit::tracer::ArgumentStash::stashValue(std::string("index"), 1, var, jit::IntType::get());
+  if (jit::tracer::isTracing() && THPVariable_Check(index)) {
+    auto& var = THPVariable_Unpack(index);
+    jit::tracer::ArgumentStash::stashValue(std::string("index"), 1, var, jit::IntType::get());
+  }
 
   int64_t index_ = THPUtils_unpackLong(index);
   if (index_ == 0 && dim == 0 && self.dim() == 0) {
