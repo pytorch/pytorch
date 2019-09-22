@@ -30,7 +30,7 @@ from .gen_autograd_functions import uses_single_grad
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
     'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward',
-    'set_data', 'data', 'is_leaf', 'output_nr'
+    'set_data', 'data', 'is_leaf', 'output_nr', '_version'
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -80,7 +80,7 @@ DONT_REQUIRE_DERIVATIVE = {
     # This is an unsafe method that is meant to be out of reach of autograd.
     '_coalesced_',
     # Quantize functions should not record gradients
-    'quantize_per_tensor', 'quantize_linear_per_channel'
+    'quantize_per_tensor', 'quantize_per_channel'
 }
 
 # NOTE [ Invariant: TensorImpl and Storage Pointer Equality ]
