@@ -162,15 +162,6 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
     return obj;
   };
 
-  auto class_resolver = [&](const c10::QualifiedName& qn) {
-    if (compilation_unit_->get_class(qn) == nullptr) {
-      auto typeptr = ClassType::create(qn, compilation_unit_, true);
-      compilation_unit_->register_type(typeptr);
-    }
-    return c10::StrongTypePtr(
-        compilation_unit_, compilation_unit_->get_class(qn));
-  };
-
   auto read_record = [&](const std::string& name) {
     std::stringstream ss;
     ss << archive_name << "/" << name;

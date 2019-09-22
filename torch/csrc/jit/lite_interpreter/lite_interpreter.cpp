@@ -4,6 +4,16 @@
 
 namespace torch{
 namespace jit{
+template <typename dtype> // int64_t, bool, double
+void ListConstructFunc(int64_t num_inputs, Stack& stack) {
+  auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
+  c10::List<dtype> vals =
+      c10::impl::toList(fmap(inputs, [](const IValue& v) {
+        return v.to<dtype>(); }));
+  drop(stack, num_inputs);
+  push(stack, std::move(vals));
+}
+
 namespace mobile {
 InterpreterState::InterpreterState(const Bytecode& bytecode)
     : instructions_(bytecode.instructions_),
@@ -29,10 +39,9 @@ bool InterpreterState::run(Stack& stack) {
     switch (inst.op) {
       case OP: {
         auto opname = op_names_[inst.X];
-        auto fc = c10::Dispatcher::singleton().findSchema(opname);
-        assert(fc.has_value());
-        auto kernel = c10::Dispatcher::singleton().lookup(fc.value(), &stack);
-        kernel.call(&stack);
+        auto op = c10::Dispatcher::singleton().findSchema(opname);
+        assert(op.has_value());
+        c10::Dispatcher::singleton().callBoxed(*op, &stack);
         ++pc;
       } break;
       case LOAD:
@@ -104,7 +113,7 @@ bool InterpreterState::run(Stack& stack) {
           push(stack, std::move(vals));
         } else {
           const size_t stack_size = stack.size();
-          auto vals = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+          auto vals = c10::impl::GenericList(c10::AnyType::get());
           vals.reserve(inst.X);
           for (size_t i = stack_size - inst.X; i < stack_size; ++i) {
             vals.emplace_back(std::move(stack[i]));

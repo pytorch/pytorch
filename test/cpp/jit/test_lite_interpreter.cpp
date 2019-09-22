@@ -27,12 +27,12 @@ void printSlots(const c10::intrusive_ptr<c10::ivalue::Object>& obj) {
 
 void testLiteInterpreter() {
   std::vector<torch::jit::IValue> inputs;
-  auto m = load("/Users/myuan/data/pytext/model_traced.pt");
+  auto m = load("/Users/myuan/data/fbnet/fbnet.pt");
   inputs.push_back(torch::ones({1, 3, 224, 224}));
 //  auto m = load("/Users/myuan/data/lenet/Lenet_trace.pt");
 //  inputs.push_back(torch::ones({1, 1, 30, 30}));
-//  at::Tensor outputref = m.forward(inputs).toTensor();
-//  std::cout << outputref.slice(/*dim=*/1, /*start=*/0, /*end=*/5);
+  at::Tensor outputref = m.forward(inputs).toTensor();
+  std::cout << outputref.slice(/*dim=*/1, /*start=*/0, /*end=*/5);
 
   std::stringstream ss;
   m._save_for_mobile(ss);
@@ -43,7 +43,7 @@ void testLiteInterpreter() {
   printSlots(m.module_object());
 
   std::cout << "bytecode slots: \n";
-  printSlots(bc.Object());
+  printSlots(bc.module_object());
 
   for (int i = 0; i < 1; ++i) {
     auto bcinputs = inputs;

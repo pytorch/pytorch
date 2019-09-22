@@ -948,7 +948,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               push(stack, std::move(vals));
             } else {
               const size_t stack_size = stack.size();
-              auto vals = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+              auto vals = c10::impl::GenericList(c10::AnyType::get());
               vals.reserve(inst.X);
               for (size_t i = stack_size - inst.X; i < stack_size; ++i) {
                 vals.emplace_back(std::move(stack[i]));
