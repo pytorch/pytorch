@@ -29,10 +29,9 @@ bool InterpreterState::run(Stack& stack) {
     switch (inst.op) {
       case OP: {
         auto opname = op_names_[inst.X];
-        auto fc = c10::Dispatcher::singleton().findSchema(opname);
-        assert(fc.has_value());
-        auto kernel = c10::Dispatcher::singleton().lookup(fc.value(), &stack);
-        kernel.call(&stack);
+        auto op = c10::Dispatcher::singleton().findSchema(opname);
+        assert(op.has_value());
+        c10::Dispatcher::singleton().callBoxed(*op, &stack);
         ++pc;
       } break;
       case LOAD:
