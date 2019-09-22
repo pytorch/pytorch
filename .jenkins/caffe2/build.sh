@@ -134,16 +134,44 @@ build_args+=("BUILD_TEST=ON")
 build_args+=("INSTALL_TEST=ON")
 build_args+=("USE_ZSTD=ON")
 
-if [[ $BUILD_ENVIRONMENT == *py2-cuda9.0-cudnn7-ubuntu16.04* ]]; then
-  # removing http:// duplicate in favor of nvidia-ml.list
-  # which is https:// version of the same repo
-  sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list
-  curl -o ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
-  sudo dpkg -i ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
-  sudo apt-key add /var/nvinfer-runtime-trt-repo-5.0.2-ga-cuda9.0/7fa2af80.pub
-  sudo apt-get -qq update
-  sudo apt-get install -y --no-install-recommends libnvinfer5=5.0.2-1+cuda9.0 libnvinfer-dev=5.0.2-1+cuda9.0
-  rm ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+if [[ $BUILD_ENVIRONMENT == *pytorch-linux-xenial-cuda9-cudnn7-py3-slow-test* ]]; then
+  LIB_FOLDER="https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64"
+  declare -a TRT_DEBS
+  TRT_DEBS=("libnvinfer6_6.0.1-1+cuda9.0_amd64.deb"
+    "libnvinfer-dev_6.0.1-1+cuda9.0_amd64.deb"
+    "libnvinfer-plugin6_6.0.1-1+cuda9.0_amd64.deb"
+    "libnvinfer-plugin-dev_6.0.1-1+cuda9.0_amd64.deb"
+    "libnvonnxparsers6_6.0.1-1+cuda9.0_amd64.deb"
+    "libnvonnxparsers-dev_6.0.1-1+cuda9.0_amd64.deb"
+    "libnvparsers6_6.0.1-1+cuda9.0_amd64.deb"
+    "libnvparsers-dev_6.0.1-1+cuda9.0_amd64.deb"
+    "python3-libnvinfer-dev_6.0.1-1+cuda9.0_amd64.deb"
+    "python3-libnvinfer_6.0.1-1+cuda9.0_amd64.deb")
+
+  for l in "${TRT_DEBS[@]}"
+  do
+     curl -L -k -o ./$l $LIB_FOLDER/$l
+  done
+  dpkg -i *.deb
+  for l in "${TRT_DEBS[@]}"
+  do
+     rm "$l"
+  done
+
+  # building OSS release of ONNX parser on top of just installed
+  git clone --depth 1 --branch release/6.0 https://github.com/onnx/onnx-tensorrt.git
+  cd onnx-tensorrt/
+  git submodule update --init --recursive
+  cd third_party/onnx
+  git checkout v1.5.0
+  cd ../../
+  mkdir build
+  cd build
+  cmake ..
+  make -j4
+  make install
+  cd ../../
+  rm -rf onnx-tensorrt/
 
   build_args+=("USE_TENSORRT=ON")
 fi

@@ -3,4 +3,3 @@ enum34
 pyyaml
 requests
 typing
-torchvision
