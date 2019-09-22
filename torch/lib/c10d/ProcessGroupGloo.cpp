@@ -879,6 +879,14 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
   // we run allgather on the nnz, and then allgather with max(nnz).
   // We could use an allgatherv for this, if it were available.
   at::Tensor allreduce(std::vector<at::Tensor>& tensors) {
+    // TODO: This is a massive hack!  There is some confusion about
+    // Variable/Tensor inside the body of this function.  Turning off
+    // grad smooths over the confusion for now.  This fixes
+    // test/test_c10d.py ProcessGroupGlooTest.test_sparse_allreduce_basics
+    //
+    // The correct fix is to stop allocating tensors that are not variables,
+    // but to conveniently do this c10d must depend on torch not ATen
+    at::AutoNonVariableTypeMode _no_grad(true);
     auto input = tensors[0];
 
     // Perform local reduction if we have multiple inputs.

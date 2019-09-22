@@ -214,6 +214,14 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor(12)
         self.run_test(FullModelScripting(), x)
 
+    def test_fuse_addmm(self):
+        class AddmmModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.mm(x, x) + x
+
+        x = torch.ones(3, 3)
+        self.run_test(AddmmModel(), x)
+
     def test_maxpool(self):
         model = torch.nn.MaxPool1d(2, stride=1)
         x = torch.randn(20, 16, 50)
@@ -862,20 +870,19 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.ones(2, 3, dtype=torch.float32)
         self.run_test(ComparisonModel(), (x, y))
 
-        # TODO: re-enable the two tests after https://github.com/pytorch/pytorch/issues/26328 is resolved.
         class MatMulModel(torch.nn.Module):
             def forward(self, x):
                 return (torch.mm(x, x) + x + torch.mm(x, x) + x)
 
         x = torch.ones(3, 3)
-        # self.run_test(MatMulModel(), x)
+        self.run_test(MatMulModel(), x)
 
         class AddMMModel(torch.nn.Module):
             def forward(self, x):
                 return torch.mm(x, x) + x
 
         x = torch.ones(3, 3)
-        # self.run_test(AddMMModel(), x)
+        self.run_test(AddMMModel(), x)
 
         class FullModel(torch.nn.Module):
             # add is used for exporting full
