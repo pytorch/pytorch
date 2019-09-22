@@ -121,7 +121,7 @@ namespace test_copy_assignment {
     EXPECT_EQ(5, hello.size());
     EXPECT_EQ("hello", hello);
     EXPECT_EQ(5, (string_view() = "hello").size());
-    EXPECT_EQ("hello", (string_view() = "hello"), "");
+    EXPECT_EQ("hello", (string_view() = "hello"));
   }
 
 }
