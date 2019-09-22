@@ -98,14 +98,24 @@ public:
     return current;
   }
 
-  AT_CPP14_CONSTEXPR reference operator*() const {
-    _Iterator iter = current;
-    return *--iter;
+  constexpr reference operator*() const {
+    #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
+      _Iterator iter = current;
+      return *--iter;
+    #else
+      // Only works for random access iterators if we're not C++14 :(
+      return *(current - 1);
+    #endif
   }
 
-  AT_CPP14_CONSTEXPR pointer operator->() const {
-    _Iterator iter = current;
-    return _S_to_pointer(--iter);
+  constexpr pointer operator->() const {
+    #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
+      _Iterator iter = current;
+      return _S_to_pointer(--iter);
+    #else
+      // Only works for random access iterators if we're not C++14 :(
+      return _S_to_pointer(current - 1);
+    #endif
   }
 
   AT_CPP14_CONSTEXPR reverse_iterator& operator++() {
