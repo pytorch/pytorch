@@ -50,6 +50,11 @@ class EvalEnv(object):
         'List': List,
         'Dict': Dict,
         'Optional': Optional,
+        'BroadcastingList1': BroadcastingList1,
+        'BroadcastingList2': BroadcastingList2,
+        'BroadcastingList3': BroadcastingList3,
+        'BroadcastingList4': BroadcastingList4,
+        'BroadcastingList6': BroadcastingList6
     }
 
     def __init__(self, rcb):
