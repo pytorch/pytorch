@@ -122,7 +122,8 @@ Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & 
       norm = norm.unsqueeze(dim[0]);
     } else {
       auto dims_to_unsqueeze = at::dim_list_to_bitset(dim, sizes.size());
-      for (size_t i = 0; i < sizes.size(); i++){
+      for (
+          size_t i = 0; i < sizes.size(); i++){
         if (dims_to_unsqueeze[i]) {
           grad = grad.unsqueeze(i);
           norm = norm.unsqueeze(i);
