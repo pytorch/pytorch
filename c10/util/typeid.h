@@ -290,7 +290,7 @@ inline constexpr TypeMetaData::Delete* _PickDelete() noexcept {
 }
 
 template <class T>
-inline TypeMetaData _makeTypeMetaDataInstance() {
+inline constexpr TypeMetaData _makeTypeMetaDataInstance() {
   return {sizeof(T),
           _PickNew<T>(),
           _PickPlacementNew<T>(),
@@ -485,17 +485,13 @@ inline std::ostream& operator<<(
 #define EXPORT_IF_NOT_GCC
 #endif
 
-#define _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, Counter)      \
-  namespace detail {                                                    \
-  const TypeMetaData C10_CONCATENATE(_typeMetaDataInstance_, Counter) = \
-      _makeTypeMetaDataInstance<T>();                                   \
-  }                                                                     \
-  template <>                                                           \
-  EXPORT_IF_NOT_GCC const detail::TypeMetaData*                         \
-  TypeMeta::_typeMetaDataInstance<T>() noexcept {                       \
-    return &C10_CONCATENATE(detail::_typeMetaDataInstance_, Counter);   \
+#define CAFFE_KNOWN_TYPE(T)                                               \
+  template <>                                                             \
+  EXPORT_IF_NOT_GCC const detail::TypeMetaData*                           \
+  TypeMeta::_typeMetaDataInstance<T>() noexcept {                         \
+    static constexpr detail::TypeMetaData singleton =                     \
+        detail::_makeTypeMetaDataInstance<T>();                           \
+    return &singleton;                                                    \
   }
-#define CAFFE_KNOWN_TYPE(T)                                             \
-  _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, __COUNTER__)
 
 } // namespace caffe2
