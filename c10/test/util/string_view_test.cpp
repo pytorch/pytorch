@@ -112,16 +112,18 @@ namespace test_copy_assignment {
       constexpr string_view hello = assign("hello");
       static_assert(5 == hello.size(), "");
       static_assert(string_equal("hello", hello.data(), hello.size()), "");
+
+      static_assert(5 == (string_view() = "hello").size(), "");
+      static_assert(string_equal("hello", (string_view() = "hello").data(), 5), "");
     }
     #endif
     const string_view hello = assign("hello");
     EXPECT_EQ(5, hello.size());
     EXPECT_EQ("hello", hello);
+    EXPECT_EQ(5, (string_view() = "hello").size());
+    EXPECT_EQ("hello", (string_view() = "hello"), "");
   }
 
-
-  static_assert(5 == (string_view() = "hello").size(), "");
-  static_assert(string_equal("hello", (string_view() = "hello").data(), 5), "");
 }
 
 namespace test_iterators {
