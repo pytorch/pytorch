@@ -1780,8 +1780,8 @@ inline Tensor Tensor::permute(DimnameList dims) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::permute(const_cast<Tensor&>(*this), dims);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::permute(Tensor(a) self, DimnameList dims) -> Tensor(a)");
-    return table->getOp<Tensor (const Tensor &, DimnameList)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dims);
+    static auto table = globalATenDispatch().getOpTable("aten::permute.names(Tensor(a) self, DimnameList dims) -> Tensor(a)");
+    return table->getOp<Tensor (const Tensor &, DimnameList)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dims);
 #endif
 }
 #endif

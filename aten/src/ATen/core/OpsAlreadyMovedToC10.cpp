@@ -997,6 +997,9 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::ones", ""},
         {"aten::ones", "out"},
         {"aten::ones_like", "dtype"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::permute", "names"},
+    #endif
         {"aten::scalar_tensor", ""},
     #ifdef BUILD_NAMEDTENSOR
         {"aten::rand", "names"},
