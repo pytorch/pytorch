@@ -3,6 +3,7 @@
 #include <string>
 #include <cstring>
 #include <stdexcept>
+#include <numeric_limits>
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
 #include <c10/util/reverse_iterator.h>
