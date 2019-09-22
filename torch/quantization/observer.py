@@ -10,6 +10,17 @@ import torch.nn as nn
 from torch._jit_internal import List, Optional
 
 
+class _PartialWrapper(object):
+    def __init__(self, p):
+        self.p = p
+
+    def __call__(self, *args, **keywords):
+        return self.p(*args, **keywords)
+
+    def __repr__(self):
+        return self.p.__repr__()
+
+
 def _with_args(cls_or_self, **kwargs):
     """
     Wrapper around functools.partial that allows chaining.
@@ -19,9 +30,10 @@ def _with_args(cls_or_self, **kwargs):
         Foo.with_args = classmethod(_with_args)
         Foo.with_args(x=1).with_args(y=2)
     """
-    r = partial(cls_or_self, **kwargs)
-    r.with_args = _with_args
+    r = _PartialWrapper(partial(cls_or_self, **kwargs))
     return r
+
+_PartialWrapper.with_args = _with_args
 
 
 ABC = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
