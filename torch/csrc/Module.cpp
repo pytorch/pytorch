@@ -596,28 +596,6 @@ PyMethodDef* THCUDNN_methods() {
 }
 #endif
 
-// ATen warning handler for Python
-static void warning_handler(
-    const c10::SourceLocation& source_location,
-    const char* msg) {
-  AutoGIL gil;
-  auto result = -1;
-  if (source_location.file == nullptr) {
-    result = PyErr_WarnEx(PyExc_RuntimeWarning, msg, 1);
-  } else {
-    result = PyErr_WarnExplicit(
-        /*category=*/PyExc_UserWarning,
-        /*message=*/msg,
-        /*filename=*/source_location.file,
-        /*lineno=*/source_location.line,
-        /*module=*/nullptr,
-        /*registry=*/nullptr);
-  }
-  if (result < 0) {
-    throw python_error();
-  }
-}
-
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
 // Guaranteed to be invoked from Python under GIL, no locking on map needed
 static void LogAPIUsageOnceFromPython(const std::string& event) {
@@ -627,7 +605,6 @@ static void LogAPIUsageOnceFromPython(const std::string& event) {
     c10::LogAPIUsage(event);
   }
 }
-
 
 #ifdef _WIN32
 __declspec(dllexport)
@@ -753,9 +730,6 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
-
-  // Set ATen warnings to issue Python warnings
-  ::c10::Warning::set_warning_handler(&warning_handler);
 
   ASSERT_TRUE(set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));

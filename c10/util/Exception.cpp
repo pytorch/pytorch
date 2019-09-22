@@ -64,16 +64,20 @@ void Error::AppendMessage(const std::string& new_msg) {
 }
 
 void Warning::warn(SourceLocation source_location, std::string msg) {
-  warning_handler_(source_location, msg.c_str());
+  warning_handler_(source_location, msg);
 }
 
 void Warning::set_warning_handler(handler_t handler) {
   warning_handler_ = handler;
 }
 
+Warning::handler_t Warning::get_warning_handler() {
+  return warning_handler_;
+}
+
 void Warning::print_warning(
     const SourceLocation& source_location,
-    const char* msg) {
+    const std::string& msg) {
   std::cerr << "Warning: " << msg << " (" << source_location << ")\n";
 }
 

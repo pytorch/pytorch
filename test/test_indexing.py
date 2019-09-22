@@ -495,11 +495,9 @@ class NumpyTests(TestCase):
         index = tensor([False] * 6)
         self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
 
-        with warnings.catch_warnings(record=True) as w:
-            index = torch.ByteTensor(4, 4).zero_()
-            self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
-            self.assertRaisesRegex(IndexError, 'mask', lambda: arr[(slice(None), index)])
-            self.assertEquals(len(w), 2)
+        index = torch.ByteTensor(4, 4).zero_()
+        self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
+        self.assertRaisesRegex(IndexError, 'mask', lambda: arr[(slice(None), index)])
 
     def test_boolean_indexing_onedim(self):
         # Indexing a 2-dimensional array with
