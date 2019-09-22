@@ -101,11 +101,13 @@ def fake_quant(fake_quant_cls, **kwargs):
     return partial(fake_quant_cls, **kwargs)
 
 def default_fake_quant(**kwargs):
-    kwargs.setdefault('observer', default_observer(dtype=torch.quint8, qscheme = torch.per_tensor_affine, reduce_range =True))
+    reduce_range = kwargs.pop('reduce_range', True)
+    kwargs.setdefault('observer', default_observer(dtype=torch.quint8, qscheme = torch.per_tensor_affine, reduce_range =reduce_range))
     return fake_quant(FakeQuantize, **kwargs)
 
 def l2_fake_quant(**kwargs):
-    kwargs.setdefault('observer', default_l2_observer(reduce_range = True))
+    reduce_range = kwargs.pop('reduce_range', True)
+    kwargs.setdefault('observer', default_l2_observer(reduce_range = reduce_range))
     return fake_quant(FakeQuantize, **kwargs)
 
 def default_per_channel_weight_fake_quant(**kwargs):

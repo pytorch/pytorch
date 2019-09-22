@@ -6,6 +6,27 @@ from .fake_quantize import *
 QConfig = namedtuple('QConfig',
                      ['activation', 'weight'])
 
+def get_default_qconfig(backend='fbgemm'):
+    if backend == 'fbgemm':
+        qconfig = QConfig(activation=default_l2_observer(),
+                          weight=default_per_channel_weight_observer())
+    else:
+        qconfig = QConfig(activation=default_l2_observer(reduce_range=False),
+                          weight=default_weight_observer())
+    return qconfig
+
+def get_default_qat_qconfig(backend='fbgemm'):
+    if backend == 'fbgemm':
+        qconfig = QConfig(activation=l2_fake_quant(),
+                          weight=default_per_channel_weight_fake_quant())
+    else:
+        qconfig = QConfig(activation=l2_fake_quant(reduce_range=False),
+                          weight=default_weight_fake_quant())
+    return qconfig
+
+
+
+
 default_qconfig = QConfig(activation=default_observer(),
                           weight=default_weight_observer())
 default_per_channel_qconfig = QConfig(activation=default_observer(),

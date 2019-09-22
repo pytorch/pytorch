@@ -596,12 +596,16 @@ def default_per_channel_weight_observer(**kwargs):
 
 def default_observer(**kwargs):
     # Restrict activations to be in the range (0,127)
-    kwargs.setdefault("reduce_range", True)
+    if "reduce_range" not in kwargs:
+        print('Reducing range in default observer')
+        kwargs.setdefault("reduce_range", True)
     return observer(MinMaxObserver, **kwargs)
 
 def default_l2_observer(**kwargs):
     # Restrict activations to be in the range (0,127)
-    kwargs.setdefault("reduce_range", True)
+    if "reduce_range" not in kwargs:
+        print('Reducing range in Hist observer')
+        kwargs.setdefault("reduce_range", True)
     return observer(HistogramObserver, **kwargs)
 
 def default_debug_observer(**kwargs):
