@@ -403,8 +403,8 @@ class C10_API TypeMeta {
   }
 
   template <class T>
-  static c10::string_view TypeName() noexcept {
-    return Make<T>().name();
+  static constexpr c10::string_view TypeName() noexcept {
+    return c10::util::get_fully_qualified_type_name<T>();
   }
 
   template <class T>
@@ -429,7 +429,7 @@ inline TypeMeta::TypeMeta() noexcept
     : TypeMeta(TypeMeta::Make<detail::_Uninitialized>()) {}
 
 inline constexpr bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
-  return (lhs.data_ == rhs.data_);
+  return (lhs.id() == rhs.id());
 }
 inline constexpr bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return !operator==(lhs, rhs);
