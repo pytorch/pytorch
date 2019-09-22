@@ -31,7 +31,7 @@ namespace detail {
 #endif
 
 template<typename T>
-constexpr uint64_t type_index_impl() noexcept {
+C10_HOST_CONSTEXPR uint64_t type_index_impl() noexcept {
   // Idea: __PRETTY_FUNCTION__ (or __FUNCSIG__ on msvc) contains a qualified name
   // of this function, including its template parameter, i.e. including the
   // type we want an id for. We use this name and run crc64 on it to get a type id.
@@ -45,8 +45,8 @@ constexpr uint64_t type_index_impl() noexcept {
 } // namespace _detail
 
 template<typename T>
-constexpr type_index get_type_index() noexcept {
-  #if defined(__CUDACC__)
+C10_HOST_CONSTEXPR type_index get_type_index() noexcept {
+  #if !defined(__CUDA_ARCH__)
     // To enforce that this is really computed at compile time, we pass the crc
     // checksum through std::integral_constant.
     return type_index{std::integral_constant<
@@ -54,7 +54,7 @@ constexpr type_index get_type_index() noexcept {
         detail::type_index_impl<guts::remove_cv_t<guts::decay_t<T>>>()
     >::value};
   #else
-    // nvcc unfortunately doesn't like this being constexpr, let's try without
+    // nvcc unfortunately doesn't like this being constexpr in device code
     return type_index{
         detail::type_index_impl<guts::remove_cv_t<guts::decay_t<T>>>()
     };

@@ -4,6 +4,14 @@
 #include <cstdint>
 #include <c10/util/IdWrapper.h>
 
+// C10_HOST_CONSTEXPR: for cases where the CUDA compiler complains about the
+// constexpr when compiling device code :'(
+#if defined(__CUDA_ARCH__)
+#define C10_HOST_CONSTEXPR
+#else
+#define C10_HOST_CONSTEXPR constexpr
+#endif
+
 namespace c10 {
 namespace util {
 
@@ -75,7 +83,7 @@ constexpr uint64_t crc64_table[] = {
     0xa6df411fbfb21ca3, 0xdc0731d78f8795da, 0x536fa08fdfd90e51, 0x29b7d047efec8728,
 };
 
-inline constexpr uint64_t crc64impl(uint64_t accumulator, const char* data, size_t size) {
+inline C10_HOST_CONSTEXPR uint64_t crc64impl(uint64_t accumulator, const char* data, size_t size) {
 #if __cpp_constexpr >= 201304
   // if we are in C++14, just use a for loop. This compiles faster.
   for (size_t i = 0; i < size; ++i) {
@@ -103,7 +111,7 @@ struct crc64_t final : IdWrapper<crc64_t, uint64_t> {
 };
 
 // CRC64 with Jones coefficients and an init value of 0.
-inline constexpr crc64_t crc64(const char* data, size_t size) {
+inline C10_HOST_CONSTEXPR crc64_t crc64(const char* data, size_t size) {
   return crc64_t{detail::crc64impl(0, data, size)};
 }
 } // namespace util
