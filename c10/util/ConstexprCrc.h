@@ -4,10 +4,16 @@
 #include <cstdint>
 #include <c10/util/IdWrapper.h>
 
-// C10_HOST_CONSTEXPR: for cases where the CUDA compiler complains about the
-// constexpr when compiling device code :'(
+// For some functions, the CUDA compiler doesn't like them to be constexpr
+// in the device code compilation, even though the function is never called
+// from the device. Use C10_HOST_CONSTEXPR for these functions instead of
+// constexpr. If it is compiled on the host, it sets constexpr, and if it is
+// compiled on the device, it sets __host__ to make sure that the function
+// really isn't executed on device. So it is still constexpr for everywhere
+// where it is actually called.
+// TODO This occurred in CUDA 9 (9.0 to 9.2). Test if this is fixed in CUDA 10.
 #if defined(__CUDA_ARCH__)
-#define C10_HOST_CONSTEXPR
+#define C10_HOST_CONSTEXPR __host__
 #else
 #define C10_HOST_CONSTEXPR constexpr
 #endif
