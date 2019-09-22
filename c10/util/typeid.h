@@ -130,7 +130,7 @@ struct TypeMetaData final {
       PlacementDelete* placementDelete,
       Delete* deleteFn,
       TypeIdentifier id,
-      const char* name) noexcept
+      c10::string_view name) noexcept
       : itemsize_(itemsize),
         new_(newFn),
         placementNew_(placementNew),
@@ -147,7 +147,7 @@ struct TypeMetaData final {
   PlacementDelete* placementDelete_;
   Delete* delete_;
   TypeIdentifier id_;
-  const char* name_;
+  c10::string_view name_;
 };
 
 // Mechanism for throwing errors which can't be prevented at compile time
@@ -289,22 +289,8 @@ inline constexpr TypeMetaData::Delete* _PickDelete() noexcept {
   return &_Delete<T>;
 }
 
-#ifdef __GXX_RTTI
 template <class T>
-const char* _typeName(const char* literalName) noexcept {
-  std::ignore = literalName; // suppress unused warning
-  static const std::string name = c10::demangle(typeid(T).name());
-  return name.c_str();
-}
-#else
-template <class T>
-constexpr const char* _typeName(const char* literalName) noexcept {
-  return literalName;
-}
-#endif
-
-template <class T>
-inline TypeMetaData _makeTypeMetaDataInstance(const char* typeName) {
+inline constexpr TypeMetaData _makeTypeMetaDataInstance() {
   return {sizeof(T),
           _PickNew<T>(),
           _PickPlacementNew<T>(),
@@ -312,7 +298,7 @@ inline TypeMetaData _makeTypeMetaDataInstance(const char* typeName) {
           _PickPlacementDelete<T>(),
           _PickDelete<T>(),
           TypeIdentifier::Get<T>(),
-          typeName};
+          c10::util::get_fully_qualified_type_name<T>()};
 }
 
 class _Uninitialized final {};
@@ -397,11 +383,11 @@ class C10_API TypeMeta {
   /**
    * Returns a printable name for the type.
    */
-  constexpr const char* name() const noexcept {
+  constexpr c10::string_view name() const noexcept {
     return data_->name_;
   }
 
-  friend bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
+  friend constexpr bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
 
   template <typename T>
   constexpr bool Match() const noexcept {
@@ -416,7 +402,7 @@ class C10_API TypeMeta {
   }
 
   template <class T>
-  static const char* TypeName() noexcept {
+  static c10::string_view TypeName() noexcept {
     return Make<T>().name();
   }
 
@@ -461,10 +447,10 @@ C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<
 inline TypeMeta::TypeMeta() noexcept
     : data_(_typeMetaDataInstance<detail::_Uninitialized>()) {}
 
-inline bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+inline constexpr bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return (lhs.data_ == rhs.data_);
 }
-inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+inline constexpr bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return !operator==(lhs, rhs);
 }
 
@@ -502,7 +488,7 @@ inline std::ostream& operator<<(
 #define _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, Counter)      \
   namespace detail {                                                    \
   const TypeMetaData C10_CONCATENATE(_typeMetaDataInstance_, Counter) = \
-      _makeTypeMetaDataInstance<T>(_typeName<T>(#T));                   \
+      _makeTypeMetaDataInstance<T>();                                   \
   }                                                                     \
   template <>                                                           \
   EXPORT_IF_NOT_GCC const detail::TypeMetaData*                         \
