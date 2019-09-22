@@ -92,7 +92,7 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
 
   # On ROCm, RCCL (distributed) development isn't complete.
   # https://github.com/ROCmSoftwarePlatform/rccl
-  ignore_tests+=("--ignore $caffe2_pypath/python/data_parallel_model_test.py")
+  ignore_tests+=( --ignore $caffe2_pypath/python/data_parallel_model_test.py )
 fi
 
 ##############################
@@ -101,7 +101,7 @@ fi
 if [[ $BUILD_ENVIRONMENT == *pytorch-linux-xenial-cuda9-cudnn7-py3-slow-test* ]]; then
   pip install -q --user torchvision
 else
-  ignore_tests+=("--ignore $caffe2_pypath/python/trt/test_pt_onnx_trt.py")
+  ignore_tests+=( --ignore $caffe2_pypath/python/trt/test_pt_onnx_trt.py )
 fi
 
 # NB: Warnings are disabled because they make it harder to see what
