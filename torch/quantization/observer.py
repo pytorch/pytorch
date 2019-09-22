@@ -586,6 +586,11 @@ def default_observer(**kwargs):
     kwargs.setdefault("reduce_range", True)
     return observer(MinMaxObserver, **kwargs)
 
+def default_l2_observer(**kwargs):
+    # Restrict activations to be in the range (0,127)
+    print(kwargs)
+    kwargs.setdefault("reduce_range", True)
+    return observer(HistogramObserver, **kwargs)
 
 def default_debug_observer(**kwargs):
     return observer(TensorObserver, **kwargs)
