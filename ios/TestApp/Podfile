@@ -1,0 +1,5 @@
+
+platform :ios, '12.0'
+target 'TestApp' do
+  pod 'LibTorch'
+end

@@ -1,7 +1,8 @@
 import sys
 import torch
 import torch._C as _C
-from torch.namedtensor import _update_names, _check_serializing_named_tensor
+from torch._namedtensor_internals import update_names, check_serializing_named_tensor, resolve_ellipsis
+from torch._namedtensor_internals import unzip_namedshape
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
@@ -37,7 +38,7 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
-        _check_serializing_named_tensor(self)
+        check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         if self.is_quantized:
@@ -427,7 +428,11 @@ class Tensor(torch._C._TensorBase):
         """
         if isinstance(element, (torch.Tensor, Number)):
             return (element == self).any().item()
-        return NotImplemented
+
+        raise RuntimeError(
+            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a %s." %
+            type(element)
+        )
 
     @property
     def __cuda_array_interface__(self):
@@ -481,23 +486,34 @@ class Tensor(torch._C._TensorBase):
 
         return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=1)
 
-    def names_(self, *names, **rename_map):
-        # Note [names_ / view_names API]
-        # The Python API for these is different from the C++ API. In Python:
-        # 1) tensor.view_names(*names) takes a vararglist of names
-        # 2) tensor.view_names(**rename_map) takes a map of names to rename.
-        # C++ is static, making it difficult to implement similar behavior.
-        return _update_names(self, names, rename_map, inplace=True)
+    def refine_names(self, *names):
+        names = resolve_ellipsis(names, self.names, 'refine_names')
+        return super(Tensor, self).refine_names(names)
 
-    def view_names(self, *names, **rename_map):
-        # See Note [names_ / view_names API]
-        return _update_names(self, names, rename_map, inplace=False)
+    def align_to(self, *names):
+        return super(Tensor, self).align_to(resolve_ellipsis(names, self.names, 'align_to'))
+
+    def unflatten(self, dim, namedshape):
+        names, sizes = unzip_namedshape(namedshape)
+        return super(Tensor, self).unflatten(dim, sizes, names)
+
+    def names_(self, *names, **rename_map):
+        # Note [names_ / renamed API]
+        # The Python API for these is different from the C++ API. In Python:
+        # 1) tensor.renamed(*names) takes a vararglist of names
+        # 2) tensor.renamed(**rename_map) takes a map of names to rename.
+        # C++ is static, making it difficult to implement similar behavior.
+        return update_names(self, names, rename_map, inplace=True)
+
+    def renamed(self, *names, **rename_map):
+        # See Note [names_ / renamed API]
+        return update_names(self, names, rename_map, inplace=False)
 
     def _update_names(self, names, inplace):
-        # See Note [names_ / view_names API]
+        # See Note [names_ / renamed API]
         if inplace:
             return super(Tensor, self).names_(names)
         else:
-            return super(Tensor, self).view_names(names)
+            return super(Tensor, self).renamed(names)
 
     __module__ = 'torch'

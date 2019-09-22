@@ -21,7 +21,7 @@ from torch.autograd.profiler import (profile, format_time, EventList,
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm, slowTest,
-                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS)
+                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
@@ -34,6 +34,8 @@ from common_methods_invocations import (method_tests,
                                         exclude_tensor_method,
                                         mask_not_all_zeros,
                                         S)
+from common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
+                                onlyCUDA)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -200,9 +202,6 @@ class TestAutograd(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, 'expected shape'):
             input = torch.randn(5, 5, dtype=torch.float, requires_grad=True)
-            MyFunction.apply(input).sum().backward()
-        with self.assertRaisesRegex(RuntimeError, 'expected type'):
-            input = torch.randn(10, dtype=torch.double, requires_grad=True)
             MyFunction.apply(input).sum().backward()
 
     def test_accumulate_grad(self):
@@ -685,47 +684,6 @@ class TestAutograd(TestCase):
                                     "calculating the gradient of a sparse Tensor argument to mm is not supported."):
             z.sum().backward()
 
-    # NOTE: flaky on ROCm CI
-    @skipIfRocm
-    def test_sparse_ctor_getter_backward(self):
-        # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
-        def test(size, sparse_dim, nnz, device):
-            v_size = [nnz] + list(size[sparse_dim:])
-            i = torch.rand(sparse_dim, nnz)
-            i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
-            i = i.to(torch.long)
-
-            inp = torch.randn(v_size, requires_grad=True)
-            other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True)[0]
-            other = other.to(device)
-
-            def fn(v):
-                x = torch.sparse_coo_tensor(i, v, size, device=device)
-                y = (x + other).coalesce()
-                yv = y.values()
-                new_v = yv.tanh()
-                z = torch.sparse_coo_tensor(y.indices(), new_v, y.size())
-                return z.coalesce().values()
-
-            gradcheck(fn, (inp,))
-            # FIXME: make gradgradcheck work.
-            # gradgradcheck(fn, (inp,))
-
-            # assert that _values is non-differentiable
-            with self.assertRaisesRegex(RuntimeError, "does not have a grad_fn"):
-                other.detach().requires_grad_()._values().backward(torch.ones_like(other._values()))
-
-        devices = ['cpu']
-
-        if torch.cuda.is_available():
-            devices.append('cuda')
-
-        for empty_i, empty_v, empty_nnz in product([True, False], repeat=3):
-            sparse_size = [] if empty_i else [2, 1]
-            dense_size = [1, 0, 2] if empty_v else [1, 2]
-            nnz = 0 if empty_nnz else 5
-            for device in devices:
-                test(sparse_size + dense_size, len(sparse_size), nnz, device)
 
     def test_multi_backward(self):
         x = torch.randn(5, 5, requires_grad=True)
@@ -900,7 +858,10 @@ class TestAutograd(TestCase):
         for i in range(3):
             x.detach_()
             x.copy_(mu + i)
-            loss += (x * torch.tensor([float(i)])).sum()
+            ft = torch.tensor([float(i)])
+            multiplied = x * ft
+            s = multiplied.sum()
+            loss += s
         loss.backward()
 
     def test_no_grad(self):
@@ -1712,19 +1673,6 @@ class TestAutograd(TestCase):
     def test_sparse_gather_both_scalar(self):
         self._test_sparse_gather((), (), 0)
 
-    # autograd tests via common_method_invocations don't allow input tensors to
-    # be sparse (RuntimeError: gradcheck expects all tensor inputs are dense when
-    # check_sparse_nnz is set to False.)
-    def test_sparse_mask_autograd(self):
-        for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
-            tensor = torch.randn(3, requires_grad=True, device=device)
-            mask = torch.ones(3, device=device)
-            mask[1] = 0
-            mask = mask.to_sparse()
-            converted = tensor.sparse_mask(mask).to_dense()
-            converted.sum().backward()
-            self.assertEqual(tensor.grad, mask.to_dense())
-
     def test_gc_in_destructor(self):
         """
         Previously, if a Function destructor triggered a garbage collection,
@@ -1924,7 +1872,6 @@ class TestAutograd(TestCase):
         torch.autograd.grad(y, x)  # should not error!
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    @skipIfRocm
     def test_unused_output_gpu(self):
         from torch.nn.parallel._functions import Broadcast
         x = Variable(torch.randn(5, 5).float().cuda(), requires_grad=True)
@@ -1953,7 +1900,6 @@ class TestAutograd(TestCase):
         self.assertEqual(device[0], 1)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    @skipIfRocm
     def test_inputbuffer_add_multigpu(self):
         input = torch.randn(1).cuda(0).requires_grad_()
         output = input.cuda(1) + input.cuda(1)
@@ -2065,65 +2011,6 @@ class TestAutograd(TestCase):
                 # one of these has to be the non-default device
                 self._test_type_conversion_backward(lambda x: x.cuda(0))
                 self._test_type_conversion_backward(lambda x: x.cuda(1))
-
-    def _test_pyscalar_conversions(self, t, integral_conv):
-        # integral -> integral
-        l = t(torch.zeros(1, 1, 1, dtype=torch.long))
-        pyscalar = -12345
-        l[0] = pyscalar
-        self.assertEqual(integral_conv(l), pyscalar)
-
-        # floating point -> floating point
-        f = Variable(t(torch.randn(1, 1)))
-        pyscalar = -12345.1
-        f[0] = pyscalar
-        self.assertEqual(float(f), pyscalar)
-        f[0] = nan
-        self.assertTrue(math.isnan(float(f)))
-        f[0] = inf
-        self.assertEqual(float(f), inf, allow_inf=True)
-        f[0] = -inf
-        self.assertEqual(float(f), -inf, allow_inf=True)
-
-        # integral -> floating point
-        # check we can convert something that loses precision
-        pyscalar = 1234567890123456789
-        self.assertNotEqual(pyscalar, integral_conv(float(pyscalar)))
-        l[0] = pyscalar
-        self.assertEqual(float(l), float(pyscalar))
-
-        # floating point -> integral
-        f[0] = nan
-        self.assertRaises(ValueError, lambda: integral_conv(f[0]))
-        f[0] = inf
-        self.assertRaises(OverflowError, lambda: integral_conv(f[0]))
-        f[0] = -inf
-        self.assertRaises(OverflowError, lambda: integral_conv(f[0]))
-        f[0] = sys.float_info.max
-        self.assertEqual(integral_conv(f), sys.float_info.max)
-
-        # bool, nonzero
-        def test_nonzero(tensor, value, expected):
-            tensor[0] = value
-            self.assertEqual(expected, bool(tensor))
-            self.assertEqual(expected, True if tensor else False)
-
-        test_nonzero(l, 0, False)
-        test_nonzero(l, -2, True)
-        test_nonzero(f, 0.0, False)
-        test_nonzero(f, sys.float_info.min, True)
-        test_nonzero(f, nan, bool(nan))
-        test_nonzero(f, inf, bool(inf))
-        test_nonzero(f, -inf, bool(-inf))
-
-    def test_pyscalar_conversions(self):
-        self._test_pyscalar_conversions(lambda x: x, lambda x: int(x))
-        if sys.version_info[0] == 2:
-            self._test_pyscalar_conversions(lambda x: x, lambda x: long(x))
-        if torch.cuda.is_available():
-            self._test_pyscalar_conversions(lambda x: x.cuda(), lambda x: int(x))
-            if sys.version_info[0] == 2:
-                self._test_pyscalar_conversions(lambda x: x.cuda(), lambda x: long(x))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     def test_pin_memory(self):
@@ -2475,38 +2362,6 @@ class TestAutograd(TestCase):
                               lambda y, x: torch.trapz(y, x),
                               True, f_args_variable, f_args_tensor)
 
-    # skip this test if running on rocm, because in cdist
-    # we use __shfl_down_sync on CUDA for fast reduction
-    # and it gives incorrect results on rocm platform
-    @skipIfRocm
-    def test_cdist(self):
-        def _test_cdist_for_size(sizes):
-            devices = torch.testing.get_all_device_types()
-            for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
-                for device in devices:
-                    x = torch.randn(sizes, device=device, dtype=torch.double)
-                    y = torch.randn(sizes, device=device, dtype=torch.double)
-
-                    eps = 1e-6
-                    # to avoid extremum
-                    x = x - (((x - y) < eps).double() * 2 * eps)
-                    x.requires_grad = True
-                    y.requires_grad = True
-
-                    f_args_variable = (x, y)
-
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
-
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist", "cdist", f,
-                                          True, f_args_variable, f_args_tensor)
-
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
 
     def test_var_mean_differentiable(self):
         dim = [2, 4]
@@ -2545,6 +2400,27 @@ class TestAutograd(TestCase):
         for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
             run_test(upper, dims)
+
+    @skipIfNoLapack
+    def test_cholesky_solve(self):
+        def _test_with_size(A_dims, B_dims, upper):
+            root = torch.rand(*A_dims).requires_grad_()
+            b = torch.rand(*B_dims).requires_grad_()
+
+            def func(root, b, upper):
+                if upper:
+                    A = root.triu()
+                else:
+                    A = root.tril()
+                return torch.cholesky_solve(b, A, upper)
+
+            gradcheck(func, [root, b, upper])
+            gradgradcheck(func, [root, b, upper])
+
+        for (a_size, b_size), upper in product([((3, 3), (3, 4)), ((3, 3), (3, 2)),
+                                                ((2, 3, 3), (2, 3, 4)), ((2, 3, 3), (2, 3, 2))],
+                                               [True, False]):
+            _test_with_size(a_size, b_size, upper)
 
     @skipIfNoLapack
     def test_symeig(self):
@@ -2726,22 +2602,6 @@ class TestAutograd(TestCase):
     def test_pow_scalar_base(self):
         a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
         gradcheck(lambda a: torch.pow(2, a), (a,))
-
-    # test for backward in https://github.com/pytorch/pytorch/issues/15511
-    def test_pdist_large(self):
-        def func(x):
-            return torch.pdist(x, p=2)
-
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
-            # shape[0] should be able to be (roughly) arbitrarily large, but the kernel
-            # is currently limited to smaller sizes (see issue above); this is just testing
-            # a floor.
-            shape = (1000, 1)
-            x = torch.randn(shape, device=device).requires_grad_()
-            output = torch.pdist(x, p=2)
-            # just run a single backward, as gradcheck/gradgradcheck is expensive here
-            output.sum().backward()
 
     @skipIfNoLapack
     def test_pinverse(self):
@@ -2973,29 +2833,6 @@ class TestAutograd(TestCase):
 
         # test select on expanded input case
         test(torch.randn(2, 3), lambda x: x.expand(10, 2, 3), [2, 3], [3, 1], 0)
-
-    def _test_where_functional(self, t):
-        x = Variable(t(torch.randn(5, 5)), requires_grad=True)
-        y = Variable(t(torch.randn(5, 5)), requires_grad=True)
-        cond = Variable(t(mask_not_all_zeros((5, 5))), requires_grad=False)
-
-        def where(cond, x, y):
-            return torch.where(cond, x, y)
-
-        gradcheck(where, [cond, x, y], raise_exception=True)
-        gradgradcheck(where, [cond, x, y], [Variable(t(torch.randn(5, 5)))])
-
-        x = Variable(t(torch.randn(5, 1, 5)), requires_grad=True)
-        y = Variable(t(torch.randn(5, 5, 1)), requires_grad=True)
-        gradcheck(where, [cond, x, y], raise_exception=True)
-        gradgradcheck(where, [cond, x, y], [Variable(t(torch.randn(5, 5, 5)))])
-
-    def test_where_functional(self):
-        self._test_where_functional(lambda t: t)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    def test_where_functional_cuda(self):
-        self._test_where_functional(lambda t: t.cuda())
 
     def _test_lerp_tensor_weights(self, cast):
         def construct_inputs(*shapes):
@@ -3268,43 +3105,6 @@ class TestAutograd(TestCase):
         d, = torch.autograd.grad(c, a, retain_graph=True, create_graph=True)
         self.assertTrue(d.requires_grad)
 
-    @staticmethod
-    def _test_set_requires_grad_only_for_floats(self, cuda):
-        dtypes = [torch.int64, torch.int32, torch.int16, torch.int8,
-                  torch.float, torch.double]
-        if cuda:
-            dtypes.append(torch.half)
-
-        def f1(dt):
-            a = torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu')
-            a.requires_grad_()
-
-        def f2(dt):
-            a = torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu')
-            a.requires_grad = True
-
-        def f3(dt):
-            torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu', requires_grad=True)
-
-        for dt in dtypes:
-            a = torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu')
-            a.requires_grad = False  # should always work
-            a.requires_grad_(False)
-
-            for f in [f1, f2, f3]:
-                if dt.is_floating_point:
-                    f(dt)
-                else:
-                    with self.assertRaisesRegex(RuntimeError, 'floating point',
-                                                msg="dt: {} device: {}".format(a.dtype, a.device)):
-                        f(dt)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    def test_set_requires_grad_only_for_floats_cuda(self):
-        self._test_set_requires_grad_only_for_floats(self, True)
-
-    def test_set_requires_grad_only_for_floats(self):
-        self._test_set_requires_grad_only_for_floats(self, False)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     def test_rnn_backward_to_input_but_not_parameters_cuda(self):
@@ -3554,6 +3354,7 @@ for shape in [(1,), ()]:
         s = TestCase.runWithPytorchAPIUsageStderr(code)
         self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
 
+    @unittest.skipIf(IS_MACOS, "Fails with SIGBUS on macOS; https://github.com/pytorch/pytorch/issues/25941")
     def test_deep_reentrant(self):
 
         class DeepReentrant(Function):
@@ -3576,15 +3377,6 @@ for shape in [(1,), ()]:
         # This will cause stack overflow if reentrant calls are handled
         # in the same thread recursively
         DeepReentrant.apply(v).sum().backward()
-
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_advanced_indexing_backwards_large(self):
-        # See https://github.com/pytorch/pytorch/issues/22843
-        n = (1 << 16)
-        x = torch.rand(n, 1, device='cuda', requires_grad=True)
-        a = x[:, [0]]
-        a.sum().backward()
-        self.assertEqual(x.grad, torch.ones(n, 1, device='cuda'))
 
     def test_reentrant_priority(self):
         order = []
@@ -3879,6 +3671,216 @@ def add_test(
 
 for test in method_tests():
     add_test(*test)
+
+# Generic device type autograd tests.
+class TestAutogradDeviceType(TestCase):
+
+    # skip this test if running on rocm, because in cdist
+    # we use __shfl_down_sync on CUDA for fast reduction
+    # and it gives incorrect results on rocm platform
+    @skipCUDAIfRocm
+    def test_cdist(self, device):
+        def _test_cdist_for_size(sizex, sizey=None):
+            if sizey is None:
+                sizey = sizex
+            for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+                x = torch.randn(sizex, device=device, dtype=torch.double)
+                y = torch.randn(sizey, device=device, dtype=torch.double)
+                eps = 1e-6
+                # to avoid extremum
+                x = x - (((x - y) < eps).double() * 2 * eps)
+                x.requires_grad = True
+                y.requires_grad = True
+                f_args_variable = (x, y)
+
+                def f(a, b):
+                    return torch.cdist(a, b, p)
+                f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+                run_functional_checks(self, "test_cdist", "cdist", f,
+                                      True, f_args_variable, f_args_tensor)
+        _test_cdist_for_size((S, S))
+        _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
+        _test_cdist_for_size((1, 1), (S, 1))
+
+
+    # NOTE: flaky on ROCm CI
+    @skipCUDAIfRocm
+    def test_sparse_ctor_getter_backward(self, device):
+        # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
+        def _test(size, sparse_dim, nnz, device):
+            v_size = [nnz] + list(size[sparse_dim:])
+            i = torch.rand(sparse_dim, nnz)
+            i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
+            i = i.to(torch.long)
+
+            inp = torch.randn(v_size, requires_grad=True)
+            other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True)[0]
+            other = other.to(device)
+
+            def fn(v):
+                x = torch.sparse_coo_tensor(i, v, size, device=device)
+                y = (x + other).coalesce()
+                yv = y.values()
+                new_v = yv.tanh()
+                z = torch.sparse_coo_tensor(y.indices(), new_v, y.size())
+                return z.coalesce().values()
+
+            gradcheck(fn, (inp,))
+            # FIXME: make gradgradcheck work.
+            # gradgradcheck(fn, (inp,))
+
+            # assert that _values is non-differentiable
+            with self.assertRaisesRegex(RuntimeError, "does not have a grad_fn"):
+                other.detach().requires_grad_()._values().backward(torch.ones_like(other._values()))
+
+        for empty_i, empty_v, empty_nnz in product([True, False], repeat=3):
+            sparse_size = [] if empty_i else [2, 1]
+            dense_size = [1, 0, 2] if empty_v else [1, 2]
+            nnz = 0 if empty_nnz else 5
+            _test(sparse_size + dense_size, len(sparse_size), nnz, device)
+
+    # autograd tests via common_method_invocations don't allow input tensors to
+    # be sparse (RuntimeError: gradcheck expects all tensor inputs are dense when
+    # check_sparse_nnz is set to False.)
+    def test_sparse_mask_autograd(self, device):
+        tensor = torch.randn(3, requires_grad=True, device=device)
+        mask = torch.ones(3, device=device)
+        mask[1] = 0
+        mask = mask.to_sparse()
+        converted = tensor.sparse_mask(mask).to_dense()
+        converted.sum().backward()
+        self.assertEqual(tensor.grad, mask.to_dense())
+
+    def test_pyscalar_conversions(self, device):
+        def _test_pyscalar_conversions(t, integral_conv):
+            # integral -> integral
+            l = t(torch.zeros(1, 1, 1, dtype=torch.long))
+            pyscalar = -12345
+            l[0] = pyscalar
+            self.assertEqual(integral_conv(l), pyscalar)
+
+            # floating point -> floating point
+            f = Variable(t(torch.randn(1, 1)))
+            pyscalar = -12345.1
+            f[0] = pyscalar
+            self.assertEqual(float(f), pyscalar)
+            f[0] = nan
+            self.assertTrue(math.isnan(float(f)))
+            f[0] = inf
+            self.assertEqual(float(f), inf, allow_inf=True)
+            f[0] = -inf
+            self.assertEqual(float(f), -inf, allow_inf=True)
+
+            # integral -> floating point
+            # check we can convert something that loses precision
+            pyscalar = 1234567890123456789
+            self.assertNotEqual(pyscalar, integral_conv(float(pyscalar)))
+            l[0] = pyscalar
+            self.assertEqual(float(l), float(pyscalar))
+
+            # floating point -> integral
+            f[0] = nan
+            self.assertRaises(ValueError, lambda: integral_conv(f[0]))
+            f[0] = inf
+            self.assertRaises(OverflowError, lambda: integral_conv(f[0]))
+            f[0] = -inf
+            self.assertRaises(OverflowError, lambda: integral_conv(f[0]))
+            f[0] = sys.float_info.max
+            self.assertEqual(integral_conv(f), sys.float_info.max)
+
+            # bool, nonzero
+            def test_nonzero(tensor, value, expected):
+                tensor[0] = value
+                self.assertEqual(expected, bool(tensor))
+                self.assertEqual(expected, True if tensor else False)
+
+            test_nonzero(l, 0, False)
+            test_nonzero(l, -2, True)
+            test_nonzero(f, 0.0, False)
+            test_nonzero(f, sys.float_info.min, True)
+            test_nonzero(f, nan, bool(nan))
+            test_nonzero(f, inf, bool(inf))
+            test_nonzero(f, -inf, bool(-inf))
+
+
+        _test_pyscalar_conversions(lambda x: x.to(device), lambda x: int(x))
+        if sys.version_info[0] == 2:
+            _test_pyscalar_conversions(lambda x: x.to(device), lambda x: long(x))
+
+    def test_set_requires_grad_only_for_floats(self, device):
+        dtypes = [torch.int64, torch.int32, torch.int16, torch.int8,
+                  torch.float, torch.double]
+        if device == 'cuda':
+            dtypes.append(torch.half)
+
+        def f1(dt):
+            a = torch.ones(1, dtype=dt, device=device)
+            a.requires_grad_()
+
+        def f2(dt):
+            a = torch.ones(1, dtype=dt, device=device)
+            a.requires_grad = True
+
+        def f3(dt):
+            torch.ones(1, dtype=dt, device=device, requires_grad=True)
+
+        for dt in dtypes:
+            a = torch.ones(1, dtype=dt, device=device)
+            a.requires_grad = False  # should always work
+            a.requires_grad_(False)
+
+            for f in [f1, f2, f3]:
+                if dt.is_floating_point:
+                    f(dt)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'floating point',
+                                                msg="dt: {} device: {}".format(a.dtype, a.device)):
+                        f(dt)
+
+    @onlyCUDA
+    def test_advanced_indexing_backwards_large(self, device):
+        # See https://github.com/pytorch/pytorch/issues/22843
+        n = (1 << 16)
+        x = torch.rand(n, 1, device=device, requires_grad=True)
+        a = x[:, [0]]
+        a.sum().backward()
+        self.assertEqual(x.grad, torch.ones(n, 1, device=device))
+
+    # test for backward in https://github.com/pytorch/pytorch/issues/15511
+    def test_pdist_large(self, device):
+        def func(x):
+            return torch.pdist(x, p=2)
+
+        # shape[0] should be able to be (roughly) arbitrarily large, but the kernel
+        # is currently limited to smaller sizes (see issue above); this is just testing
+        # a floor.
+        shape = (1000, 1)
+        x = torch.randn(shape, device=device).requires_grad_()
+        output = torch.pdist(x, p=2)
+        # just run a single backward, as gradcheck/gradgradcheck is expensive here
+        output.sum().backward()
+
+    def test_where_functional(self, device):
+        x = torch.randn(5, 5, device=device, requires_grad=True)
+        y = torch.randn(5, 5, device=device, requires_grad=True)
+        cond = mask_not_all_zeros((5, 5)).to(device=device)
+
+        def where(cond, x, y):
+            return torch.where(cond, x, y)
+
+        gradcheck(where, [cond, x, y], raise_exception=True)
+        gradgradcheck(where, [cond, x, y], [torch.randn(5, 5, device=device)])
+
+        x = torch.randn(5, 1, 5, device=device, requires_grad=True)
+        y = torch.randn(5, 5, 1, device=device, requires_grad=True)
+        gradcheck(where, [cond, x, y], raise_exception=True)
+        gradgradcheck(where, [cond, x, y], [torch.randn(5, 5, 5, device=device)])
+
+
+instantiate_device_type_tests(TestAutogradDeviceType, globals())
 
 if __name__ == '__main__':
     run_tests()

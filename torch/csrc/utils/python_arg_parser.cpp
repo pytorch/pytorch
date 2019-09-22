@@ -5,6 +5,7 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/ATen.h>
 
@@ -649,7 +650,9 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   }
 
   at::Scalar scalar;
-  if (THPUtils_checkLong(obj)) {
+  if (PyBool_Check(obj)) {
+    scalar = at::Scalar(THPUtils_unpackBool(obj));
+  } else if (THPUtils_checkLong(obj)) {
     scalar = at::Scalar(THPUtils_unpackLong(obj));
   }else if (PyComplex_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
@@ -681,8 +684,13 @@ at::Scalar PythonArgs::scalar_slow(int i) {
   if (THPVariable_Check(args[i])) {
     return ((THPVariable*)args[i])->cdata.item();
   }
+
   if (THPUtils_checkLong(args[i])) {
     return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+  }
+
+  if (PyBool_Check(args[i])) {
+    return at::Scalar(THPUtils_unpackBool(args[i]));
   }
 
   if (PyComplex_Check(args[i])) {

@@ -17,9 +17,8 @@
 #include <TH/THAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
 #include <cctype>
@@ -219,18 +218,32 @@ Tensor empty_like(
                 "It is currently not supported to specify a dtype that doesn't match "
                 "the input tensor's dtype via empty_like.  Specified: ", options.dtype(),
                 " Input tensor's dtype: ", self.dtype());
-    // TODO: uncomment when qscheme diff is landed
-    // TORCH_INTERNAL_ASSERT(self.qscheme(), at::kPerTensorAffine,
-    //                       "empty_like for quantized Tensor only works for
-    //                        PerTensorAffine scheme right now");
-    return at::_empty_affine_quantized(self.sizes(), options,
-                                       self.q_scale(),
-                                       self.q_zero_point(),
-                                       use_memory_format);
+    auto qscheme = self.qscheme();
+    if (qscheme == kPerTensorAffine) {
+      return at::_empty_affine_quantized(self.sizes(), options,
+                                         self.q_scale(),
+                                         self.q_zero_point(),
+                                         use_memory_format);
+    } else if (qscheme == kPerChannelAffine) {
+      // Copy the tensors with channels to avoid accidental overrides
+      return at::_empty_per_channel_affine_quantized_like(
+          self.q_per_channel_scales().clone(),
+          self.q_per_channel_zero_points().clone(),
+          self.sizes(),
+          self.q_per_channel_axis(),
+          options,
+          use_memory_format);
+    } else {
+      TORCH_CHECK(false, "Unsupported qscheme: ", toString(qscheme));
+    }
   }
 
 #ifdef BUILD_NAMEDTENSOR
-  return at::empty(self.sizes(), self.opt_names(), options, use_memory_format);
+  if (self.opt_names()) {
+    return at::empty(self.sizes(), self.opt_names(), options, use_memory_format);
+  } else {
+    return at::empty(self.sizes(), options, use_memory_format);
+  }
 #else
   return at::empty(self.sizes(), options, use_memory_format);
 #endif

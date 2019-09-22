@@ -184,7 +184,7 @@ static void polygamma_kernel(TensorIterator& iter, int64_t n) {
   switch (n) {
     case 0: digamma_kernel(iter); break;
     case 1: trigamma_kernel(iter); break;
-    default: AT_ERROR("polygamma(n,x) is not implemented for n>=2");
+    default: TORCH_CHECK("polygamma(n,x) is not implemented for n>=2, but was ", n);
   }
 }
 
@@ -369,5 +369,6 @@ IMPLEMENT_FLOAT_KERNEL(FLOATING, sqrt)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, tan)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, tanh)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, trunc)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, lgamma)
 
 }} // namespace at::native

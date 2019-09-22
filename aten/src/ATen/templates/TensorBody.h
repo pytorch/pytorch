@@ -11,14 +11,14 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#ifdef BUILD_NAMEDTENSOR
+#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/NamedTensor.h>
-#endif
 
 namespace caffe2 {
 class Tensor;
@@ -42,6 +42,7 @@ struct Quantizer;
 // This is temporary typedef to enable Quantizer in aten native function API
 // we'll remove them when we are actually exposing Quantizer class
 // to frontend
+using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
@@ -219,12 +220,12 @@ class CAFFE2_API Tensor {
 
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        tensorTypeIdToBackend(type_id()),
+        tensorTypeIdToBackend(legacyExtractTypeId(type_set())),
         scalar_type(),
         is_variable());
   }
-  TensorTypeId type_id() const {
-    return impl_->type_id();
+  TensorTypeSet type_set() const {
+    return impl_->type_set();
   }
   ScalarType scalar_type() const {
     return typeMetaToScalarType(impl_->dtype());
@@ -274,6 +275,10 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
+  /// If a tensor is a quantized tensor, returns its quantizer
+  /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
+  QuantizerPtr quantizer() const;
+
 #ifdef BUILD_NAMEDTENSOR
   /// Returns if a `Tensor` has any dimension names
   bool has_names() const;
@@ -317,19 +322,42 @@ class CAFFE2_API Tensor {
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() && = delete;
 
-  // Return a `PackedTensorAccessor` for CUDA `Tensor`s. You have to specify scalar type and
+  // Return a `GenericPackedTensorAccessor` for CUDA `Tensor`s. You have to specify scalar type and
   // dimension. You can optionally specify RestrictPtrTraits as a template parameter to
   // cast the data pointer to a __restrict__ pointer.
-  // In order to use this, your CUDA kernel has to take a corresponding PackedTensorAccessor
+  // In order to use this, your CUDA kernel has to take a corresponding GenericPackedTensorAccessor
   // as an argument.
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-  PackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const& {
+  GenericPackedTensorAccessor<T,N,PtrTraits,index_t> generic_packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
-    return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data_ptr<T>()),sizes().data(),strides().data());
+    return GenericPackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data_ptr<T>()),sizes().data(),strides().data());
   }
-  template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-  PackedTensorAccessor<T,N> packed_accessor() && = delete;
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+  GenericPackedTensorAccessor<T,N> generic_packed_accessor() && = delete;
+
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor32<T,N,PtrTraits> packed_accessor32() const& {
+    return generic_packed_accessor<T,N,PtrTraits,int32_t>();
+  }
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor32<T,N,PtrTraits> packed_accessor32() && = delete;
+
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor64<T,N,PtrTraits> packed_accessor64() const& {
+    return generic_packed_accessor<T,N,PtrTraits,int64_t>();
+  }
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor64<T,N,PtrTraits> packed_accessor64() && = delete;
+
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+  C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
+  GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const & {
+    return generic_packed_accessor<T,N,PtrTraits,index_t>();
+  }
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+  C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
+  GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() && = delete;
 
   Tensor operator-() const;
   Tensor& operator+=(const Tensor & other);
@@ -397,7 +425,7 @@ protected:
 };
 
 namespace detail {
-// Helper creator for Tensor clas which doesn't requires the users to pass
+// Helper creator for Tensor class which doesn't requires the users to pass
 // in an intrusive_ptr instead it just converts the argument passed to
 // requested intrusive_ptr type.
 template <typename T, typename... Args>
@@ -405,23 +433,10 @@ Tensor make_tensor(Args&&... args) {
   return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
 }
 
-inline Backend infer_backend(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return tensorTypeIdToBackend(t.type_id());
-}
-inline Backend infer_backend(const TensorList & tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tensorTypeIdToBackend(tl[0].type_id());
-}
-
-inline bool infer_is_variable(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return t.is_variable();
-}
-inline bool infer_is_variable(const TensorList & tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tl[0].is_variable();
-}
 } // namespace detail
+
+static inline TensorTypeId legacyExtractTypeId(const Tensor& t) {
+  return legacyExtractTypeId(t.type_set());
+}
 
 } // namespace at
