@@ -187,7 +187,7 @@ class CUDATestBase(DeviceTypeTestBase):
         return 'cuda:0'
 
     @classmethod
-    def all_devices(self):
+    def all_devices(cls):
         default_device_num = int(self.default_device().split(':')[1])
         num_devices = torch.cuda.device_count()
 
