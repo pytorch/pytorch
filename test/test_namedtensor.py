@@ -154,18 +154,6 @@ class TestNamedTensor(TestCase):
             names65 = ['A' * i for i in range(1, 66)]
             x = factory([1] * 65, names=names64, device=device)
 
-        # Tests for tagged names
-        x = factory(2, 3, 1, names=('C.in', 'H', 'C.out'), device=device)
-        self.assertEqual(x.names, ('C.in', 'H', 'C.out'))
-
-        with self.assertRaisesRegex(RuntimeError, 'construct a tensor with duplicate names'):
-            x = factory(2, 1, 1, names=('C.in', 'H', 'C.in'), device=device)
-
-        with self.assertRaisesRegex(
-                RuntimeError,
-                'with duplicate names unless they are tagged and have different tags'):
-            x = factory(2, 1, 1, names=('C.in', 'H', 'C'), device=device)
-
     def test_has_names(self):
         unnamed = torch.empty(2, 3)
         none_named = torch.empty(2, 3, names=(None, None))
@@ -482,6 +470,28 @@ class TestNamedTensor(TestCase):
         t = torch.randn(2, 3, names=('N', 'C'))
         self.assertEqual(t.t().names, ['C', 'N'])
 
+    def test_resize(self):
+        for device in torch.testing.get_all_device_types():
+            named = torch.randn(2, names=('N',), device=device)
+            named.resize_([2])
+            self.assertEqual(named.names, ['N'])
+
+            with self.assertRaisesRegex(RuntimeError, "Cannot resize named tensor"):
+                named.resize_([3])
+
+            other_named = torch.randn(2, names=('N',), device=device)
+            named.resize_as_(other_named)
+            self.assertEqual(other_named.names, ['N'])
+
+            unnamed = torch.randn(2, device=device)
+            with self.assertRaisesRegex(
+                    RuntimeError, r'names .* are not the same as the computed output names'):
+                named.resize_as_(unnamed)
+
+            unnamed = torch.randn(1, device=device)
+            unnamed.resize_as_(named)
+            self.assertEqual(unnamed.names, ['N'])
+
     def test_info_smoke(self):
         # Smoke test for info functions / methods / attributes on named tensors.
         tensor = torch.empty(1, 1, names=('N', 'D'))
@@ -614,6 +624,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('div'),
             fn_method_and_inplace('mul'),
             fn_method_and_inplace('sub'),
+            fn_method_and_inplace('pow'),
             method('copy_'),
         ]
         tests = flatten(tests)
@@ -622,6 +633,22 @@ class TestNamedTensor(TestCase):
             test_basic(op)
             test_wildcard(op)
             test_mixed_unnamed_named(op, is_inplace=name.endswith('_'))
+
+    def test_pow_special(self):
+        # There are a few pow cases that don't go through TensorIterator.
+        # Test them here.
+        for device in torch.testing.get_all_device_types():
+            named = torch.randn(2, 3, names=('N', 'C'), device=device)
+            unnamed = torch.randn([0], device=device)
+
+            result = torch.pow(named, 0, out=unnamed.clone())
+            self.assertEqual(result.names, named.names)
+
+            result = torch.pow(named, 1, out=unnamed.clone())
+            self.assertEqual(result.names, named.names)
+
+            result = torch.pow(1, named, out=unnamed.clone())
+            self.assertEqual(result.names, named.names)
 
     def test_out_fn_semantics(self):
         out_fn = torch.abs
@@ -1104,23 +1131,6 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(
                 RuntimeError, 'Please look up dimensions by name'):
             y = x.select(None, 1)
-
-        with self.assertRaisesRegex(
-                RuntimeError, 'Name \'C.in\' not found in'):
-            y = x.select('C.in', 1)
-
-        x = torch.empty(2, 3, 4, 5, names=('N', 'C.in', 'H', 'W'), device=device)
-        y = x.select('C', 1)
-        self.assertEqual(y.names, ('N', 'H', 'W'))
-
-        x = torch.empty(2, 3, 4, 5, names=('C.out', 'C.in', 'H', 'W'), device=device)
-        y = x.select('C.in', 1)
-        self.assertEqual(y.names, ('C.out', 'H', 'W'))
-
-        with self.assertRaisesRegex(
-                RuntimeError, 'Name \'C\' could refer to multiple dimensions'):
-            y = x.select('C', 1)
-
 
     def test_select(self):
         self._test_select('cpu')
