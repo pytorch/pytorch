@@ -679,6 +679,7 @@ class TestQuantizedOps(TestCase):
             self.assertEqual(zero_point, X_hat.q_zero_point(),
                              message=error_message.format(name + '.zero_point', scale,
                                                           X_hat.q_zero_point()))
+
     @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
