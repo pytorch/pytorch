@@ -16,7 +16,6 @@ from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, QConfig, default_observer, default_weight_observer, \
     default_qat_qconfig, propagate_qconfig, convert, DEFAULT_DYNAMIC_MODULE_MAPPING
-from functools import partial
 
 def test_only_eval_fn(model, calib_data):
     r"""
