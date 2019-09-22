@@ -225,8 +225,6 @@ namespace test_size_length {
   static_assert(5 == string_view("hello").length(), "");
 }
 
-// TODO test max_size ?
-
 namespace test_empty {
   static_assert(string_view().empty(), "");
   static_assert(string_view("").empty(), "");

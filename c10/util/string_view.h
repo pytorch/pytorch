@@ -132,10 +132,8 @@ public:
     return size();
   }
 
-  // TODO ???
   constexpr size_type max_size() const noexcept {
-    return (npos - sizeof(size_type) - sizeof(void*))
-        / sizeof(value_type) / 4;
+    return std::numeric_limits<difference_type>::max();
   }
 
   C10_NODISCARD constexpr bool empty() const noexcept {
