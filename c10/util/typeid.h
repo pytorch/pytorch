@@ -122,7 +122,7 @@ struct TypeMetaData final {
   using Delete = void(void*);
 
   TypeMetaData() = delete;
-  TypeMetaData(
+  constexpr TypeMetaData(
       size_t itemsize,
       New* newFn,
       PlacementNew* placementNew,
@@ -130,7 +130,7 @@ struct TypeMetaData final {
       PlacementDelete* placementDelete,
       Delete* deleteFn,
       TypeIdentifier id,
-      std::string name) noexcept
+      c10::string_view name) noexcept
       : itemsize_(itemsize),
         new_(newFn),
         placementNew_(placementNew),
@@ -138,7 +138,7 @@ struct TypeMetaData final {
         placementDelete_(placementDelete),
         delete_(deleteFn),
         id_(id),
-        name_(std::move(name)) {}
+        name_(name) {}
 
   size_t itemsize_;
   New* new_;
@@ -147,7 +147,7 @@ struct TypeMetaData final {
   PlacementDelete* placementDelete_;
   Delete* delete_;
   TypeIdentifier id_;
-  std::string name_;
+  c10::string_view name_;
 };
 
 // Mechanism for throwing errors which can't be prevented at compile time
@@ -170,7 +170,7 @@ inline void _PlacementNew(void* ptr, size_t n) {
 template <typename T>
 inline void _PlacementNewNotDefault(void* /*ptr*/, size_t /*n*/) {
   _ThrowRuntimeTypeLogicError(
-      "Type " + std::string(c10::demangle_type<T>()) +
+      "Type " + std::string(c10::util::get_fully_qualified_type_name<T>()) +
       " is not default-constructible.");
 }
 
@@ -201,7 +201,7 @@ inline void* _New() {
 template <typename T>
 inline void* _NewNotDefault() {
   _ThrowRuntimeTypeLogicError(
-      "Type " + std::string(c10::demangle_type<T>()) +
+      "Type " + std::string(c10::util::get_fully_qualified_type_name<T>()) +
       " is not default-constructible.");
 }
 
@@ -237,7 +237,7 @@ inline void _Copy(const void* src, void* dst, size_t n) {
 template <typename T>
 inline void _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
   _ThrowRuntimeTypeLogicError(
-      "Type " + std::string(c10::demangle_type<T>()) +
+      "Type " + std::string(c10::util::get_fully_qualified_type_name<T>()) +
       " does not allow assignment.");
 }
 
@@ -298,7 +298,7 @@ inline TypeMetaData _makeTypeMetaDataInstance() {
           _PickPlacementDelete<T>(),
           _PickDelete<T>(),
           TypeIdentifier::Get<T>(),
-          std::string(c10::util::get_fully_qualified_type_name<T>())};
+          c10::util::get_fully_qualified_type_name<T>()};
 }
 
 class _Uninitialized final {};
