@@ -931,9 +931,12 @@ class TestNamedTensor(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
                 op(t, [None, 'C'])
 
-        def test_out_variant(op_name, device):
+        def test_out_variant(op_name, output_lambda, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            out = torch.empty([0], device=device)
+            if output_lambda:
+                out = output_lambda(t)
+            else:
+                out = torch.empty([0], device=device)
             getattr(torch, op_name)(t, 'C', out=out)
             check_output(out, ['N', 'L'])
 
@@ -941,6 +944,10 @@ class TestNamedTensor(TestCase):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
             op = getattr(torch, op_name)
             check_output(op(t, 'C', keepdim=True), ['N', 'C', 'L'])
+
+        def get_minmax_output(t):
+            return (torch.empty([0], device=t.device),
+                    torch.empty([0], device=t.device, dtype=torch.long))
 
         Case = namedtuple('Case', [
             'op_name',
@@ -959,6 +966,8 @@ class TestNamedTensor(TestCase):
             Case('std', True, True, True, True, None),
             Case('std_mean', True, True, False, True, None),
             Case('var_mean', True, True, False, True, None),
+            Case('min', True, False, True, True, get_minmax_output),
+            Case('max', True, False, True, True, get_minmax_output),
             Case('unbind', False, False, False, False, None),
         ]
 
@@ -969,7 +978,7 @@ class TestNamedTensor(TestCase):
             if testcase.supports_keepdim:
                 test_keepdim(op_name, device)
             if testcase.supports_out_variant:
-                test_out_variant(op_name, device)
+                test_out_variant(op_name, testcase.output_lambda, device)
             if testcase.supports_complete_reduce:
                 test_complete_reduce(op_name, device)
             if testcase.supports_multidim_reduce:
