@@ -751,7 +751,7 @@ class TestQuantizedOps(TestCase):
         X, (scale, zero_point, torch_type) = X
         H, W = X.shape[-2:]
         X = torch.from_numpy(X)
-        if scale_factor is not  None:
+        if scale_factor is not None:
             size = None
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                        dtype=torch_type)
