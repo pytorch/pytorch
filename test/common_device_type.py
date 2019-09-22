@@ -188,10 +188,10 @@ class CUDATestBase(DeviceTypeTestBase):
 
     @classmethod
     def all_devices(cls):
-        default_device_num = int(self.default_device().split(':')[1])
+        default_device_num = int(cls.default_device().split(':')[1])
         num_devices = torch.cuda.device_count()
 
-        devices = [self.default_device()]
+        devices = [cls.default_device()]
         cuda_str = 'cuda:{0}'
         non_default_devices = [cuda_str.format(num) for num in range(num_devices) if num != default_device_num]
         devices.extend(non_default_devices)
