@@ -23,36 +23,60 @@
     torch::EnforceWarningBuffer __enforce_warning_buffer;          \
     try{
 
-#define CATCH_TH_ERRORS(retval)                                      \
+#define CATCH_TH_ERRORS(retstmnt)                                      \
     catch (python_error & e) {                                       \
-      return retval;                                                 \
+      retstmnt;                                                 \
     }                                                                \
     catch (const c10::IndexError& e) {                               \
       auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
       PyErr_SetString(PyExc_IndexError, msg.c_str());                \
-      return retval;                                                 \
+      retstmnt;                                                 \
     }                                                                \
     catch (const c10::Error& e) {                                    \
       auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
       PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
-      return retval;                                                 \
+      retstmnt;                                                 \
     }                                                                \
     catch (torch::PyTorchError & e) {                                \
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(e.python_type(), msg.c_str());                 \
-      return retval;                                                 \
+      retstmnt;                                                 \
     }                                                                \
     catch (const std::exception& e) {                                \
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
-      return retval;                                                 \
+      retstmnt;                                                 \
     }
+
+#define END_HANDLE_TH_ERRORS_PYBIND                              \
+    }                                                                \
+    catch (py::error_already_set & e) {                                       \
+      /* Unpack already stored error to be detectable by warning code */ \
+      e.restore(); \
+      throw;                                                 \
+    }                                                                \
+    catch (py::builtin_exception & e) {                                       \
+      /* Unpack already stored error to be detectable by warning code */ \
+      e.set_error(); \
+      throw;                                                 \
+    }                                                                \
+    CATCH_TH_ERRORS(throw)                                          \
+  }                                                                  \
+  catch (py::error_already_set & e) {                                       \
+    /* Repack already stored error */ \
+    throw py::error_already_set();                                                 \
+  }                                                                \
+  catch (py::builtin_exception & e) {                                       \
+    /* Repack already stored error */ \
+    throw py::error_already_set();                                                 \
+  }                                                                \
+  CATCH_TH_ERRORS(throw py::error_already_set())
 
 #define END_HANDLE_TH_ERRORS_RET(retval)                             \
     }                                                                \
-    CATCH_TH_ERRORS(retval)                                          \
+    CATCH_TH_ERRORS(return retval)                                          \
   }                                                                  \
-  CATCH_TH_ERRORS(retval)
+  CATCH_TH_ERRORS(return retval)
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
