@@ -175,7 +175,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op, impl::dispatchTypeId(type_set())${method_actuals_with_comma_prefix});
+        op, impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -739,7 +739,8 @@ def is_mutable_formal_argument(argument, option):
 
 
 def check_methods_do_not_start_with_underscore(name, is_method):
-    if name in {'_values', '_indices', '_nnz', '_dimI', '_dimV', '_coalesced_'}:
+    if name in {'_values', '_indices', '_nnz', '_dimI', '_dimV', '_coalesced_',
+                '_version'}:
         return
     if is_method and name.startswith('_') and not name.startswith('__') and not name.startswith('_th_'):
         message = "Function '{}' starts with a single underscore and is ".format(name)

@@ -138,3 +138,4 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
 adaptive_avg_pool2d = torch.nn.functional.adaptive_avg_pool2d
 
 interpolate = torch.nn.functional.interpolate
+avg_pool2d = torch.nn.functional.avg_pool2d
