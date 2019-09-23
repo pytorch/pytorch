@@ -40,23 +40,12 @@ Tensor empty_per_channel_affine_quantized_cpu(
   TORCH_CHECK(
       options.dtype() == kQInt8 || options.dtype() == kQUInt8,
       "Supported data type for tensor creation is int8 or uint8");
-  TORCH_CHECK(scales.dim() == 1, "scale tensor must have dimension 1");
-  TORCH_CHECK(
-      zero_points.dim() == 1, "zero_points tensor must have dimension 1")
-  TORCH_CHECK(
-      scales.numel() == zero_points.numel(),
-      "number of elements in scales and zero_points must match");
-  double* scales_data = scales.data_ptr<double>();
-  int64_t* zero_points_data = zero_points.data_ptr<int64_t>();
-  std::vector<double> scale_vals(scales_data, scales_data + scales.numel());
-  std::vector<int64_t> zero_point_vals(
-      zero_points_data, zero_points_data + zero_points.numel());
   return new_qtensor_cpu(
       size,
       options,
       make_per_channel_affine_quantizer(
-          scale_vals,
-          zero_point_vals,
+          scales,
+          zero_points,
           axis,
           typeMetaToScalarType(options.dtype())),
       optional_memory_format.value_or(MemoryFormat::Contiguous));
