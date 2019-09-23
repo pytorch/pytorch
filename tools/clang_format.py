@@ -18,7 +18,7 @@ import re
 
 # Whitelist of directories to check. All files that in that directory
 # (recursively) will be checked.
-CLANG_FORMAT_WHITELIST = ["torch/csrc/jit/", "test/cpp/jit/"]
+CLANG_FORMAT_WHITELIST = ["torch/csrc/jit/", "test/cpp/jit/", "torch/csrc/distributed"]
 
 CPP_FILE_REGEX = re.compile("^.*\\.(h|cpp|cc|c|hpp)$")
 CPP_FILE_REGEX = re.compile(".*\\.(h|cpp|cc|c|hpp)$")
@@ -154,6 +154,8 @@ def main():
         diff = get_clang_format_diff(filename, lines)
         if diff is not None:
             name_to_diff[filename] = diff
+        else:
+            print('diff is NONE')
 
     if args.accept_changes:
         # run clang-format on the necessary files

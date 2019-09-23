@@ -1,0 +1,39 @@
+[1/17] Building CXX object caffe2/torch/CMakeFiles/torch_python.dir/csrc/distributed/rpc/request_callback_impl.cpp.o
+FAILED: caffe2/torch/CMakeFiles/torch_python.dir/csrc/distributed/rpc/request_callback_impl.cpp.o 
+/home/rvarm1/local/onnx-dev/ccache/lib/c++  -DAT_PARALLEL_OPENMP=1 -DHAVE_MALLOC_USABLE_SIZE=1 -DHAVE_MMAP=1 -DHAVE_SHM_OPEN=1 -DHAVE_SHM_UNLINK=1 -DONNX_ML=1 -DONNX_NAMESPACE=onnx_torch -DTH_BLAS_MKL -DUSE_C10D -DUSE_C10D_GLOO -DUSE_C10D_NCCL -DUSE_CUDA -DUSE_CUDNN -DUSE_DISTRIBUTED -DUSE_NCCL -DUSE_NUMPY -D_FILE_OFFSET_BITS=64 -D_THP_CORE -Dtorch_python_EXPORTS -Iaten/src -I../aten/src -I. -I../ -I../cmake/../third_party/benchmark/include -Icaffe2/contrib/aten -I../third_party/onnx -Ithird_party/onnx -I../third_party/foxi -Ithird_party/foxi -I../torch/.. -I../torch/../aten/src -I../torch/../aten/src/TH -Icaffe2/aten/src -Ithird_party -I../torch/../third_party/build/nccl/include -I../torch/../third_party/gloo -I../torch/../third_party/onnx -I../torch/../third_party/pybind11/include -I../torch/csrc -I../torch/csrc/api/include -I../torch/lib -I../torch/lib/libshm -I../caffe2/../torch/csrc/api -I../caffe2/../torch/csrc/api/include -I../c10/.. -I../c10/cuda/../.. -I../torch/lib/libshm/../../../torch/lib -I../torch/lib/c10d/.. -I../torch/lib/c10d/../../.. -Inccl/include -isystem third_party/gloo -isystem ../cmake/../third_party/gloo -isystem ../cmake/../third_party/googletest/googlemock/include -isystem ../cmake/../third_party/googletest/googletest/include -isystem ../third_party/protobuf/src -isystem /home/rvarm1/local/anaconda3/envs/pytorch/include -isystem ../cmake/../third_party/eigen -isystem /usr/include/python3.6m -isystem /home/rvarm1/local/c2env/lib64/python3.6/site-packages/numpy/core/include -isystem ../torch/include -isystem ../cmake/../third_party/cub -isystem /usr/local/cuda/include -Wno-deprecated -fvisibility-inlines-hidden -fopenmp -DUSE_PYTORCH_QNNPACK -O2 -fPIC -Wno-narrowing -Wall -Wextra -Wno-missing-field-initializers -Wno-type-limits -Wno-array-bounds -Wno-unknown-pragmas -Wno-sign-compare -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-result -Wno-strict-overflow -Wno-strict-aliasing -Wno-error=deprecated-declarations -Wno-error=pedantic -Wno-error=redundant-decls -Wno-error=old-style-cast -Wno-unused-but-set-variable -Wno-maybe-uninitialized -fno-math-errno -fno-trapping-math -DHAVE_AVX_CPU_DEFINITION -DHAVE_AVX2_CPU_DEFINITION -g -fno-omit-frame-pointer -O0 -fPIC   -DCAFFE2_USE_GLOO -DCUDA_HAS_FP16=1 -DHAVE_GCC_GET_CPUID -DUSE_AVX -DUSE_AVX2 -DTH_HAVE_THREAD -fno-strict-aliasing -Wno-write-strings -Wno-strict-aliasing -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wno-unknown-pragmas -Wno-missing-braces -fopenmp -pthread -std=gnu++11 -MD -MT caffe2/torch/CMakeFiles/torch_python.dir/csrc/distributed/rpc/request_callback_impl.cpp.o -MF caffe2/torch/CMakeFiles/torch_python.dir/csrc/distributed/rpc/request_callback_impl.cpp.o.d -o caffe2/torch/CMakeFiles/torch_python.dir/csrc/distributed/rpc/request_callback_impl.cpp.o -c ../torch/csrc/distributed/rpc/request_callback_impl.cpp
+../torch/csrc/distributed/rpc/request_callback_impl.cpp: In member function ‘std::unique_ptr<torch::distributed::rpc::RpcCommandBase> torch::distributed::rpc::RequestCallbackImpl::processRpc(torch::distributed::rpc::RpcCommandBase*, torch::distributed::rpc::MessageType)’:
+../torch/csrc/distributed/rpc/request_callback_impl.cpp:129:14: error: cannot bind ‘std::unique_ptr<torch::distributed::rpc::RpcWithAutograd>’ lvalue to ‘std::unique_ptr<torch::distributed::rpc::RpcWithAutograd>&&’
+       return response;
+              ^
+In file included from /usr/include/c++/4.8.2/memory:81:0,
+                 from ../c10/core/Allocator.h:4,
+                 from ../aten/src/ATen/ATen.h:3,
+                 from ../torch/csrc/api/include/torch/types.h:3,
+                 from ../torch/csrc/api/include/torch/serialize/input-archive.h:6,
+                 from ../torch/csrc/api/include/torch/serialize/archive.h:3,
+                 from ../torch/csrc/api/include/torch/serialize.h:3,
+                 from ../torch/csrc/distributed/rpc/message.h:3,
+                 from ../torch/csrc/distributed/rpc/request_callback_impl.h:3,
+                 from ../torch/csrc/distributed/rpc/request_callback_impl.cpp:1:
+/usr/include/c++/4.8.2/bits/unique_ptr.h:169:2: error:   initializing argument 1 of ‘std::unique_ptr<_Tp, _Dp>::unique_ptr(std::unique_ptr<_Up, _Ep>&&) [with _Up = torch::distributed::rpc::RpcWithAutograd; _Ep = std::default_delete<torch::distributed::rpc::RpcWithAutograd>; <template-parameter-2-3> = void; _Tp = torch::distributed::rpc::RpcCommandBase; _Dp = std::default_delete<torch::distributed::rpc::RpcCommandBase>]’
+  unique_ptr(unique_ptr<_Up, _Ep>&& __u) noexcept
+  ^
+[2/17] Linking CXX shared library lib/libtorch.so
+ninja: build stopped: subcommand failed.
+Building wheel torch-1.3.0a0+c56e289
+-- Building version 1.3.0a0+c56e289
+cmake --build . --target install --config Debug -- -j 48
+Traceback (most recent call last):
+  File "setup.py", line 756, in <module>
+    build_deps()
+  File "setup.py", line 321, in build_deps
+    cmake=cmake)
+  File "/home/rvarm1/pytorch/tools/build_pytorch_libs.py", line 63, in build_caffe2
+    cmake.build(my_env)
+  File "/home/rvarm1/pytorch/tools/setup_helpers/cmake.py", line 331, in build
+    self.run(build_args, my_env)
+  File "/home/rvarm1/pytorch/tools/setup_helpers/cmake.py", line 142, in run
+    check_call(command, cwd=self.build_dir, env=env)
+  File "/usr/lib64/python3.6/subprocess.py", line 291, in check_call
+    raise CalledProcessError(retcode, cmd)
+subprocess.CalledProcessError: Command '['cmake', '--build', '.', '--target', 'install', '--config', 'Debug', '--', '-j', '48']' returned non-zero exit status 1.
