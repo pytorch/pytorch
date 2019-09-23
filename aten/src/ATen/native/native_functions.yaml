@@ -3632,6 +3632,9 @@
 - func: result_type.Scalar_Scalar(Scalar scalar1, Scalar scalar2) -> ScalarType
   variants: function
 
+- func: promote_types(ScalarType type1, ScalarType type2) -> ScalarType
+  variants: function
+
 # NB: Does NOT check precondition that numel == 1
 - func: _local_scalar_dense(Tensor self) -> Scalar
   use_c10_dispatcher: full

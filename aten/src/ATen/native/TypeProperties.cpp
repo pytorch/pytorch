@@ -113,4 +113,8 @@ ScalarType result_type(const Scalar scalar1, const Scalar scalar2) {
   return at::result_type(tensor1, scalar2);
 }
 
+ScalarType promote_types(ScalarType type1, ScalarType type2) {
+  return promoteTypes(type1, type2);
+}
+
 }} // namespace at::native

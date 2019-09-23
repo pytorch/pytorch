@@ -3976,6 +3976,26 @@ Example::
     tensor([-0.2018, -0.2962, -0.0821, -1.1831])
 """.format(**single_dim_common))
 
+add_docstr(torch.promote_types,
+           r"""
+promote_types(type1, type2) -> dtype
+
+Returns the :class:`torch.dtype` with the smallest size and scalar kind to which
+`type1` and `type2` may be safely cast. See type promotion :ref:`documentation <type-promotion-doc>`
+for more information on the type promotion logic.
+
+Args:
+    type1 (:class:`torch.dtype`)
+    type2 (:class:`torch.dtype`)
+
+Example::
+
+    >>> torch.promote_types(torch.int32, torch.float32))
+    torch.float32
+    >>> torch.promote_types(torch.uint8, torch.long)
+    torch.long
+""")
+
 add_docstr(torch.qr,
            r"""
 qr(input, some=True, out=None) -> (Tensor, Tensor)
