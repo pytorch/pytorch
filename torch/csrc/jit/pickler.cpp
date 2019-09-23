@@ -2,6 +2,7 @@
 #include <ATen/core/Dict.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/pickler.h>
+#include <aten/src/ATen/quantized/Quantizer.h>
 #include <string>
 
 namespace torch {
@@ -309,8 +310,29 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::TUPLE);
 
   if (quantized) {
-    pushDouble(tensor.q_scale());
-    pushInt(tensor.q_zero_point());
+    push<PickleOpCode>(PickleOpCode::MARK);
+    pushGlobal("torch", toString(tensor.qscheme()));
+    // tuple of (qscheme, scale, zp) or (qscheme, scales, zps, axis)
+    switch (tensor.qscheme()) {
+      case at::kPerTensorAffine:
+        pushDouble(tensor.q_scale());
+        pushInt(tensor.q_zero_point());
+        break;
+      case at::kPerChannelAffine: {
+        const auto* quantizer = static_cast<at::PerChannelAffineQuantizer*>(
+            tensor.quantizer().get());
+        pushIValue(c10::List<double>(quantizer->scales()));
+        pushIValue(c10::List<int64_t>(quantizer->zero_points()));
+        pushIValue(c10::List<int64_t>(quantizer->axis()));
+      } break;
+      default:
+        TORCH_CHECK(
+            false,
+            "Unsupported tensor quantization type in serialization ",
+            toString(tensor.qscheme()));
+        break;
+    }
+    push<PickleOpCode>(PickleOpCode::TUPLE);
   }
 
   // requires_grad
