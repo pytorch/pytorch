@@ -131,6 +131,14 @@ void polygamma_kernel_cuda(TensorIterator& iter, int64_t n) {
   }
 }
 
+void lgamma_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "lgamma_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return ::lgamma(a);
+    });
+  });
+}
+
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
 REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda);
@@ -142,4 +150,5 @@ REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(digamma_stub, &digamma_kernel_cuda);
 REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel_cuda);
+REGISTER_DISPATCH(lgamma_stub, &lgamma_kernel_cuda);
 }}
