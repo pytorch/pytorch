@@ -123,3 +123,6 @@ struct NonZeroOp<bool>
 
 #include <THC/generic/THCTensorMath.cu>
 #include <THC/THCGenerateBoolType.h>
+
+#include <THC/generic/THCTensorMath.cu>
+#include <THC/THCGenerateBFloat16Type.h>
