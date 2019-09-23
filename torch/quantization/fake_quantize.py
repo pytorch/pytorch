@@ -1,8 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 from torch.nn import Module
-from .observer import default_observer, default_l2_observer, default_per_channel_weight_observer
-from functools import partial
+from .observer import default_observer, default_l2_observer, default_per_channel_weight_observer, _with_args
 
 
 
@@ -66,12 +65,15 @@ class FakeQuantize(Module):
                     self.quant_max)
         return X
 
+    with_args = classmethod(_with_args)
+
     def extra_repr(self):
         return 'fake_quant_enabled={}, observer_enabled={},\
             scale={}, zero_point={}'.format(
             self.fake_quant_enabled, self.observer_enabled,
             self.scale, self.zero_point)
 
+default_fake_quant = FakeQuantize
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(FakeQuantize, self)._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'quant_min'] = self.quant_min
@@ -97,28 +99,24 @@ class FakeQuantize(Module):
         super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                         missing_keys, unexpected_keys, error_msgs)
 
-def fake_quant(fake_quant_cls, **kwargs):
-    return partial(fake_quant_cls, **kwargs)
-
-def default_fake_quant(**kwargs):
-    kwargs.setdefault('observer', default_observer(dtype=torch.quint8, qscheme = torch.per_tensor_affine, reduce_range =True))
-    return fake_quant(FakeQuantize, **kwargs)
 
 def l2_fake_quant(**kwargs):
     kwargs.setdefault('observer', default_l2_observer(reduce_range = True))
     return fake_quant(FakeQuantize, **kwargs)
 
-def default_per_channel_weight_fake_quant(**kwargs):
-    kwargs.setdefault('quant_min', -128)
-    kwargs.setdefault('quant_max', 127)
-    kwargs.setdefault('observer', default_per_channel_weight_observer(dtype=torch.qint8, qscheme=torch.per_channel_symmetric, reduce_range =False))
-    return fake_quant(FakeQuantize, **kwargs)
 
-def default_weight_fake_quant(**kwargs):
-    kwargs.setdefault('quant_min', -128)
-    kwargs.setdefault('quant_max', 127)
-    kwargs.setdefault('observer', default_observer(dtype=torch.qint8, qscheme = torch.per_tensor_symmetric, reduce_range =False))
-    return fake_quant(FakeQuantize, **kwargs)
+
+default_fake_quant = FakeQuantize.with_args(observer=default_observer(dtype=torch.quint8, qscheme = torch.per_tensor_affine, reduce_range =True))
+default_weight_fake_quant = FakeQuantize.with_args(observer=default_observer(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric),
+                                                   quant_min=-128,
+                                                   quant_max=127)
+default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=default_per_channel_weight_observer(dtype=torch.qint8, qscheme=torch.per_channel_symmetric, reduce_range =False),
+                                                   quant_min=-128,
+                                                   quant_max=127)
+l2_fake_quant = FakeQuantize.with_args(observer=default_l2_observer(reduce_range = True),
+                                                   quant_min=-128,
+                                                   quant_max=127)
+
 
 def disable_fake_quant(mod):
     if type(mod) == FakeQuantize:
