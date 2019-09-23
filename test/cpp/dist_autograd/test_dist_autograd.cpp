@@ -89,19 +89,7 @@ TEST_F(DistAutogradTest, TestWorkerIdsRecorded) {
 
   autogradContainer_->newContext();
   DistAutogradContext& autogradContext = autogradContainer_->currentContext();
-  // Attach the send autograd function to tensors.
   std::vector<torch::Tensor> tensors = {in1, in2};
-  for (int i = 0; i < 10; i++) {
-    worker_id_t worker_id = i;
-    addSendRpcBackward(
-        autogradContext, AutogradMetadata(1, 1), tensors, worker_id);
-  }
-
-  auto knownWorkerIds = autogradContext.getKnownWorkerIds();
-  ASSERT_EQ(knownWorkerIds.size(), 10);
-  for (int i = 0; i < 10; i++) {
-    ASSERT_TRUE(knownWorkerIds.find(i) != knownWorkerIds.end());
-  }
 
   // ensure that if we do not add the send function, then we don't record the
   // worker id
@@ -110,5 +98,6 @@ TEST_F(DistAutogradTest, TestWorkerIdsRecorded) {
   worker_id_t dst_no_grad = 11;
   addSendRpcBackward(
       autogradContext, AutogradMetadata(1, 1), tensors, dst_no_grad);
+  auto knownWorkerIds = autogradContext.getKnownWorkerIds();
   ASSERT_TRUE(knownWorkerIds.find(dst_no_grad) == knownWorkerIds.end());
 }
