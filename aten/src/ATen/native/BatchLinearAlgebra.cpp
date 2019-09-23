@@ -71,9 +71,9 @@ extern "C" void ssyev_(char *jobz, char *uplo, int *n, float *a, int *lda, float
 
 // gesdd
 extern "C" void zgesdd_(char *jobz, int *m, int *n, std::complex<double> *a, int *lda,
-                        double *s, std::complex<double> *u, int *ldu, std::complex<double> *vt, int *ldvt, std::complex<double> *work, int *lwork, int *iwork, int *info);
+                        double *s, std::complex<double> *u, int *ldu, std::complex<double> *vt, int *ldvt, std::complex<double> *work, int *lwork, int *rwork, int *iwork, int *info);
 extern "C" void cgesdd_(char *jobz, int *m, int *n, std::complex<float> *a, int *lda,
-                        float *s, std::complex<float> *u, int *ldu, std::complex<float> *vt, int *ldvt, std::complex<float> *work, int *lwork, int *iwork, int *info);
+                        float *s, std::complex<float> *u, int *ldu, std::complex<float> *vt, int *ldvt, std::complex<float> *work, int *lwork, int *rwork, int *iwork, int *info);
 extern "C" void dgesdd_(char *jobz, int *m, int *n, double *a, int *lda,
                         double *s, double *u, int *ldu, double *vt, int *ldvt, double *work, int *lwork, int *iwork, int *info);
 extern "C" void sgesdd_(char *jobz, int *m, int *n, float *a, int *lda,
@@ -136,9 +136,9 @@ void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, scalar_t *w
   AT_ERROR("symeig only takes float or double Tensors");
 }
 
-template<class scalar_t>
+template<class scalar_t, class value_t=scalar_t>
 void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda,
-               scalar_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, int *iwork, int *info) {
+               value_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, int *rwork, int *iwork, int *info) {
   AT_ERROR("svd only takes float or double Tensors");
 }
 
@@ -284,13 +284,23 @@ template<> void lapackSymeig<float>(char jobz, char uplo, int n, float *a, int l
   ssyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
 }
 
+template<> void lapackSvd<std::complex<double>, double>(char jobz, int m, int n, std::complex<double> *a, int lda,
+                                  double *s, std::complex<double> *u, int ldu, std::complex<double> *vt, int ldvt, std::complex<double> *work, int lwork, int *rwork, int *iwork, int *info) {
+  zgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, rwork, iwork, info);
+}
+
+template<> void lapackSvd<std::complex<float>, float>(char jobz, int m, int n, std::complex<float> *a, int lda,
+                                 float *s, std::complex<float> *u, int ldu, std::complex<float> *vt, int ldvt, std::complex<float> *work, int lwork, int *rwork, int *iwork, int *info) {
+  cgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, rwork, iwork, info);
+}
+
 template<> void lapackSvd<double>(char jobz, int m, int n, double *a, int lda,
-                                  double *s, double *u, int ldu, double *vt, int ldvt, double *work, int lwork, int *iwork, int *info) {
+                                  double *s, double *u, int ldu, double *vt, int ldvt, double *work, int lwork, int *rwork, int *iwork, int *info) {
   dgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, iwork, info);
 }
 
 template<> void lapackSvd<float>(char jobz, int m, int n, float *a, int lda,
-                                 float *s, float *u, int ldu, float *vt, int ldvt, float *work, int lwork, int *iwork, int *info) {
+                                 float *s, float *u, int ldu, float *vt, int ldvt, float *work, int lwork, int *rwork, int *iwork, int *info) {
   sgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, iwork, info);
 }
 
@@ -386,6 +396,7 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("inverse: LAPACK library not found in compilation");
 #else
+  using value_t = typename ztype<scalar_t>::value_t;
   auto self_data = self.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
   auto batch_size = batchCount(self);
@@ -401,7 +412,6 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   int lwork = -1;
   scalar_t wkopt;
-  using value_t = typename ztype<scalar_t>::value_t;
   lapackGetri<scalar_t>(n, self_data, n, ipiv_data, &wkopt, lwork, &info);
   lwork = static_cast<int>(zabs<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
@@ -847,6 +857,7 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
 #ifndef USE_LAPACK
   AT_ERROR("qr: LAPACK library not found in compilation");
 #else
+  using value_t = typename ztype<scalar_t>::value_t;
   auto self_data = self.data_ptr<scalar_t>();
   auto tau_data = tau.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
@@ -860,7 +871,6 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   int lwork = -1;
   scalar_t wkopt;
-  using value_t = typename ztype<scalar_t>::value_t;
   lapackGeqrf<scalar_t>(m, n, self_data, m, tau_data, &wkopt, lwork, &info);
   lwork = static_cast<int>(zabs<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
@@ -885,6 +895,7 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_co
 #ifndef USE_LAPACK
   AT_ERROR("qr: LAPACK library not found in compilation");
 #else
+  using value_t = typename ztype<scalar_t>::value_t;
   auto self_data = self.data_ptr<scalar_t>();
   auto tau_data = tau.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
@@ -898,7 +909,6 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_co
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   int lwork = -1;
   scalar_t wkopt;
-  using value_t = typename ztype<scalar_t>::value_t;
   lapackOrgqr<scalar_t>(m, n_columns, k, self_data, m, tau_data, &wkopt, lwork, &info);
   lwork = static_cast<int>(zabs<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
@@ -1001,6 +1011,7 @@ static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool 
 #ifndef USE_LAPACK
   AT_ERROR("symeig: LAPACK library not found in compilation");
 #else
+  using value_t = typename ztype<scalar_t>::value_t;
   auto self_data = self.data_ptr<scalar_t>();
   auto eigvals_data = eigvals.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
@@ -1018,7 +1029,6 @@ static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool 
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   int lwork = -1;
   scalar_t wkopt;
-  using value_t = typename ztype<scalar_t>::value_t;
   lapackSymeig<scalar_t>(jobz, uplo, n, self_data, n, eigvals_data, &wkopt, lwork, &info);
   lwork = static_cast<int>(zabs<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
@@ -1086,9 +1096,10 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
 #ifndef USE_LAPACK
   AT_ERROR("svd: LAPACK library not found in compilation");
 #else
+  using value_t = typename ztype<scalar_t>::value_t;
   auto self_data = self.data_ptr<scalar_t>();
   auto U_data = U.data_ptr<scalar_t>();
-  auto S_data = S.data_ptr<scalar_t>();
+  auto S_data = S.data_ptr<value_t>();
   auto VT_data = VT.data_ptr<scalar_t>();
   auto self_stride = matrixStride(self);
   auto U_stride = matrixStride(U);
@@ -1100,6 +1111,9 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   auto m = self.size(-2);
   auto n = self.size(-1);
   auto k = std::min(m, n);
+  int64_t lrwork = jobz == 'N' ? 5*k : k*std::max(5*k+7,2*std::max(m,n)+2*k+1);
+  Tensor rwork = at::empty({lrwork}, at::kInt);
+  auto rwork_data = rwork.data_ptr<int>();
   Tensor iwork = at::empty({8 * k}, at::kInt);
   auto iwork_data = iwork.data_ptr<int>();
 
@@ -1109,21 +1123,20 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   int lwork = -1;
   scalar_t wkopt;
-  using value_t = typename ztype<scalar_t>::value_t;
-  lapackSvd<scalar_t>(jobz, m, n, self_data, m, S_data, U_data, m, VT_data, n, &wkopt, lwork, iwork_data, &info);
+  lapackSvd<scalar_t, value_t>(jobz, m, n, self_data, m, S_data, U_data, m, VT_data, n, &wkopt, lwork, rwork_data, iwork_data, &info);
   lwork = static_cast<int>(zabs<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
   auto work_data = work.data_ptr<scalar_t>();
 
   for (int64_t i = 0; i < batchsize; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_stride];
-    scalar_t* S_working_ptr = &S_data[i * S_stride];
+    value_t* S_working_ptr = &S_data[i * S_stride];
     scalar_t* U_working_ptr = &U_data[i * U_stride];
     scalar_t* VT_working_ptr = &VT_data[i * VT_stride];
     
     // Compute S, U (optionally) and VT (optionally)
-    lapackSvd<scalar_t>(jobz, m, n, self_working_ptr, m,
-                        S_working_ptr, U_working_ptr, m, VT_working_ptr, n, work_data, lwork, iwork_data, &info);
+    lapackSvd<scalar_t, value_t>(jobz, m, n, self_working_ptr, m,
+                        S_working_ptr, U_working_ptr, m, VT_working_ptr, n, work_data, lwork, rwork_data, iwork_data, &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -1145,7 +1158,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
   if (self.numel() > 0) {
     auto self_working_copy = cloneBatchedColumnMajor(self);
 
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "svd_cpu", [&]{
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cpu", [&]{
       apply_svd<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobz, infos);
     });
 
