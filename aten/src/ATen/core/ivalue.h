@@ -374,7 +374,6 @@ struct CAFFE2_API IValue final {
 
   // ScalarType
   at::ScalarType toScalarType() const {
-    TORCH_CHECK(isScalarType(), "ivalue not a ScalarType");
     return static_cast<at::ScalarType>(payload.as_int);
   }
 
