@@ -41,8 +41,17 @@ class TORCH_API DistAutogradContext {
   DistAutogradContext(DistAutogradContext&&) = delete;
   DistAutogradContext& operator=(DistAutogradContext&&) = delete;
 
+  void addKnownWorkerId(const rpc::worker_id_t workerId);
+
+  std::unordered_set<rpc::worker_id_t> getKnownWorkerIds() const;
+
  private:
   const int64_t context_id_;
+
+  // Set containing known worker IDs, used in cleaning up autograd context.
+  // Whenever a sendRpcBackward is attached to the autograd graph for this
+  // context, the destination is added here.
+  std::unordered_set<rpc::worker_id_t> knownWorkerIds_;
 
   // Map from autograd_message_id to appropriate 'send' autograd function.
   std::unordered_map<int64_t, std::shared_ptr<SendRpcBackward>>

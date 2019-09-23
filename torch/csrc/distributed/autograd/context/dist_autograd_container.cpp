@@ -79,6 +79,10 @@ DistAutogradContext& DistAutogradContainer::getOrCreateContext(
   return context;
 }
 
+rpc::worker_id_t DistAutogradContainer::getWorkerId() const {
+  return worker_id_;
+}
+
 const DistAutogradContext& DistAutogradContainer::newContext() {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   // Check for overflow into workerId_ section.
