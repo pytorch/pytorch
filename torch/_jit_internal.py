@@ -658,4 +658,10 @@ def _qualified_name(obj):
         raise RuntimeError("Could not get qualified name for class '{}': "
                            "'{}' is not a valid identifier".format(name, name))
 
+    # XXX: This is a hack added to fix
+    # https://github.com/pytorch/pytorch/issues/25871 in time for the release.
+    # DELET THIS when we actually implement class type import resolution properly.
+    if name in ("_ConstModuleList", "_ConstSequential", "_ConstModuleDict"):
+        name = "_extra_namespace_please_dont_do_this_" + name + "." + name
+
     return module_name + "." + name
