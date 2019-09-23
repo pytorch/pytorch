@@ -985,7 +985,7 @@ class TestONNXRuntime(unittest.TestCase):
         beta = torch.tensor(3.5)
         model = MyModule()
         self.run_test(model, (x, batch1, batch2, alpha, beta))
-        
+
     def test_log(self):
         class Log(torch.nn.Module):
             def forward(self, input):
