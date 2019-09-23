@@ -5,6 +5,7 @@ import tempfile
 import time
 import unittest
 import logging
+import six
 
 from collections import namedtuple
 from functools import wraps
@@ -138,26 +139,29 @@ class MultiProcessTestCase(TestCase):
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
         return self.id().split(".")[-1]
 
-    def _fork_process(self):
+    def _start_processes(self, proc):
         self.processes = []
         for rank in range(int(self.world_size)):
-            process = torch.multiprocessing.Process(
+            process = proc(
                 target=self.__class__._run,
                 name='process ' + str(rank),
                 args=(rank, self._current_test_name(), self.file_name))
             process.start()
             self.processes.append(process)
 
-    def _spawn_process(self):
-        ctx = torch.multiprocessing.get_context('spawn')
-        self.processes = []
-        for rank in range(int(self.world_size)):
-            process = ctx.Process(
-                target=self.__class__._run,
-                name='process ' + str(rank),
-                args=(rank, self._current_test_name(), self.file_name))
-            process.start()
-            self.processes.append(process)
+    def _fork_processes(self):
+        if six.PY3:
+            proc = torch.multiprocessing.get_context("fork").Process
+        else:
+            proc = torch.multiprocessing.Process
+        self._start_processes(proc)
+
+    def _spawn_processes(self):
+        if six.PY3:
+            proc = torch.multiprocessing.get_context("spawn").Process
+        else:
+            raise RuntimeError("Cannot use spawn start method with Python 2")
+        self._start_processes(proc)
 
     @classmethod
     def _run(cls, rank, test_name, file_name):

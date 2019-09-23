@@ -518,7 +518,7 @@ class TimeoutTest(TestCase):
 class ProcessGroupGlooTest(MultiProcessTestCase):
     def setUp(self):
         super(ProcessGroupGlooTest, self).setUp()
-        self._fork_process()
+        self._fork_processes()
 
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
@@ -1742,7 +1742,7 @@ class QuadraGpuNet(nn.Module):
 class DistributedDataParallelTest(MultiProcessTestCase):
     def setUp(self):
         super(DistributedDataParallelTest, self).setUp()
-        self._fork_process()
+        self._fork_processes()
 
     def tearDown(self):
         # DistributedDataParallel test doesn't seem to call FileStore destructor
@@ -2919,7 +2919,7 @@ class CommTest(MultiProcessTestCase):
             self._get_wrapped_func(self.test_nccl_errors_blocking_sigterm),
             self._get_wrapped_func(self.test_nccl_errors_blocking_nonzero_exit),
         ]
-        self._fork_process()
+        self._fork_processes()
 
     def _get_wrapped_func(self, func):
         # Get the original function which was wrapped in the decorator.

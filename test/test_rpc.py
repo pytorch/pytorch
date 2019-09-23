@@ -72,7 +72,8 @@ def my_complex_tensor_function(
         res += t
     for k, v in dict_input.items():
         res += v
-    return (res, tensor_class_input.tensors[0])
+    complex_tensors = tensor_class_input.tensors
+    return (res, complex_tensors[0], complex_tensors[1], complex_tensors[2])
 
 
 def no_result():
@@ -132,7 +133,7 @@ def _wrap_with_rpc(func):
 class RpcTest(MultiProcessTestCase):
     def setUp(self):
         super(RpcTest, self).setUp()
-        self._spawn_process()
+        self._spawn_processes()
 
     @property
     def world_size(self):
@@ -176,6 +177,14 @@ class RpcTest(MultiProcessTestCase):
                                      self_rank=self.rank,
                                      init_method=RPC_INIT_URL)
         dist.join_rpc()
+
+    def test_init_invalid_backend(self):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Unrecognized RPC backend"):
+            dist.init_model_parallel(self_name='worker{}'.format(self.rank),
+                                     backend="invalid",
+                                     self_rank=self.rank,
+                                     init_method=RPC_INIT_URL)
 
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     def test_invalid_names(self):
@@ -396,7 +405,7 @@ class RpcTest(MultiProcessTestCase):
         futs = []
         n = self.rank + 1
         dst_rank = n % self.world_size
-        for i in range(10):
+        for i in range(100):
             fut = dist.rpc("worker{}".format(dst_rank),
                            my_tensor_function,
                            args=(torch.ones(i, i), torch.ones(i, i)),
