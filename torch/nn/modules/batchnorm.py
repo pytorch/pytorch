@@ -38,6 +38,7 @@ class _BatchNorm(Module):
             self.register_parameter('running_mean', None)
             self.register_parameter('running_var', None)
             self.register_parameter('num_batches_tracked', None)
+        self.num_batches_tracked_scalar = -1;
         self.reset_parameters()
 
     def reset_running_stats(self):
@@ -45,13 +46,20 @@ class _BatchNorm(Module):
             self.running_mean.zero_()
             self.running_var.fill_(1)
             self.num_batches_tracked.zero_()
+            self.num_batches_tracked_scalar = 0
 
     def reset_parameters(self):
         self.reset_running_stats()
-        self.num_batches_tracked_scalar = int(self.num_batches_tracked)
+        if self.track_running_stats:
+            self.num_batches_tracked_scalar = int(self.num_batches_tracked)
         if self.affine:
             init.ones_(self.weight)
             init.zeros_(self.bias)
+
+    def __getattr__(self, name):
+        if self.track_running_stats and name == 'num_batches_tracked' and name in self.__dict__['_buffers'] and self.num_batches_tracked_scalar != -1:
+            return super(_BatchNorm, self).__getattr__(name).fill_(self.num_batches_tracked_scalar)
+        return super(_BatchNorm, self).__getattr__(name)
 
     def _check_input_dim(self, input):
         raise NotImplementedError
@@ -86,11 +94,13 @@ class _BatchNorm(Module):
                'track_running_stats={track_running_stats}'.format(**self.__dict__)
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
-        self.num_batches_tracked.fill_(self.num_batches_tracked_scalar)
+        if self.num_batches_tracked is not None:
+            self.num_batches_tracked.fill_(self.num_batches_tracked_scalar)
         return super(_BatchNorm, self).state_dict(destination, prefix, keep_vars)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        self.num_batches_tracked.fill_(self.num_batches_tracked_scalar)
+        if self.num_batches_tracked is not None:
+            self.num_batches_tracked.fill_(self.num_batches_tracked_scalar)
         super(_BatchNorm, self)._save_to_state_dict(
             destination, prefix, keep_vars)
 
@@ -108,7 +118,8 @@ class _BatchNorm(Module):
         super(_BatchNorm, self)._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
-        self.num_batches_tracked_scalar = int(self.num_batches_tracked)
+        if self.num_batches_tracked is not None:
+            self.num_batches_tracked_scalar = int(self.num_batches_tracked)
 
 
 class BatchNorm1d(_BatchNorm):
