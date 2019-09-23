@@ -7,10 +7,11 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/quantized/Quantizer.h>
+#include <cstring>
+
 
 namespace at {
 namespace native {
-namespace {} // namespace
 
 // at::native functions for the native_functions.yaml
 template <typename scalar_t>
@@ -23,8 +24,8 @@ static void upsample_nearest2d_out_frame(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels) {
-  const float height_scale = (float)input_height / (float)output_height;
-  const float width_scale = (float)input_width / (float)output_width;
+  const float height_scale = (float)input_height / output_height;
+  const float width_scale = (float)input_width / output_width;
 
   channels = channels * nbatch;
   auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata);
@@ -32,21 +33,7 @@ static void upsample_nearest2d_out_frame(
 
   // special case: just copy
   if (input_height == output_height && input_width == output_width) {
-    for (int64_t h2 = 0; h2 < output_height; ++h2) {
-      const int64_t h1 = h2;
-
-      for (int64_t w2 = 0; w2 < output_width; ++w2) {
-        const int64_t w1 = w2;
-        const auto* pos1 = &i_p[h1 * input_width + w1];
-        auto* pos2 = &o_p[h2 * output_width + w2];
-
-        for (int64_t c = 0; c < channels; ++c) {
-          pos2[0] = pos1[0];
-          pos1 += input_height * input_width;
-          pos2 += output_height * output_width;
-        }
-      }
-    }
+    std::memcpy(o_p, i_p, channels * input_height * input_width * sizeof(typename scalar_t::underlying));
     return;
   }
 
@@ -80,28 +67,14 @@ static void upsample_nearest2d_out_frame_nhwc(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels) {
-  const float height_scale = (float)input_height / (float)output_height;
-  const float width_scale = (float)input_width / (float)output_width;
+  const float height_scale = (float)input_height / output_height;
+  const float width_scale = (float)input_width / output_width;
   for (int b = 0; b < nbatch; b++) {
     auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata + b * input_height * input_width * channels);
     auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata + b * output_height * output_width * channels);
     // special case: just copy
     if (input_height == output_height && input_width == output_width) {
-      for (int64_t h2 = 0; h2 < output_height; ++h2) {
-        const int64_t h1 = h2;
-
-        for (int64_t w2 = 0; w2 < output_width; ++w2) {
-          const int64_t w1 = w2;
-          const auto* pos1 = &i_p[(h1 * input_width + w1) * channels];
-          auto* pos2 = &o_p[(h2 * output_width + w2) * channels];
-
-          for (int64_t c = 0; c < channels; ++c) {
-            pos2[0] = pos1[0];
-            pos1++;
-            pos2++;;
-          }
-        }
-      }
+      std::memcpy(o_p, i_p, channels * input_height * input_width * sizeof(typename scalar_t::underlying));
       return;
     }
 
@@ -115,12 +88,7 @@ static void upsample_nearest2d_out_frame_nhwc(
 
         const auto* pos1 = &i_p[(h1 * input_width + w1)*channels];
         auto* pos2 = &o_p[(h2 * output_width + w2)*channels];
-
-        for (int64_t c = 0; c < channels; ++c) {
-          pos2[0] = pos1[0];
-          pos1++;
-          pos2++;;
-        }
+        std::memcpy(pos2, pos1, channels * sizeof(typename scalar_t::underlying));
       }
     }
   }
