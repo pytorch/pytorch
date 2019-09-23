@@ -6,7 +6,7 @@
 namespace at {
 namespace native {
 
-Tensor quantize_linear_cpu(
+Tensor quantize_per_tensor_cpu(
     const Tensor& self,
     double scale,
     int64_t zero_point,
@@ -15,7 +15,7 @@ Tensor quantize_linear_cpu(
   return quantizer->quantize(self);
 }
 
-Tensor quantize_linear_per_channel_cpu(
+Tensor quantize_per_channel_cpu(
     const Tensor& self,
     const Tensor& scales,
     const Tensor& zero_points,
@@ -42,7 +42,7 @@ Tensor dequantize_quant(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
-Tensor dequantize_linear_cpu(
+Tensor dequantize_per_tensor_cpu(
     const Tensor& self,
     double scale,
     int64_t zero_point,
@@ -142,10 +142,10 @@ Tensor per_channel_affine_qtensor_cpu(
     const Tensor& scales,
     const Tensor& zero_points,
     IntArrayRef axis) {
-  Tensor dst = at::_empty_per_channel_affine_quantized(
-      self.sizes(),
+  Tensor dst = at::_empty_per_channel_affine_quantized_like(
       scales,
       zero_points,
+      self.sizes(),
       axis,
       self.options().dtype(toQIntType(self.scalar_type())));
   Tensor self_contig = self.contiguous();
