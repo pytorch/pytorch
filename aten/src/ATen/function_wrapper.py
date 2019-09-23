@@ -1332,7 +1332,7 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
-        if BUILD_NAMEDTENSOR or not is_named_tensor_only:
+        if not is_named_tensor_only:
             top_env['registration_declarations'].append(
                 REGISTRATION_DECLARATION.substitute(option))
         if (option['use_c10_dispatcher'] != 'no'):
