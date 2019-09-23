@@ -680,6 +680,59 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                                                           X_hat.q_zero_point()))
 
+    @no_deadline
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           k=st.integers(1, 10),
+           dim=st.integers(1, 4),
+           largest=st.booleans(),
+           sorted=st.booleans())
+    def test_qtopk(self, X, k, dim, largest, sorted):
+        X, (scale, zero_point, torch_type) = X
+        qX = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type)
+        assume(dim < X.ndim)
+        assume(k < X.shape[dim])
+
+        unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=largest, sorted=sorted)
+
+        values = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type)
+        indices = torch.tensor(torch.from_numpy(X)).long()
+
+        quantized_out = torch.topk(qX, k, dim=dim, largest=largest, sorted=sorted)
+
+        assert(len(unquantized_out) == len(quantized_out))
+        torch.testing.assert_allclose(quantized_out[0].dequantize(), unquantized_out[0])
+        torch.testing.assert_allclose(quantized_out[1], unquantized_out[1])
+
+    @no_deadline
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           k=st.integers(1, 10),
+           dim=st.integers(1, 4),
+           largest=st.booleans(),
+           sorted=st.booleans())
+    def test_qtopk_nhwc(self, X, k, dim, largest, sorted):
+        # X is NHWC, we permute to view as NCHW but keep NHWC in memory
+        X, (scale, zero_point, torch_type) = X
+        qX = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type).permute([0, 3, 1, 2])
+        X = np.transpose(X, [0, 3, 1, 2])
+        assume(dim < X.ndim)
+        assume(k < X.shape[dim])
+
+        unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=largest, sorted=sorted)
+
+        values = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type)
+        indices = torch.tensor(torch.from_numpy(X)).long()
+
+        quantized_out = torch.topk(qX, k, dim=dim, largest=largest, sorted=sorted)
+
+        assert(len(unquantized_out) == len(quantized_out))
+        torch.testing.assert_allclose(quantized_out[0].dequantize(), unquantized_out[0])
+        torch.testing.assert_allclose(quantized_out[1], unquantized_out[1])
+
+
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
