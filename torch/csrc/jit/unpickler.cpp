@@ -479,8 +479,7 @@ PickleOpCode Unpickler::readInstruction() {
                 const auto& zero_points_list = qparams.at(2).toIntList();
                 std::vector<int64_t> zero_points(
                     zero_points_list.begin(), zero_points_list.end());
-                const auto& axis_list = qparams.at(3).toIntList();
-                std::vector<int64_t> axis(axis_list.begin(), axis_list.end());
+                int64_t axis = qparams.at(3).toInt();
                 result = _empty_per_channel_affine_quantized(
                     {0},
                     at::tensor(scales),

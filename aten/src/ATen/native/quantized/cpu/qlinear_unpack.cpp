@@ -40,7 +40,7 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
           {N, K},
           scales.toType(kDouble),
           zero_points.toType(kLong),
-          {0}, // The output channel axis is 0
+          0, // The output channel axis is 0
           device(kCPU).dtype(kQInt8));
     }
 
