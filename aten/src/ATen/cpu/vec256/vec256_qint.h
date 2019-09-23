@@ -330,7 +330,7 @@ struct Vec256<c10::quint8> {
 
  private:
     __m256i vals __attribute__((aligned(64)));
- 
+
  public:
     // Broadcast constructor
     Vec256(const c10::quint8& val) {
