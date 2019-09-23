@@ -360,12 +360,6 @@
   use_c10_dispatcher: full
   variants: function, method
 
-- func: argmax.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
-  variants: function, method
-
-- func: argmin.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
-  variants: function, method
-
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   use_c10_dispatcher: unboxed_only
   variants: function, method

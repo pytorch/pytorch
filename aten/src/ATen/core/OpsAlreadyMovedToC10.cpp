@@ -802,12 +802,6 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::arange", "start_step"},
         {"aten::arange", "out"},
         {"aten::arange", "start_out"},
-    #ifdef BUILD_NAMEDTENSOR
-        {"aten::argmax", "dimname"},
-    #endif
-    #ifdef BUILD_NAMEDTENSOR
-        {"aten::argmin", "dimname"},
-    #endif
         {"aten::asin", "out"},
         {"aten::atan", "out"},
         {"aten::baddbmm", "out"},

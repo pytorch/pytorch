@@ -417,26 +417,6 @@ inline Tensor Tensor::argmin(c10::optional<int64_t> dim, bool keepdim) const {
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
-#ifdef BUILD_NAMEDTENSOR
-inline Tensor Tensor::argmax(Dimname dim, bool keepdim) const {
-#ifdef USE_STATIC_DISPATCH
-    return TypeDefault::argmax(const_cast<Tensor&>(*this), dim, keepdim);
-#else
-    static auto table = globalATenDispatch().getOpTable("aten::argmax.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
-#endif
-}
-#endif
-#ifdef BUILD_NAMEDTENSOR
-inline Tensor Tensor::argmin(Dimname dim, bool keepdim) const {
-#ifdef USE_STATIC_DISPATCH
-    return TypeDefault::argmin(const_cast<Tensor&>(*this), dim, keepdim);
-#else
-    static auto table = globalATenDispatch().getOpTable("aten::argmin.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
-#endif
-}
-#endif
 inline Tensor Tensor::as_strided(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
