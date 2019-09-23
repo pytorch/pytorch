@@ -385,7 +385,7 @@ def make_stubs_for_overloads(overload_info):
             over_ast = torch.jit.get_jit_def(overload_fn, self_name="ScriptModule")
             new_ast = torch._C._replace_overloaded_method_decl(over_ast.decl(), orig_ast, overload_name)
             _rcb = _jit_internal.createResolutionCallbackFromClosure(orig_fn)
-            overload_stubs.append(torch.jit.ScriptMethodStub(_rcb, new_ast, overload_fn))
+            overload_stubs.append(ScriptMethodStub(_rcb, new_ast, overload_fn))
     return overload_stubs
 
 def recursive_script(mod, exclude_methods=()):
