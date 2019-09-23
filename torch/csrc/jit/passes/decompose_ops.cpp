@@ -171,8 +171,7 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
       std::vector<Value*> inputs {
         it->namedInput(attr::input),
         it->namedInput(attr::normalized_shape),
-        it->namedInput(attr::eps),
-        it->namedInput(attr::cudnn_enable)
+        it->namedInput(attr::eps)
       };
 
       // inline the compiled decomposed layernorm

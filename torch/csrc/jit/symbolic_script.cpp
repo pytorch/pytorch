@@ -1097,8 +1097,7 @@ const std::vector<std::string> functions = {
                        normalized_shape : List[int],
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
-                       eps : float,
-                       cudnn_enable : bool):
+                       eps : float):
 
             input_ndim = input.dim()
             normalized_ndim = len(normalized_shape)
@@ -1109,8 +1108,7 @@ const std::vector<std::string> functions = {
             input_reshape = input.contiguous().view(1, n, -1)
 
             bn_out, save1, save2, impl_idx = torch._batch_norm_impl_index(
-                input_reshape, None, None, None, None, True,
-                0.0, eps, cudnn_enable)
+                input_reshape, None, None, None, None, True, 0.0, eps, torch.backends.cudnn.enabled)
 
             bn_out = bn_out.view(input.size())
             if weight is not None and bias is not None:

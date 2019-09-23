@@ -900,7 +900,7 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
 def layer_norm(g, input, normalized_shape, weight, bias, eps):
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", input, weight, bias, normalized_shape_i=normalized_shape,
-                    eps_f=eps, cudnn_enable_i=cudnn_enable, operator_s="layer_norm")
+                    eps_f=eps, operator_s="layer_norm")
 
     axes = [-i for i in range(len(normalized_shape), 0, -1)]
 

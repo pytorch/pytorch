@@ -749,7 +749,6 @@ _(attr, complex_input) \
 _(attr, complex_output) \
 _(attr, condition) \
 _(attr, count_include_pad) \
-_(attr, cudnn_enable) \
 _(attr, cudnn_enabled) \
 _(attr, cx) \
 _(attr, cy) \
