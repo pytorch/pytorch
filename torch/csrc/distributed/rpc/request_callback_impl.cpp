@@ -130,7 +130,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
             response->tensors(),
             dstWorkerId);
       }
-      return response;
+      return std::move(response);
     }
     default: {
       TORCH_INTERNAL_ASSERT(
