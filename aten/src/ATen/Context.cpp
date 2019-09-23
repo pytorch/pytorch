@@ -39,6 +39,14 @@ void Context::setUserEnabledCuDNN(bool e) {
   enabled_cudnn = e;
 }
 
+bool Context::userEnabledMkldnn() const {
+  return enabled_mkldnn;
+}
+
+void Context::setUserEnabledMkldnn(bool e) {
+  enabled_mkldnn = e;
+}
+
 bool Context::deterministicCuDNN() const {
   return deterministic_cudnn;
 }
@@ -85,6 +93,32 @@ bool Context::hasLAPACK() const {
 #else
   return false;
 #endif
+}
+
+at::QEngine Context::qEngine() const {
+  return quantized_engine;
+}
+
+void Context::setQEngine(at::QEngine e) {
+  const auto& qengines = supportedQEngines();
+  if (std::find(qengines.begin(), qengines.end(), e) != qengines.end()) {
+    quantized_engine = e;
+    return;
+  }
+  TORCH_CHECK(false, "quantized engine ", toString(e), "is not supported");
+}
+
+std::vector<at::QEngine> Context::supportedQEngines() const {
+  static auto supported_qengines = {
+    at::kNoQEngine,
+    #ifdef USE_FBGEMM
+    at::kFBGEMM,
+    #endif
+    #ifdef USE_PYTORCH_QNNPACK
+    at::kQNNPACK,
+    #endif
+  };
+  return supported_qengines;
 }
 
 bool Context::setFlushDenormal(bool on) {

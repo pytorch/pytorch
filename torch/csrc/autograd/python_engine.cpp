@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/utils/auto_gil.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -131,7 +132,17 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 
     PyObject *grad = PyTuple_GET_ITEM(grad_tensors, i);
     if (THPVariable_Check(grad)) {
-      grads.push_back(((THPVariable*)grad)->cdata);
+      const Variable& grad_var = ((THPVariable*)grad)->cdata;
+#ifdef BUILD_NAMEDTENSOR
+      if (grad_var.has_names()) {
+        TORCH_WARN(
+            "Autograd was passed a named grad tensor with dims ", grad_var.names(),
+            ". Autograd does not yet support named tensor semantics, so all names ",
+            "will be ignored. In practice all computed gradients will still be correct "
+            "according to regular tensor semantics.");
+      }
+#endif
+      grads.push_back(grad_var);
     } else {
       THPUtils_assert(grad == Py_None,
           "element %d of gradients tuple is not a Tensor or None", i);
@@ -202,7 +213,7 @@ PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPEngine_is_checkpoint_valid(PyObject *self) {
+PyObject* THPEngine_is_checkpoint_valid(PyObject *self, PyObject *noargs) {
   HANDLE_TH_ERRORS
   if(engine.is_checkpoint_valid()) {
     Py_RETURN_TRUE;
@@ -218,7 +229,7 @@ PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 }
 
 static struct PyMethodDef THPEngine_methods[] = {
-  {(char*)"run_backward", (PyCFunction)THPEngine_run_backward, METH_VARARGS | METH_KEYWORDS, nullptr},
+  {(char*)"run_backward", (PyCFunction)(void(*)(void))THPEngine_run_backward, METH_VARARGS | METH_KEYWORDS, nullptr},
   {(char*)"queue_callback", (PyCFunction)THPEngine_queue_callback, METH_O, nullptr},
   {(char*)"is_checkpoint_valid", (PyCFunction)THPEngine_is_checkpoint_valid, METH_NOARGS, nullptr},
   {nullptr}

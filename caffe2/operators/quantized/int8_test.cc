@@ -1003,7 +1003,7 @@ TEST(Int8, Slice) {
   EXPECT_EQ(YQ.zero_point, XQ->zero_point);
 }
 
-TEST(Int8, Transpose) {
+TEST(Int8, DISABLED_Transpose) {
   auto XQ = q({1, 50, 25, 16});
   auto xop = CreateOperatorDef(
       "Int8Transpose",

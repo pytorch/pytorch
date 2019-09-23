@@ -67,8 +67,8 @@ exporter to print out a human-readable representation of the network::
       return (%output1);
     }
 
-You can also verify the protobuf using the `onnx <https://github.com/onnx/onnx/>`_ library.
-You can install ``onnx`` with conda::
+You can also verify the protobuf using the `ONNX <https://github.com/onnx/onnx/>`_ library.
+You can install ``ONNX`` with conda::
 
     conda install -c conda-forge onnx
 
@@ -103,10 +103,10 @@ Once these are installed, you can use the backend for Caffe2::
     # rather than a single numpy ndarray.
     print(outputs[0])
 
-You can also run the exported model with `ONNXRuntime <https://github.com/microsoft/onnxruntime>`_,
-you will need to install `ONNXRuntime`: please `follow these instructions <https://github.com/microsoft/onnxruntime#installation>`_.
+You can also run the exported model with `ONNX Runtime <https://github.com/microsoft/onnxruntime>`_,
+you will need to install `ONNX Runtime`: please `follow these instructions <https://github.com/microsoft/onnxruntime#installation>`_.
 
-Once these are installed, you can use the backend for ONNXRuntime::
+Once these are installed, you can use the backend for ONNX Runtime::
 
     # ...continuing from above
     import onnxruntime as ort
@@ -296,7 +296,7 @@ Limitations
         def forward(self, x):
             return [torch.squeeze(out, 0) for out in torch.split(x, [1,1,1], dim=0)]
 
-* PyTorch and ONNX backends(Caffe2, ONNXRuntime, etc) often have implementations of operators with some
+* PyTorch and ONNX backends(Caffe2, ONNX Runtime, etc) often have implementations of operators with some
   numeric differences.  Depending on model structure, these differences
   may be negligible, but they can also cause major divergences in behavior
   (especially on untrained models.)  We allow Caffe2 to call directly to Torch implementations of operators, to
@@ -595,7 +595,7 @@ change in a future interface.
 Custom operators
 ~~~~~~~~~~~~~~~~
 
-Following this tutorial `Extending TorchScript with Custom C++ Operators </advanced/torch_script_custom_ops.html>`_,
+Following this tutorial `Extending TorchScript with Custom C++ Operators <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_,
 you can create and register your own custom ops implementation in PyTorch. Here's how to export such model to ONNX.::
 
     # Create custom symbolic function
@@ -624,7 +624,7 @@ you can create and register your own custom ops implementation in PyTorch. Here'
 Depending on the custom operator, you can export it as one or a combination of existing ONNX ops.
 You can also export it as a custom op in ONNX as well. In that case, you will need to extend the backend of your choice
 with matching custom ops implementation, e.g. `Caffe2 custom ops <https://caffe2.ai/docs/custom-operators.html>`_,
-`ONNXRuntime custom ops <https://github.com/microsoft/onnxruntime/blob/master/docs/AddingCustomOp.md>`_.
+`ONNX Runtime custom ops <https://github.com/microsoft/onnxruntime/blob/master/docs/AddingCustomOp.md>`_.
 
 Frequently Asked Questions
 --------------------------

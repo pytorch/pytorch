@@ -5,6 +5,7 @@ import sys
 import tempfile
 import time
 import unittest
+import logging
 
 from collections import namedtuple
 from functools import wraps
@@ -88,6 +89,11 @@ def get_timeout(test_id):
 
 class MultiProcessTestCase(TestCase):
     MAIN_PROCESS_RANK = -1
+    # This exit code is used to indicate that the test code had an error and
+    # exited abnormally. There are certain tests that might use sys.exit() to
+    # simulate failures and in those cases, we can't have an exit code of 0,
+    # but we still want to ensure we didn't run into any other errors.
+    TEST_ERROR_EXIT_CODE = 10
 
     @property
     def world_size(self):
@@ -100,7 +106,12 @@ class MultiProcessTestCase(TestCase):
             if self.rank == self.MAIN_PROCESS_RANK:
                 self._join_processes(fn)
             else:
-                fn(self)
+                try:
+                    fn(self)
+                except Exception as e:
+                    logging.error('Caught exception: {}, exiting process with exit code: {}'
+                                  .format(e, MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
+                    sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
         return wrapper
 
     # The main process spawns N subprocesses that run the test.
@@ -147,7 +158,18 @@ class MultiProcessTestCase(TestCase):
             p.join(timeout)
         elapsed_time = time.time() - start_time
         if fn in self.skip_return_code_checks:
+            self._check_no_test_errors(elapsed_time)
+        else:
             self._check_return_codes(elapsed_time)
+
+    def _check_no_test_errors(self, elapsed_time):
+        """
+        Checks that we didn't have any errors thrown in the child processes.
+        """
+        for i, p in enumerate(self.processes):
+            if p.exitcode is None:
+                raise RuntimeError('Process {} timed out after {} seconds'.format(i, elapsed_time))
+            self.assertNotEqual(self.TEST_ERROR_EXIT_CODE, p.exitcode)
 
     def _check_return_codes(self, elapsed_time):
         """

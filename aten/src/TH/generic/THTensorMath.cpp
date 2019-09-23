@@ -2,10 +2,9 @@
 #define TH_GENERIC_FILE "TH/generic/THTensorMath.cpp"
 #else
 
+#include <ATen/core/EnableNamedTensor.h>
 #include <TH/generic/THTensorApply.hpp>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 // HEY YOU!
 //
@@ -182,7 +181,7 @@ void THTensor_(bitor)(THTensor *r_, THTensor *t, scalar_t value)
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
-void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *m1, THTensor *m2)
+void THTensor_(addmm)(THTensor *r_, THTensor *t, THTensor *m1, THTensor *m2, scalar_t beta, scalar_t alpha)
 {
   char transpose_r, transpose_m1, transpose_m2;
   THTensor *r__, *m1_, *m2_;
@@ -338,7 +337,7 @@ void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
 #endif
 }
 
-void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *mat, THTensor *vec)
+void THTensor_(addmv)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha)
 {
   if( (mat->dim() != 2) || (THTensor_nDimension(vec) != 1) )
     THError("matrix and vector expected, got %dD, %dD",
@@ -414,7 +413,7 @@ void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
   #undef LDA_COND
 }
 
-void THTensor_(addr)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *vec1, THTensor *vec2)
+void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, scalar_t beta, scalar_t alpha)
 {
   if( (THTensor_nDimension(vec1) != 1) || (THTensor_nDimension(vec2) != 1) )
     THError("vector and vector expected, got %dD, %dD tensors",
@@ -489,27 +488,6 @@ void THTensor_(addr)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, T
 // Should wrap if the value (a) has a different sign than the divisor (b), but is not 0.
 static inline bool modulo_wrap(scalar_t a, scalar_t b) {
   return (a != 0) && (a < 0) != (b < 0);
-}
-
-void THTensor_(clamp)(THTensor *r_, THTensor *t, scalar_t min_value, scalar_t max_value)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    scalar_t *tp = t->data<scalar_t>();
-    scalar_t *rp = r_->data<scalar_t>();
-    /* scalar_t t_val; */
-    at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD,
-        [&](int64_t start, int64_t end) {
-      for (auto i = start; i < end; i++) {
-        rp[i] = (tp[i] < min_value) ? min_value : (tp[i] > max_value ? max_value : tp[i]);
-      }
-    });
-  } else {
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (*t_data < min_value) ? min_value : (*t_data > max_value ? max_value : *t_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-  }
 }
 
 void THTensor_(cadd)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src)
@@ -815,7 +793,7 @@ void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, scalar_t gain)
   c10::raw::intrusive_ptr::decref(m2);
 }
 
-void THTensor_(addbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
+void THTensor_(addbmm)(THTensor *result, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha)
 {
   int64_t batch;
 
@@ -850,7 +828,7 @@ void THTensor_(addbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t al
     THTensor_(select)(matrix1, batch1, 0, batch);
     THTensor_(select)(matrix2, batch2, 0, batch);
 
-    THTensor_(addmm)(result, beta, result, alpha, matrix1, matrix2);
+    THTensor_(addmm)(result, result, matrix1, matrix2, beta, alpha);
     beta = 1; // accumulate output once
   }
 

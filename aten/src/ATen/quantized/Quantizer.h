@@ -236,10 +236,14 @@ CAFFE2_API QTensorImpl* get_qtensorimpl(const Tensor& self);
 // Quantize a float value into a uint value given scale and zero_point
 template <typename T>
 CAFFE2_API T quantize_val(double scale, int64_t zero_point, float value);
+template <typename T, int precision=8>
+void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, size_t count=8);
 template <typename T>
 CAFFE2_API Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 template <typename T>
 CAFFE2_API float dequantize_val(double scale, int64_t zero_point, T value);
+template <typename T>
+CAFFE2_API float dequantize_vec(double scale, int64_t zero_point, const T* src, float* dst, size_t count=8);
 template <typename T>
 CAFFE2_API Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point);
 template <typename SRC_T, typename DST_T>

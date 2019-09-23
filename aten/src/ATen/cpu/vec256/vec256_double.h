@@ -161,6 +161,9 @@ public:
   Vec256<double> trunc() const {
     return _mm256_round_pd(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
   }
+  Vec256<double> lgamma() const {
+    return Vec256<double>(Sleef_lgammad4_u10(values));
+  }
   Vec256<double> sqrt() const {
     return _mm256_sqrt_pd(values);
   }
@@ -244,6 +247,21 @@ Vec256<double> inline minimum(const Vec256<double>& a, const Vec256<double>& b) 
   Vec256<double> isnan = _mm256_cmp_pd(a, b, _CMP_UNORD_Q);
   // Exploit the fact that all-ones is a NaN.
   return _mm256_or_pd(min, isnan);
+}
+
+template <>
+Vec256<double> inline clamp(const Vec256<double>& a, const Vec256<double>& min, const Vec256<double>& max) {
+  return _mm256_min_pd(max, _mm256_max_pd(min, a));
+}
+
+template <>
+Vec256<double> inline clamp_min(const Vec256<double>& a, const Vec256<double>& min) {
+  return _mm256_max_pd(min, a);
+}
+
+template <>
+Vec256<double> inline clamp_max(const Vec256<double>& a, const Vec256<double>& max) {
+  return _mm256_min_pd(max, a);
 }
 
 template <>

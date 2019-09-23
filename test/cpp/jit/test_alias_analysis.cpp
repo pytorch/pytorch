@@ -1011,7 +1011,16 @@ void testMemoryDAG() {
     // But a and f don't alias
     ASSERT_FALSE(t.mayAlias(a, f));
   }
-
+  {
+    // Test invalidation of memory locations
+    MemoryDAG t;
+    auto a = t.makeFreshValue(aValue);
+    auto b = t.makeFreshValue(bValue);
+    // `a` does not point to `b`
+    ASSERT_FALSE(a->getMemoryLocations().test(b->index));
+    t.makePointerTo(a, b);
+    ASSERT_TRUE(a->getMemoryLocations().test(b->index));
+  }
   {
     // x(y) -> x contains y
 
@@ -1110,7 +1119,7 @@ void testAliasRegistration() {
                   })
                   .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
         },
-        "Tried to register operator foo::rand3(Tensor(a) arg1) -> Tensor(b) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+        "Tried to register operator foo::rand3(Tensor(a) arg1) -> (Tensor(b)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
   {
     expectThrows<c10::Error>(
@@ -1123,7 +1132,7 @@ void testAliasRegistration() {
                   })
                   .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
         },
-        "Tried to register operator foo::rand4(Tensor(a) arg1) -> Tensor(a) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+        "Tried to register operator foo::rand4(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
   {
     expectThrows<c10::Error>(
@@ -1136,7 +1145,7 @@ void testAliasRegistration() {
                   })
                   .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
         },
-        "Tried to register operator foo::rand5 with AliasAnalysisKind::FROM_SCHEMA, but the schema is inferred");
+        "Tried to register operator foo::rand5(Tensor _0) -> (Tensor _0) with AliasAnalysisKind::FROM_SCHEMA, but the schema is inferred");
   }
   {
     auto registry = torch::RegisterOperators().op(
@@ -1226,7 +1235,7 @@ void testAliasRegistration() {
                       [](at::Tensor t) -> at::Tensor { return t * 2; })
                   .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
         },
-        "Tried to register operator foo::rand11(Tensor(a) arg1) -> Tensor(a) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+        "Tried to register operator foo::rand11(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
   {
     expectThrows<c10::Error>(
@@ -1238,7 +1247,7 @@ void testAliasRegistration() {
                       [](at::Tensor t) -> at::Tensor { return t * 2; })
                   .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
         },
-        "Tried to register operator foo::rand12(Tensor(a) arg1) -> Tensor(b) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+        "Tried to register operator foo::rand12(Tensor(a) arg1) -> (Tensor(b)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
 }
 

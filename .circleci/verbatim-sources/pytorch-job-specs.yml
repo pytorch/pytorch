@@ -1,0 +1,117 @@
+jobs:
+  pytorch_linux_build:
+    <<: *pytorch_params
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - should_run_job
+    - setup_linux_system_environment
+    - checkout
+    - setup_ci_environment
+    - run:
+        name: Build
+        no_output_timeout: "1h"
+        command: |
+          set -e
+          # Pull Docker image and run build
+          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
+          docker pull ${DOCKER_IMAGE} >/dev/null
+          export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+
+          # TODO We may want to move the rebase logic to a separate step after checkout
+          # Rebase to master only if in xenial_py3_6_gcc5_4 case
+          if [[ "${CIRCLE_BRANCH}" != "master" && "${BUILD_ENVIRONMENT}" == *"gcc5"* ]]; then
+            echo "Merge master branch into $CIRCLE_BRANCH before build in environment $BUILD_ENVIRONMENT"
+            set -x
+            git config --global user.email "circleci.ossci@gmail.com"
+            git config --global user.name "CircleCI"
+            git config remote.origin.url https://github.com/pytorch/pytorch.git
+            git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
+            git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=50 --quiet
+            export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
+            echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
+            export GIT_COMMIT=${CIRCLE_SHA1}
+            echo "GIT_COMMIT: " ${GIT_COMMIT}
+            git checkout -f ${GIT_COMMIT}
+            git reset --hard ${GIT_COMMIT}
+            git merge --no-edit --no-ff ${GIT_MERGE_TARGET}
+            set +x
+          else
+            echo "Do NOT merge master branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
+          fi
+
+          git submodule sync && git submodule update -q --init --recursive
+
+          docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
+
+          if [[ ${BUILD_ENVIRONMENT} == *"namedtensor"* ]]; then
+            NAMED_FLAG="export BUILD_NAMEDTENSOR=1"
+          fi
+
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          # Push intermediate Docker image for next phase to use
+          if [ -z "${BUILD_ONLY}" ]; then
+            # Note [Special build images]
+            # The namedtensor and xla builds use the same docker image as
+            # pytorch-linux-trusty-py3.6-gcc5.4-build. In the push step, we have to
+            # distinguish between them so the test can pick up the correct image.
+            output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+            if [[ ${BUILD_ENVIRONMENT} == *"namedtensor"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-namedtensor
+            elif [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-xla
+            elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_64"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-android-x86_64
+            elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v7a"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-android-arm-v7a
+            elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v8a"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-android-arm-v8a
+            elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_32"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-android-x86_32
+            else
+              export COMMIT_DOCKER_IMAGE=$output_image
+            fi
+            docker commit "$id" ${COMMIT_DOCKER_IMAGE}
+            docker push ${COMMIT_DOCKER_IMAGE}
+          fi
+
+  pytorch_linux_test:
+    <<: *pytorch_params
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - should_run_job
+    - setup_linux_system_environment
+    - setup_ci_environment
+    - run:
+        name: Test
+        no_output_timeout: "90m"
+        command: |
+          set -e
+          # See Note [Special build images]
+          output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          if [[ ${BUILD_ENVIRONMENT} == *"namedtensor"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-namedtensor
+            export NAMED_FLAG="export BUILD_NAMEDTENSOR=1 && export TEST_NAMEDTENSOR=1"
+          elif [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-xla
+          else
+            export COMMIT_DOCKER_IMAGE=$output_image
+          fi
+          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
+          docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
+            export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          else
+            export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          fi
+          if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${NAMED_FLAG}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          else
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${NAMED_FLAG}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          fi
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts

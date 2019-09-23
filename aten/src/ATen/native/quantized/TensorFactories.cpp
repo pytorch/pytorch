@@ -37,6 +37,9 @@ Tensor empty_per_channel_affine_quantized_cpu(
   TORCH_CHECK(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");
+  TORCH_CHECK(
+      options.dtype() == kQInt8 || options.dtype() == kQUInt8,
+      "Supported data type for tensor creation is int8 or uint8");
   TORCH_CHECK(scales.dim() == 1, "scale tensor must have dimension 1");
   TORCH_CHECK(
       zero_points.dim() == 1, "zero_points tensor must have dimension 1")

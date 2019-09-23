@@ -1,12 +1,14 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 
 namespace at {
 namespace native {
 
-Tensor quantize_linear_cpu(
+Tensor quantize_per_tensor_cpu(
     const Tensor& self,
     double scale,
     int64_t zero_point,
@@ -15,7 +17,7 @@ Tensor quantize_linear_cpu(
   return quantizer->quantize(self);
 }
 
-Tensor quantize_linear_per_channel_cpu(
+Tensor quantize_per_channel_cpu(
     const Tensor& self,
     const Tensor& scales,
     const Tensor& zero_points,
@@ -42,7 +44,7 @@ Tensor dequantize_quant(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
-Tensor dequantize_linear_cpu(
+Tensor dequantize_per_tensor_cpu(
     const Tensor& self,
     double scale,
     int64_t zero_point,
@@ -94,23 +96,22 @@ Tensor q_per_channel_zero_points_quant(const Tensor& self) {
       self.options().dtype(at::kLong));
 }
 
-Quantizer* quantizer(const Tensor& self) {
-  return get_qtensorimpl(self)->quantizer().get();
+IntArrayRef q_per_channel_axis_quant(const Tensor& self) {
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+  TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
+  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->axis();
 }
 
 Tensor int_repr_quant(const Tensor& self) {
   Tensor dst;
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "int_repr", [&]() {
     dst = at::empty(self.sizes(), self.options().dtype(UNDERLYING_TYPE));
-    underlying_t* self_data =
-        reinterpret_cast<underlying_t*>(self.data_ptr<scalar_t>());
-    underlying_t* dst_data = dst.data_ptr<underlying_t>();
-    if (self.numel() > 0) {
-      memcpy(dst_data, self_data, self.nbytes());
-    }
+    auto iter = TensorIterator::unary_op(dst, self);
+    cpu_kernel(iter, [&](scalar_t value) -> underlying_t {
+       return value.val_;
+    });
   });
   self.unsafeGetTensorImpl()->set_sizes_and_strides(self.sizes(), self.strides());
-
   return dst;
 }
 
@@ -183,6 +184,10 @@ Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
 }
 
 Tensor quantized_clone(const Tensor& self) {
+  // TODO: add per channel support
+  TORCH_INTERNAL_ASSERT(
+      self.qscheme() == at::kPerTensorAffine,
+      "clone for quantized Tensor only works for PerTensorAffine scheme right now");
   Tensor dst = at::_empty_affine_quantized(
       self.sizes(), self.options(), self.q_scale(), self.q_zero_point());
 

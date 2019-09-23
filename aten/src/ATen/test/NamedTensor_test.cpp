@@ -1,11 +1,12 @@
-#ifdef BUILD_NAMEDTENSOR
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
+#include <ATen/core/EnableNamedTensor.h>
 
+#ifdef BUILD_NAMEDTENSOR
 using at::Dimname;
 using at::DimnameList;
 using at::NamedTensorMeta;
@@ -51,7 +52,7 @@ static bool dimnames_equal(at::DimnameList names, at::DimnameList other) {
   for (auto i = 0; i < names.size(); i++) {
     const auto& name = names[i];
     const auto& other_name = other[i];
-    if (name.type() != other_name.type() || name.full_name() != other_name.full_name()) {
+    if (name.type() != other_name.type() || name.symbol() != other_name.symbol()) {
       return false;
     }
   }
@@ -128,17 +129,6 @@ TEST(NamedTensorTest, dimnameToPosition) {
 
   tensor = at::empty({1, 1, 1, 1}, names);
   ASSERT_EQ(dimname_to_position(tensor, H), 2);
-
-  auto Cin = dimnameFromString("C.in");
-  auto Cout = dimnameFromString("C.out");
-  tensor = at::empty({1, 1, 1, 1}, names);
-  ASSERT_THROW(dimname_to_position(tensor, Cin), c10::Error);
-
-  tensor = at::empty({1, 1}, std::vector<Dimname>({ Cin, Cout }));
-  ASSERT_THROW(dimname_to_position(tensor, C), c10::Error);
-
-  tensor = at::empty({1, 1}, std::vector<Dimname>({ Cin, N }));
-  ASSERT_EQ(dimname_to_position(tensor, C), 0);
 }
 
 static void check_unify(
