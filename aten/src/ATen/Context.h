@@ -130,8 +130,6 @@ class CAFFE2_API Context {
   at::QEngine quantized_engine =
 #ifdef USE_FBGEMM
       at::kFBGEMM;
-#elif defined(USE_PYTORCH_QNNPACK)
-      at::kQNNPACK;
 #else
       at::kNoQEngine;
 #endif
