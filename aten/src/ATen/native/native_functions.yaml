@@ -1003,6 +1003,7 @@
   dispatch:
     CPU: resize_cpu_
     CUDA: resize_cuda_
+    QuantizedCPU: quantized_resize_cpu_
 
 - func: empty.out(int[] size, *, MemoryFormat? memory_format=None, Tensor(a!) out) -> Tensor(a!)
   device_guard: False
@@ -5035,6 +5036,10 @@
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: unboxed_only
   variants: method, function
+  dispatch:
+    CPU: topk
+    CUDA: topk
+    QuantizedCPU: quantized_topk_cpu
 
 - func: all(Tensor self) -> Tensor
   use_c10_dispatcher: full
