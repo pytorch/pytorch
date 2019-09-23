@@ -199,6 +199,4 @@ def flip(g, input, dims):
 
 
 def fmod(g, input, other):
-    dtype = input.type().scalarType()
-    other = g.op("Cast", sym_help._maybe_get_scalar(other), to_i=sym_help.cast_pytorch_to_onnx[dtype])
     return g.op("Mod", input, other, fmod_i=1)
