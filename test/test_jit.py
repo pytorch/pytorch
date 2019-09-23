@@ -44,7 +44,7 @@ from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
 from textwrap import dedent
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Tuple, Union
 import copy
 import inspect
 import math
