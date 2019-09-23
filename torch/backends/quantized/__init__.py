@@ -17,13 +17,23 @@ def get_qengine_id(qengine):
         raise RuntimeError("{} is not a valid value for quantized engine".format(qengine))
     return ret
 
+# This function should correspond to the enums present in c10/core/QEngine.h
+def get_qengine_str(qengine):
+    # type: (int) -> str
+    all_engines = {0 : 'none', 1 : 'fbgemm', 2 : 'qnnpack'}
+    return all_engines.get(qengine)
+
+def get_supported_qengines():
+    qengines = torch._C._supported_qengines()
+    return [get_qengine_str(qe) for qe in qengines]
+
 class ContextProp(object):
     def __init__(self, getter, setter):
         self.getter = getter
         self.setter = setter
 
     def __get__(self, obj, objtype):
-        return self.getter()
+        return get_qengine_str(self.getter())
 
     def __set__(self, obj, val):
         self.setter(get_qengine_id(val))
