@@ -25,8 +25,6 @@ template class DropoutImplBase<DropoutImpl>;
 template class DropoutImplBase<FeatureDropoutImpl>;
 } // namespace detail
 
-DropoutOptions::DropoutOptions(double rate) : rate_(rate) {}
-
 DropoutImpl::DropoutImpl(DropoutOptions options_) : DropoutImplBase(options_) {}
 
 Tensor DropoutImpl::forward(const Tensor& input) {

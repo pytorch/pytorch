@@ -4,6 +4,7 @@
 
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 void THCTensor_(cbitand)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
 {
@@ -207,7 +208,6 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(expm1, THCNumerics<scalar_t>::expm1, Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  cos, THCNumerics<scalar_t>::cos,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  sin, THCNumerics<scalar_t>::sin,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC( sqrt, THCNumerics<scalar_t>::sqrt,  Real)
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(rsqrt, THCNumerics<scalar_t>::rsqrt, Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(floor, THCNumerics<scalar_t>::floor, Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(trunc, THCNumerics<scalar_t>::trunc, Real)
 
