@@ -5535,14 +5535,14 @@
   python_module: nn
   dispatch:
     CPU: glu_out
-    CUDA: legacy::cuda::_thnn_glu_forward_out
+    CUDA: glu_out
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
   use_c10_dispatcher: True
   python_module: nn
   dispatch:
     CPU: glu
-    CUDA: legacy::cuda::_thnn_glu_forward
+    CUDA: glu
 
 - func: glu_backward.grad_input(Tensor grad_output, Tensor self, int dim, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn

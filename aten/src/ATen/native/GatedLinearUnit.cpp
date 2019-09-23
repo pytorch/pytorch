@@ -1,8 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/GatedLinearUnit.h>
+#include <ATen/native/TensorIterator.h>
 
 namespace at {
 namespace native {
+
+DEFINE_DISPATCH(glu_stub);
 
 Tensor& glu_out(Tensor &result, const Tensor& self, int64_t dim) {
   // this can't pass anyway because a 0-dimensional tensor has "size" 1, which
@@ -23,9 +27,9 @@ Tensor& glu_out(Tensor &result, const Tensor& self, int64_t dim) {
   Tensor firstHalf = self.narrow(dim, 0, selfSize);
   Tensor secondHalf = self.narrow(dim, selfSize, selfSize);
 
-  // x = x1:cmul( sigmoid(x2) )
-  at::sigmoid_out(result, secondHalf);
-  return result.mul_(firstHalf);
+  auto iter = TensorIterator::binary_op(result, firstHalf, secondHalf);
+  glu_stub(iter.device_type(), iter);
+  return result;
 }
 
 Tensor glu(const Tensor& self, int64_t dim) {

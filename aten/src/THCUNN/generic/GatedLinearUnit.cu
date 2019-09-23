@@ -8,26 +8,8 @@ void THNN_(GatedLinear_updateOutput)(
            THCTensor *output,
            int dim)
 {
-  THCUNN_assertSameGPU(state, 2, input, output);
-
-  // size output to half of input
-  const int64_t nIn = THCTensor_(sizeLegacyNoScalars)(state, input, dim);
-  THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld",
-      dim, nIn);
-  const int64_t inputSize = THCTensor_(size)(state, input, dim) / 2;
-  std::vector<int64_t> newSizes = THTensor_sizesLegacyNoScalars(input);
-  newSizes[dim] = inputSize;
-  THCTensor_(resize)(state, output, newSizes, {});
-
-  // halve tensor
-  THCTensor *firstHalf = THCTensor_(newNarrow)(state, input, dim, 0, inputSize);
-  THCTensor *secondHalf = THCTensor_(newNarrow)(state, input, dim, inputSize, inputSize);
-
-  // x = x1:cmul( sigmoid(x2) )
-  THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, output, secondHalf, firstHalf, gatedLinearCSigMul_functor<scalar_t, accreal>());
-
-  THCTensor_(free)(state, firstHalf);
-  THCTensor_(free)(state, secondHalf);
+  TORCH_INTERNAL_ASSERT(false, "called GatedLinear_updateOutput, but this is just " \
+                        "a stub for nn.yaml parsing");
 }
 
 void THNN_(GatedLinear_updateGradInput)(
