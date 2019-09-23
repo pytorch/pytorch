@@ -283,12 +283,6 @@ class Tensor(torch._C._TensorBase):
         else:
             return LU, pivots
 
-    def gels(self, A):
-        r"""See :func:`torch.lstsq`"""
-        warnings.warn("torch.gels is deprecated in favour of torch.lstsq and will be "
-                      "removed in the next release. Please use torch.lstsq instead.", stacklevel=2)
-        return super(Tensor, self).lstsq(A)
-
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
         r"""See :func:`torch.stft`
@@ -504,7 +498,8 @@ class Tensor(torch._C._TensorBase):
         return super(Tensor, self).refine_names(names)
 
     def align_to(self, *names):
-        return super(Tensor, self).align_to(resolve_ellipsis(names, self.names, 'align_to'))
+        return super(Tensor, self).align_to(
+            resolve_ellipsis(names, self.names, 'align_to', is_positional=False))
 
     def unflatten(self, dim, namedshape):
         names, sizes = unzip_namedshape(namedshape)
