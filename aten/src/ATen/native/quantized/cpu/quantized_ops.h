@@ -8,37 +8,35 @@ namespace native {
 using qrelu_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qadd_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Tensor& /*other*/);
-using qmaxpool_2d_fn =
-    void (*)(const Tensor &qx,
-             int64_t iC, // input/output channels
-             int64_t iH,
-             int64_t iW, // input sizes
-             int64_t oH,
-             int64_t oW, // output sizes
-             int64_t kH,
-             int64_t kW, // kernel size
-             int64_t sH,
-             int64_t sW, // strides
-             int64_t pH,
-             int64_t pW, // padding
-             int64_t dH,
-             int64_t dW, // dilation
-             Tensor &qy
-            );
-using qadaptive_avg_pool2d_fn =
-    void (*)(const Tensor &qx,
-             Tensor &qy,
-             int64_t b,
-             int64_t sizeD,
-             int64_t isizeH,
-             int64_t isizeW,
-             int64_t osizeH,
-             int64_t osizeW,
-             int64_t istrideB,
-             int64_t istrideD,
-             int64_t istrideH,
-             int64_t istrideW
-            );
+using qmaxpool_2d_fn = void (*)(
+    const Tensor& qx,
+    int64_t iC, // input/output channels
+    int64_t iH,
+    int64_t iW, // input sizes
+    int64_t oH,
+    int64_t oW, // output sizes
+    int64_t kH,
+    int64_t kW, // kernel size
+    int64_t sH,
+    int64_t sW, // strides
+    int64_t pH,
+    int64_t pW, // padding
+    int64_t dH,
+    int64_t dW, // dilation
+    Tensor& qy);
+using qadaptive_avg_pool2d_fn = void (*)(
+    const Tensor& qx,
+    Tensor& qy,
+    int64_t b,
+    int64_t sizeD,
+    int64_t isizeH,
+    int64_t isizeW,
+    int64_t osizeH,
+    int64_t osizeW,
+    int64_t istrideB,
+    int64_t istrideD,
+    int64_t istrideH,
+    int64_t istrideW);
 
 using qavg_pool2d_fn =
     void (*)(const Tensor& qx,

@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/SortingUtils.h>
