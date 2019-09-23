@@ -46,7 +46,7 @@ class Conv2d(torch.nn.Module):
         >>> m = nn.quantized.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
         >>> input = torch.randn(20, 16, 50, 100)
         >>> # quantize input to qint8
-        >>> q_input = torch.quantize_linear(input, scale=1.0, zero_point=0, dtype=torch.qint32)
+        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.qint32)
         >>> output = m(input)
 
     """
@@ -105,16 +105,15 @@ class Conv2d(torch.nn.Module):
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
         self._packed_params = torch.ops.quantized.conv_prepack(
-            w.permute([0, 2, 3, 1]), b, self.stride, self.padding, self.dilation, self.groups)
+            w, b, self.stride, self.padding, self.dilation, self.groups)
         self.weight_scale = w.q_scale()
 
     def _weight_bias(self):
-        (w, b) = torch.ops.quantized.conv_unpack(self._packed_params)
-        return (w.permute([0, 3, 1, 2]), b)
+        return torch.ops.quantized.conv_unpack(self._packed_params)
 
     def weight(self):
         (w, b) = torch.ops.quantized.conv_unpack(self._packed_params)
-        return w.permute([0, 3, 1, 2])
+        return w
 
     def bias(self):
         (w, b) = torch.ops.quantized.conv_unpack(self._packed_params)
@@ -125,12 +124,11 @@ class Conv2d(torch.nn.Module):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
-        output = ops.quantized.conv2d(input.permute([0, 2, 3, 1]),
-                                      self._packed_params,
-                                      self.stride, self.padding,
-                                      self.dilation, self.groups,
-                                      self.scale, self.zero_point)
-        return output.permute([0, 3, 1, 2])
+        return ops.quantized.conv2d(input,
+                                    self._packed_params,
+                                    self.stride, self.padding,
+                                    self.dilation, self.groups,
+                                    self.scale, self.zero_point)
 
     # ===== Serialization methods =====
     # The special consideration here is that we have to unpack the weights into their
@@ -236,7 +234,7 @@ class Conv2d(torch.nn.Module):
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have a dtype of qint8'
         wt_scale, wt_zp = weight_observer.calculate_qparams()
 
-        qweight = torch.quantize_linear(
+        qweight = torch.quantize_per_tensor(
             mod.weight.float(),
             float(wt_scale), int(wt_zp), torch.qint8)
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
