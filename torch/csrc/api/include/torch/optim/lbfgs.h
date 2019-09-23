@@ -30,8 +30,8 @@ class TORCH_API LBFGS : public LossClosureOptimizer {
   explicit LBFGS(ParameterContainer&& parameters, const LBFGSOptions& options)
       : LossClosureOptimizer(std::forward<ParameterContainer>(parameters)),
         options(options),
-        ro(options.history_size_),
-        al(options.history_size_) {}
+        ro(options.history_size()),
+        al(options.history_size()) {}
 
   torch::Tensor step(LossClosure closure) override;
 

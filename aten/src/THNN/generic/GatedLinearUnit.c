@@ -8,7 +8,8 @@ void THNN_(GatedLinear_updateOutput)(
           THTensor *output,
           int dim)
 {
-  TORCH_INTERNAL_ASSERT(false, "GatedLinear_updateOutput called, but this is just a stub for nn.yaml parsing");
+  TORCH_INTERNAL_ASSERT(false, "GatedLinear_updateOutput called, but this is just " \
+                        "a stub for nn.yaml parsing");
 }
 
 void THNN_(GatedLinear_updateGradInput)(
