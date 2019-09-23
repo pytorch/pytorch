@@ -28,6 +28,7 @@ void initializeQEngines() {
     throw python_error();
   }
 
+  addQEngine(at::kNoQEngine, "no_qengine", torch_module);
   addQEngine(at::kFBGEMM, "fbgemm", torch_module);
   addQEngine(at::kQNNPACK, "qnnpack", torch_module);
 }
