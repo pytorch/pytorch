@@ -2036,9 +2036,6 @@
   use_c10_dispatcher: unboxed_only
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
-- func: permute.names(Tensor(a) self, DimnameList dims) -> Tensor(a)
-  variants: method
-
 # Only exposed from C++ -- in Python,
 # we expose it as an attribute `T`, not a function.
 #

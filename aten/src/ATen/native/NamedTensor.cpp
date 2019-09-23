@@ -241,9 +241,6 @@ Tensor gather(const Tensor& self, Dimname dim, const Tensor& index, bool sparse_
 Tensor& gather_out(Tensor& result, const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad) {
   reportNYIDimnameOverload("gather");
 }
-Tensor permute(const Tensor& self, DimnameList dims) {
-  reportNYIDimnameOverload("permute");
-}
 std::tuple<Tensor, Tensor> mode(const Tensor& self, Dimname dim, bool keepdim) {
   reportNYIDimnameOverload("mode");
 }
