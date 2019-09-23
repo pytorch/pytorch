@@ -208,12 +208,10 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half log10(at::Half a) { return ::log10(a); }
   static inline __host__ __device__ at::Half log1p(at::Half a) { return ::log1p(a); }
   static inline __host__ __device__ at::Half log2(at::Half a) { return ::log2(a); }
-  static inline __host__ __device__ at::Half lgamma(at::Half a) { return ::lgamma(a); }
   static inline __host__ __device__ at::Half expm1(at::Half a) { return ::expm1(a); }
   static inline __host__ __device__ at::Half cos(at::Half a) { return ::cos(a); }
   static inline __host__ __device__ at::Half sin(at::Half a) { return ::sin(a); }
   static inline __host__ __device__ at::Half sqrt(at::Half a) { return ::sqrt(a); }
-  static inline __host__ __device__ at::Half floor(at::Half a) { return ::floor(a); }
   static inline __host__ __device__ at::Half trunc(at::Half a) { return ::trunc(a); }
   static inline __host__ __device__ at::Half acos(at::Half a) { return ::acos(a); }
   static inline __host__ __device__ at::Half cosh(at::Half a) { return ::cosh(a); }
@@ -282,7 +280,6 @@ struct THCNumerics<float> {
   static inline __device__ bool eq_with_nan(float a, float b) { return __float_as_int(a) == __float_as_int(b); }
   static inline __host__ __device__ bool ne(float a, float b) { return a != b; }
 
-  static inline __host__ __device__  float lgamma(float a) { return lgammaf(a);}
   static inline __host__ __device__  float exp  (float a) { return   expf(a); }
   static inline __host__ __device__  float exp10(float a) { return exp10f(a); }
   static inline __host__ __device__  float log  (float a) { return   logf(a); }
@@ -293,7 +290,6 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float cos  (float a) { return   cosf(a); }
   static inline __host__ __device__  float sin  (float a) { return   sinf(a); }
   static inline __host__ __device__  float sqrt (float a) { return  sqrtf(a); }
-  static inline __host__ __device__  float floor(float a) { return floorf(a); }
   static inline __host__ __device__  float trunc(float a) { return truncf(a); }
   static inline __host__ __device__  float acos (float a) { return  acosf(a); }
   static inline __host__ __device__  float cosh (float a) { return  coshf(a); }
@@ -337,7 +333,6 @@ struct THCNumerics<double> {
   static inline __device__ bool eq_with_nan(double a, double b) { return __double_as_longlong(a) == __double_as_longlong(b); }
   static inline __host__ __device__ bool ne(double a, double b) { return a != b; }
 
-  static inline __host__ __device__  double lgamma(double a) { return ::lgamma(a);}
   static inline __host__ __device__  double exp  (double a) { return   ::exp(a); }
   static inline __host__ __device__  double exp10(double a) { return ::exp10(a); }
   static inline __host__ __device__  double log  (double a) { return   ::log(a); }
@@ -348,7 +343,6 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double cos  (double a) { return   ::cos(a); }
   static inline __host__ __device__  double sin  (double a) { return   ::sin(a); }
   static inline __host__ __device__  double sqrt (double a) { return  ::sqrt(a); }
-  static inline __host__ __device__  double floor(double a) { return ::floor(a); }
   static inline __host__ __device__  double trunc(double a) { return ::trunc(a); }
   static inline __host__ __device__  double acos (double a) { return  ::acos(a); }
   static inline __host__ __device__  double cosh (double a) { return  ::cosh(a); }
