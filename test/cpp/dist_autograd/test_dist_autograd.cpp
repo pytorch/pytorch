@@ -32,9 +32,15 @@ TEST_F(DistAutogradTest, TestSendFunction) {
   DistAutogradContext& autogradContext = autogradContainer_->currentContext();
   // Attach the send autograd function to tensors.
   std::vector<torch::Tensor> tensors = {in1, in2};
-  addSendRpcBackward(autogradContext, AutogradMetadata(1, 1), tensors);
+  worker_id_t worker_id = 1;
+  addSendRpcBackward(
+      autogradContext, AutogradMetadata(1, 1), tensors, worker_id);
   auto send_function = autogradContext.sendFunctions()[1];
   ASSERT_NE(send_function, nullptr);
+  // Ensure that worker id is recorded.
+  auto knownWorkerIds = autogradContext.getKnownWorkerIds();
+  ASSERT_EQ(knownWorkerIds.size(), 1);
+  ASSERT_TRUE(knownWorkerIds.find(worker_id) != knownWorkerIds.end());
 
   // Build loss and attach it as input to send autograd function.
   auto o1 = torch::autograd::Variable(torch::ones({3, 3}));
@@ -61,7 +67,9 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
   DistAutogradContext& autogradContext = autogradContainer_->currentContext();
   // Attach the send autograd function to tensors.
   std::vector<torch::Tensor> tensors = {in1, in2};
-  addSendRpcBackward(autogradContext, AutogradMetadata(1, 1), tensors);
+  worker_id_t worker_id = 1;
+  addSendRpcBackward(
+      autogradContext, AutogradMetadata(1, 1), tensors, worker_id);
   auto send_function = autogradContext.sendFunctions()[1];
 
   // Build loss and attach it as input to send autograd function.
@@ -72,4 +80,35 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
   // inputs and as a result encounters an undefined grad.
   EXPECT_THROW(
       loss.backward(torch::autograd::Variable(), false, false), c10::Error);
+}
+
+TEST_F(DistAutogradTest, TestWorkerIdsRecorded) {
+  auto options = at::TensorOptions().requires_grad(true);
+  auto in1 = torch::ones({3, 3}, options);
+  auto in2 = torch::ones({3, 3}, options);
+
+  autogradContainer_->newContext();
+  DistAutogradContext& autogradContext = autogradContainer_->currentContext();
+  // Attach the send autograd function to tensors.
+  std::vector<torch::Tensor> tensors = {in1, in2};
+  for (int i = 0; i < 10; i++) {
+    worker_id_t worker_id = i;
+    addSendRpcBackward(
+        autogradContext, AutogradMetadata(1, 1), tensors, worker_id);
+  }
+
+  auto knownWorkerIds = autogradContext.getKnownWorkerIds();
+  ASSERT_EQ(knownWorkerIds.size(), 10);
+  for (int i = 0; i < 10; i++) {
+    ASSERT_TRUE(knownWorkerIds.find(i) != knownWorkerIds.end());
+  }
+
+  // ensure that if we do not add the send function, then we don't record the
+  // worker id
+  in1.set_requires_grad(false);
+  in2.set_requires_grad(false);
+  worker_id_t dst_no_grad = 11;
+  addSendRpcBackward(
+      autogradContext, AutogradMetadata(1, 1), tensors, dst_no_grad);
+  ASSERT_TRUE(knownWorkerIds.find(dst_no_grad) == knownWorkerIds.end());
 }
