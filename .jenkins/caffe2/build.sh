@@ -134,7 +134,7 @@ build_args+=("BUILD_TEST=ON")
 build_args+=("INSTALL_TEST=ON")
 build_args+=("USE_ZSTD=ON")
 
-if [[ $BUILD_ENVIRONMENT == *caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04* ]]; then
+if [[ $BUILD_ENVIRONMENT == *linux-xenial-cuda9-cudnn7-py3* ]]; then
   # removing http:// duplicate in favor of nvidia-ml.list
   # which is https:// version of the same repo
   sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list

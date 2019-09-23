@@ -98,7 +98,7 @@ fi
 ##############################
 # TensorRT integration tests #
 ##############################
-if [[ $BUILD_ENVIRONMENT == *caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04* ]]; then
+if [[ $BUILD_ENVIRONMENT == *linux-xenial-cuda9-cudnn7-py3* ]]; then
   pip install -q --user torchvision
 else
   ignore_tests+=( --ignore $caffe2_pypath/python/trt/test_pt_onnx_trt.py )
