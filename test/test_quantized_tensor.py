@@ -98,7 +98,7 @@ class TestQuantizedTensor(TestCase):
 
         # create Tensor from uint8_t Tensor, scale and zero_point
         int_tensor = torch.randint(0, 100, size=(10,), dtype=torch.uint8)
-        q = torch._per_tensor_affine_qtensor(int_tensor, scale, zero_point)
+        q = torch._make_per_tensor_quantized_tensor(int_tensor, scale, zero_point)
         self.assertEqual(int_tensor, q.int_repr())
         self.assertEqual(scale, q.q_scale())
         self.assertEqual(zero_point, q.q_zero_point())
@@ -133,7 +133,7 @@ class TestQuantizedTensor(TestCase):
         scale = 3
         zero_point = 2
         qt = torch._dequantize_per_tensor(t, scale, zero_point, torch.qint8)
-        qt2 = torch._per_tensor_affine_qtensor(t, scale, zero_point)
+        qt2 = torch._make_per_tensor_quantized_tensor(t, scale, zero_point)
         self.assertEqual(qt, qt2.dequantize())
 
     def test_qtensor_per_channel_affine(self):

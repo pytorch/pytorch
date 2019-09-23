@@ -3552,10 +3552,10 @@
   dispatch:
     QuantizedCPU: int_repr_quant
 
-- func: _per_tensor_affine_qtensor(Tensor self, float scale, int zero_point) -> Tensor
+- func: _make_per_tensor_quantized_tensor(Tensor self, float scale, int zero_point) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    CPU: per_tensor_affine_qtensor_cpu
+    CPU: make_per_tensor_quantized_tensor_cpu
 
 - func: _per_channel_affine_qtensor(Tensor self, Tensor scale, Tensor zero_point, int[] axis) -> Tensor
   use_c10_dispatcher: unboxed_only
