@@ -814,15 +814,7 @@ inline Tensor Tensor::cummax(int64_t dim, c10::optional<ScalarType> dtype) const
     return TypeDefault::cummax(const_cast<Tensor&>(*this), dim, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::cummax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, dtype);
-#endif
-}
-inline Tensor Tensor::cummax(int64_t dim, c10::optional<ScalarType> dtype) const {
-#ifdef USE_STATIC_DISPATCH
-    return TypeDefault::cummax(const_cast<Tensor&>(*this), dim, dtype);
-#else
-    static auto table = globalATenDispatch().getOpTable("aten::cummax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, dtype);
+    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
 inline Tensor Tensor::det() const {

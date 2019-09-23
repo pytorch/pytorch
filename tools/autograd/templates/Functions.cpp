@@ -427,10 +427,14 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
 }
 
 Tensor cummax_backward(const Tensor &grad, const Tensor &self, int64_t dim) {
-  if (x.dim() == 0) {
-    return x;
+  if (grad.dim() == 0) {
+    return grad;
   }
-  auto ret = TODO;
+  auto size = grad.size(dim);
+  auto ret = at::cummax(self, dim);
+  ret.narrow(dim, 1, size-1) = (ret.narrow(dim, 1, size-1) > ret.narrow(dim, 0, size-1)).type_as(grad);
+  ret.narrow(dim, 0, 1) = 1;
+  ret *= grad;
   return ret;
 }
 
