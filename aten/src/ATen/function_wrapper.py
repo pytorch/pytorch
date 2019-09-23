@@ -1332,6 +1332,10 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
+        # RegistrationDeclartion.h is used downstream in XLA, where XLA uses
+        # it as the "source of truth" for pytorch ops and generates code based
+        # on it. We don't pass named tensor only functions there because XLA
+        # doesn't support them.
         if not is_named_tensor_only:
             top_env['registration_declarations'].append(
                 REGISTRATION_DECLARATION.substitute(option))
