@@ -1417,11 +1417,13 @@ RegisterOperators logging_operators(
       },                                   \
       aliasAnalysisFromSchema())
 
-#define DEFINE_BINARY_OP(aten_op, op)             \
-  DEFINE_GENERIC_OP(aten_op, op, op, int, float), \
-  DEFINE_INT_FLOAT_OP(aten_op, op, float), \
+// define a primitive op over Scalar operands.
+// it's necessary to register this overload following
+// int/float variations to avoid trapping Scalar args
+// in unintended implicit conversions
+#define DEFINE_SCALAR_BINARY_OP(aten_op, op, result) \
   Operator( \
-    #aten_op "(Scalar a, Scalar b) -> Scalar", \
+    #aten_op "(Scalar a, Scalar b) -> " #result, \
     [](Stack& stack) { \
       IValue x, y; \
       pop(stack, x, y); \
@@ -1451,9 +1453,15 @@ RegisterOperators logging_operators(
     aliasAnalysisFromSchema() \
   )
 
+#define DEFINE_BINARY_OP(aten_op, op)             \
+  DEFINE_GENERIC_OP(aten_op, op, op, int, float), \
+  DEFINE_INT_FLOAT_OP(aten_op, op, float), \
+  DEFINE_SCALAR_BINARY_OP(aten_op, op, Scalar)
+
 #define DEFINE_BINARY_FLOAT_OP(aten_op, op)         \
   DEFINE_GENERIC_OP(aten_op, op, op, float, float), \
-      DEFINE_INT_FLOAT_OP(aten_op, op, float)
+  DEFINE_INT_FLOAT_OP(aten_op, op, float), \
+  DEFINE_SCALAR_BINARY_OP(aten_op, op, float)
 
 #define DEFINE_COMPARISON_OP(aten_op, op)         \
   DEFINE_GENERIC_OP(aten_op, op, op, bool, bool), \
