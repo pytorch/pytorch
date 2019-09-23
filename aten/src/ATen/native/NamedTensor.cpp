@@ -258,74 +258,74 @@ std::tuple<Tensor&, Tensor&> kthvalue_out(
     int64_t k,
     Dimname dim,
     bool keepdim) {
-	reportNYIDimnameOverload("kthvalue");
+  reportNYIDimnameOverload("kthvalue");
 }
 std::tuple<Tensor, Tensor> kthvalue(
     const Tensor& self,
     int64_t k,
     Dimname dim,
     bool keepdim) {
-	reportNYIDimnameOverload("kthvalue");
+  reportNYIDimnameOverload("kthvalue");
 }
 Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-	reportNYIDimnameOverload("index_add");
+  reportNYIDimnameOverload("index_add");
 }
 Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-	reportNYIDimnameOverload("index_add");
+  reportNYIDimnameOverload("index_add");
 }
 Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
-	reportNYIDimnameOverload("index_fill");
+  reportNYIDimnameOverload("index_fill");
 }
 Tensor& index_fill_(Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
-	reportNYIDimnameOverload("index_fill");
+  reportNYIDimnameOverload("index_fill");
 }
 Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-	reportNYIDimnameOverload("index_fill");
+  reportNYIDimnameOverload("index_fill");
 }
 Tensor& index_fill_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-	reportNYIDimnameOverload("index_fill");
+  reportNYIDimnameOverload("index_fill");
 }
 Tensor index_copy(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-	reportNYIDimnameOverload("index_copy");
+  reportNYIDimnameOverload("index_copy");
 }
 Tensor& index_copy_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-	reportNYIDimnameOverload("index_copy");
+  reportNYIDimnameOverload("index_copy");
 }
 Tensor& index_select_out(Tensor& out, const Tensor& self, Dimname dim, const Tensor& index) {
-	reportNYIDimnameOverload("index_select");
+  reportNYIDimnameOverload("index_select");
 }
 Tensor index_select(const Tensor& self, Dimname dim, const Tensor& index) {
-	reportNYIDimnameOverload("index_select");
+  reportNYIDimnameOverload("index_select");
 }
 Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-	reportNYIDimnameOverload("scatter");
+  reportNYIDimnameOverload("scatter");
 }
 Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-	reportNYIDimnameOverload("scatter");
+  reportNYIDimnameOverload("scatter");
 }
 Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
-	reportNYIDimnameOverload("scatter");
+  reportNYIDimnameOverload("scatter");
 }
 Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
-	reportNYIDimnameOverload("scatter");
+  reportNYIDimnameOverload("scatter");
 }
 Tensor scatter_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-	reportNYIDimnameOverload("scatter_add");
+  reportNYIDimnameOverload("scatter_add");
 }
 Tensor& scatter_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-	reportNYIDimnameOverload("scatter_add");
+  reportNYIDimnameOverload("scatter_add");
 }
 std::tuple<Tensor&, Tensor&> sort_out(Tensor& values, Tensor& indices, const Tensor& self, Dimname dim, bool keepdim) {
-	reportNYIDimnameOverload("sort");
+  reportNYIDimnameOverload("sort");
 }
 std::tuple<Tensor, Tensor> sort(const Tensor& self, Dimname dim, bool keepdim) {
-	reportNYIDimnameOverload("sort");
+  reportNYIDimnameOverload("sort");
 }
 Tensor& squeeze_(Tensor& self, Dimname dim) {
-	reportNYIDimnameOverload("squeeze");
+  reportNYIDimnameOverload("squeeze");
 }
 Tensor squeeze(const Tensor& self, Dimname dim) {
-	reportNYIDimnameOverload("squeeze");
+  reportNYIDimnameOverload("squeeze");
 }
 
 #endif
