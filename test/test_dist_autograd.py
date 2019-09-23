@@ -39,7 +39,7 @@ def dist_init(func):
 class TestDistAutograd(MultiProcessTestCase):
     def setUp(self):
         super(TestDistAutograd, self).setUp()
-        self._spawn_process()
+        self._spawn_processes()
 
     @property
     def world_size(self):

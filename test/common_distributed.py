@@ -138,7 +138,7 @@ class MultiProcessTestCase(TestCase):
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
         return self.id().split(".")[-1]
 
-    def _fork_process(self):
+    def _fork_processes(self):
         self.processes = []
         for rank in range(int(self.world_size)):
             process = torch.multiprocessing.Process(
@@ -148,7 +148,7 @@ class MultiProcessTestCase(TestCase):
             process.start()
             self.processes.append(process)
 
-    def _spawn_process(self):
+    def _spawn_processes(self):
         ctx = torch.multiprocessing.get_context('spawn')
         self.processes = []
         for rank in range(int(self.world_size)):

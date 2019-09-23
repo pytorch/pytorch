@@ -100,7 +100,7 @@ def _wrap_with_rpc(func):
 class RpcTest(MultiProcessTestCase):
     def setUp(self):
         super(RpcTest, self).setUp()
-        self._spawn_process()
+        self._spawn_processes()
 
     @property
     def world_size(self):
