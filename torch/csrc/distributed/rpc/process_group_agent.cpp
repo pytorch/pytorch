@@ -153,6 +153,7 @@ void ProcessGroupAgent::join() {
   sync();
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(lock, [this] { return futures_.empty(); });
+  lock.unlock();
   pg_->barrier()->wait();
   int dst = (pg_->getRank() + 1) % pg_->getSize();
   enqueueSend(

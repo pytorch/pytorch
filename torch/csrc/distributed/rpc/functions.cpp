@@ -110,7 +110,7 @@ Message processRequestBlocking(Message&& request) {
         auto deletedRRef = RRefContext::getInstance()->delForkOfOwner(
             rud.rrefId(), rud.forkId());
 
-        {
+        if (deletedRRef && deletedRRef->isPyObj()) {
           // Need GIL here as this could trigger deletion on py::object
           AutoGIL ag;
           deletedRRef.reset();
