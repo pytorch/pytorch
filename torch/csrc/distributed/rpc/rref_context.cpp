@@ -1,6 +1,8 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 
+#include <sstream>
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -34,17 +36,22 @@ RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
     : agent_(std::move(agent)) {}
 
 RRefContext::~RRefContext() {
+  AutoGIL ag;
+  owners_.clear();
+}
+
+void RRefContext::checkRRefLeaks() {
   if (!forks_.empty()) {
+    std::stringstream ss;
     for (auto& entry : forks_) {
       const RRefId& rrefId = entry.first;
       for (const auto& forkId : entry.second) {
-        VLOG(1) << "Leaking RRef " << rrefId << " with fork Id " << forkId
-                << std::endl;
+        ss << "Leaking RRef " << rrefId << " with fork Id " << forkId
+           << std::endl;
       }
     }
+    AT_ERROR(ss.str());
   }
-  AutoGIL ag;
-  owners_.clear();
 }
 
 template <typename T>
@@ -71,7 +78,9 @@ std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(
   // constructor of UserRRef is private
   auto userRRef =
       std::shared_ptr<UserRRef<T>>(new UserRRef<T>(ownerId, rrefId, forkId));
-  addPendingUser(forkId, userRRef);
+  if (forkId.createdOn_ != ownerId) {
+    addPendingUser(forkId, userRRef);
+  }
   return userRRef;
 }
 
@@ -132,12 +141,19 @@ template std::shared_ptr<OwnerRRef<IValue>> RRefContext::getOrCreateOwnerRRef<
 template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
     getOrCreateOwnerRRef<py::object>(const RRefId& rrefId);
 
+
 RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
   auto rfd = rref->fork();
   if (rref->isOwner()) {
     addForkOfOwner(rfd.rrefId_, rfd.forkId_);
   } else {
-    addPendingChild(rfd.forkId_, rref);
+    if (rref->isPyObj()) {
+      addPendingChild(
+          rfd.forkId_, std::static_pointer_cast<UserRRef<py::object>>(rref));
+    } else {
+      addPendingChild(
+          rfd.forkId_, std::static_pointer_cast<UserRRef<IValue>>(rref));
+    }
   }
   return rfd;
 }
@@ -164,15 +180,23 @@ void RRefContext::notifyOwnerAndParentOfFork(
   }
 }
 
+template <typename T>
 void RRefContext::addPendingChild(
     const ForkId& forkId,
-    const std::shared_ptr<RRef>& rref) {
+    const std::shared_ptr<UserRRef<T>>& rref) {
   std::lock_guard<std::mutex> lock(mutex_);
   TORCH_INTERNAL_ASSERT(
       pendingChildren_.find(forkId) == pendingChildren_.end(),
       "Inconsistent states: attempt to add the same child fork twice.");
   pendingChildren_[forkId] = rref;
 }
+
+template void RRefContext::addPendingChild<IValue>(
+    const ForkId& forkId, const std::shared_ptr<UserRRef<IValue>>& rref);
+
+template void RRefContext::addPendingChild<py::object>(
+    const ForkId& forkId, const std::shared_ptr<UserRRef<py::object>>& rref);
+
 
 void RRefContext::delPendingChild(const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -183,15 +207,23 @@ void RRefContext::delPendingChild(const ForkId& forkId) {
   pendingChildren_.erase(iter);
 }
 
+template <typename T>
 void RRefContext::addPendingUser(
     const ForkId& forkId,
-    const std::shared_ptr<RRef>& rref) {
+    const std::shared_ptr<UserRRef<T>>& rref) {
   std::lock_guard<std::mutex> lock(mutex_);
   TORCH_INTERNAL_ASSERT(
       pendingUsers_.find(forkId) == pendingUsers_.end(),
       "Inconsistent states: attempt to add the same UserRRef twice.");
   pendingUsers_[forkId] = rref;
 }
+
+template void RRefContext::addPendingUser<IValue>(
+    const ForkId& forkId, const std::shared_ptr<UserRRef<IValue>>& rref);
+
+template void RRefContext::addPendingUser<py::object>(
+    const ForkId& forkId, const std::shared_ptr<UserRRef<py::object>>& rref);
+
 
 void RRefContext::delPendingUser(const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);

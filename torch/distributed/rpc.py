@@ -2,7 +2,7 @@
 
 from . import invoke_rpc_builtin, invoke_rpc_python_udf
 from . import invoke_remote_builtin, invoke_remote_python_udf
-from . import init_rref_context
+from . import _init_rref_context, _check_rref_leaks
 from . import ProcessGroupAgent
 from . import WorkerInfo
 from .internal_rpc_utils import serialize, PythonUDF
@@ -35,7 +35,7 @@ def join_rpc():
     if _agent:
         _agent.join()
         _agent = None
-
+        _check_rref_leaks()
 
 @_require_initialized
 def sync_rpc():
@@ -67,7 +67,7 @@ def _init_rpc(name, backend=RpcBackend.PROCESS_GROUP):
         group = _get_default_group()
         # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(name, group)
-        init_rref_context(_agent)
+        _init_rref_context(_agent)
     else:
         raise RuntimeError("Unrecognized RPC backend ", backend)
 
