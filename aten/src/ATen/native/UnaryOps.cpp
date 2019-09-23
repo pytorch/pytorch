@@ -69,6 +69,10 @@ Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_ou
 Tensor erfinv(const Tensor& self) { return unary_op_impl(self, at::erfinv_out); }
 Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
 
+Tensor& floor_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, floor_stub); }
+Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
+Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
+
 Tensor& round_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, round_stub); }
 Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
 Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
@@ -262,6 +266,7 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
 
 #define IMPLEMENT_UNARY_OP_VEC_CUDA(op)                                \
   IMPLEMENT_UNARY_OP_CORE(op)                                          \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
 IMPLEMENT_UNARY_OP_VEC(abs)
@@ -274,7 +279,6 @@ IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC(expm1)
-IMPLEMENT_UNARY_OP_VEC(floor)
 IMPLEMENT_UNARY_OP_VEC(frac)
 IMPLEMENT_UNARY_OP_VEC(log)
 IMPLEMENT_UNARY_OP_VEC(log10)
@@ -288,7 +292,7 @@ IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
-IMPLEMENT_UNARY_OP_VEC(lgamma)
+IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)
 
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(acos_stub);
