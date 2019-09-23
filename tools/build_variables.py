@@ -196,6 +196,7 @@ def add_torch_libs():
         "torch/csrc/api/src/nn/modules/fold.cpp",
         "torch/csrc/api/src/nn/modules/linear.cpp",
         "torch/csrc/api/src/nn/modules/loss.cpp",
+        "torch/csrc/api/src/nn/modules/padding.cpp",
         "torch/csrc/api/src/nn/modules/pooling.cpp",
         "torch/csrc/api/src/nn/modules/rnn.cpp",
         "torch/csrc/api/src/nn/modules/container/functional.cpp",
