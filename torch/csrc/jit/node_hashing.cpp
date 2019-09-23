@@ -27,6 +27,19 @@ bool tensorListEqual(
   return std::equal(lhs.begin(), lhs.end(), rhs.begin(), tensorEqual);
 }
 
+bool typeListEqual(
+    const std::vector<TypePtr>& lhs,
+    const std::vector<TypePtr>& rhs) {
+  if (lhs.size() != rhs.size())
+    return false;
+  for (size_t i = 0; i < lhs.size(); ++i) {
+    if (*lhs[i] != *rhs[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Check whether two nodes have the same attributes in CSE.
 // This function may be too conservative for general use.
 // Do NOT support g/gs attributes.
@@ -51,10 +64,10 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
     if (lhs->kindOf(name) != rhs->kindOf(name))
       return false;
 
-#define COMPARE_ATTRIBUTEVALUE(type)        \
-  case AttributeKind::type: {               \
-    if (lhs->type(name) != rhs->type(name)) \
-      return false;                         \
+#define COMPARE_ATTRIBUTEVALUE(selector)            \
+  case AttributeKind::selector: {                   \
+    if (lhs->selector(name) != rhs->selector(name)) \
+      return false;                                 \
   } break;
 
     switch (lhs->kindOf(name)) {
@@ -74,6 +87,14 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
           return false;
         break;
       }
+      case AttributeKind::ty:
+        if (*lhs->ty(name) != *rhs->ty(name)) {
+          return false;
+        }
+      case AttributeKind::tys:
+        if (!typeListEqual(lhs->tys(name), rhs->tys(name))) {
+          return false;
+        }
       case AttributeKind::g:
       case AttributeKind::gs:
         return false;
