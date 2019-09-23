@@ -161,8 +161,10 @@ class ObserverBase(ABC, nn.Module):
         return torch.tensor([scale]), torch.tensor([zero_point])
 
     with_args = classmethod(_with_args)
+
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(ObserverBase, self)._save_to_state_dict(destination, prefix, keep_vars)
+
         destination[prefix + 'dtype'] = self.dtype
         destination[prefix + 'qscheme'] = self.qscheme
         destination[prefix + 'reduce_range'] = self.reduce_range

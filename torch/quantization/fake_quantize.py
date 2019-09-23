@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 from torch.nn import Module
-from .observer import default_observer, default_l2_observer, default_per_channel_weight_observer, _with_args
+from .observer import default_observer, default_weight_observer, default_l2_observer, default_per_channel_weight_observer, _with_args
 
 
 
@@ -15,7 +15,7 @@ class FakeQuantize(Module):
         given the stats
     '''
 
-    def __init__(self, observer=default_observer(), quant_min=0, quant_max=255):
+    def __init__(self, observer=default_observer, quant_min=0, quant_max=255):
         super(FakeQuantize, self).__init__()
         assert quant_min <= quant_max, \
             'quant_min must be less than or equal to quant_max'
@@ -73,7 +73,6 @@ class FakeQuantize(Module):
             self.fake_quant_enabled, self.observer_enabled,
             self.scale, self.zero_point)
 
-default_fake_quant = FakeQuantize
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(FakeQuantize, self)._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'quant_min'] = self.quant_min
@@ -100,12 +99,6 @@ default_fake_quant = FakeQuantize
                                                         missing_keys, unexpected_keys, error_msgs)
 
 
-def l2_fake_quant(**kwargs):
-    kwargs.setdefault('observer', default_l2_observer(reduce_range = True))
-    return fake_quant(FakeQuantize, **kwargs)
-
-
-
 default_fake_quant = FakeQuantize.with_args(observer=default_observer(dtype=torch.quint8, qscheme = torch.per_tensor_affine, reduce_range =True))
 default_weight_fake_quant = FakeQuantize.with_args(observer=default_observer(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric),
                                                    quant_min=-128,
@@ -116,7 +109,6 @@ default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=default_
 l2_fake_quant = FakeQuantize.with_args(observer=default_l2_observer(reduce_range = True),
                                                    quant_min=-128,
                                                    quant_max=127)
-
 
 def disable_fake_quant(mod):
     if type(mod) == FakeQuantize:
