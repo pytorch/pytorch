@@ -3557,10 +3557,10 @@
   dispatch:
     CPU: make_per_tensor_quantized_tensor_cpu
 
-- func: _per_channel_affine_qtensor(Tensor self, Tensor scale, Tensor zero_point, int[] axis) -> Tensor
+- func: _make_per_channel_quantized_tensor(Tensor self, Tensor scale, Tensor zero_point, int[] axis) -> Tensor
   use_c10_dispatcher: unboxed_only
   dispatch:
-    CPU: per_channel_affine_qtensor_cpu
+    CPU: make_per_channel_quantized_tensor_cpu
 
 - func: qscheme(Tensor self) -> QScheme
   variants: method
