@@ -1108,7 +1108,7 @@ const std::vector<std::string> functions = {
             input_reshape = input.contiguous().view(1, n, -1)
 
             bn_out, save1, save2, impl_idx = torch._batch_norm_impl_index(
-                input_reshape, None, None, None, None, True, 0.0, eps, torch.backends.cudnn.enabled)
+                input_reshape, None, None, None, None, True, 0.0, eps)
 
             bn_out = bn_out.view(input.size())
             if weight is not None and bias is not None:
