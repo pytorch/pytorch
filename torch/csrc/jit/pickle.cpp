@@ -1,7 +1,6 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/pickle.h>
-#include <torch/csrc/jit/pickler.h>
 
 namespace torch {
 namespace jit {
@@ -60,9 +59,7 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
   // sys_info, this isn't actually used in de-serialization so we can leave this
   // one empty
   pickler.protocol();
-  IValue dict_ivalue =
-      c10::impl::GenericDict(c10::impl::deprecatedUntypedDict());
-  pickler.pushDict(dict_ivalue);
+  pickler.pushEmptyDict();
   pickler.stop();
 
   jit::Pickler data_pickler(writer, /*tensor_table=*/nullptr);
@@ -80,7 +77,7 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
     keys.emplace_back(std::to_string(i));
   }
 
-  auto keys_tuple = at::ivalue::Tuple::create(keys, at::TupleType::create(types));
+  auto keys_tuple = at::ivalue::Tuple::create(keys);
   jit::pickle(writer, keys_tuple);
 
   for (const auto& tensor_data : writeable_tensors) {
