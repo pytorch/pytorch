@@ -364,8 +364,25 @@ struct THCNumerics<at::BFloat16> {
   static inline __host__ __device__  at::BFloat16 sub  (at::BFloat16 a, at::BFloat16 b) { return a - b; }
   static inline __host__ __device__  at::BFloat16 pow  (at::BFloat16 a, at::BFloat16 b) { return powf(a, b); }
   static inline __host__ __device__  at::BFloat16 atan2(at::BFloat16 a, at::BFloat16 b) { return atan2f(a, b); }
-  static inline __host__ __device__  bool isnan(at::BFloat16 a) { return ::isnan(a); }
-  static inline __host__ __device__  bool isinf(at::BFloat16 a) { return ::isinf(a); }
+  static inline __host__ __device__ bool isnan(at::BFloat16 a) {
+    #ifdef _MSC_VER
+      // Windows requires this explicit conversion. The reason is unclear
+      // related issue with clang: https://reviews.llvm.org/D37906
+      return ::isnan((float) a);
+    #else
+      return ::isnan(a);
+    #endif
+  }
+
+  static inline __host__ __device__ bool isinf(at::BFloat16 a) {
+    #ifdef _MSC_VER
+      // Windows requires this explicit conversion. The reason is unclear
+      // related issue with clang: https://reviews.llvm.org/D37906
+      return ::isinf((float) a);
+    #else
+      return ::isinf(a);
+    #endif
+  }
 };
 
 // DEPRECATED: use math functions from std and cuda math API (if needed)
