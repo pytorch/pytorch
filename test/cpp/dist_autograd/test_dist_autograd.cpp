@@ -32,7 +32,7 @@ TEST_F(DistAutogradTest, TestSendFunction) {
   DistAutogradContext& autogradContext = autogradContainer_->currentContext();
   // Attach the send autograd function to tensors.
   std::vector<torch::Tensor> tensors = {in1, in2};
-  addSendRpcBackward(autogradContext, AutogradMetadata(1, 1), tensors);
+  addSendRpcBackward(autogradContext, AutogradMetadata(1, 1), tensors, 1);
   auto send_function = autogradContext.sendFunctions()[1];
   ASSERT_NE(send_function, nullptr);
 

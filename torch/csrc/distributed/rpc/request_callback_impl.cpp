@@ -126,7 +126,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
         addSendRpcBackward(
             *autogradContext, responseAutogradMetadata, response->tensors());
       }
-      return response;
+      return std::move(response);
     }
     default: {
       TORCH_INTERNAL_ASSERT(
