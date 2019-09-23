@@ -42,14 +42,27 @@ class Tensor(torch._C._TensorBase):
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         if self.is_quantized:
+            if self.qscheme() == torch.per_tensor_affine:
+                quantizer_params = (torch.per_tensor_affine,
+                                    self.q_scale(),
+                                    self.q_zero_point())
+            elif self.qscheme() == torch.per_channel_affine:
+                # convert scales and zero points to tuple to avoid recursive calls
+                # when/if we get multi-axis quantized tensors in the future, the shape
+                # is recoverable from the main tensor shape
+                quantizer_params = (torch.per_channel_affine,
+                                    [e.item() for e in self.q_per_channel_scales().reshape(-1)],
+                                    [e.item() for e in self.q_per_channel_zero_points().reshape(-1)],
+                                    list(self.q_per_channel_axis()))
+            else:
+                raise RuntimeError("Serialization is not supported for tensors of type {}".format(self.qscheme()))
             args = (self.storage(),
                     self.storage_offset(),
                     tuple(self.size()),
                     self.stride(),
-                    self.q_scale(),
-                    self.q_zero_point(),
+                    quantizer_params,
                     self.requires_grad,
-                    OrderedDict())  # TODO: self.qscheme()
+                    OrderedDict())
             return (torch._utils._rebuild_qtensor, args)
         else:
             args = (self.storage(),
