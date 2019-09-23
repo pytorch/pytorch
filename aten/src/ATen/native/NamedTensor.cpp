@@ -7,11 +7,11 @@
 #ifdef BUILD_NAMEDTENSOR
 namespace at { namespace native {
 
-Tensor& names_(Tensor& self, optional<DimnameList> names) {
+Tensor& rename_(Tensor& self, optional<DimnameList> names) {
   return at::internal_set_names_inplace(self, names);
 }
 
-Tensor renamed(const Tensor& self, optional<DimnameList> names) {
+Tensor rename(const Tensor& self, optional<DimnameList> names) {
   auto result = self.alias();
   at::internal_set_names_inplace(result, names);
   return result;
@@ -60,7 +60,6 @@ static std::vector<int64_t> aligned_size(
   ptrdiff_t dim = (ptrdiff_t)tensor_sizes.size() - 1;
   ptrdiff_t idx = (ptrdiff_t)aligned_names.size() - 1;
   for (; idx >= 0 && dim >= 0; --idx) {
-    TORCH_INTERNAL_ASSERT(!tensor_names[dim].is_tagged() && !aligned_names[idx].is_tagged(), "Tagged names NYI");
     if (tensor_names[dim] != aligned_names[idx]) {
       continue;
     }
@@ -74,7 +73,7 @@ static std::vector<int64_t> aligned_size(
     //       *, a
     // [*, a] is a subsequence of [*, c, a, b], but in order to align them,
     // we'd have to move the * to create [*, c: 1, a, b: 1]
-    if (tensor_names[dim].is_wildcard() &&
+    if (tensor_names[dim].isWildcard() &&
         tensor_sizes.size() - dim != aligned_names.size() - idx) {
       report_moving_unnamed_dim_error(
           tensor_names, aligned_names, /*is_aligning_two_tensors=*/false);
@@ -101,10 +100,10 @@ Tensor refine_names(const Tensor& self, DimnameList names) {
   for (size_t idx = 0; idx < self_names.size(); idx++) {
     const auto& self_name = self_names[idx];
     const auto& out_name = names[idx];
-    if (self_name == out_name || self_name.is_wildcard()) {
+    if (self_name == out_name || self_name.isWildcard()) {
       continue;
     }
-    if (out_name.is_wildcard()) {
+    if (out_name.isWildcard()) {
       TORCH_CHECK(false,
           "refine_names: cannot coerse Tensor", self_names, " to Tensor", names,
           " because ", self_name, " is more specific than ", out_name, " at index ",
@@ -137,7 +136,7 @@ static Tensor align(const Tensor& tensor, DimnameList names, bool is_aligning_tw
         tensor.names(),
         names,
         is_aligning_two_tensors);
-  auto result = tensor.renamed(nullopt).view(expanded_sizes);
+  auto result = tensor.rename(nullopt).view(expanded_sizes);
   at::internal_set_names_inplace(result, names);
   return result;
 }
@@ -151,7 +150,7 @@ Tensor align_to(const Tensor& tensor, DimnameList names) {
 
   for (auto idx = 0; idx < tensor_names.size(); ++idx) {
     const auto& dim = tensor_names[idx];
-    TORCH_CHECK(dim.is_normal(),
+    TORCH_CHECK(dim.isBasic(),
         "align_to: All input dims must be named. Found unnamed dim at index ",
         dim, " of Tensor", tensor_names);
     auto it = std::find(names.begin(), names.end(), dim);
