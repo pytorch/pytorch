@@ -7,6 +7,10 @@
 namespace torch {
 namespace nn {
 
+FoldImpl::FoldImpl(const FoldOptions& options_) : options(options_) {
+  reset();
+}
+
 Tensor FoldImpl::forward(const Tensor& input) {
   TORCH_CHECK(
       input.dim() == 3,
