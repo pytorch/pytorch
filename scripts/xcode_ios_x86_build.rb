@@ -2,7 +2,7 @@ require 'optparse'
 require 'xcodeproj'
 
 options = {}
-option_parser = OptionParser.new do  |opts| 
+option_parser = OptionParser.new do |opts| 
  opts.banner = 'Tools for testing the PyTorch iOS x86 build on MacOS'
  opts.on('-i', '--install ', 'path to the cmake install folder') { |value|
     options[:install] = value
@@ -14,13 +14,13 @@ end.parse!
 puts options.inspect
 
 install_path = File.expand_path(options[:install])
-puts("Libraries install path: #{install_path}")
+puts("Library install path: #{install_path}")
 if not Dir.exist? (install_path) 
     puts "path don't exist:#{install_path}!"
     exit(false)
 end
 xcodeproj_path = File.expand_path(options[:xcodeproj])
-puts("XCode project: #{xcodeproj_path}")
+puts("XCode project file path: #{xcodeproj_path}")
 if not File.exist? (xcodeproj_path) 
     puts "path don't exist:#{xcodeproj_path}!"
     exit(false)
@@ -40,7 +40,7 @@ end
 
 # link static libraries
 target.frameworks_build_phases.clear
-libs = ['libc10.a', 'libclog.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch.a']
+libs = ['libc10.a', 'libclog.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch.a']
 for lib in libs do 
     path = "#{install_path}/lib/#{lib}"
     libref = project.frameworks_group.new_file(path)
