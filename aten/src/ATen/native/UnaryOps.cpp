@@ -266,6 +266,7 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
 
 #define IMPLEMENT_UNARY_OP_VEC_CUDA(op)                                \
   IMPLEMENT_UNARY_OP_CORE(op)                                          \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
 IMPLEMENT_UNARY_OP_VEC(abs)
@@ -291,7 +292,7 @@ IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
-IMPLEMENT_UNARY_OP_VEC(lgamma)
+IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)
 
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(acos_stub);
