@@ -2115,10 +2115,11 @@ class _TestTorchMixin(object):
 
     def test_qengnie(self):
         qengines = torch._C._supported_qengines()
-        original_qe = torch._C._get_qengine()
+        original_qe = torch.backends.quantized.engine
+        all_engines = {0 : 'none', 1 : 'fbgemm', 2 : 'qnnpack'}
         for qe in qengines:
-            torch._C._set_qengine(qe)
-            assert torch._C._get_qengine() == qe, 'qengine not set successfully'
+            torch.backends.quantized.engine = all_engines.get(qe)
+            assert torch.backends.quantized.engine == qe, 'qengine not set successfully'
         torch._C._set_qengine(original_qe)
 
     def test_new_tensor(self):
