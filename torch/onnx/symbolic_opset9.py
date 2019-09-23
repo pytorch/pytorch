@@ -1905,11 +1905,10 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
                 sample_size_i=num_samples)
 
 
-def baddbmm(g, self, batch1, batch2, beta, alpha):
-    dtype = self.type().scalarType()    
+def baddbmm(g, self, batch1, batch2, beta, alpha):  
     batch_mul = matmul(g, batch1, batch2)
-    mul_a = mul(g, batch_mul, g.op("Cast", alpha, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
-    mul_b = mul(g, self, g.op("Cast", beta, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
+    mul_a = mul(g, batch_mul, sym_help._maybe_get_scalar(alpha))
+    mul_b = mul(g, self, sym_help._maybe_get_scalar(beta))
     return add(g, mul_a, mul_b)
 
 def gelu(g, self):
