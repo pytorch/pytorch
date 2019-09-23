@@ -3,18 +3,8 @@ producer_name: "pytorch"
 producer_version: "1.2"
 graph {
   node {
-    input: "1"
-    output: "2"
-    op_type: "Cast"
-    attribute {
-      name: "to"
-      i: 1
-      type: INT
-    }
-  }
-  node {
     input: "0"
-    input: "2"
+    input: "1"
     output: "3"
     op_type: "Mod"
     attribute {
