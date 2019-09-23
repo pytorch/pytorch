@@ -3082,6 +3082,26 @@ class TestAutograd(TestCase):
             y.add_(0)
         assert y.grad_fn is None
 
+    def test_inplace_view_in_autograd_function(self):
+        # See https://github.com/pytorch/pytorch/issues/26546
+        class F(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x.t()
+                y.add_(0)
+                return y
+
+            @staticmethod
+            def backward(ctx, g):
+                return g.fill_(42)
+
+        x = torch.rand(3, requires_grad=True)
+        y = F.apply(x)
+        y.sum().backward()
+
+        assert y.grad_fn.__class__ is F._backward_cls
+        assert x.grad.mean().item() == 42
+
     def test_mul_out(self):
         a = torch.randn(2, 2, requires_grad=True)
         b = torch.randn(2, 2, requires_grad=True)
