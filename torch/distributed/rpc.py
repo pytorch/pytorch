@@ -144,7 +144,7 @@ def remote(to, func, args=None, kwargs=None):
         >>> x = rref1.to_here() + rref2.to_here()
         >>> dist.join_rpc()
 
-        One worker 1:
+        On worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
         >>> dist.init_rpc("worker1")
@@ -205,7 +205,7 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> ret = dist.rpc_sync("worker1", torch.add, args=(torch.ones(2), 3))
         >>> dist.join_rpc()
 
-        One worker 1:
+        On worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
         >>> dist.init_model_parallel("worker1")
@@ -248,7 +248,7 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> result = fut1.wait() + fut2.wait()
         >>> dist.join_rpc()
 
-        One worker 1:
+        On worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
         >>> dist.init_model_parallel("worker1")
@@ -297,7 +297,7 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         >>> ret = dist.rpc("worker1", torch.add, args=(torch.ones(2), 3))
         >>> dist.join_rpc()
 
-        One worker 1:
+        On worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
         >>> dist.init_model_parallel("worker1")
@@ -315,7 +315,7 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         >>> result = fut1.wait() + fut2.wait()
         >>> dist.join_rpc()
 
-        One worker 1:
+        On worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
         >>> dist.init_model_parallel("worker1")
