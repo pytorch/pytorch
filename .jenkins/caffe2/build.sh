@@ -186,7 +186,7 @@ if [[ $BUILD_ENVIRONMENT == *caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04* ]]; then
   sudo cp libnvonnxparser.so.6.0.1 /usr/lib/x86_64-linux-gnu
   sudo cp libnvonnxparser_static.a /usr/lib/x86_64-linux-gnu
   cd ../../
-  rm -rf onnx-tensorrt/ cmake-3.14.6-Linux-x86_64/
+  rm -rf onnx-tensorrt/
 
   build_args+=("USE_TENSORRT=ON")
 fi
