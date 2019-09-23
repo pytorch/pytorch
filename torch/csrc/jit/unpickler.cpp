@@ -103,6 +103,7 @@ static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
       case StringType::Kind:
       case FunctionType::Kind:
       case DeviceObjType::Kind:
+      case ScalarTypeType::Kind:
         // no op, there is nothing to tag
         break;
       case AnyType::Kind:
