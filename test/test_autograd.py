@@ -3073,6 +3073,15 @@ class TestAutograd(TestCase):
         with self.assertRaises(RuntimeError):
             c.sum().backward(torch.ones(1, requires_grad=True))
 
+    def test_inplace_view_no_grad(self):
+        # See https://github.com/pytorch/pytorch/issues/26546
+        x = torch.ones(1, requires_grad=True)
+
+        with torch.no_grad():
+            y = x.t()
+            y.add_(0)
+        assert y.grad_fn is None
+
     def test_mul_out(self):
         a = torch.randn(2, 2, requires_grad=True)
         b = torch.randn(2, 2, requires_grad=True)
@@ -3447,15 +3456,6 @@ for shape in [(1,), ()]:
         # compute mean as a proxy for some joint reasoning
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
-
-    def test_inplace_after_view(self):
-        # See https://github.com/pytorch/pytorch/issues/26546
-        x = torch.ones(1, requires_grad=True)
-
-        with torch.no_grad():
-            y = x.t()
-            y.add_(0)
-        assert y.grad_fn is None
 
 
 def index_variable(shape, max_indices):
