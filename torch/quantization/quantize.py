@@ -102,7 +102,7 @@ def add_observer(module):
     if hasattr(module, 'qconfig') and module.qconfig is not None and \
        len(module._modules) == 0:
         # observer and hook will be gone after we swap the module
-        if module.training and type(module) not in set(DEFAULT_QAT_SKIP_MODULE_LIST) or module.training is False:
+        if module.training and type(module) not in set([DeQuantStub]) or module.training is False:
             module.add_module('observer', module.qconfig.activation())
             module.register_forward_hook(_observer_forward_hook)
 
@@ -231,8 +231,6 @@ DEFAULT_DYNAMIC_MODULE_MAPPING = {
     nn.Linear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
 }
-# List of modules for which we do not need FakeQuant for activations
-DEFAULT_QAT_SKIP_MODULE_LIST = [DeQuantStub]
 
 def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
     r"""Converts a float model to quantized model.
