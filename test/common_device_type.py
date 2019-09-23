@@ -150,6 +150,10 @@ class CUDATestBase(DeviceTypeTestBase):
     _do_cuda_non_default_stream = True
 
     @classmethod
+    def total_memory(cls, device_idx):
+        return torch.cuda.get_device_properties(device_idx).total_memory
+
+    @classmethod
     def setUpClass(cls):
         # has_magma shows up after cuda is initialized
         torch.ones(1).cuda()
@@ -166,7 +170,7 @@ if torch.cuda.is_available():
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
 # See note "Generic Device Type Testing."
-def instantiate_device_type_tests(generic_test_class, scope):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -186,6 +190,11 @@ def instantiate_device_type_tests(generic_test_class, scope):
 
     # Creates device-specific test cases
     for base in device_type_test_bases:
+
+        # Skips bases listed in except_for
+        if except_for and base.device_type in except_for:
+            continue
+
         class_name = generic_test_class.__name__ + base.device_type.upper()
         device_type_test_class = type(class_name, (base, empty_class), {})
 
@@ -217,6 +226,13 @@ def instantiate_device_type_tests(generic_test_class, scope):
         # This lets the instantiated class be discovered by unittest.
         device_type_test_class.__module__ = generic_test_class.__module__
         scope[class_name] = device_type_test_class
+
+
+# Returns the test base corresponding to the device type
+def _get_test_base(device_type):
+    for base in device_type_test_bases:
+        if base.device_type == device_type:
+            return base
 
 
 # Decorator that skips a test if the given condition is true.
@@ -260,6 +276,8 @@ class skipCUDAIf(skipIf):
         super(skipCUDAIf, self).__init__(dep, reason, device_type='cuda')
 
 
+# Specifies the test only runs on one device type.
+# See specific instantiations of this decorator below.
 class onlyOn(object):
 
     def __init__(self, device_type):
@@ -276,6 +294,33 @@ class onlyOn(object):
             return fn(slf, device, *args, **kwargs)
 
         return only_fn
+
+
+# Specifies the test requires a certain amount of memory to be run.
+class requiresMemory(object):
+
+    def __init__(self, mem_required):
+        self.mem_required = mem_required
+
+    def __call__(self, fn):
+
+        @wraps(fn)
+        def mem_fn(slf, device, *args, **kwargs):
+            device_type = device
+            device_idx = 0
+            if ':' in device:
+                split = device.split(':')[0]
+                device_type = split[0]
+                device_idx = split[1]
+
+            base = _get_test_base(device_type)
+            if hasattr(base, 'total_memory') and base.total_memory(device_idx) < self.mem_required:
+                reason = "Insufficient memory, only has {0}".format(base.total_memory(device_idx))
+                raise unittest.SkipTest(reason)
+
+            return fn(slf, device, *args, **kwargs)
+
+        return mem_fn
 
 
 # Decorator that instantiates a variant of the test for each given dtype.
