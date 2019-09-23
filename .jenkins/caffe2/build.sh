@@ -135,6 +135,8 @@ build_args+=("INSTALL_TEST=ON")
 build_args+=("USE_ZSTD=ON")
 
 if [[ $BUILD_ENVIRONMENT == *caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04* ]]; then
+  sudo apt-get update
+  sudo apt-get install python3
   export ANACONDA_VERSION=3
   sudo -E ./docker/caffe2/jenkins/common/install_anaconda.sh
   . /opt/conda/etc/profile.d/conda.sh
