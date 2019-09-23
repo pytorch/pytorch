@@ -22,9 +22,7 @@
     }                                                                     \
   } while (0)
 
-namespace c10d {
-
-std::string getNcclVersion() {
+inline std::string getNcclVersion() {
   int version;
   ncclResult_t status = ncclGetVersion(&version);
   if (status != ncclSuccess) {
@@ -36,6 +34,8 @@ std::string getNcclVersion() {
   return std::to_string(ncclMajor) + "." + std::to_string(ncclMinor) + "." +
       std::to_string(ncclPatch);
 }
+
+namespace c10d {
 
 // RAII wrapper for NCCL communicator
 class NCCLComm {
