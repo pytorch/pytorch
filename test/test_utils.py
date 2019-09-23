@@ -282,7 +282,7 @@ class TestCheckpoint(TestCase):
         out = checkpoint(run_fn, input_var, None)
         out.sum().backward()
 
-    def test_checkpoint_inplace_after_view(self):
+    def test_checkpoint_inplace_view(self):
         # See https://github.com/pytorch/pytorch/issues/26546
         def run_fn(input):
             out = input + 1    # add a grad_fn
