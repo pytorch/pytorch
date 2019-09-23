@@ -22,8 +22,6 @@ struct WorkerId {
         " out of bound of int16_t.");
   }
 
-  WorkerId() : name_(""), id_(-1){};
-
   WorkerId(std::string name, worker_id_t id) : name_(std::move(name)), id_(id) {
     bool validSize = name_.length() < MAX_NAME_LEN && name_.length() > 0;
     bool validChar =
