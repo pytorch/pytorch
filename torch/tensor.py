@@ -485,7 +485,8 @@ class Tensor(torch._C._TensorBase):
         return super(Tensor, self).refine_names(names)
 
     def align_to(self, *names):
-        return super(Tensor, self).align_to(resolve_ellipsis(names, self.names, 'align_to'))
+        return super(Tensor, self).align_to(
+            resolve_ellipsis(names, self.names, 'align_to', is_positional=False))
 
     def unflatten(self, dim, namedshape):
         names, sizes = unzip_namedshape(namedshape)
