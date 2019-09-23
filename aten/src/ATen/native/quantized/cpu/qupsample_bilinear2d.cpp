@@ -6,6 +6,7 @@
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/native/quantized/cpu/quantized_ops.h>
 
 #include <algorithm>
 #include <cmath>
@@ -13,7 +14,7 @@
 
 namespace at {
 namespace native {
-namespace {} // namespace
+namespace {
 
 // at::native functions for the native_functions.yaml
 template <typename scalar_t>
@@ -104,6 +105,8 @@ static void upsample_bilinear2d_out_frame(
   }
 }
 
+} // namespace
+
 Tensor quantized_upsample_bilinear2d_cpu(
     const Tensor& input,
     IntArrayRef output_size,
@@ -125,31 +128,53 @@ Tensor quantized_upsample_bilinear2d_cpu(
   int64_t channels = input.size(1);
   int64_t input_height = input.size(2);
   int64_t input_width = input.size(3);
-
-  Tensor output = at::_empty_affine_quantized(
-      {nbatch, channels, output_height, output_width},
-      input.options(),
-      input.q_scale(),
-      input.q_zero_point());
-
-  auto input_contig = input.contiguous();
   AT_ASSERT(input_width > 0 && output_width > 0);
 
-  AT_DISPATCH_QINT_TYPES(
-      input_contig.scalar_type(), "upsample_bilinear2d", [&] {
-        upsample_bilinear2d_out_frame<scalar_t>(
-            output,
-            input_contig,
-            input_height,
-            input_width,
-            output_height,
-            output_width,
-            nbatch,
-            channels,
-            align_corners);
-      });
-  return output;
+  if (input.is_contiguous(c10::MemoryFormat::ChannelsLast)) {
+    Tensor output = at::_empty_affine_quantized(
+        {nbatch, channels, output_height, output_width},
+        input.options(),
+        input.q_scale(),
+        input.q_zero_point(),
+        input.suggest_memory_format());
+
+    upsample_bilinear2d_nhwc_stub(
+        input.device().type(),
+        output,
+        input,
+        input_height,
+        input_width,
+        output_height,
+        output_width,
+        nbatch,
+        channels,
+        align_corners);
+    return output;
+  } else {
+    Tensor output = at::_empty_affine_quantized(
+        {nbatch, channels, output_height, output_width},
+        input.options(),
+        input.q_scale(),
+        input.q_zero_point());
+
+    auto input_contig = input.contiguous();
+    AT_DISPATCH_QINT_TYPES(
+        input_contig.scalar_type(), "upsample_bilinear2d", [&] {
+          upsample_bilinear2d_out_frame<scalar_t>(
+              output,
+              input_contig,
+              input_height,
+              input_width,
+              output_height,
+              output_width,
+              nbatch,
+              channels,
+              align_corners);
+        });
+    return output;
+  }
 }
 
+DEFINE_DISPATCH(upsample_bilinear2d_nhwc_stub);
 } // namespace native
 } // namespace at
