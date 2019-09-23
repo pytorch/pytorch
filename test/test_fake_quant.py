@@ -121,7 +121,7 @@ class TestFakeQuantizePerTensorAffine(TestCase):
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
     def test_fq_serializable(self):
-        observer = default_observer()
+        observer = default_observer
         quant_min = 0
         quant_max = 255
         fq_module = FakeQuantize(observer, quant_min, quant_max)
