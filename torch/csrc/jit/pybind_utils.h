@@ -123,7 +123,7 @@ inline InferredType tryToInferType(py::handle input) {
   }
 
   if (input.is(py::none())) {
-    return InferredType("Cannot infer type of a None value");
+    return InferredType(NoneType::get());
   }
 
   // Try basic types first
