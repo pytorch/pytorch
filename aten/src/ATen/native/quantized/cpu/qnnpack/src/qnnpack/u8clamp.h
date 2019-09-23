@@ -18,15 +18,15 @@
 extern "C" {
 #endif
 
-#define DECLARE_U8CLAMP_UKERNEL_FUNCTION(fn_name) \
+#define DECLARE_PYTORCH_U8CLAMP_UKERNEL_FUNCTION(fn_name) \
   PYTORCH_QNNP_INTERNAL void fn_name(             \
       size_t n,                                   \
       const uint8_t* x,                           \
       uint8_t* y,                                 \
       const union pytorch_qnnp_u8_clamping_params* params);
 
-DECLARE_U8CLAMP_UKERNEL_FUNCTION(u8clamp_ukernel__neon)
-DECLARE_U8CLAMP_UKERNEL_FUNCTION(u8clamp_ukernel__sse2)
+DECLARE_PYTORCH_U8CLAMP_UKERNEL_FUNCTION(pytorch_u8clamp_ukernel__neon)
+DECLARE_PYTORCH_U8CLAMP_UKERNEL_FUNCTION(pytorch_u8clamp_ukernel__sse2)
 
 #ifdef __cplusplus
 } /* extern "C" */

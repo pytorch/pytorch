@@ -101,8 +101,8 @@ void BoundShapeInferencer::InferBoundShapeAndType(
       }
     }
     inferFinished = old_shape_num == shape_info_.size();
-    LOG(INFO) << "old shape info num: " << old_shape_num
-              << ", new shape info num: " << shape_info_.size();
+    VLOG(1) << "old shape info num: " << old_shape_num
+            << ", new shape info num: " << shape_info_.size();
     old_shape_num = shape_info_.size();
   }
 
