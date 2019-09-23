@@ -1358,18 +1358,18 @@ class TestQNNPackOps(TestCase):
                                           zero_point_min=0,
                                           zero_point_max=0)))
     def test_qnnpack_relu(self, X):
-        X, (scale, zero_point, torch_type) = X
-        relu = torch.ops.quantized.qnnpack_relu
+        with enable_mobile_quantized_engine():
+            X, (scale, zero_point, torch_type) = X
+            relu = torch.nn.functional.relu
+            X = torch.from_numpy(X)
+            Y = X.clone()
 
-        X = torch.from_numpy(X)
-        Y = X.clone()
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point, dtype=torch_type)
+            qY_hat = relu(qX)
 
-        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point, dtype=torch_type)
-        qY_hat = relu(qX)
-
-        Y[Y < 0] = 0
-        qY = torch.quantize_per_tensor(Y, scale=scale, zero_point=zero_point, dtype=torch_type)
-        self.assertEqual(qY, qY_hat)
+            Y[Y < 0] = 0
+            qY = torch.quantize_per_tensor(Y, scale=scale, zero_point=zero_point, dtype=torch_type)
+            self.assertEqual(qY, qY_hat)
 
     @given(batch_size=st.integers(1, 4),
            input_channels=st.integers(16, 32),
@@ -1662,110 +1662,105 @@ class TestQNNPackOps(TestCase):
             np.testing.assert_equal(np.float32(W_q.q_scale()), np.float32(W_unpacked.q_scale()))
             np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
 
-    """Tests the correctness of the quantized::qnnpack_add op."""
+    """Tests the correctness of the quantized::add (qnnpack) op."""
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       qparams=hu.qparams(dtypes=torch.quint8,
-                                          zero_point_min=0,
-                                          zero_point_max=0)),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
+           zero_point=st.sampled_from([0, 2, 5, 15, 127]),
            scale_A=st.sampled_from([0.001, 0.057, 0.889, 12.3]),
            scale_B=st.sampled_from([0.008, 0.0821, 0.67, 7]),
            scale_C=st.sampled_from([0.003, 0.07821, 0.457, 7.34]),)
-    def test_qnnpack_add(self, A, scale_A, scale_B, scale_C):
-        A_temp = A
-        A, (scale_a, zero_point_A, torch_type) = A_temp
-        B, (scale_b, zero_point_B, torch_type) = A_temp
-        A = torch.from_numpy(A)
-        B = torch.from_numpy(B)
+    def test_qnnpack_add(self, A, zero_point, scale_A, scale_B, scale_C):
+        with enable_mobile_quantized_engine():
+            A_temp = A
+            A, (scale_a, zero_point_A, torch_type) = A_temp
+            B, (scale_b, zero_point_B, torch_type) = A_temp
+            A = torch.from_numpy(A)
+            B = torch.from_numpy(B)
 
-        assume(scale_A // scale_C >= 2**-14)
-        assume(scale_A // scale_C < 2**8)
-        assume(scale_B // scale_C >= 2**-14)
-        assume(scale_B // scale_C < 2**8)
+            assume(scale_A // scale_C >= 2**-14)
+            assume(scale_A // scale_C < 2**8)
+            assume(scale_B // scale_C >= 2**-14)
+            assume(scale_B // scale_C < 2**8)
 
-        zero_point_C = 127
+            zero_point_C = 127
+            qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point,
+                                           dtype=torch.quint8)
+            qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
+                                           dtype=torch.quint8)
 
-        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,
-                                       dtype=torch.quint8)
-        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point_B,
-                                       dtype=torch.quint8)
+            # Add ground truth
+            C = (qA.dequantize() + qB.dequantize()).numpy()
 
-        # Add ground truth
-        C = (qA.dequantize() + qB.dequantize()).numpy()
+            qC = _quantize(C, scale_C, zero_point_C)
 
-        qC = _quantize(C, scale_C, zero_point_C)
+            qC_qnnp = torch.ops.quantized.add(qA, qB, scale_C, zero_point_C)
 
-        qC_qnnp = torch.ops.quantized.qnnpack_add(qA, qB, scale_C, zero_point_C)
+            np.testing.assert_equal(qC, qC_qnnp.int_repr(),
+                                    "Quantized addition failed.")
 
-        np.testing.assert_equal(qC, qC_qnnp.int_repr(),
-                                "Quantized addition failed.")
-
-        A = torch.ones((0, 2), dtype=torch.float32)
-        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,
-                                       dtype=torch.quint8)
-        qC = torch.ops.quantized.qnnpack_add(qA, qA, scale_C, zero_point_C)
-        np.testing.assert_equal(qC.size(), qA.size(),
-                                "Quantized addition with batch size 0 failed.")
+            A = torch.ones((0, 2), dtype=torch.float32)
+            qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,
+                                           dtype=torch.quint8)
+            qC = torch.ops.quantized.add(qA, qA, scale_C, zero_point_C)
+            np.testing.assert_equal(qC.size(), qA.size(),
+                                    "Quantized addition with batch size 0 failed.")
 
     """Tests the correctness of quantized::qnnpack_maxpool2d op."""
     @given(A=hu.tensor(shapes=hu.array_shapes(4, 4, 3, 5),
-                       qparams=hu.qparams(dtypes=torch.quint8,
-                                          zero_point_min=0,
-                                          zero_point_max=0)),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
            kernel=st.sampled_from([2, 4]),
            stride=st.sampled_from([1, 2]),
            padding=st.sampled_from([1, 2]))
     def test_qnnpack_maxpool2d(self, A, kernel, stride, padding):
         import torch.nn.functional as F
 
-        A, (scale, zero_point, torch_type) = A
-        X = torch.from_numpy(A)
-        np_type = np.uint8
-        dilation = 1
+        with enable_mobile_quantized_engine():
+            A, (scale, zero_point, torch_type) = A
+            X = torch.from_numpy(A)
+            np_type = np.uint8
+            dilation = 1
 
-        # Check constraints
-        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+            # Check constraints
+            assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
 
-        iH, iW = X.shape[-2:]
+            iH, iW = X.shape[-2:]
 
-        oH = pool_output_shape(iH, kernel, padding, stride, dilation)
-        assume(oH > 0)
-        oW = pool_output_shape(iW, kernel, padding, stride, dilation)
-        assume(oW > 0)
+            oH = pool_output_shape(iH, kernel, padding, stride, dilation)
+            assume(oH > 0)
+            oW = pool_output_shape(iW, kernel, padding, stride, dilation)
+            assume(oW > 0)
 
-        k = (kernel, kernel)
-        s = (stride, stride)
-        d = (dilation, dilation)
-        p = (padding, padding)
+            k = (kernel, kernel)
+            s = (stride, stride)
+            d = (dilation, dilation)
+            p = (padding, padding)
 
-        # TODO(supriyar): unify qnnpack op apis with generic ones and follow logical NCHW
-        q_max_pool = torch.ops.quantized.qnnpack_maxpool2d
+            q_max_pool = torch.ops.quantized.max_pool2d
 
-        a = scale * (X - zero_point).to(dtype=torch.float)
-        qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
+            a = scale * (X - zero_point).to(dtype=torch.float)
+            qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
 
-        qa_nhwc = qa.permute([0, 2, 3, 1]).contiguous()
-        a_ref = qa.dequantize()
+            a_ref = qa.dequantize()
 
-        a_pool = F.max_pool2d(a_ref, kernel_size=k, stride=s, padding=p,
-                              dilation=d)
+            a_pool = F.max_pool2d(a_ref, kernel_size=k, stride=s, padding=p,
+                                  dilation=d)
 
-        a_pool_nhwc = a_pool.permute([0, 2, 3, 1])
+            a_pool_nhwc = a_pool.permute([0, 2, 3, 1])
 
-        qa_pool = q_max_pool(qa_nhwc, k, s, p, d)
+            qa_pool = q_max_pool(qa, k, s, p, d)
 
-        qa_pool_int = qa_pool.dequantize()
-        np.testing.assert_equal(a_pool_nhwc.numpy(), qa_pool_int.numpy())
+            qa_pool_int = qa_pool.dequantize()
+            np.testing.assert_equal(a_pool.numpy(), qa_pool_int.numpy())
 
-        A = torch.ones((0, 4, 4, 2), dtype=torch.float32)
-        qa = torch.quantize_per_tensor(A, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
-        qc = q_max_pool(qa, k, s, p, d)
-        oH = pool_output_shape(4, kernel, padding, stride, dilation)
-        oW = pool_output_shape(4, kernel, padding, stride, dilation)
-        np.testing.assert_equal(qc.size(), (0, oH, oW, 2),
-                                "Quantized maxpool2d with batch size 0 failed.")
-
+            A = torch.ones((0, 2, 4, 4), dtype=torch.float32)
+            qa = torch.quantize_per_tensor(A, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            qc = q_max_pool(qa, k, s, p, d)
+            oH = pool_output_shape(4, kernel, padding, stride, dilation)
+            oW = pool_output_shape(4, kernel, padding, stride, dilation)
+            np.testing.assert_equal(qc.size(), (0, 2, oH, oW),
+                                    "Quantized maxpool2d with batch size 0 failed.")
 
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
