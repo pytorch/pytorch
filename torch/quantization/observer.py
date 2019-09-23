@@ -507,8 +507,10 @@ class HistogramObserver(ObserverBase):
                 new_histogram = torch.histc(x, self.bins, min=new_min, max=new_max)
                 # combine the existing histogram and new histogram into 1 histogram
                 combined_histogram = torch.zeros_like(self.histogram)
-                combined_min = self.min_val + self.averaging_constant * (new_min - self.min_val)
-                combined_max = self.max_val + self.averaging_constant * (new_max - self.max_val)
+                combined_min = torch.min(new_min, self.min_val)
+                combined_max = torch.max(new_max, self.max_val)
+#                combined_min = self.min_val + self.averaging_constant * (new_min - self.min_val)
+#                combined_max = self.max_val + self.averaging_constant * (new_max - self.max_val)
                 self._combine_histograms(
                     combined_histogram,
                     combined_min.item(),
@@ -601,7 +603,7 @@ def default_observer(**kwargs):
 
 def default_l2_observer(**kwargs):
     # Restrict activations to be in the range (0,127)
-    kwargs.setdefault("reduce_range", True)
+        kwargs.setdefault("reduce_range", True)
     return observer(HistogramObserver, **kwargs)
 
 def default_debug_observer(**kwargs):
