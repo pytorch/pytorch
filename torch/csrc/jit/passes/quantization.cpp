@@ -173,27 +173,37 @@ Node* createIntReprNode(Value* v, Graph* g) {
   return intrepr;
 }
 
-class ObserveHelper {
+class InsertObserversHelper {
  public:
-  ObserveHelper(const ModuleQConfigMap& map) : module_qconfig_map_(map) {}
+  InsertObserversHelper(const ModuleQConfigMap& map) : module_qconfig_map_(map) {}
   void insertObservers(script::Module& module, const std::string& method_name);
+
+ private:
   Node* insertObserverFor(
       Value* v,
       Graph* g,
       script::Module& module,
       const QConfig& qconfig);
+  // Values that are the output of GetAttr[name="weight"] and GetAttr[name="bias"]
+  // will be propagated from parent method call to the child graph
   void propagateValues(Node* n, std::shared_ptr<Graph>& graph);
 
- private:
   const ModuleQConfigMap& module_qconfig_map_;
+  // Values we want to skip observing, used to skip values in
+  // the middle of the ops that are supposed to be fused, e.g.
+  // the output value of conv in the conv - relu pattern
   std::unordered_set<Value*> values_to_skip_;
+  // Values that are the output of GetAttr[name="weight"] and they
+  // will be propagated through the function call hierarchy
   std::unordered_set<Value*> weight_values_;
+  // Values that are the output of GetAttr[name="bias"] and they
+  // will be propagated through the function call hierarchy
   std::unordered_set<Value*> bias_values_;
 };
 
 // Clone observer module and add it to the original module,
 // and insert a call to observer forward function
-Node* ObserveHelper::insertObserverFor(
+Node* InsertObserversHelper::insertObserverFor(
     Value* v,
     Graph* g,
     script::Module& module,
@@ -258,7 +268,9 @@ void fillQConfigMap(
   }
 }
 
-void ObserveHelper::propagateValues(Node* n, std::shared_ptr<Graph>& graph) {
+void InsertObserversHelper::propagateValues(
+    Node* n,
+    std::shared_ptr<Graph>& graph) {
   for (auto i = 1; i < n->inputs().size(); ++i) {
     if (weight_values_.count(n->inputs()[i])) {
       weight_values_.emplace(graph->inputs()[i]);
@@ -269,7 +281,7 @@ void ObserveHelper::propagateValues(Node* n, std::shared_ptr<Graph>& graph) {
   }
 }
 
-void ObserveHelper::insertObservers(
+void InsertObserversHelper::insertObservers(
     script::Module& module,
     const std::string& method_name) {
   if (!module_qconfig_map_.count(module.module_object())) {
@@ -619,8 +631,8 @@ TORCH_API script::Module InsertObservers(
   script::Module module = inplace ? input_module : input_module.clone();
   ModuleQConfigMap module_qconfig_map;
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
-  ObserveHelper oh(module_qconfig_map);
-  oh.insertObservers(module, method_name);
+  InsertObserversHelper helper(module_qconfig_map);
+  helper.insertObservers(module, method_name);
   return module;
 }
 
