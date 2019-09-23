@@ -10,30 +10,6 @@ namespace at {
 namespace native {
 namespace {
 
-SmallVector<int64_t, 4> convOutputShape(
-    int N, // mini-batch
-    int K, // output channels
-    int H, // input height
-    int W, // input width
-    const std::vector<int64_t>& kernel,
-    const torch::List<int64_t>& stride,
-    const torch::List<int64_t>& padding,
-    const torch::List<int64_t>& dilation) {
-  SmallVector<int64_t, 4> out_shape;
-  out_shape.push_back(N);
-
-  int H_out = std::floor(
-      (H + 2 * padding[0] - dilation[0] * (kernel[0] - 1) - 1) / stride[0] + 1);
-  int W_out = std::floor(
-      (W + 2 * padding[1] - dilation[1] * (kernel[1] - 1) - 1) / stride[1] + 1);
-  out_shape.push_back(H_out);
-  out_shape.push_back(W_out);
-  // TODO: reorder it to NCHW order once the memory format regression is fixed
-  out_shape.push_back(K);
-
-  return out_shape;
-}
-
 /*
  * FBGEMM uses vpmaddubsw instruction to multiply activations (uint8_t) and
  * weights (int8_t).
@@ -195,8 +171,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     }
 
     // TODO: change convOutputShape to return NCHW sizes once perf is fixed
-    auto outShape =
-        convOutputShape(N, K, H, W, kernel, stride, padding, dilation);
+    SmallVector<int64_t, 4> outShape{
+        N, conv_p.OUT_DIM[0], conv_p.OUT_DIM[1], K};
     TORCH_CHECK(
         std::all_of(
             outShape.begin(), outShape.end(), [](int64_t i) { return i > 0; }),
