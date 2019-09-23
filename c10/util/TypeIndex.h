@@ -42,10 +42,7 @@ inline constexpr string_view extract(string_view prefix, string_view suffix, str
 }
 
 template<typename T>
-inline C10_HOST_CONSTEXPR string_view fully_qualified_type_name_impl() noexcept {
-  // Idea: __PRETTY_FUNCTION__ (or __FUNCSIG__ on msvc) contains a qualified name
-  // of this function, including its template parameter, i.e. including the
-  // type we want an id for. We use this name and run crc64 on it to get a type id.
+inline constexpr string_view fully_qualified_type_name_impl() noexcept {
   #if defined(_MSC_VER)
       return extract("class c10::string_view __cdecl c10::util::detail::fully_qualified_type_name_impl<", ">(void)", __FUNCSIG__);
   #elif defined(__clang__)
@@ -56,15 +53,28 @@ inline C10_HOST_CONSTEXPR string_view fully_qualified_type_name_impl() noexcept 
 }
 
 template<typename T>
-inline C10_HOST_CONSTEXPR uint64_t type_index_impl() {
-  return crc64(fully_qualified_type_name_impl<T>()).checksum();
+inline constexpr uint64_t type_index_impl() {
+  #if !defined(__CUDA_ARCH__)
+    // Idea: __PRETTY_FUNCTION__ (or __FUNCSIG__ on msvc) contains a qualified name
+    // of this function, including its template parameter, i.e. including the
+    // type we want an id for. We use this name and run crc64 on it to get a type id.
+    #if defined(_MSC_VER)
+        return crc64(__FUNCSIG__, sizeof(__FUNCSIG__)).checksum();
+    #elif defined(__clang__)
+        return crc64(__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__)).checksum();
+    #elif defined(__GNUC__)
+        return crc64(__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__)).checksum();
+    #endif
+  #else
+    throw std::logic_error("This should not be called on device code");
+  #endif
 }
 
 } // namespace _detail
 
 
 template<typename T>
-inline C10_HOST_CONSTEXPR type_index get_type_index() noexcept {
+inline constexpr type_index get_type_index() noexcept {
   #if !defined(__CUDA_ARCH__)
     // To enforce that this is really computed at compile time, we pass the
     // type index through std::integral_constant.
@@ -75,12 +85,12 @@ inline C10_HOST_CONSTEXPR type_index get_type_index() noexcept {
   #else
     // There's nothing in theory preventing us from running this on device code
     // except for nvcc throwing a compiler error if we enable it.
-    TORCH_INTERNAL_ASSERT(false, "This should not be called on device code");
+    return (throw std::logic_error("This should not be called on device code"), type_index(0));
   #endif
 }
 
 template<typename T>
-inline C10_HOST_CONSTEXPR string_view get_fully_qualified_type_name() noexcept {
+inline constexpr string_view get_fully_qualified_type_name() noexcept {
   return detail::fully_qualified_type_name_impl<T>();
 }
 

@@ -104,8 +104,8 @@ struct crc64_t final : IdWrapper<crc64_t, uint64_t> {
 };
 
 // CRC64 with Jones coefficients and an init value of 0.
-inline C10_HOST_CONSTEXPR crc64_t crc64(string_view str) {
-  return crc64_t{detail::crc64impl(0, str.data(), str.size())};
+inline C10_HOST_CONSTEXPR crc64_t crc64(const char* str, size_t size) {
+  return crc64_t{detail::crc64impl(0, str, size)};
 }
 } // namespace util
 } // namespace c10
