@@ -184,6 +184,12 @@ struct Vec256<int32_t> : public Vec256i {
       std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
     }
   }
+  void dump() const {
+      for (size_t i = 0; i < size(); ++i) {
+          std::cout << (int)((value_type*)&values)[i] << " ";
+      }
+      std::cout << std::endl;
+  }
   const int32_t& operator[](int idx) const  = delete;
   int32_t& operator[](int idx)  = delete;
   Vec256<int32_t> abs() const {
@@ -581,6 +587,21 @@ Vec256<int32_t> inline clamp_min(const Vec256<int32_t>& a, const Vec256<int32_t>
 template <>
 Vec256<int16_t> inline clamp_min(const Vec256<int16_t>& a, const Vec256<int16_t>& min_val) {
   return _mm256_max_epi16(min_val, a);
+}
+
+template<typename T>
+Vec256<int32_t> inline convert_to_int32(const T* ptr) {
+  return Vec256<int32_t>::loadu(ptr);
+}
+
+template<>
+Vec256<int32_t> inline convert_to_int32<int8_t>(const int8_t* ptr) {
+  return _mm256_cvtepi8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr)));
+}
+
+template<>
+Vec256<int32_t> inline convert_to_int32<uint8_t>(const uint8_t* ptr) {
+  return _mm256_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr)));
 }
 
 template <typename T>

@@ -8,8 +8,8 @@ namespace torch {
 namespace nn {
 
 template <size_t D, typename Derived>
-AvgPoolImpl<D, Derived>::AvgPoolImpl(AvgPoolOptions<D> options)
-    : options(std::move(options)) {}
+AvgPoolImpl<D, Derived>::AvgPoolImpl(const AvgPoolOptions<D>& options_)
+    : options(options_) {}
 
 template <size_t D, typename Derived>
 void AvgPoolImpl<D, Derived>::reset() {}
@@ -17,8 +17,8 @@ void AvgPoolImpl<D, Derived>::reset() {}
 template <size_t D, typename Derived>
 void AvgPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::AvgPool" << D << "d"
-         << "(kernel_size=" << options.kernel_size_
-         << ", stride=" << options.stride_ << ")";
+         << "(kernel_size=" << options.kernel_size()
+         << ", stride=" << options.stride() << ")";
 }
 
 Tensor AvgPool1dImpl::forward(const Tensor& input) {
@@ -40,8 +40,8 @@ template class AvgPoolImpl<3, AvgPool3dImpl>;
 // ============================================================================
 
 template <size_t D, typename Derived>
-MaxPoolImpl<D, Derived>::MaxPoolImpl(MaxPoolOptions<D> options)
-    : options(std::move(options)) {}
+MaxPoolImpl<D, Derived>::MaxPoolImpl(const MaxPoolOptions<D>& options_)
+    : options(options_) {}
 
 template <size_t D, typename Derived>
 void MaxPoolImpl<D, Derived>::reset() {}
@@ -49,8 +49,8 @@ void MaxPoolImpl<D, Derived>::reset() {}
 template <size_t D, typename Derived>
 void MaxPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::MaxPool" << D << "d"
-         << "(kernel_size=" << options.kernel_size_
-         << ", stride=" << options.stride_ << ")";
+         << "(kernel_size=" << options.kernel_size()
+         << ", stride=" << options.stride() << ")";
 }
 
 Tensor MaxPool1dImpl::forward(const Tensor& input) {
