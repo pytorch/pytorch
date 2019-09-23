@@ -744,7 +744,7 @@ class TestQuantizedOps(TestCase):
            mode=st.sampled_from(("bilinear", "bilinear")),
            scale_factor=st.sampled_from((None, 1.5, 2.0)),
            align_corners=st.sampled_from((True, False)),
-           nhwc_layout=st.sampled_from((True, True)))
+           nhwc_layout=st.sampled_from((True, False)))
     def test_interpolate(self, X, size, mode, scale_factor, align_corners, nhwc_layout):
         """
         This test cover upsample_nearest2d
