@@ -331,7 +331,6 @@ BLAS and LAPACK Operations
 .. autofunction:: cholesky_solve
 .. autofunction:: dot
 .. autofunction:: eig
-.. autofunction:: gels
 .. autofunction:: geqrf
 .. autofunction:: ger
 .. autofunction:: inverse
