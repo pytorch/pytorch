@@ -2186,6 +2186,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_model_test(MaskedFillModel2(), input=(x, ), train=False, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedMinOpsetVersion(8)
     def test_meshgrid(self):
         class MeshgridModel(torch.nn.Module):
             def forward(self, x, y, z):
