@@ -44,7 +44,7 @@ void Message::swap(Message& rhs) noexcept {
   std::swap(id_, rhs.id_);
 }
 
-std::vector<char>&& Message::movePayload() {
+std::vector<char>&& Message::movePayload() && {
   return std::move(payload_);
 }
 

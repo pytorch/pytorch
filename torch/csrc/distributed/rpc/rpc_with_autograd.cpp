@@ -49,7 +49,11 @@ RpcWithAutograd::RpcWithAutograd(
 }
 
 Message RpcWithAutograd::toMessage() {
-  auto payload = wrappedMessage_.movePayload();
+  auto& tensors = wrappedMessage_.tensors();
+  auto messageId = wrappedMessage_.id();
+  auto messageType = wrappedMessage_.type();
+
+  auto payload = std::move(wrappedMessage_).movePayload();
   TORCH_INTERNAL_ASSERT(!payload.empty());
 
   // We append the message type (1 byte), autograd context id(8 bytes) and
@@ -61,7 +65,7 @@ Message RpcWithAutograd::toMessage() {
   payload.resize(payload.size() + kAutogradMessageSize);
 
   // Add message type.
-  payload[writableIndex++] = wrappedMessage_.type();
+  payload[writableIndex++] = messageType;
 
   // Add autograd ids.
   torch::utils::THP_encodeInt64Buffer(
@@ -77,10 +81,7 @@ Message RpcWithAutograd::toMessage() {
       1);
 
   return Message(
-      std::move(payload),
-      std::move(wrappedMessage_.tensors()),
-      messageType_,
-      wrappedMessage_.id());
+      std::move(payload), std::move(tensors), messageType_, messageId);
 }
 
 std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
@@ -149,7 +150,7 @@ const AutogradMetadata& RpcWithAutograd::autogradMetadata() const {
   return autogradMetadata_;
 }
 
-std::unique_ptr<RpcCommandBase> RpcWithAutograd::moveWrappedRpc() {
+std::unique_ptr<RpcCommandBase> RpcWithAutograd::moveWrappedRpc() && {
   return std::move(wrappedRpc_);
 }
 

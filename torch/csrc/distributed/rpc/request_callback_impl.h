@@ -14,7 +14,7 @@ class TORCH_API RequestCallbackImpl : public RequestCallback {
 
  private:
   std::unique_ptr<RpcCommandBase> processRpc(
-      RpcCommandBase* rpc,
+      RpcCommandBase& rpc,
       MessageType messageType);
 };
 

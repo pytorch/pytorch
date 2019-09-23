@@ -7,7 +7,7 @@ import torch.nn._intrinsic as nni
 import torch.nn._intrinsic.quantized as nniq
 import torch.nn._intrinsic.qat as nniqat
 from torch.quantization import \
-    QConfig_dynamic, default_weight_observer, get_observer_dict,\
+    QConfigDynamic, default_weight_observer, get_observer_dict,\
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
     default_dynamic_qconfig, HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver, RecordingObserver, QuantWrapper
@@ -398,7 +398,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             'dtype': torch.quint8,
             'qscheme': torch.per_tensor_affine
         }
-        custom_dynamic_qconfig = QConfig_dynamic(weight=default_weight_observer())
+        custom_dynamic_qconfig = QConfigDynamic(weight=default_weight_observer)
         qconfig_dynamic_dict = {
             'fc3': default_dynamic_qconfig,
             'sub2': default_dynamic_qconfig,
@@ -633,8 +633,8 @@ class ScriptabilityTest(QuantizationTestCase):
         self.qmodel_under_test = self.qmodel_under_test.from_float(
             self.model_under_test)
         self.x = torch.rand(10)
-        self.qx = torch.quantize_linear(self.x.to(torch.float), scale=1.0,
-                                        zero_point=0, dtype=torch.qint32)
+        self.qx = torch.quantize_per_tensor(self.x.to(torch.float), scale=1.0,
+                                            zero_point=0, dtype=torch.qint32)
 
     def test_scriptability_serialization(self):
         # test serialization of quantized functional modules
@@ -648,7 +648,7 @@ class ScriptabilityTest(QuantizationTestCase):
                         'zero point not in state dict for functional modules')
 
         x = torch.rand(10, 1, dtype=torch.float)
-        xq = torch.quantize_linear(x, 1.0, 0, torch.qint8)
+        xq = torch.quantize_per_tensor(x, 1.0, 0, torch.qint8)
         self.checkScriptable(self.qmodel_under_test, [(xq, xq)], check_save_load=True)
         self.checkScriptable(self.model_under_test, [(xq.dequantize(), xq.dequantize())], check_save_load=True)
 
@@ -852,7 +852,7 @@ class ObserverTest(QuantizationTestCase):
         self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
 
     def test_observer_scriptable(self):
-        obs = torch.quantization.default_observer()()
+        obs = torch.quantization.default_observer()
         scripted = torch.jit.script(obs)
 
         x = torch.rand(3, 4)

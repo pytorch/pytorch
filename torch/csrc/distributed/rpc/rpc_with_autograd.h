@@ -48,7 +48,7 @@ class TORCH_API RpcWithAutograd final : public RpcCommandBase {
   const AutogradMetadata& autogradMetadata() const;
 
   // Destructively retrieves the wrapped rpc.
-  std::unique_ptr<RpcCommandBase> moveWrappedRpc();
+  std::unique_ptr<RpcCommandBase> moveWrappedRpc() &&;
 
   // Message type of the wrapped RPC.
   MessageType wrappedMessageType() const;
