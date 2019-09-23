@@ -17,6 +17,8 @@ class Store {
 
   Store() : timeout_(kDefaultTimeout) {}
 
+  Store(const std::chrono::milliseconds& timeout) : timeout_(timeout) {}
+
   virtual ~Store();
 
   virtual void set(
