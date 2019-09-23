@@ -88,9 +88,14 @@ class QuantizationTestCase(TestCase):
         r"""Checks the module or module's leaf descendants
             have observers in preperation for quantization
         """
+        if module.training:
+            skip_list = torch.quantization.DEFAULT_QAT_SKIP_MODULE_LIST
+        else:
+            skip_list = None
         if hasattr(module, 'qconfig') and module.qconfig is not None and len(module._modules) == 0:
-            self.assertTrue(hasattr(module, 'observer'),
-                            'module: ' + str(type(module)) + ' do not have observer')
+            if skip_list is None or type(module) not in set(skip_list):
+                self.assertTrue(hasattr(module, 'observer'),
+                                'module: ' + str(type(module)) + ' do not have observer')
         for child in module.children():
             self.checkObservers(child)
 

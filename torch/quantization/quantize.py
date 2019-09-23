@@ -75,7 +75,7 @@ def _observer_forward_hook(self, input, output):
     """
     return self.observer(output)
 
-def add_observer(module, module_skip_list =None):
+def add_observer(module, module_skip_list=None):
     r"""Add observer for the leaf child of the module.
 
     This function insert observer module to all leaf child module that
@@ -104,8 +104,6 @@ def add_observer(module, module_skip_list =None):
         if module_skip_list is None or type(module) not in set(module_skip_list):
             module.add_module('observer', module.qconfig.activation())
             module.register_forward_hook(_observer_forward_hook)
-        else:
-            print('Skipping for DeQuantStub')
 
 class QuantWrapper(nn.Module):
     r"""A wrapper class that wraps the input module, adds QuantStub and
