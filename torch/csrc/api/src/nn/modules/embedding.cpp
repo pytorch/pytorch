@@ -48,19 +48,19 @@ namespace nn {
       stream << "torch::nn::Embedding(num_embeddings=" << options.num_embeddings()
              << ", embedding_dim=" << options.embedding_dim();
       if(options.padding_idx() != c10::nullopt) {
-        stream << ",padding_idx=" << *options.padding_idx();
+        stream << ", padding_idx=" << *options.padding_idx();
       }
       if(options.max_norm() != c10::nullopt) {
-        stream << ",max_norm=" << *options.max_norm();
+        stream << ", max_norm=" << *options.max_norm();
       }
       if(options.norm_type() != 2) {
-        stream << ",norm_type=" << options.norm_type();
+        stream << ", norm_type=" << options.norm_type();
       }
       if(options.scale_grad_by_freq()) {
-        stream << ",scale_grad_by_freq=" << options.scale_grad_by_freq();
+        stream << ", scale_grad_by_freq=" << options.scale_grad_by_freq();
       }
       if(options.sparse()) {
-        stream << ",sparse=" << options.sparse();
+        stream << ", sparse=" << options.sparse();
       }
       stream << ")";
     }
@@ -72,7 +72,7 @@ namespace nn {
         }
         else if(*options.padding_idx() < 0) {
           TORCH_CHECK(*options.padding_idx() >= -weight.size(0), "Padding_idx must be within num_embedding");
-          options.padding_idx((weight.size(0) + *options.padding_idx());
+          options.padding_idx(weight.size(0) + *options.padding_idx());
         }
       }
       else {
@@ -182,7 +182,10 @@ namespace nn {
       if(options.scale_grad_by_freq()) {
         stream << ", scale_grad_by_freq=" << options.scale_grad_by_freq();
       }
-      stream << ", mode="<<mode<<")";
+      if(options.sparse()) {
+        stream << ", sparse=" << options.sparse();
+      }
+      stream << ", mode="<<options.mode()<<")";
     }
 
     EmbeddingBag EmbeddingBag::from_pretrained(Tensor embeddings, c10::optional<EmbeddingBagOptions> options, bool freeze = true) {

@@ -449,6 +449,19 @@ TEST_F(ModulesTest, L1Loss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, from_pretrained_Embedding) {
+  Tensor weight = Tensor({{1., 2.3, 3.}, {4., 5.1, 6.3}});
+  Embedding embedding = torch::nn::Embedding::from_pretrained(weight);
+  cout<<c10::str(embedding[1]));
+  //ASSERT_EQ(c10::str(embedding[1])), "tensor([[ 4.0000,  5.1000,  6.3000]])");
+}
+
+TEST_F(ModulesTest, from_pretrained_EmbeddingBag) {
+  Tensor weight = Tensor([[1., 2.3, 3.], [4., 5.1, 6.3]]);
+  EmbeddingBag embedding = torch::nn::EmbeddingBag::from_pretrained(weight);
+  ASSERT_EQ(c10::str(embeddingbag[1])), "tensor([[ 2.5000,  3.7000,  4.6500]])");
+}
+
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in=3, out=4, with_bias=true)");
@@ -528,14 +541,29 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm) {
 
 TEST_F(ModulesTest, PrettyPrintEmbedding) {
   ASSERT_EQ(
-      c10::str(Embedding(num_embeddings=10, embedding_dim=2)),
+      c10::str(Embedding(10, 2)),
       "torch::nn::Embedding(num_embeddings=10, embedding_dim=2)");
   ASSERT_EQ(
-      c10::str(Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2)),
+      c10::str(Embedding(10, 2).padding_idx(3).max_norm(2)),
       "torch::nn::Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2)");
   ASSERT_EQ(
-      c10::str(Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true)),
+      c10::str(Embedding(10, 2).padding_idx(3).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true)),
       "torch::nn::Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintEmbeddingBag) {
+  ASSERT_EQ(
+      c10::str(EmbeddingBag(10, 2)),
+      "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2)");
+  ASSERT_EQ(
+      c10::str(EmbeddingBag(10, 2).max_norm(2)),
+      "torch::nn::Embedding(num_embeddings=10, embedding_dim=2, max_norm=2)");
+  ASSERT_EQ(
+      c10::str(EmbeddingBag(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true)),
+      "torch::nn::Embedding(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true)");
+  ASSERT_EQ(
+      c10::str(EmbeddingBag(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode("sum")),
+      "torch::nn::Embedding(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true, mode = sum)");
 }
 
 TEST_F(ModulesTest, PrettyPrintNestedModel) {
@@ -554,8 +582,6 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
         : torch::nn::Module("TestModule"),
           fc(register_module("fc", torch::nn::Linear(4, 5))),
           table(register_module("table", torch::nn::Embedding(10, 2))),
-          table(register_module("table", torch::nn::Embedding(10, 2, padding_idx=3, max_norm=2))),
-          table(register_module("table", torch::nn::Embedding(10, 2, padding_idx=3, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true))),
           inner(register_module("inner", std::make_shared<InnerTestModule>())) {
     }
 
@@ -569,11 +595,9 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
       "TestModule(\n"
       "  (fc): torch::nn::Linear(in=4, out=5, with_bias=true)\n"
       "  (table): torch::nn::Embedding(num_embeddings=10, embedding_dim=2)\n"
-      "  (table): torch::nn::Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2)"
-      "  (table): torch::nn::Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true)"
       "  (inner): InnerTestModule(\n"
       "    (fc): torch::nn::Linear(in=3, out=4, with_bias=true)\n"
-      "    (table): torch::nn::Embedding(count=10, dimension=2)\n"
+      "    (table): torch::nn::Embedding(num_embeddings=10, embedding_dim=2)\n"
       "  )\n"
       ")");
 }
