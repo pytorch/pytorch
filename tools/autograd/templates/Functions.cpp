@@ -757,9 +757,9 @@ Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inver
     Tensor common_term = grad + grad.transpose(-2, -1);
     common_term = at::matmul(inverse, at::matmul(common_term, inverse));
     if (upper) {
-      grad_L = -at::matmul(inverse, common_term);
+      grad_L = -at::matmul(L, common_term);
     } else {
-      grad_L = -at::matmul(common_term, inverse);
+      grad_L = -at::matmul(common_term, L);
     }
   } else {
     grad_L = at::zeros({1}, L.options()).expand_as(L);
