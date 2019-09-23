@@ -281,6 +281,13 @@ if (ANDROID OR IOS)
   set(INTERN_BUILD_MOBILE ON)
 endif()
 
+# Setting `PYTORCH_BUILD_MOBILE` environment variable can force it to do mobile
+# build with host toolchain.
+if (DEFINED ENV{PYTORCH_BUILD_MOBILE})
+  set(INTERN_BUILD_MOBILE ON)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DC10_MOBILE")
+endif()
+
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
 # It's disabled for caffe2 mobile library.
 if (INTERN_BUILD_MOBILE AND BUILD_CAFFE2_MOBILE)
@@ -303,9 +310,12 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(FEATURE_TORCH_MOBILE ON)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
+  set(USE_PYTORCH_QNNPACK ON)
+  set(USE_QNNPACK OFF)
   set(USE_STATIC_DISPATCH ON)
   set(INTERN_DISABLE_ONNX ON)
   set(INTERN_DISABLE_AUTOGRAD ON)
+  set(INTERN_USE_EIGEN_BLAS ON)
 endif()
 
 # ---[ Utils
@@ -376,10 +386,6 @@ endif()
 
 if(USE_PYTORCH_QNNPACK)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PYTORCH_QNNPACK")
-endif()
-
-if(USE_STATIC_DISPATCH)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_STATIC_DISPATCH")
 endif()
 
 # ---[ Whitelist file if whitelist is specified
