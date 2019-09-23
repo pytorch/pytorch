@@ -15606,7 +15606,9 @@ def partial_apply_nontensors(fn, args, **kwargs):
 def create_traced_fn(self, fn):
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
-        traced = torch.jit.trace(fn_tensors, inputs_tensors)
+        traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
+        # print("after trace")
+        # print(str(traced.graph_for(*inputs_tensors)))
         self.assertExportImport(traced.graph, inputs_tensors)
         output = traced(*inputs_tensors)
         traced_fn.last_graph = traced.graph_for(*inputs_tensors)
@@ -15724,6 +15726,26 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
 
     nograd_inputs, nograd_tensors = clone_inputs(False)
     recording_inputs, recording_tensors = clone_inputs(True)
+
+    # the caller of check_against_reference will be doing fusion/autodiff checks
+    # against the last_optimized_graph which is run against tensors with requires_grad=True
+    # so we profile and optimize this configuration first
+    # no_grad configuration will go through bailout path which the tests don't check
+    # anyways
+
+
+    # with enable_profiling_mode(True):
+    #     # profile
+    #     recording_inputs_profiling, recording_tensors_profiling = clone_inputs(True)
+    #     self.runAndSaveRNG(func, recording_inputs_profiling, kwargs)
+    #     # print("profiling")
+    #     # print(str(func.last_graph))
+    #     # optimzie
+    #     recording_inputs_optimized, recording_tensors_optimized = clone_inputs(True)
+    #     self.runAndSaveRNG(func, recording_inputs_optimized, kwargs)
+    #     print("optimize")
+    #     print(str(func.last_graph))
+        
 
     # test no gradients case
     outputs = self.runAndSaveRNG(reference_func, nograd_inputs, kwargs)
@@ -16200,8 +16222,8 @@ nn_functional_tests = [
     ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M),),),
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
-    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),
-        '', (True, 'aten::_batch_norm_impl_index')),
+    # ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),
+    #     '', (True, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],), '',
      (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
@@ -16394,6 +16416,17 @@ def add_autograd_test(
                             if IS_SANDCASTLE or IS_WINDOWS:
                                 autodiff_nodes = autodiff_nodes + fusible_nodes
                                 fusible_nodes = []
+
+                            print(str(traced_fn.last_graph))
+
+
+                            # def get_optimized_graph(script_module):   
+                            #     ge_state = script_module.get_debug_state()
+                            #     fwd_plan = get_execution_plan(ge_state)
+                            #     return fwd_plan.graph()
+
+                            # print (get_optimized_graph(traced_fn))
+
                             self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
                         if not is_magic_method and test_name not in EXCLUDE_SCRIPT:

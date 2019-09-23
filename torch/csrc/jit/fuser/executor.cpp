@@ -338,6 +338,10 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
     inputs.emplace_back(all_inputs[i].toTensor());
   }
 
+  if (!inputs.at(0).defined()) {
+    return false;
+  }
+
   // Determines device to dispatch to.
   at::Device device = inputs.at(0).device();
   // If there's a device mismatch in the inputs or if one of the input is a

@@ -33,26 +33,38 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
     : GraphExecutorImplBase(graph), arg_spec_creator_(*this->graph) {}
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
+
   if (optimized_plan_) {
     return *optimized_plan_;
   }
 
-  if (!pr_) {
-    pr_ = ProfilingRecord::instrumentGraph(prepareGraph(graph, stack));
-    auto copy = pr_->graph()->copy();
-    LowerGradOf(*copy);
-    RemoveExpands(copy);
-    CanonicalizeOps(copy);
-    EliminateDeadCode(copy);
-    profiling_plan_ = ExecutionPlan(copy);
-    // fall-through
+  std::shared_ptr<Graph> copy;
+  if (getProfilingMode()) {
+    if (!pr_) {
+      pr_ = ProfilingRecord::instrumentGraph(prepareGraph(graph, stack));
+      auto copy = pr_->graph()->copy();
+      LowerGradOf(*copy);
+      RemoveExpands(copy);
+      CanonicalizeOps(copy);
+      EliminateDeadCode(copy);
+      profiling_plan_ = ExecutionPlan(copy);
+      // fall-through
+    }
+
+    if (!pr_->ready()) {
+      return *profiling_plan_;
+    }
+    copy = pr_->graph()->copy();
+  } else {
+    copy = graph->copy();
   }
 
-  if (!pr_->ready()) {
-    return *profiling_plan_;
+  if (!getGraphExecutorOptimize()) {
+    runRequiredPasses(copy);
+    optimized_plan_ = ExecutionPlan(copy);
+    return *optimized_plan_;
   }
-  // copy already has differentiableGraphs
-  auto copy = pr_->graph()->copy();
+
   // insert bailouts
   InsertGuards(copy);
   // get rid of autograd specific ops
@@ -72,6 +84,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   GRAPH_DUMP("After InsertBailOuts: ", copy);
   runRequiredPasses(copy);
   ConstantPropagation(copy);
+  runOptimization(copy);
   if (needsGradient(copy)) {
     auto diff_nodes = CreateAutodiffSubgraphs(
         copy,
@@ -87,12 +100,16 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
     InlineAutodiffSubgraphs(copy, getAutodiffSubgraphInlining()
                                       ? autodiffSubgraphInlineThreshold
                                       : 1);
+  } else {
+    runNondiffOptimization(copy);
   }
-  GRAPH_DUMP("InlineAutodiffSubgraphs: ", copy);
-  ConstantPropagation(copy);
-  runOptimization(copy);
-  runNondiffOptimization(copy);
   EliminateDeadCode(copy);
+
+  const static auto *ppg = std::getenv("PYTORCH_PRINT_GRAPH");
+  if (ppg) {
+    std::cout << "optimized graph:\n";
+    copy->dump();
+  }
   // cache
   optimized_plan_ = ExecutionPlan(copy);
   return *optimized_plan_;

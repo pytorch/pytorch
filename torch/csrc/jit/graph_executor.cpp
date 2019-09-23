@@ -628,11 +628,14 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 };
 
 GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph)
-    : pImpl(
-          getProfilingMode() ? dynamic_cast<GraphExecutorImplBase*>(
-                                   new ProfilingGraphExecutorImpl(graph))
-                             : dynamic_cast<GraphExecutorImplBase*>(
-                                   new GraphExecutorImpl(graph))) {}
+    // : pImpl(
+    //       getProfilingMode() ? dynamic_cast<GraphExecutorImplBase*>(
+    //                                new ProfilingGraphExecutorImpl(graph))
+    //                          : dynamic_cast<GraphExecutorImplBase*>(
+    //                                new GraphExecutorImpl(graph))) {}
+
+    : pImpl(dynamic_cast<GraphExecutorImplBase *>(
+          new ProfilingGraphExecutorImpl(graph))) {}
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
