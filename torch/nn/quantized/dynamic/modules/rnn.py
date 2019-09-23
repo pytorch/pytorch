@@ -254,7 +254,7 @@ class RNNBase(torch.nn.Module):
                         #   w_ih, w_hh
                         weight_observer(weight)
                         wt_scale, wt_zp = weight_observer.calculate_qparams()
-                        qweight = torch.quantize_linear(
+                        qweight = torch.quantize_per_tensor(
                             weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
                         packed_weight = \
                             torch.ops.quantized.linear_prepack(qweight, bias)

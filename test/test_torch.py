@@ -244,8 +244,8 @@ class _TestTorchMixin(object):
                        'sparse_resize_and_clear_',
                        'align_to',  # BUILD_NAMEDTENSOR only
                        'align_as',  # BUILD_NAMEDTENSOR only
-                       'renamed',  # BUILD_NAMEDTENSOR only
-                       'names_',  # BUILD_NAMEDTENSOR only
+                       'rename',  # BUILD_NAMEDTENSOR only
+                       'rename_',  # BUILD_NAMEDTENSOR only
                        'has_names',  # BUILD_NAMEDTENSOR only
                        'rename',  # BUILD_NAMEDTENSOR only
                        'refine_names',  # BUILD_NAMEDTENSOR only
@@ -2113,6 +2113,15 @@ class _TestTorchMixin(object):
         test_inference(torch.float64)
         test_inference(torch.float32)
 
+    def test_qengnie(self):
+        qengines = torch._C._supported_qengines()
+        # [TODO] Enable after the interface change
+        # original_qe = torch._C._get_qengine()
+        # for qe in qengines:
+        #     torch._C._set_qengine(qe)
+        #     assert torch._C._get_qengine() == qe, 'qengine not set successfully'
+        # torch._C._set_qengine(original_qe)
+
     def test_new_tensor(self):
         expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
         # test data
@@ -3943,7 +3952,7 @@ class _TestTorchMixin(object):
             self.assertTensorsSlowEqual(byte_tensor, byte_tensor.abs(), 1e-16)
 
         # Checking that the right abs function is called for LongTensor
-        bignumber = 2 ^ 31 + 1
+        bignumber = 2 ** 31 + 1
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
 
@@ -5542,9 +5551,6 @@ class _TestTorchMixin(object):
             if t.is_sparse:
                 continue
             if t.is_cuda and not torch.cuda.is_available():
-                continue
-            if t == torch.cuda.BFloat16Tensor:
-                self.assertRaises(RuntimeError, lambda: t(100, 100).fill_(1))
                 continue
             obj = t(100, 100).fill_(1)
             obj.__repr__()
@@ -10840,9 +10846,6 @@ class TestTorchDeviceType(TestCase):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
             x_clone = x.clone()
-            if (device == 'cuda' and dt == torch.bfloat16):
-                self.assertRaises(RuntimeError, lambda: copy(x))
-                continue
             y = copy(x)
             y.fill_(1)
             # copy is a shallow copy, only copies the tensor view,
@@ -10866,17 +10869,11 @@ class TestTorchDeviceType(TestCase):
     def test_view_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
-            if (device == 'cuda' and dt == torch.bfloat16):
-                self.assertRaises(RuntimeError, lambda: x.view(6))
-                continue
             self.assertEqual(x.view(6).shape, [6])
 
     def test_fill_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor((1, 1), dtype=dt, device=device)
-            if (device == 'cuda' and dt == torch.bfloat16):
-                self.assertRaises(RuntimeError, lambda: x.fill_(1))
-                continue
             x.fill_(1)
 
             self.assertEqual(x, torch.tensor([1, 1], dtype=dt, device=device))
@@ -10886,18 +10883,11 @@ class TestTorchDeviceType(TestCase):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor((1, 1), dtype=dt, device=device)
             y = x.clone()
-            if (device == 'cuda' and dt == torch.bfloat16):
-                # `x - y` is used inside of the assertEqual
-                self.assertRaises(RuntimeError, lambda: x - y)
-                continue
             self.assertEqual(x, y)
 
     def test_cat_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
-            if (device == 'cuda' and dt == torch.bfloat16):
-                self.assertRaises(RuntimeError, lambda: torch.cat((x, x), 0))
-                continue
 
             expected1 = torch.tensor([[1, 2], [3, 4], [1, 2], [3, 4]], dtype=dt, device=device)
             self.assertEqual(torch.cat((x, x), 0), expected1)
@@ -10912,24 +10902,15 @@ class TestTorchDeviceType(TestCase):
         for shape in shapes:
             for dt in torch.testing.get_all_dtypes():
 
-                if (device == 'cuda' and dt == torch.bfloat16):
-                    self.assertRaises(RuntimeError, lambda: torch.zeros(shape, device=device, dtype=dt).shape)
-                    self.assertRaises(RuntimeError, lambda: torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
-                    self.assertRaises(RuntimeError, lambda: torch.full(shape, 3, device=device, dtype=dt).shape)
-                    self.assertRaises(RuntimeError, lambda: torch.full_like(torch.zeros(shape, device=device, dtype=dt), 3))
-                    self.assertRaises(RuntimeError, lambda: torch.ones(shape, device=device, dtype=dt).shape)
-                    self.assertRaises(RuntimeError, lambda: torch.ones_like(torch.zeros(shape, device=device, dtype=dt)).shape)
-                    self.assertRaises(RuntimeError, lambda: torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
-                else:
-                    self.assertEqual(shape, torch.zeros(shape, device=device, dtype=dt).shape)
-                    self.assertEqual(shape, torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
-                    self.assertEqual(shape, torch.full(shape, 3, device=device, dtype=dt).shape)
-                    self.assertEqual(shape, torch.full_like(torch.zeros(shape, device=device, dtype=dt), 3).shape)
-                    self.assertEqual(shape, torch.ones(shape, device=device, dtype=dt).shape)
-                    self.assertEqual(shape, torch.ones_like(torch.zeros(shape, device=device, dtype=dt)).shape)
-                    self.assertEqual(shape, torch.empty(shape, device=device, dtype=dt).shape)
-                    self.assertEqual(shape, torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
-                    self.assertEqual(shape, torch.empty_strided(shape, (0,) * len(shape), device=device, dtype=dt).shape)
+                self.assertEqual(shape, torch.zeros(shape, device=device, dtype=dt).shape)
+                self.assertEqual(shape, torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
+                self.assertEqual(shape, torch.full(shape, 3, device=device, dtype=dt).shape)
+                self.assertEqual(shape, torch.full_like(torch.zeros(shape, device=device, dtype=dt), 3).shape)
+                self.assertEqual(shape, torch.ones(shape, device=device, dtype=dt).shape)
+                self.assertEqual(shape, torch.ones_like(torch.zeros(shape, device=device, dtype=dt)).shape)
+                self.assertEqual(shape, torch.empty(shape, device=device, dtype=dt).shape)
+                self.assertEqual(shape, torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
+                self.assertEqual(shape, torch.empty_strided(shape, (0,) * len(shape), device=device, dtype=dt).shape)
 
                 if dt == torch.half and device == "cpu":
                     # update once random is implemented for half on CPU
@@ -11067,15 +11048,6 @@ class TestTorchDeviceType(TestCase):
             if dt == torch.bool:
                 # torch.bool is a special case and is being tested later
                 # in this test
-                continue
-
-            if device == 'cuda' and dt == torch.bfloat16:
-                self.assertRaises(RuntimeError, lambda: x > b)
-                self.assertRaises(RuntimeError, lambda: x < b)
-                self.assertRaises(RuntimeError, lambda: x == b)
-                self.assertRaises(RuntimeError, lambda: x != b)
-                self.assertRaises(RuntimeError, lambda: x >= b)
-                self.assertRaises(RuntimeError, lambda: x <= b)
                 continue
 
             self.assertEqual(x.lt(2), torch.tensor([True, False, False, False]))
@@ -11268,11 +11240,6 @@ class TestTorchDeviceType(TestCase):
                     num_src = 10
                     src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
                     mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
-
-                    if dt == torch.bfloat16 and device == 'cuda':
-                        # remove once bfloat16 implemented on CUDA
-                        self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
-                        continue
 
                     if dt == torch.half and device == 'cpu':
                         self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
