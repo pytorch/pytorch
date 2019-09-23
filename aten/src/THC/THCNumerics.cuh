@@ -208,12 +208,10 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half log10(at::Half a) { return ::log10(a); }
   static inline __host__ __device__ at::Half log1p(at::Half a) { return ::log1p(a); }
   static inline __host__ __device__ at::Half log2(at::Half a) { return ::log2(a); }
-  static inline __host__ __device__ at::Half lgamma(at::Half a) { return ::lgamma(a); }
   static inline __host__ __device__ at::Half expm1(at::Half a) { return ::expm1(a); }
   static inline __host__ __device__ at::Half cos(at::Half a) { return ::cos(a); }
   static inline __host__ __device__ at::Half sin(at::Half a) { return ::sin(a); }
   static inline __host__ __device__ at::Half sqrt(at::Half a) { return ::sqrt(a); }
-  static inline __host__ __device__ at::Half floor(at::Half a) { return ::floor(a); }
   static inline __host__ __device__ at::Half trunc(at::Half a) { return ::trunc(a); }
   static inline __host__ __device__ at::Half acos(at::Half a) { return ::acos(a); }
   static inline __host__ __device__ at::Half cosh(at::Half a) { return ::cosh(a); }
@@ -282,7 +280,6 @@ struct THCNumerics<float> {
   static inline __device__ bool eq_with_nan(float a, float b) { return __float_as_int(a) == __float_as_int(b); }
   static inline __host__ __device__ bool ne(float a, float b) { return a != b; }
 
-  static inline __host__ __device__  float lgamma(float a) { return lgammaf(a);}
   static inline __host__ __device__  float exp  (float a) { return   expf(a); }
   static inline __host__ __device__  float exp10(float a) { return exp10f(a); }
   static inline __host__ __device__  float log  (float a) { return   logf(a); }
@@ -293,7 +290,6 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float cos  (float a) { return   cosf(a); }
   static inline __host__ __device__  float sin  (float a) { return   sinf(a); }
   static inline __host__ __device__  float sqrt (float a) { return  sqrtf(a); }
-  static inline __host__ __device__  float floor(float a) { return floorf(a); }
   static inline __host__ __device__  float trunc(float a) { return truncf(a); }
   static inline __host__ __device__  float acos (float a) { return  acosf(a); }
   static inline __host__ __device__  float cosh (float a) { return  coshf(a); }
@@ -319,6 +315,59 @@ struct THCNumerics<float> {
   static inline __host__ __device__  bool isinf(float a) { return ::isinf(a); }
 };
 
+template <>
+struct THCNumerics<at::BFloat16> {
+  static inline __host__ __device__ at::BFloat16 min() { return at::numeric_limits<at::BFloat16>::lowest(); }
+  static inline __host__ __device__ at::BFloat16 max() { return at::numeric_limits<at::BFloat16>::max(); }
+  static inline __host__ __device__ at::BFloat16 lower_bound() { return at::numeric_limits<at::BFloat16>::lower_bound(); }
+  static inline __host__ __device__ at::BFloat16 upper_bound() { return at::numeric_limits<at::BFloat16>::upper_bound(); }
+
+  static inline __host__ __device__ bool lt(at::BFloat16 a, at::BFloat16 b) { return a < b; }
+  static inline __host__ __device__ bool le(at::BFloat16 a, at::BFloat16 b) { return a <= b; }
+  static inline __host__ __device__ bool gt(at::BFloat16 a, at::BFloat16 b) { return a > b; }
+  static inline __host__ __device__ bool ge(at::BFloat16 a, at::BFloat16 b) { return a >= b; }
+  static inline __host__ __device__ bool eq(at::BFloat16 a, at::BFloat16 b) { return a == b; }
+  static inline __host__ __device__ bool ne(at::BFloat16 a, at::BFloat16 b) { return a != b; }
+
+  static inline __host__ __device__  at::BFloat16 lgamma(at::BFloat16 a) { return lgammaf(a);}
+  static inline __host__ __device__  at::BFloat16 exp  (at::BFloat16 a) { return   expf(a); }
+  static inline __host__ __device__  at::BFloat16 exp10(at::BFloat16 a) { return exp10f(a); }
+  static inline __host__ __device__  at::BFloat16 log  (at::BFloat16 a) { return   logf(a); }
+  static inline __host__ __device__  at::BFloat16 log10(at::BFloat16 a) { return log10f(a); }
+  static inline __host__ __device__  at::BFloat16 log1p(at::BFloat16 a) { return log1pf(a); }
+  static inline __host__ __device__  at::BFloat16 log2 (at::BFloat16 a) { return  log2f(a); }
+  static inline __host__ __device__  at::BFloat16 expm1(at::BFloat16 a) { return expm1f(a); }
+  static inline __host__ __device__  at::BFloat16 cos  (at::BFloat16 a) { return   cosf(a); }
+  static inline __host__ __device__  at::BFloat16 sin  (at::BFloat16 a) { return   sinf(a); }
+  static inline __host__ __device__  at::BFloat16 sqrt (at::BFloat16 a) { return  sqrtf(a); }
+  static inline __host__ __device__  at::BFloat16 rsqrt(at::BFloat16 a) { return rsqrtf(a); }
+  static inline __host__ __device__  at::BFloat16 floor(at::BFloat16 a) { return floorf(a); }
+  static inline __host__ __device__  at::BFloat16 trunc(at::BFloat16 a) { return truncf(a); }
+  static inline __host__ __device__  at::BFloat16 acos (at::BFloat16 a) { return  acosf(a); }
+  static inline __host__ __device__  at::BFloat16 cosh (at::BFloat16 a) { return  coshf(a); }
+  static inline __host__ __device__  at::BFloat16 acosh(at::BFloat16 a) { return acoshf(a); }
+  static inline __host__ __device__  at::BFloat16 asin (at::BFloat16 a) { return  asinf(a); }
+  static inline __host__ __device__  at::BFloat16 sinh (at::BFloat16 a) { return  sinhf(a); }
+  static inline __host__ __device__  at::BFloat16 asinh(at::BFloat16 a) { return asinhf(a); }
+  static inline __host__ __device__  at::BFloat16 tan  (at::BFloat16 a) { return   tanf(a); }
+  static inline __host__ __device__  at::BFloat16 atan (at::BFloat16 a) { return  atanf(a); }
+  static inline __host__ __device__  at::BFloat16 tanh (at::BFloat16 a) { return  tanhf(a); }
+  static inline __host__ __device__  at::BFloat16 erf  (at::BFloat16 a) { return   erff(a); }
+  static inline __host__ __device__  at::BFloat16 erfc (at::BFloat16 a) { return  erfcf(a); }
+  static inline __host__ __device__  at::BFloat16 abs  (at::BFloat16 a) { return  fabsf(a); }
+  static inline __host__ __device__  at::BFloat16 round(at::BFloat16 a) { return nearbyintf(a); }
+  static inline __host__ __device__  at::BFloat16 frac (at::BFloat16 a) { return a - truncf(a); }
+  static inline __host__ __device__  at::BFloat16 cinv (at::BFloat16 a) { return 1.0f / a; }
+  static inline __host__ __device__  at::BFloat16 add  (at::BFloat16 a, at::BFloat16 b) { return a + b; }
+  static inline __host__ __device__  at::BFloat16 div  (at::BFloat16 a, at::BFloat16 b) { return a / b; }
+  static inline __host__ __device__  at::BFloat16 mul  (at::BFloat16 a, at::BFloat16 b) { return a * b; }
+  static inline __host__ __device__  at::BFloat16 sub  (at::BFloat16 a, at::BFloat16 b) { return a - b; }
+  static inline __host__ __device__  at::BFloat16 pow  (at::BFloat16 a, at::BFloat16 b) { return powf(a, b); }
+  static inline __host__ __device__  at::BFloat16 atan2(at::BFloat16 a, at::BFloat16 b) { return atan2f(a, b); }
+  static inline __host__ __device__  bool isnan(at::BFloat16 a) { return ::isnan(a); }
+  static inline __host__ __device__  bool isinf(at::BFloat16 a) { return ::isinf(a); }
+};
+
 // DEPRECATED: use math functions from std and cuda math API (if needed)
 //             note that the functions exp10,erfinv,frac and cinv
 //             are not in the std namespace
@@ -337,7 +386,6 @@ struct THCNumerics<double> {
   static inline __device__ bool eq_with_nan(double a, double b) { return __double_as_longlong(a) == __double_as_longlong(b); }
   static inline __host__ __device__ bool ne(double a, double b) { return a != b; }
 
-  static inline __host__ __device__  double lgamma(double a) { return ::lgamma(a);}
   static inline __host__ __device__  double exp  (double a) { return   ::exp(a); }
   static inline __host__ __device__  double exp10(double a) { return ::exp10(a); }
   static inline __host__ __device__  double log  (double a) { return   ::log(a); }
@@ -348,7 +396,6 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double cos  (double a) { return   ::cos(a); }
   static inline __host__ __device__  double sin  (double a) { return   ::sin(a); }
   static inline __host__ __device__  double sqrt (double a) { return  ::sqrt(a); }
-  static inline __host__ __device__  double floor(double a) { return ::floor(a); }
   static inline __host__ __device__  double trunc(double a) { return ::trunc(a); }
   static inline __host__ __device__  double acos (double a) { return  ::acos(a); }
   static inline __host__ __device__  double cosh (double a) { return  ::cosh(a); }
