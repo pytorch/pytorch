@@ -162,12 +162,12 @@ torch::RegisterOperators::options().kernel<decltype(at::embedding), &at::embeddi
 ).op(
   "_aten::dropout",
   torch::RegisterOperators::options().kernel<decltype(at::dropout), &at::dropout>(c10::TensorTypeId::CPUTensorId)
-//).op(
-//  "aten::device",
-//  torch::RegisterOperators::options().catchAllKernel(
-//    [](std::string s) ->c10::Device {
-//      return c10::Device(s);
-//})
+).op(
+  "aten::device",
+  torch::RegisterOperators::options().catchAllKernel(
+    [](std::string s) ->c10::Device {
+      return c10::Device(s);
+})
 //).op(
 //  "aten::zeros",
 //  torch::RegisterOperators::options().catchAllKernel(
@@ -187,7 +187,7 @@ torch::RegisterOperators::options().kernel<decltype(at::embedding), &at::embeddi
 //).op(
 //"aten::zeros",
 //torch::RegisterOperators::options().catchAllKernel(
-//    [](Stack* stack, c10::KernelCache* cache) {
+//    [](Stack* stack) {
 //      const auto options = c10::TensorOptions()
 //                               .dtype((std::move(peek(*stack, 1, 5))).toOptional<c10::ScalarType>())
 //                               .layout((std::move(peek(*stack, 2, 5))).toOptional<c10::Layout>())

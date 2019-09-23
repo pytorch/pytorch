@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/lite_interpreter/import_bytecode.h>
 #include <torch/csrc/jit/lite_interpreter/mobile_module.h>
 #include <torch/csrc/jit/import.h>
+#include <torch/types.h>
 
 // Tests go in torch::jit
 namespace torch {
@@ -27,10 +28,22 @@ void printSlots(const c10::intrusive_ptr<c10::ivalue::Object>& obj) {
 
 void testLiteInterpreter() {
   std::vector<torch::jit::IValue> inputs;
-  auto m = load("/Users/myuan/data/fbnet/fbnet.pt");
-  inputs.push_back(torch::ones({1, 3, 224, 224}));
+
+//  auto m = load("/Users/myuan/data/fbnet/fbnet.pt");
+//  inputs.push_back(torch::ones({1, 3, 224, 224}));
+
 //  auto m = load("/Users/myuan/data/lenet/Lenet_trace.pt");
 //  inputs.push_back(torch::ones({1, 1, 30, 30}));
+
+  // pytext
+  auto m = load("/Users/myuan/data/pytext/model_traced.pt");
+  auto options = torch::TensorOptions().dtype(torch::kI64)
+                     .requires_grad(false).device(torch::kCPU);
+  int length = 5;
+  inputs.push_back(torch::ones({1, length}, options));
+  auto stensor = length * torch::ones({1}, options);
+  inputs.push_back(stensor);
+
   at::Tensor outputref = m.forward(inputs).toTensor();
   std::cout << outputref.slice(/*dim=*/1, /*start=*/0, /*end=*/5);
 
