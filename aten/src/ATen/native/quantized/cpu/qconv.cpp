@@ -265,7 +265,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
           1 /* num_threads */);
     }
 
-    //TODO: remove permute once MemoryLayout is added above
+    // TODO: remove permute once MemoryLayout is added above
     return output.permute({0, 3, 1, 2});
   }
 #endif
@@ -285,13 +285,15 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     PackedConvWeightsQnnp& pack_ptr =
         cpp_custom_type_hack::cast<PackedConvWeightsQnnp>(packed_weight);
     auto packB = pack_ptr.w.get();
-    auto& kernel = pack_ptr.kernel;
+    auto kernel = pack_ptr.kernel;
     auto kernel_zp = pack_ptr.w_zp;
     auto kernel_scale = pack_ptr.w_scale;
 
     const uint32_t kernel_h = kernel[0];
     const uint32_t kernel_w = kernel[1];
-    const auto out_ch = packB->getOutputChannels();
+    // TODO Can be replaced with packB->getOutputChannels() when update pre-pack
+    // to actually do the packing.
+    const auto out_ch = pack_ptr.bias.size(0);
     // inputs are in semantic NCHW format
     int N = act.size(0);
     int in_ch = act.size(1);
@@ -335,6 +337,39 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     // Force output format to be NHWC
     // TODO: consider preserving input format
     // TODO: add MemoryFormat::ChannelsLast here once perf is fixed
+    auto input_scale = input_contig.q_scale();
+
+    // Re-quantizing the bias based on input scale and weight scale.
+    if (!pack_ptr.input_scale.has_value() ||
+        pack_ptr.input_scale.value() != input_scale) {
+      // Get the original weight and adjust it to uint8 from int8
+      auto weight_contig =
+          pack_ptr.orig_weight.contiguous(MemoryFormat::ChannelsLast);
+      auto bias_fp32 = pack_ptr.bias;
+      int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
+      Tensor qnnp_weight = at::_empty_affine_quantized(
+          weight_contig.sizes(),
+          at::device(kCPU).dtype(kQUInt8),
+          kernel_scale,
+          kernel_zp,
+          MemoryFormat::ChannelsLast);
+      auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
+      for (int i = 0; i < weight_contig.numel(); ++i) {
+        qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
+      }
+      // Original bias was float, so we requantize it here.
+      auto bias = at::quantize_linear(
+          bias_fp32, kernel_scale * input_scale, 0, kQInt32);
+      // Update the input scale to not pack again.
+      pack_ptr.input_scale = input_scale;
+      pack_ptr.w.reset();
+      pack_ptr.w = guts::make_unique<qnnpack::PrePackConvWeights>(
+          conv_p,
+          (uint8_t*)qnnp_w_data,
+          (int32_t*)bias.data_ptr<c10::qint32>());
+      packB = pack_ptr.w.get();
+    }
+    TORCH_INTERNAL_ASSERT(packB != nullptr, "Packed Weights are NULL");
     auto outShape =
         convOutputShape(N, K, H, W, kernel, stride, padding, dilation);
     TORCH_CHECK(
@@ -372,7 +407,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         runStatus == pytorch_qnnp_status_success,
         "failed to run quantized::conv2d (qnnpack) operator");
 
-    //TODO: remove permute once MemoryLayout is added above
+    // TODO: remove permute once MemoryLayout is added above
     return output.permute({0, 3, 1, 2});
   }
 #endif

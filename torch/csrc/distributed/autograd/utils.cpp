@@ -25,9 +25,6 @@ void addSendRpcBackward(
       grad_fn->add_input_metadata(tensor);
     }
 
-    // Update the autograd context and the message.
-    auto& autogradContainer = DistAutogradContainer::getInstance();
-
     // Record the send autograd function in our current context.
     autogradContext.addSendFunction(
         grad_fn, autogradMetadata.autogradMessageId);

@@ -28,6 +28,8 @@ class TORCH_API ScriptCall : public RpcCommandBase {
   Message toMessage() override;
   static std::unique_ptr<ScriptCall> fromMessage(const Message& message);
 
+  virtual ~ScriptCall() = default;
+
  protected:
   virtual void toIValues(std::vector<at::IValue>& ivalues) const;
   static std::shared_ptr<Operator> fromIValues(

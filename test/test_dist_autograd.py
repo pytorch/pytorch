@@ -8,6 +8,7 @@ from functools import wraps
 import six
 import unittest
 import torch
+import time
 
 if not dist.is_available():
     print("c10d not available, skipping tests")
@@ -105,6 +106,7 @@ class TestDistAutograd(MultiProcessTestCase):
 
             # Wait for the prev rank to be done with rpc.
             while not prev_rank_rpc_done:
+                time.sleep(0.1)
                 pass
 
             # Now verify the autograd graph.

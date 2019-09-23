@@ -99,13 +99,13 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   }
 
 #if !(defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR))
-  THPByteOrder byte_order;
+  torch::utils::THPByteOrder byte_order;
   if (strcmp(byte_order_str, "native") == 0) {
-    byte_order = THP_nativeByteOrder();
+    byte_order = torch::utils::THP_nativeByteOrder();
   } else if (strcmp(byte_order_str, "big") == 0) {
-    byte_order = THP_BIG_ENDIAN;
+    byte_order = torch::utils::THP_BIG_ENDIAN;
   } else if (strcmp(byte_order_str, "little") == 0) {
-    byte_order = THP_LITTLE_ENDIAN;
+    byte_order = torch::utils::THP_LITTLE_ENDIAN;
   } else {
     PyErr_Format(PyExc_ValueError,
       "invalid byte_order '%s' (expected 'big', 'little', or 'native')",
@@ -152,22 +152,30 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   // Because of ASAN checks, that are failing in the THStorage.cpp whenever
   // we are trying to get a value which is not 0 or 1, we have to manually
   // convert original values to boolean ones.
-  THP_decodeBoolBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+  torch::utils::THP_decodeBoolBuffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_SHORT)
-  THP_decodeInt16Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+  torch::utils::THP_decodeInt16Buffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_INT)
-  THP_decodeInt32Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+  torch::utils::THP_decodeInt32Buffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_LONG)
   // TODO: remove the cast
-  THP_decodeInt64Buffer((int64_t*) THWStorage_(data)(storage), src + offset, byte_order, count);
+  torch::utils::THP_decodeInt64Buffer(
+      (int64_t*)THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_HALF)
-  THP_decodeHalfBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+  torch::utils::THP_decodeHalfBuffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_BFLOAT16)
-  THP_decodeBFloat16Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+  torch::utils::THP_decodeBFloat16Buffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_FLOAT)
-  THP_decodeFloatBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+  torch::utils::THP_decodeFloatBuffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_DOUBLE)
-  THP_decodeDoubleBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+  torch::utils::THP_decodeDoubleBuffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
 #else
 #error "Unknown type"
 #endif

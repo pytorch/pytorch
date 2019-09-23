@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/rpc/rpc_with_autograd.h>
-#include <torch/csrc/byte_order.h>
+#include <c10/util/C++17.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/utils/byte_order.h>
 
 namespace torch {
 namespace distributed {
@@ -63,16 +64,16 @@ Message RpcWithAutograd::toMessage() {
   payload[writableIndex++] = wrappedMessage_.type();
 
   // Add autograd ids.
-  THP_encodeInt64Buffer(
+  torch::utils::THP_encodeInt64Buffer(
       reinterpret_cast<uint8_t*>(payload.data()) + writableIndex,
       &autogradMetadata_.autogradContextId,
-      THPByteOrder::THP_BIG_ENDIAN,
+      torch::utils::THPByteOrder::THP_BIG_ENDIAN,
       1);
   writableIndex += sizeof(int64_t);
-  THP_encodeInt64Buffer(
+  torch::utils::THP_encodeInt64Buffer(
       reinterpret_cast<uint8_t*>(payload.data()) + writableIndex,
       &autogradMetadata_.autogradMessageId,
-      THPByteOrder::THP_BIG_ENDIAN,
+      torch::utils::THPByteOrder::THP_BIG_ENDIAN,
       1);
 
   return Message(
@@ -96,19 +97,19 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   // autograd message id.
   size_t indexToRead = payload.size() - sizeof(int64_t);
   TORCH_INTERNAL_ASSERT(indexToRead >= 0);
-  THP_decodeInt64Buffer(
+  torch::utils::THP_decodeInt64Buffer(
       &autogradMessageId,
       reinterpret_cast<uint8_t*>(payload.data()) + indexToRead,
-      THPByteOrder::THP_BIG_ENDIAN,
+      torch::utils::THPByteOrder::THP_BIG_ENDIAN,
       1);
 
   // autograd context id.
   indexToRead -= sizeof(int64_t);
   TORCH_INTERNAL_ASSERT(indexToRead >= 0);
-  THP_decodeInt64Buffer(
+  torch::utils::THP_decodeInt64Buffer(
       &autogradContextId,
       reinterpret_cast<uint8_t*>(payload.data()) + indexToRead,
-      THPByteOrder::THP_BIG_ENDIAN,
+      torch::utils::THPByteOrder::THP_BIG_ENDIAN,
       1);
 
   // message type.
@@ -132,12 +133,12 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
     wrappedRpc = std::move(deserializeResponse(wrappedMessage));
   }
 
-  return std::unique_ptr<RpcWithAutograd>(new RpcWithAutograd(
+  return c10::guts::make_unique<RpcWithAutograd>(
       message.type(),
       AutogradMetadata(autogradContextId, autogradMessageId),
       std::move(wrappedRpc),
       wrappedMessageType,
-      message.tensors()));
+      message.tensors());
 }
 
 std::vector<torch::Tensor>& RpcWithAutograd::tensors() {

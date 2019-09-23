@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/python_udf_call.h>
+#include <c10/util/C++17.h>
 
 namespace torch {
 namespace distributed {
@@ -16,7 +17,7 @@ Message PythonUDFCall::toMessage() {
 
 std::unique_ptr<PythonUDFCall> PythonUDFCall::fromMessage(
     const Message& message) {
-  return std::unique_ptr<PythonUDFCall>(new PythonUDFCall(message.payload()));
+  return c10::guts::make_unique<PythonUDFCall>(message.payload());
 }
 
 const std::vector<char>& PythonUDFCall::pickledPayload() const {

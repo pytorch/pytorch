@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
+#include <c10/util/C++17.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
 #include <torch/csrc/distributed/autograd/utils.h>
@@ -45,15 +46,13 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
           "size ",
           stack.size());
 
-      return std::unique_ptr<ScriptResp>(
-          new ScriptResp(std::move(stack.front())));
+      return c10::guts::make_unique<ScriptResp>(std::move(stack.front()));
     }
     case MessageType::PYTHON_CALL: {
       auto pyCall = static_cast<PythonUDFCall*>(rpc);
       auto payload = PythonRpcHandler::getInstance().generatePythonUDFResult(
           pyCall->pickledPayload());
-      return std::unique_ptr<PythonUDFResp>(
-          new PythonUDFResp(std::move(payload)));
+      return c10::guts::make_unique<PythonUDFResp>(std::move(payload));
     }
     case MessageType::REMOTE_CALL: {
       auto src = static_cast<ScriptRemoteCall*>(rpc);
@@ -85,8 +84,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
       std::shared_ptr<OwnerRRef<IValue>> rref =
           RRefContext::getInstance()->getOrCreateOwnerRRef<IValue>(
               RRefId::fromIValue(srf->value()));
-      return std::unique_ptr<ScriptRRefFetchRet>(
-          new ScriptRRefFetchRet(rref->getValue()));
+      return c10::guts::make_unique<ScriptRRefFetchRet>(rref->getValue());
     }
     case MessageType::RREF_USER_CREATE: {
       auto sra = static_cast<ScriptRRefCreate*>(rpc);
@@ -107,9 +105,9 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
           rpcWithAutograd->autogradMetadata(), rpcWithAutograd->tensors());
 
       // Process the original RPC.
+      auto wrappedMessageType = rpcWithAutograd->wrappedMessageType();
       auto wrappedRpcResponse = processRpc(
-          rpcWithAutograd->moveWrappedRpc().get(),
-          rpcWithAutograd->wrappedMessageType());
+          rpcWithAutograd->moveWrappedRpc().get(), wrappedMessageType);
 
       // Wrap the response with autograd, need a new autograd message id for
       // each send/recv pair.
@@ -118,10 +116,10 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
           autogradMetadata.autogradContextId,
           autogradContainer.newAutogradMessageId());
 
-      std::unique_ptr<RpcWithAutograd> response(new RpcWithAutograd(
+      auto response = c10::guts::make_unique<RpcWithAutograd>(
           MessageType::MESSAGE_WITH_AUTOGRAD_RESP,
           responseAutogradMetadata,
-          std::move(wrappedRpcResponse)));
+          std::move(wrappedRpcResponse));
 
       // Attach the 'send' autograd function if needed.
       if (autogradContext != nullptr) {

@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
+#include <c10/util/C++17.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/python_udf_call.h>
@@ -70,16 +71,15 @@ py::object toPyObjInternal(RpcCommandBase* rpc, MessageType messageType) {
     }
     case MessageType::MESSAGE_WITH_AUTOGRAD_RESP: {
       auto rpcWithAutograd = static_cast<RpcWithAutograd*>(rpc);
-      const auto& autogradMetadata = rpcWithAutograd->autogradMetadata();
 
       // Attach 'recv' autograd function.
-      DistAutogradContext* autogradContext = addRecvRpcBackward(
+      addRecvRpcBackward(
           rpcWithAutograd->autogradMetadata(), rpcWithAutograd->tensors());
 
       // Handle the original RPC.
+      auto wrappedMessageType = rpcWithAutograd->wrappedMessageType();
       return toPyObjInternal(
-          rpcWithAutograd->moveWrappedRpc().get(),
-          rpcWithAutograd->wrappedMessageType());
+          rpcWithAutograd->moveWrappedRpc().get(), wrappedMessageType);
     }
     default: {
       AT_ERROR("Unrecognized response message type ", messageType);
@@ -99,7 +99,7 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
     const py::kwargs& kwargs) {
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
-  std::unique_ptr<ScriptCall> scriptCall(new ScriptCall(op, std::move(stack)));
+  auto scriptCall = c10::guts::make_unique<ScriptCall>(op, std::move(stack));
   auto& autogradContainer = DistAutogradContainer::getInstance();
   if (autogradContainer.hasValidContext()) {
     // Retrieve the appropriate context to modify.

@@ -1,11 +1,13 @@
-#ifndef THP_BYTE_ORDER_H
-#define THP_BYTE_ORDER_H
+#pragma once
 
 #include <THHalf.h>
 #include <c10/util/BFloat16.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <cstddef>
 #include <cstdint>
+
+namespace torch {
+namespace utils {
 
 enum THPByteOrder {
   THP_LITTLE_ENDIAN = 0,
@@ -81,4 +83,5 @@ TORCH_API void THP_encodeDoubleBuffer(
     THPByteOrder order,
     size_t len);
 
-#endif
+} // namespace utils
+} // namespace torch
