@@ -2,6 +2,8 @@
 
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/cpp_custom_type_hack.h>
+#include <ATen/native/quantized/cpu/fbgemm_utils.h>
 
 #include <ATen/native/c10_utils.h>
 
@@ -11,7 +13,7 @@ namespace {
 
 // Check if pytorch is compiled with MIOpen.
 bool use_miopen(const at::Tensor& input, const double dropout_state) {
-    bool is_miopen_acceptable = (input.scalar_type() == at::kFloat) && 
+    bool is_miopen_acceptable = (input.scalar_type() == at::kFloat) &&
                                 (detail::getCUDAHooks().compiledWithMIOpen()) &&
                                 (input.is_cuda()) &&
                                 (dropout_state == 0.0);
@@ -170,10 +172,10 @@ struct QuantizedCellParamsDynamic {
   }
 
   Tensor linear_ih(const Tensor& input_ih) const {
-    const auto kFuncName = "quantized::fbgemm_linear_dynamic";
+    const auto kFuncName = "quantized::linear_dynamic";
     const auto kOvrldName = "";
     const std::vector<c10::IValue> output_ih_list =
-        callOp(kFuncName, kOvrldName, input_ih, w_ih, b_ih);
+        callOp(kFuncName, kOvrldName, input_ih, w_ih);
     TORCH_INTERNAL_ASSERT(
         output_ih_list.size() == 1,
         "The output vector should have exact one element");
@@ -181,10 +183,10 @@ struct QuantizedCellParamsDynamic {
     return output_ih;
   }
   Tensor linear_hh(const Tensor& input_hh) const {
-    const auto kFuncName = "quantized::fbgemm_linear_dynamic";
+    const auto kFuncName = "quantized::linear_dynamic";
     const auto kOvrldName = "";
     const std::vector<c10::IValue> output_hh_list =
-        callOp(kFuncName, kOvrldName, input_hh, w_hh, b_hh);
+        callOp(kFuncName, kOvrldName, input_hh, w_hh);
     TORCH_INTERNAL_ASSERT(
         output_hh_list.size() == 1,
         "The output vector should have exact one element");
@@ -278,12 +280,23 @@ static std::vector<QuantizedCellParamsDynamic> gather_quantized_params_dynamic(
   static at::Tensor undefined;
   std::vector<QuantizedCellParamsDynamic> result;
   TORCH_CHECK(
-      params.size() % 4 == 0,
+      params.size() % 2 == 0,
       "got an incorrect number of quantized RNN parameters");
-  for (size_t i = 0; i < params.size(); i += 4) {
-    result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3]);
+  // PackedLinearWeight is only defined when USE_FBGEMM is defined
+#ifdef USE_FBGEMM
+  for (size_t i = 0; i < params.size(); i += 2) {
+    auto& packed_struct_ih =
+        cpp_custom_type_hack::cast<PackedLinearWeight>(params[i]);
+    auto& packed_struct_hh =
+        cpp_custom_type_hack::cast<PackedLinearWeight>(params[i + 1]);
+    auto bias_ih = packed_struct_ih.bias.value_or(undefined);
+    auto bias_hh = packed_struct_hh.bias.value_or(undefined);
+    result.emplace_back(params[i], params[i + 1], bias_ih, bias_hh);
   }
   return result;
+#else // USE_FBGEMM
+  TORCH_INTERNAL_ASSERT(false, "Tried to use quantized RNN wihtout FBGEMM!")
+#endif // USE_FBGEMM
 }
 
 static std::vector<QuantizedCellParamsFP16> gather_quantized_params_fp16(
@@ -966,7 +979,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(output, hy, cy);
-  } 
+  }
 
   if (use_miopen(_input, dropout_p)) {
     Tensor output, hy, cy;
@@ -995,7 +1008,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     lstm_packed_cudnn_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
     return std::make_tuple(output, hy, cy);
-  } 
+  }
 
   if (use_miopen(data, dropout_p)) {
     Tensor output, hy, cy;
@@ -1003,7 +1016,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
     return std::make_tuple(output, hy, cy);
   }
-  
+
   PackedSequence input { data, batch_sizes };
   auto params = gather_params(_params, has_biases);
   auto result = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
@@ -1059,11 +1072,13 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
   check_device(_input, _params, hx);
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   TORCH_CHECK(has_biases, "quantized LSTM requires biases");
-  TORCH_CHECK(result_dtype == at::kChar || result_dtype == at::kHalf,
-              "dtype is not supported");
+  TORCH_CHECK(
+      result_dtype == at::kChar || result_dtype == at::kQInt8 ||
+          result_dtype == at::kHalf,
+      "dtype is not supported");
 
   std::tuple<Tensor, Tensor, Tensor> results;
-  if (result_dtype == at::kChar) {
+  if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
     if (use_dynamic) {
       auto params = gather_quantized_params_dynamic(_params);
       results = _lstm_impl<FullLayer, FullBidirectionalLayer>(

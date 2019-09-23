@@ -7,6 +7,9 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/init_qnnpack.h>
+#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
 #include <algorithm>
 #include <vector>
@@ -244,12 +247,142 @@ Tensor quantized_max_pool2d(
 namespace {
 class QMaxPool2D_arr_args final : public torch::OperatorKernel {
  public:
+  #ifdef USE_PYTORCH_QNNPACK
+   Tensor qnnpack_maxpool(
+       Tensor input,
+       IntArrayRef kernel_size,
+       IntArrayRef stride,
+       IntArrayRef padding,
+       IntArrayRef dilation) {
+     Tensor qy;
+
+     TORCH_CHECK(
+         input.ndimension() == 4,
+         "qnnpack_maxpool(): Expected input to be 4-dimensional: got ",
+         input.ndimension());
+     TORCH_CHECK(
+         kernel_size.size() == 2,
+         "qnnpack_maxpool(): Expected kernel_size to be 2-dimensional: got ",
+         kernel_size.size());
+     TORCH_CHECK(
+         stride.size() == 2,
+         "qnnpack_maxpool(): Expected stride to be 2-dimensional: got ",
+         stride.size());
+     TORCH_CHECK(
+         dilation.size() == 2,
+         "qnnpack_maxpool(): Expected dilation to be 2-dimensional: got ",
+         dilation.size());
+     TORCH_CHECK(
+         padding.size() == 2,
+         "qnnpack_maxpool(): Expected padding to be 2-dimensional: got ",
+         padding.size());
+
+     int64_t batch_size = input.size(0);
+     int64_t inC = input.size(1);
+     int64_t inH = input.size(2);
+     int64_t inW = input.size(3);
+     // TODO: change it to contiguous(MemoryFormat::ChannelsLast) once a perf
+     // regression of it is fixed.
+     Tensor input_contig = input.permute({0, 2, 3, 1}).contiguous();
+
+     initQNNPACK();
+     const auto scale = input_contig.q_scale();
+     const auto zero_point = input_contig.q_zero_point();
+     pytorch_qnnp_operator_t qnnpack_operator{nullptr};
+
+     int64_t padH = padding[0];
+     int64_t padW = padding[1];
+     int64_t kH = kernel_size[0];
+     int64_t kW = kernel_size[1];
+     int64_t strideH = stride[0];
+     int64_t strideW = stride[1];
+     int64_t dilationH = dilation[0];
+     int64_t dilationW = dilation[1];
+
+     TORCH_CHECK(
+         kH > 0 && kW > 0,
+         "qnnpack_maxpool(): kernel_size should be greater than zero.");
+     TORCH_CHECK(
+         strideH > 0 && strideW > 0,
+         "qnnpack_maxpool(): strides should be greater than zero.");
+
+     const pytorch_qnnp_status createStatus =
+         pytorch_qnnp_create_max_pooling2d_nhwc_u8(
+             padH /* input_padding_top */,
+             padW /* input_padding_right */,
+             padH /* input_padding_bottom */,
+             padW /* input_padding_left */,
+             kH /* pooling height */,
+             kW /* pooling width */,
+             strideH /* stride height */,
+             strideW /* stride width */,
+             dilationH /* dilation height */,
+             dilationW /* dilation width */,
+             inC /* input channels */,
+             std::numeric_limits<uint8_t>::min() /* output min */,
+             std::numeric_limits<uint8_t>::max() /* output max */,
+             0 /* flags */,
+             &qnnpack_operator);
+     TORCH_INTERNAL_ASSERT(
+         createStatus == pytorch_qnnp_status_success,
+         "failed to create QNNPACK MaxPool operator");
+
+     int64_t outC = inC;
+     int64_t outH =
+         pooling_output_shape(inH, kH, padH, strideH, dilationH, false);
+     int64_t outW =
+         pooling_output_shape(inW, kW, padW, strideW, dilationW, false);
+
+     TORCH_CHECK(
+         outH > 0 && outW > 0,
+         "qnnpack_maxpool(): the resulting output Tensor size should be >= 0");
+
+     std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
+         qnnpack_uniq_ptr(qnnpack_operator);
+
+     // NHWC output
+     qy = at::_empty_affine_quantized(
+         {batch_size, outH, outW, outC},
+         at::device(kCPU).dtype(kQUInt8),
+         scale,
+         zero_point);
+
+     const pytorch_qnnp_status setupStatus =
+         pytorch_qnnp_setup_max_pooling2d_nhwc_u8(
+             qnnpack_operator /* max pooling */,
+             batch_size /* batch size */,
+             inH /* input height */,
+             inW /* input width */,
+             (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input */,
+             inC /* input_pixel_stride */,
+             (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
+             outC /* output_pixel_stride */,
+             nullptr /* thread pool */);
+     TORCH_INTERNAL_ASSERT(
+         setupStatus == pytorch_qnnp_status_success,
+         "failed to setup QNNPACK MaxPool operator");
+
+     pthreadpool_t threadpool = caffe2::mobile_threadpool();
+     const pytorch_qnnp_status runStatus =
+         pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
+     TORCH_INTERNAL_ASSERT(
+         runStatus == pytorch_qnnp_status_success,
+         "failed to run QNNPACK MaxPool operator");
+     //TODO: remove permute once MemoryLayout is added above
+     return qy.permute({0, 3, 1, 2});
+   }
+   #endif
   Tensor operator()(
       Tensor qx,
       std::vector<int64_t> kernel_size,
       std::vector<int64_t> stride,
       std::vector<int64_t> padding,
       std::vector<int64_t> dilation) {
+    #ifdef USE_PYTORCH_QNNPACK
+    if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+      return qnnpack_maxpool(qx, kernel_size, stride, padding, dilation);
+    }
+    #endif
     return at::max_pool2d(qx, kernel_size, stride, padding, dilation);
   }
 };
