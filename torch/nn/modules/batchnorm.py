@@ -38,7 +38,7 @@ class _BatchNorm(Module):
             self.register_parameter('running_mean', None)
             self.register_parameter('running_var', None)
             self.register_parameter('num_batches_tracked', None)
-        self.num_batches_tracked_scalar = -1;
+        self.num_batches_tracked_scalar = -1
         self.reset_parameters()
 
     def reset_running_stats(self):
@@ -57,8 +57,10 @@ class _BatchNorm(Module):
             init.zeros_(self.bias)
 
     def __getattr__(self, name):
-        if self.track_running_stats and name == 'num_batches_tracked' and name in self.__dict__['_buffers'] and self.num_batches_tracked_scalar != -1:
-            return super(_BatchNorm, self).__getattr__(name).fill_(self.num_batches_tracked_scalar)
+        if self.track_running_stats and name == 'num_batches_tracked' and name in self.__dict__[
+                '_buffers'] and self.num_batches_tracked_scalar != -1:
+            return super(_BatchNorm, self).__getattr__(name).fill_(
+                self.num_batches_tracked_scalar)
         return super(_BatchNorm, self).__getattr__(name)
 
     def _check_input_dim(self, input):
