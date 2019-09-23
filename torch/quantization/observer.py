@@ -10,6 +10,32 @@ import torch.nn as nn
 from torch._jit_internal import List, Optional
 
 
+class _PartialWrapper(object):
+    def __init__(self, p):
+        self.p = p
+
+    def __call__(self, *args, **keywords):
+        return self.p(*args, **keywords)
+
+    def __repr__(self):
+        return self.p.__repr__()
+
+
+def _with_args(cls_or_self, **kwargs):
+    """
+    Wrapper around functools.partial that allows chaining.
+
+    Often you want to assign it to a class as a class method:
+
+        Foo.with_args = classmethod(_with_args)
+        Foo.with_args(x=1).with_args(y=2)
+    """
+    r = _PartialWrapper(partial(cls_or_self, **kwargs))
+    return r
+
+_PartialWrapper.with_args = _with_args
+
+
 ABC = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
 
 
@@ -132,6 +158,7 @@ class ObserverBase(ABC, nn.Module):
 
         return torch.tensor([scale]), torch.tensor([zero_point])
 
+    with_args = classmethod(_with_args)
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(ObserverBase, self)._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'dtype'] = self.dtype
@@ -554,14 +581,14 @@ class HistogramObserver(ObserverBase):
 
 
 
-class TensorObserver(ObserverBase):
+class RecordingObserver(ObserverBase):
     r"""
     The module is mainly for debug and records the tensor values during runtime
     """
     __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
     def __init__(self, **kwargs):
-        super(TensorObserver, self).__init__(**kwargs)
+        super(RecordingObserver, self).__init__(**kwargs)
         self.tensor_val = []
 
     def forward(self, x):
@@ -570,36 +597,15 @@ class TensorObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        raise Exception("calculate_qparams should not be called for TensorObserver")
+        raise Exception("calculate_qparams should not be called for RecordingObserver")
 
     @torch.jit.export
     def get_tensor_value(self):
         return self.tensor_val
 
-def observer(observer_cls, **kwargs):
-    return partial(observer_cls, **kwargs)
-
-def default_per_channel_weight_observer(**kwargs):
-    kwargs.setdefault('dtype', torch.qint8)
-    kwargs.setdefault('qscheme', torch.per_channel_symmetric)
-    return observer(PerChannelMinMaxObserver, **kwargs)
-
-def default_observer(**kwargs):
-    # Restrict activations to be in the range (0,127)
-    kwargs.setdefault("reduce_range", True)
-    return observer(MinMaxObserver, **kwargs)
-
-def default_l2_observer(**kwargs):
-    # Restrict activations to be in the range (0,127)
-    print(kwargs)
-    kwargs.setdefault("reduce_range", True)
-    return observer(HistogramObserver, **kwargs)
-
-def default_debug_observer(**kwargs):
-    return observer(TensorObserver, **kwargs)
-
-
-def default_weight_observer(**kwargs):
-    kwargs.setdefault("dtype", torch.qint8)
-    kwargs.setdefault("qscheme", torch.per_tensor_symmetric)
-    return observer(MinMaxObserver, **kwargs)
+# Restrict activations to be in the range (0,127)
+default_observer = MinMaxObserver.with_args(reduce_range=True)
+default_debug_observer = RecordingObserver
+default_weight_observer = MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)
+default_histogram_observer = HistogramObserver.with_args(reduce_range=True)
+default_per_channel_weight_observer = PerChannelMinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_channel_symmetric)

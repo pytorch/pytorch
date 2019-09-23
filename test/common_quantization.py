@@ -89,8 +89,11 @@ class QuantizationTestCase(TestCase):
             have observers in preperation for quantization
         """
         if hasattr(module, 'qconfig') and module.qconfig is not None and len(module._modules) == 0:
-            self.assertTrue(hasattr(module, 'observer'),
-                            'module: ' + str(type(module)) + ' do not have observer')
+            if module.training and \
+               type(module) not in set(torch.quantization.DEFAULT_QAT_SKIP_MODULE_LIST) \
+               or module.training is False:
+                self.assertTrue(hasattr(module, 'observer'),
+                                'module: ' + str(type(module)) + ' do not have observer')
         for child in module.children():
             self.checkObservers(child)
 
@@ -279,8 +282,8 @@ class AnnotatedCustomConfigNestedModel(torch.nn.Module):
             'dtype': torch.quint8,
             'qscheme': torch.per_tensor_affine
         }
-        custom_qconfig = QConfig(activation=default_observer(**custom_options),
-                                 weight=default_weight_observer())
+        custom_qconfig = QConfig(activation=default_observer.with_args(**custom_options),
+                                 weight=default_weight_observer)
         self.sub2.fc1.qconfig = custom_qconfig
 
         self.sub2.fc1 = QuantWrapper(self.sub2.fc1)
