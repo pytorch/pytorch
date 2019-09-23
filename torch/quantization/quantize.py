@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
+import torch
 import torch.nn as nn
 import torch.nn._intrinsic as nni
 import torch.nn._intrinsic.quantized as nniq
@@ -101,8 +102,9 @@ def add_observer(module):
     if hasattr(module, 'qconfig') and module.qconfig is not None and \
        len(module._modules) == 0:
         # observer and hook will be gone after we swap the module
-        module.add_module('observer', module.qconfig.activation())
-        module.register_forward_hook(_observer_forward_hook)
+        if module.training and type(module) not in set(DEFAULT_QAT_SKIP_MODULE_LIST) or module.training is False:
+            module.add_module('observer', module.qconfig.activation())
+            module.register_forward_hook(_observer_forward_hook)
 
 class QuantWrapper(nn.Module):
     r"""A wrapper class that wraps the input module, adds QuantStub and
@@ -229,6 +231,8 @@ DEFAULT_DYNAMIC_MODULE_MAPPING = {
     nn.Linear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
 }
+# List of modules for which we do not need FakeQuant for activations
+DEFAULT_QAT_SKIP_MODULE_LIST = [DeQuantStub]
 
 def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
     r"""Converts a float model to quantized model.
@@ -260,7 +264,7 @@ DEFAULT_QCONFIG_DICT = {
     nn.LSTM : default_dynamic_qconfig,
 }
 
-def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):
+def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING, dtype=torch.qint8):
     r"""Converts a float model to dynamic quantized model.
 
     Perform dynamic training and output a quantized model.
@@ -268,7 +272,7 @@ def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_D
     model = copy.deepcopy(model)
     model.eval()
     propagate_qconfig(model, qconfig_dict)
-    convert(model, mapping)
+    convert(model, mapping, dtype)
     return model
 
 def prepare_qat(model):
@@ -294,7 +298,7 @@ def quantize_qat(model, run_fn, run_args):
     convert(model)
     return model
 
-def convert(module, mapping=DEFAULT_MODULE_MAPPING):
+def convert(module, mapping=DEFAULT_MODULE_MAPPING, dtype=torch.qint8):
     r"""Converts the float module with observers(where we can get quantization
     parameters) to a quantized module.
     Args:
@@ -311,13 +315,13 @@ def convert(module, mapping=DEFAULT_MODULE_MAPPING):
 
     for name, mod in module.named_children():
         if type(mod) not in SWAPPABLE_MODULES:
-            convert(mod, mapping)
-        reassign[name] = swap_module(mod, mapping)
+            convert(mod, mapping, dtype)
+        reassign[name] = swap_module(mod, mapping, dtype)
 
     for key, value in reassign.items():
         module._modules[key] = value
 
-def swap_module(mod, mapping):
+def swap_module(mod, mapping, dtype=torch.qint8):
     r"""Swaps the module if it has a quantized counterpart and it has an
     `observer` attached.
 
@@ -331,28 +335,29 @@ def swap_module(mod, mapping):
     new_mod = mod
     if hasattr(mod, 'qconfig') and mod.qconfig is not None:
         if type(mod) in mapping:
-            new_mod = mapping[type(mod)].from_float(mod)
+            supported_scalar_types = [torch.qint8, torch.float16]
+            if dtype not in supported_scalar_types:
+                raise RuntimeError('Unsupported dtype: {}'.format(dtype))
+            if dtype == torch.qint8:
+                new_mod = mapping[type(mod)].from_float(mod)
+            elif dtype == torch.float16:
+                # We want to support float16 dynamic quantization
+                new_mod = mapping[type(mod)].from_float(mod, dtype)
     return new_mod
 
-def dump_tensor(mod, target_dict, prefix=""):
-    r"""Traverse the modules and save the weight and stored activation to given dict.
+def get_observer_dict(mod, target_dict, prefix=""):
+    r"""Traverse the modules and save all observers into dict.
     This is mainly used for quantization accuracy debug
     Args:
-        mod: the top module we want to save all tensors
+        mod: the top module we want to save all observers
         prefix: the prefix for the current module
-        target_dict: the dictionary used to save the tensors
+        target_dict: the dictionary used to save all the observers
     """
     def get_prefix(prefix):
         return prefix if prefix == "" else prefix + '.'
 
-    weight_unpack = getattr(mod, "weight", None)
-    if weight_unpack is not None and callable(weight_unpack):
-        target_dict[get_prefix(prefix) + 'weight'] = mod.weight()
-    elif hasattr(mod, 'weight'):
-        target_dict[get_prefix(prefix) + 'weight'] = mod.weight
-
     if hasattr(mod, 'observer'):
-        target_dict[get_prefix(prefix) + 'activation'] = mod.observer.get_tensor_value()
+        target_dict[get_prefix(prefix) + 'observer'] = mod.observer
     for name, child in mod.named_children():
         module_prefix = get_prefix(prefix) + name if prefix else name
-        dump_tensor(child, target_dict, module_prefix)
+        get_observer_dict(child, target_dict, module_prefix)

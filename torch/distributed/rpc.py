@@ -76,14 +76,14 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
         # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
         init_rref_context(_agent)
-    elif is_backend_registered(rpc_backend):
-        _agent = registered_init_rpc(rpc_backend,
+    elif is_backend_registered(backend):
+        _agent = registered_init_rpc(backend,
                                      self_rank=self_rank,
                                      self_name=self_name,
-                                     init_url=init_method)
+                                     init_method=init_method)
         init_rref_context(_agent)
     else:
-        raise RuntimeError("Unrecognized RPC backend ", rpc_backend)
+        raise RuntimeError("Unrecognized RPC backend ", backend)
 
 
 @_require_initialized

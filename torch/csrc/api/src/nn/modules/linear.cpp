@@ -9,7 +9,7 @@
 namespace torch {
 namespace nn {
 
-LinearImpl::LinearImpl(LinearOptions options) : options(options) {
+LinearImpl::LinearImpl(const LinearOptions& options_) : options(options_) {
   reset();
 }
 
