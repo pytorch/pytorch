@@ -3365,7 +3365,7 @@ graph(%Ra, %Rb):
                 else:
                     s = torch.rand(5, dtype=torch.float64) + 0.1
                     zp = torch.randint(5, 15, (5,))
-                    x_q = torch.quantize_linear_per_channel(x, s, zp, [1], torch.quint8)
+                    x_q = torch.quantize_per_channel(x, s, zp, [1], torch.quint8)
                 self.register_buffer('x', x_q)
 
             @torch.jit.script_method
