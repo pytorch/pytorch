@@ -167,6 +167,11 @@ if [[ $BUILD_ENVIRONMENT == *caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04* ]]; then
      rm "$l"
   done
 
+  curl -L -k -o ./cmake-3.14.6-Linux-x86_64.tar.gz https://github.com/Kitware/CMake/releases/download/v3.14.6/cmake-3.14.6-Linux-x86_64.tar.gz
+  tar -xzf cmake-3.14.6-Linux-x86_64.tar.gz
+  rm cmake-3.14.6-Linux-x86_64.tar.gz
+  export PATH=$(pwd)/cmake-3.14.6-Linux-x86_64/bin/:$PATH
+
   # building OSS release of ONNX parser on top of just installed
   git clone --depth 1 --branch release/6.0 https://github.com/onnx/onnx-tensorrt.git
   cd onnx-tensorrt/
@@ -180,7 +185,7 @@ if [[ $BUILD_ENVIRONMENT == *caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04* ]]; then
   make -j4
   sudo make install
   cd ../../
-  rm -rf onnx-tensorrt/
+  rm -rf onnx-tensorrt/ cmake-3.14.6-Linux-x86_64/
 
   build_args+=("USE_TENSORRT=ON")
 fi
