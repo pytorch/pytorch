@@ -134,8 +134,7 @@ build_args+=("BUILD_TEST=ON")
 build_args+=("INSTALL_TEST=ON")
 build_args+=("USE_ZSTD=ON")
 
-if [[ $BUILD_ENVIRONMENT == *pytorch-linux-xenial-cuda9-cudnn7-py3* ]]; then
-  ANACONDA_VERSION=3 ./docker/caffe2/jenkins/common/install_anaconda.sh
+if [[ $BUILD_ENVIRONMENT == *caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04* ]]; then
   LIB_FOLDER="https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64"
   declare -a TRT_DEBS
   TRT_DEBS=("libnvinfer6_6.0.1-1+cuda9.0_amd64.deb"
@@ -153,7 +152,7 @@ if [[ $BUILD_ENVIRONMENT == *pytorch-linux-xenial-cuda9-cudnn7-py3* ]]; then
   do
      curl -L -k -o ./$l $LIB_FOLDER/$l
   done
-  dpkg -i *.deb
+  sudo dpkg -i *.deb
   for l in "${TRT_DEBS[@]}"
   do
      rm "$l"
@@ -170,7 +169,7 @@ if [[ $BUILD_ENVIRONMENT == *pytorch-linux-xenial-cuda9-cudnn7-py3* ]]; then
   cd build
   cmake ..
   make -j4
-  make install
+  sudo make install
   cd ../../
   rm -rf onnx-tensorrt/
 
