@@ -7,7 +7,7 @@ import functools
 
 import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args
-from torch.nn import Module, ModuleList, Parameter, Sequential, ModuleDict
+from torch.nn import Module, ModuleList, Sequential, ModuleDict
 from torch._six import get_function_from_type
 
 

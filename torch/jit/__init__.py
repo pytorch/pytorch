@@ -5,12 +5,10 @@ import torch.jit.annotations
 import torch.testing
 import torch.jit._recursive
 
-
-from torch.jit._recursive import ScriptMethodStub
 from torch._jit_internal import _qualified_name
 from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
-from torch.nn import Module, ModuleList, Sequential, ModuleDict
+from torch.nn import Module
 from torch.serialization import validate_cuda_device
 from torch._six import PY2, PY37, with_metaclass, string_classes
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \

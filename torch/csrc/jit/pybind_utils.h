@@ -109,16 +109,6 @@ struct InferredType {
 
 InferredType tryToInferContainerType(py::handle input);
 
-// struct ModuleMetaData {
-//   std::unordered_map<std::string, TypePtr> attrTypes_;
-//   // This could be the c++ constant value?
-//   std::unordered_map<std::string, py::object> constants_;
-// };
-
-// ModuleMetaData buildModuleMetaData(py::handle module) {
-
-// }
-
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
 //   input is a None

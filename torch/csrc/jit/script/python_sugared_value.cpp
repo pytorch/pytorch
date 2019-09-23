@@ -355,7 +355,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return std::make_shared<FunctionValue>(functionAttrIt->second->function());
   }
 
-  // 5. Check if it's a property of the original Python class that this
+  // 6. Check if it's a property of the original Python class that this
   // ScriptModule was derived from. The only class properties we handle are
   // methods.
   py::object unboundMethod = py::getattr(

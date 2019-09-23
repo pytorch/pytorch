@@ -14217,8 +14217,8 @@ a")
                 # type: (Tensor) -> Tensor
                 pass
 
-            @torch.jit.script_method
-            def forward(self, x):  # noqa: F811
+            @torch.jit.script_method  # noqa: F811
+            def forward(self, x):
                 if isinstance(x, Tensor):
                     return x + 20
                 else:
