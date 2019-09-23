@@ -1906,8 +1906,6 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
 
 
 def remainder(g, input, other):
-    dtype = input.type().scalarType()
-    other = g.op("Cast", sym_help._maybe_get_scalar(other), to_i=sym_help.cast_pytorch_to_onnx[dtype])
     div = g.op("Div", input, other)
     if sym_help._is_fp(input):
         div = g.op("Floor", div)
