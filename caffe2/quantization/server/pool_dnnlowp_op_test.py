@@ -21,7 +21,7 @@ class DNNLowPOpPoolTest(hu.HypothesisTestCase):
         kernel=st.integers(1, 5),
         size=st.integers(1, 20),
         input_channels=st.integers(1, 3),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 3),
         order=st.sampled_from({"NCHW", "NHWC"}),
         in_quantized=st.booleans(),
         **hu.gcs_cpu_only

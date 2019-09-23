@@ -62,6 +62,10 @@ bool ConcatDNNLowPOp<T>::RunOnDevice() {
       continue;
     }
     int dim = input_zero.dim32(i);
+    if (dim == 0) {
+      // In C2, batch size 0 is allowed, so we should just early return.
+      return true;
+    }
     if (i < axis_) {
       before *= dim;
     } else { // i > axis_ || i == axis_ && add_axis_
@@ -105,6 +109,12 @@ bool ConcatDNNLowPOp<T>::RunOnDevice() {
     output_dims[axis_] = output_channels;
   }
   output->Resize(output_dims);
+
+  if (input_zero.ndim() == 0 || before == 0 || after == 0) {
+    LOG(WARNING) << "The input tensor size is 0!";
+    return true;
+  }
+
   size_t output_offset = 0;
 
   char* output_data = reinterpret_cast<char*>(GetQuantizedOutputData_());

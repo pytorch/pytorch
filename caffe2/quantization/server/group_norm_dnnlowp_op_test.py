@@ -17,7 +17,7 @@ workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 class DNNLowPOpGroupNormTest(hu.HypothesisTestCase):
     @given(
-        N=st.integers(1, 4),
+        N=st.integers(0, 4),
         G=st.integers(2, 4),
         K=st.integers(2, 12),
         H=st.integers(4, 16),
@@ -80,7 +80,9 @@ class DNNLowPOpGroupNormTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([int8_given_tensor_fill])
 
-                X_q_param = dnnlowp_utils.choose_quantization_params(X.min(), X.max())
+                X_min = 0 if X.size == 0 else X.min()
+                X_max = 0 if X.size == 0 else X.max()
+                X_q_param = dnnlowp_utils.choose_quantization_params(X_min, X_max)
                 int8_bias_tensor_fill = dnnlowp_utils.create_int8_bias_tensor_fill(
                     beta, "beta_q", X_q_param, gamma_q_param
                 )

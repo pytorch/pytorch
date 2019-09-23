@@ -40,6 +40,11 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
   const auto canonical_axis_w = W.canonical_axis_index(axis_w_);
   const int N = W.size_to_dim(canonical_axis_w);
 
+  if (M == 0) {
+    LOG(WARNING) << "The batch size is 0!";
+    return true;
+  }
+
   // Quantize X
   vector<uint8_t> X_temp;
   const uint8_t* Xdata =

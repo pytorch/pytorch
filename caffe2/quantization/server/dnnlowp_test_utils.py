@@ -12,8 +12,12 @@ from hypothesis import assume
 # The error bound is derived based on assumption that there's no input
 # quantization error.
 def check_quantized_results_close(outputs, ref=None, symmetric=False, atol_scale=0.53):
+    if len(outputs) == 0 or len(outputs[0]) == 0:
+        return
     if ref is None:
         ref = outputs[0][0]
+    if ref.size == 0:
+        return
     ref_min = min(np.min(ref), 0)
     ref_max = max(np.max(ref), 0)
     if symmetric:
@@ -218,60 +222,62 @@ def generate_convnd_inputs(
         + X_min
     )
     X = X.astype(np.float32)
-    if (
-        depthwise_convolution
-        and groupwise_quantization
-        and not preserve_activation_sparsity
-    ):
-        # Put X_max in a position not to be paired with any padded value.
-        # Put X_min to all positions that can be paired with the X_max value.
-        #
-        # This is an example of a pattern for 3x3x3
-        #  .   .   .   .   .
-        #  .   .   .   .   .
-        #  .   .   .   .   .
-        #  .   .   .   .   .
-        #  .   .   .   .  min
-        #
-        #  .   .   .   .   .
-        #  .   .   .   .  min
-        #  .  min max min  .
-        # min  .   .   .   .
-        #  .   .   .   .   .
-        #
-        # min  .   .   .   .
-        #  .   .   .   .   .
-        #  .   .   .   .   .
-        #  .   .   .   .   .
-        #  .   .   .   .   .
+    if batch_size != 0:
+        if (
+            depthwise_convolution
+            and groupwise_quantization
+            and not preserve_activation_sparsity
+        ):
+            # Put X_max in a position not to be paired with any padded value.
+            # Put X_min to all positions that can be paired with the X_max value.
+            #
+            # This is an example of a pattern for 3x3x3
+            #  .   .   .   .   .
+            #  .   .   .   .   .
+            #  .   .   .   .   .
+            #  .   .   .   .   .
+            #  .   .   .   .  min
+            #
+            #  .   .   .   .   .
+            #  .   .   .   .  min
+            #  .  min max min  .
+            # min  .   .   .   .
+            #  .   .   .   .   .
+            #
+            # min  .   .   .   .
+            #  .   .   .   .   .
+            #  .   .   .   .   .
+            #  .   .   .   .   .
+            #  .   .   .   .   .
 
-        # Make sure we have enough dimension
-        assert X.shape[1] >= 3
-        assert all(X.shape[d + 1] >= kernels[d] + 2 for d in range(1, dim))
+            # Make sure we have enough dimension
+            assert X.shape[1] >= 3
+            assert all(X.shape[d + 1] >= kernels[d] + 2 for d in range(1, dim))
 
-        # Take subtensor we want to manipulate
-        X_sub = X[(0,) * (X.ndim - dim - 1) + (slice(None),) * dim + (0,)]
+            # Take subtensor we want to manipulate
+            X_sub = X[(0,) * (X.ndim - dim - 1) + (slice(None),) * dim + (0,)]
 
-        # Put X_max in the middle of the subtensor
-        X_sub[(1,) + tuple(kernels[d] // 2 + 1 for d in range(1, dim))] = X_max
+            # Put X_max in the middle of the subtensor
+            X_sub[(1,) + tuple(kernels[d] // 2 + 1 for d in range(1, dim))] = X_max
 
-        # Put X_min to the positions that can be paired with X_max across
-        # the slowest moving dimension
-        X_sub[[[0, 2]] + [[kernels[d] + 1, 0] for d in range(1, dim)]] = X_min
+            # Put X_min to the positions that can be paired with X_max across
+            # the slowest moving dimension
+            X_sub[[[0, 2]] + [[kernels[d] + 1, 0] for d in range(1, dim)]] = X_min
 
-        # Put X_min to other positions that can be paired with X_max
-        for d1 in range(1, dim):
-            X_sub[
-                [[1]]
-                + [[kernels[d2] // 2 + 1] for d2 in range(1, d1)]
-                + [[kernels[d1] // 2, kernels[d1] // 2 + 2]]
-                + [[kernels[d2] + 1, 0] for d2 in range(d1 + 1, dim)]
-            ] = X_min
-    else:
-        # input channel 0 is all X_min to avoid overflow from vpmaddubsw when
-        # multiplied with W_min and W_max
-        X[..., 0] = X_min
-        X[(0,) * (X.ndim - 1) + (1,)] = X_max
+            # Put X_min to other positions that can be paired with X_max
+            for d1 in range(1, dim):
+                X_sub[
+                    [[1]]
+                    + [[kernels[d2] // 2 + 1] for d2 in range(1, d1)]
+                    + [[kernels[d1] // 2, kernels[d1] // 2 + 2]]
+                    + [[kernels[d2] + 1, 0] for d2 in range(d1 + 1, dim)]
+                ] = X_min
+        else:
+            # input channel 0 is all X_min to avoid overflow from vpmaddubsw when
+            # multiplied with W_min and W_max
+            X[..., 0] = X_min
+            if batch_size != 0:
+                X[(0,) * (X.ndim - 1) + (1,)] = X_max
 
     if preserve_weight_sparsity:
         W_min = -128

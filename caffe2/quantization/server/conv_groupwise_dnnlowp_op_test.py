@@ -30,7 +30,7 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         group=st.integers(1, 4),
         input_channels_per_group=st.sampled_from([2, 3, 4, 5, 8, 16, 32]),
         output_channels_per_group=st.integers(2, 16),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 0),
         order=st.sampled_from(["NCHW", "NHWC"]),
         prepack_weight=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
@@ -104,8 +104,10 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
                 net.Proto().op.extend([quantize])
 
             if do_prepack_weight:
+                X_min = 0 if X.size == 0 else X.min()
+                X_max = 0 if X.size == 0 else X.max()
                 x_q_param = hardcode_scale_zp.choose_quantization_params(
-                    X.min(), X.max()
+                    X_min, X_max
                 )
                 inputs = ["W"]
                 if do_dequantize:
@@ -177,7 +179,7 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         group=st.integers(1, 4),
         input_channels_per_group=st.sampled_from([2, 3, 4, 5, 8, 16, 32]),
         output_channels_per_group=st.integers(2, 16),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 0),
         order=st.sampled_from(["NCHW", "NHWC"]),
         **hu.gcs_cpu_only
     )

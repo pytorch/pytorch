@@ -25,7 +25,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         size=st.integers(10, 16),
         # depthwise 3x3 fast path only works for a multiple of 8
         group=st.sampled_from([8, 24, 32]),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 3),
         prepack_weight=st.booleans(),
         share_col_buffer=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
@@ -49,6 +49,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         gc,
         dc,
     ):
+        batch_size = 0
         pad = 1
         kernel = 3
         dilation = 1
@@ -108,8 +109,10 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 net.Proto().op.extend([quantize])
 
             if do_prepack_weight:
+                X_min = 0 if X.size == 0 else X.min()
+                X_max = 0 if X.size == 0 else X.max()
                 x_q_param = dnnlowp_utils.choose_quantization_params(
-                    X.min(), X.max(), preserve_activation_sparsity
+                    X_min, X_max, preserve_activation_sparsity
                 )
                 inputs = ["W"]
                 if do_dequantize:
@@ -173,7 +176,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         size=st.integers(5, 12),
         # depthwise 3x3x3 fast path only works for a multiple of 8
         group=st.sampled_from([8, 24, 32]),
-        batch_size=st.integers(1, 2),
+        batch_size=st.integers(0, 2),
         prepack_weight=st.booleans(),
         fuse_relu=st.booleans(),
         share_col_buffer=st.booleans(),
@@ -199,6 +202,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         gc,
         dc,
     ):
+        batch_size = 0
         pad = 1
         kernel = 3
         dilation = 1
@@ -248,8 +252,10 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 net.Proto().op.extend([quantize])
 
             if do_prepack_weight:
+                X_min = 0 if X.size == 0 else X.min()
+                X_max = 0 if X.size == 0 else X.max()
                 x_q_param = dnnlowp_utils.choose_quantization_params(
-                    X.min(), X.max(), preserve_activation_sparsity
+                    X_min, X_max, preserve_activation_sparsity
                 )
                 inputs = ["W"]
                 if do_dequantize:

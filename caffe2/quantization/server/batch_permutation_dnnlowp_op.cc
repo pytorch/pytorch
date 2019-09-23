@@ -16,6 +16,10 @@ bool BatchPermutationDNNLowPOp<T>::RunOnDevice() {
   const auto& indices = Input(INDICES);
   auto* Y = OutputTensorCPU_(OUTPUT);
 
+  if (X.dim32(0) == 0) {
+    return true;
+  }
+
   CAFFE_ENFORCE(indices.ndim() == 1, "indices must be 1-d");
   CAFFE_ENFORCE(
       X.dim32(0) == indices.dim32(0),

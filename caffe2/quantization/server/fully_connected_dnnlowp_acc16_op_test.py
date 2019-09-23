@@ -184,7 +184,9 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([quantize])
 
-            x_q_param = dnnlowp_utils.choose_quantization_params(X.min(), X.max())
+            X_min = 0 if X.size == 0 else X.min()
+            X_max = 0 if X.size == 0 else X.max()
+            x_q_param = dnnlowp_utils.choose_quantization_params(X_min, X_max)
 
             if do_prepack_weight:
                 inputs = ["W"]

@@ -22,7 +22,7 @@ class FullyConnectedFP16Test(hu.HypothesisTestCase):
     @given(
         input_channels=st.integers(128, 256),
         output_channels=st.integers(128, 256),
-        batch_size=st.integers(128, 256),
+        batch_size=st.integers(0, 256),
         **hu.gcs_cpu_only
     )
     def test_fully_connected(self, input_channels, output_channels, batch_size, gc, dc):
@@ -66,4 +66,5 @@ class FullyConnectedFP16Test(hu.HypothesisTestCase):
         mse_c2 = mse(Yref, output.Y)
         mse_py = mse(Yref, Yrefh)
         print(np.abs(mse_c2 - mse_py))
-        assert np.isclose(mse_c2, mse_py, atol=1e-3), np.abs(mse_c2 - mse_py)
+        if batch_size != 0:
+            assert np.isclose(mse_c2, mse_py, atol=1e-3), np.abs(mse_c2 - mse_py)

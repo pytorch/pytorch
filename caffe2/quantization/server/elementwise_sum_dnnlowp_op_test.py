@@ -16,7 +16,7 @@ workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 class DNNLowPOpSumOpTest(hu.HypothesisTestCase):
     # correctness test with no quantization error in inputs
-    @given(N=st.integers(32, 256), M=st.integers(1, 3), **hu.gcs_cpu_only)
+    @given(N=st.integers(0, 0), M=st.integers(1, 3), **hu.gcs_cpu_only)
     def test_dnnlowp_elementwise_sum_int(self, N, M, gc, dc):
         # All inputs have scale 1, so exactly represented after quantization
         inputs = M * [None]
@@ -25,8 +25,9 @@ class DNNLowPOpSumOpTest(hu.HypothesisTestCase):
 
         for i in range(M):
             X = np.random.randint(-128, 127, N, np.int8).astype(np.float32)
-            X[0] = -128
-            X[-1] = 127
+            if N != 0:
+                X[0] = -128
+                X[-1] = 127
             inputs[i] = X
             X_names[i] = chr(ord("A") + i)
             X_q_names[i] = X_names[i] + "_q"
@@ -76,7 +77,7 @@ class DNNLowPOpSumOpTest(hu.HypothesisTestCase):
         check_quantized_results_close(outputs)
 
     # correctness test with no quantization error in inputs
-    @given(N=st.integers(32, 256), M=st.integers(1, 3), **hu.gcs_cpu_only)
+    @given(N=st.integers(0, 0), M=st.integers(1, 3), **hu.gcs_cpu_only)
     def test_dnnlowp_elementwise_sum_int_inplace(self, N, M, gc, dc):
         # All inputs have scale 1, so exactly represented after quantization
         inputs = M * [None]
@@ -85,8 +86,9 @@ class DNNLowPOpSumOpTest(hu.HypothesisTestCase):
 
         for i in range(M):
             X = np.random.randint(-128, 127, N, np.int8).astype(np.float32)
-            X[0] = -128
-            X[-1] = 127
+            if N != 0:
+                X[0] = -128
+                X[-1] = 127
             inputs[i] = X
             X_names[i] = chr(ord("A") + i)
             X_q_names[i] = X_names[i] + "_q"
@@ -142,7 +144,7 @@ class DNNLowPOpSumOpTest(hu.HypothesisTestCase):
         check_quantized_results_close(outputs)
 
     # correctness test with no quantization error in inputs
-    @given(N=st.integers(32, 256), M=st.integers(1, 3), **hu.gcs_cpu_only)
+    @given(N=st.integers(0, 256), M=st.integers(1, 3), **hu.gcs_cpu_only)
     def test_dnnlowp_elementwise_sum_relu_int(self, N, M, gc, dc):
         # All inputs have scale 1, so exactly represented after quantization
         inputs = M * [None]
@@ -151,8 +153,9 @@ class DNNLowPOpSumOpTest(hu.HypothesisTestCase):
 
         for i in range(M):
             X = np.random.randint(-128, 127, N, np.int8).astype(np.float32)
-            X[0] = -128
-            X[-1] = 127
+            if N != 0:
+                X[0] = -128
+                X[-1] = 127
             inputs[i] = X
             X_names[i] = chr(ord("A") + i)
             X_q_names[i] = X_names[i] + "_q"
@@ -206,7 +209,7 @@ class DNNLowPOpSumOpTest(hu.HypothesisTestCase):
         check_quantized_results_close(outputs)
 
     # correctness test with no quantization error in inputs
-    @given(N=st.integers(32, 256), M=st.integers(1, 3), **hu.gcs_cpu_only)
+    @given(N=st.integers(0, 256), M=st.integers(1, 3), **hu.gcs_cpu_only)
     def test_dnnlowp_elementwise_sum_relu_int_inplace(self, N, M, gc, dc):
         # All inputs have scale 1, so exactly represented after quantization
         inputs = M * [None]
@@ -215,8 +218,9 @@ class DNNLowPOpSumOpTest(hu.HypothesisTestCase):
 
         for i in range(M):
             X = np.random.randint(-128, 127, N, np.int8).astype(np.float32)
-            X[0] = -128
-            X[-1] = 127
+            if N != 0:
+                X[0] = -128
+                X[-1] = 127
             inputs[i] = X
             X_names[i] = chr(ord("A") + i)
             X_q_names[i] = X_names[i] + "_q"

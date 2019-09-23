@@ -15,8 +15,9 @@ workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPDequantizeOpTest(hu.HypothesisTestCase):
-    @given(size=st.integers(1024, 2048), **hu.gcs_cpu_only)
+    @given(size=st.integers(0, 2048), **hu.gcs_cpu_only)
     def test_dnnlowp_dequantize(self, size, gc, dc):
+        size = 0
         min_ = -10.0
         max_ = 20.0
         X = (np.random.rand(size) * (max_ - min_) + min_).astype(np.float32)

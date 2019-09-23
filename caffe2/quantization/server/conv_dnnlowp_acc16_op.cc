@@ -296,6 +296,11 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHW() {
   auto sizes = this->GetOutputSize(X, filter.dim32(0));
   Tensor* Y = OutputTensorCPU_(0, sizes, at::dtype<uint8_t>());
 
+  if (N == 0) {
+    LOG(WARNING) << "The batch size is 0!";
+    return true;
+  }
+
   const vector<int> input_dims = GetDims(X);
   const vector<int> output_dims = GetDims(*Y);
   const int input_image_size = this->GetDimsSize(X);

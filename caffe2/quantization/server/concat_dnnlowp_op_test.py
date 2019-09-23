@@ -16,8 +16,8 @@ workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 class DNNLowPConcatOpTest(hu.HypothesisTestCase):
     @given(
-        dim1=st.integers(128, 256),
-        dim2=st.integers(128, 256),
+        dim1=st.integers(0, 256),
+        dim2=st.integers(0, 256),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         **hu.gcs_cpu_only
@@ -29,8 +29,11 @@ class DNNLowPConcatOpTest(hu.HypothesisTestCase):
         max_ = min_ + 255
         X = np.round(np.random.rand(dim1, dim2) * (max_ - min_) + min_)
         X = X.astype(np.float32)
-        X[0, 0] = min_
-        X[0, 1] = max_
+        if dim1 >= 1 and dim2 >= 2:
+            X[0, 0] = min_
+            X[0, 1] = max_
+        elif dim2 == 1:
+            return
 
         # Y has scale 1/2, so exactly represented after quantization
         Y = np.round(np.random.rand(dim1, dim2) * 255 / 2 - 64)

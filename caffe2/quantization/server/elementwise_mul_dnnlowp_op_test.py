@@ -16,7 +16,7 @@ workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 class DNNLowPMulOpTest(hu.HypothesisTestCase):
     @given(
-        N=st.integers(32, 256),
+        N=st.integers(0, 0),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         in_place=st.sampled_from([(False, False), (True, False), (False, True)]),
@@ -31,13 +31,16 @@ class DNNLowPMulOpTest(hu.HypothesisTestCase):
             in_quantized = True
             out_quantized = True
 
+        N = 0
+
         # All inputs have scale 1, so exactly represented after quantization
         min_ = -100
         max_ = min_ + 255
         A = np.round(np.random.rand(N) * (max_ - min_) + min_)
         A = A.astype(np.float32)
-        A[0] = min_
-        A[1] = max_
+        if N != 0:
+            A[0] = min_
+            A[1] = max_
 
         B = np.round(np.random.rand(N) * 255 - 128).astype(np.float32)
         B[0] = -128

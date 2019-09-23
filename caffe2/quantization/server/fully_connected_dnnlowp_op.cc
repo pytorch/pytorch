@@ -134,6 +134,11 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
   const auto canonical_axis_w = W.canonical_axis_index(axis_w_);
   const int N = W.size_to_dim(canonical_axis_w);
 
+  if (M == 0) {
+    LOG(WARNING) << "The batch size is 0!";
+    return true;
+  }
+
   const T_signed* Wdata = W_quantized_.data();
 
   Y_shape_cache_ = X.sizes().vec();

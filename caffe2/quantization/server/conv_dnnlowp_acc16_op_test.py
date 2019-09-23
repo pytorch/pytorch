@@ -36,7 +36,7 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         group=st.integers(1, 4),
         input_channels_per_group=st.sampled_from([2, 3, 4, 5, 8, 16, 32]),
         output_channels_per_group=st.integers(2, 16),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 3),
         order=st.sampled_from(["NCHW", "NHWC"]),
         weight_quantized=st.booleans(),
         share_col_buffer=st.booleans(),
@@ -63,6 +63,7 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         gc,
         dc,
     ):
+        batch_size = 0
         assume(group == 1 or dilation == 1)
         assume(size >= dilation * (kernel - 1) + 1)
 
@@ -85,7 +86,8 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         X = np.random.rand(batch_size, size, size, input_channels) * 4 + X_min
         X = np.round(X).astype(np.float32)
         X[..., 0] = X_min
-        X[0, 0, 0, 1] = X_max
+        if batch_size != 0:
+            X[0, 0, 0, 1] = X_max
 
         if preserve_weight_sparsity:
             W_min = -128
@@ -207,7 +209,7 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         group=st.integers(1, 4),
         input_channels_per_group=st.sampled_from([2, 3, 4, 5, 8, 16, 32]),
         output_channels_per_group=st.integers(2, 16),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 3),
         order=st.sampled_from(["NHWC"]),
         weight_quantized=st.booleans(),
         prepack_weight=st.booleans(),
@@ -238,6 +240,7 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         gc,
         dc,
     ):
+        batch_size = 0
         assume(group == 1 or dilation == 1)
         assume(size >= dilation * (kernel - 1) + 1)
 
@@ -249,7 +252,8 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         X = np.random.rand(batch_size, size, size, input_channels) * 4 + X_min
         X = np.round(X).astype(np.float32)
         X[..., 0] = X_min
-        X[0, 0, 0, 1] = X_max
+        if batch_size != 0:
+            X[0, 0, 0, 1] = X_max
 
         if preserve_weight_sparsity:
             W_min = -128

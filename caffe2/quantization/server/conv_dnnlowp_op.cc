@@ -1116,7 +1116,8 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
   const int Y_HxW = this->GetDimsSize(*Y);
 
   if (N == 0) {
-    LOG(WARNING) << "The batch size is 0 in ConvNHWCCore_ function!";
+    LOG(WARNING) << "The batch size is 0!";
+    return;
   }
 
   if (FLAGS_caffe2_dnnlowp_dump_tensors) {

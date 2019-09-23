@@ -25,13 +25,15 @@ class DNNLowPElementwiseLinearOpTest(hu.HypothesisTestCase):
     def test_dnnlowp_elementwise_linear_int(
         self, N, D, in_quantized, out_quantized, gc, dc
     ):
+        N = 0
         # All inputs have scale 1, so exactly represented after quantization
         min_ = -100
         max_ = min_ + 255
         X = np.round(np.random.rand(N, D) * (max_ - min_) + min_)
         X = X.astype(np.float32)
-        X[0, 0] = min_
-        X[0, 1] = max_
+        if N != 0:
+            X[0, 0] = min_
+            X[0, 1] = max_
 
         a = np.round(np.random.rand(D) * 255 - 128).astype(np.float32)
         a[0] = -128

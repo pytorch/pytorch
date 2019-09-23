@@ -37,6 +37,10 @@ bool ChannelShuffleDNNLowPOp<T>::RunOnDeviceWithOrderNCHW() {
   auto* Y = OutputTensorCPU_(0);
   Y->ResizeLike(X);
   const int N = X.dim32(0);
+  if (N == 0) {
+    LOG(WARNING) << "The batch size is 0!";
+    return true;
+  }
   const int C = X.dim32(1);
   const int G = group_;
   CAFFE_ENFORCE_EQ(C % G, 0);

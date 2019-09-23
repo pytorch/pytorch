@@ -36,7 +36,7 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         group=st.integers(1, 4),
         input_channels_per_group=st.sampled_from([2, 3, 4, 5, 8, 16, 32]),
         output_channels_per_group=st.integers(2, 16),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 0),
         order=st.sampled_from(["NCHW", "NHWC"]),
         share_col_buffer=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
@@ -83,7 +83,8 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         X = np.random.rand(batch_size, size, size, input_channels) * 4 + X_min
         X = np.round(X).astype(np.float32)
         X[..., 0] = X_min
-        X[0, 0, 0, 1] = X_max
+        if batch_size != 0:
+            X[0, 0, 0, 1] = X_max
 
         if preserve_weight_sparsity:
             W_min = -128
@@ -187,7 +188,7 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         group=st.integers(1, 4),
         input_channels_per_group=st.sampled_from([2, 3, 4, 5, 8, 16, 32]),
         output_channels_per_group=st.integers(2, 16),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 0),
         order=st.sampled_from(["NHWC"]),
         prepack_weight=st.booleans(),
         nbits_in_non_outlier=st.sampled_from((0, 1, 6, 8)),
@@ -222,8 +223,9 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         X_max = X_min + 255
         X = np.random.rand(batch_size, size, size, input_channels) * 4 + X_min
         X = np.round(X).astype(np.float32)
-        X[..., 0] = X_min
-        X[0, 0, 0, 1] = X_max
+        if batch_size != 0:
+            X[..., 0] = X_min
+            X[0, 0, 0, 1] = X_max
 
         W_min = -100
         W_max = W_min + 255
@@ -271,7 +273,9 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
                 net.Proto().op.extend([quantize])
 
             if do_prepack_weight:
-                x_q_param = dnnlowp_utils.choose_quantization_params(X.min(), X.max())
+                X_min = 0 if X.size == 0 else X.min()
+                X_max = 0 if X.size == 0 else X.max()
+                x_q_param = dnnlowp_utils.choose_quantization_params(X_min, X_max)
                 inputs = ["W"]
                 if do_dequantize:
                     inputs += ["b"]
