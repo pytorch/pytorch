@@ -416,7 +416,6 @@ class RpcTest(MultiProcessTestCase):
         dst_rank = n % self.world_size
         a = [torch.ones(n, n), torch.ones(n, n)]
         b = TensorClass(build_complex_tensors())
-        print(b)
         c = {"foo": torch.ones(n, n), "bar": torch.ones(n, n)}
         ret = dist.rpc("worker{}".format(dst_rank),
                        my_complex_tensor_function,
