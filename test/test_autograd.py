@@ -2363,40 +2363,6 @@ class TestAutograd(TestCase):
                               True, f_args_variable, f_args_tensor)
 
 
-    # skip this test if running on rocm, because in cdist
-    # we use __shfl_down_sync on CUDA for fast reduction
-    # and it gives incorrect results on rocm platform
-    @skipIfRocm
-    def test_cdist(self):
-        def _test_cdist_for_size(sizes):
-            devices = torch.testing.get_all_device_types()
-            for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
-                for device in devices:
-                    x = torch.randn(sizes, device=device, dtype=torch.double)
-                    y = torch.randn(sizes, device=device, dtype=torch.double)
-
-                    eps = 1e-6
-                    # to avoid extremum
-                    x = x - (((x - y) < eps).double() * 2 * eps)
-                    x.requires_grad = True
-                    y.requires_grad = True
-
-                    f_args_variable = (x, y)
-
-                    def f(a, b):
-                        return torch.cdist(a, b, p)
-
-                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-                    run_functional_checks(self, "test_cdist", "cdist", f,
-                                          True, f_args_variable, f_args_tensor)
-
-        _test_cdist_for_size((S, S))
-        _test_cdist_for_size((S, S, S))
-        _test_cdist_for_size((3, 5))
-        _test_cdist_for_size((2, 3, 5))
-        _test_cdist_for_size((1, 2, 3))
-
-
     def test_var_mean_differentiable(self):
         dim = [2, 4]
         keepdim = False
@@ -3708,6 +3674,37 @@ for test in method_tests():
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
+
+    # skip this test if running on rocm, because in cdist
+    # we use __shfl_down_sync on CUDA for fast reduction
+    # and it gives incorrect results on rocm platform
+    @skipCUDAIfRocm
+    def test_cdist(self, device):
+        def _test_cdist_for_size(sizex, sizey=None):
+            if sizey is None:
+                sizey = sizex
+            for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+                x = torch.randn(sizex, device=device, dtype=torch.double)
+                y = torch.randn(sizey, device=device, dtype=torch.double)
+                eps = 1e-6
+                # to avoid extremum
+                x = x - (((x - y) < eps).double() * 2 * eps)
+                x.requires_grad = True
+                y.requires_grad = True
+                f_args_variable = (x, y)
+
+                def f(a, b):
+                    return torch.cdist(a, b, p)
+                f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+                run_functional_checks(self, "test_cdist", "cdist", f,
+                                      True, f_args_variable, f_args_tensor)
+        _test_cdist_for_size((S, S))
+        _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
+        _test_cdist_for_size((1, 1), (S, 1))
+
 
     # NOTE: flaky on ROCm CI
     @skipCUDAIfRocm
