@@ -14,7 +14,7 @@ from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.hub as hub
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common_utils import skipIfRocm, load_tests, IS_MACOS
+from common_utils import skipIfRocm, load_tests, IS_MACOS, SANDCASTLE
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -521,6 +521,7 @@ SUM_OF_HUB_EXAMPLE = 431080
 TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/releases/download/0.1/mnist_init_ones'
 
 @unittest.skipIf(IS_MACOS, 'Broken on macOS; see #26032')
+@unittest.skipIf(SANDCASTLE, 'Sandcastle cannot ping external')
 class TestHub(TestCase):
     def test_load_from_github(self):
         hub_model = hub.load(
