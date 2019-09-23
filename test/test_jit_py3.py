@@ -5,6 +5,7 @@ from typing import NamedTuple, List, Optional
 import unittest
 import sys
 import torch
+import jit_utils
 
 class TestScriptPy3(JitTestCase):
     def test_joined_str(self):
@@ -177,7 +178,7 @@ class TestScriptPy3(JitTestCase):
 
         mm = MyMod()
         mm.save('foo.zip')
-        torch._C._jit_clear_class_registry()
+        jit_utils.clear_class_registry()
         loaded = torch.jit.load('foo.zip')
 
         out = mm()

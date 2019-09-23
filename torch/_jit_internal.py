@@ -81,6 +81,8 @@ def createResolutionCallbackFromClosure(fn):
     Create a resolutionCallback by introspecting the function instead of
     looking up the stack for the enclosing scope
     """
+    if hasattr(fn, "_torchscript_rcb"):
+        return fn._torchscript_rcb
     closure = get_closure(fn)
 
     def env(key):
@@ -373,6 +375,8 @@ def is_ignored_fn(fn):
     mod = get_torchscript_modifier(fn)
     return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
 
+def is_parameter_list(fn):
+    return hasattr(fn, "_parameter_names_fn")
 
 def get_torchscript_modifier(fn):
     if not callable(fn):

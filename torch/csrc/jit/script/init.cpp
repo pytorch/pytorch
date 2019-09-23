@@ -262,13 +262,20 @@ static StrongFunctionPtr script_compile_function(
 }
 
 struct VISIBILITY_HIDDEN ModuleSelf : public Self {
-  ModuleSelf(const Module& m, py::object& py_m)
-      : Self(), module_(m), pyModule_(py_m) {}
+  ModuleSelf(
+      const Module& m,
+      py::object& py_m,
+      std::shared_ptr<ModuleMetadata> moduleMeta)
+      : Self(),
+        module_(m),
+        pyModule_(py_m),
+        moduleMeta_(std::move(moduleMeta)) {}
 
   std::shared_ptr<SugaredValue> makeSugared(Value* v) const override {
     v->setType(module_.type());
-    return std::make_shared<ModuleValue>(v, module_, pyModule_);
+    return std::make_shared<ModuleValue>(v, module_, pyModule_, *moduleMeta_);
   }
+
   ClassTypePtr getClassType() const override {
     return module_.type();
   }
@@ -276,6 +283,7 @@ struct VISIBILITY_HIDDEN ModuleSelf : public Self {
  private:
   const Module& module_;
   const py::object& pyModule_;
+  std::shared_ptr<ModuleMetadata> moduleMeta_;
 };
 
 static TypePtr getTensorType(const at::Tensor& t, bool complete) {
@@ -477,17 +485,20 @@ void initJitScriptBindings(PyObject* module) {
           "_define",
           [](Module& m,
              py::object py_m,
+             std::shared_ptr<ModuleMetadata> moduleMeta,
              const std::string& script,
              ResolutionCallback rcb) {
-            const auto self = ModuleSelf(m, py_m);
+            const auto self = ModuleSelf(m, py_m, std::move(moduleMeta));
             m.class_compilation_unit()->define(
                 m.name(), script, pythonResolver(rcb), &self);
             didFinishEmitModule(m);
           })
+      .def("_type", [](Module& m) { return m.type(); })
       .def(
           "_create_methods",
           [](Module& m,
              py::object py_m,
+             std::shared_ptr<ModuleMetadata> moduleMeta,
              const std::vector<Def>& defs,
              const std::vector<ResolutionCallback>& rcbs,
              const std::vector<FunctionDefaults>& defaults) {
@@ -498,7 +509,7 @@ void initJitScriptBindings(PyObject* module) {
               resolvers.push_back(pythonResolver(callback));
             }
             const auto& prefix = m.name();
-            const auto self = ModuleSelf(m, py_m);
+            const auto self = ModuleSelf(m, py_m, std::move(moduleMeta));
             m.class_compilation_unit()->define(prefix, defs, resolvers, &self);
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
@@ -656,6 +667,7 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
+      .def("_finalize", &Module::_finalize)
       .def_property_readonly(
           "name", [](const Module& self) { return self.name().name(); })
       .def(
@@ -993,6 +1005,99 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("_get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
+  m.def(
+      // TODO rename this
+      "_get_fresh_type",
+      [](const std::string& name, const ModuleMetadata& moduleMeta) {
+        auto cu = get_python_cu();
+        auto class_name = c10::QualifiedName(name);
+        if (class_name.prefix().empty()) {
+          class_name = c10::QualifiedName("__torch__", class_name.name());
+        }
+        if (cu->get_class(class_name) != nullptr) {
+          class_name = cu->mangle(class_name);
+        }
+        auto cls =
+            ClassType::create(std::move(class_name), cu, /*is_module=*/true);
+        cu->register_type(cls);
+
+        // populate type with module meta information
+        for (const auto& pr : moduleMeta.attributes_) {
+          const auto& name = pr.first;
+          const auto& type = pr.second.type_;
+          const auto& isParameter = pr.second.isParam_;
+
+          cls->addAttribute(name, type, isParameter);
+        }
+
+        return cls;
+      });
+
+  m.def("_create_module_with_type", [](const ClassTypePtr& type) {
+    return Module(get_python_cu(), type);
+  });
+
+  py::class_<ModuleMetadata, std::shared_ptr<ModuleMetadata>>(
+      m, "ModuleMetadata")
+      .def(py::init<>())
+      .def(
+          "get_attributes",
+          [](ModuleMetadata& self) {
+            // Convert to a more pybind-friendly representation, so we don't
+            // need to bind ModuleMetadata::Attribute as well.
+            std::unordered_map<std::string, std::pair<TypePtr, bool>> ret;
+            for (auto& pr : self.attributes_) {
+              ret.emplace(
+                  pr.first,
+                  std::pair<TypePtr, bool>(
+                      pr.second.type_, pr.second.isParam_));
+            }
+            return ret;
+          })
+      .def(
+          "get_module_names",
+          [](const ModuleMetadata& self) {
+            return fmap(
+                self.modules_, [](const ModuleMetadata::ModuleInfo& info) {
+                  return info.name;
+                });
+          })
+      .def("add_constant", &ModuleMetadata::addConstant)
+      .def("add_attribute", &ModuleMetadata::addAttribute)
+      .def("add_module", &ModuleMetadata::addModule)
+      .def("add_pyclass", &ModuleMetadata::addPyClass)
+      .def("add_overload", &ModuleMetadata::addOverload)
+      .def(
+          "add_failed_attribute",
+          [](ModuleMetadata& self, std::string name, std::string pyType) {
+            self.failedAttributes_.emplace(std::move(name), std::move(pyType));
+          })
+      .def(
+          "equals",
+          [](const ModuleMetadata& self, const ModuleMetadata& other) {
+            return self == other;
+          })
+      .def("dump", [](const ModuleMetadata& self) {
+        std::cout << "Constants: \n";
+        for (const auto& pr : self.constants_) {
+          std::cout << "\t" << pr.first << ": " << pr.second.v_ << "\n";
+        }
+        std::cout << "\nAttributes: \n";
+        for (const auto& pr : self.attributes_) {
+          std::cout << "\t" << pr.first << ": " << pr.second.type_->python_str()
+                    << "\n";
+        }
+        std::cout << "\nSubmodules: \n";
+        for (const auto& info : self.modules_) {
+          std::cout << "\t" << info.name << ": " << info.type->python_str()
+                    << "\n";
+        }
+        std::cout << "\nOverloads: \n";
+        for (const auto& pr : self.overloads_) {
+          std::cout << "\t" << pr.first << ": " << pr.second
+                    << "\n";
+        }
+      });
 
   m.def(
       "_resolve_type",

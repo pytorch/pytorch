@@ -37,6 +37,12 @@ Module::Module(c10::QualifiedName class_name)
           std::move(class_name),
           std::make_shared<CompilationUnit>())) {}
 
+Module::Module(std::shared_ptr<CompilationUnit> cu, c10::ClassTypePtr type)
+    : isInitializing_(true),
+      module_value_(c10::ivalue::Object::create(
+          c10::StrongTypePtr(std::move(cu), type),
+          type->numAttributes())) {}
+
 Module::Module(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,

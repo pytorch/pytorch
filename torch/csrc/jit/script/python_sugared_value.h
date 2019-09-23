@@ -193,18 +193,125 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
   std::vector<StrongFunctionPtr> compiled_overloads_;
 };
 
-// defines how modules/methods behave inside the script subset.
-// for now this does not have any interaction with python.
-// in the future, we will add the ability to resolve `self.foo` to python
-// {functions, modules, contants} so this SugaredValue is defined here
-// anticipating we will eventually need to replace Module with a py::object
-// holding the actual nn.Module class.
+// This holds all relevant Python state that ModuleValue needs. I
+struct VISIBILITY_HIDDEN ModuleMetadata {
+  void addPyClass(py::object pyClass) {
+    pyClass_ = std::move(pyClass);
+  }
+
+  void addConstant(std::string name, py::object value) {
+    constants_.emplace(std::move(name), std::move(value));
+  }
+
+  c10::optional<py::object> findConstant(const std::string& name) {
+    auto it = constants_.find(name);
+    if (it != constants_.end()) {
+      return it->second.v_;
+    }
+    return c10::nullopt;
+  }
+
+  void addAttribute(std::string name, TypePtr type, bool isParameter) {
+    TORCH_INTERNAL_ASSERT(type);
+    if (auto functionType = type->cast<FunctionType>()) {
+      // TODO
+      functionAttributes_.emplace(std::move(name), std::move(functionType));
+      return;
+    }
+
+    attributes_.emplace(
+        std::move(name), Attribute(unshapedType(type), isParameter));
+  }
+
+  void addModule(
+      std::string name,
+      TypePtr type,
+      std::shared_ptr<ModuleMetadata> meta) {
+    TORCH_INTERNAL_ASSERT(type);
+    modules_.emplace_back(
+        ModuleInfo{std::move(name), std::move(type), std::move(meta)});
+  }
+
+  void addOverload(
+      std::string methodName,
+      std::vector<std::string> overloadedMethodNames) {
+    overloads_.emplace(std::move(methodName), std::move(overloadedMethodNames));
+  }
+
+  // This determines whether two modules can share a type. The container structs
+  // used by ModuleMeta have been defined such that operator== implements a
+  // meaningful comparison in that context.
+  friend bool operator==(const ModuleMetadata& lhs, const ModuleMetadata& rhs) {
+    return lhs.pyClass_.is(rhs.pyClass_) && lhs.constants_ == rhs.constants_ &&
+        lhs.attributes_ == rhs.attributes_ && lhs.modules_ == rhs.modules_ &&
+        lhs.overloads_ == rhs.overloads_ &&
+        lhs.functionAttributes_ == rhs.functionAttributes_;
+  }
+
+  std::shared_ptr<ModuleMetadata> findModuleMeta(const std::string& name) {
+    const auto it = std::find_if(
+        modules_.cbegin(), modules_.cend(), [&](const ModuleInfo& info) {
+          return info.name == name;
+        });
+    if (it == modules_.end()) {
+      return nullptr;
+    }
+    return it->meta;
+  }
+
+  struct Constant {
+    /* implicit */ Constant(py::object v) : v_(std::move(v)) {}
+    friend bool operator==(
+        const Constant& lhs,
+        const Constant& rhs) {
+      return lhs.v_.equal(rhs.v_);
+    }
+    py::object v_;
+  };
+
+  struct Attribute {
+    Attribute(TypePtr type, bool isParam)
+        : type_(std::move(type)), isParam_(isParam) {}
+    friend bool operator==(
+        const Attribute& lhs,
+        const Attribute& rhs) {
+      return *(lhs.type_) == *(rhs.type_) && lhs.isParam_ == rhs.isParam_;
+    }
+    TypePtr type_;
+    bool isParam_;
+  };
+
+  struct ModuleInfo {
+    std::string name;
+    TypePtr type;
+    std::shared_ptr<ModuleMetadata> meta;
+    friend bool operator==(const ModuleInfo& lhs, const ModuleInfo& rhs) {
+      return *(lhs.type) == *(rhs.type) && lhs.name == rhs.name;
+    }
+  };
+
+  // The value of any constants defined by the module.
+  std::unordered_map<std::string, Constant> constants_;
+  // The types of any attributes
+  // TODO these shouldn't be unordered maps
+  std::unordered_map<std::string, Attribute> attributes_;
+  std::unordered_map<std::string, std::vector<std::string>> overloads_;
+  std::unordered_map<std::string, std::string> failedAttributes_;
+  std::unordered_map<std::string, FunctionTypePtr> functionAttributes_;
+  std::vector<ModuleInfo> modules_;
+  py::object pyClass_;
+};
 
 struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
-  ModuleValue(Value* self, Module module, py::object py_module)
+  ModuleValue(
+      Value* self,
+      Module module,
+      py::object pyModule,
+      ModuleMetadata moduleMeta)
       : self_(self),
         module_(std::move(module)),
-        py_module_(std::move(py_module)) {}
+        pyModule_(std::move(pyModule)),
+        moduleMeta_(std::move(moduleMeta)) {}
 
   std::string kind() const override {
     return "module";
@@ -241,15 +348,15 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       Value* newValue) override;
 
  private:
-  Value* self_;
-  Module module_;
-  py::object py_module_;
-
   std::vector<std::shared_ptr<SugaredValue>> desugarModuleContainer(
       bool get_keys,
       bool get_values,
       const SourceRange& loc,
       Function& m);
+  Value* self_;
+  Module module_;
+  py::object pyModule_;
+  ModuleMetadata moduleMeta_;
 };
 
 struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {

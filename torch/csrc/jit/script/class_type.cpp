@@ -51,6 +51,14 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   return ptr;
 }
 
+void ClassType::addMethod(Function* method) {
+  TORCH_CHECK(
+      getMethod(method->name()) == nullptr,
+      "Can't redefine method: ",
+      method->name());
+  methods_.push_back(method);
+}
+
 size_t ClassType::addAttribute(
     const std::string& name,
     TypePtr type,

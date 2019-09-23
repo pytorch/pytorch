@@ -116,7 +116,6 @@ void testClassDerive() {
   auto methods = cu->define("foo.bar", methodSrc, nativeResolver(), &self);
   auto method = methods[0];
   cls->addAttribute("attr", TensorType::get());
-  cls->addMethod(method);
   ASSERT_TRUE(cls->getMethod(method->name()));
 
   // Refining a new class should retain attributes and methods

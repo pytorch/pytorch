@@ -109,6 +109,16 @@ struct InferredType {
 
 InferredType tryToInferContainerType(py::handle input);
 
+// struct ModuleMetaData {
+//   std::unordered_map<std::string, TypePtr> attrTypes_;
+//   // This could be the c++ constant value?
+//   std::unordered_map<std::string, py::object> constants_;
+// };
+
+// ModuleMetaData buildModuleMetaData(py::handle module) {
+
+// }
+
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
 //   input is a None
@@ -124,6 +134,11 @@ inline InferredType tryToInferType(py::handle input) {
 
   if (input.is(py::none())) {
     return InferredType(NoneType::get());
+  }
+
+  if (py::isinstance<StrongFunctionPtr>(input)) {
+    auto fn = py::cast<StrongFunctionPtr>(input).function_;
+    return InferredType(FunctionType::create(fn));
   }
 
   // Try basic types first
@@ -239,6 +254,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
     }
     return InferredType(ListType::create(element_type));
   } else {
+    // TODO: this message is not correct anymore, since this InferredType is
+    // used from a bunch of circumstances unrelated to tracing. We can re-use
+    // this instead of the attribute_failure stuff in moduleMeta
     return InferredType(c10::str(
         "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
         "are supported ",

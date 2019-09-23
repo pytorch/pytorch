@@ -109,6 +109,7 @@ struct TORCH_API Method {
 
 struct TORCH_API Module {
   explicit Module(c10::QualifiedName class_name);
+  Module(std::shared_ptr<CompilationUnit> cu, c10::ClassTypePtr type);
   Module(
       c10::QualifiedName,
       std::shared_ptr<CompilationUnit> cu,
@@ -358,7 +359,18 @@ struct TORCH_API Module {
     return module_object()->slots().size();
   }
 
+  void _finalize() {
+    isInitializing_ = false;
+  }
+
  private:
+  // We need a way to represent a module in the following state:
+  //   The type is fully initialized, but the module state is not.
+  // In particular, slot resolution doesn't work in this case.
+  //
+  // TODO: figure out a better way
+  bool isInitializing_ = false;
+
   Module clone_impl(std::unordered_map<TypePtr, TypePtr>& type_remap) const;
 
   std::string _dump_to_string(
@@ -411,7 +423,11 @@ struct TORCH_API Module {
       slot =
           type()->addAttribute(name, slot_type, etype == EntityType::PARAMETER);
     } else {
-      check_entity(etype, *slot);
+      if (!isInitializing_) {
+        // Skip this check if the module is in an initializing state, as the
+        // slot may not actually be filled.
+        check_entity(etype, *slot);
+      }
     }
     TypePtr atype = type()->getAttribute(*slot);
     TORCH_CHECK(slot_type->isSubtypeOf(atype));

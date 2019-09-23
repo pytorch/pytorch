@@ -100,6 +100,7 @@ def get_num_params(fn, loc):
         return None
     else:
         num_params = len(py_def.args.args)
+        # TODO inspect.ismethod will always return false with the ScriptModule2
         if inspect.ismethod(fn):
             num_params = num_params - 1
         return num_params

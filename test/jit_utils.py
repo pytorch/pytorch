@@ -43,6 +43,10 @@ def execWrapper(code, glob, loc):
 def do_input_map(fn, input):
     return _nested_map(lambda t: isinstance(t, torch.Tensor), fn)(input)
 
+def clear_class_registry():
+    torch._C._jit_clear_class_registry()
+    torch.jit._recursive.module_meta_store = torch.jit._recursive.ModuleMetaStore()
+
 
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
@@ -84,7 +88,7 @@ class JitTestCase(TestCase):
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
         self.clearHooks()
-        torch._C._jit_clear_class_registry()
+        clear_class_registry()
 
     def _isHookExceptionOk(self, e):
         se = str(e)
