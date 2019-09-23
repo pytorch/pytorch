@@ -311,6 +311,11 @@
 
 - func: all.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: all.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
+  variants: function, method
+
+- func: all.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: allclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> bool
   use_c10_dispatcher: full
   variants: function, method
@@ -320,6 +325,11 @@
   variants: function, method
 
 - func: any.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: any.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
+  variants: function, method
+
+- func: any.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: arange(Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -348,6 +358,12 @@
 
 - func: argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
+  variants: function, method
+
+- func: argmax.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
+  variants: function, method
+
+- func: argmin.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
   variants: function, method
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
@@ -821,10 +837,21 @@
 
 - func: cumsum.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
+- func: cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+
+- func: cumsum.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+
 - func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
 - func: cumprod.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+
+- func: cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+
+- func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+
 
 - func: ctc_loss.IntList(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
   use_c10_dispatcher: unboxed_only
@@ -1314,6 +1341,12 @@
   use_c10_dispatcher: full
   variants: function, method
 
+- func: index_copy_.dimname(Tensor(a!) self, Dimname dim, Tensor index, Tensor source) -> Tensor(a!)
+  variants: method
+
+- func: index_copy.dimname(Tensor self, Dimname dim, Tensor index, Tensor source) -> Tensor
+  variants: function, method
+
 - func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
   variants: function, method
 
@@ -1400,6 +1433,11 @@
   dispatch:
     CPU: kthvalue_out_cpu
     CUDA: kthvalue_out_cuda
+
+- func: kthvalue.dimname(Tensor self, int k, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  variants: function, method
+
+- func: kthvalue.dimname_out(Tensor self, int k, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
 
@@ -1818,6 +1856,11 @@
 
 - func: mode.values(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
+- func: mode.dimname(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  variants: function, method
+
+- func: mode.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+
 - func: mul.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -1992,6 +2035,9 @@
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
   use_c10_dispatcher: unboxed_only
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+
+- func: permute.names(Tensor(a) self, DimnameList dims) -> Tensor(a)
+  variants: method
 
 # Only exposed from C++ -- in Python,
 # we expose it as an attribute `T`, not a function.
@@ -2444,6 +2490,10 @@
   variants: function, method
   device_guard: False
 
+- func: squeeze.dimname(Tensor(a) self, Dimname dim) -> Tensor(a)
+  variants: function, method
+  device_guard: False
+
 - func: squeeze_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
@@ -2451,6 +2501,10 @@
 
 - func: squeeze_.dim(Tensor(a!) self, int dim) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
+  variants: method
+  device_guard: False
+
+- func: squeeze_.dimname(Tensor(a!) self, Dimname dim) -> Tensor(a!)
   variants: method
   device_guard: False
 
@@ -2978,7 +3032,6 @@
 - func: norm.names_dtype_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
 
 - func: norm.names_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
 
 - func: frobenius_norm(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -3832,6 +3885,12 @@
   use_c10_dispatcher: full
   variants: function, method
 
+- func: index_add_.dimname(Tensor(a!) self, Dimname dim, Tensor index, Tensor source) -> Tensor(a!)
+  variants: method
+
+- func: index_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor source) -> Tensor
+  variants: function, method
+
 - func: index_fill_.Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
@@ -3852,6 +3911,18 @@
 
 - func: index_fill.Tensor(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
   use_c10_dispatcher: full
+  variants: function, method
+
+- func: index_fill_.dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)
+  variants: method
+
+- func: index_fill.dimname_Scalar(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
+  variants: function, method
+
+- func: index_fill_.dimname_Tensor(Tensor(a!) self, Dimname dim, Tensor index, Tensor value) -> Tensor(a!)
+  variants: method
+
+- func: index_fill.dimname_Tensor(Tensor self, Dimname dim, Tensor index, Tensor value) -> Tensor
   variants: function, method
 
 - func: scatter_.src(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
@@ -3876,6 +3947,18 @@
   use_c10_dispatcher: full
   variants: function, method
 
+- func: scatter_.dimname_src(Tensor(a!) self, Dimname dim, Tensor index, Tensor src) -> Tensor(a!)
+  variants: method
+
+- func: scatter.dimname_src(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
+  variants: function, method
+
+- func: scatter_.dimname_value(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)
+  variants: method
+
+- func: scatter.dimname_value(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
+  variants: function, method
+
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
@@ -3885,6 +3968,12 @@
 
 - func: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   use_c10_dispatcher: full
+  variants: function, method
+
+- func: scatter_add_.dimname(Tensor(a!) self, Dimname dim, Tensor index, Tensor src) -> Tensor(a!)
+  variants: method
+
+- func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
 - func: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -4547,6 +4636,11 @@
     SparseCPU: index_select_sparse
     SparseCUDA: index_select_sparse
 
+- func: index_select.dimname_out(Tensor self, Dimname dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: index_select.dimname(Tensor self, Dimname dim, Tensor index) -> Tensor
+  variants: method, function
+
 - func: masked_select.out(Tensor self, Tensor mask, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: masked_select_out_cpu
@@ -4588,6 +4682,11 @@
   dispatch:
     CPU: gather_cpu
     CUDA: gather_cuda
+
+- func: gather.dimname_out(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
+
+- func: gather.dimname(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False) -> Tensor
+  variants: method, function
 
 - func: _gather_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor
   use_c10_dispatcher: full
@@ -5033,8 +5132,16 @@
     CUDA: legacy::cuda::_th_sort
     QuantizedCPU: sort_quant
 
+- func: sort.dimname_values(Tensor self, Dimname dim, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+
+- func: sort.dimname(Tensor self, Dimname dim, bool descending=False) -> (Tensor values, Tensor indices)
+  variants: method, function
+
 - func: argsort(Tensor self, int dim=-1, bool descending=False) -> Tensor
   use_c10_dispatcher: full
+  variants: method, function
+
+- func: argsort.dimname(Tensor self, Dimname dim, bool descending=False) -> Tensor
   variants: method, function
 
 - func: topk.values(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)

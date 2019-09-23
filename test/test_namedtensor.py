@@ -1666,6 +1666,11 @@ class TestNamedTensor(TestCase):
             self.assertTrue(
                 str(warns[0].message).startswith('Autograd was passed a named grad tensor'))
 
+    def test_nyi_dimname_overload_msg(self):
+        x = torch.randn(3, 3)
+        with self.assertRaisesRegex(RuntimeError, "squeeze: You passed a dimname"):
+            x.squeeze("N")
+
     def test_dot(self):
         for device in torch.testing.get_all_device_types():
             # torch.dot ignores the names of both tensors

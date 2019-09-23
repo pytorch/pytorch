@@ -361,6 +361,16 @@ inline Tensor Tensor::all(int64_t dim, bool keepdim) const {
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::all(Dimname dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::all(const_cast<Tensor&>(*this), dim, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::all.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
+#endif
+}
+#endif
 inline bool Tensor::allclose(const Tensor & other, double rtol, double atol, bool equal_nan) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::allclose(const_cast<Tensor&>(*this), other, rtol, atol, equal_nan);
@@ -379,6 +389,16 @@ inline Tensor Tensor::any(int64_t dim, bool keepdim) const {
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::any(Dimname dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::any(const_cast<Tensor&>(*this), dim, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::any.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
+#endif
+}
+#endif
 inline Tensor Tensor::argmax(c10::optional<int64_t> dim, bool keepdim) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::argmax(const_cast<Tensor&>(*this), dim, keepdim);
@@ -397,6 +417,26 @@ inline Tensor Tensor::argmin(c10::optional<int64_t> dim, bool keepdim) const {
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::argmax(Dimname dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::argmax(const_cast<Tensor&>(*this), dim, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::argmax.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::argmin(Dimname dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::argmin(const_cast<Tensor&>(*this), dim, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::argmin.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
+#endif
+}
+#endif
 inline Tensor Tensor::as_strided(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
@@ -801,6 +841,16 @@ inline Tensor Tensor::cumsum(int64_t dim, c10::optional<ScalarType> dtype) const
     return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::cumsum(Dimname dim, c10::optional<ScalarType> dtype) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::cumsum(const_cast<Tensor&>(*this), dim, dtype);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, dtype);
+#endif
+}
+#endif
 inline Tensor Tensor::cumprod(int64_t dim, c10::optional<ScalarType> dtype) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::cumprod(const_cast<Tensor&>(*this), dim, dtype);
@@ -809,6 +859,16 @@ inline Tensor Tensor::cumprod(int64_t dim, c10::optional<ScalarType> dtype) cons
     return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::cumprod(Dimname dim, c10::optional<ScalarType> dtype) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::cumprod(const_cast<Tensor&>(*this), dim, dtype);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, dtype);
+#endif
+}
+#endif
 inline Tensor Tensor::det() const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::det(const_cast<Tensor&>(*this));
@@ -1244,6 +1304,26 @@ inline Tensor Tensor::index_copy(int64_t dim, const Tensor & index, const Tensor
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this, index, source)), const_cast<Tensor&>(*this), dim, index, source);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor & Tensor::index_copy_(Dimname dim, const Tensor & index, const Tensor & source) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::index_copy_(const_cast<Tensor&>(*this), dim, index, source);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::index_copy_.dimname(Tensor(a!) self, Dimname dim, Tensor index, Tensor source) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, source))(const_cast<Tensor&>(*this), dim, index, source);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::index_copy(Dimname dim, const Tensor & index, const Tensor & source) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::index_copy(const_cast<Tensor&>(*this), dim, index, source);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::index_copy.dimname(Tensor self, Dimname dim, Tensor index, Tensor source) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, source))(const_cast<Tensor&>(*this), dim, index, source);
+#endif
+}
+#endif
 inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values, bool accumulate) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::index_put_(const_cast<Tensor&>(*this), indices, values, accumulate);
@@ -1341,6 +1421,16 @@ inline std::tuple<Tensor,Tensor> Tensor::kthvalue(int64_t k, int64_t dim, bool k
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), k, dim, keepdim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline std::tuple<Tensor,Tensor> Tensor::kthvalue(int64_t k, Dimname dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::kthvalue(const_cast<Tensor&>(*this), k, dim, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::kthvalue.dimname(Tensor self, int k, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)");
+    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, int64_t, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), k, dim, keepdim);
+#endif
+}
+#endif
 inline Tensor Tensor::log() const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::log(const_cast<Tensor&>(*this));
@@ -1652,6 +1742,16 @@ inline std::tuple<Tensor,Tensor> Tensor::mode(int64_t dim, bool keepdim) const {
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline std::tuple<Tensor,Tensor> Tensor::mode(Dimname dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::mode(const_cast<Tensor&>(*this), dim, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::mode.dimname(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)");
+    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
+#endif
+}
+#endif
 inline Tensor Tensor::mul(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
@@ -1775,6 +1875,16 @@ inline Tensor Tensor::permute(IntArrayRef dims) const {
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), dims);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::permute(DimnameList dims) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::permute(const_cast<Tensor&>(*this), dims);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::permute.names(Tensor(a) self, DimnameList dims) -> Tensor(a)");
+    return table->getOp<Tensor (const Tensor &, DimnameList)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dims);
+#endif
+}
+#endif
 inline Tensor Tensor::numpy_T() const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::numpy_T(const_cast<Tensor&>(*this));
@@ -2245,6 +2355,16 @@ inline Tensor Tensor::squeeze(int64_t dim) const {
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), dim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::squeeze(Dimname dim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::squeeze(const_cast<Tensor&>(*this), dim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::squeeze.dimname(Tensor(a) self, Dimname dim) -> Tensor(a)");
+    return table->getOp<Tensor (const Tensor &, Dimname)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim);
+#endif
+}
+#endif
 inline Tensor & Tensor::squeeze_() const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::squeeze_(const_cast<Tensor&>(*this));
@@ -2263,6 +2383,16 @@ inline Tensor & Tensor::squeeze_(int64_t dim) const {
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), dim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor & Tensor::squeeze_(Dimname dim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::squeeze_(const_cast<Tensor&>(*this), dim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::squeeze_.dimname(Tensor(a!) self, Dimname dim) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, Dimname)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim);
+#endif
+}
+#endif
 inline Tensor Tensor::sspaddmm(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::sspaddmm(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
@@ -3553,6 +3683,26 @@ inline Tensor Tensor::index_add(int64_t dim, const Tensor & index, const Tensor 
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this, index, source)), const_cast<Tensor&>(*this), dim, index, source);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor & Tensor::index_add_(Dimname dim, const Tensor & index, const Tensor & source) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::index_add_(const_cast<Tensor&>(*this), dim, index, source);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::index_add_.dimname(Tensor(a!) self, Dimname dim, Tensor index, Tensor source) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, source))(const_cast<Tensor&>(*this), dim, index, source);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::index_add(Dimname dim, const Tensor & index, const Tensor & source) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::index_add(const_cast<Tensor&>(*this), dim, index, source);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::index_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor source) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, source))(const_cast<Tensor&>(*this), dim, index, source);
+#endif
+}
+#endif
 inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, Scalar value) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
@@ -3601,6 +3751,46 @@ inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, const Tensor
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this, index, value)), const_cast<Tensor&>(*this), dim, index, value);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor & Tensor::index_fill_(Dimname dim, const Tensor & index, Scalar value) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::index_fill_(const_cast<Tensor&>(*this), dim, index, value);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::index_fill_.dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, Dimname, const Tensor &, Scalar)>(at::detail::multi_dispatch_tensor_type_set(*this, index))(const_cast<Tensor&>(*this), dim, index, value);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::index_fill(Dimname dim, const Tensor & index, Scalar value) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::index_fill(const_cast<Tensor&>(*this), dim, index, value);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::index_fill.dimname_Scalar(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, Scalar)>(at::detail::multi_dispatch_tensor_type_set(*this, index))(const_cast<Tensor&>(*this), dim, index, value);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor & Tensor::index_fill_(Dimname dim, const Tensor & index, const Tensor & value) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::index_fill_(const_cast<Tensor&>(*this), dim, index, value);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::index_fill_.dimname_Tensor(Tensor(a!) self, Dimname dim, Tensor index, Tensor value) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, value))(const_cast<Tensor&>(*this), dim, index, value);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::index_fill(Dimname dim, const Tensor & index, const Tensor & value) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::index_fill(const_cast<Tensor&>(*this), dim, index, value);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::index_fill.dimname_Tensor(Tensor self, Dimname dim, Tensor index, Tensor value) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, value))(const_cast<Tensor&>(*this), dim, index, value);
+#endif
+}
+#endif
 inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, const Tensor & src) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
@@ -3649,6 +3839,46 @@ inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, Scalar value) c
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this, index)), const_cast<Tensor&>(*this), dim, index, value);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor & Tensor::scatter_(Dimname dim, const Tensor & index, const Tensor & src) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::scatter_(const_cast<Tensor&>(*this), dim, index, src);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::scatter_.dimname_src(Tensor(a!) self, Dimname dim, Tensor index, Tensor src) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, src))(const_cast<Tensor&>(*this), dim, index, src);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::scatter(Dimname dim, const Tensor & index, const Tensor & src) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::scatter(const_cast<Tensor&>(*this), dim, index, src);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::scatter.dimname_src(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, src))(const_cast<Tensor&>(*this), dim, index, src);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor & Tensor::scatter_(Dimname dim, const Tensor & index, Scalar value) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::scatter_(const_cast<Tensor&>(*this), dim, index, value);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::scatter_.dimname_value(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, Dimname, const Tensor &, Scalar)>(at::detail::multi_dispatch_tensor_type_set(*this, index))(const_cast<Tensor&>(*this), dim, index, value);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::scatter(Dimname dim, const Tensor & index, Scalar value) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::scatter(const_cast<Tensor&>(*this), dim, index, value);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::scatter.dimname_value(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, Scalar)>(at::detail::multi_dispatch_tensor_type_set(*this, index))(const_cast<Tensor&>(*this), dim, index, value);
+#endif
+}
+#endif
 inline Tensor & Tensor::scatter_add_(int64_t dim, const Tensor & index, const Tensor & src) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
@@ -3673,6 +3903,26 @@ inline Tensor Tensor::scatter_add(int64_t dim, const Tensor & index, const Tenso
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this, index, src)), const_cast<Tensor&>(*this), dim, index, src);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor & Tensor::scatter_add_(Dimname dim, const Tensor & index, const Tensor & src) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::scatter_add_(const_cast<Tensor&>(*this), dim, index, src);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::scatter_add_.dimname(Tensor(a!) self, Dimname dim, Tensor index, Tensor src) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, src))(const_cast<Tensor&>(*this), dim, index, src);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::scatter_add(Dimname dim, const Tensor & index, const Tensor & src) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::scatter_add(const_cast<Tensor&>(*this), dim, index, src);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, src))(const_cast<Tensor&>(*this), dim, index, src);
+#endif
+}
+#endif
 inline Tensor & Tensor::lt_(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
@@ -4831,6 +5081,16 @@ inline Tensor Tensor::index_select(int64_t dim, const Tensor & index) const {
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this, index)), const_cast<Tensor&>(*this), dim, index);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::index_select(Dimname dim, const Tensor & index) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::index_select(const_cast<Tensor&>(*this), dim, index);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::index_select.dimname(Tensor self, Dimname dim, Tensor index) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index))(const_cast<Tensor&>(*this), dim, index);
+#endif
+}
+#endif
 inline Tensor Tensor::masked_select(const Tensor & mask) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
@@ -4885,6 +5145,16 @@ inline Tensor Tensor::gather(int64_t dim, const Tensor & index, bool sparse_grad
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this, index)), const_cast<Tensor&>(*this), dim, index, sparse_grad);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::gather(Dimname dim, const Tensor & index, bool sparse_grad) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::gather(const_cast<Tensor&>(*this), dim, index, sparse_grad);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::gather.dimname(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, bool)>(at::detail::multi_dispatch_tensor_type_set(*this, index))(const_cast<Tensor&>(*this), dim, index, sparse_grad);
+#endif
+}
+#endif
 inline Tensor Tensor::addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::addcmul(const_cast<Tensor&>(*this), tensor1, tensor2, value);
@@ -5385,6 +5655,16 @@ inline std::tuple<Tensor,Tensor> Tensor::sort(int64_t dim, bool descending) cons
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), dim, descending);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline std::tuple<Tensor,Tensor> Tensor::sort(Dimname dim, bool descending) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::sort(const_cast<Tensor&>(*this), dim, descending);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::sort.dimname(Tensor self, Dimname dim, bool descending=False) -> (Tensor values, Tensor indices)");
+    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, descending);
+#endif
+}
+#endif
 inline Tensor Tensor::argsort(int64_t dim, bool descending) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::argsort(const_cast<Tensor&>(*this), dim, descending);
@@ -5394,6 +5674,16 @@ inline Tensor Tensor::argsort(int64_t dim, bool descending) const {
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), dim, descending);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::argsort(Dimname dim, bool descending) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::argsort(const_cast<Tensor&>(*this), dim, descending);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::argsort.dimname(Tensor self, Dimname dim, bool descending=False) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, descending);
+#endif
+}
+#endif
 inline std::tuple<Tensor,Tensor> Tensor::topk(int64_t k, int64_t dim, bool largest, bool sorted) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::topk(const_cast<Tensor&>(*this), k, dim, largest, sorted);
