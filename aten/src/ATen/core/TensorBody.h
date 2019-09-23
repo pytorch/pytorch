@@ -403,11 +403,12 @@ class CAFFE2_API Tensor {
   Tensor data() const;
   bool is_leaf() const;
   int64_t output_nr() const;
+  int64_t _version() const;
   #ifdef BUILD_NAMEDTENSOR
-  Tensor & names_(c10::optional<DimnameList> names) const;
+  Tensor & rename_(c10::optional<DimnameList> names) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
-  Tensor renamed(c10::optional<DimnameList> names) const;
+  Tensor rename(c10::optional<DimnameList> names) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
   Tensor align_to(DimnameList names) const;
@@ -934,21 +935,12 @@ protected:
 };
 
 namespace detail {
-// Helper creator for Tensor clas which doesn't requires the users to pass
+// Helper creator for Tensor class which doesn't requires the users to pass
 // in an intrusive_ptr instead it just converts the argument passed to
 // requested intrusive_ptr type.
 template <typename T, typename... Args>
 Tensor make_tensor(Args&&... args) {
   return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
-}
-
-inline TensorTypeSet infer_tensor_type_set(const Tensor & tl) {
-  return tl.type_set();
-}
-
-inline TensorTypeSet infer_tensor_type_set(TensorList tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tl[0].type_set();
 }
 
 } // namespace detail

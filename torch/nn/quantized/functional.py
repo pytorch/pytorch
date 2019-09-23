@@ -101,8 +101,8 @@ def conv2d(input, weight, bias,
         >>> scale, zero_point = 1.0, 0
         >>> dtype = torch.quint8
         >>>
-        >>> q_filters = torch.quantize_linear(filters, scale, zero_point, dtype)
-        >>> q_inputs = torch.quantize_linear(inputs, scale, zero_point, dtype)
+        >>> q_filters = torch.quantize_per_tensor(filters, scale, zero_point, dtype)
+        >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype)
         >>> qF.conv2d(q_inputs, q_filters, bias, scale, zero_point, padding=1)
     """  # noqa: E501
     if padding_mode != 'zeros':
@@ -136,3 +136,5 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
 
 # TODO(zaf): Add documentation
 adaptive_avg_pool2d = torch.nn.functional.adaptive_avg_pool2d
+
+avg_pool2d = torch.nn.functional.avg_pool2d

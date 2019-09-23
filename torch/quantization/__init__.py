@@ -26,7 +26,7 @@ _all__ = [
     'Observer', 'WeightObserver', 'observer', 'default_observer',
     'default_weight_observer',
     # QConfig
-    'QConfig', 'default_qconfig',
+    'QConfig', 'default_qconfig', 'default_dynamic_qconfig',
     # QAT utilities
     'default_qat_qconfig', 'prepare_qat', 'quantize_qat',
     # module transformations
