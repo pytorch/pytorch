@@ -595,10 +595,14 @@ add_docstr(torch.atan2,
            r"""
 atan2(input, other, out=None) -> Tensor
 
-Returns a new tensor with the arctangent of the elements of :attr:`input`
-and :attr:`other`.
+Element-wise arctangent of :math:`\text{{input}}_{{i}} / \text{{other}}_{{i}}`
+with consideration of the quadrant. Returns a new tensor with the signed angles
+in radians between vector :math:`(\text{{other}}_{{i}}, \text{{input}}_{{i}})`
+and vector :math:`(1, 0)`. (Note that :math:`\text{{other}}_{{i}}`, the second
+parameter, is the x-coordinate, while :math:`\text{{input}}_{{i}}`, the first
+parameter, is the y-coordinate.)
 
-The shapes of :attr:`input` and :attr:`other` must be
+The shapes of ``input`` and ``other`` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
@@ -6047,20 +6051,20 @@ Example::
 
 add_docstr(torch.where,
            r"""
-.. function:: where(condition, input, other) -> Tensor
+.. function:: where(condition, x, y) -> Tensor
 
-Return a tensor of elements selected from either :attr:`input` or :attr:`other`, depending on :attr:`condition`.
+Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
 
 The operation is defined as:
 
 .. math::
     \text{out}_i = \begin{cases}
-        \text{input}_i & \text{if } \text{condition}_i \\
-        \text{other}_i & \text{otherwise} \\
+        \text{x}_i & \text{if } \text{condition}_i \\
+        \text{y}_i & \text{otherwise} \\
     \end{cases}
 
 .. note::
-    The tensors :attr:`condition`, :attr:`input`, :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+    The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Arguments:
     condition (BoolTensor): When True (nonzero), yield x, otherwise yield y
@@ -6068,7 +6072,7 @@ Arguments:
     y (Tensor): values selected at indices where :attr:`condition` is ``False``
 
 Returns:
-    Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`input`, :attr:`other`
+    Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
 
 Example::
 

@@ -141,7 +141,6 @@ template std::shared_ptr<OwnerRRef<IValue>> RRefContext::getOrCreateOwnerRRef<
 template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
     getOrCreateOwnerRRef<py::object>(const RRefId& rrefId);
 
-
 RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
   auto rfd = rref->fork();
   if (rref->isOwner()) {
@@ -192,11 +191,12 @@ void RRefContext::addPendingChild(
 }
 
 template void RRefContext::addPendingChild<IValue>(
-    const ForkId& forkId, const std::shared_ptr<UserRRef<IValue>>& rref);
+    const ForkId& forkId,
+    const std::shared_ptr<UserRRef<IValue>>& rref);
 
 template void RRefContext::addPendingChild<py::object>(
-    const ForkId& forkId, const std::shared_ptr<UserRRef<py::object>>& rref);
-
+    const ForkId& forkId,
+    const std::shared_ptr<UserRRef<py::object>>& rref);
 
 void RRefContext::delPendingChild(const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -219,11 +219,12 @@ void RRefContext::addPendingUser(
 }
 
 template void RRefContext::addPendingUser<IValue>(
-    const ForkId& forkId, const std::shared_ptr<UserRRef<IValue>>& rref);
+    const ForkId& forkId,
+    const std::shared_ptr<UserRRef<IValue>>& rref);
 
 template void RRefContext::addPendingUser<py::object>(
-    const ForkId& forkId, const std::shared_ptr<UserRRef<py::object>>& rref);
-
+    const ForkId& forkId,
+    const std::shared_ptr<UserRRef<py::object>>& rref);
 
 void RRefContext::delPendingUser(const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -252,9 +253,7 @@ void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   rrefForks.insert(forkId);
 }
 
-void RRefContext::delForkOfOwner(
-    const RRefId& rrefId,
-    const ForkId& forkId) {
+void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   std::shared_ptr<RRef> deletedRRef = nullptr;
   {
     std::lock_guard<std::mutex> lock(mutex_);

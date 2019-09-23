@@ -84,17 +84,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
           py::arg("process_group"),
           py::arg("num_send_recv_threads") = 4)
       .def(
-          "get_worker_id",
+          "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
               RpcAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "get_worker_id",
-          (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
-              RpcAgent::getWorkerInfo,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_worker_id",
+          "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&)const) &
               ProcessGroupAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())

@@ -155,7 +155,7 @@ py::object UserRRef<py::object>::toHere() {
   const Message& message = fm->wait();
   RRefContext::handleException(message);
   auto srv = RRefFetchRet::fromMessage(message);
-  return PythonRpcHandler::deserialize(srv.value().toStringRef());
+  return PythonRpcHandler::getInstance().deserialize(srv.value().toStringRef());
 }
 
 template class UserRRef<IValue>;

@@ -43,7 +43,8 @@ Message processRequestBlocking(Message&& request) {
         return ScriptRet(std::move(stack.front())).toMessage();
       }
       case MessageType::PYTHON_CALL: {
-        auto payload = PythonRpcHandler::generatePythonUDFResult(request);
+        auto payload =
+            PythonRpcHandler::getInstance().generatePythonUDFResult(request);
         return Message(
             std::move(payload),
             std::vector<torch::Tensor>(),
@@ -78,7 +79,8 @@ Message processRequestBlocking(Message&& request) {
         auto& ctx = RRefContext::getInstance();
 
         auto ownerRRef = ctx->getOrCreateOwnerRRef<py::object>(rrefId);
-        ownerRRef->setValue(PythonRpcHandler::runPythonUDF(prc.udf()));
+        ownerRRef->setValue(
+            PythonRpcHandler::getInstance().runPythonUDF(prc.udf()));
         ctx->addForkOfOwner(rrefId, forkId);
         return RemoteRet(rrefId, forkId).toMessage();
       }
@@ -96,7 +98,8 @@ Message processRequestBlocking(Message&& request) {
         std::shared_ptr<OwnerRRef<py::object>> rref =
             RRefContext::getInstance()->getOrCreateOwnerRRef<py::object>(
                 prf.rrefId());
-        return RRefFetchRet(PythonRpcHandler::serialize(rref->getValue()))
+        return RRefFetchRet(
+                   PythonRpcHandler::getInstance().serialize(rref->getValue()))
             .toMessage();
       }
       case MessageType::RREF_USER_ACCEPT: {

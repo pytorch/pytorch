@@ -3,65 +3,54 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
-namespace {
 
-py::object module_;
-py::object runUDFFunction_;
-py::object loadResultFunction_;
-py::object serializeFunction_;
-
-} // anonymous namespace
-
-namespace PythonRpcHandler {
-
-void init() {
+PythonRpcHandler::PythonRpcHandler() {
   AutoGIL ag;
-  if (module_ == nullptr) {
-    module_ = py::module::import("torch.distributed.internal_rpc_utils");
-  }
-  if (runUDFFunction_ == nullptr) {
-    runUDFFunction_ = module_.attr("run_python_udf_internal");
-  }
-  if (loadResultFunction_ == nullptr) {
-    loadResultFunction_ = module_.attr("load_python_udf_result_internal");
-  }
-  if (serializeFunction_ == nullptr) {
-    serializeFunction_ = module_.attr("serialize");
-  }
+  py::object module =
+      py::module::import("torch.distributed.internal_rpc_utils");
+  runUDFFunction_ = module.attr("run_python_udf_internal");
+  loadResultFunction_ = module.attr("load_python_udf_result_internal");
+  serializeFunction_ = module.attr("serialize");
 }
 
-std::vector<char> generatePythonUDFResult(const Message& message) {
+PythonRpcHandler& PythonRpcHandler::getInstance() {
+  static PythonRpcHandler handler;
+  return handler;
+}
+
+std::vector<char> PythonRpcHandler::generatePythonUDFResult(
+    const Message& request) {
   AutoGIL ag;
   auto pickledPythonUDF =
-      py::bytes(message.payload().data(), message.payload().size());
+      py::bytes(request.payload().data(), request.payload().size());
+  TORCH_CHECK(runUDFFunction_ != nullptr, "runUDFFunction_ is nullptr");
   py::object res = runUDFFunction_(pickledPythonUDF);
-  const auto& presStr = static_cast<std::string>(serialize(res));
-  std::vector<char> payload(presStr.begin(), presStr.end());
+  const auto& resStr = static_cast<std::string>(serialize(res));
+  std::vector<char> payload(resStr.begin(), resStr.end());
   return payload;
 }
 
-py::object runPythonUDF(const std::string& pickledPythonUDF) {
+py::object PythonRpcHandler::runPythonUDF(const std::string& pickledPythonUDF) {
   AutoGIL ag;
   return runUDFFunction_(py::bytes(pickledPythonUDF));
 }
 
-std::string serialize(const py::object& obj) {
+std::string PythonRpcHandler::serialize(const py::object& obj) {
   AutoGIL ag;
   return static_cast<std::string>((py::bytes)serializeFunction_(obj));
 }
 
-py::object deserialize(const std::string& serializedObj) {
+py::object PythonRpcHandler::deserialize(const std::string& serializedObj) {
   AutoGIL ag;
   return loadResultFunction_(py::bytes(serializedObj));
 }
 
-py::object loadPythonUDFResult(const Message& message) {
+py::object PythonRpcHandler::loadPythonUDFResult(const Message& message) {
   AutoGIL ag;
   auto pargs = py::bytes(message.payload().data(), message.payload().size());
+  TORCH_CHECK(loadResultFunction_ != nullptr, "loadResultFunction_ is nullptr");
   return loadResultFunction_(pargs);
 }
-
-} // namespace PythonRpcHandler
 
 } // namespace rpc
 } // namespace distributed

@@ -158,6 +158,9 @@ class JitTestCase(TestCase):
             for a, b in zip(code_files, code_files_2):
                 self.assertMultiLineEqual(a, b)
 
+            if isinstance(m, torch._C.ScriptModule):
+                self.assertTrue(torch._C._ivalue_tags_match(m, imported._c))
+
 
     def emitFunctionHook(self, func):
         # func has invalid names for export, skip the jitter check
@@ -487,6 +490,24 @@ class JitTestCase(TestCase):
         with freeze_rng_state():
             results = func(*inputs, **kwargs)
         return results
+
+    def checkModule(self, nn_module, args):
+        """
+        Check that a nn.Module's results in Script mode match eager and that it
+        can be exported
+        """
+        sm = torch.jit.script(nn_module)
+
+        with freeze_rng_state():
+            eager_out = nn_module(*args)
+
+        with freeze_rng_state():
+            script_out = sm(*args)
+
+        self.assertEqual(eager_out, script_out)
+        self.assertExportImportModule(sm, args)
+
+        return sm
 
 @contextmanager
 def enable_profiling_mode():
