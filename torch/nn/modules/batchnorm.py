@@ -56,12 +56,11 @@ class _BatchNorm(Module):
             init.ones_(self.weight)
             init.zeros_(self.bias)
 
-    def __getattr__(self, name):
-        if self.track_running_stats and name == 'num_batches_tracked' and name in self.__dict__[
-                '_buffers'] and self.num_batches_tracked_scalar != -1:
-            return super(_BatchNorm, self).__getattr__(name).fill_(
-                self.num_batches_tracked_scalar)
-        return super(_BatchNorm, self).__getattr__(name)
+    @property
+    def num_batches_tracked(self):
+        if self.track_running_stats and self.num_batches_tracked_scalar != -1:
+            super(_BatchNorm, self).__getattr__('num_batches_tracked').fill_(self.num_batches_tracked_scalar)
+        return super(_BatchNorm, self).__getattr__('num_batches_tracked')
 
     def _check_input_dim(self, input):
         raise NotImplementedError
