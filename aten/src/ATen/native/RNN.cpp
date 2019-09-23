@@ -1032,6 +1032,49 @@ std::tuple<Tensor, Tensor> lstm_cell(
   return LSTMCell<CellParams>{}(input, std::make_tuple(hx[0], hx[1]), CellParams{w_ih, w_hh, b_ih, b_hh});
 }
 
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_lstm_cell_backward(
+  const Tensor& grad_hy, const Tensor& grad_cy,
+  const Tensor& input_gates, const Tensor& hidden_gates, const Tensor& input_bias, const Tensor& hidden_bias, const Tensor& cx, const Tensor& cy,
+  bool has_bias) {
+auto gates = input_gates + hidden_gates;
+if (input_bias.defined()) {
+  gates = gates + input_bias;
+}
+if (hidden_bias.defined()) {
+  gates = gates + hidden_bias;
+}
+auto chunked_gates = gates.chunk(4,1);
+auto i = chunked_gates[0].sigmoid();
+auto f = chunked_gates[1].sigmoid();
+auto c = chunked_gates[2].tanh();
+auto o = chunked_gates[3].sigmoid();
+
+auto gcx = cy.tanh();
+Tensor gog;
+TORCH_INTERNAL_ASSERT((grad_hy.defined() || grad_cy.defined()), "either gradient with respect to hy or cy should be defined")
+if (grad_hy.defined()) {
+  gog = grad_hy * gcx;
+  gog = at::sigmoid_backward(gog,o);
+  gcx = at::tanh_backward(grad_hy * o, gcx);
+  if (grad_cy.defined()) {
+    gcx = gcx + grad_cy;
+  }
+} else if (grad_cy.defined()){
+  gog = at::zeros_like(cx);
+  gcx = grad_cy;
+} 
+Tensor gig = gcx * c;
+Tensor gfg = gcx * cx;
+Tensor gcg = gcx * i;
+gcx = gcx * f;
+gig = at::sigmoid_backward(gig, i);
+gfg = at::sigmoid_backward(gfg, f);
+gcg = at::tanh_backward(gcg, c);
+Tensor grad_gates = at::cat({gig, gfg, gcg, gog}, 1);
+auto grad_bias = has_bias ? grad_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
+return std::make_tuple(grad_gates, grad_gates, gcx, grad_bias, grad_bias);
+}
+
 Tensor gru_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
