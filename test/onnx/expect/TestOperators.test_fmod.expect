@@ -5,7 +5,7 @@ graph {
   node {
     input: "0"
     input: "1"
-    output: "3"
+    output: "2"
     op_type: "Mod"
     attribute {
       name: "fmod"
@@ -53,7 +53,7 @@ graph {
     }
   }
   output {
-    name: "3"
+    name: "2"
     type {
       tensor_type {
         elem_type: 1
