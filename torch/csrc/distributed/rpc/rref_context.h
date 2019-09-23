@@ -50,10 +50,12 @@ class RRefContext {
   template <typename T>
   std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId);
 
+  // Register a fork of the ``OwnerRRef``, and inserts a shared_ptr of the
+  // ``OwnerRRef`` in a map to keep it alive.
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
-  std::shared_ptr<RRef> delForkOfOwner(
-      const RRefId& rrefId,
-      const ForkId& forkId);
+  // Delete a fork of the ``OwnerRRef``. NB: this could trigger deletion on the
+  // IValue or py::object. For the later, this method will acquire GIL.
+  void delForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
 
   // Invoked when pickling an RRef to setup child/fork properly
   RRefForkData prepareChildFork(const std::shared_ptr<RRef>& rref);
@@ -85,6 +87,7 @@ class RRefContext {
       const ForkId& forkId, const std::shared_ptr<UserRRef<T>>& rref);
   void delPendingUser(const ForkId& forkId);
 
+  // If there is any leak on any RRef, this method will throw an error.
   void checkRRefLeaks();
 
  private:

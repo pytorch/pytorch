@@ -107,14 +107,7 @@ Message processRequestBlocking(Message&& request) {
       }
       case MessageType::RREF_USER_DELETE: {
         RRefUserDelete rud = RRefUserDelete::fromMessage(request);
-        auto deletedRRef = RRefContext::getInstance()->delForkOfOwner(
-            rud.rrefId(), rud.forkId());
-
-        if (deletedRRef && deletedRRef->isPyObj()) {
-          // Need GIL here as this could trigger deletion on py::object
-          AutoGIL ag;
-          deletedRRef.reset();
-        }
+        RRefContext::getInstance()->delForkOfOwner(rud.rrefId(), rud.forkId());
         return Message({}, {}, MessageType::ACK);
       }
       case MessageType::RREF_CHILD_ACCEPT: {

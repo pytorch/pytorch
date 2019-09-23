@@ -252,33 +252,38 @@ void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   rrefForks.insert(forkId);
 }
 
-std::shared_ptr<RRef> RRefContext::delForkOfOwner(
+void RRefContext::delForkOfOwner(
     const RRefId& rrefId,
     const ForkId& forkId) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  auto rrefIter = forks_.find(rrefId);
-  TORCH_INTERNAL_ASSERT(
-      rrefIter != forks_.end(),
-      "Inconsistent states, deleting a fork before the owner knows it.");
-  auto& rrefForks = rrefIter->second;
-  auto forkIter = rrefForks.find(forkId);
-  TORCH_INTERNAL_ASSERT(
-      forkIter != rrefForks.end(),
-      "Attempt to delete a non-exist fork ",
-      forkId);
+  std::shared_ptr<RRef> deletedRRef = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto rrefIter = forks_.find(rrefId);
+    TORCH_INTERNAL_ASSERT(
+        rrefIter != forks_.end(),
+        "Inconsistent states, deleting a fork before the owner knows it.");
+    auto& rrefForks = rrefIter->second;
+    auto forkIter = rrefForks.find(forkId);
+    TORCH_INTERNAL_ASSERT(
+        forkIter != rrefForks.end(),
+        "Attempt to delete a non-exist fork ",
+        forkId);
 
-  rrefForks.erase(forkId);
+    rrefForks.erase(forkId);
 
-  std::shared_ptr<RRef> ret = nullptr;
-  if (rrefForks.empty()) {
-    auto ownerIter = owners_.find(rrefId);
-    if (ownerIter != owners_.end()) {
-      ret = ownerIter->second;
-      owners_.erase(ownerIter);
+    if (rrefForks.empty()) {
+      auto ownerIter = owners_.find(rrefId);
+      if (ownerIter != owners_.end()) {
+        deletedRRef = ownerIter->second;
+        owners_.erase(ownerIter);
+      }
+      forks_.erase(rrefIter);
     }
-    forks_.erase(rrefIter);
   }
-  return ret;
+  if (deletedRRef && deletedRRef->isPyObj()) {
+    AutoGIL ag;
+    deletedRRef.reset();
+  }
 }
 
 } // namespace rpc

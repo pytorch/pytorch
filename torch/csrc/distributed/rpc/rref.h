@@ -48,7 +48,7 @@ static_assert(
     C10_IS_TRIVIALLY_COPYABLE(RRefForkData),
     "RRefForkData must be trivially copyable");
 
-// Note [RRef Algorithm]
+// Note [RRef Protocol]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // RRef stands for Remote REFerence. Each RRef is owned by a single worker
@@ -176,23 +176,30 @@ static_assert(
 //
 // TODO: make RRef an IValue, and edit createStackForSchema accordingly
 // TODO: make RRef system messages idempotent and retry on failures.
+//
+// ``RRef`` is the base type for both ``UserRRef`` and ``OwnerRRef``.
+// Each ``RRef`` has a globally unique ``RRefId``.
 class RRef {
  public:
   // RRef is made NOT copyable NOT movable to prevent messing up reference
-  // counting
+  // counting.
   RRef(const RRef& other) = delete;
   RRef(RRef&& other) = delete;
+  RRef& operator=(RRef&& other) = delete;
 
   virtual ~RRef() = default;
 
+  // returns the worker id of the owner
   inline worker_id_t owner() const {
     return ownerId_;
   }
 
+  // Returns the globally unique RRefId of this RRef
   inline const RRefId& rrefId() const {
     return rrefId_;
   }
 
+  // Returns true if this is the ``OwnerRRef``
   virtual bool isOwner() const = 0;
 
   // returns true if this RRef holds an py::object, false if IValue
@@ -209,6 +216,10 @@ class RRef {
   const RRefId rrefId_;
 };
 
+// ``UserRRef`` represents a user of an RRef. Besides the ``RRefId``, each user
+// also has a globally unique ``ForkId`` to identify this user. ``UserRRef``
+// never owns the real value, the only way to get the value of the ``RRef`` is
+// to call ``to_here()`` and get a copy..
 template <typename T>
 class UserRRef final : public RRef {
  public:
@@ -225,9 +236,14 @@ class UserRRef final : public RRef {
     return std::is_same<T, py::object>::value;
   }
 
+  // Returns the globally unique ForkId of this RRef
   const ForkId& forkId() const;
+
+  // Get of copy of the value from the ``OwnerRRef``. If the value is not ready
+  // yet, this call will block.
   T toHere();
 
+  // Upon destruction, this ``UserRRef`` will tell the owner to deref.
   ~UserRRef() override;
 
  private:
@@ -256,7 +272,11 @@ class OwnerRRef final : public RRef {
     return std::is_same<T, py::object>::value;
   }
 
+  // Get a constant reference of the real value. This method will block if the
+  // value is not ready.
   const T& getValue() const;
+
+  // Set the value of this ``OwnerRRef``.
   void setValue(T&& value);
 
  private:
