@@ -1249,15 +1249,15 @@ class TestNamedTensor(TestCase):
         # Input tensor partially named
         partiall_named = create('N:7,None:1')
         with self.assertRaisesRegex(RuntimeError, "All input dims must be named"):
-            partiall_named.align_to(..., 'N')
+            partiall_named.align_to('...', 'N')
 
         # Input order partially named
         with self.assertRaisesRegex(RuntimeError, "desired order must not contain None"):
-            tensor.align_to(..., 'N', None)
+            tensor.align_to('...', 'N', None)
 
         # Input order duplicate names
         with self.assertRaisesRegex(RuntimeError, "Duplicate names"):
-            tensor.align_to(..., 'N', 'N')
+            tensor.align_to('...', 'N', 'N')
 
     def test_align_as(self):
         # align_as calls align_to internally. align_to has pretty substantial tests,
