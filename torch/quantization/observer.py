@@ -493,14 +493,14 @@ class HistogramObserver(ObserverBase):
         return self._calculate_qparams(new_min.item(), new_max.item())
 
 
-class TensorObserver(ObserverBase):
+class RecordingObserver(ObserverBase):
     r"""
     The module is mainly for debug and records the tensor values during runtime
     """
     __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
     def __init__(self, **kwargs):
-        super(TensorObserver, self).__init__(**kwargs)
+        super(RecordingObserver, self).__init__(**kwargs)
         self.tensor_val = []
 
     def forward(self, x):
@@ -509,7 +509,7 @@ class TensorObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        raise Exception("calculate_qparams should not be called for TensorObserver")
+        raise Exception("calculate_qparams should not be called for RecordingObserver")
 
     @torch.jit.export
     def get_tensor_value(self):
@@ -527,7 +527,7 @@ def default_observer(**kwargs):
 
 
 def default_debug_observer(**kwargs):
-    return observer(TensorObserver, **kwargs)
+    return observer(RecordingObserver, **kwargs)
 
 
 def default_weight_observer(**kwargs):

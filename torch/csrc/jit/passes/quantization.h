@@ -52,16 +52,18 @@ TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
  *
  * \param module the input module
  * \param method_name the method we want to insert observers for
- * \param observer_module the default observer module
- * \param weight_observer_module the observer module that will be used
- * by weight
+ * \param qconfig_dict the qconfig dictionary that specifies how
+ * each module is going to be quantized
+ * \param inplace whether we want to do inplace modification to the input module or
+ * clone the module
  */
-TORCH_API void InsertObservers(
+TORCH_API script::Module InsertObservers(
     script::Module& module,
     const std::string& method_name,
     const std::unordered_map<
         std::string,
-        std::tuple<script::Module, script::Module>>& qconfig_dict);
+        std::tuple<script::Module, script::Module>>& qconfig_dict,
+    bool inplace = false);
 
 /** \brief Insert quantize - int_repr - dequantize calls to the Tensors
  *  that are observed in insert_observers pass
@@ -76,7 +78,8 @@ TORCH_API void InsertObservers(
  */
 TORCH_API script::Module InsertQuantDeQuant(
     script::Module& module,
-    const std::string& method_name);
+    const std::string& method_name,
+    bool inplace = false);
 
 /** \brief Backend specific pass to fuse dequantize - op - quantize calls
  * as quantized_op calls.
@@ -107,10 +110,10 @@ TORCH_API void FoldConvBatchNorm2d(const script::Module& module);
 
 /** \brief Fold quantize function call into module
  *
- *  For the graph in the specified method of module, if we find a quantize_linear
+ *  For the graph in the specified method of module, if we find a quantize_per_tensor
  *  call on an attribute("weight") of the module, we'll quantize the attribute directly
  *  and register a new buffer "_quantized_weight" on the module and remove the
- *  quantize_linear call and replace the use of the quantized weight with
+ *  quantize_per_tensor call and replace the use of the quantized weight with
  *  "_quantized_weight".
  */
 TORCH_API void FoldQuantizeCallIntoBuffer(script::Module& module, const std::string& method_name);
