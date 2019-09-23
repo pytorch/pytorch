@@ -87,11 +87,16 @@ namespace nn {
       return torch::embedding(weight, input, *options.padding_idx(), options.scale_grad_by_freq(), options.sparse());
     }
 
-    Embedding Embedding::from_pretrained(Tensor embeddings, EmbeddingOptions options, bool freeze = true) {
+    Embedding Embedding::from_pretrained(Tensor embeddings, c10::optional<EmbeddingOptions> options, bool freeze = true) {
       TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
-      options.num_embeddings = embeddings.size(0);
-      options.embeddings_dim = embeddings.size(1);
-      Embedding embedding= Embedding(options);
+      if(options != c10:nullopt){
+        TORCH_CHECK(options.num_embeddings == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", options.num_embeddings);
+        TORCH_CHECK(options.embeddings_dim == embeddings.size(1), "Expects options.embeddings_dim to be ", embeddings.size(1) , "but found ", options.embeddings_dim);
+      }
+      else{
+        options = EmbeddingOptions(embeddings.size(0), embeddings.size(1));
+      }
+      Embedding embedding= Embedding(*options);
       embedding.weight.set_requires_grad(!freeze);
       return embedding;
     }
@@ -180,10 +185,15 @@ namespace nn {
       stream << ", mode="<<mode<<")";
     }
 
-    EmbeddingBag EmbeddingBag::from_pretrained(Tensor embeddings, EmbeddingBagOptions options, bool freeze = true) {
+    EmbeddingBag EmbeddingBag::from_pretrained(Tensor embeddings, c10::optional<EmbeddingBagOptions> options, bool freeze = true) {
       TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
-      options.num_embeddings = embeddings.size(0);
-      options.embeddings_dim = embeddings.size(1);
+      if(options != c10:nullopt){
+        TORCH_CHECK(options.num_embeddings == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", options.num_embeddings);
+        TORCH_CHECK(options.embeddings_dim == embeddings.size(1), "Expects options.embeddings_dim to be ", embeddings.size(1) , "but found ", options.embeddings_dim);
+      }
+      else{
+        options = EmbeddingBagOptions(embeddings.size(0), embeddings.size(1));
+      }
       EmbeddingBag embeddingbag = EmbeddingBag(options);
       embeddingbag.weight.set_requires_grad(!freeze);
       return embeddingbag;
