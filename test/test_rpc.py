@@ -641,6 +641,28 @@ class RpcTest(MultiProcessTestCase):
         )
         self.assertEqual(rref.to_here(), None)
 
+    @_wrap_with_rpc
+    def test_remote_same_worker(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        for i in range(20):
+            rref_a = dist.remote(
+                'worker{}'.format(dst_rank),
+                torch.add,
+                args=(torch.ones(n, n), 2)
+            )
+            rref_b = dist.remote(
+                'worker{}'.format(dst_rank),
+                torch.add,
+                args=(torch.ones(n, n), i)
+            )
+            rref_c = dist.remote(
+                'worker{}'.format(dst_rank),
+                my_rref_function,
+                args=(rref_a, rref_b)
+            )
+            self.assertEqual(rref_c.to_here(), torch.ones(n, n) * 4 + i)
+
 
 if __name__ == '__main__':
     run_tests()
