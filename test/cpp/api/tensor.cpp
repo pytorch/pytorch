@@ -490,6 +490,21 @@ TEST(TensorTest, DetachInplace) {
   ASSERT_THROWS_WITH(y.detach_(), message);
 }
 
+TEST(TensorTest, SetData) {
+  auto x = torch::randn({5});
+  auto y = torch::randn({5});
+  ASSERT_FALSE(torch::equal(x, y));
+  ASSERT_NE(x.data_ptr<float>(), y.data_ptr<float>());
+
+  x.set_data(y);
+  ASSERT_TRUE(torch::equal(x, y));
+  ASSERT_EQ(x.data_ptr<float>(), y.data_ptr<float>());
+
+  x = at::tensor({5});
+  y = at::tensor({5});
+  ASSERT_THROWS_WITH(x.set_data(y), "set_data is not implemented for Tensor");
+}
+
 TEST(TensorTest, RequiresGradInplace) {
   auto x = torch::tensor({5.0});
   x.requires_grad_(true);
