@@ -183,7 +183,8 @@ if [[ $BUILD_ENVIRONMENT == *caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04* ]]; then
   cd build
   cmake ..
   CPLUS_INCLUDE_PATH=/usr/local/cuda/include make -j4
-  sudo make install
+  sudo cp libnvonnxparser.so.6.0.1 /usr/lib/x86_64-linux-gnu
+  sudo cp libnvonnxparser_static.a /usr/lib/x86_64-linux-gnu
   cd ../../
   rm -rf onnx-tensorrt/ cmake-3.14.6-Linux-x86_64/
 
