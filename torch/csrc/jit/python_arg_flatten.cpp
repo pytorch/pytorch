@@ -53,20 +53,10 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
       flatten_rec(item.ptr(), args);
     }
     structure.push_back(D::DictClose);
-    std::string msg =
-        "Warning : Input dictionaries are allowed in ONNX but they should be handled with care. "
-        "Usages of dictionaries is not recommended, and should not be used except "
-        "for configuration use. "
-        "Also note that the order and values of the keys must remain the same.\n";
-    std::cerr << msg;
   } else if (THPUtils_checkString(obj)) {
     string str = THPUtils_unpackString(obj);
     args.desc.strings.emplace_back(str);
     args.desc.structure.push_back(D::String);
-    std::string msg =
-        "Warning : The model seems to have string inputs/outputs. "
-        "Note that strings will not appear as inputs/outputs of the ONNX graph.\n";
-    std::cerr << msg;
   } else if (THPVariable_Check(obj)) {
     auto& var = reinterpret_cast<THPVariable*>(obj)->cdata;
     args.vars.push_back(var);
