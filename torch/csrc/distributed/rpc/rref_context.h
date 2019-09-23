@@ -21,18 +21,23 @@ class RRefContext {
   static void handleException(const Message& message);
 
   RRefContext(const RRefContext&) = delete;
+  RRefContext(RRefContext&& other) = delete;
   void operator=(const RRefContext&) = delete;
+  RRefContext& operator=(RRefContext&& other) = delete;
 
   ~RRefContext();
 
+  // get the worker id of the current worker
   inline worker_id_t getWorkerId() const {
     return agent_->getWorkerInfo().id_;
   }
 
+  // get the worker name of the current worker
   inline const std::string& getWorkerName() const {
     return agent_->getWorkerInfo().name_;
   }
 
+  //  generate a globally unique ID
   inline GloballyUniqueId genGloballyUniqueId() {
     return GloballyUniqueId(getWorkerId(), nextLocalId_++);
   }
@@ -41,12 +46,18 @@ class RRefContext {
     return agent_;
   }
 
+  // create a ``UserRRef`` owned by the worker ``ownerId``
   template <typename T>
   std::shared_ptr<UserRRef<T>> createUserRRef(worker_id_t ownerId);
 
+  // Convert an RRefForkData into an RRef. This RRef could be user or owner.
+  // This RRef could have already existed before, or could be created in this
+  // method.
   template <typename T>
   std::shared_ptr<RRef> getOrCreateRRef(const RRefForkData& rfd);
 
+  // Get the ``OwnerRRef`` of id ``rrefId``. If it does not exist, create a new
+  // one.
   template <typename T>
   std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId);
 
