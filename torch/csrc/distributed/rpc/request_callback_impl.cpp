@@ -123,7 +123,9 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
 
       // Attach the 'send' autograd function if needed.
       if (autogradContext != nullptr) {
-        rpc::worker_id_t dstWorkerId = autogradMetadata.autogradContextId >> 48;
+        const int kAutoIncrementBits = 48;
+        rpc::worker_id_t dstWorkerId =
+            autogradMetadata.autogradContextId >> kAutoIncrementBits;
         addSendRpcBackward(
             *autogradContext,
             responseAutogradMetadata,
