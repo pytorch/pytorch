@@ -302,14 +302,17 @@ set of reviewers.
 ### `use_c10_dispatcher`
 
 ```
-use_c10_dispatcher: True
+use_c10_dispatcher: 'no'
+use_c10_dispatcher: 'unboxed_only'
+use_c10_dispatcher: 'full'
 ```
 
 This will indicate that the func signature only uses features supported by
 the c10 dispatcher. With this flag, the operator will be added to the
-c10 operator library and be available there. If enabling this works for your
-operator, please do. For a few corner cases, enabling this might not compile
-successfully, so setting this to false is a workaround. Also, False is the default.
+c10 operator library and be available there. If setting this to 'full' works for
+your operator, please do. For a few corner cases, enabling this might not compile
+successfully, so setting this to 'unboxed_only', or as last resort 'no' is a
+workaround. Also, 'no' is the default if you don't specify anything.
 
 ## Writing an implementation in C++
 
