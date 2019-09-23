@@ -4,6 +4,9 @@
 #include <ATen/core/ivalue.h>
 
 namespace c10 {
+
+using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
+
 /**
  * Inherit from OperatorKernel to implement a c10 kernel.
  *
@@ -15,14 +18,15 @@ namespace c10 {
  * >   };
  * > }
  *
- * The kernel class is allowed to have members to cache things between calls
- * but it is not allowed to change behavior based on the cache.
- * The cache is purely a performance optimization and the kernel must
- * return the same outputs regardless of what's in the cache.
+ * The kernel class is allowed to have members but these are equivalent
+ * to global variables. The kernel implementation is responsible for
+ * preventing race conditions on them.
  *
  * See below for how to register this kernel with PyTorch.
  */
-class OperatorKernel : public KernelCache {};
+struct CAFFE2_API OperatorKernel {
+  virtual ~OperatorKernel() = default;
+};
 
 namespace detail {
   // supported_primitive_arg_types defines which primitive types we allow in
@@ -224,10 +228,10 @@ namespace detail {
   struct wrap_kernel_functor_boxed<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
-    static void call(Stack* stack, KernelCache* cache) {
+    static void call(OperatorKernel* functor, Stack* stack) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
-      KernelFunctor* functor = static_cast<KernelFunctor*>(cache);
-      auto output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, stack);
+      KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
+      auto output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
       torch::jit::drop(*stack, num_inputs);
       push_outputs<typename guts::infer_function_traits_t<KernelFunctor>::return_type, AllowDeprecatedTypes>::call(std::move(output), stack);
     }
@@ -238,10 +242,10 @@ namespace detail {
   struct wrap_kernel_functor_boxed<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
-    static void call(Stack* stack, KernelCache* cache) {
+    static void call(OperatorKernel* functor, Stack* stack) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
-      KernelFunctor* functor = static_cast<KernelFunctor*>(cache);
-      call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, stack);
+      KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
+      call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
       torch::jit::pop(*stack, num_inputs);
     }
   };
@@ -251,9 +255,9 @@ namespace detail {
     static_assert(std::is_same<ReturnType, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value, "Return type mismatch");
     static_assert(std::is_same<guts::typelist::typelist<ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value, "Parameter types mismatch");
 
-    static ReturnType call(KernelCache* cache, ParameterTypes... args) {
-      KernelFunctor* functor = static_cast<KernelFunctor*>(cache);
-      return (*functor)(std::forward<ParameterTypes>(args)...);
+    static ReturnType call(OperatorKernel* functor, ParameterTypes... args) {
+      KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
+      return (*functor_)(std::forward<ParameterTypes>(args)...);
     }
   };
   template<class KernelFunctor> using wrap_kernel_functor_unboxed = wrap_kernel_functor_unboxed_<KernelFunctor, typename guts::infer_function_traits_t<KernelFunctor>::func_type>;
@@ -266,9 +270,9 @@ namespace detail {
     explicit constexpr KernelFactory(Args... args)
     : constructor_parameters_(std::move(args)...) {}
 
-    std::unique_ptr<KernelCache> operator()() const {
+    std::shared_ptr<KernelFunctor> operator()() const {
       return guts::apply(
-        [] (const Args&... params) {return guts::make_unique<KernelFunctor>(params...); },
+        [] (const Args&... params) {return std::make_shared<KernelFunctor>(params...); },
         constructor_parameters_);
     }
 

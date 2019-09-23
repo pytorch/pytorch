@@ -358,7 +358,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
       }
       // Original bias was float, so we requantize it here.
-      auto bias = at::quantize_linear(
+      auto bias = at::quantize_per_tensor(
           bias_fp32, kernel_scale * input_scale, 0, kQInt32);
       // Update the input scale to not pack again.
       pack_ptr.input_scale = input_scale;
