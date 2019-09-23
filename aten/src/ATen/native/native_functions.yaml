@@ -1645,6 +1645,8 @@
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
   use_c10_dispatcher: unboxed_only
 
+# The CPU and GPU dispatch variants are named weirdly here because otherwise there
+# are namespacing issues in C++
 - func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
