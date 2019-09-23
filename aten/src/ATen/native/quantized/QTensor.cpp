@@ -42,30 +42,6 @@ Tensor dequantize_quant(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
-Tensor dequantize_per_tensor_cpu(
-    const Tensor& self,
-    double scale,
-    int64_t zero_point,
-    ScalarType dtype) {
-  TORCH_CHECK(
-      isQIntType(toQIntType(self.scalar_type())),
-      "Scalar type for quantized Tensor must have same underlying type as input.");
-  TORCH_CHECK(
-      dtype == toQIntType(self.scalar_type()),
-      "ScalarType argument must match the corresponding quantized scalar type of input integer Tensor");
-  // scalar type of output Tensor is hard-coded as float
-  Tensor f = at::empty(self.sizes(), self.options().dtype(at::kFloat));
-  AT_DISPATCH_QINT_TYPES(
-      toQIntType(self.scalar_type()), "dequantize_linear_cpu", [&]() {
-        underlying_t* qdata = self.data_ptr<underlying_t>();
-        auto* fdata = f.data_ptr<float>();
-        for (int i = 0; i < self.numel(); ++i) {
-          fdata[i] = (static_cast<float>(qdata[i]) - zero_point) * scale;
-        }
-      });
-  return f;
-}
-
 double q_scale_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerTensorAffine);

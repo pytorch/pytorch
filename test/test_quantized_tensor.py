@@ -128,15 +128,7 @@ class TestQuantizedTensor(TestCase):
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
-    def test_qtensor_dequantize_per_tensor(self):
-        t = torch.arange(-10, 10, dtype=torch.int8)
-        scale = 3
-        zero_point = 2
-        qt = torch._dequantize_per_tensor(t, scale, zero_point, torch.qint8)
-        qt2 = torch._make_per_tensor_quantized_tensor(t, scale, zero_point)
-        self.assertEqual(qt, qt2.dequantize())
-
-    def test_qtensor_per_channel_affine(self):
+    def test_qtensor_quantize_per_channel(self):
         r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
         scales = torch.tensor([0.2, 0.03], dtype=torch.double)
         zero_points = torch.tensor([5, 10], dtype=torch.long)
