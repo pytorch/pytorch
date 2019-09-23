@@ -1,6 +1,5 @@
-#import "TorchModule.h"
 #import <LibTorch/LibTorch.h>
-#import <torch/csrc/autograd/grad_mode.h>
+#import "TorchModule.h"
 #import "TorchIValuePrivate.h"
 
 @implementation TorchModule {
@@ -22,6 +21,10 @@
     NSLog(@"%@", exception);
   }
   return nil;
+}
+
++ (NSArray<NSNumber* >* )predict:(void* )data dims:(NSArray<NSNumber* >* )dims type:(TensorType) type {
+    return nil;
 }
 
 - (TorchIValue*)forward:(NSArray<TorchIValue*>*)values {
@@ -53,6 +56,8 @@
   @try {
     if (auto method = _impl.find_method(
             std::string([methodName cStringUsingEncoding:NSASCIIStringEncoding]))) {
+      torch::autograd::AutoGradMode guard(false);
+      at::AutoNonVariableTypeMode non_var_type_mode(true);
       auto result = (*method)(std::move(inputs));
       return [TorchIValue newWithIValue:result];
     }
