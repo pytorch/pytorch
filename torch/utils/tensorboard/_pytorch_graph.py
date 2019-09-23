@@ -208,16 +208,16 @@ def parse(graph, args=None, omit_useless_nodes=True):
         # p.s. Those Constant will be composed by 'prim::listConstruct' and then
         # send to common OPs such as Maxpool, Conv, Linear.
         # We can let user pass verbosity value to dicide how detailed the graph is.
-        if node.kind()=='prim::Constant':
+        if node.kind() == 'prim::Constant':
             continue
 
         # By observation, prim::GetAttr are parameter related. ClassType is used to decorate its scope.
-        if node.kind()=='prim::GetAttr':
+        if node.kind() == 'prim::GetAttr':
             assert node.scopeName() == ''
 
             # Since `populate_namespace_from_OP_to_IO` is already available, we just ignore this.
             # TODO: When it comes to shared parameter, will it still work?
-            if " : ClassType" in  node.__repr__():
+            if " : ClassType" in node.__repr__():
                 continue
 
             nodes_py.append(NodePyIO(node, debugName=list(node.outputs())[0].debugName()))
