@@ -139,7 +139,7 @@ if [[ $BUILD_ENVIRONMENT == *caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04* ]]; then
   # which is https:// version of the same repo
   sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list
   sudo apt-get -qq update
-  sudo apt-get install python3
+  sudo apt-get install -y --no-install-recommends python3
   export ANACONDA_VERSION=3
   sudo -E ./docker/caffe2/jenkins/common/install_anaconda.sh
   . /opt/conda/etc/profile.d/conda.sh
