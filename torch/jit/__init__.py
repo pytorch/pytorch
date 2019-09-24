@@ -1240,6 +1240,7 @@ def interface(obj):
     ast = get_jit_class_def(obj, obj.__name__)
     rcb = _jit_internal.createResolutionCallback(1)
     torch._C._jit_script_interface_compile(qualified_name, ast, rcb)
+    obj.__torch_script_interface__ = True
     return obj
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))

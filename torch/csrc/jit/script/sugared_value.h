@@ -277,7 +277,7 @@ struct TORCH_API ClosureValue : public SugaredValue {
   Value* value_;
 };
 
-// defines how a method obtained from a module behaves in script
+// defines how a method obtained from a module/class/interface behaves in script
 struct MethodValue : public SugaredValue {
   MethodValue(Value* self, std::string method_name)
       : self_(std::move(self)), method_name_(std::move(method_name)) {}

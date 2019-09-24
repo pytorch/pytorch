@@ -176,6 +176,14 @@ struct TORCH_API CompilationUnit {
     return type->cast<c10::ClassType>();
   }
 
+  c10::InterfaceTypePtr get_interface(const c10::QualifiedName& name) const {
+    auto type = get_type(name);
+    if (!type) {
+      return nullptr;
+    }
+    return type->cast<c10::InterfaceType>();
+  }
+
   c10::TupleTypePtr get_named_tuple(const c10::QualifiedName& name) const {
     for (const auto& cls : classes_) {
       if (cls->name()->qualifiedName() == name.qualifiedName()) {

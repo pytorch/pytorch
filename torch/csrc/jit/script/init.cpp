@@ -529,8 +529,42 @@ void initJitScriptBindings(PyObject* module) {
           "_register_attribute",
           [](Module& self, std::string name, TypePtr type, py::object value) {
             auto unshaped = unshapedType(type);
-            self.register_attribute(
-                name, unshaped, toIValue(std::move(value), type));
+            if (type->cast<InterfaceType>()) {
+              // When registering an object to a interface, we turn the value
+              // into the compiled TorchScript class and check if it conform
+              // with the interface or not, then register the attribute to our
+              // slots.
+              py::str qualified_name =
+                  py::module::import("torch.jit")
+                      .attr("_qualified_name")(value.get_type());
+              auto pyCu = get_python_cu();
+              const auto classType =
+                  pyCu->get_class(c10::QualifiedName(qualified_name));
+              if (!classType) {
+                // throw ErrorReport("Assigning a Non-class instance to an
+                // interface attribute");
+                std::cout
+                    << "registering an attribute that is not a TorchScript compatible";
+                throw std::runtime_error(c10::str(
+                    "registering the attribute ",
+                    name,
+                    "as an interface fails because the value is not "
+                    "a TorchScript compatible type, did you forget to",
+                    "turn it into a user defined TorchScript class?"));
+              }
+              if (!classType->isSubtypeOf(type)) {
+                throw py::cast_error(c10::str(
+                    "Object ",
+                    py::str(value),
+                    " is not compatible with interface ",
+                    type->python_str()));
+              }
+              IValue class_ival = toIValue(std::move(value), classType);
+              self.register_attribute(name, unshaped, class_ival);
+            } else {
+              self.register_attribute(
+                  name, unshaped, toIValue(std::move(value), type));
+            }
           })
       .def("_register_module", &Module::register_module)
       .def("_register_buffer", &Module::register_buffer)
