@@ -3083,6 +3083,15 @@ class TestAutograd(TestCase):
 
         assert y.grad_fn is None
 
+    def test_view_no_grad(self):
+        # Issue 26546: View result under torch.no_grad() should not require grad.
+        x = torch.ones(1, requires_grad=True)
+
+        with torch.no_grad():
+            y = x.t()
+
+        assert not y.requires_grad
+
     def test_inplace_view_in_autograd_function(self):
         # Issue 26546: In-place operation on a view inside of a Python autograd
         # function should not break the graph.
