@@ -12,8 +12,7 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.distributed.rpc import RpcBackend
-from common_distributed import MultiProcessTestCase
-from common_utils import load_tests, run_tests, TEST_WITH_ASAN
+from common_utils import load_tests
 from os import getenv
 from typing import (
     Dict,
@@ -50,7 +49,7 @@ class MyClass:
         return d + e
 
     @staticmethod
-    def my_static_method(f : int):
+    def my_static_method(f):
         return f > 10
 
 
@@ -58,15 +57,11 @@ def my_function(a, b, c):
     return a + b + c
 
 
-def my_tensor_function(a : torch.Tensor, b : torch.Tensor) -> torch.Tensor:
+def my_tensor_function(a, b):
     return a + b
 
 
-def my_complex_tensor_function(
-    list_input : Sequence[torch.Tensor],
-    tensor_class_input : TensorClass,
-    dict_input : Dict[str, torch.Tensor]
-) -> torch.Tensor:
+def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
     res = list_input[0]
     for t in list_input:
         res += t
@@ -88,7 +83,7 @@ def light_rpc():
     return 0
 
 
-def heavy_rpc(tensor : torch.Tensor):
+def heavy_rpc(tensor):
     for i in range(1, 100):
         tensor *= i
         tensor /= i + 1
@@ -129,12 +124,7 @@ def _wrap_with_rpc(func):
     sys.version_info < (3, 0),
     "Pytorch distributed rpc package " "does not support python2",
 )
-@unittest.skipIf(TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues")
-class RpcTest(MultiProcessTestCase):
-    def setUp(self):
-        super(RpcTest, self).setUp()
-        self._spawn_processes()
-
+class RpcTest(object):
     @property
     def world_size(self):
         return 4
@@ -511,7 +501,3 @@ class RpcTest(MultiProcessTestCase):
 
         for i in range(m):
             self.assertEqual(rrefs[i].to_here(), expected[i])
-
-
-if __name__ == '__main__':
-    run_tests()

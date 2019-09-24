@@ -3,12 +3,10 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import sys
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
-from common_distributed import MultiProcessTestCase
 from functools import wraps
 import six
 import unittest
 import torch
-from common_utils import TEST_WITH_ASAN
 
 if not dist.is_available():
     print("c10d not available, skipping tests")
@@ -35,11 +33,7 @@ def dist_init(func):
 
 @unittest.skipIf(not six.PY3, "Pytorch distributed autograd package "
                  "does not support python2")
-@unittest.skipIf(TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues")
-class TestDistAutograd(MultiProcessTestCase):
-    def setUp(self):
-        super(TestDistAutograd, self).setUp()
-        self._spawn_processes()
+class TestDistAutograd(object):
 
     @property
     def world_size(self):
@@ -115,7 +109,3 @@ class TestDistAutograd(MultiProcessTestCase):
                     self.assertEqual(tensors[i], next_funcs[i][0].variable)
                 else:
                     self.assertIsNone(next_funcs[i][0])
-
-
-if __name__ == '__main__':
-    unittest.main()
