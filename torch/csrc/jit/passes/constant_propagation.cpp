@@ -123,7 +123,7 @@ struct ConstantPropagator {
       if (new_output) {
         GRAPH_UPDATE(
             "Folding\n",
-            *(n->outputs()[i]->node()),
+            n->outputs()[i]->debugName(),
             " with\n",
             *((*new_output)->node()));
         if (outputs[i].isNone()) {
@@ -137,7 +137,7 @@ struct ConstantPropagator {
         if (auto new_tup = tryInsertTuple(outputs[i], tuple_val)) {
           GRAPH_UPDATE(
               "Folding tuple\n",
-              *(n->outputs()[i]->node()),
+              n->outputs()[i]->debugName(),
               " with\n",
               *(new_tup->node()));
           tuple_val = new_tup;
@@ -166,6 +166,14 @@ struct ConstantPropagator {
     bool cond_val = constant_as<bool>(start_cond).value_or(true);
 
     bool loop_might_run = cond_val && iter_len > 0;
+    if (!loop_might_run)
+      GRAPH_UPDATE(
+          "Removing unexecuted loop:\n",
+          *node,
+          "\ntripcount: ",
+          *(trip_count->node()),
+          " and start_cond: ",
+          *(start_cond->node()));
     return !loop_might_run;
   }
 
@@ -189,6 +197,8 @@ struct ConstantPropagator {
   void inlineIf(Node* n) {
     auto input_bool = constant_as<bool>(n->input());
     AT_ASSERT(input_bool);
+    GRAPH_UPDATE(
+        "Folding if\n", n->input()->debugName(), " with\n", *input_bool);
     size_t block_index = *input_bool ? 0 : 1;
     ConstantPropagation(n->blocks().at(block_index));
     inlineIfBody(n->blocks().at(block_index));
