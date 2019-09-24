@@ -244,8 +244,8 @@ class _TestTorchMixin(object):
                        'sparse_resize_and_clear_',
                        'align_to',  # BUILD_NAMEDTENSOR only
                        'align_as',  # BUILD_NAMEDTENSOR only
-                       'renamed',  # BUILD_NAMEDTENSOR only
-                       'names_',  # BUILD_NAMEDTENSOR only
+                       'rename',  # BUILD_NAMEDTENSOR only
+                       'rename_',  # BUILD_NAMEDTENSOR only
                        'has_names',  # BUILD_NAMEDTENSOR only
                        'rename',  # BUILD_NAMEDTENSOR only
                        'refine_names',  # BUILD_NAMEDTENSOR only
@@ -1385,6 +1385,12 @@ class _TestTorchMixin(object):
             res2[i] = math.pow(3, m1[i][4])
         self.assertEqual(res1, res2)
 
+        # resize behavior for exp == 1
+        m1 = torch.randn(2, 2)
+        out = torch.randn([0])
+        torch.pow(m1, 1, out=out)
+        self.assertEqual(out, m1)
+
     def _test_cop(self, torchfn, mathfn):
         def reference_implementation(res2):
             for i, j in iter_indices(sm1):
@@ -2106,6 +2112,15 @@ class _TestTorchMixin(object):
 
         test_inference(torch.float64)
         test_inference(torch.float32)
+
+    def test_qengnie(self):
+        qengines = torch._C._supported_qengines()
+        # [TODO] Enable after the interface change
+        # original_qe = torch._C._get_qengine()
+        # for qe in qengines:
+        #     torch._C._set_qengine(qe)
+        #     assert torch._C._get_qengine() == qe, 'qengine not set successfully'
+        # torch._C._set_qengine(original_qe)
 
     def test_new_tensor(self):
         expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
@@ -3937,7 +3952,7 @@ class _TestTorchMixin(object):
             self.assertTensorsSlowEqual(byte_tensor, byte_tensor.abs(), 1e-16)
 
         # Checking that the right abs function is called for LongTensor
-        bignumber = 2 ^ 31 + 1
+        bignumber = 2 ** 31 + 1
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
 
@@ -7296,7 +7311,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(res1, empty)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    'expected a non-empty list of Tensors'):
+                                    'non-empty list of Tensors'):
             torch.cat([], dim=1)
 
     def test_cat_empty(self, device):
@@ -11789,7 +11804,7 @@ class TestTorchDeviceType(TestCase):
             ("expm1", doubles, True, True, 'cpu'),
             ("expm1", doubles, False, True, 'cuda'),
             ("floor", doubles, True, True, 'cpu'),
-            ("floor", doubles, False, True, 'cuda'),
+            ("floor", doubles, True, True, 'cuda'),
             ("frac", doubles, True, True, 'cpu'),
             ("frac", doubles, False, True, 'cuda'),
             ("log", positives, True, True, 'cpu'),
