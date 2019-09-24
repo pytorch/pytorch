@@ -8,6 +8,7 @@
 
 #include <ATen/Utils.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/Math.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
 #include <c10/util/BFloat16.h>
@@ -196,6 +197,9 @@ public:
   }
   Vec256<T> erfc() const {
     return map(std::erfc);
+  }
+  Vec256<T> erfinv() const {
+    return map(calc_erfinv);
   }
   Vec256<T> exp() const {
     return map(std::exp);

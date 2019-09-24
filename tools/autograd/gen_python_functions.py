@@ -593,12 +593,13 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 # produce a compile-time error that is obvious
                 has_tensor_return = True
 
-        is_like_function = name.endswith('_like')
+        category_override = declaration['category_override']
+        is_like_function = name.endswith('_like') or category_override == 'like'
         is_like_function_with_options = is_like_function and has_options_arg
-        is_new_function = name.startswith('new_')
+        is_new_function = name.startswith('new_') or category_override == 'new'
         is_new_function_with_options = is_new_function and has_options_arg
-        is_factory_function = has_tensor_return and not has_tensor_input_arg
-        is_factory_or_like_or_new_function = has_tensor_return and (not has_tensor_input_arg or is_like_function or is_new_function)
+        is_factory_function = has_tensor_return and not has_tensor_input_arg or category_override == 'factory'
+        is_factory_or_like_or_new_function = has_tensor_return and (is_factory_function or is_like_function or is_new_function)
         is_like_or_new_function_with_options = is_like_function_with_options or is_new_function_with_options
 
         if (is_factory_function and not has_type_input_arg) or has_options_arg:
