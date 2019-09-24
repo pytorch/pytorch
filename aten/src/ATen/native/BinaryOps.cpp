@@ -239,11 +239,19 @@ Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) {
 
 Tensor lt(const Tensor& self, Scalar other) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
-  return native::lt_out(result, self, other);
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "lt", [&]{
+    // Validate that is possible to convert scalar to tensor dtype without overflow
+    native::lt_out(result, self, wrapped_scalar_tensor(other.to<scalar_t>()));
+  });
+  return result;
 }
 
 Tensor& lt_(Tensor& self, Scalar other) {
-  return native::lt_out(self, self, other);
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "lt_", [&]{
+    // Validate that is possible to convert scalar to tensor dtype without overflow
+    native::lt_(self, wrapped_scalar_tensor(other.to<scalar_t>()));
+  });
+  return self;
 }
 
 }
