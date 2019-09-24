@@ -11,6 +11,9 @@ class RMSprop(Optimizer):
     The centered version first appears in `Generating Sequences
     With Recurrent Neural Networks <https://arxiv.org/pdf/1308.0850v5.pdf>`_.
 
+    Note that the implementation here takes the square root of the gradient average before
+    adding epsilon.
+
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
