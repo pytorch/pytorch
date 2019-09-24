@@ -428,7 +428,9 @@ class C10_API TypeMeta {
 inline TypeMeta::TypeMeta() noexcept
     : TypeMeta(TypeMeta::Make<detail::_Uninitialized>()) {}
 
-inline constexpr bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+inline constexpr bool operator==(
+    const TypeMeta& lhs,
+    const TypeMeta& rhs) noexcept {
   return (lhs.id() == rhs.id());
 }
 inline constexpr bool operator!=(
