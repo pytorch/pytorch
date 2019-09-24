@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 from torch.nn import Module
-from .observer import default_observer, _with_args
+from .observer import MinMaxObserver, _with_args
 
 class FakeQuantize(Module):
     ''' Simulate the quantize and dequantize operations in training time.
@@ -14,7 +14,7 @@ class FakeQuantize(Module):
     '''
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                 quant_min=0, quant_max=255):
+                 quant_min=0, quant_max=255, reduce_range=False):
         super(FakeQuantize, self).__init__()
         assert torch.iinfo(dtype).min <= quant_min, 'quant_min out of bound'
         assert quant_min <= quant_max, \
@@ -26,7 +26,7 @@ class FakeQuantize(Module):
         self.quant_max = quant_max
         self.fake_quant_enabled = True
         self.observer_enabled = True
-        self.observer = default_observer(dtype=dtype, qscheme=qscheme)()
+        self.observer = MinMaxObserver.with_args(dtype=dtype, qscheme=qscheme, reduce_range=reduce_range)()
         self.scale = None
         self.zero_point = None
 
@@ -52,9 +52,7 @@ class FakeQuantize(Module):
             scale, zero_point = self.calculate_qparams()
             self.scale, self.zero_point = float(scale), int(zero_point)
         if self.fake_quant_enabled:
-            X = torch.fake_quantize_per_tensor_affine(
-                X, self.scale, self.zero_point, self.quant_min,
-                self.quant_max)
+            X = torch.fake_quantize_per_tensor_affine(X, self.scale, self.zero_point, self.quant_min, self.quant_max)
         return X
 
     with_args = classmethod(_with_args)
@@ -66,8 +64,5 @@ class FakeQuantize(Module):
             self.scale, self.zero_point)
 
 default_fake_quant = FakeQuantize
-
-default_weight_fake_quant = FakeQuantize.with_args(dtype=torch.qint8,
-                                                   qscheme=torch.per_tensor_symmetric,
-                                                   quant_min=-128,
-                                                   quant_max=127)
+default_weight_fake_quant = FakeQuantize.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric,
+                                                   quant_min=-128, quant_max=127)
