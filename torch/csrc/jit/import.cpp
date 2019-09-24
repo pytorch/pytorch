@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/jit/source_range_serialization.h>
-#include <torch/csrc/jit/source_range_serialization_impl.h>
 
 #include "caffe2/serialize/file_adapter.h"
 #include "caffe2/serialize/inline_container.h"
@@ -45,7 +44,14 @@ class ScriptModuleDeserializer final {
       std::shared_ptr<script::CompilationUnit> cu,
       std::unique_ptr<PyTorchStreamReader> reader)
       : compilation_unit_(cu),
-        reader_(std::move(reader)) {}
+        reader_(std::move(reader)),
+        source_importer_(
+            compilation_unit_,
+            &constants_table_,
+            [this](const std::string& qualifier) {
+              return findSourceInArchiveFromQualifier(
+                  *reader_, export_prefix_, qualifier);
+            }) {}
 
   script::Module deserialize(
       c10::optional<at::Device> device,
@@ -53,13 +59,12 @@ class ScriptModuleDeserializer final {
 
  private:
   IValue readArchive(const std::string& archive_name);
-  void importCallback(const std::string& qualifier);
 
   std::shared_ptr<script::CompilationUnit> compilation_unit_;
   std::unique_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
   std::vector<at::Tensor> constants_table_;
-  std::unordered_set<std::string> imported_libs_;
+  script::SourceImporter source_importer_;
   std::string export_prefix_ = "code/";
 };
 
@@ -84,9 +89,8 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
   };
 
   auto class_resolver = [&](const c10::QualifiedName& qn) {
-    importCallback(qn.prefix());
-    return c10::StrongTypePtr(
-        compilation_unit_, compilation_unit_->get_class(qn));
+    auto cls = source_importer_.loadNamedType(qn)->expect<ClassType>();
+    return c10::StrongTypePtr(compilation_unit_, std::move(cls));
   };
   auto read_record = [&](const std::string& name) {
     std::stringstream ss;
@@ -127,40 +131,6 @@ script::Module ScriptModuleDeserializer::deserialize(
     constants_table_.push_back(constant.toTensor());
   }
   return script::Module(readArchive("data").toObject());
-}
-
-void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
-  if (imported_libs_.count(qualifier)) {
-    return;
-  }
-  imported_libs_.insert(qualifier);
-  std::function<void(const std::string&)> import_callback =
-      [this](const std::string& qualifier) { importCallback(qualifier); };
-  const std::string path =
-      ImportExportHelpers::qualifierToPath(qualifier, export_prefix_);
-  at::DataPtr data;
-  size_t size;
-  std::tie(data, size) = reader_->getRecord(path);
-
-  std::shared_ptr<ConcreteSourceRangeUnpickler> gen_ranges = nullptr;
-
-  std::string debug_file = path + ".debug_pkl";
-  if (reader_->hasRecord(debug_file)) {
-    at::DataPtr debug_data;
-    size_t debug_size;
-    std::tie(debug_data, debug_size) = reader_->getRecord(debug_file);
-    gen_ranges = std::make_shared<ConcreteSourceRangeUnpickler>(
-        std::move(debug_data), debug_size);
-  }
-
-  auto src = std::make_shared<Source>(
-      std::string(static_cast<const char*>(data.get()), size),
-      path,
-      1,
-      gen_ranges);
-
-  script::import_libs(
-      compilation_unit_, qualifier, src, constants_table_, import_callback);
 }
 
 } // namespace
