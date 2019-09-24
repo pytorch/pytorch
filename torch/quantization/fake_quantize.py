@@ -50,9 +50,7 @@ class FakeQuantize(Module):
             scale, zero_point = self.calculate_qparams()
             self.scale, self.zero_point = float(scale), int(zero_point)
         if self.fake_quant_enabled:
-            X = torch.fake_quantize_per_tensor_affine(
-                X, self.scale, self.zero_point, self.quant_min,
-                self.quant_max)
+            X = torch.fake_quantize_per_tensor_affine(X, self.scale, self.zero_point, self.quant_min, self.quant_max)
         return X
 
     with_args = classmethod(_with_args)
