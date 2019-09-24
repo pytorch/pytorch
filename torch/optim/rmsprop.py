@@ -3,7 +3,7 @@ from .optimizer import Optimizer
 
 
 class RMSprop(Optimizer):
-    """Implements RMSprop algorithm.
+    r"""Implements RMSprop algorithm.
 
     Proposed by G. Hinton in his
     `course <http://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf>`_.
@@ -11,8 +11,11 @@ class RMSprop(Optimizer):
     The centered version first appears in `Generating Sequences
     With Recurrent Neural Networks <https://arxiv.org/pdf/1308.0850v5.pdf>`_.
 
-    Note that the implementation here takes the square root of the gradient average before
-    adding epsilon.
+    The implementation here takes the square root of the gradient average before
+    adding epsilon (note that Tensor Flow interchange these two operations). The effective
+    learning rate is thus :math:`\alpha/(\sqrt{v} + \epsilon)` where :math:`\alpha`
+    is the scheduled learning rate decay and :math:`v` is the weighted moving average
+    of the squared gradient.
 
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
