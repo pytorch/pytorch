@@ -744,7 +744,7 @@ class CAFFE2_API Tensor {
   int64_t q_zero_point() const;
   Tensor q_per_channel_scales() const;
   Tensor q_per_channel_zero_points() const;
-  IntArrayRef q_per_channel_axis() const;
+  int64_t q_per_channel_axis() const;
   Tensor int_repr() const;
   QScheme qscheme() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
