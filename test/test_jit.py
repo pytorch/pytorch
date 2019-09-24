@@ -44,7 +44,7 @@ from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
 from textwrap import dedent
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Union
 import copy
 import inspect
 import math
@@ -1169,12 +1169,10 @@ graph(%x : Tensor,
                    .check("return") \
                    .run(str(get_forward(m).graph))
         FileCheck().check("aten::quantize_per_tensor") \
-                   .check_next("aten::int_repr") \
-                   .check_next("aten::_dequantize_per_tensor") \
+                   .check_next("aten::dequantize") \
                    .check("aten::conv2d") \
                    .check("aten::quantize_per_tensor") \
-                   .check_next("aten::int_repr") \
-                   .check_next("aten::_dequantize_per_tensor") \
+                   .check_next("aten::dequantize") \
                    .check("return") \
                    .run(str(m._c._get_module('conv')._get_method('conv2d_forward').graph))
 
@@ -1185,40 +1183,29 @@ graph(%x : Tensor,
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
 %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::int_repr
-        %a_intrepr = aten::int_repr(%a_quant)
-        # CHECK-NOT: aten::_dequantize_per_tensor
-        %a_dequant = aten::_dequantize_per_tensor(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        # CHECK-NOT: aten::dequantize
+        %a_dequant = aten::dequantize(%a_quant)
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        %w_intrepr = aten::int_repr(%w_quant)
-        # CHECK-NOT: aten::_dequantize_per_tensor
-        %w_dequant = aten::_dequantize_per_tensor(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::dequantize
+        %w_dequant = aten::dequantize(%w_quant)
         # CHECK: quantized::conv_prepack
         # CHECK: quantized::conv2d
         # CHECK-NOT: aten::conv2d
         %r = aten::conv2d(%a_dequant, %w_dequant, %b, %c, %d, %e, %f)
         # CHECK-NOT: aten::quantize_per_tensor
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::int_repr
-        %r_intrepr = aten::int_repr(%r_quant)
-        # CHECK: aten::_dequantize_per_tensor
-        %r_dequant = aten::_dequantize_per_tensor(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        # CHECK: aten::dequantize
+        %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # addmm -> quantized::linear
             """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%r_scale, %r_zero_point, %r_dtype, %4):
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::int_repr
-        %a_intrepr = aten::int_repr(%a_quant)
-        # CHECK-NOT: aten::_dequantize_per_tensor
-        %a_dequant = aten::_dequantize_per_tensor(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        # CHECK-NOT: aten::dequantize
+        %a_dequant = aten::dequantize(%a_quant)
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        %w_intrepr = aten::int_repr(%w_quant)
-        # CHECK-NOT: aten::_dequantize_per_tensor
-        %w_dequant = aten::_dequantize_per_tensor(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::dequantize
+        %w_dequant = aten::dequantize(%w_quant)
         # CHECK: aten::t
         # CHECK: quantized::linear_prepack
         # CHECK: quantized::linear
@@ -1226,27 +1213,18 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
         # CHECK-NOT: aten::quantize_per_tensor
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::int_repr
-        %r_intrepr = aten::int_repr(%r_quant)
-        # CHECK: aten::_dequantize_per_tensor
-        %r_dequant = aten::_dequantize_per_tensor(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        # CHECK: aten::dequantize
+        %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # matmul(with bias) -> quantized::linear
             """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%r_scale, %r_zero_point, %r_dtype, %4):
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::int_repr
-        %a_intrepr = aten::int_repr(%a_quant)
-        # CHECK-NOT: aten::_dequantize_per_tensor
-        %a_dequant = aten::_dequantize_per_tensor(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        # CHECK-NOT: aten::dequantize
+        %a_dequant = aten::dequantize(%a_quant)
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        %w_intrepr = aten::int_repr(%w_quant)
-        # CHECK-NOT: aten::_dequantize_per_tensor
-        %w_dequant = aten::_dequantize_per_tensor(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        # CHECK-NOT: aten::_dequantize_per_tensor
+        # CHECK-NOT: aten::dequantize
+        %w_dequant = aten::dequantize(%w_quant)
         # CHECK: aten::t
         # CHECK: quantized::linear_prepack
         # CHECK: quantized::linear
@@ -1255,25 +1233,18 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %r = aten::add_(%output, %b, %4)
         # CHECK-NOT: aten::quantize_per_tensor
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::int_repr
-        %r_intrepr = aten::int_repr(%r_quant)
-        # CHECK: aten::_dequantize_per_tensor
-        %r_dequant = aten::_dequantize_per_tensor(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        # CHECK: aten::dequantize
+        %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # matmul(without bias) -> quantized::linear
             """
-graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%r_scale, %r_zero_point, %r_dtype):
+graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::int_repr
-        %a_intrepr = aten::int_repr(%a_quant)
-        # CHECK-NOT: aten::_dequantize_per_tensor
-        %a_dequant = aten::_dequantize_per_tensor(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        # CHECK-NOT: aten::dequantize
+        %a_dequant = aten::dequantize(%a_quant)
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        %w_intrepr = aten::int_repr(%w_quant)
-        # CHECK-NOT: aten::_dequantize_per_tensor
-        %w_dequant = aten::_dequantize_per_tensor(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::dequantize
+        %w_dequant = aten::dequantize(%w_quant)
         # CHECK: aten::t
         # CHECK: prim::Constant()
         # CHECK: quantized::linear_prepack
@@ -1282,10 +1253,8 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
         %r = aten::matmul(%a_dequant, %w_dequant)
         # CHECK-NOT: aten::quantize_per_tensor
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::int_repr
-        %r_intrepr = aten::int_repr(%r_quant)
-        # CHECK: aten::_dequantize_per_tensor
-        %r_dequant = aten::_dequantize_per_tensor(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        # CHECK: aten::dequantize
+        %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)"""
         ]
         for input_str in input_strs:
@@ -1303,7 +1272,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
             def __init__(self):
                 super(TestModule, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1)
-                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.bn = torch.nn.BatchNorm2d(num_features=20, eps=1e-1)
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1311,7 +1280,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
                 return x
 
         eager = TestModule()
-        scripted = torch.jit.script(eager)
+        scripted = torch.jit.script(copy.deepcopy(eager))
         eager.eval()
         scripted.eval()
 
@@ -1343,7 +1312,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
             def __init__(self):
                 super(TestModule, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1, bias=False)
-                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.bn = torch.nn.BatchNorm2d(num_features=20, eps=1e-1)
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1351,7 +1320,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
                 return x
 
         eager = TestModule()
-        scripted = torch.jit.script(eager)
+        scripted = torch.jit.script(copy.deepcopy(eager))
         eager.eval()
         scripted.eval()
 
@@ -1383,7 +1352,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
             def __init__(self):
                 super(SubModule, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1)
-                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.bn = torch.nn.BatchNorm2d(num_features=20, eps=1e-1)
 
             def forward(self, x):
                 x = self.conv(x)
@@ -3555,6 +3524,10 @@ def foo(x):
                 def invalid_prefix_annotation3(a):
                     #     type: (Int) -> Int
                     return a + 2
+
+    def test_is_optional(self):
+        ann = Union[List[int], List[float]]
+        torch._jit_internal.is_optional(ann)
 
     def test_interpreter_fuzz(self):
         # This test generates random tree-like programs to fuzz test
@@ -14599,6 +14572,69 @@ a")
             # supported
             m = M({char : torch.ones(1) + ord(char) - ord("a") for char in "abcdefg"})
             self.assertEqual(m("c"), torch.tensor([103]))
+
+    def test_module_const_attrs(self):
+        class M(torch.nn.Module):
+            __constants__ = ['i', 'non']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.i = 10
+                self.non = None
+
+            def forward(self, x):
+                # type: (int) -> int
+                if self.non is None:
+                    return x + self.i
+                else:
+                    return -1
+
+        m = torch.jit.script(M())
+        self.assertEqual(m(5), 15)
+        self.assertTrue(m._c._has_attribute('i'))
+        self.assertFalse(m._c._has_attribute('non'))
+
+    def test_module_mutate_const_attrs(self):
+        # Check that we cannot mutate a constant
+        class M(torch.nn.Module):
+            __constants__ = ['i', 'non']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.i = 10
+                self.non = None
+
+            def forward(self, x):
+                # type: (int) -> int
+                self.i = 5
+                if self.non is None:
+                    return x + self.i
+                else:
+                    return -1
+
+        with self.assertRaises(RuntimeError):
+            m = torch.jit.script(M())
+
+    def test_module_mutate_const_attrs_2(self):
+        # Check that we cannot mutate constant of a mutable type (e.g. list)
+        class M(torch.nn.Module):
+            __constants__ = ['i', 'non']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.i = [10, 20]
+                self.non = None
+
+            def forward(self, x):
+                # type: (int) -> int
+                self.i.append(30)
+                if self.non is None:
+                    return x + self.i[0]
+                else:
+                    return -1
+
+        with self.assertRaises(RuntimeError):
+            m = torch.jit.script(M())
 
     def test_tensor_import_export(self):
         @torch.jit.script

@@ -1547,7 +1547,16 @@ inline Tensor Tensor::max_values(DimnameList dim, bool keepdim) const {
 #endif
 inline Tensor Tensor::mean(c10::optional<ScalarType> dtype) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::mean(const_cast<Tensor&>(*this), dtype);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::mean(const_cast<Tensor&>(*this), dtype);
+            break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::mean(const_cast<Tensor&>(*this), dtype);
+            break;
+        default:
+            AT_ERROR("mean not implemented for ", at::toString(type_set()));
+    }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor");
     return table->getOp<Tensor (const Tensor &, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dtype);
@@ -1555,7 +1564,16 @@ inline Tensor Tensor::mean(c10::optional<ScalarType> dtype) const {
 }
 inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::mean(const_cast<Tensor&>(*this), dim, keepdim, dtype);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::mean(const_cast<Tensor&>(*this), dim, keepdim, dtype);
+            break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::mean(const_cast<Tensor&>(*this), dim, keepdim, dtype);
+            break;
+        default:
+            AT_ERROR("mean not implemented for ", at::toString(type_set()));
+    }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
     return table->getOp<Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim, dtype);
@@ -1564,7 +1582,13 @@ inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim, c10::optional<ScalarTy
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor Tensor::mean(DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::mean(const_cast<Tensor&>(*this), dim, keepdim, dtype);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::mean(const_cast<Tensor&>(*this), dim, keepdim, dtype);
+            break;
+        default:
+            AT_ERROR("mean not implemented for ", at::toString(type_set()));
+    }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
     return table->getOp<Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim, dtype);
