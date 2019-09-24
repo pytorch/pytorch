@@ -31,7 +31,8 @@ FunctionSchema PythonValue::getSchema(
     const size_t n_binders,
     const SourceRange& loc) {
   auto annotations = py::module::import("torch.jit.annotations");
-  auto signature = annotations.attr("get_signature")(self);
+  auto signature =
+      annotations.attr("get_signature")(self, rcb ? *rcb : py::none(), loc);
   std::vector<Argument> args, rets;
   // We may mutate this if we can determine the number of args from Python
   // introspection.
@@ -359,7 +360,9 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         m.graph()->insertGetAttr(self_, field),
         *v,
         py_module_.attr(field.c_str()));
-  } else if (auto kind = module_.kind_of(field)) {
+  }
+
+  if (auto kind = module_.kind_of(field)) {
     // methods, parameters, attributes, and buffers are all first class
     return SimpleValue(self_).attr(loc, m, field);
   }
@@ -443,6 +446,24 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
                     .attr("create_method_from_fn")(py_module_, attr);
     if (!stub.is_none()) {
       return SimpleValue(self_).attr(loc, m, field);
+    }
+  }
+
+  if (py_module_.attr("_constants_set").contains(field.c_str())) {
+    // Values of the attributes listed in the _constants_set will be put
+    // directly into IR. In order to allow us to access these values by their
+    // name after IR is generated, we register them as attributes.
+    if (py::isinstance<py::bool_>(attr)) {
+      module_.register_attribute(field, BoolType::get(), py::cast<bool>(attr));
+    } else if (py::isinstance<py::int_>(attr)) {
+      module_.register_attribute(
+          field, IntType::get(), py::cast<int64_t>(attr));
+    } else if (py::isinstance<py::float_>(attr)) {
+      module_.register_attribute(
+          field, FloatType::get(), py::cast<double>(attr));
+    } else if (py::isinstance<py::str>(attr)) {
+      module_.register_attribute(
+          field, StringType::get(), py::cast<std::string>(attr));
     }
   }
 
@@ -659,6 +680,14 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     if (auto callee = as_function(compiled_fn)) {
       return std::make_shared<FunctionValue>(*callee);
     }
+  }
+
+  py::bool_ isMethod = py::module::import("inspect").attr("ismethod")(obj);
+  // methods here have been explicitly annotated to not be compiled,
+  // so they do not have the same overload and compile checks as for functions
+  if (isFunction || isMethod) {
+    auto rcb = py::module::import("torch.jit").attr("_gen_rcb")(obj, 0);
+    return std::make_shared<PythonValue>(obj, rcb);
   }
 
   return std::make_shared<PythonValue>(obj);
