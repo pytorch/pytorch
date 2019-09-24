@@ -234,7 +234,8 @@ Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) {
     // Validate that is possible to convert scalar to tensor dtype without overflow
     scalar_t val = other.to<scalar_t>();
     Tensor other_tensor = at::empty({1}, self.options()).fill_(val);
-    auto iter = TensorIterator::comparison_op(result, self, other_tensor, true);
+    auto iter = TensorIterator::comparison_op(result, self, other_tensor,
+      /*check_mem_overlap=*/true);
     lt_stub(iter.device_type(), iter);
   });
   return result;
