@@ -6818,7 +6818,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     def test_comparison_ops_diff_types(self):
         self.assertRaisesRegex(RuntimeError, "The output tensor of lt must be a bool",
-                               lambda: torch.lt(torch.tensor([True]), torch.tensor([False]), out = torch.empty(1, dtype=torch.uint8)))
+                               lambda: torch.lt(torch.tensor([True]), torch.tensor([False]), out=torch.empty(1, dtype=torch.uint8)))
         self.assertRaisesRegex(RuntimeError, "Expected object of scalar type",
                                lambda: torch.tensor([1], dtype=torch.int).lt_(torch.tensor([2], dtype=torch.long)))
         self.assertRaisesRegex(RuntimeError, "value cannot be converted to type",
