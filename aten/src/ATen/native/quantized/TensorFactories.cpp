@@ -28,9 +28,9 @@ Tensor empty_affine_quantized_cpu(
 }
 
 Tensor empty_per_channel_affine_quantized_cpu(
+    IntArrayRef size,
     const Tensor& scales,
     const Tensor& zero_points,
-    IntArrayRef size,
     IntArrayRef axis,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
@@ -61,6 +61,26 @@ Tensor empty_per_channel_affine_quantized_cpu(
           axis,
           typeMetaToScalarType(options.dtype())),
       optional_memory_format.value_or(MemoryFormat::Contiguous));
+}
+
+// Provide better error message if dtype is wrong
+Tensor empty_affine_quantized_other_backends_stub(
+    IntArrayRef,
+    const TensorOptions&,
+    double,
+    int64_t,
+    c10::optional<c10::MemoryFormat>) {
+  TORCH_CHECK(false, "Creation of quantized tensor requires quantized dtype like torch.quint8");
+}
+
+Tensor empty_per_channel_affine_quantized_other_backends_stub(
+    IntArrayRef,
+    const Tensor&,
+    const Tensor&,
+    IntArrayRef,
+    const TensorOptions&,
+    c10::optional<c10::MemoryFormat>) {
+  TORCH_CHECK(false, "Creation of quantized tensor requires quantized dtype like torch.quint8");
 }
 
 } // namespace native

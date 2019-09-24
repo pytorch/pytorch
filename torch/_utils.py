@@ -151,8 +151,8 @@ def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, re
             raise RuntimeError("Can't deserialize multi-axis per-channel quantized tensor yet")
         scales = torch.tensor(scales, dtype=torch.float64)
         zero_points = torch.tensor(zero_points, dtype=torch.int64)
-        tensor = torch._empty_per_channel_affine_quantized_like(
-            scales, zero_points=zero_points, size=size, axis=axis, dtype=storage.dtype)
+        tensor = torch._empty_per_channel_affine_quantized(
+            size, scales=scales, zero_points=zero_points, axis=axis, dtype=storage.dtype)
     else:
         raise RuntimeError("Can't deserialize quantized tensor with qscheme {}".format(qscheme))
     tensor.set_(storage, storage_offset, size, stride)
