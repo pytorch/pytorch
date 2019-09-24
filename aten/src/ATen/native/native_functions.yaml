@@ -2729,15 +2729,12 @@
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _trunc__cpu
-    CUDA: _trunc__cuda
 
 - func: trunc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _trunc_out_cpu
-    CUDA: _trunc_out_cuda
+    CPU: trunc_out
+    CUDA: trunc_out
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
@@ -4845,17 +4842,23 @@
   use_c10_dispatcher: full
   supports_named_tensor: True
   variants: method, function
+  dispatch:
+    CPU: erfinv
+    CUDA: erfinv
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: method
+  dispatch:
+    CPU: _erfinv__cpu
+    CUDA: _erfinv__cuda
 
 - func: erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: erfinv_out
-    CUDA: erfinv_out
+    CPU: _erfinv_out_cpu
+    CUDA: _erfinv_out_cuda
 
 - func: sign(Tensor self) -> Tensor
   use_c10_dispatcher: unboxed_only
