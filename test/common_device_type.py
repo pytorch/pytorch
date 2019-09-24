@@ -14,13 +14,13 @@ from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
 #
 #           (1a) testX(self, device)
 #
-#           (1b) @multidevice(<minimum number of devices to run test with>)
+#           (1b) @deviceCountAtLeast(<minimum number of devices to run test with>)
 #                testX(self, devices)
 #
 #           (1c) @dtypes(<list of dtypes>)
 #                testX(self, device, dtype)
 #
-#           (1d) @multidevice(<minimum number of devices to run test with>)
+#           (1d) @deviceCountAtLeast(<minimum number of devices to run test with>)
 #                @dtypes(<list of dtypes>)
 #                testX(self, devices, dtype)
 #
@@ -34,7 +34,7 @@ from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
 #       Tests like (1b) are called with a list of device strings, like
 #       ['cuda:0', 'cuda:1']. The first device string will be the
 #       current/default device. These tests will be skipped if the device type
-#       has fewer available devices than the argument to @multidevice.
+#       has fewer available devices than the argument to @deviceCountAtLeast.
 #
 #       Tests like (1c) are called with a device string and a torch.dtype from
 #       the list of dtypes specified in the @dtypes decorator. Device-specific
