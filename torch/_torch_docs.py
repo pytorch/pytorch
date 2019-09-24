@@ -595,10 +595,14 @@ add_docstr(torch.atan2,
            r"""
 atan2(input, other, out=None) -> Tensor
 
-Returns a new tensor with the arctangent of the elements of :attr:`input`
-and :attr:`other`.
+Element-wise arctangent of :math:`\text{{input}}_{{i}} / \text{{other}}_{{i}}`
+with consideration of the quadrant. Returns a new tensor with the signed angles
+in radians between vector :math:`(\text{{other}}_{{i}}, \text{{input}}_{{i}})`
+and vector :math:`(1, 0)`. (Note that :math:`\text{{other}}_{{i}}`, the second
+parameter, is the x-coordinate, while :math:`\text{{input}}_{{i}}`, the first
+parameter, is the y-coordinate.)
 
-The shapes of :attr:`input` and :attr:`other` must be
+The shapes of ``input`` and ``other`` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
