@@ -320,11 +320,11 @@ Tensor mean_cpu_gpu(const Tensor& self, IntArrayRef dim, bool keepdim, optional<
 }
 
 #ifdef BUILD_NAMEDTENSOR
-Tensor mean(const Tensor& self, DimnameList dim, bool keepdim, optional<ScalarType> dtype) {
+Tensor mean_cpu_gpu(const Tensor& self, DimnameList dim, bool keepdim, optional<ScalarType> dtype) {
   return at::native::mean_cpu_gpu(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor& mean_out(Tensor& result, const Tensor& self, DimnameList dim,
+Tensor& mean_out_cpu_gpu(Tensor& result, const Tensor& self, DimnameList dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
   return at::native::mean_out_cpu_gpu(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }

@@ -945,6 +945,9 @@ inline Tensor & Tensor::resize_(IntArrayRef size) const {
         case Backend::CPU:
             return CPUType::resize_(const_cast<Tensor&>(*this), size);
             break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::resize_(const_cast<Tensor&>(*this), size);
+            break;
         default:
             AT_ERROR("resize_ not implemented for ", at::toString(type_set()));
     }
@@ -1579,7 +1582,13 @@ inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim, c10::optional<ScalarTy
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor Tensor::mean(DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::mean(const_cast<Tensor&>(*this), dim, keepdim, dtype);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::mean(const_cast<Tensor&>(*this), dim, keepdim, dtype);
+            break;
+        default:
+            AT_ERROR("mean not implemented for ", at::toString(type_set()));
+    }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
     return table->getOp<Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim, dtype);
@@ -5414,7 +5423,16 @@ inline Tensor Tensor::argsort(int64_t dim, bool descending) const {
 }
 inline std::tuple<Tensor,Tensor> Tensor::topk(int64_t k, int64_t dim, bool largest, bool sorted) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::topk(const_cast<Tensor&>(*this), k, dim, largest, sorted);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::topk(const_cast<Tensor&>(*this), k, dim, largest, sorted);
+            break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::topk(const_cast<Tensor&>(*this), k, dim, largest, sorted);
+            break;
+        default:
+            AT_ERROR("topk not implemented for ", at::toString(type_set()));
+    }
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::topk", ""}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool, bool>(
