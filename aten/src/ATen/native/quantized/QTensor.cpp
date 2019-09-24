@@ -106,12 +106,16 @@ Tensor int_repr_quant(const Tensor& self) {
   Tensor dst;
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "int_repr", [&]() {
     dst = at::empty(self.sizes(), self.options().dtype(UNDERLYING_TYPE));
-    auto iter = TensorIterator::unary_op(dst, self);
+    dst.unsafeGetTensorImpl()->set_sizes_and_strides(self.sizes(), self.strides());
+    auto iter = TensorIterator();
+    iter.add_output(dst);
+    iter.add_input(self);
+    iter.dont_compute_common_dtype();
+    iter.build();
     cpu_kernel(iter, [&](scalar_t value) -> underlying_t {
        return value.val_;
     });
   });
-  self.unsafeGetTensorImpl()->set_sizes_and_strides(self.sizes(), self.strides());
   return dst;
 }
 

@@ -285,9 +285,10 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(b.size(), c.size())
         self.assertEqual(b.q_scale(), c.q_scale())
         self.assertEqual(b.q_zero_point(), c.q_zero_point())
+        self.assertNotEqual(b.stride(), c.stride())
         # size is the same but the underlying data is different
         self.assertNotEqual(b.int_repr(), c.int_repr())
-
+        self.assertFalse(torch.equal(b, c))
 
         # a case can't view non-contiguos Tensor
         a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype)
@@ -317,7 +318,9 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(b.size(), c.size())
         self.assertEqual(b.q_scale(), c.q_scale())
         self.assertEqual(b.q_zero_point(), c.q_zero_point())
-        self.assertEqual(b.int_repr(), c.int_repr())
+        self.assertNotEqual(b.stride(), c.stride())
+        self.assertNotEqual(b.int_repr(), c.int_repr())
+        self.assertFalse(torch.equal(b, c))
 
         # we can use reshape for non-contiguous Tensor
         a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype)
