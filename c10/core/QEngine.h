@@ -10,18 +10,19 @@ namespace c10 {
  * QEngine is an enum that is used to select the engine to run quantized ops.
  */
 enum class QEngine : uint8_t {
-  FBGEMM = 0,
-  QNNPACK = 1,
-  COMPILE_TIME_NUM_QENGINES = 2,
+  NoQEngine = 0,
+  FBGEMM = 1,
+  QNNPACK = 2,
 };
 
+constexpr auto kNoQEngine = QEngine::NoQEngine;
 constexpr auto kFBGEMM = QEngine::FBGEMM;
 constexpr auto kQNNPACK = QEngine::QNNPACK;
-constexpr int COMPILE_TIME_NUM_QENGINES =
-    static_cast<int>(QEngine::COMPILE_TIME_NUM_QENGINES);
 
 inline std::string toString(QEngine qengine) {
   switch (qengine) {
+    case kNoQEngine:
+      return "NoQEngine";
     case kFBGEMM:
       return "FBGEMM";
     case kQNNPACK:
