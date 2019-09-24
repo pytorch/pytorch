@@ -14,10 +14,6 @@ if not dist.is_available():
 from torch.distributed.rpc import RpcBackend
 from common_utils import load_tests
 from os import getenv
-from typing import (
-    Dict,
-    Sequence,
-)
 from collections import namedtuple
 
 BACKEND = getenv('RPC_BACKEND', RpcBackend.PROCESS_GROUP)
