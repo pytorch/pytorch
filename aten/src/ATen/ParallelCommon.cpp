@@ -78,6 +78,8 @@ std::string get_parallel_info() {
   ss << "native thread pool";
   #elif AT_PARALLEL_NATIVE_TBB
   ss << "native thread pool and TBB";
+  #elif AT_PARALLEL_NATIVE_MOBILE
+  ss << "native thread pool and mobile-optimized thread pool";
   #endif
   ss << std::endl;
 
@@ -89,12 +91,19 @@ std::string get_parallel_info() {
 }
 
 int intraop_default_num_threads() {
+#ifdef AT_PARALLEL_NATIVE_MOBILE
+  // Intraop thread pool size should be determined by mobile cpuinfo.
+  // We should hook up with the logic in caffe2/utils/threadpool if we ever need
+  // call this API for mobile.
+  AT_ERROR("Undefined intraop_default_num_threads on mobile.");
+#else
   size_t nthreads = get_env_num_threads("OMP_NUM_THREADS", 0);
   nthreads = get_env_num_threads("MKL_NUM_THREADS", nthreads);
   if (nthreads == 0) {
     nthreads = TaskThreadPoolBase::defaultNumThreads();
   }
   return nthreads;
+#endif
 }
 
 } // namespace at

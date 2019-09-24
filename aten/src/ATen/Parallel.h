@@ -123,4 +123,6 @@ CAFFE2_API int intraop_default_num_threads();
 #include <ATen/ParallelNative.h>
 #elif AT_PARALLEL_NATIVE_TBB
 #include <ATen/ParallelNativeTBB.h>
+#elif AT_PARALLEL_NATIVE_MOBILE
+#include <ATen/ParallelNativeMobile.h>
 #endif
