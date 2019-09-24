@@ -193,18 +193,6 @@ class TestONNXOpset(TestCase):
             def forward(self, x):
                 return x[1:x.size(0)]
 
-        ops_9 = [{"op_name" : "Constant"},
-                 {"op_name" : "Constant"},
-                 {"op_name" : "Shape"},
-                 {"op_name" : "Gather",
-                 "attributes" : [{"name" : "axis", "i" : 0, "type" : 2}]},
-                 {"op_name" : "Unsqueeze",
-                 "attributes" : [{"name" : "axes", "i" : 0, "type" : 7}]},
-                 {"op_name" : "Unsqueeze",
-                 "attributes" : [{"name" : "axes", "i" : 0, "type" : 7}]},
-                 {"op_name" : "Unsqueeze",
-                 "attributes" : [{"name" : "axes", "i" : 0, "type" : 7}]},
-                 {"op_name" : "DynamicSlice"}]
         ops_10 = [{"op_name" : "Constant"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Shape"},
@@ -219,11 +207,11 @@ class TestONNXOpset(TestCase):
                   {"op_name" : "Constant"},
                   {"op_name" : "Slice",
                    "attributes" : []}]
-        ops = {9 : ops_9, 10 : ops_10}
+        ops = {10 : ops_10}
         module = DynamicSliceModel()
         x = torch.rand(1, 2)
         example_output = module(x)
-        check_onnx_opsets_operator(module, x, ops, opset_versions=[9, 10], example_outputs=example_output)
+        check_onnx_opsets_operator(module, x, ops, opset_versions=[10], example_outputs=example_output)
 
     def test_flip(self):
         class MyModule(Module):
