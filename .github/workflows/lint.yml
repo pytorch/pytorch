@@ -24,9 +24,11 @@ jobs:
             # We are on master, just set the SHA from our current location
             echo ::set-output name=commit_sha::${GITHUB_SHA}
           else
-            # We are on a PR, we need to check out PR branch
-            git checkout ${GITHUB_HEAD_REF}
-            echo ::set-output name=commit_sha::$(git rev-parse ${GITHUB_HEAD_REF})
+            # We are on a PR, so actions/checkout leaves us on merge commit.
+            # Check out the actual tip of the branch.
+            PR_TIP=$(git rev-parse HEAD^2)
+            git checkout ${PR_TIP}
+            echo ::set-output name=commit_sha::${PR_TIP}
           fi
         id: get_pr_tip
       - name: Run flake8
