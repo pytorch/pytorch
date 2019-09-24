@@ -29,7 +29,7 @@ std::tuple<Tensor, Tensor> sort_quant(
   std::tie(sort_int, sort_indicies) =
       at::sort(self.int_repr(), dim, descending);
   return std::forward_as_tuple(
-      at::_per_tensor_affine_qtensor(
+      at::_make_per_tensor_quantized_tensor(
           sort_int, self.q_scale(), self.q_zero_point()),
       sort_indicies);
 }
