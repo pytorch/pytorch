@@ -1469,5 +1469,5 @@ jobs:
 workflows:
   build:
     jobs:
-      - setup
+      - setup:
           context: org-member
