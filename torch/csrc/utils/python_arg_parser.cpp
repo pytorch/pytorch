@@ -147,7 +147,7 @@ static PyObject* get_tensor_torch_function(void)
 
 bool FunctionParameter::check_has_torch_function(PyObject* obj)
 {
-  PyObject* method = PyArray_LookupSpecial(obj, "__torch_function__");
+  PyObject* method = PyTorch_LookupSpecial(obj, "__torch_function__");
   if(method != NULL){
     return true;
   }
@@ -513,7 +513,7 @@ pyobject_array_insert(PyObject **array, int length, int index, PyObject *item)
 
 bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
                                PyObject* overloaded_args[], bool raise_exception) {
-  int num_implementing_args = 0;
+  int num_overloaded_args = 0;
   int arg_index = 0;
   int j;
   int new_class = 1;
@@ -582,8 +582,11 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       continue;
     }
     else if (param.check_has_torch_function(obj)) {
+      // Collects arguments with __torch_function__ and
+      // in the order in which they should be tried (i.e., skipping redundant types).
+      // by checking for subclasses
       dst[i++] = obj;
-      for (j = 0; j < num_implementing_args; j++) {
+      for (j = 0; j < num_overloaded_args; j++) {
         if (Py_TYPE(obj) == Py_TYPE(overloaded_args[j])) {
           new_class = 0;
           break;
@@ -594,9 +597,9 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
 
         if (method != NULL) {
           int arg_index;
-          arg_index = num_implementing_args;
+          arg_index = num_overloaded_args;
 
-          for (j = 0; j < num_implementing_args; j++) {
+          for (j = 0; j < num_overloaded_args; j++) {
             PyObject *other_type;
             other_type = (PyObject *)Py_TYPE(overloaded_args[j]);
             if (PyObject_IsInstance(obj, other_type)) {
@@ -604,8 +607,8 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
               break;
             }
           }
-          pyobject_array_insert(overloaded_args, num_implementing_args, arg_index, obj);
-          ++num_implementing_args;
+          pyobject_array_insert(overloaded_args, num_overloaded_args, arg_index, obj);
+          ++num_overloaded_args;
         }
       }
     } else if (raise_exception) {

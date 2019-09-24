@@ -45,7 +45,22 @@ inline torch::autograd::Variable& THPVariable_Unpack(PyObject* obj) {
   return var->cdata;
 }
 
-static PyObject * maybe_get_attr(PyObject *obj, char *name)
+/*
+ * Stripped down version of PyObject_GetAttrString,
+ * avoids lookups for None, tuple, and List objects,
+ * and doesn't create a PyErr since this code ignores it.
+ *
+ * This can be much faster then PyObject_GetAttrString where
+ * exceptions are not used by caller.
+ *
+ * 'obj' is the object to search for attribute.
+ *
+ * 'name' is the attribute to search for.
+ *
+ * Returns attribute value on success, NULL on failure.
+ */
+
+static PyObject * PyObject_FastGetAttrString(PyObject *obj, char *name)
 {
     PyTypeObject *tp = Py_TYPE(obj);
     PyObject *res = (PyObject *)NULL;
@@ -72,8 +87,8 @@ static PyObject * maybe_get_attr(PyObject *obj, char *name)
     return res;
 }
 
-static bool
-_is_basic_python_type(PyTypeObject *tp)
+// Makes sure that we don't check for __torch_function__ on basic Python types
+static bool _is_basic_python_type(PyTypeObject *tp)
 {
     return (
         /* Basic number types */
@@ -108,16 +123,26 @@ _is_basic_python_type(PyTypeObject *tp)
     );
 }
 
-static PyObject* PyArray_LookupSpecial(PyObject *obj, char *name)
+/*
+ * Lookup a special method, following the python approach of looking up
+ * on the type object, rather than on the instance itself.
+ *
+ * Assumes that the special method is a numpy-specific one, so does not look
+ * at builtin types, nor does it look at a base ndarray.
+ *
+ * In future, could be made more like _Py_LookupSpecial
+ */
+
+static PyObject* PyTorch_LookupSpecial(PyObject *obj, char *name)
 {
   PyTypeObject *tp = Py_TYPE(obj);
   if (_is_basic_python_type(tp)) {
     return NULL;
   }
-  return maybe_get_attr((PyObject *)tp, name);
+  return PyObject_FastGetAttrString((PyObject *)tp, name);
 }
 
 static PyObject* get_torch_function(PyObject* obj)
 {
-  return PyArray_LookupSpecial(obj, "__torch_function__");
+  return PyTorch_LookupSpecial(obj, "__torch_function__");
 }

@@ -66,6 +66,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 }
 """)
 
+# Check for __torch_function__ overrides
 PY_VARIABLE_FUNCTION_VARARGS  = CodeTemplate("""\
 static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
@@ -78,7 +79,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   auto r = parser.parse(args, kwargs, parsed_args);
 
   if(r.has_torch_function()){
-    PyObject* torch_function = maybe_get_attr(r.get_overloaded_arg(0), "__torch_function__");
+    PyObject* torch_function = PyObject_FastGetAttrString(r.get_overloaded_arg(0), "__torch_function__");
     return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
   }
   else{
