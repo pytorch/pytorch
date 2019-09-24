@@ -18369,7 +18369,8 @@ class TestList(JitTestCase):
         def changes_type():
             a = [float(i) for i in range(5)]
             b = [float(i) for i in [1, 2, 3, 4]]
-            return a, b
+            c = [(float(i), j) for i, j in enumerate([1, 2, 3, 8])]
+            return a, b, c
 
         test_func(changes_type, ())
 
