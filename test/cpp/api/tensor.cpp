@@ -441,3 +441,51 @@ TEST(TensorTest, OutputNr) {
   ASSERT_THROWS_WITH(y.output_nr(), message);
   ASSERT_THROWS_WITH(x.output_nr(), message);
 }
+
+TEST(TensorTest, Version) {
+  auto x = torch::ones(3);
+  ASSERT_EQ(x._version(), 0);
+  x.mul_(2);
+  ASSERT_EQ(x._version(), 1);
+  x.add_(1);
+  ASSERT_EQ(x._version(), 2);
+
+  x = at::ones(3);
+  const auto message = "version is not implemented for Tensor";
+  ASSERT_THROWS_WITH(x._version(), message);
+  x.mul_(2);
+  ASSERT_THROWS_WITH(x._version(), message);
+  x.add_(1);
+  ASSERT_THROWS_WITH(x._version(), message);
+}
+
+TEST(TensorTest, Detach) {
+  auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  auto y = x * x;
+  const auto y_detached = y.detach();
+  ASSERT_FALSE(y.is_leaf());
+  ASSERT_TRUE(y_detached.is_leaf());
+  ASSERT_FALSE(y_detached.requires_grad());
+
+  x = at::tensor({5}, at::TensorOptions().requires_grad(false));
+  y = x * x;
+  const auto message = "detach is not implemented for Tensor";
+  ASSERT_THROWS_WITH(x.detach(), message);
+  ASSERT_THROWS_WITH(y.detach(), message);
+}
+
+TEST(TensorTest, DetachInplace) {
+  auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  auto y = x * x;
+  auto y_detached = y.detach_();
+  ASSERT_TRUE(y.is_leaf());
+  ASSERT_FALSE(y.requires_grad());
+  ASSERT_TRUE(y_detached.is_leaf());
+  ASSERT_FALSE(y_detached.requires_grad());
+
+  x = at::tensor({5}, at::TensorOptions().requires_grad(false));
+  y = x * x;
+  const auto message = "detach_ is not implemented for Tensor";
+  ASSERT_THROWS_WITH(x.detach_(), message);
+  ASSERT_THROWS_WITH(y.detach_(), message);
+}
