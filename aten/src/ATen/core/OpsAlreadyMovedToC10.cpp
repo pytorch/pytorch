@@ -1253,6 +1253,8 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::_addr", "out"},
         {"aten::_cumsum", "out"},
         {"aten::_cumprod", "out"},
+        {"aten::_amp_unscale_inf_check_", ""},
+        {"aten::_amp_update_scale", ""},
         {"aten::_cat", "out"},
         {"aten::_mode", "values"},
         {"aten::_max", "max"},
