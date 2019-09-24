@@ -114,7 +114,7 @@ TEST_F(ModulesTest, MaxPool1dReturnIndices) {
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
 
-  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.dim(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1 ,2})));
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 
@@ -154,7 +154,7 @@ TEST_F(ModulesTest, MaxPool2dReturnIndices) {
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
 
-  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.dim(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2 ,2})));
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
   ASSERT_TRUE(torch::allclose(
@@ -185,7 +185,7 @@ TEST_F(ModulesTest, MaxPool3dReturnIndices) {
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
 
-  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(y.dim(), 4);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
 
