@@ -226,6 +226,14 @@ def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
     else:
         return g.op("TopK", input, k, axis_i=dim, largest_i=largest, sorted_i=sorted, outputs=2)
 
+
+def _scatter_helper(g, self, dim, index, src):
+    if _export_onnx_opset_version <= 10:
+        from torch.onnx.symbolic_opset9 import scatter
+    else:
+        from torch.onnx.symbolic_opset11 import scatter
+    return scatter(g, self, dim, index, src)
+
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
