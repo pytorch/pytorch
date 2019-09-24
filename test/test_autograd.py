@@ -3111,7 +3111,7 @@ class TestAutograd(TestCase):
         y.sum().backward()
 
         assert y.grad_fn.__class__ is F._backward_cls
-        assert x.grad.mean().item() == 42
+        assert x.grad.tolist() == [42, 42, 42]
 
     def test_mul_out(self):
         a = torch.randn(2, 2, requires_grad=True)
