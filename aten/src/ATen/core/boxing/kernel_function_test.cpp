@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <ATen/core/op_registration/test_helpers.h>
+#include <ATen/core/boxing/test_helpers.h>
 
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
@@ -7,7 +7,6 @@
 
 using c10::RegisterOperators;
 using c10::TensorTypeId;
-using c10::KernelCache;
 using c10::Stack;
 using c10::guts::make_unique;
 using c10::intrusive_ptr;
@@ -642,7 +641,7 @@ void expectCannotCallConcatBoxed(TensorTypeId type_id) {
   ASSERT_TRUE(op.has_value());
   expectThrows<c10::Error>(
     [&] {callOp(*op, dummyTensor(type_id), "1", "2", 3);},
-    "Tried to call OpKernel::call() for a kernel that doesn't have an boxed version."
+    "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::callUnboxed()."
   );
 }
 

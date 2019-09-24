@@ -455,8 +455,8 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::q_per_channel_scales", ""},
         {"aten::q_per_channel_zero_points", ""},
         {"aten::int_repr", ""},
-        {"aten::_per_tensor_affine_qtensor", ""},
-        {"aten::_per_channel_affine_qtensor", ""},
+        {"aten::_make_per_tensor_quantized_tensor", ""},
+        {"aten::_make_per_channel_quantized_tensor", ""},
         {"aten::fake_quantize_per_tensor_affine", ""},
         {"aten::fake_quantize_per_tensor_affine_backward", ""},
         {"aten::to", "other"},
@@ -754,11 +754,12 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::set_data", ""},
         {"aten::is_leaf", ""},
         {"aten::output_nr", ""},
+        {"aten::_version", ""},
     #ifdef BUILD_NAMEDTENSOR
-        {"aten::names_", ""},
+        {"aten::rename_", ""},
     #endif
     #ifdef BUILD_NAMEDTENSOR
-        {"aten::renamed", ""},
+        {"aten::rename", ""},
     #endif
     #ifdef BUILD_NAMEDTENSOR
         {"aten::align_to", ""},
@@ -860,7 +861,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::new_empty", ""},
         {"aten::new_full", ""},
         {"aten::_empty_affine_quantized", ""},
-        {"aten::_empty_per_channel_affine_quantized_like", ""},
+        {"aten::_empty_per_channel_affine_quantized", ""},
         {"aten::empty", "out"},
         {"aten::empty_like", "dtype"},
         {"aten::empty_strided", ""},
@@ -1150,9 +1151,9 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
     #ifdef BUILD_NAMEDTENSOR
         {"aten::unbind", "Dimname"},
     #endif
-        {"aten::quantize_linear", ""},
-        {"aten::quantize_linear_per_channel", ""},
-        {"aten::_dequantize_linear", ""},
+        {"aten::quantize_per_tensor", ""},
+        {"aten::quantize_per_channel", ""},
+        {"aten::_dequantize_per_tensor", ""},
         {"aten::q_per_channel_axis", ""},
         {"aten::qscheme", ""},
         {"aten::to", "dtype_layout"},
