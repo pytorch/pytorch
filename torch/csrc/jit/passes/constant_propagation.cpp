@@ -122,10 +122,10 @@ struct ConstantPropagator {
       auto new_output = tryInsertConstant(*graph, outputs[i]);
       if (new_output) {
         GRAPH_UPDATE(
-            "Folding\n",
+            "Folding %",
             n->outputs()[i]->debugName(),
-            " with\n",
-            *((*new_output)->node()));
+            " with ",
+            getHeader((*new_output)->node()));
         if (outputs[i].isNone()) {
           (*new_output)->setType(n->outputs()[i]->type());
         }
@@ -136,10 +136,10 @@ struct ConstantPropagator {
         auto tuple_val = n->outputs()[i];
         if (auto new_tup = tryInsertTuple(outputs[i], tuple_val)) {
           GRAPH_UPDATE(
-              "Folding tuple\n",
+              "Folding tuple %",
               n->outputs()[i]->debugName(),
-              " with\n",
-              *(new_tup->node()));
+              " with ",
+              getHeader(new_tup->node()));
           tuple_val = new_tup;
         }
         tuples[tuple_val] = std::move(outputs[i]);
@@ -166,14 +166,15 @@ struct ConstantPropagator {
     bool cond_val = constant_as<bool>(start_cond).value_or(true);
 
     bool loop_might_run = cond_val && iter_len > 0;
-    if (!loop_might_run)
+    if (!loop_might_run) {
       GRAPH_UPDATE(
-          "Removing unexecuted loop:\n",
+          "Removing unexecuted loop: ",
           *node,
           "\ntripcount: ",
-          *(trip_count->node()),
+          trip_count,
           " and start_cond: ",
-          *(start_cond->node()));
+          getHeader(start_cond->node()));
+    }
     return !loop_might_run;
   }
 
@@ -198,9 +199,9 @@ struct ConstantPropagator {
     auto input_bool = constant_as<bool>(n->input());
     AT_ASSERT(input_bool);
     GRAPH_UPDATE(
-        "Folding if\n",
-        n->input()->debugName(),
-        " if condition value:\n",
+        "Folding if ",
+        getHeader(n->input()->node()),
+        " where condition = ",
         *input_bool);
     size_t block_index = *input_bool ? 0 : 1;
     ConstantPropagation(n->blocks().at(block_index));
