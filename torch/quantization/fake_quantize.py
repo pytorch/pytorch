@@ -3,8 +3,6 @@ import torch
 from torch.nn import Module
 from .observer import default_observer, default_weight_observer, default_l2_observer, default_per_channel_weight_observer, _with_args
 
-
-
 class FakeQuantize(Module):
     ''' Simulate the quantize and dequantize operations in training time.
     Args:

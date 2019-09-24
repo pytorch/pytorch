@@ -81,20 +81,16 @@ class ConvBn2d(nn.Conv2d):
 
     def enable_fake_quant(self):
         self.observer.enable_fake_quant()
+        self.observer.enable_observer()
         self.weight_fake_quant.enable_fake_quant()
+        self.weight_fake_quant.enable_observer()
         return self
 
     def disable_fake_quant(self):
         self.observer.disable_fake_quant()
+        self.observer.disable_observer()
         self.weight_fake_quant.disable_fake_quant()
-        return self
-
-    def update_bn_stats(self):
-        self.freeze_bn = False
-        return self
-
-    def freeze_bn_stats(self):
-        self.freeze_bn = True
+        self.weight_fake_quant.disable_observer()
         return self
 
     def _forward(self, input):
