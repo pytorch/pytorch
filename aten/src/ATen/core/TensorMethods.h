@@ -2559,13 +2559,7 @@ inline Tensor Tensor::trunc() const {
 }
 inline Tensor & Tensor::trunc_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::trunc_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("trunc_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::trunc_(const_cast<Tensor&>(*this));
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::trunc_", ""}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &>(
@@ -5126,7 +5120,13 @@ inline Tensor Tensor::polygamma(int64_t n) const {
 }
 inline Tensor Tensor::erfinv() const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::erfinv(const_cast<Tensor&>(*this));
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::erfinv(const_cast<Tensor&>(*this));
+            break;
+        default:
+            AT_ERROR("erfinv not implemented for ", at::toString(type_set()));
+    }
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::erfinv", ""}).value();
     return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor &>(
@@ -5135,7 +5135,13 @@ inline Tensor Tensor::erfinv() const {
 }
 inline Tensor & Tensor::erfinv_() const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::erfinv_(const_cast<Tensor&>(*this));
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::erfinv_(const_cast<Tensor&>(*this));
+            break;
+        default:
+            AT_ERROR("erfinv_ not implemented for ", at::toString(type_set()));
+    }
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::erfinv_", ""}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &>(
