@@ -47,7 +47,7 @@ enum class JitLoggingLevels {
   GRAPH_DEBUG,
 };
 
-std::string debugValueOrDefault(const Node* n);
+std::string TORCH_API getHeader(const Node *node);
 
 std::string TORCH_API log_function(const std::shared_ptr<Graph> &graph);
 

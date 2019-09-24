@@ -35,7 +35,6 @@ TESTS = [
     'expecttest',
     'fake_quant',
     'indexing',
-    'indexing_cuda',
     'jit',
     'logging',
     'mkldnn',
