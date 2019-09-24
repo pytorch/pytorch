@@ -1332,6 +1332,13 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
                  num_layers, dropout, train, bidirectional, batch_first=None, batch_sizes=None):
+
+    warnings.warn("Exporting a model to ONNX with a batch_size other than 1, " +
+                  "with a variable lenght with " + variant + " can cause an error " +
+                  "when running the ONNX model with a different batch size. " +
+                  "Make sure to save the model with a batch size of 1, " +
+                  "or define the initial states (h0/c0) as inputs of the model. ")
+
     onnxActivations = ['Relu', 'Tanh', 'Sigmoid', 'Affine', 'LeakyRelu', 'ThresholdedRelu',
                        'ScaledTanh', 'HardSigmoid', 'Elu', 'Softsign', 'Softplus']
     variantToOnnxActivationMap = dict(zip([act_fun.lower() for act_fun in onnxActivations], onnxActivations))
@@ -1662,10 +1669,10 @@ def scatter_add(g, self, dim, index, src):
         return _unimplemented("scatter_add", "input size not accessible")
     dtype = self.type().scalarType()
     dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-    dims = self.type().sizes()
-    to_add = torch.zeros(dims)
-    to_add = g.op("Constant", value_t=to_add)
-    to_add = scatter(g, to_add, dim, index, src)
+    dtype = sym_help.scalar_type_to_pytorch_type[dtype]
+    sizes = self.type().sizes()
+    to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=dtype))
+    to_add = sym_help._scatter_helper(g, to_add, dim, index, src)
     return add(g, self, to_add)
 
 
@@ -1680,8 +1687,10 @@ def prim_shape(g, self):
 
 @parse_args('v', 'i', 'v', 'v')
 def gather(g, self, dim, index, sparse_grad=False):
-    # NOTE: Update this workaround if ONNX has native Gather support.
-    #       The current Gather in ONNX is not the same as torch.gather.
+    if sym_help._maybe_get_const(sparse_grad, 'i'):
+        return _unimplemented("gather", "sparse_grad == True")
+    # NOTE: This workaround is needed since GatherElement is only supported
+    #       since opset 11, and Gather in ONNX is not the same as torch.gather.
     dtype = self.type().scalarType()
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
     depth = size(g, self, g.op("Constant", value_t=torch.LongTensor([dim])))
