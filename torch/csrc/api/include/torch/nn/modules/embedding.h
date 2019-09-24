@@ -79,7 +79,7 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
   Tensor weight;
 };
 
-class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
+class TORCH_API Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
 public:
     using torch::nn::ModuleHolder<EmbeddingImpl>::ModuleHolder;
     static Embedding from_pretrained(torch::Tensor embeddings, c10::optional<EmbeddingOptions> options = c10::nullopt, bool freeze= true);
@@ -105,7 +105,7 @@ class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl>
     Tensor weight;
 };
 
-class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
+class TORCH_API EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
 public:
     using torch::nn::ModuleHolder<EmbeddingBagImpl>::ModuleHolder;
     static EmbeddingBag from_pretrained(torch::Tensor embeddings, c10::optional<EmbeddingBagOptions> options = c10::nullopt, bool freeze= true);
