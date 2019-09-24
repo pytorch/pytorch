@@ -32,7 +32,7 @@
 
 namespace torch {
 namespace jit {
-std::ostream& operator<<(std::ostream& out, OpCode op);
+char const * OpCode2Str(OpCode op);
 
 namespace {
 namespace onnx_torch = ::torch::onnx;
@@ -672,14 +672,9 @@ class ScriptModuleSerializer {
       // instructions
       std::vector<IValue> inss;
       for (const auto& ins : code.instructions()) {
-        TORCH_CHECK(ins.op != CALL, "Instruction CALL is not supported in mobile.");
-        TORCH_CHECK(ins.op != INTERFACE_CALL, "Instruction INTERFACE_CALL is not supported in mobile.");
-        TORCH_CHECK(ins.op != WAIT, "Instruction WAIT is not supported in mobile.");
-        TORCH_CHECK(ins.op != GUARD, "Instruction GUARD is not supported in mobile.");
-        TORCH_CHECK(ins.op != TAIL_CALL, "Instruction TAIL_CALL is not supported in mobile.");
-        std::stringstream ss;
-        ss << ins.op;
-        std::vector<IValue> insv{ss.str(), ins.X, ins.N};
+        TORCH_CHECK(isOpSupportedInMobile(ins.op), OpCode2Str(ins.op),
+                    " is not supported in mobile module.");
+        std::vector<IValue> insv{OpCode2Str(ins.op), ins.X, ins.N};
         inss.emplace_back(c10::ivalue::Tuple::create(std::move(insv)));
       }
       auto instructions = c10::ivalue::Tuple::create(std::move(inss));

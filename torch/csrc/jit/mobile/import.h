@@ -1,5 +1,5 @@
 #pragma once
-#include "mobile_module.h"
+#include "module.h"
 
 #include <istream>
 #include <memory>

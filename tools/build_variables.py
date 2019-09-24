@@ -156,10 +156,11 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
     "torch/csrc/jit/function.cpp",
-    "torch/csrc/jit/lite_interpreter/import_bytecode.cpp",
-    "torch/csrc/jit/lite_interpreter/mobile_module.cpp",
-    "torch/csrc/jit/lite_interpreter/register_ins_ops.cpp",
-    "torch/csrc/jit/lite_interpreter/lite_interpreter.cpp",
+    "torch/csrc/jit/mobile/function.cpp",
+    "torch/csrc/jit/mobile/import.cpp",
+    "torch/csrc/jit/mobile/module.cpp",
+    "torch/csrc/jit/mobile/register_mobile_ops.cpp",
+    "torch/csrc/jit/mobile/interpreter.cpp",
 ]
 
 libtorch_cuda_sources = [
