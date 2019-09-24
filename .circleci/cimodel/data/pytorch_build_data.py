@@ -53,16 +53,6 @@ CONFIG_TREE_DATA = [
             ("10", [X("3.6")]),
             ("10.1", [X("3.6")]),
         ]),
-        ("android", [
-            ("r19c", [
-                ("3.6", [
-                    ("android_abi", [XImportant("x86_32")]),
-                    ("android_abi", [X("x86_64")]),
-                    ("android_abi", [X("arm-v7a")]),
-                    ("android_abi", [X("arm-v8a")]),
-                ])
-            ]),
-        ]),
     ]),
 ]
 

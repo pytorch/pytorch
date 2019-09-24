@@ -23,7 +23,6 @@ jobs:
           # Rebase to master only if in xenial_py3_6_gcc5_4 case
           if [[ "${CIRCLE_BRANCH}" != "master" && "${BUILD_ENVIRONMENT}" == *"gcc5"* ]]; then
             echo "Merge master branch into $CIRCLE_BRANCH before build in environment $BUILD_ENVIRONMENT"
-            set -x
             git config --global user.email "circleci.ossci@gmail.com"
             git config --global user.name "CircleCI"
             git config remote.origin.url https://github.com/pytorch/pytorch.git
@@ -36,7 +35,6 @@ jobs:
             git checkout -f ${GIT_COMMIT}
             git reset --hard ${GIT_COMMIT}
             git merge --no-edit --no-ff ${GIT_MERGE_TARGET}
-            set +x
           else
             echo "Do NOT merge master branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
           fi
@@ -49,9 +47,8 @@ jobs:
             NAMED_FLAG="export BUILD_NAMEDTENSOR=1"
           fi
 
-          # TODO: temporary for ease of testing
-          #export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
-          #echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
           # Push intermediate Docker image for next phase to use
           if [ -z "${BUILD_ONLY}" ]; then
@@ -77,11 +74,11 @@ jobs:
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
             docker images --digests
-            docker save "${COMMIT_DOCKER_IMAGE}" | gzip -1 > built_image.tgz
+            docker save "${COMMIT_DOCKER_IMAGE}" | gzip -1 > << parameters.saved_docker_filename >>
           fi
     - persist_to_workspace:
         root: .
-        paths: built_image.tgz
+        paths: << parameters.saved_docker_filename >>
 
   pytorch_linux_test:
     <<: *pytorch_params
@@ -98,7 +95,7 @@ jobs:
         name: Test
         no_output_timeout: "90m"
         command: |
-          set -e
+          set -ex
           # See Note [Special build images]
           output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"namedtensor"* ]]; then
