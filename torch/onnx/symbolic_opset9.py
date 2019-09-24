@@ -1332,6 +1332,13 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
                  num_layers, dropout, train, bidirectional, batch_first=None, batch_sizes=None):
+
+    warnings.warn("Exporting a model to ONNX with a batch_size other than 1, " +
+                  "with a variable lenght with " + variant + " can cause an error " +
+                  "when running the ONNX model with a different batch size. " +
+                  "Make sure to save the model with a batch size of 1, " +
+                  "or define the initial states (h0/c0) as inputs of the model. ")
+
     onnxActivations = ['Relu', 'Tanh', 'Sigmoid', 'Affine', 'LeakyRelu', 'ThresholdedRelu',
                        'ScaledTanh', 'HardSigmoid', 'Elu', 'Softsign', 'Softplus']
     variantToOnnxActivationMap = dict(zip([act_fun.lower() for act_fun in onnxActivations], onnxActivations))
