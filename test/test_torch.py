@@ -8343,7 +8343,7 @@ class TestTorchDeviceType(TestCase):
 
             def tensor_indices_to_np(tensor, indices):
                 # convert the Torch Tensor to a numpy array
-                if not 'cpu' in device:
+                if 'cpu' not in device:
                     tensor = tensor.cpu()
                 npt = tensor.numpy()
 
@@ -11425,15 +11425,12 @@ class TestTorchDeviceType(TestCase):
             self.ternary_check_input_output_mem_overlap(out_op, device, expected_failure=False)
 
         # Tests lerp, which has divergent CPU and CUDA behavior
-        out_op = getattr(torch, 'lerp')
-        inplace_op = getattr(torch.Tensor, 'lerp_')
-
         if 'cpu' in device:
-            self.check_internal_mem_overlap(inplace_op, num_inputs=3, device=device, expected_failure=False)
-            self.ternary_check_input_output_mem_overlap(out_op, device, expected_failure=False)
+            self.check_internal_mem_overlap(torch.lerp_, num_inputs=3, device=device, expected_failure=False)
+            self.ternary_check_input_output_mem_overlap(torch.lerp, device, expected_failure=False)
         if 'cuda' in device:
-            self.check_internal_mem_overlap(inplace_op, num_inputs=3, device=device, expected_failure=True)
-            self.ternary_check_input_output_mem_overlap(out_op, device, expected_failure=True)
+            self.check_internal_mem_overlap(torch.lerp_, num_inputs=3, device=device, expected_failure=True)
+            self.ternary_check_input_output_mem_overlap(torch.lerp, device, expected_failure=True)
 
     def test_copy_mem_overlap(self, device):
         self.check_internal_mem_overlap(
