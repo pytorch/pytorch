@@ -10,37 +10,47 @@ import torch.nn as nn
 from torch._jit_internal import List, Optional
 
 
+class _PartialWrapper(object):
+    def __init__(self, p):
+        self.p = p
+
+    def __call__(self, *args, **keywords):
+        return self.p(*args, **keywords)
+
+    def __repr__(self):
+        return self.p.__repr__()
+
+
+def _with_args(cls_or_self, **kwargs):
+    """
+    Wrapper around functools.partial that allows chaining.
+
+    Often you want to assign it to a class as a class method:
+
+        Foo.with_args = classmethod(_with_args)
+        Foo.with_args(x=1).with_args(y=2)
+    """
+    r = _PartialWrapper(partial(cls_or_self, **kwargs))
+    return r
+
+_PartialWrapper.with_args = _with_args
+
+
 ABC = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
 
 
-class ObserverBase(ABC, nn.Module):
-    r"""Observer base Module
-    Any concrete observer implementation should derive from this class.
+class Observer(ABC, nn.Module):
+    r"""
+    Observer base Module. Any observer implementation should derive from this class.
 
     Concrete observers should follow the same API. In forward, they will update
     the statistics of the observed Tensor. And they should provide a
     `calculate_qparams` function that computes the quantization parameters given
     the collected statistics.
     """
-
-    def __init__(
-        self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False
-    ):
-        super(ObserverBase, self).__init__()
+    def __init__(self, dtype):
+        super(Observer, self).__init__()
         self.dtype = dtype
-        self.qscheme = qscheme
-        self.reduce_range = reduce_range
-
-        self.eps = torch.finfo(torch.float32).eps
-        assert self.qscheme in (
-            torch.per_tensor_affine,
-            torch.per_tensor_symmetric,
-        ), "Default Observer only works for per_tensor_affine and \
-                per_tensor_symmetric quantization scheme"
-        assert self.dtype in (
-            torch.qint8,
-            torch.quint8,
-        ), "Default Observer only works for qint8 and quint8 data type"
 
     @abstractmethod
     def forward(self, x):
@@ -49,6 +59,64 @@ class ObserverBase(ABC, nn.Module):
     @abstractmethod
     def calculate_qparams(self, **kwargs):
         pass
+
+    with_args = classmethod(_with_args)
+
+
+class _ObserverBase(Observer):
+    r"""
+    Common base for all qint/quint8 observers
+    """
+
+    def __init__(
+        self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False
+    ):
+        super(_ObserverBase, self).__init__(dtype=dtype)
+        self.qscheme = qscheme
+        self.reduce_range = reduce_range
+
+        self.eps = torch.finfo(torch.float32).eps
+        assert self.qscheme in (
+            torch.per_tensor_affine,
+            torch.per_tensor_symmetric,
+            torch.per_channel_affine,
+            torch.per_channel_symmetric,
+        ), "Default Observer only works for per_tensor_affine, \
+                per_tensor_symmetric, per_channel_affine and \
+                per_channel_symmetric quantization scheme"
+        assert self.dtype in (
+            torch.qint8,
+            torch.quint8,
+        ), "Default Observer only works for qint8 and quint8 data type"
+
+    def _calculate_per_channel_qparams(self, min_vals, max_vals):
+        # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
+        """
+        Given min and max value tensors, this function calculates per channel
+        quantization parameters
+        """
+        if min_vals is None or max_vals is None:
+            warnings.warn(
+                "must run observer before calling calculate_qparams.\
+                                    Returning default scale and zero point "
+            )
+            return torch.tensor([1.0]), torch.tensor([0])
+
+        for i in range(len(min_vals)):
+            assert (
+                min_vals[i] <= max_vals[i]
+            ), "min {} should be less than max {}".format(min_vals[i], max_vals[i])
+
+        scales = torch.ones(min_vals.size())
+        zero_points = torch.ones(min_vals.size())
+        for i in range(len(scales)):
+            qparam = self._calculate_qparams(
+                min_vals[i], max_vals[i]
+            )
+            scales[i] = float(qparam[0])
+            zero_points[i] = int(qparam[1])
+
+        return scales, zero_points
 
     def _calculate_qparams(self, min_val, max_val):
         # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
@@ -85,7 +153,7 @@ class ObserverBase(ABC, nn.Module):
             scale = 1.0
             zero_point = 0
         else:
-            if self.qscheme == torch.per_tensor_symmetric:
+            if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
                 max_val = max(-min_val, max_val)
                 scale = max_val / ((qmax - qmin) / 2)
                 scale = max(scale, self.eps)
@@ -101,7 +169,7 @@ class ObserverBase(ABC, nn.Module):
         return torch.tensor([scale]), torch.tensor([zero_point])
 
 
-class MinMaxObserver(ObserverBase):
+class MinMaxObserver(_ObserverBase):
     r"""Default Observer Module
     A default implementation of the observer module, only works for
     `per_tensor_affine` quantization scheme.  The module will record the
@@ -156,7 +224,57 @@ class MinMaxObserver(ObserverBase):
         return "min_val={}, max_val={}".format(self.min_val, self.max_val)
 
 
-class HistogramObserver(ObserverBase):
+class PerChannelMinMaxObserver(_ObserverBase):
+    r"""Per Channel Observer Module
+    The module will record the running average of max and min value for each
+    channel of the observed Tensor and calculate_qparams will calculate
+    scales and zero_points for each channel
+    """
+
+    def __init__(self, ch_axis=0, **kwargs):
+        super(PerChannelMinMaxObserver, self).__init__(**kwargs)
+        self.ch_axis = ch_axis
+        self.min_vals = None
+        self.max_vals = None
+        if (
+            self.qscheme == torch.per_channel_symmetric
+            and self.reduce_range
+            and self.dtype == torch.quint8
+        ):
+            raise NotImplementedError(
+                "Cannot reduce range for symmetric quantization for quint8"
+            )
+
+    def forward(self, x):
+        with torch.no_grad():
+            min_vals = self.min_vals
+            max_vals = self.max_vals
+            x_dim = x.size()
+
+            new_axis_list = list(range(len(x_dim)))
+            new_axis_list[self.ch_axis] = 0
+            new_axis_list[0] = self.ch_axis
+            y = x.permute(tuple(new_axis_list))
+            y = torch.flatten(y, start_dim=1)
+            if min_vals is None or max_vals is None:
+                min_vals = torch.min(y, 1)[0]
+                max_vals = torch.max(y, 1)[0]
+            else:
+                min_vals = torch.min(torch.min(y, 1)[0], min_vals)
+                max_vals = torch.max(torch.max(y, 1)[0], max_vals)
+            self.min_vals = min_vals
+            self.max_vals = max_vals
+            return x
+
+    def calculate_qparams(self):
+        return self._calculate_per_channel_qparams(self.min_vals, self.max_vals)
+
+    def extra_repr(self):
+        return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
+
+
+
+class HistogramObserver(_ObserverBase):
     r"""
     The module records the running histogram of tensor values along with
     min/max values. calculate_qparams will calculate scale and zero_point
@@ -411,14 +529,14 @@ class HistogramObserver(ObserverBase):
         return self._calculate_qparams(new_min.item(), new_max.item())
 
 
-class TensorObserver(ObserverBase):
+class RecordingObserver(_ObserverBase):
     r"""
     The module is mainly for debug and records the tensor values during runtime
     """
     __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
     def __init__(self, **kwargs):
-        super(TensorObserver, self).__init__(**kwargs)
+        super(RecordingObserver, self).__init__(**kwargs)
         self.tensor_val = []
 
     def forward(self, x):
@@ -427,28 +545,34 @@ class TensorObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        raise Exception("calculate_qparams should not be called for TensorObserver")
+        raise Exception("calculate_qparams should not be called for RecordingObserver")
 
     @torch.jit.export
     def get_tensor_value(self):
         return self.tensor_val
 
 
-def observer(observer_cls, **kwargs):
-    return partial(observer_cls, **kwargs)
+class NoopObserver(Observer):
+    r"""
+    Observer that doesn't do anything and just passes its configuration to the
+    quantized module's ``.from_float()`.
+
+    Primarily used for quantization to float16 which doesn't require determining
+    ranges.
+    """
+    def __init__(self, dtype=torch.float16):
+        if dtype != torch.float16:
+            raise ValueError("Only float16 quantization can be used without calibration process")
+        super(NoopObserver, self).__init__(dtype=dtype)
+
+    def forward(self, x):
+        return x
+
+    def calculate_qparams(self):
+        raise Exception("calculate_qparams should not be called for NoopObserver")
 
 
-def default_observer(**kwargs):
-    # Restrict activations to be in the range (0,127)
-    kwargs.setdefault("reduce_range", True)
-    return observer(MinMaxObserver, **kwargs)
-
-
-def default_debug_observer(**kwargs):
-    return observer(TensorObserver, **kwargs)
-
-
-def default_weight_observer(**kwargs):
-    kwargs.setdefault("dtype", torch.qint8)
-    kwargs.setdefault("qscheme", torch.per_tensor_symmetric)
-    return observer(MinMaxObserver, **kwargs)
+# Restrict activations to be in the range (0,127)
+default_observer = MinMaxObserver.with_args(reduce_range=True)
+default_debug_observer = RecordingObserver
+default_weight_observer = MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)

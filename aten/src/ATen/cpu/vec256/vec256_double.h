@@ -109,6 +109,9 @@ public:
   Vec256<double> erfc() const {
     return Vec256<double>(Sleef_erfcd4_u15(values));
   }
+  Vec256<double> erfinv() const {
+    return map(calc_erfinv);
+  }
   Vec256<double> exp() const {
     return Vec256<double>(Sleef_expd4_u10(values));
   }
@@ -160,6 +163,9 @@ public:
   }
   Vec256<double> trunc() const {
     return _mm256_round_pd(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
+  }
+  Vec256<double> lgamma() const {
+    return Vec256<double>(Sleef_lgammad4_u10(values));
   }
   Vec256<double> sqrt() const {
     return _mm256_sqrt_pd(values);

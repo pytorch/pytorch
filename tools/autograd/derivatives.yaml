@@ -208,7 +208,7 @@
   self, input2: cholesky_solve_backward(grad, self, input2, result, upper)
 
 - name: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
-  self: not_implemented("cholesky_inverse")
+  self: cholesky_inverse_backward(grad, self, upper, result)
 
 - name: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
   self: not_implemented("fbgemm_linear_int8_weight_fp32_activation only supported for inference")
@@ -621,7 +621,7 @@
   pdist: not_implemented("_pdist_backward")
 
 - name: cdist(Tensor x1, Tensor x2, float p=2) -> Tensor
-  x1: _cdist_backward(grad, x1, x2, p, result)
+  x1: _cdist_backward(grad.contiguous(), x1, x2, p, result)
   x2: _cdist_backward(grad.transpose(-1, -2).contiguous(), x2, x1, p, result.transpose(-1, -2).contiguous())
 
 - name: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
