@@ -53,11 +53,11 @@ struct TORCH_API EmbeddingBagOptions {
   TORCH_ARG(c10::optional<torch::Tensor>, _weight) = c10::nullopt;
 };
 
-class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
-public:
-    using torch::nn::ModuleHolder<EmbeddingImpl>::ModuleHolder;
-    static Embedding from_pretrained(Tensor embeddings, EmbeddingOptions options, bool freeze= true);
-}
+// class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
+// public:
+//     using torch::nn::ModuleHolder<EmbeddingImpl>::ModuleHolder;
+//     static Embedding from_pretrained(Tensor embeddings, EmbeddingOptions options, bool freeze= true);
+// };
 
 /// Performs a lookup in a fixed size embedding table.
 class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
@@ -83,7 +83,7 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
   Tensor weight;
 };
 
-class TORCH_API EmbeddingBagImpl() : public torch::nn::Cloneable<EmbeddingBagImpl> {
+class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl> {
   public:
     EmbeddingBagImpl(int64_t num_embeddings, int64_t embedding_dim)
       : EmbeddingBagImpl(EmbeddingBagOptions(num_embeddings, embedding_dim)) {}
@@ -102,18 +102,17 @@ class TORCH_API EmbeddingBagImpl() : public torch::nn::Cloneable<EmbeddingBagImp
     /// The embedding table
     Tensor weight;
 };
-
-class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
-public:
-    using torch::nn::ModuleHolder<EmbeddingBagImpl>::ModuleHolder;
-    static EmbeddingBag from_pretrained(Tensor embeddings, EmbeddingBagOptions options, bool freeze= true);
-}
+//
+// class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBag> {
+// public:
+//     using torch::nn::ModuleHolder<EmbeddingBag>::ModuleHolder;
+//     static EmbeddingBag from_pretrained(Tensor embeddings, EmbeddingBagOptions options, bool freeze= true);
+// };
 
 /// A `ModuleHolder` subclass for `EmbeddingImpl`.
 /// See the documentation for `EmbeddingImpl` class to learn what methods it
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(Embedding);
-
 } // namespace nn
 } // namespace torch
