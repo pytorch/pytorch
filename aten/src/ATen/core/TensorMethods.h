@@ -945,6 +945,9 @@ inline Tensor & Tensor::resize_(IntArrayRef size) const {
         case Backend::CPU:
             return CPUType::resize_(const_cast<Tensor&>(*this), size);
             break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::resize_(const_cast<Tensor&>(*this), size);
+            break;
         default:
             AT_ERROR("resize_ not implemented for ", at::toString(type_set()));
     }
@@ -5396,7 +5399,16 @@ inline Tensor Tensor::argsort(int64_t dim, bool descending) const {
 }
 inline std::tuple<Tensor,Tensor> Tensor::topk(int64_t k, int64_t dim, bool largest, bool sorted) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::topk(const_cast<Tensor&>(*this), k, dim, largest, sorted);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::topk(const_cast<Tensor&>(*this), k, dim, largest, sorted);
+            break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::topk(const_cast<Tensor&>(*this), k, dim, largest, sorted);
+            break;
+        default:
+            AT_ERROR("topk not implemented for ", at::toString(type_set()));
+    }
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::topk", ""}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool, bool>(
