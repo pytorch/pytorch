@@ -2676,7 +2676,7 @@ workflows:
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2685,7 +2685,7 @@ workflows:
           requires:
             - setup
           libtorch_variant: "shared-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2694,7 +2694,7 @@ workflows:
           requires:
             - setup
           libtorch_variant: "static-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2703,7 +2703,7 @@ workflows:
           requires:
             - setup
           libtorch_variant: "static-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2712,7 +2712,7 @@ workflows:
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2721,7 +2721,7 @@ workflows:
           requires:
             - setup
           libtorch_variant: "shared-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2730,7 +2730,7 @@ workflows:
           requires:
             - setup
           libtorch_variant: "static-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2739,7 +2739,7 @@ workflows:
           requires:
             - setup
           libtorch_variant: "static-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2748,7 +2748,7 @@ workflows:
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2757,7 +2757,7 @@ workflows:
           requires:
             - setup
           libtorch_variant: "shared-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2766,7 +2766,7 @@ workflows:
           requires:
             - setup
           libtorch_variant: "static-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2775,7 +2775,7 @@ workflows:
           requires:
             - setup
           libtorch_variant: "static-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_mac_test:
@@ -3191,84 +3191,84 @@ workflows:
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda92"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-without-deps_build
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "shared-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda92"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-with-deps_build
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "static-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda92"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-without-deps_build
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "static-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda92"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-with-deps_build
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda100"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-without-deps_build
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "shared-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda100"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-with-deps_build
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "static-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda100"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-without-deps_build
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "static-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda100"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_shared-with-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_shared-without-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "shared-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_static-with-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "static-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_static-without-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "static-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_mac_build:
           name: binary_macos_wheel_2_7_cpu_build
           build_environment: "wheel 2.7 cpu"
@@ -3874,7 +3874,7 @@ workflows:
             - setup
             - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-with-deps_build
           libtorch_variant: "shared-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3884,7 +3884,7 @@ workflows:
             - setup
             - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-without-deps_build
           libtorch_variant: "shared-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3894,7 +3894,7 @@ workflows:
             - setup
             - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-with-deps_build
           libtorch_variant: "static-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3904,7 +3904,7 @@ workflows:
             - setup
             - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-without-deps_build
           libtorch_variant: "static-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3914,7 +3914,7 @@ workflows:
             - setup
             - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-with-deps_build
           libtorch_variant: "shared-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3924,7 +3924,7 @@ workflows:
             - setup
             - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-without-deps_build
           libtorch_variant: "shared-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3934,7 +3934,7 @@ workflows:
             - setup
             - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-with-deps_build
           libtorch_variant: "static-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3944,7 +3944,7 @@ workflows:
             - setup
             - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-without-deps_build
           libtorch_variant: "static-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3954,7 +3954,7 @@ workflows:
             - setup
             - binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_shared-with-deps_build
           libtorch_variant: "shared-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3964,7 +3964,7 @@ workflows:
             - setup
             - binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_shared-without-deps_build
           libtorch_variant: "shared-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3974,7 +3974,7 @@ workflows:
             - setup
             - binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_static-with-deps_build
           libtorch_variant: "static-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3984,7 +3984,7 @@ workflows:
             - setup
             - binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_static-without-deps_build
           libtorch_variant: "static-without-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       #- binary_linux_libtorch_2.7m_cpu_test:
