@@ -1421,7 +1421,7 @@ RegisterOperators logging_operators(
 // it's necessary to register this overload following
 // int/float variations to avoid trapping Scalar args
 // in unintended implicit conversions
-#define DEFINE_SCALAR_BINARY_OP(aten_op, op, result) \
+#define DEFINE_SCALAR_BINARY_OP(aten_op, int_op, float_op, result) \
   Operator( \
     #aten_op "(Scalar a, Scalar b) -> " #result, \
     [](Stack& stack) { \
@@ -1431,21 +1431,21 @@ RegisterOperators logging_operators(
         if (y.isDouble()) { \
           double a = x.toDouble(); \
           double b = y.toDouble(); \
-          push(stack, op); \
+          push(stack, float_op); \
         } else { \
           double a = x.toDouble(); \
           int64_t b = y.toInt(); \
-          push(stack, op); \
+          push(stack, float_op); \
         } \
       } else { \
         if (y.isDouble()) { \
           int64_t a = x.toInt(); \
           double b = y.toDouble(); \
-          push(stack, op); \
+          push(stack, float_op); \
         } else { \
           int64_t a = x.toInt(); \
           int64_t b = y.toInt(); \
-          push(stack, op); \
+          push(stack, int_op); \
         } \
       } \
       return 0; \
@@ -1453,19 +1453,21 @@ RegisterOperators logging_operators(
     aliasAnalysisFromSchema() \
   )
 
-#define DEFINE_BINARY_OP(aten_op, op)             \
-  DEFINE_GENERIC_OP(aten_op, op, op, int, float), \
-  DEFINE_INT_FLOAT_OP(aten_op, op, float), \
-  DEFINE_SCALAR_BINARY_OP(aten_op, op, Scalar)
+#define DEFINE_BINARY_OP(aten_op, op)               \
+  DEFINE_GENERIC_OP(aten_op, op, op, int, float),   \
+  DEFINE_INT_FLOAT_OP(aten_op, op, float),          \
+  DEFINE_SCALAR_BINARY_OP(aten_op, op, op, Scalar)
 
 #define DEFINE_BINARY_FLOAT_OP(aten_op, op)         \
   DEFINE_GENERIC_OP(aten_op, op, op, float, float), \
-  DEFINE_INT_FLOAT_OP(aten_op, op, float), \
-  DEFINE_SCALAR_BINARY_OP(aten_op, op, float)
+  DEFINE_INT_FLOAT_OP(aten_op, op, float),          \
+  DEFINE_SCALAR_BINARY_OP(aten_op, op, op, float)
 
 #define DEFINE_COMPARISON_OP(aten_op, op)         \
   DEFINE_GENERIC_OP(aten_op, op, op, bool, bool), \
-      DEFINE_INT_FLOAT_OP(aten_op, op, bool), DEFINE_STR_CMP_OP(aten_op, op)
+  DEFINE_INT_FLOAT_OP(aten_op, op, bool),         \
+  DEFINE_SCALAR_BINARY_OP(aten_op, op, op, bool), \
+  DEFINE_STR_CMP_OP(aten_op, op)
 
 #define DEFINE_UNARY_INT_OP(aten_op, op, result) \
   Operator(                                      \
@@ -2753,7 +2755,7 @@ RegisterOperators reg2({
 
     DEFINE_BINARY_OP(aten::add, a + b),
     DEFINE_BINARY_OP(aten::sub, a - b),
-    DEFINE_BINARY_OP(aten::mul, a* b),
+    DEFINE_BINARY_OP(aten::mul, a * b),
     DEFINE_BINARY_OP(aten::pow, pow(a, b)),
     // min and max are in prim:: because there is a difference between
     // the python builtin 'min' and 'torch.min'
@@ -2771,6 +2773,11 @@ RegisterOperators reg2({
         int,
         float),
     DEFINE_INT_FLOAT_OP(aten::remainder, fmod((b + fmod(a, b)), b), float),
+    DEFINE_SCALAR_BINARY_OP(
+        aten::remainder,
+        (b + (a % b)) % b,
+        fmod((b + fmod(a, b)), b),
+        Scalar),
 
     DEFINE_GENERIC_OP(
         aten::floordiv,
@@ -2779,6 +2786,11 @@ RegisterOperators reg2({
         int,
         float),
     DEFINE_INT_FLOAT_OP(aten::floordiv, std::floor(a / b), float),
+    DEFINE_SCALAR_BINARY_OP(
+        aten::floordiv,
+        floordiv(a, b),
+        std::floor(a / b),
+        Scalar),
 
     // NB: This is the python truediv operation
     DEFINE_GENERIC_OP(
@@ -2786,6 +2798,11 @@ RegisterOperators reg2({
         static_cast<double>(a) / static_cast<double>(b),
         a / b,
         float,
+        float),
+    DEFINE_SCALAR_BINARY_OP(
+        aten::div,
+        static_cast<double>(a) / static_cast<double>(b),
+        a / b,
         float),
 
     // only used in loop unrolling, not exposed to end users
@@ -2909,6 +2926,7 @@ RegisterOperators reg2({
         float,
         float),
     DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a, b), float),
+    DEFINE_SCALAR_BINARY_OP(aten::copysign, std::copysign(a, b), std::copysign(a, b), float),
 
     DEFINE_UNARY_OP(aten::gamma, std::tgamma(a), float, float),
     DEFINE_UNARY_OP(aten::erf, std::erf(a), float, float),
@@ -2938,7 +2956,7 @@ RegisterOperators reg2({
     DEFINE_COMPARISON_OP(aten::gt, a > b),
     DEFINE_COMPARISON_OP(aten::le, a <= b),
     DEFINE_COMPARISON_OP(aten::ge, a >= b),
-    DEFINE_BOOL_OP(aten::__and__, a&& b),
+    DEFINE_BOOL_OP(aten::__and__, a && b),
     DEFINE_BOOL_OP(aten::__or__, a || b),
     DEFINE_BOOL_OP(aten::__xor__, a != b),
 
