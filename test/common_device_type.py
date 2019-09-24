@@ -33,7 +33,7 @@ from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
 #
 #       Tests like (1b) are called with a list of device strings, like
 #       ['cuda:0', 'cuda:1']. The first device string will be the
-#       current/default device. These tests will be skipped if the device type
+#       primary device. These tests will be skipped if the device type
 #       has fewer available devices than the argument to @deviceCountAtLeast.
 #
 #       Tests like (1c) are called with a device string and a torch.dtype from
@@ -122,22 +122,25 @@ device_type_test_bases = []
 
 class DeviceTypeTestBase(TestCase):
     device_type = 'generic_device_type'
-    default_device = device_type  # Note: can be defined in setUpClass
 
-    # Returns a string representing the default device tests should use.
+    # The device that single device tests run on
+    # Note: can be defined in setUpClass
+    primary_device = device_type
+
+    # Returns a string representing the device that single device tests should use.
     # Note: single device tests use this device exclusively.
     @classmethod
-    def get_default_device(cls):
-        return cls.default_device
+    def get_primary_device(cls):
+        return cls.primary_device
 
     # Returns a list of strings representing all available devices of this
-    # device type. The default device must be the first string in the list
+    # device type. The primary device must be the first string in the list
     # and the list must contain no duplicates.
     # Note: UNSTABLE API. Will be replaced once PyTorch has a device generic
     #   mechanism of acquiring all available devices.
     @classmethod
     def get_all_devices(cls):
-        return [cls.get_default_device()]
+        return [cls.get_primary_device()]
 
     # Returns the dtypes the test has requested.
     # Prefers device-specific dtype specifications over generic ones.
@@ -158,7 +161,7 @@ class DeviceTypeTestBase(TestCase):
 
             @wraps(test)
             def instantiated_test(self, test=test):
-                device_arg = cls.get_default_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
+                device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
                 return test(self, device_arg)
 
             setattr(cls, test_name, instantiated_test)
@@ -170,7 +173,7 @@ class DeviceTypeTestBase(TestCase):
 
                 @wraps(test)
                 def instantiated_test(self, test=test, dtype=dtype):
-                    device_arg = cls.get_default_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
+                    device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
                     return test(self, device_arg, dtype)
 
                 setattr(cls, dtype_test_name, instantiated_test)
@@ -178,7 +181,7 @@ class DeviceTypeTestBase(TestCase):
 
 class CPUTestBase(DeviceTypeTestBase):
     device_type = 'cpu'
-    default_device = device_type
+    primary_device = device_type
 
 
 class CUDATestBase(DeviceTypeTestBase):
@@ -188,13 +191,13 @@ class CUDATestBase(DeviceTypeTestBase):
 
     @classmethod
     def get_all_devices(cls):
-        default_device_idx = int(cls.get_default_device().split(':')[1])
+        primary_device_idx = int(cls.get_primary_device().split(':')[1])
         num_devices = torch.cuda.device_count()
 
-        devices = [cls.get_default_device()]
+        devices = [cls.get_primary_device()]
         cuda_str = 'cuda:{0}'
-        non_default_devices = [cuda_str.format(idx) for idx in range(num_devices) if idx != default_device_idx]
-        devices.extend(non_default_devices)
+        non_primary_devices = [cuda_str.format(idx) for idx in range(num_devices) if idx != primary_device_idx]
+        devices.extend(non_primary_devices)
         return devices
 
     @classmethod
@@ -203,13 +206,8 @@ class CUDATestBase(DeviceTypeTestBase):
         torch.ones(1).cuda()
         cls.no_magma = not torch.cuda.has_magma
 
-        # Acquires the current device as the default (test) device
-        cls.default_device = 'cuda:{0}'.format(torch.cuda.current_device())
-        torch.cuda.set_device(cls.get_default_device())
-
-    @classmethod
-    def tearDownClass(cls):
-        torch.cuda.set_device(cls.get_default_device())
+        # Acquires the current device as the primary (test) device
+        cls.primary_device = 'cuda:{0}'.format(torch.cuda.current_device())
 
 
 # Adds available device-type-specific test base classes
