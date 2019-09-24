@@ -1301,10 +1301,6 @@ inline TypePtr getTypePtr() {
   return detail::getTypePtr_<T>::call();
 }
 
-CAFFE2_API TypePtr incompleteInferTypeFrom(const IValue& value);
-CAFFE2_API TypePtr attemptToRecoverType(const IValue& input_ivalue);
-CAFFE2_API bool isSubvalueOf(const IValue& input_ivalue, TypePtr type);
-
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
 struct MatchTypeReturn {
   MatchTypeReturn(std::string reason) : reason_(std::move(reason)) {}

@@ -504,7 +504,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
 
       auto jivalue_first_element = jarray->getElement(0);
       auto first_element = JIValue::JIValueToAtIValue(jivalue_first_element);
-      c10::TypePtr typePtr = c10::attemptToRecoverType(first_element);
+      c10::TypePtr typePtr = first_element.type();
       c10::impl::GenericList list{typePtr};
       list.reserve(n);
       list.push_back(first_element);
@@ -527,7 +527,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       }
 
       auto firstEntryValue = JIValue::JIValueToAtIValue(it->second);
-      c10::TypePtr typePtr = c10::attemptToRecoverType(firstEntryValue);
+      c10::TypePtr typePtr =  firstEntryValue.type();
       c10::impl::GenericDict dict{c10::StringType::get(), typePtr};
       dict.insert(it->first->toStdString(), firstEntryValue);
       it++;
@@ -550,7 +550,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       }
 
       auto firstEntryValue = JIValue::JIValueToAtIValue(it->second);
-      c10::TypePtr typePtr = c10::attemptToRecoverType(firstEntryValue);
+      c10::TypePtr typePtr = firstEntryValue.type();
       c10::impl::GenericDict dict{c10::IntType::get(), typePtr};
       dict.insert(it->first->longValue(), firstEntryValue);
       it++;
