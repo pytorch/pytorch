@@ -1,21 +1,32 @@
 #include <c10d/NCCLUtils.hpp>
+#include <mutex>
 
 namespace c10d {
+
+std::once_flag ncclGetVersionFlag;
+
 std::string getNcclVersion() {
-  int version;
-  ncclResult_t status = ncclGetVersion(&version);
-  if (status != ncclSuccess) {
-    return "Unknown NCCL version";
-  }
-  auto ncclMajor = version / 1000;
-  auto ncclMinor = (version % 1000) / 100;
-  auto ncclPatch = version % (ncclMajor * 1000 + ncclMinor * 100);
-  return std::to_string(ncclMajor) + "." + std::to_string(ncclMinor) + "." +
-      std::to_string(ncclPatch);
+  std::string versionString;
+
+  std::call_once(ncclGetVersionFlag, [&versionString]() {
+    int version;
+    ncclResult_t status = ncclGetVersion(&version);
+    if (status != ncclSuccess) {
+      versionString = "Unknown NCCL version";
+    }
+    auto ncclMajor = version / 1000;
+    auto ncclMinor = (version % 1000) / 100;
+    auto ncclPatch = version % (ncclMajor * 1000 + ncclMinor * 100);
+    versionString = std::to_string(ncclMajor) + "." +
+        std::to_string(ncclMinor) + "." + std::to_string(ncclPatch);
+  });
+
+  return versionString;
 }
 
 std::string ncclGetErrorWithVersion(ncclResult_t error) {
   return std::string(ncclGetErrorString(error)) + ", NCCL version " +
       getNcclVersion();
 }
+
 } // namespace c10d

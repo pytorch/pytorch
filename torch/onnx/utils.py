@@ -85,7 +85,7 @@ def _split_tensor_list_constants(g, block):
                 node.output().replaceAllUsesWith(lc)
 
 
-def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False):
+def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False):
     # Inline everyting (recursively)
     torch._C._jit_pass_inline(graph, True)
 
@@ -136,7 +136,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_lint(graph)
 
         from torch.onnx.symbolic_helper import _export_onnx_opset_version
-        torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version)
+        torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
         torch._C._jit_pass_lint(graph)
 
     # graph is not a valid jit graph anymore because types have been replaced
@@ -191,7 +191,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
                     operator_export_type=OperatorExportTypes.ONNX,
                     example_outputs=None, propagate=False,
                     _retain_param_name=False, do_constant_folding=False,
-                    _disable_torch_constant_prop=False):
+                    _disable_torch_constant_prop=False, fixed_batch_size=False):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -231,7 +231,8 @@ def _model_to_graph(model, args, verbose=False, training=False,
                     inp.setDebugName(param_names[i - user_input_num])
 
     graph = _optimize_graph(graph, operator_export_type,
-                            _disable_torch_constant_prop=_disable_torch_constant_prop)
+                            _disable_torch_constant_prop=_disable_torch_constant_prop,
+                            fixed_batch_size=fixed_batch_size)
 
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.Function):
         out_vars, _ = torch.jit._flatten(tuple(example_outputs))
@@ -293,8 +294,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
                              google_printer=False, opset_version=None, _retain_param_name=False,
-                             do_constant_folding=False,
-                             keep_initializers_as_inputs=True):
+                             do_constant_folding=False, keep_initializers_as_inputs=True, fixed_batch_size=False):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
@@ -305,7 +305,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                     training, input_names,
                                                     output_names, operator_export_type,
                                                     example_outputs, propagate, _retain_param_name,
-                                                    do_constant_folding)
+                                                    do_constant_folding, fixed_batch_size=fixed_batch_size)
 
     return graph._pretty_print_onnx(params_dict, opset_version, False,
                                     operator_export_type, google_printer,
@@ -320,7 +320,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
             opset_version=None, _retain_param_name=False, do_constant_folding=False,
-            strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=True):
+            strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=True, fixed_batch_size=False):
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
                          'exporter, please use \'attribute\' module to '
@@ -340,7 +340,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
                                                         training, input_names,
                                                         output_names, operator_export_type,
                                                         example_outputs, propagate,
-                                                        _retain_param_name, do_constant_folding)
+                                                        _retain_param_name, do_constant_folding,
+                                                        fixed_batch_size=fixed_batch_size)
 
         # TODO: Don't allocate a in-memory string for the protobuf
         defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE

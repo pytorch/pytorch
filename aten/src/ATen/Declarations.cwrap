@@ -1215,34 +1215,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_lgamma
-  cname: lgamma
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_lgamma_
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  cname: lgamma
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
   name: _th_exp
   cname: exp
   types:
@@ -1427,20 +1399,6 @@
 [[
   name: _th_sqrt
   cname: sqrt
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_floor
-  cname: floor
   types:
     - floating_point
   backends:
