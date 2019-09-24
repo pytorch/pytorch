@@ -238,7 +238,7 @@
   pytorch_windows_ws2019_cuda10_1_cudnn7_py3:
     environment:
       BUILD_ENVIRONMENT: pytorch-windows-ws2019-cuda10.1-cudnn7-py3
-    executor: vs2019
+    executor: windows/vs2019
     steps:
     - should_run_job
     - run:
