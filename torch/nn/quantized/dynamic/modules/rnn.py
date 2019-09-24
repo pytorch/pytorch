@@ -53,6 +53,7 @@ class RNNBase(torch.nn.Module):
         self._all_weight_names = []
         self._all_weight_values = []
         orig_weight_values = []
+        orig_bias_values = []
         for layer in range(num_layers):
             for direction in range(num_directions):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
@@ -65,6 +66,9 @@ class RNNBase(torch.nn.Module):
                         #   w_ih, w_hh
                         packed_weight = \
                             torch.ops.quantized.linear_prepack(qweight, bias)
+
+                        # This is extra for INT8 path, duplicated for the compatibility with FP16 path.
+                        orig_bias_values.append(bias)
 
                         params = [packed_weight]
                         pos_names = ['w']
@@ -80,6 +84,7 @@ class RNNBase(torch.nn.Module):
                             qweight)
 
                         orig_weight_values.append(qweight)
+                        orig_bias_values.append(bias)
                         params = [packed_weight, bias]
                         pos_names = ['packed', 'b']
                         ret_name = ['{}_{}_l{}{}'.format(name, ihhh, layer, suffix) for name in pos_names]
@@ -120,8 +125,10 @@ class RNNBase(torch.nn.Module):
         # workaround that error.
         if dtype == torch.qint8:
             self._orig_weight_values = self._all_weight_values
+            self._orig_bias_values = orig_bias_values
         else:
             self._orig_weight_values = orig_weight_values
+            self._orig_bias_values = orig_bias_values
 
     def check_input(self, input, batch_sizes):
         # type: (Tensor, Optional[Tensor]) -> None
@@ -182,21 +189,21 @@ class RNNBase(torch.nn.Module):
             self.training,
             self.dtype,
             self._orig_weight_values,
+            self._orig_bias_values,
         )
 
-        if self.dtype == torch.qint8:
-            dynamic_vals = torch.jit.annotate(List[Tuple[torch.Tensor, Optional[torch.Tensor]]],
-                                              [])
+        dynamic_vals = torch.jit.annotate(List[Tuple[torch.Tensor, Optional[torch.Tensor]]],
+                                          [])
 
+        if self.dtype == torch.qint8:
             for i in range(len(self._all_weight_names)):
                 dynamic_vals.append(torch.ops.quantized.linear_unpack(self._all_weight_values[i]))
-
-            return vals, dynamic_vals
         else:
-            dynamic_vals_fp16 = torch.jit.annotate(List[torch.Tensor], [])
-            for i in range(len(self._all_weight_names)):
-                dynamic_vals_fp16.append(self._all_weight_values[i])
-            return vals, dynamic_vals_fp16
+            for i in range(len(self._orig_weight_values)):
+                # Dummy values
+                dynamic_vals.append((self._orig_weight_values[i], self._orig_bias_values[i]))
+
+        return vals, dynamic_vals
 
     @torch.jit.export
     def __setstate__(self, state):
@@ -214,14 +221,27 @@ class RNNBase(torch.nn.Module):
         self.training = vals[10]
         self.dtype = vals[11]
         self._orig_weight_values = vals[12]
+        self._orig_bias_values = vals[13]
 
         self._all_weight_values = []
+
         if self.dtype == torch.qint8:
             for i in range(len(self._all_weight_names)):
                 self._all_weight_values.append(torch.ops.quantized.linear_prepack(*dynamic_vals[i]))
+
         else:
-            for i in range(len(self._all_weight_names)):
-                self._all_weight_values.append(torch.torch.fbgemm_pack_gemm_matrix_fp16(*dynamic_vals[i]))
+            # for each layer, for each direction we need to quantize and pack
+            # weights and pack parameters in this order:
+            #
+            #   packed_ih, packed_hh, b_ih, b_hh
+            assert(len(self._orig_weight_values) % 2 == 0)
+            for i in range(len(self._orig_weight_values) // 2):
+                self._all_weight_values.append(
+                    torch.torch.fbgemm_pack_gemm_matrix_fp16(self._orig_weight_values[2 * i]))
+                self._all_weight_values.append(
+                    torch.torch.fbgemm_pack_gemm_matrix_fp16(self._orig_weight_values[2 * i + 1]))
+                self._all_weight_values.append(self._orig_bias_values[2 * i])
+                self._all_weight_values.append(self._orig_bias_values[2 * i + 1])
 
     @classmethod
     def from_float(cls, mod, dtype=torch.qint8):
@@ -260,7 +280,7 @@ class RNNBase(torch.nn.Module):
         qRNNBase._all_weight_names = []
         qRNNBase._all_weight_values = []
         orig_weight_values = []
-        packed_weights = []
+        orig_bias_values = []
         for layer in range(qRNNBase.num_layers):
             for direction in range(num_directions):
                 layer_input_size = qRNNBase.input_size if layer == 0 else qRNNBase.hidden_size * num_directions
@@ -279,10 +299,13 @@ class RNNBase(torch.nn.Module):
                         #   w_ih, w_hh
                         weight_observer(weight)
                         wt_scale, wt_zp = weight_observer.calculate_qparams()
-                        qweight = torch.quantize_linear(
+                        qweight = torch.quantize_per_tensor(
                             weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
                         packed_weight = \
                             torch.ops.quantized.linear_prepack(qweight, bias)
+
+                        # This is extra for INT8 path, duplicated for the compatibility with FP16 path.
+                        orig_bias_values.append(bias)
 
                         params = [packed_weight]
                         pos_names = ['w']
@@ -298,10 +321,10 @@ class RNNBase(torch.nn.Module):
                             weight.float())
 
                         orig_weight_values.append(weight)
+                        orig_bias_values.append(bias)
                         params = [packed_weight, bias]
                         pos_names = ['packed', 'b']
                         ret_name = ['{}_{}_l{}{}'.format(name, ihhh, layer, suffix) for name in pos_names]
-                        packed_weights.append(ret_name[0])
                         return params, ret_name
 
                 suffix = '_reverse' if direction == 1 else ''
@@ -317,8 +340,10 @@ class RNNBase(torch.nn.Module):
         # workaround that error.
         if dtype == torch.qint8:
             qRNNBase._orig_weight_values = qRNNBase._all_weight_values
+            qRNNBase._orig_bias_values = orig_bias_values
         else:
             qRNNBase._orig_weight_values = orig_weight_values
+            qRNNBase._orig_bias_values = orig_bias_values
 
         return qRNNBase
 
