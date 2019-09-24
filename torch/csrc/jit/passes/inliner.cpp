@@ -20,13 +20,13 @@ void inlineCalls(Block* block) {
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
         cur->removeInput(0);
-        inlineCallTo(cur, *fun_type->function()->graph());
+        inlineCallTo(cur, *fun_type->function()->optimized_graph());
       } break;
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
         if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
           auto function = class_type->getMethod(name);
-          inlineCallTo(cur, *function->graph());
+          inlineCallTo(cur, *function->optimized_graph());
         }
       } break;
       default: {

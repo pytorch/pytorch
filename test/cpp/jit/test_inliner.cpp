@@ -47,11 +47,7 @@ void testInliner() {
 
     auto g = fn.graph();
     Inline(*g);
-    FileCheck()
-        .check("three")
-        ->check("two")
-        ->check_count("prim::CallFunction", 1)
-        ->run(*g);
+    FileCheck().check_count("prim::Print", 3)->run(*g);
   }
 }
 } // namespace jit
