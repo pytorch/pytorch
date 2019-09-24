@@ -13,9 +13,6 @@ import torch
 # Thread local tensor tables to store tensors while pickling torch.Tensor
 # objects
 _thread_local_tensor_tables = threading.local()
-_thread_local_tensor_tables.recv_tables = []
-_thread_local_tensor_tables.send_tables = []
-
 
 # This class provides serialize() and deserialize() interfaces to serialize
 # data to be "binary string + tensor table" format
@@ -46,10 +43,14 @@ class InternalRPCPickler:
 
     def _clear_tensor_tables(self):
         global _thread_local_tensor_tables
+        if hasattr(_thread_local_tensor_tables, "send_tables"):
+            raise Exception("nested serialization is not supported right now")
         _thread_local_tensor_tables.send_tables = []
 
     def _set_tensor_tables(self, tensors):
         global _thread_local_tensor_tables
+        if hasattr(_thread_local_tensor_tables, "recv_tables"):
+            raise Exception("nested deserialization is not supported right now")
         _thread_local_tensor_tables.recv_tables = tensors
 
     # Serialize non tensor data into binary string, tensor data into
@@ -61,14 +62,17 @@ class InternalRPCPickler:
         # before serialization, clear tensor tables
         self._clear_tensor_tables()
         p.dump(obj)
-        return f.getvalue()
+        tensors = _thread_local_tensor_tables.send_tables
+        del _thread_local_tensor_tables.send_tables
+        return (f.getvalue(), tensors)
 
     # Deserilize binary string + tensor table to original obj
     def deserialize(self, binary_data, tensor_table):
         # before deserilaization, copy received tensors into tensor tables
         self._set_tensor_tables(tensor_table)
-        return pickle.loads(binary_data)
-
+        ret = pickle.loads(binary_data)
+        del _thread_local_tensor_tables.recv_tables
+        return ret
 
 # Create _internal_rpc_pickler only once to initialize _dispatch_table only once
 _internal_rpc_pickler = InternalRPCPickler()
@@ -85,8 +89,7 @@ def run_python_udf_internal(pickled_python_udf, tensors):
         # except str = exception info + traceback string
         except_str = "{}\n{}".format(repr(e), traceback.format_exc())
         result = RemoteException(except_str)
-    return (_internal_rpc_pickler.serialize(result),
-            _thread_local_tensor_tables.send_tables)
+    return _internal_rpc_pickler.serialize(result)
 
 
 # Internal python function will be imported and executed in C++ land

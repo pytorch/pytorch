@@ -5,7 +5,7 @@ from . import init_rref_context
 from . import ProcessGroupAgent
 from . import WorkerId
 from .rpc_backend_handler import is_backend_registered, registered_init_rpc
-from .internal_rpc_utils import _internal_rpc_pickler, PythonUDF, _thread_local_tensor_tables
+from .internal_rpc_utils import _internal_rpc_pickler, PythonUDF
 
 import sys
 import torch
@@ -233,11 +233,13 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         fut = invoke_rpc_builtin(
             _agent, _to_worker_id(to), qualified_name, *args, **kwargs)
     else:
+        (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
+            PythonUDF(func, args, kwargs))
         fut = invoke_rpc_python_udf(
             _agent,
             _to_worker_id(to),
-            _internal_rpc_pickler.serialize(PythonUDF(func, args, kwargs)),
-            _thread_local_tensor_tables.send_tables)
+            pickled_python_udf,
+            tensors)
 
     if async_call:
         return fut
