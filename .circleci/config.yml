@@ -377,7 +377,7 @@ jobs:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
     - attach_workspace:
-      at: ~/workspace
+        at: ~/workspace
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
