@@ -133,8 +133,24 @@ class SparseLookup(ModelLayer):
                  name='sparse_lookup', regularizer=None, **kwargs):
 
         super(SparseLookup, self).__init__(model, name, input_record, **kwargs)
+        assert isinstance(self.input_record, schema.List) or isinstance(
+            input_record, schema.Struct
+        ), "Unexpected input_record. Expect List or Struct, got {0}".format(
+            type(self.input_record)
+        )
+        self.att_weight = (
+            self.input_record.att_weight
+            if isinstance(self.input_record, schema.Struct)
+            else None
+        )
+        self.sparse_segment = (
+            self.input_record.get("sparse_segment", None)
+            if isinstance(self.input_record, schema.Struct)
+            else self.input_record
+        )
+        assert self.sparse_segment, "Sparse_segment cannot be None"
 
-        self.sparse_key = get_key(self.input_record)()
+        self.sparse_key = get_key(self.sparse_segment)()
         logger.info("Setup the sparse lookup layer for " + self.sparse_key)
 
         # TODO Add some asserts about input type
@@ -145,23 +161,25 @@ class SparseLookup(ModelLayer):
             format(type(inner_shape), self.sparse_key)
 
         if reducer == "PositionWeighted":
-            assert _is_id_score_list(self.input_record), (
-                "PositionWeighted only support IdScoreList, but got {} for {}" +
-                "please use PositionWeighted layer to convert IdList " +
-                "to IdScoreList").format(repr(self.input_record), self.sparse_key)
-            self.external_weights = self.input_record.values()
+            assert _is_id_score_list(self.sparse_segment), (
+                "PositionWeighted only support IdScoreList, but got {} for {}"
+                + "please use PositionWeighted layer to convert IdList "
+                + "to IdScoreList"
+            ).format(repr(self.sparse_segment), self.sparse_key)
+            self.external_weights = self.sparse_segment.values()
 
         elif reducer == "RecencyWeighted":
-            assert _is_id_score_list(self.input_record), (
+            assert _is_id_score_list(self.sparse_segment), (
                 "RecencyWeighted only supports IdScoreList, "
-                "while the sparse feature {} is not.".format(self.sparse_key))
-            self.external_weights = self.input_record.values()
+                "while the sparse feature {} is not.".format(self.sparse_key)
+            )
+            self.external_weights = self.sparse_segment.values()
         self.reducer = reducer
 
-        input_dim = get_categorical_limit(self.input_record)
-        assert input_dim > 0, (
-            "{} should have categorical limit > 0, but got {}".format(
-                self.sparse_key, input_dim))
+        input_dim = get_categorical_limit(self.sparse_segment)
+        assert input_dim > 0, "{} should have categorical limit > 0, but got {}".format(
+            self.sparse_key, input_dim
+        )
 
         self.input_dim = input_dim
         self.shape = [input_dim] + inner_shape
@@ -175,10 +193,12 @@ class SparseLookup(ModelLayer):
         self.weight_init = weight_init or default_init_op
 
         self.evicted_values = None
-        if schema.equal_schemas(self.input_record, IdListWithEvicted) or \
-            schema.equal_schemas(self.input_record, IdScoreListWithEvicted,
-                                 check_field_types=False):
-            self.evicted_values = self.input_record._evicted_values
+        if schema.equal_schemas(
+            self.sparse_segment, IdListWithEvicted
+        ) or schema.equal_schemas(
+            self.sparse_segment, IdScoreListWithEvicted, check_field_types=False
+        ):
+            self.evicted_values = self.sparse_segment._evicted_values
 
         # If fp16 is used, make sure fp16 init op is used
         if self.trainer_version == "fp16":
@@ -202,8 +222,8 @@ class SparseLookup(ModelLayer):
 
             assert regularizer is None, "Regularizer is not compatible with fp16"
 
-        if self.input_record.lengths.metadata:
-            avg_length = self.input_record.lengths.metadata.expected_value
+        if self.sparse_segment.lengths.metadata:
+            avg_length = self.sparse_segment.lengths.metadata.expected_value
         else:
             avg_length = None
 
@@ -315,13 +335,20 @@ class SparseLookup(ModelLayer):
                 )
 
     def _sparse_lengths_weighted_reducer(
-            self, in_indices, weights, reducer,
-            net, version, grad_on_weights=0):
+        self,
+        in_indices,
+        weights,
+        reducer,
+        net,
+        version,
+        grad_on_weights=0,
+        use_att_weight=False,
+    ):
         op_input = [
             self.w,
-            weights,
+            self.att_weight.field_blobs()[0] if use_att_weight else weights,
             in_indices,
-            self.input_record.lengths()
+            self.sparse_segment.lengths(),
         ]
         layer_name = 'SparseLengths' + reducer
 
@@ -369,8 +396,8 @@ class SparseLookup(ModelLayer):
         )
         if self.reducer in ['Sum', 'Mean', 'WeightedSum', 'WeightedMean']:
             op_input = [self.w,
-                        self.input_record.items(),
-                        self.input_record.lengths()]
+                        self.sparse_segment.items(),
+                        self.sparse_segment.lengths()]
 
             # For id list features, the behaviors of 'Sum' and
             # 'WeightedSum' are identical, since we can regard the weight on each
@@ -406,28 +433,28 @@ class SparseLookup(ModelLayer):
 
         elif self.reducer == 'Sqrt':
             sqrt_weight = net.LengthsToWeights(
-                [self.input_record.lengths()],
+                [self.sparse_segment.lengths()],
                 [net.NextScopedBlob('lengths_sqrt')],
                 power=0.5,
             )
             self._sparse_lengths_weighted_reducer(
-                self.input_record.items(),
+                self.sparse_segment.items(),
                 sqrt_weight,
                 'WeightedSum', net, version)
 
         elif self.reducer == 'None':
             # Gather operator will gather the embedding for each id of
             # each IdList.
-            self._gather_wrapper(net, version, self.input_record.items(),
+            self._gather_wrapper(net, version, self.sparse_segment.items(),
                                  self.output_schema.field_blobs())
 
         else:
             table_rows = self._gather_wrapper(
-                net, version, self.input_record.items(), 'table_rows')
+                net, version, self.sparse_segment.items(), 'table_rows')
 
             segment_ids = net.LengthsToSegmentIds(
-                self.input_record.lengths(),
-                net.NextScopedBlob(self.input_record.lengths() + '_sid'))
+                self.sparse_segment.lengths(),
+                net.NextScopedBlob(self.sparse_segment.lengths() + '_sid'))
             net.__getattr__('SortedSegmentRange' + self.reducer)(
                 [table_rows, segment_ids],
                 self.output_schema.field_blobs(),
@@ -440,16 +467,26 @@ class SparseLookup(ModelLayer):
                 self.reducer, self.sparse_key
             )
         )
-        if self.reducer in ['WeightedSum', 'WeightedMean']:
+        if self.reducer in ["Sum"] and self.att_weight:
             self._sparse_lengths_weighted_reducer(
-                self.input_record.keys(),
-                self.input_record.values(),
+                self.sparse_segment.keys(),
+                None,
+                "WeightedSum",
+                net,
+                version,
+                grad_on_weights=1,
+                use_att_weight=True,
+            )
+        elif self.reducer in ['WeightedSum', 'WeightedMean']:
+            self._sparse_lengths_weighted_reducer(
+                self.sparse_segment.keys(),
+                self.sparse_segment.values(),
                 self.reducer, net, version)
 
         elif self.reducer in ['Sum', 'Mean']:
             op_input = [self.w,
-                        self.input_record.keys(),
-                        self.input_record.lengths()]
+                        self.sparse_segment.keys(),
+                        self.sparse_segment.lengths()]
 
             layer_name = 'SparseLengths' + self.reducer
 
@@ -475,14 +512,14 @@ class SparseLookup(ModelLayer):
 
         elif self.reducer in ['PositionWeighted', 'RecencyWeighted']:
             self._sparse_lengths_weighted_reducer(
-                self.input_record.keys(),
+                self.sparse_segment.keys(),
                 self.external_weights,
                 'WeightedSum', net, version, grad_on_weights=1)
 
         elif self.reducer == 'None':
             # Gather operator will gather the embedding for each id of
             # each IdList.
-            self._gather_wrapper(net, version, self.input_record.keys(),
+            self._gather_wrapper(net, version, self.sparse_segment.keys(),
                                  self.output_schema.field_blobs())
         else:
             raise "Only Sum, Mean, None are supported for IdScoreList input." +\
@@ -494,12 +531,12 @@ class SparseLookup(ModelLayer):
         if self.evicted_values:
             net.CopyRowsToTensor(
                 [self.w, self.evicted_values.get(), self.reinit_vec], [self.w])
-        if _is_id_list(self.input_record):
+        if _is_id_list(self.sparse_segment):
             self._add_ops_id_list(net, version=version)
-        elif _is_id_score_list(self.input_record):
+        elif _is_id_score_list(self.sparse_segment):
             self._add_ops_id_score_list(net, version=version)
         else:
-            raise "Unsupported input type {0}".format(self.input_record)
+            raise "Unsupported input type {0}".format(self.sparse_segment)
 
     def add_train_ops(self, net):
         self._add_ops(net, self.trainer_version)
