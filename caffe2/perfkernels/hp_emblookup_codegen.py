@@ -53,7 +53,7 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
     code.append(
         "    for ("
         + IndexType
-        + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        + " rangeIndex = output_start; rangeIndex < output_end; ++rangeIndex) {"
     )
     code.append("      " + OutType + "* op = &out[rangeIndex * block_size];")
     for i in range(0, uf):
@@ -63,9 +63,7 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
     # inner loop
     if use_offsets:
         code.append(
-            "      if (dataInd != offsets[rangeIndex]) {\n"
-            + "        return false;\n"
-            + "      }"
+            "      dataInd = offsets[rangeIndex]; \n"
         )
         code.append("""\
       int64_t end_offset =
@@ -225,7 +223,7 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
     code.append(
         "    for ("
         + IndexType
-        + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        + " rangeIndex = output_start; rangeIndex < output_end; ++rangeIndex) {"
     )
     code.append("      " + OutType + "* op = &out[rangeIndex * block_size];")
 
@@ -241,9 +239,7 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
     # inner loop
     if use_offsets:
         code.append(
-            "      if (dataInd != offsets[rangeIndex]) {\n"
-            + "        return false;\n"
-            + "      }"
+            "      dataInd = offsets[rangeIndex];\n"
         )
         code.append("""\
       int end_offset =
@@ -428,6 +424,8 @@ for o in options:
 
     args = []
     args.append("    const int64_t block_size,")
+    args.append("    const int64_t output_start,")
+    args.append("    const int64_t output_end,")
     args.append("    const int64_t output_size,")
     args.append("    const int64_t index_size,")
     args.append("    const int64_t data_size,")
@@ -479,6 +477,8 @@ for o in options:
         code += args
         code.append("  return " + fn_base + suffix + "<" + is_weight_positional + ">(")
         code.append("      block_size,")
+        code.append("      output_start,")
+        code.append("      output_end,")
         code.append("      output_size,")
         code.append("      index_size,")
         code.append("      data_size,")

@@ -79,30 +79,36 @@ void index_select_add<float>(const Tensor &select_indices,
   auto src_data = src.data_ptr<float>();
   auto select_indices_data = select_indices.data_ptr<int64_t>();
   auto output_data = output.data_ptr<float>();
+  auto select_numel = select_indices.numel();
 
   if (isFastPathIndexSelect(src, output)) {
-    caffe2::EmbeddingLookupIdx(
-      /*block_size=*/ddim,
-      /*output_size=*/offsets.numel(),
-      /*index_size=*/select_indices.numel(),
-      /*data_size=*/src.size(0),
-      /*input=*/src_data,
-      /*indices=*/select_indices_data,
-      /*offsets=*/offsets.data_ptr<int64_t>(),
-      /*weights=*/nullptr,
-      /*scale_bias=*/nullptr,
-      /*normalize_by_lengths=*/false,
-      /*out=*/output_data
-    );
+    auto offset_data = offsets.data_ptr<int64_t>();
+    auto offset_numel = offsets.numel();
+    at::parallel_for(0, offset_numel, 64, [&](int64_t start, int64_t end) {
+     caffe2::EmbeddingLookupIdx(
+        /*block_size=*/ddim,
+        /*output_start=*/start,
+        /*output_end=*/end,
+        /*output_size=*/offset_numel,
+        /*index_size=*/select_numel,
+        /*data_size=*/src.size(0),
+        /*input=*/src_data,
+        /*indices=*/select_indices_data,
+        /*offsets=*/offset_data,
+        /*weights=*/nullptr,
+        /*scale_bias=*/nullptr,
+        /*normalize_by_lengths=*/false,
+        /*out=*/output_data
+      );
+    });
   } else {
-    AT_ASSERT(select_indices.numel() == add_indices.numel());
+    AT_ASSERT(select_numel == add_indices.numel());
     auto add_indices_data = add_indices.data_ptr<int64_t>();
     auto src_stride0 = src.stride(0);
     auto src_stride1 = src.stride(1);
     auto output_stride0 = output.stride(0);
     auto output_stride1 = output.stride(1);
-    auto numel = add_indices.numel();
-    for (int64_t i = 0; i < numel; i++) {
+    for (int64_t i = 0; i < select_numel; i++) {
       THBlas_axpy<float>(ddim, 1,
               src_data + src_stride0 * select_indices_data[i], src_stride1,
               output_data + output_stride0 * add_indices_data[i], output_stride1);
@@ -155,36 +161,41 @@ void index_select_scale_add<float>(const Tensor &select_indices,
                                           const Tensor& offsets) {
   int64_t ddim = src.size(1);
   auto* scale_data = scale.data_ptr<float>();
+  auto select_numel = select_indices.numel();
   auto select_indices_data = select_indices.data_ptr<int64_t>();
   auto src_data = src.data_ptr<float>();
   auto output_data = output.data_ptr<float>();
 
   if (isFastPathIndexSelectScale(src, scale, output)) {
-    caffe2::EmbeddingLookupIdx(
-      /*block_size=*/ddim,
-      /*output_size=*/offsets.numel(),
-      /*index_size=*/select_indices.numel(),
-      /*data_size=*/src.size(0),
-      /*input=*/src_data,
-      /*indices=*/select_indices_data,
-      /*offsets=*/offsets.data_ptr<int64_t>(),
-      /*weights=*/scale_data,
-      /*scale_bias=*/nullptr,
-      /*normalize_by_lengths=*/false,
-      /*out=*/output_data
-    );
+    auto offset_data = offsets.data_ptr<int64_t>();
+    auto offset_numel = offsets.numel();
+    at::parallel_for(0, offset_numel, 64, [&](int64_t start, int64_t end) {
+      caffe2::EmbeddingLookupIdx(
+        /*block_size=*/ddim,
+        /*output_start=*/start,
+        /*output_end=*/end,
+        /*output_size=*/offset_numel,
+        /*index_size=*/select_numel,
+        /*data_size=*/src.size(0),
+        /*input=*/src_data,
+        /*indices=*/select_indices_data,
+        /*offsets=*/offset_data,
+        /*weights=*/scale_data,
+        /*scale_bias=*/nullptr,
+        /*normalize_by_lengths=*/false,
+        /*out=*/output_data
+      );
+    });
   } else {
-    AT_ASSERT(select_indices.numel() == add_indices.numel());
+    AT_ASSERT(select_numel == add_indices.numel());
     auto add_indices_data = add_indices.data_ptr<int64_t>();
     auto src_stride0 = src.stride(0);
     auto src_stride1 = src.stride(1);
     auto output_stride0 = output.stride(0);
     auto output_stride1 = output.stride(1);
     auto scale_stride = scale.stride(0);
-    auto numel = add_indices.numel();
 
-
-    for (int64_t i = 0; i < numel; i++) {
+    for (int64_t i = 0; i < select_numel; i++) {
       auto* src_base = src_data + src_stride0 * select_indices_data[i];
       auto* output_base = output_data + output_stride0 * add_indices_data[i];
       auto scale = scale_data[i * scale_stride];

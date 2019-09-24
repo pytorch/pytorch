@@ -41,6 +41,8 @@ template <
     bool IS_WEIGHT_POSITIONAL = false>
 void EmbeddingLookupIdx(
     const std::int64_t block_size,
+    const std::int64_t output_start,
+    const std::int64_t output_end,
     const std::int64_t output_size,
     const std::int64_t index_size,
     const std::int64_t data_size,
