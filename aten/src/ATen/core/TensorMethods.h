@@ -132,21 +132,21 @@ inline int64_t Tensor::_version() const {
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
-inline Tensor & Tensor::names_(c10::optional<DimnameList> names) const {
+inline Tensor & Tensor::rename_(c10::optional<DimnameList> names) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::names_(const_cast<Tensor&>(*this), names);
+    return TypeDefault::rename_(const_cast<Tensor&>(*this), names);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)");
+    static auto table = globalATenDispatch().getOpTable("aten::rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, c10::optional<DimnameList>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), names);
 #endif
 }
 #endif
 #ifdef BUILD_NAMEDTENSOR
-inline Tensor Tensor::renamed(c10::optional<DimnameList> names) const {
+inline Tensor Tensor::rename(c10::optional<DimnameList> names) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::renamed(const_cast<Tensor&>(*this), names);
+    return TypeDefault::rename(const_cast<Tensor&>(*this), names);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::renamed(Tensor(a) self, Dimname[]? names) -> Tensor(a)");
+    static auto table = globalATenDispatch().getOpTable("aten::rename(Tensor(a) self, Dimname[]? names) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, c10::optional<DimnameList>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), names);
 #endif
 }
@@ -944,6 +944,9 @@ inline Tensor & Tensor::resize_(IntArrayRef size) const {
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::resize_(const_cast<Tensor&>(*this), size);
+            break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::resize_(const_cast<Tensor&>(*this), size);
             break;
         default:
             AT_ERROR("resize_ not implemented for ", at::toString(type_set()));
@@ -5396,7 +5399,16 @@ inline Tensor Tensor::argsort(int64_t dim, bool descending) const {
 }
 inline std::tuple<Tensor,Tensor> Tensor::topk(int64_t k, int64_t dim, bool largest, bool sorted) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::topk(const_cast<Tensor&>(*this), k, dim, largest, sorted);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::topk(const_cast<Tensor&>(*this), k, dim, largest, sorted);
+            break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::topk(const_cast<Tensor&>(*this), k, dim, largest, sorted);
+            break;
+        default:
+            AT_ERROR("topk not implemented for ", at::toString(type_set()));
+    }
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::topk", ""}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool, bool>(
