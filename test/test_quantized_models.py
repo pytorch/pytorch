@@ -6,19 +6,19 @@ from common_quantization import QuantizationTestCase, ModelMultipleOps, ModelMul
 class ModelNumerics(QuantizationTestCase):
     def test_float_quant_compare_per_tensor(self):
         torch.manual_seed(42)
-        myModel = ModelMultipleOps().to(torch.float32)
-        myModel.eval()
+        my_model = ModelMultipleOps().to(torch.float32)
+        my_model.eval()
         calib_data = torch.rand(1024, 3, 15, 15, dtype=torch.float32)
         eval_data = torch.rand(1, 3, 15, 15, dtype=torch.float32)
-        out_ref = myModel(eval_data)
-        qModel = torch.quantization.QuantWrapper(myModel)
-        qModel.eval()
-        qModel.qconfig = torch.quantization.default_qconfig
-        torch.quantization.fuse_modules(qModel.module, [['conv1', 'bn1', 'relu1']])
-        torch.quantization.prepare(qModel)
-        qModel(calib_data)
-        torch.quantization.convert(qModel)
-        out_q = qModel(eval_data)
+        out_ref = my_model(eval_data)
+        q_model = torch.quantization.QuantWrapper(my_model)
+        q_model.eval()
+        q_model.qconfig = torch.quantization.default_qconfig
+        torch.quantization.fuse_modules(q_model.module, [['conv1', 'bn1', 'relu1']])
+        torch.quantization.prepare(q_model)
+        q_model(calib_data)
+        torch.quantization.convert(q_model)
+        out_q = q_model(eval_data)
         SQNRdB = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_q))
         # Quantized model output should be close to floating point model output numerically
         # Setting target SQNR to be 30 dB so that relative error is 1e-3 below the desired
@@ -28,19 +28,19 @@ class ModelNumerics(QuantizationTestCase):
     def test_float_quant_compare_per_channel(self):
         # Test for per-channel Quant
         torch.manual_seed(67)
-        myModel = ModelMultipleOps().to(torch.float32)
-        myModel.eval()
+        my_model = ModelMultipleOps().to(torch.float32)
+        my_model.eval()
         calib_data = torch.rand(2048, 3, 15, 15, dtype=torch.float32)
         eval_data = torch.rand(10, 3, 15, 15, dtype=torch.float32)
-        out_ref = myModel(eval_data)
-        qModel = torch.quantization.QuantWrapper(myModel)
-        qModel.eval()
-        qModel.qconfig = torch.quantization.default_per_channel_qconfig
-        torch.quantization.fuse_modules(qModel.module, [['conv1', 'bn1', 'relu1']])
-        torch.quantization.prepare(qModel)
-        qModel(calib_data)
-        torch.quantization.convert(qModel)
-        out_q = qModel(eval_data)
+        out_ref = my_model(eval_data)
+        q_model = torch.quantization.QuantWrapper(my_model)
+        q_model.eval()
+        q_model.qconfig = torch.quantization.default_per_channel_qconfig
+        torch.quantization.fuse_modules(q_model.module, [['conv1', 'bn1', 'relu1']])
+        torch.quantization.prepare(q_model)
+        q_model(calib_data)
+        torch.quantization.convert(q_model)
+        out_q = q_model(eval_data)
         SQNRdB = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_q))
         # Quantized model output should be close to floating point model output numerically
         # Setting target SQNR to be 35 dB
