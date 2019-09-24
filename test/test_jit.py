@@ -18366,6 +18366,13 @@ class TestList(JitTestCase):
             # type: (int)
             return [i for i in range(x)]
 
+        def changes_type():
+            a = [float(i) for i in range(5)]
+            b = [float(i) for i in [1, 2, 3, 4]]
+            return a, b
+
+        test_func(changes_type, ())
+
         test_func(fn, (9,))
         test_func(fn, (0,))
         test_func(fn, (-1,))
