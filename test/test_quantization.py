@@ -485,20 +485,8 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         ref = copy.deepcopy(cell)
 
-        qconfig_dynamic_dict = {
-            torch.nn.LSTM: default_dynamic_qconfig,
-        }
-        default_dynamic_module_mapping = {
-            torch.nn.LSTM: torch.nn.quantized.dynamic.LSTM,
-        }
-        model_int8 = quantize_dynamic(
-            model=model, qconfig_dict=qconfig_dynamic_dict, mapping=default_dynamic_module_mapping,
-            dtype=torch.qint8
-        )
-        model_fp16 = quantize_dynamic(
-            model=model, qconfig_dict=qconfig_dynamic_dict, mapping=default_dynamic_module_mapping,
-            dtype=torch.float16
-        )
+        model_int8 = quantize_dynamic(model=model, dtype=torch.qint8)
+        model_fp16 = quantize_dynamic(model=model, dtype=torch.float16)
         cell_int8 = model_int8.lstm
         cell_fp16 = model_fp16.lstm
 
@@ -801,7 +789,7 @@ class ObserverTest(QuantizationTestCase):
         loaded_dict = torch.load(b)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
-        loaded_obs = MinMaxObserver()
+        loaded_obs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
         loaded_obs.load_state_dict(loaded_dict)
         loaded_qparams = loaded_obs.calculate_qparams()
         self.assertEqual(myobs.min_val, loaded_obs.min_val)
@@ -875,7 +863,7 @@ class ObserverTest(QuantizationTestCase):
         loaded_dict = torch.load(b)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
-        loaded_obs = PerChannelMinMaxObserver()
+        loaded_obs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
         loaded_obs.load_state_dict(loaded_dict)
         loaded_qparams = loaded_obs.calculate_qparams()
         self.assertEqual(myobs.min_vals, loaded_obs.min_vals)
@@ -902,7 +890,7 @@ class ObserverTest(QuantizationTestCase):
                  'Quantization requires FBGEMM. FBGEMM does not play'
                  ' well with UBSAN at the moment, so we skip the test if'
                  ' we are in a UBSAN environment.')
-class QuantizationDebugTest(QuantizationTestCase):
+class NonScriptableObserverTest(QuantizationTestCase):
     def test_record_observer(self):
         model = SingleLayerLinearModel()
         model.qconfig = default_debug_qconfig
@@ -921,7 +909,7 @@ class QuantizationDebugTest(QuantizationTestCase):
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
-    def test_observer_observer_scriptable(self, qdtype, qscheme):
+    def test_observer_scriptable(self, qdtype, qscheme):
         obs = RecordingObserver(dtype=qdtype, qscheme=qscheme)
         scripted = torch.jit.script(obs)
 
@@ -977,7 +965,7 @@ class QuantizationDebugTest(QuantizationTestCase):
         loaded_dict = torch.load(b)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
-        loaded_obs = HistogramObserver()
+        loaded_obs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
         loaded_obs.load_state_dict(loaded_dict)
         loaded_qparams = loaded_obs.calculate_qparams()
         self.assertEqual(myobs.min_val, loaded_obs.min_val)
