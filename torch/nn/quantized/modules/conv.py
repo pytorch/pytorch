@@ -80,7 +80,6 @@ class Conv2d(torch.nn.Module):
             [out_channels, in_channels // self.groups, self.kernel_size[0],
                 self.kernel_size[1]],
             scale=1, zero_point=0, dtype=torch.qint8)
-        self.weight_scale = 1.0
         bias_float = None
         if bias:
             bias_float = torch.zeros(out_channels, dtype=torch.float)
@@ -106,10 +105,6 @@ class Conv2d(torch.nn.Module):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
         self._packed_params = torch.ops.quantized.conv_prepack(
             w, b, self.stride, self.padding, self.dilation, self.groups)
-        if w.qscheme() in set([torch.per_channel_affine, torch.per_channel_symmetric]):
-            self.weight_scale = w.q_per_channel_scales()
-        else:
-            self.weight_scale = w.q_scale()
 
 
     def _weight_bias(self):
@@ -245,7 +240,7 @@ class Conv2d(torch.nn.Module):
                 mod.weight.float(),
                 float(wt_scale), int(wt_zp), torch.qint8)
         else:
-            qweight = torch.quantize_linear_per_channel(
+            qweight = torch.quantize_per_channel(
                 mod.weight.float(),
                 wt_scale.to(torch.double), wt_zp.to(torch.int64), [0], torch.qint8)
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,

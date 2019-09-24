@@ -207,13 +207,29 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual((1,), qlast.q_per_channel_axis())
         self.assertEqual(qlast.dequantize(), qr.dequantize())
 
-
     def test_qtensor_load_save(self):
-        scale = 2.0
+        scale = 0.2
         zero_point = 10
-        r = torch.ones(15, dtype=torch.float) * 2
+        r = torch.rand(15, 2, dtype=torch.float32) * 2
         for dtype in [torch.quint8, torch.qint8, torch.qint32]:
             qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+            qrv = qr[:, 1]
+            with tempfile.NamedTemporaryFile() as f:
+                # Serializing and Deserializing Tensor
+                torch.save((qr, qrv), f)
+                f.seek(0)
+                qr2, qrv2 = torch.load(f)
+                self.assertEqual(qr, qr2)
+                self.assertEqual(qrv, qrv2)
+                self.assertEqual(qr2.storage().data_ptr(), qrv2.storage().data_ptr())
+
+    def test_qtensor_per_channel_load_save(self):
+        r = torch.rand(20, 10, dtype=torch.float) * 4 - 2
+        scales = torch.rand(10) * 0.02 + 0.01
+        zero_points = torch.round(torch.rand(10) * 20 + 1).to(torch.long)
+        # quint32 is not supported yet
+        for dtype in [torch.quint8, torch.qint8]:
+            qr = torch.quantize_per_channel(r, scales, zero_points, [1], dtype)
             with tempfile.NamedTemporaryFile() as f:
                 # Serializing and Deserializing Tensor
                 torch.save(qr, f)
