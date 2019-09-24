@@ -79,7 +79,10 @@ module_metadata_map = {
     'FractionalMaxPool2d': TorchNNModuleMetadata(),
     'LPPool1d': TorchNNModuleMetadata(),
     'LPPool2d': TorchNNModuleMetadata(),
-    'AdaptiveMaxPool1d': TorchNNModuleMetadata(),
+    'AdaptiveMaxPool1d': TorchNNModuleMetadata(
+        cpp_default_constructor_args="(1)",
+        num_attrs_recursive=1,
+    ),
     'AdaptiveMaxPool2d': TorchNNModuleMetadata(),
     'AdaptiveMaxPool3d': TorchNNModuleMetadata(),
     'AdaptiveAvgPool1d': TorchNNModuleMetadata(),

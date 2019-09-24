@@ -79,5 +79,20 @@ using MaxPool2dOptions = MaxPoolOptions<2>;
 /// `MaxPoolOptions` specialized for 3-D maxpool.
 using MaxPool3dOptions = MaxPoolOptions<3>;
 
+// ============================================================================
+
+/// Options for a `D`-dimensional adaptive maxpool functional and module.
+template <size_t D>
+struct AdaptiveMaxPoolOptions {
+  AdaptiveMaxPoolOptions(ExpandingArray<D> output_size)
+      : output_size_(output_size) {}
+
+  /// the target output size
+  TORCH_ARG(ExpandingArray<D>, output_size);
+};
+
+/// `AdaptiveMaxPoolOptions` specialized for 1-D maxpool.
+using AdaptiveMaxPool1dOptions = AdaptiveMaxPoolOptions<1>;
+
 } // namespace nn
 } // namespace torch

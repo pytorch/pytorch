@@ -29,7 +29,7 @@ torch.nn.AvgPool3d|Yes|No
 torch.nn.FractionalMaxPool2d|No|No
 torch.nn.LPPool1d|No|No
 torch.nn.LPPool2d|No|No
-torch.nn.AdaptiveMaxPool1d|No|No
+torch.nn.AdaptiveMaxPool1d|Yes|No
 torch.nn.AdaptiveMaxPool2d|No|No
 torch.nn.AdaptiveMaxPool3d|No|No
 torch.nn.AdaptiveAvgPool1d|No|No

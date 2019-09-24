@@ -69,5 +69,30 @@ template class MaxPoolImpl<1, MaxPool1dImpl>;
 template class MaxPoolImpl<2, MaxPool2dImpl>;
 template class MaxPoolImpl<3, MaxPool3dImpl>;
 
+// ============================================================================
+
+template <size_t D, typename Derived>
+AdaptiveMaxPoolImpl<D, Derived>::AdaptiveMaxPoolImpl(
+  const AdaptiveMaxPoolOptions<D>& options_) : options(options_) {}
+
+template <size_t D, typename Derived>
+void AdaptiveMaxPoolImpl<D, Derived>::reset() {}
+
+template <size_t D, typename Derived>
+void AdaptiveMaxPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::AdaptiveMaxPool" << D << "d"
+         << "(output_size=" << options.output_size() << ")";
+}
+
+Tensor AdaptiveMaxPool1dImpl::forward(const Tensor& input) {
+  return F::adaptive_max_pool1d(input, options);
+}
+
+std::tuple<Tensor, Tensor> AdaptiveMaxPool1dImpl::forward_with_indices(const Tensor& input) {
+  return F::adaptive_max_pool1d_with_indices(input, options);
+}
+
+template class AdaptiveMaxPoolImpl<1, AdaptiveMaxPool1dImpl>;
+
 } // namespace nn
 } // namespace torch
