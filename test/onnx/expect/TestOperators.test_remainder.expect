@@ -15,7 +15,7 @@ graph {
   }
   node {
     input: "3"
-    input: "2"
+    input: "1"
     output: "4"
     op_type: "Mul"
   }
