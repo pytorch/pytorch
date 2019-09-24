@@ -154,7 +154,7 @@ class InsertObserversHelper {
       script::Module& module,
       const QConfig& qconfig);
 
-  void findValuesInPattern(
+  void findIntermediateValuesInPattern(
     Graph& graph,
     const std::string& pattern);
 
@@ -221,7 +221,7 @@ Node* InsertObserversHelper::insertObserverFor(
   return call;
 }
 
-void InsertObserversHelper::findValuesInPattern(
+void InsertObserversHelper::findIntermediateValuesInPattern(
     Graph& graph,
     const std::string& pattern) {
   Graph pattern_graph;
@@ -230,7 +230,7 @@ void InsertObserversHelper::findValuesInPattern(
 
   auto matches = findPatternMatches(pattern_graph, graph);
   for (const auto& match : matches) {
-    auto output_value = vmap.at("output");
+    auto output_value = vmap.at("intermediate_val");
     TORCH_INTERNAL_ASSERT(
         match.values_map.find(output_value) != match.values_map.end(),
         "Didn't find Value output in match result.");
@@ -245,32 +245,32 @@ void InsertObserversHelper::addIntermediateValuesToSkipObserver(
   auto graph = method.graph();
 
   // Note that the name of the value we want to skip inserting observer for
-  // is hard coded as "output"
+  // is hard coded as "intermediate_val"
   std::string conv_functional_relu = R"(
 graph(%self, %input, %inplace):
     %relu = prim::Constant[name="relu"]()
     %conv = match::module[name="Conv2d"](%self)
-    %output = prim::CallMethod[name="forward"](%conv, %input)
+    %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
     %r = prim::CallFunction(%relu, %output, %inplace)
     return (%r))";
   std::string conv_relu_module = R"(
 graph(%self, %input):
     %conv = match::module[name="Conv2d"](%self)
-    %output = prim::CallMethod[name="forward"](%conv, %input)
+    %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
     %relu = match::module[name="ReLU"](%self)
     %r = prim::CallMethod[name="forward"](%relu, %output)
     return (%r))";
   std::string matmul_add = R"(
 graph(%input, %weight, %bias, %4):
      %weight_t = aten::t(%weight)
-     %output = aten::matmul(%input, %weight_t)
+     %intermediate_val = aten::matmul(%input, %weight_t)
      %res = aten::add_(%output, %bias, %4)
      return (%res))";
   std::vector<std::string> patterns = {
       conv_functional_relu, conv_relu_module, matmul_add};
 
   for (const auto& pattern : patterns) {
-    findValuesInPattern(*graph, pattern);
+    findIntermediateValuesInPattern(*graph, pattern);
   }
 }
 
