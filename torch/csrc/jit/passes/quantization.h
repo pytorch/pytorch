@@ -122,6 +122,8 @@ TORCH_API void FoldQuantizeCallIntoBuffer(script::Module& module, const std::str
  *  attribute, we'll clone the wrapper module and set the weight
  *  and bias of the module and add the wrapper module as a child
  *  to the input module.
+ *  Folding is recursively applied to all methods that in the call
+ *  hierarchy
  *
  *  Wrapper module is used to overwrite serialization for packed
  *  weight and bias since they are not recognized by JIT, this

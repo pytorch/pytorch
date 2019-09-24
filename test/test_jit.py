@@ -1472,6 +1472,14 @@ graph(%input, %weight):
         self.assertEqual(ref_b, b)
         self.assertEqual(ref_res, res)
 
+        # test serialization
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        loaded_mod = torch.jit.load(buffer)
+        loaded_res = loaded_mod._c._get_method('forward')(data)
+        self.assertEqual(ref_res, loaded_res)
+
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
         # --> mulmul(mulmul(x,y,z), x, y)
