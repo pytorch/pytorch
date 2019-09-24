@@ -1218,37 +1218,19 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::set_", "source_Storage_storage_offset"},
         {"aten::set_quantizer_", ""},
     #ifdef BUILD_NAMEDTENSOR
-        {"aten::index_add_", "dimname"},
-    #endif
-    #ifdef BUILD_NAMEDTENSOR
         {"aten::index_add", "dimname"},
-    #endif
-    #ifdef BUILD_NAMEDTENSOR
-        {"aten::index_fill_", "dimname_Scalar"},
     #endif
     #ifdef BUILD_NAMEDTENSOR
         {"aten::index_fill", "dimname_Scalar"},
     #endif
     #ifdef BUILD_NAMEDTENSOR
-        {"aten::index_fill_", "dimname_Tensor"},
-    #endif
-    #ifdef BUILD_NAMEDTENSOR
         {"aten::index_fill", "dimname_Tensor"},
-    #endif
-    #ifdef BUILD_NAMEDTENSOR
-        {"aten::scatter_", "dimname_src"},
     #endif
     #ifdef BUILD_NAMEDTENSOR
         {"aten::scatter", "dimname_src"},
     #endif
     #ifdef BUILD_NAMEDTENSOR
-        {"aten::scatter_", "dimname_value"},
-    #endif
-    #ifdef BUILD_NAMEDTENSOR
         {"aten::scatter", "dimname_value"},
-    #endif
-    #ifdef BUILD_NAMEDTENSOR
-        {"aten::scatter_add_", "dimname"},
     #endif
     #ifdef BUILD_NAMEDTENSOR
         {"aten::scatter_add", "dimname"},

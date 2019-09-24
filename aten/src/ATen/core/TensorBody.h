@@ -799,9 +799,6 @@ class CAFFE2_API Tensor {
   Tensor & index_add_(int64_t dim, const Tensor & index, const Tensor & source) const;
   Tensor index_add(int64_t dim, const Tensor & index, const Tensor & source) const;
   #ifdef BUILD_NAMEDTENSOR
-  Tensor & index_add_(Dimname dim, const Tensor & index, const Tensor & source) const;
-  #endif
-  #ifdef BUILD_NAMEDTENSOR
   Tensor index_add(Dimname dim, const Tensor & index, const Tensor & source) const;
   #endif
   Tensor & index_fill_(int64_t dim, const Tensor & index, Scalar value) const;
@@ -809,13 +806,7 @@ class CAFFE2_API Tensor {
   Tensor & index_fill_(int64_t dim, const Tensor & index, const Tensor & value) const;
   Tensor index_fill(int64_t dim, const Tensor & index, const Tensor & value) const;
   #ifdef BUILD_NAMEDTENSOR
-  Tensor & index_fill_(Dimname dim, const Tensor & index, Scalar value) const;
-  #endif
-  #ifdef BUILD_NAMEDTENSOR
   Tensor index_fill(Dimname dim, const Tensor & index, Scalar value) const;
-  #endif
-  #ifdef BUILD_NAMEDTENSOR
-  Tensor & index_fill_(Dimname dim, const Tensor & index, const Tensor & value) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
   Tensor index_fill(Dimname dim, const Tensor & index, const Tensor & value) const;
@@ -825,22 +816,13 @@ class CAFFE2_API Tensor {
   Tensor & scatter_(int64_t dim, const Tensor & index, Scalar value) const;
   Tensor scatter(int64_t dim, const Tensor & index, Scalar value) const;
   #ifdef BUILD_NAMEDTENSOR
-  Tensor & scatter_(Dimname dim, const Tensor & index, const Tensor & src) const;
-  #endif
-  #ifdef BUILD_NAMEDTENSOR
   Tensor scatter(Dimname dim, const Tensor & index, const Tensor & src) const;
-  #endif
-  #ifdef BUILD_NAMEDTENSOR
-  Tensor & scatter_(Dimname dim, const Tensor & index, Scalar value) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
   Tensor scatter(Dimname dim, const Tensor & index, Scalar value) const;
   #endif
   Tensor & scatter_add_(int64_t dim, const Tensor & index, const Tensor & src) const;
   Tensor scatter_add(int64_t dim, const Tensor & index, const Tensor & src) const;
-  #ifdef BUILD_NAMEDTENSOR
-  Tensor & scatter_add_(Dimname dim, const Tensor & index, const Tensor & src) const;
-  #endif
   #ifdef BUILD_NAMEDTENSOR
   Tensor scatter_add(Dimname dim, const Tensor & index, const Tensor & src) const;
   #endif
