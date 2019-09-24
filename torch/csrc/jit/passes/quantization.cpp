@@ -35,6 +35,7 @@ void findValuesInPattern(
   }
 }
 
+// TODO: move into ObserveHelper
 void addIntermediateValuesToSkipObserver(
     const script::Module& module,
     const std::string& method_name,
@@ -149,7 +150,7 @@ Value* insertScalarType(Node* ins_node, at::ScalarType t) {
 
 // Create Quant Node
 Node* createQuantNode(Value* v, Graph* g) {
-  Node* quant = g->create(at::Symbol::fromQualString("aten::quantize_linear"));
+  Node* quant = g->create(at::Symbol::fromQualString("aten::quantize_per_tensor"));
   TORCH_INTERNAL_ASSERT(quant != nullptr, "Failed to create quant node");
   quant->output()->setDebugName(v->debugName() + ".quant");
   return quant;
@@ -158,7 +159,7 @@ Node* createQuantNode(Value* v, Graph* g) {
 // Create Dequant node
 Node* createDeQuantNode(Value* v, Graph* g) {
   Node* dequant =
-      g->create(at::Symbol::fromQualString("aten::_dequantize_linear"));
+      g->create(at::Symbol::fromQualString("aten::_dequantize_per_tensor"));
   TORCH_INTERNAL_ASSERT(dequant != nullptr, "Failed to create dequant node");
   dequant->output()->setDebugName(v->debugName() + ".dequant");
   return dequant;
@@ -172,28 +173,53 @@ Node* createIntReprNode(Value* v, Graph* g) {
   return intrepr;
 }
 
+class InsertObserversHelper {
+ public:
+  InsertObserversHelper(const ModuleQConfigMap& map) : module_qconfig_map_(map) {}
+  void insertObservers(script::Module& module, const std::string& method_name);
+
+ private:
+  Node* insertObserverFor(
+      Value* v,
+      Graph* g,
+      script::Module& module,
+      const QConfig& qconfig);
+  // Values that are the output of GetAttr[name="weight"] and GetAttr[name="bias"]
+  // will be propagated from parent method call to the child graph
+  void propagateValues(Node* n, std::shared_ptr<Graph>& graph);
+
+  const ModuleQConfigMap& module_qconfig_map_;
+  // Values we want to skip observing, used to skip values in
+  // the middle of the ops that are supposed to be fused, e.g.
+  // the output value of conv in the conv - relu pattern
+  std::unordered_set<Value*> values_to_skip_;
+  // Values that are the output of GetAttr[name="weight"] and they
+  // will be propagated through the function call hierarchy
+  std::unordered_set<Value*> weight_values_;
+  // Values that are the output of GetAttr[name="bias"] and they
+  // will be propagated through the function call hierarchy
+  std::unordered_set<Value*> bias_values_;
+};
+
 // Clone observer module and add it to the original module,
 // and insert a call to observer forward function
-Node* insertObserver(
+Node* InsertObserversHelper::insertObserverFor(
     Value* v,
     Graph* g,
     script::Module& module,
     const QConfig& qconfig) {
+  // Skip observing bias
+  if (bias_values_.count(v)) {
+    return nullptr;
+  }
+
   script::Module observer_module;
-  if (v->node()->kind() == prim::GetAttr &&
-      v->node()->s(attr::name) == "weight") {
+  if (weight_values_.count(v)) {
     observer_module = std::get<1>(qconfig);
   } else {
     observer_module = std::get<0>(qconfig);
   }
   std::string observer_name = "observer_for_" + v->debugName();
-  // Temporary workaround to skip inserting duplicate modules,
-  // full support will come in next PR
-  for (script::Slot s : module.get_module_slots()) {
-    if (s.name() == observer_name) {
-      return nullptr;
-    }
-  }
   script::Module observer = observer_module.clone();
   module.register_module(observer_name, observer);
   // Get handle of observer module
@@ -242,12 +268,23 @@ void fillQConfigMap(
   }
 }
 
-void InsertObserversImpl(
+void InsertObserversHelper::propagateValues(
+    Node* n,
+    std::shared_ptr<Graph>& graph) {
+  for (auto i = 1; i < n->inputs().size(); ++i) {
+    if (weight_values_.count(n->inputs()[i])) {
+      weight_values_.emplace(graph->inputs()[i]);
+    }
+    if (bias_values_.count(n->inputs()[i])) {
+      bias_values_.emplace(graph->inputs()[i]);
+    }
+  }
+}
+
+void InsertObserversHelper::insertObservers(
     script::Module& module,
-    const std::string& method_name,
-    const ModuleQConfigMap& module_qconfig_map,
-    std::unordered_set<Value*>& values_to_skip) {
-  if (module_qconfig_map.count(module.module_object()) == 0) {
+    const std::string& method_name) {
+  if (!module_qconfig_map_.count(module.module_object())) {
     // the module is added by us, e.g.: observer module
     return;
   }
@@ -255,7 +292,7 @@ void InsertObserversImpl(
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   ConstantPropagation(graph);
-  addIntermediateValuesToSkipObserver(module, method_name, values_to_skip);
+  addIntermediateValuesToSkipObserver(module, method_name, values_to_skip_);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -273,14 +310,13 @@ void InsertObserversImpl(
   // prim::Param nodes do not belong to the graph. Hence the Insert
   // point is the beginning of graph node. This also safe guards against
   // observing a potentially mutated value due to some in-place operation
-  Value* self = graph->inputs()[0];
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
-    if (!values_to_skip.count(v) && valueNeedsToBeQuantized(v)) {
-      auto qconfig = module_qconfig_map.at(module.module_object());
+    if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
+      auto qconfig = module_qconfig_map_.at(module.module_object());
       if (qconfig) {
         auto observer_node =
-            insertObserver(v, v->owningGraph(), module, qconfig.value());
+            insertObserverFor(v, v->owningGraph(), module, qconfig.value());
         if (observer_node) {
           observer_for_input.emplace(observer_node);
         }
@@ -301,8 +337,15 @@ void InsertObserversImpl(
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
-        if (!values_to_skip.count(v) && valueNeedsToBeQuantized(v)) {
+        if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
+        }
+        if (v->node()->kind() == prim::GetAttr) {
+          if (v->node()->s(attr::name) == "weight") {
+            weight_values_.emplace(v);
+          } else if (v->node()->s(attr::name) == "bias") {
+            bias_values_.emplace(v);
+          }
         }
         if (v->node()->kind() == prim::CallMethod) {
           // If we find a call to a method of a child module,
@@ -310,27 +353,28 @@ void InsertObserversImpl(
           // the child module.
           auto module_instance = v->node()->inputs()[0];
           auto module_method_name = v->node()->s(attr::name);
+          // TODO: looks like this block is not related to v? maybe we should
+          // move this outside
+          script::Module callee_module;
           if (module_instance->node()->kind() == prim::GetAttr) {
             auto child_module_name = module_instance->node()->s(attr::name);
             auto child_module = module.find_module(child_module_name);
             TORCH_INTERNAL_ASSERT(
                 child_module,
                 "Child module " + child_module_name + " does not exist");
-            // Recursively insert observer for the forward function of child
-            // module
-            InsertObserversImpl(
-                child_module.value(),
-                module_method_name,
-                module_qconfig_map,
-                values_to_skip);
+            callee_module = child_module.value();
           } else {
             TORCH_INTERNAL_ASSERT(
                 module_instance == graph->inputs()[0],
                 "We only support call method either on %self"
                 "or child instance in insert_observers_pass right now");
-            InsertObserversImpl(
-                module, module_method_name, module_qconfig_map, values_to_skip);
+            callee_module = module;
           }
+          auto method_graph = callee_module.get_method(module_method_name).graph();
+          propagateValues(v->node(), method_graph);
+          // Recursively insert observer for the forward function of child
+          // module
+          insertObservers(callee_module, module_method_name);
         }
       }
 
@@ -342,15 +386,10 @@ void InsertObserversImpl(
 
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
-    // Skip inserting observer for bias
-    if (v->node()->kind() == prim::GetAttr &&
-        v->node()->s(c10::attr::name) == "bias") {
-      continue;
-    }
-    auto qconfig = module_qconfig_map.at(module.module_object());
+    auto qconfig = module_qconfig_map_.at(module.module_object());
     // Skip inserting observer if no qconfig is specified
     if (qconfig) {
-      insertObserver(v, v->owningGraph(), module, qconfig.value());
+      insertObserverFor(v, v->owningGraph(), module, qconfig.value());
     }
   }
 }
@@ -358,7 +397,7 @@ void InsertObserversImpl(
 Node* insertQuantDeQuantCall(
     Value* v,
     const IValue& qparams,
-    at::ScalarType t,
+    const IValue& scalar_type,
     bool insert_after = true) {
   Graph* g = v->node()->owningGraph();
   Node* quant = createQuantNode(v, g);
@@ -398,7 +437,7 @@ Node* insertQuantDeQuantCall(
   dequant->addInput(scale_val);
   dequant->addInput(zero_point_val);
 
-  Value* scalar_type_val = insertScalarType(quant, t);
+  Value* scalar_type_val = insertScalarType(quant, scalar_type.toScalarType());
   TORCH_INTERNAL_ASSERT(scalar_type_val != nullptr);
   quant->addInput(scalar_type_val);
   dequant->addInput(scalar_type_val);
@@ -427,7 +466,8 @@ c10::optional<std::string> findObserverName(Value* v) {
 class QuantizeHelper {
  public:
   QuantizeHelper(const script::Module& m) : module_(m) {}
-  IValue getQParams(Value* v);
+  // quantization parameters and scalar type
+  std::tuple<IValue, IValue> getQParams(Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
       Value* child_instance);
   void quantizeTensor(Value* v, bool insert_after = true);
@@ -464,7 +504,7 @@ void QuantizeHelper::removeObserver(
   }
 }
 
-IValue QuantizeHelper::getQParams(Value* v) {
+std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
   TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
@@ -478,14 +518,11 @@ IValue QuantizeHelper::getQParams(Value* v) {
       "getQParams expects the corresponding observer for ",
       v->debugName(),
       " exists.");
-  auto calculate_qparams =
-      observer_module.value().get_method("calculate_qparams");
+  auto om = observer_module.value();
+  auto calculate_qparams = om.get_method("calculate_qparams");
   IValue qparams = calculate_qparams(std::vector<IValue>());
-  return qparams;
-}
-
-double getScale(const IValue& qparam) {
-  return qparam.toTuple()->elements()[0].toTensor().item().toDouble();
+  auto scalar_type = om.get_attribute("dtype");
+  return std::make_tuple(qparams, scalar_type);
 }
 
 void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
@@ -493,15 +530,12 @@ void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
   if (!observer_name) {
     return;
   }
-  IValue qparams = getQParams(v);
+  auto tp = getQParams(v);
+  auto qparams = std::get<0>(tp);
+  auto scalar_type = std::get<1>(tp);
   removeObserver(v, observer_name.value());
   Node* dequant;
-  if (v->node()->kind() == prim::GetAttr &&
-      v->node()->s(c10::attr::name) == "weight") {
-    dequant = insertQuantDeQuantCall(v, qparams, at::kQInt8);
-  } else {
-    dequant = insertQuantDeQuantCall(v, qparams, at::kQUInt8, insert_after);
-  }
+  dequant = insertQuantDeQuantCall(v, qparams, scalar_type, insert_after);
   v->replaceAllUsesWith(dequant->output());
   Node* q = traverseToQuantNode(dequant);
   TORCH_INTERNAL_ASSERT(q);
@@ -589,20 +623,24 @@ void InsertQuantDeQuantImpl(
 }
 } // namespace
 
-TORCH_API void InsertObservers(
-    script::Module& module,
+TORCH_API script::Module InsertObservers(
+    script::Module& input_module,
     const std::string& method_name,
-    const QConfigDict& qconfig_dict) {
+    const QConfigDict& qconfig_dict,
+    bool inplace) {
+  script::Module module = inplace ? input_module : input_module.clone();
   ModuleQConfigMap module_qconfig_map;
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
-  std::unordered_set<Value*> values_to_skip;
-  InsertObserversImpl(module, method_name, module_qconfig_map, values_to_skip);
+  InsertObserversHelper helper(module_qconfig_map);
+  helper.insertObservers(module, method_name);
+  return module;
 }
 
 script::Module InsertQuantDeQuant(
     script::Module& input_module,
-    const std::string& method_name) {
-  script::Module module = input_module.clone();
+    const std::string& method_name,
+    bool inplace) {
+  script::Module module = inplace ? input_module : input_module.clone();
   InsertQuantDeQuantImpl(module, method_name);
 
   // NOTE: Remove observer module does not work right now, we'll return
@@ -637,11 +675,11 @@ graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_ze
        {R"(
 graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %a_intrepr = aten::int_repr(%a_quant)
-        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %a_dequant = aten::_dequantize_per_tensor(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
         %w_intrepr = aten::int_repr(%w_quant)
-        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        %w_dequant = aten::_dequantize_per_tensor(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
-        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))",
         R"(
 graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
@@ -658,34 +696,34 @@ graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_ze
        {R"(
 graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_intrepr = aten::int_repr(%a_quant)
-        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %a_dequant = aten::_dequantize_per_tensor(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
         %w_intrepr = aten::int_repr(%w_quant)
-        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        %w_dequant = aten::_dequantize_per_tensor(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
         %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
-        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))",
         quantized_linear_with_bias},
        // matmul(with bias) -> quantized::linear
        {R"(
 graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_intrepr = aten::int_repr(%a_quant)
-        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %a_dequant = aten::_dequantize_per_tensor(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
         %w_intrepr = aten::int_repr(%w_quant)
-        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        %w_dequant = aten::_dequantize_per_tensor(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
         %output = aten::matmul(%a_dequant, %w_dequant)
         %r = aten::add_(%output, %b, %4)
-        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))",
         quantized_linear_with_bias},
        // matmul(without bias) -> quantized::linear
        {R"(
 graph(%a_quant, %w_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype):
         %a_intrepr = aten::int_repr(%a_quant)
-        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %a_dequant = aten::_dequantize_per_tensor(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
         %w_intrepr = aten::int_repr(%w_quant)
-        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        %w_dequant = aten::_dequantize_per_tensor(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
         %r = aten::matmul(%a_dequant, %w_dequant)
-        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))",
         R"(
 graph(%a_quant, %w_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype):
@@ -867,7 +905,7 @@ void FoldQuantizeCallIntoBuffer(
   const std::string pattern = R"(
 graph(%self, %scale, %zero_point, %dtype):
    %weight = prim::GetAttr[name="weight"](%self)
-   %weight_quant = aten::quantize_linear(%weight, %scale, %zero_point, %dtype)
+   %weight_quant = aten::quantize_per_tensor(%weight, %scale, %zero_point, %dtype)
    return (%weight_quant))";
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
@@ -894,12 +932,12 @@ graph(%self, %scale, %zero_point, %dtype):
     auto float_weight = module.get_parameter("weight").variable_data();
     auto scale = toIValue(match_vmap.at(vmap.at("scale"))).value().toDouble();
     auto zero_point =
-        toIValue(match_vmap.at(vmap.at("zero_point"))).value().toInt();
+      toIValue(match_vmap.at(vmap.at("zero_point"))).value().toInt();
     auto dtype =
         toIValue(match_vmap.at(vmap.at("dtype"))).value().toScalarType();
     module.register_buffer(
         "_quantized_weight",
-        at::quantize_linear(float_weight, scale, zero_point, dtype));
+        at::quantize_per_tensor(float_weight, scale, zero_point, dtype));
   }
 
   std::string replacement = R"(
