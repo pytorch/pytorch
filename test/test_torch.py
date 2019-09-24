@@ -35,7 +35,7 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
 from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
-    dtypes, dtypesIfCUDA, multidevice
+    dtypes, dtypesIfCUDA, deviceCountAtLeast
 import torch.backends.quantized
 
 
@@ -12365,7 +12365,7 @@ class TestTorchDeviceType(TestCase):
         run_test(device, torch.long)
         run_test(device, torch.uint8)
 
-    @multidevice(2)
+    @deviceCountAtLeast(2)
     @onlyCUDA
     def test_reverse_binary_ops_multiple_device(self, devices):
         self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to(devices[1]))    # __radd__
@@ -12425,7 +12425,7 @@ class TestTorchDeviceType(TestCase):
             RuntimeError, "multinomial arguments must have the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
-    @multidevice(2)
+    @deviceCountAtLeast(2)
     @onlyCUDA
     def test_multinomial_gpu_device_constrain(self, devices):
         x = torch.empty(0, device=devices[0])
@@ -12434,7 +12434,7 @@ class TestTorchDeviceType(TestCase):
             RuntimeError, "multinomial arguments must have the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
-    @multidevice(2)
+    @deviceCountAtLeast(2)
     @onlyCUDA
     def test_zeros_like_multiple_device(self, devices):
         expected = torch.zeros(100, 100, device=devices[0])
@@ -12449,7 +12449,7 @@ class TestTorchDeviceType(TestCase):
         res1 = torch.ones_like(expected)
         self.assertEqual(res1, expected)
 
-    @multidevice(2)
+    @deviceCountAtLeast(2)
     @onlyCUDA
     def test_ones_like_multiple_device(self, devices):
         expected = torch.ones(100, 100, device=devices[0])
@@ -12457,7 +12457,7 @@ class TestTorchDeviceType(TestCase):
         output = torch.ones_like(x)
         self.assertEqual(output, expected)
 
-    @multidevice(2)
+    @deviceCountAtLeast(2)
     @onlyCUDA
     def test_device_guard(self, devices):
         # verify that all operators with `device_guard: False` behave properly with multiple devices.
@@ -12626,7 +12626,7 @@ class TestTorchDeviceType(TestCase):
                 torch.lu_solve(b, A, torch.rand(A.shape[:-1], device=b_device).int())
 
     # Note - reports a leak of 512 bytes on CUDA device 1
-    @multidevice(2)
+    @deviceCountAtLeast(2)
     @skipCUDAMemoryLeakCheckIf(True)
     @onlyCUDA
     def test_tensor_set_errors_multigpu(self, devices):
@@ -12652,7 +12652,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(xc.float(), xc2.float())
 
     @onlyCUDA
-    @multidevice(1)  # Note: Tests works with one but prefers more devices
+    @deviceCountAtLeast(1)  # Note: Tests works with one but prefers more devices
     def test_serialization(self, devices):
         def _test_serialization(filecontext_lambda):
             t0 = torch.cuda.FloatTensor(5).fill_(1)
@@ -12898,7 +12898,7 @@ class TestTorchDeviceType(TestCase):
         x = torch.tensor([], device=device)
         self.assertEqual(x.dtype, x.storage().dtype)
 
-    @multidevice(2)
+    @deviceCountAtLeast(2)
     @onlyCUDA
     def test_storage_multigpu(self, devices):
         for device in devices:

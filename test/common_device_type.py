@@ -158,7 +158,7 @@ class DeviceTypeTestBase(TestCase):
 
             @wraps(test)
             def instantiated_test(self, test=test):
-                device_arg = cls.get_default_device() if not hasattr(test, 'deviceCountAtLeast') else cls.get_all_devices()
+                device_arg = cls.get_default_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
                 return test(self, device_arg)
 
             setattr(cls, test_name, instantiated_test)
@@ -170,7 +170,7 @@ class DeviceTypeTestBase(TestCase):
 
                 @wraps(test)
                 def instantiated_test(self, test=test, dtype=dtype):
-                    device_arg = cls.get_default_device() if not hasattr(test, 'deviceCountAtLeast') else cls.get_all_devices()
+                    device_arg = cls.get_default_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
                     return test(self, device_arg, dtype)
 
                 setattr(cls, dtype_test_name, instantiated_test)
@@ -337,20 +337,20 @@ class onlyOn(object):
 # Decorator that provides all available devices of the device type to the test
 # as a list of strings instead of providing a single device string.
 # Skips the test if the number of available devices of the variant's device
-# type is less than the 'deviceCountAtLeast' arg.
-class multidevice(object):
+# type is less than the 'num_required_devices' arg.
+class deviceCountAtLeast(object):
 
-    def __init__(self, deviceCountAtLeast):
-        self.deviceCountAtLeast = deviceCountAtLeast
+    def __init__(self, num_required_devices):
+        self.num_required_devices = num_required_devices
 
     def __call__(self, fn):
-        assert not hasattr(fn, 'deviceCountAtLeast'), "multidevice redefinition for {0}".format(fn.__name__)
-        fn.deviceCountAtLeast = self.deviceCountAtLeast
+        assert not hasattr(fn, 'num_required_devices'), "deviceCountAtLeast redefinition for {0}".format(fn.__name__)
+        fn.num_required_devices = self.num_required_devices
 
         @wraps(fn)
         def multi_fn(slf, devices, *args, **kwargs):
-            if len(devices) < self.deviceCountAtLeast:
-                reason = "fewer than {0} devices detected".format(self.deviceCountAtLeast)
+            if len(devices) < self.num_required_devices:
+                reason = "fewer than {0} devices detected".format(self.num_required_devices)
                 raise unittest.SkipTest(reason)
 
             return fn(slf, devices, *args, **kwargs)
