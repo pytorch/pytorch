@@ -803,10 +803,6 @@ class ScatterOp : public Operator<CPUContext> {
     const int64_t src_batch_size = updates.size_from_dim(axis_);
     const int64_t dst_batch_size = data.size_from_dim(axis_);
 
-    const int64_t src_indexing_axis_dim = updates.size(axis_);
-    const int64_t src_batch_bytesize = updates.size_from_dim(axis_) * item_bytesize;
-    const int64_t dst_batch_size = data.size_from_dim(axis_) * item_bytesize;
-
     const int64_t N = indices.size(axis_);
 
     check_indexarray_range<IndexType>(idxs, N, dst_indexing_axis_dim);
