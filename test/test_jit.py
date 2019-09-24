@@ -19438,16 +19438,16 @@ class TestClassType(JitTestCase):
 
     @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
     def test_imported_classes(self):
-        import jit.foo
-        import jit.bar
-        import jit.very.very.nested
+        import jit._imported_class_test.foo
+        import jit._imported_class_test.bar
+        import jit._imported_class_test.very.very.nested
 
         class MyMod(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, a):
-                foo = jit.foo.FooSameName(a)
-                bar = jit.bar.FooSameName(a)
-                three = jit.very.very.nested.FooUniqueName(a)
+                foo = jit._imported_class_test.foo.FooSameName(a)
+                bar = jit._imported_class_test.bar.FooSameName(a)
+                three = jit._imported_class_test.very.very.nested.FooUniqueName(a)
                 return foo.x + bar.y + three.y
 
         m = MyMod()
