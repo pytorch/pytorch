@@ -103,9 +103,13 @@ struct TORCH_API Function {
     if (executor_) {
       return executor_;
     }
+    // Make sure optimized graph is computed (do it before acquiring the lock to
+    // avoid deadlock).
+    (void)optimized_graph();
+
     std::lock_guard<std::mutex> lock(compile_mutex);
     check_single_output();
-    executor_ = GraphExecutor(graph());
+    executor_ = GraphExecutor(*optimized_graph_);
     return executor_;
   }
 
