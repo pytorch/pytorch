@@ -206,8 +206,9 @@ Tensor& logical_xor_(Tensor& self, const Tensor& other) {
 
 Tensor& lt_out(Tensor& result, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(result.scalar_type() == kBool,
-      "The output tensor of lt must be a bool.");
-  auto iter = TensorIterator::comparison_op(result, self, other, true);
+      "The output tensor of lt must be a bool, but was ", result.scalar_type());
+  auto iter = TensorIterator::comparison_op(result, self, other,
+      /*check_mem_overlap=*/true);
   lt_stub(iter.device_type(), iter);
   return result;
 }
@@ -222,7 +223,8 @@ Tensor& lt_(Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.dtype() == other.dtype(),
       "Expected object of scalar type ", self.dtype(), " but got scalar type ",
       other.dtype(), "for argument 'other' in call to lt_")
-  auto iter = TensorIterator::comparison_op(self, self, other, true);
+  auto iter = TensorIterator::comparison_op(self, self, other,
+      /*check_mem_overlap=*/true);
   lt_stub(iter.device_type(), iter);
   return self;
 }

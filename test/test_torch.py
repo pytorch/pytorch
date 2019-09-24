@@ -6181,12 +6181,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(x[idx] >= y[idx], ge[idx] == 1)
 
     def test_comparison_ops_diff_types(self):
-        self.assertRaisesRegex(RuntimeError, "The output tensor of lt must be a bool",
-                               lambda: torch.lt(torch.tensor([True]), torch.tensor([False]), out=torch.empty(1, dtype=torch.uint8)))
-        self.assertRaisesRegex(RuntimeError, "Expected object of scalar type",
-                               lambda: torch.tensor([1], dtype=torch.int).lt_(torch.tensor([2], dtype=torch.long)))
-        self.assertRaisesRegex(RuntimeError, "value cannot be converted to type",
-                               lambda: torch.tensor([1 << 5], dtype=torch.uint8) < (1 << 20))
+        with self.assertRaisesRegex(RuntimeError, 'The output tensor of lt must be a bool'):
+            torch.lt(torch.tensor([True]), torch.tensor([False]), out=torch.empty(1, dtype=torch.uint8))
+        with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
+            torch.tensor([1], dtype=torch.int).lt_(torch.tensor([2], dtype=torch.long))
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            torch.tensor([1 << 5], dtype=torch.uint8) < (1 << 20)
 
     def test_bitwise_ops(self):
         x = torch.randn(5, 5).gt(0)
