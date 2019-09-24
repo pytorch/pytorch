@@ -644,7 +644,7 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         """
         # eager mode
         model_eager = quantize(AnnotatedSingleLayerLinearModel(), test_only_eval_fn,
-                         self.calib_data)
+                               self.calib_data)
 
         qconfig_dict = {
             '': QConfig(
