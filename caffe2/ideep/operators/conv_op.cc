@@ -38,7 +38,7 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
       eparam.scratch_pad = NULL;
       eparam.flatting = OperatorBase::GetRepeatedArgument<int>("flatting", {1, 1});
       eparam.blocking = OperatorBase::GetRepeatedArgument<int>("blocking", {1, 1});
-      eparam.partition = OperatorBase::GetRepeatedArgument<int>("partition", {1, 1});
+      eparam.partition = OperatorBase::GetRepeatedArgument<int>("partition", {1, 1, 1});
     }
 #endif
   }

@@ -22,7 +22,7 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
     if (conv_algorithm == CONV_ALGORITHM_WINOGRAD) {
       algo_ = ialgo::convolution_winograd;
     }
-    CAFFE_ENFORCE(zero_point_ == 128 || zero_point_ == 0);
+    //CAFFE_ENFORCE(zero_point_ == 128 || zero_point_ == 0);
     
     int per_channel_output = this->template GetSingleArgument<int>("per_channel_output", 0);
     if (per_channel_output) {
@@ -30,6 +30,7 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
     } else {
       scale_ = {(this->template GetSingleArgument<float>("Y_scale", 1.0))};
     }
+    with_softmax = bool(OperatorBase::GetSingleArgument<int>("with_softmax", 0));
    
     Y_scales_ = ConvertScales(scale_);
     expect_x_format = ideep::format::nhwc;
@@ -46,18 +47,21 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
       } else {
 	eparam.dst_format = ideep::format::nhwc;
       }
-      eparam.shared_workspace_key = operator_def.name();
+      eparam.name = operator_def.name();
       eparam.nthreads = OperatorBase::GetSingleArgument<int>("nthreads", 0);
       eparam.tile_size = OperatorBase::GetSingleArgument<int>("tile_size", 5);
-      eparam.conv_algorithm = OperatorBase::GetSingleArgument<int>("conv_algorithm", 0);
+      eparam.conv_algorithm = OperatorBase::GetSingleArgument<int>("euler_algorithm", 0);
       eparam.execution_mode = execution_mode_trans(
               OperatorBase::GetSingleArgument<string>("execution_mode", "0x0000"));
       eparam.dst_type = OperatorBase::GetSingleArgument<string>("dst_type", "u8");
       eparam.scratch_pad = NULL;
       eparam.flatting = OperatorBase::GetRepeatedArgument<int>("flatting", {1, 1});
       eparam.blocking = OperatorBase::GetRepeatedArgument<int>("blocking", {1, 1});
-      eparam.partition = OperatorBase::GetRepeatedArgument<int>("partition", {1, 1});
+      eparam.partition = OperatorBase::GetRepeatedArgument<int>("partition", {1, 1, 1});
       eparam.wino_tinput_quant = OperatorBase::GetRepeatedArgument<float>("wino_tinput_quant", {1.0, 0.0});
+      eparam.eager_mode = OperatorBase::GetSingleArgument<int>("euler_eager_mode", 1);
+      eparam.stream_sync = OperatorBase::GetSingleArgument<int>("euler_stream_sync", 0);
+
       int X_zero_point = OperatorBase::GetSingleArgument<int>("X_zero_point", 0);
       eparam.input_quant = {1.0, float(X_zero_point)};
       int sum_zero_point = OperatorBase::GetSingleArgument<int>("sum_zero_point", 0);
@@ -121,6 +125,9 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
       op_key_.clear();
       cached_X_descriptor_ = X_in.dup_descriptor();
       Y_dims = CalcOutputDims(X, filter.get_dim(0));
+      if (Y_dims[2] == 1 && Y_dims[3] == 1) {
+        with_softmax = true;
+      }
     }
 #ifdef USE_EULER      
     if (need_euler_) {
@@ -143,7 +150,7 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
 
         auto filter_in = filter.as_weights();
         filter_in.make_group(group_);
-	ideep::format filter_format = ideep::format::OIhw16i16o;
+	ideep::format filter_format = group_ > 1 ? ideep::format::goihw : ideep::format::OIhw16i16o;
         ideep::tensor::descriptor expected_descriptor = {filter_in.get_dims(), idtype::f32, filter_format};
         if (filter.get_descriptor() != expected_descriptor) {
           filter_.init(expected_descriptor);
@@ -183,6 +190,8 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
       if (X.get_dim(2)==1 && X.get_dim(3) ==1) {
 	if (eparam.with_argmax ) {
 	  Y->set_descriptor({{X.get_dim(0),1,1,1}, idtype::s32, ideep::format::nhwc});
+	} else if (with_softmax) {
+	  Y->set_descriptor({Y_dims, Y->get_data_type(), ideep::format::nchw});
 	} else {
 	  Y->set_descriptor({Y_dims, Y->get_data_type(), ideep::format::nhwc});
 	}
@@ -274,6 +283,9 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
           iprop::forward_inference, ipadding::zero, lowp_kind_);
     }
 
+    if (with_softmax) {
+      Y->set_descriptor({Y_dims, Y->get_data_type(), ideep::format::nchw});
+    }
     if (fusion_type_ != FUSION_CONV_RELU && fusion_type_ != FUSION_CONV_BRELU 
         && fusion_type_ != FUSION_UNKNOWN) {
       CAFFE_ENFORCE(
@@ -304,6 +316,7 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
   int need_euler_;
   INPUT_TAGS(INPUT_X, FILTER, BIAS_OR_INPUT_S, INPUT_S);
   OUTPUT_TAGS(OUTPUT);
+  bool with_softmax;
 };
 
 class IDEEPInt8ConvReluOp final : public IDEEPInt8ConvOp {
@@ -324,6 +337,9 @@ class IDEEPInt8ConvReluOp final : public IDEEPInt8ConvOp {
       float bound_max = OperatorBase::GetSingleArgument<float>("bound_max", 0.0);
       float bound_min = OperatorBase::GetSingleArgument<float>("bound_min", 0.0);
       attr_ = iattr::fuse_relu(1.0, bound_max, bound_min, ialgo::eltwise_bounded_relu);
+#ifdef USE_EULER
+      eparam.relu_bound_thresh = {bound_min, bound_max};   
+#endif      
     }
   }
   virtual ~IDEEPInt8ConvReluOp() {}
@@ -361,6 +377,9 @@ class IDEEPInt8ConvSumReluOp final : public IDEEPInt8ConvOp {
       float bound_max = OperatorBase::GetSingleArgument<float>("bound_max", 0.0);
       float bound_min = OperatorBase::GetSingleArgument<float>("bound_min", 0.0);
       attr_ = iattr::residual(sum_scale, relu_scale, bound_max, bound_min, ialgo::eltwise_bounded_relu);
+#ifdef USE_EULER
+      eparam.relu_bound_thresh = {bound_min, bound_max};   
+#endif      
     }
   }
 
