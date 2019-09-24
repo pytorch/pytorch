@@ -3980,9 +3980,10 @@ add_docstr(torch.promote_types,
            r"""
 promote_types(type1, type2) -> dtype
 
-Returns the :class:`torch.dtype` with the smallest size and scalar kind to which
-`type1` and `type2` may be safely cast. See type promotion :ref:`documentation <type-promotion-doc>`
-for more information on the type promotion logic.
+Returns the :class:`torch.dtype` with the smallest size and scalar kind that is
+not smaller or of lower kind than `type1` or `type2`. See type promotion
+:ref:`documentation <type-promotion-doc>` for more information on the type
+promotion logic.
 
 Args:
     type1 (:class:`torch.dtype`)
