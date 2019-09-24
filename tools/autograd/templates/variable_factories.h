@@ -58,7 +58,8 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
         // NOTE: Currently `torch::tensor(...)` doesn't support mixed data types
         // (i.e. `torch::tensor({{bool, 2.0}})` doesn't work). We might be able to
         // support it in the future by iterating over all sub-lists to find
-        // the largest data type that can represent all of the elements.
+        // the largest data type that can represent all of the elements, or by using
+        // variadic templates.
         TORCH_CHECK(elem.scalar_type_ == first_elem.scalar_type_,
           "Expected all elements of the tensor to have the same scalar type: ",
           first_elem.scalar_type_,
