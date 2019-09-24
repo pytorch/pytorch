@@ -170,12 +170,6 @@ class _ObserverBase(Observer):
 
 
 class MinMaxObserver(_ObserverBase):
-
-
-
-
-
-
     r"""Default Observer Module
     A default implementation of the observer module, only works for
     `per_tensor_affine` quantization scheme.  The module will record the
@@ -293,13 +287,12 @@ class PerChannelMinMaxObserver(_ObserverBase):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
+        # We have to handle min_vals and max_vals manually even though they are registered as buffers
+        # as they are initialized to None
         self.min_vals = state_dict.pop(prefix + 'min_vals')
         self.max_vals = state_dict.pop(prefix + 'max_vals')
         super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                             missing_keys, unexpected_keys, error_msgs)
-
-
-
+                                                                    missing_keys, unexpected_keys, error_msgs)
 
 class HistogramObserver(_ObserverBase):
     r"""
@@ -564,8 +557,6 @@ class HistogramObserver(_ObserverBase):
         self.max_val = state_dict.pop(prefix + 'max_val')
         super(HistogramObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                              missing_keys, unexpected_keys, error_msgs)
-
-
 
 class RecordingObserver(_ObserverBase):
     r"""
