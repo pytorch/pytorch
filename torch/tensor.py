@@ -53,7 +53,7 @@ class Tensor(torch._C._TensorBase):
                 quantizer_params = (torch.per_channel_affine,
                                     [e.item() for e in self.q_per_channel_scales().reshape(-1)],
                                     [e.item() for e in self.q_per_channel_zero_points().reshape(-1)],
-                                    list(self.q_per_channel_axis()))
+                                    self.q_per_channel_axis())
             else:
                 raise RuntimeError("Serialization is not supported for tensors of type {}".format(self.qscheme()))
             args = (self.storage(),
