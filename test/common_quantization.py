@@ -89,11 +89,8 @@ class QuantizationTestCase(TestCase):
             have observers in preperation for quantization
         """
         if hasattr(module, 'qconfig') and module.qconfig is not None and len(module._modules) == 0:
-#            if module.training and \
-#               type(module) != torch.quantization.DeQuantStub \
-#               or module.training is False:
-                self.assertTrue(hasattr(module, 'observer'),
-                                'module: ' + str(type(module)) + ' do not have observer')
+            self.assertTrue(hasattr(module, 'observer'),
+                            'module: ' + str(type(module)) + ' do not have observer')
         for child in module.children():
             self.checkObservers(child)
 
