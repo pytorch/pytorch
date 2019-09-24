@@ -598,6 +598,8 @@ FunctionOption = TypedDict('FunctionOption', {
     # cimpls is really a List[FunctionOption]
     'cimpls': List[Any],
     'cname': str,
+    # explicitly specify whether the function is a factory function or other special category
+    'category_override': str,
     'condition': str,
     'device_guard': bool,
     'device_guard_declaration': str,
@@ -606,7 +608,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'with_gil': bool,
     'cpu_half': bool,
     'cpu_bfloat16': bool,
-    'cuda_bfloat16': bool,
     'deprecated': bool,
     'cpu_bool': bool,
     'cuda_bool': bool,
@@ -664,6 +665,7 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('operator_name', str),
     ('overload_name', str),
     ('use_c10_dispatcher', str),
+    ('category_override', str),
     ('matches_jit_signature', bool),
     ('schema_string', str),
     ('method_prefix_derived', str),
@@ -1333,7 +1335,11 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
-        if BUILD_NAMEDTENSOR or not is_named_tensor_only:
+        # RegistrationDeclarations.h is used downstream in XLA, where XLA uses
+        # it as the "source of truth" for pytorch ops and generates code based
+        # on it. We don't pass named tensor only functions there because XLA
+        # doesn't support them.
+        if not is_named_tensor_only:
             top_env['registration_declarations'].append(
                 REGISTRATION_DECLARATION.substitute(option))
         if (option['use_c10_dispatcher'] != 'no'):
@@ -1410,6 +1416,7 @@ def create_generic(top_env, declarations):
             operator_name=option['operator_name'],
             overload_name=option['overload_name'],
             use_c10_dispatcher=option['use_c10_dispatcher'],
+            category_override=option['category_override'],
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],
             method_prefix_derived=option['method_prefix_derived'],

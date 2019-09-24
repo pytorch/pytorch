@@ -1211,17 +1211,6 @@ class TestNamedTensor(TestCase):
         self.assertEqual(output.names, ['N', 'H', 'W', 'C'])
         self.assertEqual(output.shape, [3, 5, 1, 2])
 
-        # globbing
-        tensor = create('N:7,H:3,W:5,C:2')
-        output = tensor.align_to('...', 'C', 'H', 'W')
-        self.assertEqual(output.names, ['N', 'C', 'H', 'W'])
-        self.assertEqual(output.shape, [7, 2, 3, 5])
-
-        tensor = create('N:7,C:2,H:3,W:5')
-        output = tensor.align_to('...', 'W', 'H')
-        self.assertEqual(output.names, ['N', 'C', 'W', 'H'])
-        self.assertEqual(output.shape, [7, 2, 5, 3])
-
         # All input dimensions must be named
         with self.assertRaisesRegex(RuntimeError, "All input dims must be named"):
             create('None:2,C:3').align_to('N', 'C')
@@ -1233,6 +1222,42 @@ class TestNamedTensor(TestCase):
         # names not found
         with self.assertRaisesRegex(RuntimeError, "Cannot find dim 'C'"):
             create('N:2,C:3').align_to('D', 'N')
+
+    def test_align_to_ellipsis(self):
+        tensor = create('N:7,H:3,W:5,C:2')
+
+        # ... = ['N', 'H', 'W', 'C']
+        output = tensor.align_to('...')
+        self.assertEqual(output.names, ['N', 'H', 'W', 'C'])
+        self.assertEqual(output.shape, [7, 3, 5, 2])
+
+        # ... = ['H', 'C']
+        output = tensor.align_to('...', 'W', 'N')
+        self.assertEqual(output.names, ['H', 'C', 'W', 'N'])
+        self.assertEqual(output.shape, [3, 2, 5, 7])
+
+        # ... = ['H', 'C']
+        output = tensor.align_to('W', '...', 'N')
+        self.assertEqual(output.names, ['W', 'H', 'C', 'N'])
+        self.assertEqual(output.shape, [5, 3, 2, 7])
+
+        # ... = []
+        output = tensor.align_to('N', '...', 'C', 'D', 'H', 'W')
+        self.assertEqual(output.names, ['N', 'C', 'D', 'H', 'W'])
+        self.assertEqual(output.shape, [7, 2, 1, 3, 5])
+
+        # Input tensor partially named
+        partiall_named = create('N:7,None:1')
+        with self.assertRaisesRegex(RuntimeError, "All input dims must be named"):
+            partiall_named.align_to('...', 'N')
+
+        # Input order partially named
+        with self.assertRaisesRegex(RuntimeError, "desired order must not contain None"):
+            tensor.align_to('...', 'N', None)
+
+        # Input order duplicate names
+        with self.assertRaisesRegex(RuntimeError, "Duplicate names"):
+            tensor.align_to('...', 'N', 'N')
 
     def test_align_as(self):
         # align_as calls align_to internally. align_to has pretty substantial tests,
