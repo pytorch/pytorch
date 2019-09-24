@@ -11836,7 +11836,7 @@ class TestTorchDeviceType(TestCase):
             ("tanh", doubles, True, True, 'cpu'),
             ("tanh", doubles, False, True, 'cuda'),
             ("trunc", doubles, True, True, 'cpu'),
-            ("trunc", doubles, False, True, 'cuda')
+            ("trunc", doubles, True, True, 'cuda')
         ]
 
         for (fn, inputs, has_input_output_mem_overlap_check,
