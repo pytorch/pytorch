@@ -15,6 +15,7 @@ from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
 from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion
+from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
 
@@ -46,7 +47,8 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                    input=None, use_gpu=True, rtol=0.001, atol=1e-7,
                    example_outputs=None, do_constant_folding=True,
                    dynamic_axes=None, test_with_inputs=None,
-                   input_names=None, output_names=None):
+                   input_names=None, output_names=None,
+                   fixed_batch_size=False):
     model.eval()
 
     if input is None:
@@ -61,14 +63,14 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
 
         # export the model to ONNX
         f = io.BytesIO()
-        torch.onnx.export(model, input, f,
-                          opset_version=self.opset_version,
-                          example_outputs=output,
-                          do_constant_folding=do_constant_folding,
-                          keep_initializers_as_inputs=self.keep_initializers_as_inputs,
-                          dynamic_axes=dynamic_axes,
-                          input_names=input_names, output_names=output_names)
-
+        torch.onnx._export(model, input, f,
+                           opset_version=self.opset_version,
+                           example_outputs=output,
+                           do_constant_folding=do_constant_folding,
+                           keep_initializers_as_inputs=self.keep_initializers_as_inputs,
+                           dynamic_axes=dynamic_axes,
+                           input_names=input_names, output_names=output_names,
+                           fixed_batch_size=fixed_batch_size)
 
         # compute onnxruntime output prediction
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
@@ -83,7 +85,6 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                 output = model(*test_input)
                 if isinstance(output, torch.Tensor):
                     output = (output,)
-
                 ort_test_with_input(ort_sess, test_input, output, rtol, atol)
 
 
@@ -98,14 +99,15 @@ class TestONNXRuntime(unittest.TestCase):
             torch.cuda.manual_seed_all(0)
         np.random.seed(seed=0)
 
-    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
+    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=False,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
-                 input_names=None, output_names=None):
-        run_model_test(self, model, batch_size=batch_size,
-                       input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
-                       do_constant_folding=do_constant_folding,
-                       dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
-                       input_names=input_names, output_names=output_names)
+                 input_names=None, output_names=None, fixed_batch_size=False):
+        return run_model_test(self, model, batch_size=batch_size,
+                              input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
+                              do_constant_folding=do_constant_folding,
+                              dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
+                              input_names=input_names, output_names=output_names,
+                              fixed_batch_size=fixed_batch_size)
 
     def run_word_language_model(self, model_name):
         ntokens = 50
@@ -213,6 +215,14 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.tensor(12)
         self.run_test(FullModelScripting(), x)
+
+    def test_fuse_addmm(self):
+        class AddmmModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.mm(x, x) + x
+
+        x = torch.ones(3, 3)
+        self.run_test(AddmmModel(), x)
 
     def test_maxpool(self):
         model = torch.nn.MaxPool1d(2, stride=1)
@@ -533,6 +543,44 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 5, 10, 10)
         self.run_test(model, x)
 
+    # enable test for opset 11 when ScatterElements is supported in ORT
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfUnsupportedOpsetVersion([11])
+    def test_scatter(self):
+        class ScatterModel(torch.nn.Module):
+            def forward(self, input, indices, values):
+                return input.scatter(1, indices, values)
+
+        input = torch.tensor([[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]])
+        indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
+        values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
+        self.run_test(ScatterModel(), input=(input, indices, values))
+
+    # enable test for opset 11 when ScatterElements is supported in ORT
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfUnsupportedOpsetVersion([11])
+    def test_scatter_add(self):
+        class ScatterModel(torch.nn.Module):
+            def forward(self, input, indices, values):
+                return input.scatter_add(1, indices, values)
+
+        input = torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
+        values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
+        self.run_test(ScatterModel(), input=(input, indices, values))
+
+    # enable test for opset 11 when GatherElements is supported in ORT
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfUnsupportedOpsetVersion([11])
+    def test_gather(self):
+        class GatherModel(torch.nn.Module):
+            def forward(self, input, indices):
+                return input.gather(1, indices)
+
+        input = torch.tensor([[1., 2., 3.], [4., 5., 6.], [7., 8., 9.]])
+        indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
+        self.run_test(GatherModel(), input=(input, indices))
+
     def test_multinomial(self):
         class Multinomial(torch.nn.Module):
             def forward(self, weight):
@@ -555,6 +603,63 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(4, 4, requires_grad=True)
         self.run_test(ReduceLogSumExpModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_lstm(self):
+        model = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
+        input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
+        h0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
+        c0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
+        self.run_test(model, (input, (h0, c0)))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_lstm_default_init_state(self):
+        model = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
+        input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
+        self.run_test(model, input)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_lstm_fixed_batch_size(self):
+        class LSTMModel(torch.nn.Module):
+            def __init__(self):
+                super(LSTMModel, self).__init__()
+                self.lstm = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
+
+            def forward(self, input):
+                batch_size = input.size()[1]
+                h0_np = np.ones([1, batch_size, RNN_HIDDEN_SIZE]).astype(np.float32)
+                c0_np = np.ones([1, batch_size, RNN_HIDDEN_SIZE]).astype(np.float32)
+                h0 = torch.from_numpy(h0_np)
+                c0 = torch.from_numpy(c0_np)
+                return self.lstm(input, (h0, c0))
+
+        input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
+        # verify with different input of same batch size
+        input2 = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
+        self.run_test(LSTMModel(), input, fixed_batch_size=True, test_with_inputs=[input2])
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_lstm_post_fix_init_state(self):
+        class LSTMModel(torch.nn.Module):
+            def __init__(self):
+                super(LSTMModel, self).__init__()
+                self.lstm = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE,
+                                          1, bidirectional=False)
+
+            def forward(self, input):
+                batch_size = input.size()[1]
+                h0_np = np.ones([1, batch_size, RNN_HIDDEN_SIZE]).astype(np.float32)
+                c0_np = np.ones([1, batch_size, RNN_HIDDEN_SIZE]).astype(np.float32)
+                h0 = torch.from_numpy(h0_np)
+                c0 = torch.from_numpy(c0_np)
+                return self.lstm(input, (h0, c0))
+
+        model = LSTMModel()
+        input = torch.randn(RNN_SEQUENCE_LENGTH, 1, RNN_INPUT_SIZE)
+        # verify with different input of different batch size
+        input2 = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
+        self.run_test(model, input, dynamic_axes={'input' : {0 : 'seq', 1 : 'batch'}},
+                      test_with_inputs=[input2])
 
     def test_lstm_constant_folding(self):
         class LstmNet(torch.nn.Module):
@@ -862,20 +967,19 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.ones(2, 3, dtype=torch.float32)
         self.run_test(ComparisonModel(), (x, y))
 
-        # TODO: re-enable the two tests after https://github.com/pytorch/pytorch/issues/26328 is resolved.
         class MatMulModel(torch.nn.Module):
             def forward(self, x):
                 return (torch.mm(x, x) + x + torch.mm(x, x) + x)
 
         x = torch.ones(3, 3)
-        # self.run_test(MatMulModel(), x)
+        self.run_test(MatMulModel(), x)
 
         class AddMMModel(torch.nn.Module):
             def forward(self, x):
                 return torch.mm(x, x) + x
 
         x = torch.ones(3, 3)
-        # self.run_test(AddMMModel(), x)
+        self.run_test(AddMMModel(), x)
 
         class FullModel(torch.nn.Module):
             # add is used for exporting full

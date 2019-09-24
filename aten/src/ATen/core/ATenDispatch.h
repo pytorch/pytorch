@@ -64,7 +64,8 @@ namespace detail {
     }
   };
 
-  // NB: No universal forwarding
+  // NB: take by const reference (Don't do universal forwarding here! You
+  // don't want to move into this function!)
   template <typename... Args>
   TensorTypeSet multi_dispatch_tensor_type_set(const Args&... args) {
     return MultiDispatchTensorTypeSet().apply(args...).ts;
@@ -77,13 +78,18 @@ using FallbackBoxedFunction = void(const char* schema, torch::jit::Stack*);
 template <typename T>
 using not_ok_to_box =
   c10::guts::disjunction<
-    c10::guts::negation<std::is_constructible<IValue, T>>,
+    c10::guts::negation<
+      c10::guts::disjunction<
+        std::is_constructible<IValue, T>,
+        // TensorOptions are not directly constructible into IValue,
+        // but torch::jit::push knows how to handle them
+        std::is_same<TensorOptions, T>
+      >>,
     // some constructors are templated (and therefore pass
     // is_constructible), but do not actually work with all
     // template arguments, so we must blacklist them explicitly
     // TODO: The correct fix is to sfinae based on is_constructible of T
-    std::is_same<optional<ArrayRef<Dimname>>, T>,
-    std::is_same<optional<ScalarType>, T>
+    std::is_same<optional<ArrayRef<Dimname>>, T>
   >;
 
 template <class Result, class... Args>
@@ -91,6 +97,7 @@ using supports_boxed_fallback =
   c10::guts::negation<c10::guts::disjunction<
     std::is_lvalue_reference<Result>,
     not_ok_to_box<Result>,
+    std::is_same<IntArrayRef, Result>,
     not_ok_to_box<guts::decay_t<Args>>...
   >>;
 
@@ -183,6 +190,7 @@ Result callBoxedFallback(const char* schema, const FallbackBoxedFunction* boxed_
   torch::jit::Stack stack;
   torch::jit::push(stack, std::forward<Args>(args)...);
   boxed_fallback_fn(schema, &stack);
+  TORCH_INTERNAL_ASSERT(stack.size() == 1);
   return torch::jit::pop(stack).to<Result>();
 }
 
@@ -205,19 +213,21 @@ Result ATenOpTable::callUnboxed(Args... args) const {
     return (*unboxed_fn)(std::forward<Args>(args)...);
   }
 
-  // We need to do a if statement on box fallback support AS WELL
-  // as SFINAE.
-  //    - If statement: because some functions return void, and so
-  //    we cannot easily call a helper function and the conditionally
-  //    return.
-  //    - SFINAE: our template gadget doesn't work on all types,
-  //    we must not typecheck code if it does not work
+  // The supports_boxed_fallback condition test, and the SFINAE on
+  // callBoxedFallback, do the same thing.  But we perform this (compile-time)
+  // test twice so that we can take advantage of the fact that return
+  // func_returns_void() is OK.  If we eliminated this condition in exchange
+  // for having callBoxedFallback return an optional, we can't conveniently
+  // handle the Result=void case anymore.
+  //
+  // (The SFINAE in callBoxedFallback, of course, is necessary to
+  // prevent us from attempting to typecheck code that won't typecheck.)
   auto* boxed_fallback_fn = globalATenDispatch().getFallbackBoxedOp(tid);
   if (C10_UNLIKELY(boxed_fallback_fn)) {
     if (supports_boxed_fallback<Result, Args...>::value) {
       return callBoxedFallback<Result, Args...>(schema_.c_str(), boxed_fallback_fn, std::forward<Args>(args)...);
     } else {
-      TORCH_INTERNAL_ASSERT(0, schema_, " does not support boxed fallback, but boxed fallback for ", tid, "was available");
+      TORCH_INTERNAL_ASSERT(0, schema_, " does not support boxed fallback, but boxed fallback for ", tid, " was available");
     }
   }
 
