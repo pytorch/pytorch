@@ -230,6 +230,11 @@ def unscale(self,
         current_scale = torch.full((1,), current_scale, dtype=torch.float32, device="cuda")
 
     # Eventually, we'd like this to become a multi-tensor apply call dispatched via NestedTensor.
+    # In the meantime, compute the reciprocal of the current scale to use for all grads.
+    # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
+    # These ops are cheap and only need to be done once for all the params.
+    rscale = current_scale.double().reciprocal().float()
+
     for group in self.param_groups:
         for param in group["params"]:
             if param.grad is not None:
@@ -237,7 +242,7 @@ def unscale(self,
                     raise ValueError("Attempting to unscale FP16 gradients.  If you want to check for infs/nans  "
                                      "without unscaling, use optimizer.check_infs() instead.")
                 else:
-                    torch._amp_unscale_inf_check_(param.grad, current_scale, found_inf)
+                    torch._amp_unscale_inf_check_(param.grad, rscale, found_inf)
 
     if scale_scheduler is None:
         next_recommended_scale = _next_recommended_scale(current_scale, found_inf,

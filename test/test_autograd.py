@@ -3253,7 +3253,7 @@ class TestAutograd(TestCase):
     def _create_scaling_case(self):
         mod_control, mod_scaling, opt_control, opt_scaling, S = self._create_scaling_models_optimizers_S()
 
-        # There's no need to use 2**24 for functional correctness testing.
+        # There's no need to use the default initial scale value of 2**24 for functional correctness testing.
         S.fill_(1024.)
 
         data = [(torch.randn((8, 8), device="cuda"), torch.randn((8, 8), device="cuda")),
