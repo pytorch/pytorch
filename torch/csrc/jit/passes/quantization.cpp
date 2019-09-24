@@ -35,6 +35,7 @@ void findValuesInPattern(
   }
 }
 
+// TODO: move into ObserveHelper
 void addIntermediateValuesToSkipObserver(
     const script::Module& module,
     const std::string& method_name,
@@ -172,16 +173,38 @@ Node* createIntReprNode(Value* v, Graph* g) {
   return intrepr;
 }
 
+class InsertObserversHelper {
+ public:
+  InsertObserversHelper(const ModuleQConfigMap& map) : module_qconfig_map_(map) {}
+  void insertObservers(script::Module& module, const std::string& method_name);
+
+ private:
+  Node* insertObserverFor(
+      Value* v,
+      Graph* g,
+      script::Module& module,
+      const QConfig& qconfig);
+  void propagateWeightValues(Node* n, std::shared_ptr<Graph>& graph);
+
+  const ModuleQConfigMap& module_qconfig_map_;
+  // Values we want to skip observing, used to skip values in
+  // the middle of the ops that are supposed to be fused, e.g.
+  // the output value of conv in the conv - relu pattern
+  std::unordered_set<Value*> values_to_skip_;
+  // Values that are the output of GetAttr[name="weight"] and they
+  // will be propagated through the function call hierarchy
+  std::unordered_set<Value*> weight_values_;
+};
+
 // Clone observer module and add it to the original module,
 // and insert a call to observer forward function
-Node* insertObserver(
+Node* InsertObserversHelper::insertObserverFor(
     Value* v,
     Graph* g,
     script::Module& module,
-    const QConfig& qconfig,
-    const std::unordered_set<Value*>& weight_values) {
+    const QConfig& qconfig) {
   script::Module observer_module;
-  if (weight_values.count(v)) {
+  if (weight_values_.count(v)) {
     observer_module = std::get<1>(qconfig);
   } else {
     observer_module = std::get<0>(qconfig);
@@ -235,24 +258,20 @@ void fillQConfigMap(
   }
 }
 
-void propagateWeightValues(
+void InsertObserversHelper::propagateWeightValues(
     Node* n,
-    std::shared_ptr<Graph>& graph,
-    std::unordered_set<Value*>& weight_values) {
+    std::shared_ptr<Graph>& graph) {
   for (auto i = 1; i < n->inputs().size(); ++i) {
-    if (weight_values.count(n->inputs()[i])) {
-      weight_values.emplace(graph->inputs()[i]);
+    if (weight_values_.count(n->inputs()[i])) {
+      weight_values_.emplace(graph->inputs()[i]);
     }
   }
 }
 
-void InsertObserversImpl(
+void InsertObserversHelper::insertObservers(
     script::Module& module,
-    const std::string& method_name,
-    const ModuleQConfigMap& module_qconfig_map,
-    std::unordered_set<Value*>& values_to_skip,
-    std::unordered_set<Value*>& weight_values) {
-  if (!module_qconfig_map.count(module.module_object())) {
+    const std::string& method_name) {
+  if (!module_qconfig_map_.count(module.module_object())) {
     // the module is added by us, e.g.: observer module
     return;
   }
@@ -260,7 +279,7 @@ void InsertObserversImpl(
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   ConstantPropagation(graph);
-  addIntermediateValuesToSkipObserver(module, method_name, values_to_skip);
+  addIntermediateValuesToSkipObserver(module, method_name, values_to_skip_);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -280,11 +299,11 @@ void InsertObserversImpl(
   // observing a potentially mutated value due to some in-place operation
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
-    if (!values_to_skip.count(v) && valueNeedsToBeQuantized(v)) {
-      auto qconfig = module_qconfig_map.at(module.module_object());
+    if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
+      auto qconfig = module_qconfig_map_.at(module.module_object());
       if (qconfig) {
-        auto observer_node = insertObserver(
-            v, v->owningGraph(), module, qconfig.value(), weight_values);
+        auto observer_node =
+            insertObserverFor(v, v->owningGraph(), module, qconfig.value());
         if (observer_node) {
           observer_for_input.emplace(observer_node);
         }
@@ -305,12 +324,12 @@ void InsertObserversImpl(
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
-        if (!values_to_skip.count(v) && valueNeedsToBeQuantized(v)) {
+        if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
         }
         if (v->node()->kind() == prim::GetAttr &&
             v->node()->s(attr::name) == "weight") {
-          weight_values.emplace(v);
+          weight_values_.emplace(v);
         }
         if (v->node()->kind() == prim::CallMethod) {
           // If we find a call to a method of a child module,
@@ -336,18 +355,10 @@ void InsertObserversImpl(
             callee_module = module;
           }
           auto method_graph = callee_module.get_method(module_method_name).graph();
-          propagateWeightValues(
-              v->node(),
-              method_graph,
-              weight_values);
+          propagateWeightValues(v->node(), method_graph);
           // Recursively insert observer for the forward function of child
           // module
-          InsertObserversImpl(
-              callee_module,
-              module_method_name,
-              module_qconfig_map,
-              values_to_skip,
-              weight_values);
+          insertObservers(callee_module, module_method_name);
         }
       }
 
@@ -364,11 +375,10 @@ void InsertObserversImpl(
         v->node()->s(c10::attr::name) == "bias") {
       continue;
     }
-    auto qconfig = module_qconfig_map.at(module.module_object());
+    auto qconfig = module_qconfig_map_.at(module.module_object());
     // Skip inserting observer if no qconfig is specified
     if (qconfig) {
-      insertObserver(
-          v, v->owningGraph(), module, qconfig.value(), weight_values);
+      insertObserverFor(v, v->owningGraph(), module, qconfig.value());
     }
   }
 }
@@ -610,10 +620,8 @@ TORCH_API script::Module InsertObservers(
   script::Module module = inplace ? input_module : input_module.clone();
   ModuleQConfigMap module_qconfig_map;
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
-  std::unordered_set<Value*> values_to_skip;
-  std::unordered_set<Value*> weight_values;
-  InsertObserversImpl(
-      module, method_name, module_qconfig_map, values_to_skip, weight_values);
+  InsertObserversHelper helper(module_qconfig_map);
+  helper.insertObservers(module, method_name);
   return module;
 }
 
