@@ -320,7 +320,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 # this output will be None, since we are not doing any tracing but rather
 # directly extracting the graph.
 def _export(model, args, f, export_params=True, verbose=False, training=False,
-            input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
+            input_names=None, output_names=None, operator_export_type=None,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
             opset_version=None, _retain_param_name=False, do_constant_folding=False,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None, fixed_batch_size=False):
@@ -337,6 +337,11 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         from torch.onnx.symbolic_helper import _set_operator_export_type
         if opset_version is None:
             opset_version = _default_onnx_opset_version
+        if not operator_export_type:
+            if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
+                operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
+            else:
+                operator_export_type = OperatorExportTypes.ONNX
         _set_opset_version(opset_version)
         _set_operator_export_type(operator_export_type)
         val_keep_init_as_ip = True if keep_initializers_as_inputs is None else keep_initializers_as_inputs
