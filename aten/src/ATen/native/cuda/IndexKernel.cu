@@ -18,6 +18,27 @@ static OffsetCalculator<N> index_make_offset_calculator(const TensorIterator& it
   return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
 }
 
+__device__ bool __g_assert(c10::cuda::CUDAAssert* assert_state, bool condition) {
+  if (assert_state->error) {
+      return true;    // previous
+  }
+
+  if (!condition) { 
+    if (atomicCAS(&assert_state->error, 0, 1) == 0) {
+        c10::cuda::CUDAAssertDetailIndexKernel* blub = reinterpret_cast<c10::cuda::CUDAAssertDetailIndexKernel*>(assert_state->details);
+        blub->index = 123;  // write some dummy details
+    }
+    return true;
+  }
+
+  return false;
+}
+
+#define assert_leave(assert_state, condition) \
+  if (__g_assert(assert_state, condition)) { \
+      return; \
+  }
+
 template <typename func_t>
 void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
   int num_indices = index_size.size();
@@ -48,6 +69,9 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   char* in_ptr = (char*)iter.data_ptr(1);
 
   auto offset_calc = index_make_offset_calculator<3>(iter);
+  auto stream = at::cuda::getCurrentCUDAStream();
+  auto assert_state = stream.assert_state();
+
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int idx) {
     auto offsets = offset_calc.get(idx);
     char* out_data = out_ptr + offsets[0];
@@ -57,7 +81,25 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
     #pragma unroll
     for (int i = 0; i < num_indices; i++) {
       int64_t index = *(int64_t*)(index_ptrs[i] + offsets[2]);
-      assert(index >= -sizes[i] && index < sizes[i] && "index out of bounds");
+
+      if (__g_assert(assert_state, index >= -sizes[i] && index < sizes[i] && "index out of bounds")) {
+        return;
+      }
+
+      //assert(index >= -sizes[i] && index < sizes[i] && "index out of bounds");
+      /*if (index < -sizes[i] || index >= sizes[i]) {
+        if (atomicExch(&ds->err, 1) == 0) {
+          // Only the first thread that encounters an error records the set of values
+          // for the error message.
+          ds->index = index;
+          ds->axis = i;
+          ds->size = sizes[i];
+          __threadfence_system();
+          assert(0);
+        }
+        return;
+      }*/
+      
       if (index < 0) {
         index += sizes[i];
       }

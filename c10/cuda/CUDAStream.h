@@ -7,6 +7,7 @@
 
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAMacros.h>
+#include <c10/cuda/CUDAAssert.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/core/Stream.h>
@@ -163,6 +164,8 @@ public:
       AT_ERROR("cuDeviceGetStreamPriorityRange with HIP is not supported");
     #endif
   }
+
+  CUDAAssert* assert_state() const;
 
   // Deleted for now; use CUDAEvent::block instead
   // void synchronize_with(const CUDAEvent& event) const;
