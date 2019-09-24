@@ -15,7 +15,7 @@ void testSchemaMatching() {
     RegisterOperators reg({
         Operator(
             "aten::test_vartype(t[] a, t b) -> (t)",
-            [](const Node* node) {
+            [](const Node* node) -> Operation {
               return [](Stack& stack) {
                 c10::List<double> list;
                 double a;
@@ -53,7 +53,7 @@ void testSchemaMatching() {
     RegisterOperators reg({
         Operator(
             "aten::test_vartype2(t a, t[] b) -> (t[])",
-            [](const Node* node) {
+            [](const Node* node) -> Operation {
               return [](Stack& stack) {
                 double a;
                 c10::List<double> list;
