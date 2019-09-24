@@ -67,11 +67,14 @@ inline std::string parseStringLiteral(
       case 't':
         c = '\t';
         break;
-      case 'h':
+      case 'x':
         throw ErrorReport(range) << "unsupported hex specifier";
+      case 'u':
+      case 'U':
+        throw ErrorReport(range) << "unsupported unicode specifier";
       default:
-        // \0NN
-        if (auto v = parseOctal(str, pos + 1)) {
+        // octal value in format \nnn, n is [0-7]
+        if (auto v = parseOctal(ret_str, pos)) {
           to_erase = 4;
           c = *v;
         } else {

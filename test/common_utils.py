@@ -18,6 +18,7 @@ import warnings
 import random
 import contextlib
 import socket
+import subprocess
 import time
 from collections import OrderedDict
 from contextlib import contextmanager
@@ -42,13 +43,16 @@ import torch.backends.mkl
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
-torch.backends.cudnn.disable_global_flags()
+torch.backends.disable_global_flags()
 
 
 parser = argparse.ArgumentParser(add_help=False)
+parser.add_argument('--subprocess', action='store_true',
+                    help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 args, remaining = parser.parse_known_args()
+TEST_IN_SUBPROCESS = args.subprocess
 SEED = args.seed
 if not expecttest.ACCEPT:
     expecttest.ACCEPT = args.accept
@@ -56,13 +60,67 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 
+def shell(command, cwd=None):
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # The following cool snippet is copied from Py3 core library subprocess.call
+    # only the with
+    #   1. `except KeyboardInterrupt` block added for SIGINT handling.
+    #   2. In Py2, subprocess.Popen doesn't return a context manager, so we do
+    #      `p.wait()` in a `final` block for the code to be portable.
+    #
+    # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
+    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
+    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd)
+    try:
+        return p.wait()
+    except KeyboardInterrupt:
+        # Give `p` a chance to handle KeyboardInterrupt. Without this,
+        # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
+        exit_status = p.wait(timeout=5)
+        if exit_status is not None:
+            return exit_status
+        else:
+            p.kill()
+            raise
+    except:  # noqa E722, copied from python core library
+        p.kill()
+        raise
+    finally:
+        # Always call p.wait() to ensure exit
+        p.wait()
+
+
 def run_tests(argv=UNITTEST_ARGS):
-    unittest.main(argv=argv)
+    if TEST_IN_SUBPROCESS:
+        suite = unittest.TestLoader().loadTestsFromModule(__main__)
+        test_cases = []
+
+        def add_to_test_cases(suite_or_case):
+            if isinstance(suite_or_case, unittest.TestCase):
+                test_cases.append(suite_or_case)
+            else:
+                for element in suite_or_case:
+                    add_to_test_cases(element)
+
+        add_to_test_cases(suite)
+        failed_tests = []
+        for case in test_cases:
+            test_case_full_name = case.id().split('.', 1)[1]
+            exitcode = shell([sys.executable] + argv + [test_case_full_name])
+            if exitcode != 0:
+                failed_tests.append(test_case_full_name)
+
+        assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
+            len(failed_tests), '\n\t'.join(failed_tests))
+    else:
+        unittest.main(argv=argv)
 
 PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
 
 IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
@@ -124,9 +182,10 @@ TEST_LIBROSA = _check_module_exists('librosa') and PY3
 # Python 2.7 doesn't have spawn
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1' or sys.version_info[0] == 2
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
+TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
-
+TEST_WITH_QNNPACK = os.getenv('PYTORCH_TEST_WITH_QNNPACK', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -148,6 +207,13 @@ def skipIfRocm(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
+
+
+
+def _test_function(fn, device):
+    def run_test_function(self):
+        return fn(self, device)
+    return run_test_function
 
 
 def skipIfNoLapack(fn):
@@ -348,6 +414,65 @@ class CudaMemoryLeakCheck():
                     warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
                         self.name, after - before, i), RuntimeWarning)
 
+#  "min_satisfying_examples" setting has been deprecated in hypythesis
+#  3.56.0 and removed in hypothesis 4.x
+try:
+    import hypothesis
+    if hypothesis.version.__version_info__ >= (3, 56, 0):
+        hypothesis.settings.register_profile(
+            "pytorch_ci",
+            hypothesis.settings(
+                derandomize=True,
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=100))
+        hypothesis.settings.register_profile(
+            "dev",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=10,
+                verbosity=hypothesis.Verbosity.verbose))
+        hypothesis.settings.register_profile(
+            "debug",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=1000,
+                verbosity=hypothesis.Verbosity.verbose))
+    else:
+        hypothesis.settings.register_profile(
+            "pytorch_ci",
+            hypothesis.settings(
+                derandomize=True,
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=100,
+                min_satisfying_examples=1))
+        hypothesis.settings.register_profile(
+            "dev",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=10,
+                min_satisfying_examples=1,
+                verbosity=hypothesis.Verbosity.verbose))
+        hypothesis.settings.register_profile(
+            "debug",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=1000,
+                min_satisfying_examples=1,
+                verbosity=hypothesis.Verbosity.verbose))
+
+    hypothesis.settings.load_profile(
+        "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
+                                                     'dev')
+    )
+except ImportError:
+    print('Fail to import hypothesis in common_utils, tests are not derandomized')
+
 class TestCase(expecttest.TestCase):
     precision = 1e-5
     maxDiff = None
@@ -366,7 +491,7 @@ class TestCase(expecttest.TestCase):
 
         # Wraps the tested method if we should enforce non default CUDA stream.
         self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
-        if self._do_cuda_non_default_stream and not IS_WINDOWS:
+        if self._do_cuda_non_default_stream and not IS_WINDOWS and not TEST_WITH_ROCM:
             self.wrap_with_cuda_policy(method_name, self.enforceNonDefaultStream)
 
     def assertLeaksNoCudaTensors(self, name=None):
@@ -495,13 +620,17 @@ class TestCase(expecttest.TestCase):
             prec = self.precision
 
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
-            self.assertEqual(x.item(), y, prec, message, allow_inf)
+            self.assertEqual(x.item(), y, prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
-            self.assertEqual(x, y.item(), prec, message, allow_inf)
+            self.assertEqual(x, y.item(), prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(x, torch.Tensor) and isinstance(y, numpy.bool_):
-            self.assertEqual(x.item(), y, prec, message, allow_inf)
+            self.assertEqual(x.item(), y, prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(y, torch.Tensor) and isinstance(x, numpy.bool_):
-            self.assertEqual(x, y.item(), prec, message, allow_inf)
+            self.assertEqual(x, y.item(), prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
@@ -545,10 +674,26 @@ class TestCase(expecttest.TestCase):
                 assertTensorsEqual(x._indices(), y._indices())
                 assertTensorsEqual(x._values(), y._values())
             elif x.is_quantized and y.is_quantized:
-                self.assertEqual(x.qscheme(), y.qscheme())
-                self.assertEqual(x.q_scale(), y.q_scale())
-                self.assertEqual(x.q_zero_point(), y.q_zero_point())
-                self.assertEqual(x.int_repr(), y.int_repr())
+                self.assertEqual(x.qscheme(), y.qscheme(), prec=prec,
+                                 message=message, allow_inf=allow_inf)
+                if x.qscheme() == torch.per_tensor_affine:
+                    self.assertEqual(x.q_scale(), y.q_scale(), prec=prec,
+                                     message=message, allow_inf=allow_inf)
+                    self.assertEqual(x.q_zero_point(), y.q_zero_point(),
+                                     prec=prec, message=message,
+                                     allow_inf=allow_inf)
+                elif x.qscheme() == torch.per_channel_affine:
+                    self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), prec=prec,
+                                     message=message, allow_inf=allow_inf)
+                    self.assertEqual(x.q_per_channel_zero_points(), y.q_per_channel_zero_points(),
+                                     prec=prec, message=message,
+                                     allow_inf=allow_inf)
+                    self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
+                                     prec=prec, message=message)
+                self.assertEqual(x.dtype, y.dtype)
+                self.assertEqual(x.int_repr().to(torch.int32),
+                                 y.int_repr().to(torch.int32), prec=prec,
+                                 message=message, allow_inf=allow_inf)
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
@@ -557,15 +702,21 @@ class TestCase(expecttest.TestCase):
             super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, dict) and isinstance(y, dict):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
-                self.assertEqual(x.items(), y.items())
+                self.assertEqual(x.items(), y.items(), prec=prec,
+                                 message=message, allow_inf=allow_inf)
             else:
-                self.assertEqual(set(x.keys()), set(y.keys()))
+                self.assertEqual(set(x.keys()), set(y.keys()), prec=prec,
+                                 message=message, allow_inf=allow_inf)
                 key_list = list(x.keys())
-                self.assertEqual([x[k] for k in key_list], [y[k] for k in key_list])
+                self.assertEqual([x[k] for k in key_list],
+                                 [y[k] for k in key_list],
+                                 prec=prec, message=message,
+                                 allow_inf=allow_inf)
         elif is_iterable(x) and is_iterable(y):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
-                self.assertEqual(x_, y_, prec, message)
+                self.assertEqual(x_, y_, prec=prec, message=message,
+                                 allow_inf=allow_inf)
         elif isinstance(x, bool) and isinstance(y, bool):
             super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):
@@ -604,7 +755,9 @@ class TestCase(expecttest.TestCase):
                 if diff.is_signed():
                     diff = diff.abs()
                 diff[nan_mask] = 0
-                max_err = diff.max()
+                # Use `item()` to work around:
+                # https://github.com/pytorch/pytorch/issues/22301
+                max_err = diff.max().item()
                 self.assertGreaterEqual(max_err, prec, message)
         elif type(x) == str and type(y) == str:
             super(TestCase, self).assertNotEqual(x, y)
@@ -876,51 +1029,78 @@ def random_square_matrix_of_rank(l, rank):
 
 def random_symmetric_matrix(l, *batches):
     A = torch.randn(*(batches + (l, l)))
-    for i in range(l):
-        for j in range(i):
-            A[..., i, j] = A[..., j, i]
+    A = (A + A.transpose(-2, -1)).div_(2)
     return A
 
 
-def random_symmetric_psd_matrix(l):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1))
-
-
-def random_symmetric_pd_matrix(l, *batches):
+def random_symmetric_psd_matrix(l, *batches):
     A = torch.randn(*(batches + (l, l)))
-    return A.matmul(A.transpose(-2, -1)) + torch.eye(l) * 1e-5
+    return torch.matmul(A, A.transpose(-2, -1))
+
+
+def random_symmetric_pd_matrix(matrix_size, *batch_dims):
+    A = torch.randn(*(batch_dims + (matrix_size, matrix_size)))
+    return torch.matmul(A, A.transpose(-2, -1)) + torch.eye(matrix_size) * 1e-5
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     u, s, v = A.svd()
-    s[s < min_singular_value] = min_singular_value
-    A = u.mm(torch.diag(s)).mm(v.t())
-    det = A.det().item()
+    s.clamp_(min=min_singular_value)
+    A = torch.matmul(u, torch.matmul(torch.diag_embed(s), v.transpose(-2, -1)))
+    det = A.det()
     if sign is not None:
-        if (det < 0) ^ (sign < 0):
-            A[0, :].neg_()
+        if A.dim() == 2:
+            det = det.item()
+            if (det < 0) ^ (sign < 0):
+                A[0, :].neg_()
+        else:
+            cond = ((det < 0) ^ (sign < 0)).nonzero()
+            if cond.size(0) > 0:
+                for i in range(cond.size(0)):
+                    A[list(cond[i])][0, :].neg_()
     return A
 
 
-def random_fullrank_matrix_distinct_singular_value(l, *batches, **kwargs):
+def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims, **kwargs):
     silent = kwargs.get("silent", False)
     if silent and not torch._C.has_lapack:
-        return torch.ones(l, l)
+        return torch.ones(matrix_size, matrix_size)
 
-    if len(batches) == 0:
-        A = torch.randn(l, l)
-        u, _, v = A.svd()
-        s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
-        return u.mm(torch.diag(s)).mm(v.t())
-    else:
-        all_matrices = []
-        for _ in range(0, torch.prod(torch.as_tensor(batches)).item()):
-            A = torch.randn(l, l)
-            u, _, v = A.svd()
-            s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
-            all_matrices.append(u.mm(torch.diag(s)).mm(v.t()))
-        return torch.stack(all_matrices).reshape(*(batches + (l, l)))
+    A = torch.randn(batch_dims + (matrix_size, matrix_size))
+    u, _, v = A.svd()
+    s = torch.arange(1., matrix_size + 1).mul_(1.0 / (matrix_size + 1)).diag()
+    return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).matmul(v.transpose(-2, -1)))
+
+
+def lu_solve_test_helper(self, A_dims, b_dims, cast, pivot):
+    b = cast(torch.randn(*b_dims))
+    A = cast(random_fullrank_matrix_distinct_singular_value(*A_dims))
+    LU_data, LU_pivots, info = torch.lu(A, get_infos=True, pivot=pivot)
+    self.assertEqual(info, torch.zeros_like(info))
+    return b, A, LU_data, LU_pivots
+
+
+def cholesky_solve_test_helper(A_dims, b_dims, cast, upper):
+    b = cast(torch.randn(*b_dims))
+    A = cast(random_symmetric_pd_matrix(*A_dims))
+    L = torch.cholesky(A, upper=upper)
+    return b, A, L
+
+
+def triangular_solve_test_helper(A_dims, b_dims, cast, upper, unitriangular):
+    triangle_function = torch.triu if upper else torch.tril
+    b = cast(torch.randn(*b_dims))
+    A = cast(torch.randn(*A_dims))
+    A_triangular = triangle_function(A)
+    if unitriangular:
+        A_triangular.diagonal(dim1=-2, dim2=-1).fill_(1.)
+    return b, A_triangular
+
+
+def solve_test_helper(A_dims, b_dims, cast):
+    b = cast(torch.randn(*b_dims))
+    A = cast(random_fullrank_matrix_distinct_singular_value(*A_dims))
+    return b, A
 
 
 def brute_pdist(inp, p=2):

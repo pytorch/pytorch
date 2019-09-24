@@ -1,7 +1,7 @@
 # ---[ GPU files
 # ------[ cuDNN
 if (USE_CUDNN)
-  file(GLOB tmp *_cudnn.cc)
+  file(GLOB tmp *_cudnn.cc *_cudnn.cu)
   set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
 endif()
 # ------[ general GPU

@@ -24,6 +24,34 @@ class TorchBenchmarkBase(object):
     def __init__(self):
         self.user_given_name = None
         self._jit_forward = None
+        self._pass_count = 0
+        self._num_inputs_require_grads = 0
+
+    def _set_backward_test(self, is_backward):
+        self._is_backward = is_backward
+
+    def auto_set(self):
+        """ This is used to automatically set the require_grad for the backward patch.
+            It is implemented based on two counters. One counter to save the number of 
+            times init has been called. The other counter to save the number of times 
+            this function itself has been called. In the very first time init is called, 
+            this function counts how many inputs require gradient. In each of the 
+            following init calls, this function will return only one true value. 
+            Here is an example: 
+                ...
+                self.v1 = torch.rand(M, N, K, requires_grad=self.auto_set())
+                self.v2 = torch.rand(M, N, K, requires_grad=self.auto_set())
+                ...
+        """
+        if not self._is_backward:
+            return False
+
+        if self._pass_count == 0:
+            self._num_inputs_require_grads += 1
+            return True
+        else: 
+            self._auto_set_counter += 1
+            return (self._pass_count == self._auto_set_counter)
 
     def forward(self):
         pass 

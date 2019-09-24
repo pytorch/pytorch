@@ -22,6 +22,16 @@ void Set<at::Half, CPUContext>(
   Set(0, h.x, (uint16_t*)v, c);
 }
 
+template <>
+void Set<at::BFloat16, CPUContext>(
+    const std::int64_t /* N */,
+    const at::BFloat16 b,
+    at::BFloat16* v,
+    CPUContext* c) {
+  Set(0, b.x, (uint16_t*)v, c);
+}
+
+
 } // namespace math
 
 } // namespace caffe2

@@ -195,6 +195,14 @@ def _tensor_str(self, indent):
     if self.numel() == 0:
         return '[]'
 
+    if torch._C._BUILD_NAMEDTENSOR and self.has_names():
+        # There are two main codepaths (possibly more) that tensor printing goes through:
+        # - tensor data can fit comfortably on screen
+        # - tensor data needs to be summarized
+        # Some of the codepaths don't fully support named tensors, so we send in
+        # an unnamed tensor to the formatting code as a workaround.
+        self = self.rename(None)
+
     summarize = self.numel() > PRINT_OPTS.threshold
     if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
         self = self.float()
@@ -273,11 +281,14 @@ def _str(self):
         suffixes.append('size=' + str(tuple(self.shape)))
         if not has_default_dtype:
             suffixes.append('dtype=' + str(self.dtype))
-        # TODO: change to a call to self.q_scheme() when we add q_scheme method
-        # and uncomment this
-        # suffixes.append('quantization_scheme=' + 'per_tensor_affine')
-        suffixes.append('scale=' + str(self.q_scale()))
-        suffixes.append('zero_point=' + str(self.q_zero_point()))
+        suffixes.append('quantization_scheme=' + str(self.qscheme()))
+        if self.qscheme() == torch.per_tensor_affine or self.qscheme() == torch.per_tensor_symmetric:
+            suffixes.append('scale=' + str(self.q_scale()))
+            suffixes.append('zero_point=' + str(self.q_zero_point()))
+        elif self.qscheme() == torch.per_channel_affine or self.qscheme() == torch.per_channel_symmetric:
+            suffixes.append('scale=' + str(self.q_per_channel_scales()))
+            suffixes.append('zero_point=' + str(self.q_per_channel_zero_points()))
+            suffixes.append('axis=' + str(self.q_per_channel_axis()))
         tensor_str = _tensor_str(self.dequantize(), indent)
     else:
         if self.numel() == 0 and not self.is_sparse:
@@ -309,5 +320,8 @@ def _str(self):
         suffixes.append('grad_fn=<{}>'.format(name))
     elif self.requires_grad:
         suffixes.append('requires_grad=True')
+
+    if torch._C._BUILD_NAMEDTENSOR and self.has_names():
+        suffixes.append('names={}'.format(self.names))
 
     return _add_suffixes(prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse)

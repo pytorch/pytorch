@@ -23,15 +23,13 @@ template<class StorageT>
 struct ListImpl final : public c10::intrusive_ptr_target {
   using list_type = std::vector<StorageT>;
 
-  explicit ListImpl(list_type list_, optional<TypePtr> elementType_)
+  explicit ListImpl(list_type list_, TypePtr elementType_)
   : list(std::move(list_))
-  , elementType(std::move(elementType_))
-  {}
+  , elementType(std::move(elementType_)) {}
 
   list_type list;
 
-  // TODO Right now, this is optional, but we want to make it mandatory for all lists to know their types
-  optional<TypePtr> elementType;
+  TypePtr elementType;
 
   intrusive_ptr<ListImpl> copy() const {
     return make_intrusive<ListImpl>(list, elementType);
@@ -424,6 +422,11 @@ public:
    */
   // TODO Test use_count
   size_t use_count() const;
+
+  TypePtr elementType() const;
+
+  // See [unsafe set type] for why this exists.
+  void unsafeSetElementType(TypePtr t);
 
 private:
   explicit List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);

@@ -45,9 +45,8 @@ std::shared_ptr<Graph> ProfilingGraphExecutorImpl::prepareGraph(
 }
 
 ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
-    const std::shared_ptr<Graph>& graph,
-    bool optimize)
-    : GraphExecutorImplBase(graph, optimize), arg_spec_creator_(*this->graph) {}
+    const std::shared_ptr<Graph>& graph)
+    : GraphExecutorImplBase(graph), arg_spec_creator_(*this->graph) {}
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   if (optimized_plan_) {
@@ -61,7 +60,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   }
 
   if (!pr_->ready()) {
-    std::cout << "running profiling graph\n";
     return *profiling_plan_;
   }
 

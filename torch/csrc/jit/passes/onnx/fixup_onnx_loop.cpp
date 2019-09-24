@@ -29,10 +29,12 @@ Node* InsertCastForCond(Value* cond_val, Graph* graph, Node* consumer_node) {
 
 bool IsCondCastRequired(Value* cond_val) {
   const auto& type = cond_val->type();
-  if (type->isSubclass(TypeKind::DimensionedTensorType)) {
-    return type->expect<DimensionedTensorType>()->scalarType() != c10::kBool;
+  if (auto tt = type->cast<TensorType>()) {
+    if (auto scalar_type = tt->scalarType()) {
+      return *scalar_type != c10::kBool;
+    }
   }
-  return !type->isSubclass(TypeKind::BoolType);
+  return !type->isSubtypeOf(BoolType::get());
 }
 
 void FixupONNXLoops(Block* block) {
@@ -53,7 +55,7 @@ void FixupONNXLoops(Block* block) {
       cond->setType(BoolType::create());
 
       Value* i = sub_block->inputs()[0];
-      i->setType(CompleteTensorType::fromNumberType(IntType::get()));
+      i->setType(TensorType::fromNumberType(IntType::get()));
 
       // add cast to condition input inside the loop.
       Value* next_cond_val = sub_block->outputs()[0];

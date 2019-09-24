@@ -177,14 +177,10 @@ def set_mode(option):
 
 
 def discover_zero_dim_tensor_operations(declaration):
-    def exclude(arg):
-        return arg.get('ignore_check')
-
     def signature(option, i=None, value=None):
         elements = [TYPE_FORMAL_GENERIC.get(arg['type'], arg['type'])
                     if i is None or j != i else value
-                    for j, arg in enumerate(option['arguments'])
-                    if not exclude(arg)]
+                    for j, arg in enumerate(option['arguments'])]
         return '#'.join(elements)
     signature_to_option = {signature(option): option
                            for option in declaration['options']}
@@ -196,8 +192,7 @@ def discover_zero_dim_tensor_operations(declaration):
                 if signature_of_tensor_version in signature_to_option:
                     tensor_version = \
                         signature_to_option[signature_of_tensor_version]
-                    names = [arg['name'] for arg in tensor_version['arguments']
-                             if not exclude(arg)]
+                    names = [arg['name'] for arg in tensor_version['arguments']]
                     tensor_version['zero_dim_dispatch_when_scalar'] = names[i]
                     # print("FOUND "+str(i)   )
                     # print("Scalar Version ===== ")
@@ -205,18 +200,6 @@ def discover_zero_dim_tensor_operations(declaration):
                     # print("Tensor Version ===== ")
                     # print(yaml.dump(tensor_version))
                     # print("SHARED "+names[i])
-
-
-def discover_sparse_tensor_operations(declaration):
-    def exclude(arg):
-        return arg.get('ignore_check')
-
-    def signature(option, i=None, value=None):
-        elements = [TYPE_FORMAL_GENERIC.get(arg['type'], arg['type'])
-                    if i is None or j != i else value
-                    for j, arg in enumerate(option['arguments'])
-                    if not exclude(arg)]
-        return '#'.join(elements)
 
 
 def is_extended_method(option):
@@ -238,10 +221,9 @@ def run(declarations):
             type_to_signature=TYPE_FORMAL_GENERIC,
             remove_self=True)
 
-        common_with_cwrap.sort_by_number_of_options(declaration)
+        common_with_cwrap.sort_by_number_of_args(declaration)
 
         discover_zero_dim_tensor_operations(declaration)
-        discover_sparse_tensor_operations(declaration)
 
         for option in declaration['options']:
             set_mode(option)

@@ -39,9 +39,9 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
 
   // read records through readers
   PyTorchStreamReader reader(&iss);
-  ASSERT_TRUE(reader.hasFile("key1"));
-  ASSERT_TRUE(reader.hasFile("key2"));
-  ASSERT_FALSE(reader.hasFile("key2000"));
+  ASSERT_TRUE(reader.hasRecord("key1"));
+  ASSERT_TRUE(reader.hasRecord("key2"));
+  ASSERT_FALSE(reader.hasRecord("key2000"));
   at::DataPtr data_ptr;
   int64_t size;
   std::tie(data_ptr, size) = reader.getRecord("key1");

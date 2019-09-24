@@ -2,7 +2,7 @@
 #include <torch/csrc/jit/source_range_serialization_impl.h>
 
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/pickle.h>
 
 namespace torch {
 namespace jit {
@@ -71,31 +71,34 @@ c10::IValue SourceRangeSerializer::serialize_source(
   if (serialized_sources.count(s)) {
     return serialized_sources.at(s);
   }
-  std::vector<c10::IValue> elements{
-      s->text(), s->filename(), (int64_t)s->starting_line_no()};
+  std::vector<c10::IValue> elements;
+  if (s == nullptr) {
+    elements = {"", "", 0};
+  } else {
+    elements = {s->text(), s->filename(), (int64_t)s->starting_line_no()};
+  }
   auto serialized = c10::ivalue::Tuple::create(std::move(elements));
   serialized_sources[s] = serialized;
   return serialized;
 }
 
 SourceRangePickler::SourceRangePickler()
-    : p(new Pickler()), srs(new SourceRangeSerializer()) {}
+    : srs(new SourceRangeSerializer()) {}
 
-void SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
-  p->start();
-  p->startTuple();
+std::vector<char> SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
+  std::vector<c10::IValue> ivalues;
   for (const auto& range : ranges) {
     std::vector<c10::IValue> row_elems{(int64_t)range.bytes,
                                        srs->serialize(range.range)};
-    p->addIValue(c10::ivalue::Tuple::create(std::move(row_elems)));
+    ivalues.emplace_back(c10::ivalue::Tuple::create(std::move(row_elems)));
   }
-  p->endTuple();
-  p->finish();
+  std::vector<at::Tensor> table;
+  auto ivalue = c10::ivalue::Tuple::create(std::move(ivalues));
+  auto result = jit::pickle(ivalue, &table);
+  TORCH_CHECK(table.size() == 0, "Expected 0 tensors to be written");
+  return result;
 }
 
-const std::vector<char>& SourceRangePickler::get_data() {
-  return p->stack();
-}
 
 ConcreteSourceRangeUnpickler::ConcreteSourceRangeUnpickler(
     at::DataPtr&& data,
@@ -110,8 +113,9 @@ void ConcreteSourceRangeUnpickler::unpickle() {
     return;
   }
 
-  Unpickler up(data.get(), size, nullptr);
-  auto ivalues = up.parse_ivalue_list();
+  auto ivalues = jit::unpickle(reinterpret_cast<const char*>(data.get()), size)
+                     .toTuple()
+                     ->elements();
 
   unpickled_records = std::make_shared<SourceRangeRecords>();
   for (auto& val : ivalues) {
@@ -126,7 +130,7 @@ c10::optional<SourceRange> ConcreteSourceRangeUnpickler::
     findSourceRangeThatGenerated(const SourceRange& range) {
   unpickle();
 
-  auto query = TaggedRange(range.start(), SourceRange{""});
+  auto query = TaggedRange(range.start(), SourceRange{});
   auto entry = std::upper_bound(
       unpickled_records->begin(),
       unpickled_records->end(),

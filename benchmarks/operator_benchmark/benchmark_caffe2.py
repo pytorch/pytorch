@@ -25,6 +25,11 @@ class Caffe2BenchmarkBase(object):
     def __init__(self):
         self.args = {}
         self.user_provided_name = None
+        self._num_inputs_require_grads = 0
+        self._pass_count = 0
+
+    def _set_backward_test(self, is_backward):
+        pass
 
     def _device_option(self, device):
         """ This method is used to set device option.

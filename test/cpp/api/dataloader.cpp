@@ -2225,3 +2225,84 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
     }
   }
 }
+
+TEST(DataLoaderTest, CustomPreprocessPolicy) {
+  const size_t chunk_size = 5;
+  const size_t batch_size = 10;
+
+  struct D : public datasets::ChunkDataReader<int> {
+   public:
+    using BatchType = datasets::ChunkDataReader<int>::ChunkType;
+    D(size_t chunk_count) : chunk_count_(chunk_count) {}
+
+    BatchType read_chunk(size_t chunk_index) override {
+      BatchType batch_data(chunk_size);
+      auto rand_gen = []() { return std::rand() % 100; };
+      std::generate(batch_data.begin(), batch_data.end(), rand_gen);
+      return batch_data;
+    }
+
+    size_t chunk_count() override {
+      return chunk_count_;
+    };
+
+    void reset() override{};
+    size_t chunk_count_;
+  };
+
+  // custom preprocessing policy - sort the data ascendingly
+  auto sorting_policy = [](std::vector<int>& raw_batch_data) {
+    std::sort(raw_batch_data.begin(), raw_batch_data.end());
+  };
+  std::function<void(std::vector<int>&)> policy_function =
+      sorting_policy;
+
+  const size_t prefetch_count = 1;
+  const size_t cache_size = 10;
+  const size_t cross_chunk_shuffle_counts[] = {1, 2};
+  const size_t chunk_counts[] = {3, 4};
+
+  samplers::SequentialSampler chunk_sampler(0);
+
+  for (auto chunk_count : chunk_counts) {
+    for (auto cross_chunk_shuffle_count : cross_chunk_shuffle_counts) {
+      D data_reader(chunk_count);
+
+      datasets::SharedBatchDataset<datasets::ChunkDataset<
+          D,
+          samplers::SequentialSampler,
+          samplers::SequentialSampler>>
+          dataset = datasets::make_shared_dataset<datasets::ChunkDataset<
+              D,
+              samplers::SequentialSampler,
+              samplers::SequentialSampler>>(
+              data_reader,
+              chunk_sampler,
+              chunk_sampler,
+              datasets::ChunkDatasetOptions(
+                  prefetch_count,
+                  batch_size,
+                  cache_size,
+                  cross_chunk_shuffle_count),
+              policy_function);
+
+      auto data_loader = torch::data::make_data_loader(
+          dataset, DataLoaderOptions(batch_size).workers(0));
+
+      std::vector<int> result;
+      for (auto iterator = data_loader->begin(); iterator != data_loader->end();
+           ++iterator) {
+        auto batch_result = *iterator;
+        if (batch_result.size() > chunk_size * cross_chunk_shuffle_count) {
+          for (int i = 0; i < batch_result.size(); i += chunk_size) {
+            ASSERT_TRUE(std::is_sorted(
+                batch_result.begin() + i,
+                batch_result.begin() + i + chunk_size));
+          }
+        } else {
+          ASSERT_TRUE(std::is_sorted(batch_result.begin(), batch_result.end()));
+        }
+      }
+    }
+  }
+}

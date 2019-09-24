@@ -16,35 +16,26 @@ template<class T>
 List<T>::List()
 : List(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>(
   typename detail::ListImpl<typename List<T>::StorageT>::list_type(),
-  getTypePtr<T>())) {}
-
-template<>
-inline List<IValue>::List()
-: List(make_intrusive<detail::ListImpl<IValue>>(
-  typename detail::ListImpl<IValue>::list_type(),
-  c10::nullopt)) {}
+  getTypePtr<T>())) {
+  static_assert(!std::is_same<T, IValue>::value, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType) instead.");
+}
 
 template<class T>
 List<T>::List(ArrayRef<T> values)
 : List(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>(
     typename detail::ListImpl<typename List<T>::StorageT>::list_type(),
     getTypePtr<T>())) {
+  static_assert(!std::is_same<T, IValue>::value, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType).");
   impl_->list.reserve(values.size());
   for (const T& element : values) {
     impl_->list.push_back(element);
   }
 }
 
-template<>
-inline List<IValue>::List(ArrayRef<IValue> values)
-: List(make_intrusive<detail::ListImpl<IValue>>(
-    values.vec(),
-    c10::nullopt)) {
-}
-
 template<class T>
 List<T>::List(std::initializer_list<T> initial_values)
 : List(ArrayRef<T>(initial_values)) {
+  static_assert(!std::is_same<T, IValue>::value, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType).");
 }
 
 template<class T>
@@ -59,9 +50,7 @@ namespace impl {
 template<class T>
 List<T> toTypedList(impl::GenericList list) {
   static_assert(std::is_same<IValue, typename List<T>::StorageT>::value, "Can only call toTypedList with lists that store their elements as IValues.");
-  if (list.impl_->elementType.has_value()) {
-    TORCH_INTERNAL_ASSERT(*getTypePtr<T>() == **list.impl_->elementType, "Tried to cast a List<", toString(*list.impl_->elementType), "> to a List<", toString(getTypePtr<T>()), ">. Types mismatch.");
-  }
+  TORCH_INTERNAL_ASSERT(*getTypePtr<T>() == *list.impl_->elementType, "Tried to cast a List<", toString(list.impl_->elementType), "> to a List<", toString(getTypePtr<T>()), ">. Types mismatch.");
   return List<T>(std::move(list.impl_));
 }
 
@@ -291,4 +280,13 @@ size_t List<T>::use_count() const {
   return impl_.use_count();
 }
 
+template <class T>
+TypePtr List<T>::elementType() const {
+  return impl_->elementType;
+}
+
+template <class T>
+void List<T>::unsafeSetElementType(TypePtr t) {
+  impl_->elementType = std::move(t);
+}
 }

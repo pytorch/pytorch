@@ -92,6 +92,15 @@ public:
   DeviceIndex device_index() const noexcept { return device_.index(); }
   StreamId id() const noexcept { return id_; }
 
+  // Enqueues a wait instruction in the stream's work queue.
+  // This instruction is a no-op unless the event is marked
+  // for recording. In that case the stream stops processing
+  // until the event is recorded.
+  template <typename T>
+  void wait(const T& event) const {
+    event.block(*this);
+  }
+
   // The purpose of this function is to more conveniently permit binding
   // of Stream to and from Python.  Without packing, I have to setup a whole
   // class with two fields (device and stream id); with packing I can just
@@ -143,8 +152,3 @@ namespace std {
     }
   };
 } // namespace std
-
-namespace at {
-  using c10::StreamId;
-  using c10::Stream;
-}

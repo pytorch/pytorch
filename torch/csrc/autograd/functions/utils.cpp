@@ -29,7 +29,7 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
         autograd::create_gradient_edge(variable, grad_fn);
         result.push_back(std::move(variable));
       } else {
-        grad_fn->add_input_metadata(Function::undefined_input());
+        grad_fn->add_input_metadata(Node::undefined_input());
         result.emplace_back();
       }
     }

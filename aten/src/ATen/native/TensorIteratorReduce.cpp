@@ -48,7 +48,7 @@ static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop) {
     slice.copy_(dst);
 
     auto sub_iter = TensorIterator::reduce_op(slice, iter.input(0));
-    sub_iter->serial_for_each(loop, {begin, end});
+    sub_iter.serial_for_each(loop, {begin, end});
   });
 
   // fill any unwritten slices of the buffer with the identity
@@ -60,7 +60,7 @@ static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop) {
 
   auto unsqueezed = dst.unsqueeze(0);
   auto final_reduce = TensorIterator::reduce_op(unsqueezed, buffer);
-  final_reduce->for_each(loop);
+  final_reduce.for_each(loop);
 }
 
 /// Chooses a dimension over which to parallelize. Prefers the outer-most

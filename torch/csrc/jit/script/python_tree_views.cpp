@@ -13,17 +13,27 @@ namespace torch {
 namespace jit {
 namespace script {
 
+c10::optional<std::string> maybeConvertToString(const py::object& obj) {
+  if (obj.is_none()) {
+    return c10::nullopt;
+  }
+  std::stringstream ss;
+  ss << py::str(obj);
+  return ss.str();
+}
+
 struct SourceRangeFactory {
   SourceRangeFactory(
       std::string text,
-      std::string filename,
+      py::object filename,
       size_t file_lineno,
       size_t leading_whitespace_chars)
       : source_(std::make_shared<Source>(
             std::move(text),
-            std::move(filename),
+            maybeConvertToString(filename),
             file_lineno)),
         leading_whitespace_chars_(leading_whitespace_chars) {}
+
   SourceRange create(int line, int start_col, int end_col) {
     size_t start_byte_offset, end_byte_offset;
     std::tie(start_byte_offset, end_byte_offset) =
@@ -38,11 +48,7 @@ struct SourceRangeFactory {
       int line,
       int start_col,
       int end_col) {
-    // Python has a weird convention where col_offset points to the column
-    // *before* the token starts.
-    start_col++;
-    end_col++;
-    // Also, lines are counted from 1.
+    // lines are counted from 1.
     line--;
     auto line_start = source_->offset_for_line(line);
     return std::make_tuple<size_t, size_t>(
@@ -82,7 +88,7 @@ void initTreeViewBindings(PyObject* module) {
       .def_property_readonly("start", &SourceRange::start)
       .def_property_readonly("end", &SourceRange::end);
   py::class_<SourceRangeFactory>(m, "SourceRangeFactory")
-      .def(py::init<std::string&&, std::string&&, size_t, size_t>())
+      .def(py::init<std::string&&, py::object, size_t, size_t>())
       .def("make_range", &SourceRangeFactory::create)
       .def(
           "make_raw_range",
@@ -141,17 +147,22 @@ void initTreeViewBindings(PyObject* module) {
     return Expr(Compound::create(TK_NONE, range, {}));
   });
 
-  py::class_<Stmt, TreeView>(m, "Stmt"); // NOLINT(bugprone-unused-raii)
+  py::class_<Stmt, TreeView>(m, "Stmt") // NOLINT(bugprone-unused-raii)
+      .def(py::init([](const TreeView& thing) { return Stmt(thing.get()); }));
   py::class_<Expr, TreeView>(m, "Expr"); // NOLINT(bugprone-unused-raii)
-  py::class_<Def, TreeView>(m, "Def").def(
-      py::init([](const Ident& name, Decl decl, std::vector<Stmt> body) {
-        const auto& r = name.range();
-        return Def::create(r, name, decl, wrap_list(r, std::move(body)));
-      }));
+  py::class_<Def, TreeView>(m, "Def")
+      .def(py::init(
+          [](const Ident& name, const Decl& decl, std::vector<Stmt> body) {
+            const auto& r = name.range();
+            return Def::create(r, name, decl, wrap_list(r, std::move(body)));
+          }))
+      .def("decl", [](const Def& def) { return def.decl(); })
+      .def("name", [](const Def& def) { return def.name(); });
   py::class_<ClassDef, TreeView>(m, "ClassDef")
-      .def(py::init([](const Ident& name, std::vector<Def> body) {
+      .def(py::init([](const Ident& name, std::vector<Stmt> body) {
         const auto& r = name.range();
-        return ClassDef::create(r, name, wrap_list(r, std::move(body)));
+        return ClassDef::create(
+            r, name, Maybe<Expr>::create(r), wrap_list(r, std::move(body)));
       }));
   py::class_<Decl, TreeView>(m, "Decl").def(py::init(
       [](const SourceRange& r, std::vector<Param> params, Expr* return_type) {
@@ -160,13 +171,21 @@ void initTreeViewBindings(PyObject* module) {
       }));
 
   py::class_<Assign, Stmt>(m, "Assign")
-      .def(py::init([](const Expr& lhs, const Expr& rhs) {
+      .def(py::init([](std::vector<Expr> lhs, const Expr& rhs) {
+        auto li = wrap_list(rhs.range(), std::move(lhs));
         return Assign::create(
-            lhs.range(), lhs, rhs, Maybe<Expr>::create(lhs.range()));
+            li.range(),
+            li,
+            Maybe<Expr>::create(rhs.range(), rhs),
+            Maybe<Expr>::create(li.range()));
       }))
-      .def(py::init([](const Expr& lhs, const Expr& rhs, Expr* type) {
+      .def(py::init([](std::vector<Expr> lhs, const Expr& rhs, Expr* type) {
+        auto li = wrap_list(rhs.range(), std::move(lhs));
         return Assign::create(
-            lhs.range(), lhs, rhs, wrap_maybe(lhs.range(), type));
+            li.range(),
+            li,
+            Maybe<Expr>::create(rhs.range(), rhs),
+            wrap_maybe(li.range(), type));
       }));
   py::class_<AugAssign, Stmt>(m, "AugAssign")
       .def(py::init([](const Expr& lhs, std::string kind_str, const Expr& rhs) {
@@ -190,6 +209,12 @@ void initTreeViewBindings(PyObject* module) {
       }));
   py::class_<Pass, Stmt>(m, "Pass").def(
       py::init([](const SourceRange& range) { return Pass::create(range); }));
+  py::class_<Break, Stmt>(m, "Break")
+      .def(py::init(
+          [](const SourceRange& range) { return Break::create(range); }));
+  py::class_<Continue, Stmt>(m, "Continue")
+      .def(py::init(
+          [](const SourceRange& range) { return Continue::create(range); }));
   py::class_<Dots, Expr>(m, "Dots").def(
       py::init([](const SourceRange& range) { return Dots::create(range); }));
   py::class_<If, Stmt>(m, "If").def(
