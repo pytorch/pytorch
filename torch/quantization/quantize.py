@@ -129,8 +129,8 @@ def add_observer(module):
     if hasattr(module, 'qconfig') and module.qconfig is not None and \
        len(module._modules) == 0:
         # observer and hook will be gone after we swap the module
-            module.add_module('observer', module.qconfig.activation())
-            module.register_forward_hook(_observer_forward_hook)
+        module.add_module('observer', module.qconfig.activation())
+        module.register_forward_hook(_observer_forward_hook)
 
 class QuantWrapper(nn.Module):
     r"""A wrapper class that wraps the input module, adds QuantStub and
