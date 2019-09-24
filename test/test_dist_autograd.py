@@ -60,7 +60,7 @@ class TestDistAutograd(MultiProcessTestCase):
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
-            ret = dist.rpc('worker{}'.format(dst_rank), torch.add,
+            ret = dist.rpc_sync('worker{}'.format(dst_rank), torch.add,
                            args=(t1, t2))
 
             # Get send function.
@@ -97,7 +97,7 @@ class TestDistAutograd(MultiProcessTestCase):
             tensors = []
             for i in range(num_tensors):
                 tensors.append(torch.ones(3, 3, requires_grad=(i % 2 == 0)))
-            ret = dist.rpc('worker{}'.format(dst_rank), torch.stack,
+            ret = dist.rpc_sync('worker{}'.format(dst_rank), torch.stack,
                            args=(tensors,))
             self.assertEqual(torch.stack(tensors), ret)
 
