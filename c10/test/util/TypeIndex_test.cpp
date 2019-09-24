@@ -141,4 +141,4 @@ static_assert(
             "test_function_arguments_and_returns::Dummy"),
     "");
 } // namespace test_function_arguments_and_returns
-}
+} // namespace
