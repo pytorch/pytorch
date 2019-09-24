@@ -65,8 +65,8 @@ namespace detail {
   };
 
   template <typename... Args>
-  TensorTypeSet multi_dispatch_tensor_type_set(Args&&... args) {
-    return MultiDispatchTensorTypeSet().apply(std::forward<Args>(args)...).ts;
+  TensorTypeSet multi_dispatch_tensor_type_set(const Args&... args) {
+    return MultiDispatchTensorTypeSet().apply(args...).ts;
   }
 }
 
