@@ -36,6 +36,7 @@ from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA
+import torch.backends.quantized
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -2114,13 +2115,12 @@ class _TestTorchMixin(object):
         test_inference(torch.float32)
 
     def test_qengnie(self):
-        qengines = torch._C._supported_qengines()
-        # [TODO] Enable after the interface change
-        # original_qe = torch._C._get_qengine()
-        # for qe in qengines:
-        #     torch._C._set_qengine(qe)
-        #     assert torch._C._get_qengine() == qe, 'qengine not set successfully'
-        # torch._C._set_qengine(original_qe)
+        qengines = torch.backends.quantized.get_supported_qengines()
+        original_qe = torch.backends.quantized.engine
+        for qe in qengines:
+            torch.backends.quantized.engine = qe
+            assert torch.backends.quantized.engine == qe, 'qengine not set successfully'
+        torch.backends.quantized.engine = original_qe
 
     def test_new_tensor(self):
         expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
