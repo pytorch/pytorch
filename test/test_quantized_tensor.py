@@ -75,18 +75,18 @@ class TestQuantizedTensor(TestCase):
         scales = torch.rand(numel, dtype=torch.double)
         zero_points = torch.randint(0, 10, size=(numel,), dtype=torch.long)
         q = torch._empty_per_channel_affine_quantized(
-            [numel], scales=scales, zero_points=zero_points, axis=[ch_axis], dtype=torch.quint8)
+            [numel], scales=scales, zero_points=zero_points, axis=ch_axis, dtype=torch.quint8)
         self.assertEqual(scales, q.q_per_channel_scales())
         self.assertEqual(zero_points, q.q_per_channel_zero_points())
-        self.assertEqual([ch_axis], q.q_per_channel_axis())
+        self.assertEqual(ch_axis, q.q_per_channel_axis())
 
         # create Tensor from uint8_t Tensor, scales and zero_points
         int_tensor = torch.randint(0, 100, size=(numel,), dtype=torch.uint8)
-        q = torch._make_per_channel_quantized_tensor(int_tensor, scales, zero_points, [ch_axis])
+        q = torch._make_per_channel_quantized_tensor(int_tensor, scales, zero_points, ch_axis)
         self.assertEqual(int_tensor, q.int_repr())
         self.assertEqual(scales, q.q_per_channel_scales())
         self.assertEqual(zero_points, q.q_per_channel_zero_points())
-        self.assertEqual([ch_axis], q.q_per_channel_axis())
+        self.assertEqual(ch_axis, q.q_per_channel_axis())
 
     def test_qtensor_creation(self):
         scale = 0.5
@@ -141,7 +141,7 @@ class TestQuantizedTensor(TestCase):
         r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
         scales = torch.tensor([0.2, 0.03], dtype=torch.double)
         zero_points = torch.tensor([5, 10], dtype=torch.long)
-        axis = [1]
+        axis = 1
 
         def quantize_c(data, scales, zero_points):
             res = torch.empty((3, 2))
@@ -192,7 +192,7 @@ class TestQuantizedTensor(TestCase):
         r = torch.rand(20, 10, 2, 2, dtype=torch.float) * 4 - 2
         scales = torch.rand(10) * 0.02 + 0.01
         zero_points = torch.round(torch.rand(10) * 2 - 1).to(torch.long)
-        qr = torch.quantize_per_channel(r, scales, zero_points, [1], torch.qint8)
+        qr = torch.quantize_per_channel(r, scales, zero_points, 1, torch.qint8)
 
         # we can't reorder the axis
         with self.assertRaises(RuntimeError):
@@ -205,7 +205,7 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(qr.int_repr(), qlast.int_repr())
         self.assertEqual(scales, qlast.q_per_channel_scales())
         self.assertEqual(zero_points, qlast.q_per_channel_zero_points())
-        self.assertEqual((1,), qlast.q_per_channel_axis())
+        self.assertEqual(1, qlast.q_per_channel_axis())
         self.assertEqual(qlast.dequantize(), qr.dequantize())
 
     def test_qtensor_load_save(self):
@@ -230,7 +230,7 @@ class TestQuantizedTensor(TestCase):
         zero_points = torch.round(torch.rand(10) * 20 + 1).to(torch.long)
         # quint32 is not supported yet
         for dtype in [torch.quint8, torch.qint8]:
-            qr = torch.quantize_per_channel(r, scales, zero_points, [1], dtype)
+            qr = torch.quantize_per_channel(r, scales, zero_points, 1, dtype)
             with tempfile.NamedTemporaryFile() as f:
                 # Serializing and Deserializing Tensor
                 torch.save(qr, f)

@@ -262,16 +262,15 @@ Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
                                           Tensor qtensor,
                                           const std::vector<double>& scales,
                                           const std::vector<int64_t>& zero_points,
-                                          IntArrayRef axis) {
+                                          int64_t axis) {
   auto fn_name = "quantize_tensor_per_channel_affine";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoints<typename T::underlying>(fn_name, zero_points);
-  int64_t channel_axis = axis[0];
-  TORCH_CHECK(channel_axis < rtensor.dim(), "Channel axis out of range in per channel affine quantization.");
-  int64_t batches = size_to_dim_(channel_axis, rtensor.sizes());
-  int64_t elements_per_channel = size_from_dim_(channel_axis + 1, rtensor.sizes());
-  int64_t channel = rtensor.size(channel_axis);
+  TORCH_CHECK(0 <= axis && axis < rtensor.dim(), "Channel axis out of range in per channel affine quantization.");
+  int64_t batches = size_to_dim_(axis, rtensor.sizes());
+  int64_t elements_per_channel = size_from_dim_(axis + 1, rtensor.sizes());
+  int64_t channel = rtensor.size(axis);
   TORCH_CHECK(channel == int64_t(scales.size()),
               "length of scales must equal to channel");
   TORCH_CHECK(channel == int64_t(zero_points.size()),
@@ -294,17 +293,16 @@ Tensor dequantize_tensor_per_channel_affine(Tensor qtensor,
                                             Tensor rtensor,
                                             const std::vector<double>& scales,
                                             const std::vector<int64_t>& zero_points,
-                                            IntArrayRef axis) {
+                                            int64_t axis) {
   auto fn_name = "dequantize_tensor_per_channel_affine";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoints<typename T::underlying>(fn_name, zero_points);
-  int64_t channel_axis = axis[0];
-  TORCH_CHECK(channel_axis < qtensor.dim(),
+  TORCH_CHECK(0 <= axis && axis < qtensor.dim(),
               "Channel axis out of range in per channel affine dequantization.");
-  int64_t batches = size_to_dim_(channel_axis, rtensor.sizes());
-  int64_t elements_per_channel = size_from_dim_(channel_axis + 1, rtensor.sizes());
-  int64_t channel = rtensor.size(channel_axis);
+  int64_t batches = size_to_dim_(axis, rtensor.sizes());
+  int64_t elements_per_channel = size_from_dim_(axis + 1, rtensor.sizes());
+  int64_t channel = rtensor.size(axis);
   TORCH_CHECK(channel == int64_t(scales.size()),
               "length of scales must equal to channel");
   TORCH_CHECK(channel == int64_t(zero_points.size()),
@@ -335,7 +333,7 @@ QuantizerPtr make_per_tensor_affine_quantizer(
 QuantizerPtr make_per_channel_affine_quantizer(
     const std::vector<double>& scales,
     const std::vector<int64_t>& zero_points,
-    IntArrayRef axis,
+    int64_t axis,
     ScalarType scalar_type) {
   return c10::make_intrusive<PerChannelAffineQuantizer>(scalar_type,
                                                         scales, zero_points, axis);
