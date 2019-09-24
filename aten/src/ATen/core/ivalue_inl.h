@@ -191,6 +191,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  public:
+  Future() {}
   Future(TypePtr type) : type_(type) {}
   struct CAFFE2_API FutureError final : public std::exception {
     FutureError(std::string&& error_msg_)
