@@ -128,11 +128,11 @@ class TestQuantizedTensor(TestCase):
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
-    def test_qtensor_dequantize_linear(self):
+    def test_qtensor_dequantize_per_tensor(self):
         t = torch.arange(-10, 10, dtype=torch.int8)
         scale = 3
         zero_point = 2
-        qt = torch._dequantize_linear(t, scale, zero_point, torch.qint8)
+        qt = torch._dequantize_per_tensor(t, scale, zero_point, torch.qint8)
         qt2 = torch._per_tensor_affine_qtensor(t, scale, zero_point)
         self.assertEqual(qt, qt2.dequantize())
 
@@ -149,7 +149,7 @@ class TestQuantizedTensor(TestCase):
                 for j in range(2):
                     res[i][j] = np.clip(np.round(data[i][j] / scales[j]) + zero_points[j], quant_min, quant_max)
             return res
-        qr = torch.quantize_linear_per_channel(r, scales, zero_points, axis, torch.quint8)
+        qr = torch.quantize_per_channel(r, scales, zero_points, axis, torch.quint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(qr.int_repr(), quantize_c(r, scales, zero_points)))
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
@@ -191,7 +191,7 @@ class TestQuantizedTensor(TestCase):
         r = torch.rand(20, 10, 2, 2, dtype=torch.float) * 4 - 2
         scales = torch.rand(10) * 0.02 + 0.01
         zero_points = torch.round(torch.rand(10) * 2 - 1).to(torch.long)
-        qr = torch.quantize_linear_per_channel(r, scales, zero_points, [1], torch.qint8)
+        qr = torch.quantize_per_channel(r, scales, zero_points, [1], torch.qint8)
 
         # we can't reorder the axis
         with self.assertRaises(RuntimeError):
@@ -207,13 +207,29 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual((1,), qlast.q_per_channel_axis())
         self.assertEqual(qlast.dequantize(), qr.dequantize())
 
-
     def test_qtensor_load_save(self):
-        scale = 2.0
+        scale = 0.2
         zero_point = 10
-        r = torch.ones(15, dtype=torch.float) * 2
+        r = torch.rand(15, 2, dtype=torch.float32) * 2
         for dtype in [torch.quint8, torch.qint8, torch.qint32]:
             qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+            qrv = qr[:, 1]
+            with tempfile.NamedTemporaryFile() as f:
+                # Serializing and Deserializing Tensor
+                torch.save((qr, qrv), f)
+                f.seek(0)
+                qr2, qrv2 = torch.load(f)
+                self.assertEqual(qr, qr2)
+                self.assertEqual(qrv, qrv2)
+                self.assertEqual(qr2.storage().data_ptr(), qrv2.storage().data_ptr())
+
+    def test_qtensor_per_channel_load_save(self):
+        r = torch.rand(20, 10, dtype=torch.float) * 4 - 2
+        scales = torch.rand(10) * 0.02 + 0.01
+        zero_points = torch.round(torch.rand(10) * 20 + 1).to(torch.long)
+        # quint32 is not supported yet
+        for dtype in [torch.quint8, torch.qint8]:
+            qr = torch.quantize_per_channel(r, scales, zero_points, [1], dtype)
             with tempfile.NamedTemporaryFile() as f:
                 # Serializing and Deserializing Tensor
                 torch.save(qr, f)
