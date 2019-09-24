@@ -33,7 +33,7 @@ __all__ = [
 # Load the extension module
 ################################################################################
 
-# Loading the extension with RTLD_GLOBAL option allows to not link extension
+# Loading the extension with RTLD_LAZY option allows to not link extension
 # modules against the _C shared object. Their missing THP symbols will be
 # automatically filled by the dynamic loader.
 import os as _dl_flags
@@ -65,7 +65,7 @@ if platform.system() == 'Windows':
 
 else:
     # first check if the os package has the required flags
-    if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
+    if not hasattr(_dl_flags, 'RTLD_LAZY'):
         try:
             # next try if DLFCN exists
             import DLFCN as _dl_flags
@@ -74,7 +74,7 @@ else:
             import torch._dl as _dl_flags
 
     old_flags = sys.getdlopenflags()
-    sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
+    sys.setdlopenflags(_dl_flags.RTLD_LAZY)
 
 del _dl_flags
 
