@@ -870,7 +870,7 @@ jobs:
       - checkout
       - run:
           name: Ensure config is up to date
-          command: env
+          command: env | cut -f 1 -d =
           working_directory: .circleci
       - run:
           name: Save commit message
