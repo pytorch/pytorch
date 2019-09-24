@@ -47,13 +47,13 @@ set(C10D_SRCS
   PrefixStore.cpp
   TCPStore.cpp
   Utils.cpp
-  NCCLUtils.cpp
   )
 
 set(C10D_LIBS torch)
 
 if(USE_C10D_NCCL)
   list(APPEND C10D_SRCS ProcessGroupNCCL.cpp)
+  list(APPEND C10D_SRCS NCCLUtils.cpp)
   list(APPEND C10D_LIBS __caffe2_nccl)
 endif()
 
