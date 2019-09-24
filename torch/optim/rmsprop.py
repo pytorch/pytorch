@@ -14,7 +14,7 @@ class RMSprop(Optimizer):
     The implementation here takes the square root of the gradient average before
     adding epsilon (note that Tensor Flow interchange these two operations). The effective
     learning rate is thus :math:`\alpha/(\sqrt{v} + \epsilon)` where :math:`\alpha`
-    is the scheduled learning rate decay and :math:`v` is the weighted moving average
+    is the scheduled learning rate and :math:`v` is the weighted moving average
     of the squared gradient.
 
     Arguments:
