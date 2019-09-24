@@ -47,6 +47,7 @@ set(C10D_SRCS
   PrefixStore.cpp
   TCPStore.cpp
   Utils.cpp
+  NCCLUtils.cpp
   )
 
 set(C10D_LIBS torch)
