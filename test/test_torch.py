@@ -6816,6 +6816,14 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         for idx in iter_indices(x):
             self.assertEqual(x[idx] >= y[idx], ge[idx] == 1)
 
+    def test_comparison_ops_diff_types(self):
+        self.assertRaisesRegex(RuntimeError, "The output tensor of lt must be a bool",
+                               lambda: torch.lt(torch.tensor([True]), torch.tensor([False]), out = torch.empty(1, dtype=torch.uint8)))
+        self.assertRaisesRegex(RuntimeError, "Expected object of scalar type",
+                               lambda: torch.tensor([1], dtype=torch.int).lt_(torch.tensor([2], dtype=torch.long)))
+        self.assertRaisesRegex(RuntimeError, "value cannot be converted to type",
+                               lambda: torch.tensor([1 << 5], dtype=torch.uint8) < (1 << 20))
+
     def test_bitwise_ops(self):
         x = torch.randn(5, 5).gt(0)
         y = torch.randn(5, 5).gt(0)
@@ -12071,10 +12079,6 @@ class TestTorchDeviceType(TestCase, GenericDeviceTypeHelpers):
             with warnings.catch_warnings(record=True) as warningsCount:
                 byteRes = torch.empty_like(x, device=device).byte()
                 boolRes = torch.empty_like(x, device=device).bool()
-
-                torch.lt(x, b, out=byteRes)
-                torch.lt(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
 
                 torch.le(x, b, out=byteRes)
                 torch.le(x, b, out=boolRes)

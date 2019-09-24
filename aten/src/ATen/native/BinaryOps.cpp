@@ -248,8 +248,8 @@ Tensor& logical_xor_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& lt_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(result.scalar_type() == kBool || result.scalar_type() == kByte,
-      "The output tensor of lt must be a bool or byte tensor.");
+  TORCH_CHECK(result.scalar_type() == kBool,
+      "The output tensor of lt must be a bool.");
   auto iter = TensorIterator::comparison_op(result, self, other, true);
   lt_stub(iter.device_type(), iter);
   return result;
@@ -262,21 +262,32 @@ Tensor lt(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& lt_(Tensor& self, const Tensor& other) {
+  TORCH_CHECK(self.dtype() == other.dtype(),
+      "Expected object of scalar type ", self.dtype(), " but got scalar type ",
+      other.dtype(), "for argument 'other' in call to lt_")
   auto iter = TensorIterator::comparison_op(self, self, other, true);
   lt_stub(iter.device_type(), iter);
   return self;
 }
 
+Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "lt_out", [&]{
+    // Validate that is possible to convert scalar to tensor dtype without overflow
+    scalar_t val = other.to<scalar_t>();
+    Tensor other_tensor = at::empty({1}, self.options()).fill_(val);
+    auto iter = TensorIterator::comparison_op(result, self, other_tensor, true);
+    lt_stub(iter.device_type(), iter);
+  });
+  return result;
+}
+
 Tensor lt(const Tensor& self, Scalar other) {
-  return native::lt(self, wrapped_scalar_tensor(other));
+  Tensor result = at::empty({0}, self.options().dtype(kBool));
+  return native::lt_out(result, self, other);
 }
 
 Tensor& lt_(Tensor& self, Scalar other) {
-  return native::lt_(self, wrapped_scalar_tensor(other));
-}
-
-Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) {
-  return native::lt_out(result, self, wrapped_scalar_tensor(other));
+  return native::lt_out(self, self, other);
 }
 
 }

@@ -83,14 +83,8 @@ void lt_kernel_cuda(TensorIterator& iter) {
         return a < b;
       });
     });
-  } else if (iter.dtype() == ScalarType::Byte) {
-    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.input_dtype(), "lt_cpu", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
-        return a < b;
-      });
-    });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.input_dtype(), "lt_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "lt_cpu", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a < b;
       });

@@ -219,18 +219,45 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.scalar_tensor(False, device=self.device), torch.tensor(0., device=self.device))
 
     def test_comparison_ops_with_type_promotion(self):
+        value_for_type = {
+            torch.uint8: (1 << 5),
+            torch.int8: (1 << 5),
+            torch.int16: (1 << 10),
+            torch.int32: (1 << 20),
+            torch.int64: (1 << 30),
+            torch.float16: (1 << 10),
+            torch.float32: (1 << 20),
+            torch.float64: (1 << 30)
+        }
+        comparison_ops = [
+            dict(
+                name="lt",
+                out_op=lambda x, y, d: torch.lt(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                ret_op=lambda x, y: torch.lt(x, y),
+                compare_op=lambda x, y: x < y,
+            ),
+        ]
         for device in torch.testing.get_all_device_types():
-            x = torch.tensor([1 << 5], dtype=torch.uint8, device=device)
-            y = torch.tensor([1 << 15], dtype=torch.int32, device=device)
-            torch.lt(x, y, out=x)
-            self.assertEqual(x, torch.tensor([True]))
+            for op in comparison_ops:
+                for dt1 in torch.testing.get_all_math_dtypes(device):
+                    for dt2 in torch.testing.get_all_math_dtypes(device):
+                        val1 = value_for_type[dt1]
+                        val2 = value_for_type[dt2]
+                        t1 = torch.tensor([val1], dtype=dt1, device=device)
+                        t2 = torch.tensor([val2], dtype=dt2, device=device)
+                        expected = torch.tensor([op["compare_op"](val1, val2)], dtype=torch.bool)
 
-            x = torch.tensor([1 << 5], dtype=torch.uint8, device=device)
-            torch.lt(y, x, out=x)
-            self.assertEqual(x, torch.tensor([False]))
+                        out_res = op["out_op"](t1, t2, device)
+                        self.assertEqual(out_res, expected)
+                        self.assertTrue(out_res.dtype == torch.bool)
+                        self.assertTrue(t1.dtype == dt1)
+                        self.assertTrue(t2.dtype == dt2)
 
-            x = torch.tensor([0]).int() < 0.5
-            self.assertEqual(x, torch.tensor([True]))
+                        out_res = op["ret_op"](t1, t2)
+                        self.assertEqual(out_res, expected)
+                        self.assertTrue(out_res.dtype == torch.bool)
+                        self.assertTrue(t1.dtype == dt1)
+                        self.assertTrue(t2.dtype == dt2)
 
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):
