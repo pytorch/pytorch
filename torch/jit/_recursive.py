@@ -519,7 +519,6 @@ def is_module_dict(cls):
 def is_module_list(cls):
     return issubclass(cls, torch.jit._ConstModuleList) or issubclass(cls, torch.nn.ModuleList) or issubclass(cls, torch.nn.Sequential)
 
-import functools
 def bind_to_dummy_module(module_meta, unbound_method, cpp_mod):
     """
     Create a dummy ScriptModule object for `unbound_method` to bind to.
