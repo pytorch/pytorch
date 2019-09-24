@@ -18,17 +18,17 @@
 #include <exception>
 
 #include <c10/macros/Macros.h>
-#include <c10/util/TypeIndex.h>
+#include <c10/util/BFloat16.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/IdWrapper.h>
 #include <c10/util/Type.h>
+#include <c10/util/TypeIndex.h>
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
-#include <c10/util/BFloat16.h>
 
 // TODO: This file is still in the caffe2 namespace, despite living
 // in the ATen directory. Move to c10.
@@ -278,30 +278,26 @@ class _Uninitialized final {};
 
 template <class T>
 inline constexpr TypeMetaData _makeTypeMetaDataInstance() {
-  return {
-    sizeof(T),
-    _PickNew<T>(),
-    _PickPlacementNew<T>(),
-    _PickCopy<T>(),
-    _PickPlacementDelete<T>(),
-    _PickDelete<T>(),
-    TypeIdentifier::Get<T>(),
-    c10::util::get_fully_qualified_type_name<T>()
-  };
+  return {sizeof(T),
+          _PickNew<T>(),
+          _PickPlacementNew<T>(),
+          _PickCopy<T>(),
+          _PickPlacementDelete<T>(),
+          _PickDelete<T>(),
+          TypeIdentifier::Get<T>(),
+          c10::util::get_fully_qualified_type_name<T>()};
 }
 
 template <>
 inline constexpr TypeMetaData _makeTypeMetaDataInstance<_Uninitialized>() {
-  return {
-    0,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    TypeIdentifier::uninitialized(),
-    "nullptr (uninitialized)"
-  };
+  return {0,
+          nullptr,
+          nullptr,
+          nullptr,
+          nullptr,
+          nullptr,
+          TypeIdentifier::uninitialized(),
+          "nullptr (uninitialized)"};
 }
 
 } // namespace detail
@@ -334,7 +330,8 @@ class C10_API TypeMeta {
   /**
    * Assignment operator.
    */
-  AT_CPP14_CONSTEXPR TypeMeta& operator=(const TypeMeta& src) noexcept = default;
+  AT_CPP14_CONSTEXPR TypeMeta& operator=(const TypeMeta& src) noexcept =
+      default;
 
   constexpr TypeMeta(TypeMeta&& rhs) noexcept = default;
 
@@ -388,7 +385,9 @@ class C10_API TypeMeta {
     return data_->name_;
   }
 
-  friend constexpr bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
+  friend constexpr bool operator==(
+      const TypeMeta& lhs,
+      const TypeMeta& rhs) noexcept;
 
   template <typename T>
   constexpr bool Match() const noexcept {
@@ -417,12 +416,13 @@ class C10_API TypeMeta {
    */
   template <typename T>
   static TypeMeta Make() {
-    static constexpr detail::TypeMetaData singleton = detail::_makeTypeMetaDataInstance<T>();
+    static constexpr detail::TypeMetaData singleton =
+        detail::_makeTypeMetaDataInstance<T>();
     return TypeMeta(&singleton);
   }
 
  private:
-   const detail::TypeMetaData* data_;
+  const detail::TypeMetaData* data_;
 };
 
 inline TypeMeta::TypeMeta() noexcept
@@ -431,7 +431,9 @@ inline TypeMeta::TypeMeta() noexcept
 inline constexpr bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return (lhs.id() == rhs.id());
 }
-inline constexpr bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+inline constexpr bool operator!=(
+    const TypeMeta& lhs,
+    const TypeMeta& rhs) noexcept {
   return !operator==(lhs, rhs);
 }
 
@@ -440,7 +442,6 @@ inline std::ostream& operator<<(
     caffe2::TypeMeta typeMeta) {
   return stream << typeMeta.name();
 }
-
 
 // Deprecated. CAFFE_KNOWN_TYPE is not needed anymore.
 // TODO Remove all CAFFE_KNOWN_TYPE occurrences
