@@ -151,7 +151,6 @@ TH_API void THTensor_(abs)(THTensor *r_, THTensor *t);
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
 TH_API void THTensor_(sigmoid)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(log)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(log10)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(log1p)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(log2)(THTensor *r_, THTensor *t);
