@@ -137,7 +137,7 @@ Tensor make_per_tensor_quantized_tensor_cpu(
   return dst;
 }
 
-Tensor per_channel_affine_qtensor_cpu(
+Tensor make_per_channel_quantized_tensor_cpu(
     const Tensor& self,
     const Tensor& scales,
     const Tensor& zero_points,
