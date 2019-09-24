@@ -323,7 +323,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
             tensor.quantizer().get());
         pushIValue(c10::List<double>(quantizer->scales()));
         pushIValue(c10::List<int64_t>(quantizer->zero_points()));
-        pushIValue(c10::List<int64_t>(quantizer->axis()));
+        pushInt(quantizer->axis());
       } break;
       default:
         TORCH_CHECK(

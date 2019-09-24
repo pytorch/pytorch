@@ -987,12 +987,18 @@
 - func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
 
+# other overrides are to provide a more helpful error message that dtype is required
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
   dispatch:
+    CPU: empty_affine_quantized_other_backends_stub
     QuantizedCPU: empty_affine_quantized_cpu
 
-- func: _empty_per_channel_affine_quantized_like(Tensor self, Tensor zero_points, int[] size, int[] axis, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor
+# it's a factory function receiving a tensor argument, thus overriding explicitly
+# other overrides are to provide a more helpful error message that dtype is required
+- func: _empty_per_channel_affine_quantized(int[] size, *, Tensor scales, Tensor zero_points, int axis, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor
+  category_override: factory
   dispatch:
+    CPU: empty_per_channel_affine_quantized_other_backends_stub
     QuantizedCPU: empty_per_channel_affine_quantized_cpu
 
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
@@ -2723,15 +2729,12 @@
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _trunc__cpu
-    CUDA: _trunc__cuda
 
 - func: trunc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _trunc_out_cpu
-    CUDA: _trunc_out_cuda
+    CPU: trunc_out
+    CUDA: trunc_out
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
@@ -3502,7 +3505,7 @@
   dispatch:
     CPU: quantize_per_tensor_cpu
 
-- func: quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int[] axis, ScalarType dtype) -> Tensor
+- func: quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
     CPU: quantize_per_channel_cpu
@@ -3542,7 +3545,7 @@
   dispatch:
     QuantizedCPU: q_per_channel_zero_points_quant
 
-- func: q_per_channel_axis(Tensor self) -> int[]
+- func: q_per_channel_axis(Tensor self) -> int
   variants: function, method
   dispatch:
     QuantizedCPU: q_per_channel_axis_quant
@@ -3558,7 +3561,7 @@
   dispatch:
     CPU: make_per_tensor_quantized_tensor_cpu
 
-- func: _make_per_channel_quantized_tensor(Tensor self, Tensor scale, Tensor zero_point, int[] axis) -> Tensor
+- func: _make_per_channel_quantized_tensor(Tensor self, Tensor scale, Tensor zero_point, int axis) -> Tensor
   use_c10_dispatcher: unboxed_only
   dispatch:
     CPU: make_per_channel_quantized_tensor_cpu
@@ -4839,17 +4842,23 @@
   use_c10_dispatcher: full
   supports_named_tensor: True
   variants: method, function
+  dispatch:
+    CPU: erfinv
+    CUDA: erfinv
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: method
+  dispatch:
+    CPU: _erfinv__cpu
+    CUDA: _erfinv__cuda
 
 - func: erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: erfinv_out
-    CUDA: erfinv_out
+    CPU: _erfinv_out_cpu
+    CUDA: _erfinv_out_cuda
 
 - func: sign(Tensor self) -> Tensor
   use_c10_dispatcher: unboxed_only

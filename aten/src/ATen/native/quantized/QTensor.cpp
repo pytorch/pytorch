@@ -19,22 +19,10 @@ Tensor quantize_per_channel_cpu(
     const Tensor& self,
     const Tensor& scales,
     const Tensor& zero_points,
-    IntArrayRef axis,
+    int64_t axis,
     ScalarType dtype) {
-  TORCH_CHECK(scales.dim() == 1, "scale tensor must have dimension 1");
-  TORCH_CHECK(
-      zero_points.dim() == 1, "zero_points tensor must have dimension 1");
-  TORCH_CHECK(
-      scales.numel() == zero_points.numel(),
-      "number of elements in scales and zero_points must match");
-  TORCH_CHECK(axis.size() == 1, "only axis of size 1 is supported right now");
-  double* scales_data = scales.data_ptr<double>();
-  int64_t* zero_points_data = zero_points.data_ptr<int64_t>();
-  std::vector<double> scale_vals(scales_data, scales_data + scales.numel());
-  std::vector<int64_t> zero_point_vals(
-      zero_points_data, zero_points_data + zero_points.numel());
-  auto quantizer = make_per_channel_affine_quantizer(
-      scale_vals, zero_point_vals, axis, dtype);
+  auto quantizer =
+      make_per_channel_affine_quantizer(scales, zero_points, axis, dtype);
   return quantizer->quantize(self);
 }
 
@@ -94,7 +82,7 @@ Tensor q_per_channel_zero_points_quant(const Tensor& self) {
       self.options().dtype(at::kLong));
 }
 
-IntArrayRef q_per_channel_axis_quant(const Tensor& self) {
+int64_t q_per_channel_axis_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
   return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->axis();
@@ -141,11 +129,11 @@ Tensor make_per_channel_quantized_tensor_cpu(
     const Tensor& self,
     const Tensor& scales,
     const Tensor& zero_points,
-    IntArrayRef axis) {
-  Tensor dst = at::_empty_per_channel_affine_quantized_like(
+    int64_t axis) {
+  Tensor dst = at::_empty_per_channel_affine_quantized(
+      self.sizes(),
       scales,
       zero_points,
-      self.sizes(),
       axis,
       self.options().dtype(toQIntType(self.scalar_type())));
   Tensor self_contig = self.contiguous();

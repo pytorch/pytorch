@@ -3363,7 +3363,7 @@ graph(%Ra, %Rb):
                 else:
                     s = torch.rand(5, dtype=torch.float64) + 0.1
                     zp = torch.randint(5, 15, (5,))
-                    x_q = torch.quantize_per_channel(x, s, zp, [1], torch.quint8)
+                    x_q = torch.quantize_per_channel(x, s, zp, 1, torch.quint8)
                 self.register_buffer('x', x_q)
 
             @torch.jit.script_method
@@ -3444,6 +3444,21 @@ def foo(x):
             return fn()
 
         FileCheck().check("NamedTuple").run(fn2.graph)
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+
+            @torch.jit.unused
+            def fn(self):
+                # type: () -> MyTuple
+                return MyTuple(1)
+
+            def forward(self, x):
+                return self.fn()
+
+        mod = torch.jit.script(MyMod())
+        FileCheck().check_dag("NamedTuple").check_dag("Exception").run(mod.forward.graph)
 
     def test_inherit_method(self):
         class A(torch.jit.ScriptModule):
@@ -14972,7 +14987,7 @@ a")
                 torch.rand(2, 3, dtype=torch.float),
                 scales=torch.tensor([0.1, 0.5, 0.01]),
                 zero_points=torch.tensor([10, 0, 20]),
-                axis=[1], dtype=torch.quint8).to(device)
+                axis=1, dtype=torch.quint8).to(device)
             m = M()
             m(q, qc)
             with open(fname, "rb") as handle:

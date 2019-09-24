@@ -861,7 +861,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::new_empty", ""},
         {"aten::new_full", ""},
         {"aten::_empty_affine_quantized", ""},
-        {"aten::_empty_per_channel_affine_quantized_like", ""},
+        {"aten::_empty_per_channel_affine_quantized", ""},
         {"aten::empty", "out"},
         {"aten::empty_like", "dtype"},
         {"aten::empty_strided", ""},
