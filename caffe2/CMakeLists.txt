@@ -463,10 +463,11 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   if (NOT INTERN_BUILD_MOBILE)
     set (LITE_INTERPRETER_SRCS
-        ${TORCH_SRC_DIR}/csrc/jit/lite_interpreter/import_bytecode.cpp
-        ${TORCH_SRC_DIR}/csrc/jit/lite_interpreter/mobile_module.cpp
-        ${TORCH_SRC_DIR}/csrc/jit/lite_interpreter/register_ins_ops.cpp
-        ${TORCH_SRC_DIR}/csrc/jit/lite_interpreter/lite_interpreter.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_ops.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
         )
     list (APPEND TORCH_SRCS ${LITE_INTERPRETER_SRCS})
   endif()

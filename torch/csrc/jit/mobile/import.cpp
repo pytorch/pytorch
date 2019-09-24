@@ -1,4 +1,4 @@
-#include "import_bytecode.h"
+#include "import.h"
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/unpickler.h>
@@ -37,7 +37,7 @@ using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::ReadAdapterInterface;
 
-OpCode str2OpCode(const char *str);
+OpCode parseOpCode(const char *str);
 namespace {
 void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::CompilationUnit> mcu) {
   for (const auto& element : vals) {
@@ -58,7 +58,7 @@ void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::Compi
       auto ins_item = ins.toTuple()->elements();
       TORCH_CHECK(ins_item.size() == 3,
                   "There should be three parts in an instruction.");
-      OpCode op_code = str2OpCode(ins_item[0].toString()->string().c_str());
+      OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
       function->append_instruction(op_code, ins_item[1].toInt(),
                                 ins_item[2].toInt());
     }
@@ -89,7 +89,7 @@ void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::Compi
     auto size_name = named_agg_size[0].toString()->string();
     TORCH_CHECK(size_name == "agg_output_size",
                 "agg_output_size is expected, but get", ops_name);
-    function->set_agg_size(named_agg_size[1].toInt());
+    function->set_register_size(named_agg_size[1].toInt());
 
     mcu->register_function(std::move(function));
   }
@@ -150,7 +150,7 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
         compilation_unit_, compilation_unit_->get_class(qn));
   };
 
-  auto attr_retriever = [&](at::StrongTypePtr type, IValue input) {
+  auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
     auto dict = std::move(input).toGenericDict();
     size_t ndict = dict.size();
     auto obj = c10::ivalue::Object::create(type, ndict);
@@ -169,7 +169,7 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
   };
 
   Unpickler unpickler(reader, std::move(class_resolver),
-                      std::move(attr_retriever), std::move(read_record), device_);
+                      std::move(obj_loader), std::move(read_record), device_);
   return unpickler.parse_ivalue();
 }
 

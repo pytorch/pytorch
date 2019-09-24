@@ -116,7 +116,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
   // Decouple how to get obj from type. In this file it's dependent on
   // Method.run() and graph executor, etc.
   // For bytecode import we need to decouple these dependencies.
-  auto attr_retriever = [&](at::StrongTypePtr type, IValue input) {
+  auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
     auto cls = type.type_->expect<at::ClassType>();
     size_t n = cls->numAttributes();
     if (checkHasValidSetGetState(type.type_)) {
@@ -145,7 +145,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
   };
 
   Unpickler unpickler(
-      reader, std::move(class_resolver), std::move(attr_retriever),
+      reader, std::move(class_resolver), std::move(obj_loader),
       std::move(read_record), device_);
   return unpickler.parse_ivalue();
 }

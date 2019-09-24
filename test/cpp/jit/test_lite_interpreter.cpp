@@ -1,8 +1,8 @@
 #include <test/cpp/jit/test_base.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/jit/lite_interpreter/import_bytecode.h>
-#include <torch/csrc/jit/lite_interpreter/mobile_module.h>
+#include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/import.h>
 #include <torch/types.h>
 

@@ -1,9 +1,13 @@
-#include "lite_interpreter.h"
-#include <ATen/core/operator_name.h>
+#include "interpreter.h"
+#include <torch/csrc/jit/mobile/function.h>
+#include <aten/src/ATen/core/operator_name.h>
 #include <aten/src/ATen/core/dispatch/Dispatcher.h>
 
 namespace torch{
 namespace jit{
+char const * OpCode2Str(OpCode op);
+std::ostream& operator<<(std::ostream& out, Instruction inst);
+
 template <typename dtype> // int64_t, bool, double
 void ListConstructFunc(int64_t num_inputs, Stack& stack) {
   auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
@@ -14,14 +18,16 @@ void ListConstructFunc(int64_t num_inputs, Stack& stack) {
   push(stack, std::move(vals));
 }
 
+>>>>>>> 34d5c6f588... Make it produce correct results for fbnet, after the recent updates of earlier commits:torch/csrc/jit/lite_interpreter/lite_interpreter.cpp
 namespace mobile {
-InterpreterState::InterpreterState(const Bytecode& bytecode)
-    : instructions_(bytecode.instructions_),
-      op_names_(bytecode.op_names_),
-      constants_(bytecode.constants_),
-      register_size_(bytecode.agg_size_) {
-  registers_.resize(register_size_);
+InterpreterState::InterpreterState(std::shared_ptr<Code> code) : code_(code) {
+  registers_.resize(code_->register_size_);
 }
+
+//InterpreterState::InterpreterState(Function* function)
+//    : function_(function) {
+//  registers_.resize(function->register_size());
+//}
 
 bool InterpreterState::run(Stack& stack) {
   size_t pc = 0;
@@ -35,10 +41,12 @@ bool InterpreterState::run(Stack& stack) {
     //        std::cout << val << std::endl;
     //      }
     //    }
-    Instruction inst = instructions_[pc];
+    Instruction inst = code_->instructions_[pc];
+    TORCH_CHECK(isOpSupportedInMobile(inst.op), OpCode2Str(inst.op),
+                " is not supported in mobile module.");
     switch (inst.op) {
       case OP: {
-        auto opname = op_names_[inst.X];
+        auto opname = code_->op_names_[inst.X];
         auto op = c10::Dispatcher::singleton().findSchema(opname);
         assert(op.has_value());
         c10::Dispatcher::singleton().callBoxed(*op, &stack);
@@ -71,7 +79,7 @@ bool InterpreterState::run(Stack& stack) {
         ++pc;
         break;
       case LOADC:
-        stack.emplace_back(constants_[inst.X]);
+        stack.emplace_back(code_->constants_[inst.X]);
         ++pc;
         break;
       case GET_ATTR: {
@@ -148,23 +156,10 @@ bool InterpreterState::run(Stack& stack) {
           pc += inst.X;
         }
       } break;
-      case CALL: {
-        AT_ERROR("Instruction CALL is not supported in mobile.");
-      } break;
-      case INTERFACE_CALL: {
-        AT_ERROR("Instruction INTERFACE_CALL is not supported in mobile.");
-      } break;
       case RET:
         return false;
-      case WAIT: {
-        AT_ERROR("Instruction WAIT is not supported in mobile.");
-      } break;
-      case GUARD: {
-        AT_ERROR("Instruction GUARD is not supported in mobile.");
-      } break;
-      case TAIL_CALL: {
-        AT_ERROR("Instruction TAIL_CALL is not supported in mobile.");
-      } break;
+      default:
+        AT_ERROR(OpCode2Str(inst.op), " is invalid.");
     }
   }
   return false;

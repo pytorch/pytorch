@@ -1,6 +1,6 @@
-#include "mobile_module.h"
+#include "module.h"
 #include <torch/csrc/jit/script/jit_exception.h>
-#include <torch/csrc/jit/lite_interpreter/lite_interpreter.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
 
 namespace torch {
 namespace jit {
@@ -13,24 +13,6 @@ const c10::QualifiedName& Function::qualname() const {
 
 const std::string& Function::name() const {
   return name_.name();
-}
-
-void Function::append_instruction(OpCode op, int N, int X) {
-  bytecode_.instructions_.emplace_back(op, N, X);
-}
-
-void Function::append_opname(const std::string& name,
-                           const std::string& overload_name) {
-  bytecode_.op_names_.emplace_back(name, overload_name);
-}
-
-void Function::append_constant(const c10::IValue& constant) {
-  bytecode_.constants_.push_back(constant);
-}
-
-bool Function::run(Stack& stack) const {
-  InterpreterState interp_state(bytecode_);
-  return interp_state.run(stack);
 }
 
 void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
