@@ -356,6 +356,9 @@ class TestCppApiParity(common.TestCase):
         getattr(cpp_module, cpp_test_name)()
 
     def _test_torch_nn_module_variant(self, test_params):
+        def get_python_ignored_attrs(module_metadata):
+            return list(TORCH_NN_MODULE_IGNORED_ATTRS) + module_metadata.python_ignored_attrs
+
         def generate_test_cpp_sources(test_params, template, extra_stmts):
             input_args = self._get_forward_input_args(test_params)
             input_arg_types = [self._python_arg_to_cpp_arg(arg).type for arg in list(input_args)]
@@ -400,7 +403,7 @@ class TestCppApiParity(common.TestCase):
                 python_constructor_arg_names = [
                     x for x in init_arg_spec.args[1:] if x not in module_metadata.python_ignored_constructor_args]
                 for name, attr in module.__dict__.items():
-                    if name not in list(TORCH_NN_MODULE_IGNORED_ATTRS) + module_metadata.python_ignored_attrs:
+                    if name not in get_python_ignored_attrs(module_metadata):
                         # Every constructor arg of the Python module must have
                         # a corresponding C++ module options arg.
                         if name in python_constructor_arg_names:
@@ -477,7 +480,7 @@ class TestCppApiParity(common.TestCase):
                 for sub_module, sub_script_module in zip(module.children(), script_module.children()):
                     register_attrs(sub_module, sub_script_module)
                 for key, value in module.__dict__.items():
-                    if key not in list(TORCH_NN_MODULE_IGNORED_ATTRS) + module_metadata.python_ignored_attrs:
+                    if key not in get_python_ignored_attrs(module_metadata):
                         if value is None:
                             value_type = module_metadata.python_optional_attribute_to_jit_type[key]
                         elif type(value) == tuple:
