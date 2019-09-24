@@ -1566,7 +1566,7 @@ if _enabled:
             # createResolutionCallback internally adds 1 to get us to our frame, then
             # we add 1 to get to the proper surrounding scope.
             rcb = _jit_internal.createResolutionCallback(frames_up=1)
-            self._c._define(self, self._module_meta, src, rcb)
+            self._c._define(self._module_meta, src, rcb)
 
         # TODO Doc
         # Use this to define() within __init__. These will be enqueued to

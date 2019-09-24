@@ -264,16 +264,14 @@ static StrongFunctionPtr script_compile_function(
 struct VISIBILITY_HIDDEN ModuleSelf : public Self {
   ModuleSelf(
       const Module& m,
-      py::object& py_m,
       std::shared_ptr<ModuleMetadata> moduleMeta)
       : Self(),
         module_(m),
-        pyModule_(py_m),
         moduleMeta_(std::move(moduleMeta)) {}
 
   std::shared_ptr<SugaredValue> makeSugared(Value* v) const override {
     v->setType(module_.type());
-    return std::make_shared<ModuleValue>(v, module_, pyModule_, *moduleMeta_);
+    return std::make_shared<ModuleValue>(v, module_, *moduleMeta_);
   }
 
   ClassTypePtr getClassType() const override {
@@ -282,7 +280,6 @@ struct VISIBILITY_HIDDEN ModuleSelf : public Self {
 
  private:
   const Module& module_;
-  const py::object& pyModule_;
   std::shared_ptr<ModuleMetadata> moduleMeta_;
 };
 
@@ -484,11 +481,10 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_define",
           [](Module& m,
-             py::object py_m,
              std::shared_ptr<ModuleMetadata> moduleMeta,
              const std::string& script,
              ResolutionCallback rcb) {
-            const auto self = ModuleSelf(m, py_m, std::move(moduleMeta));
+            const auto self = ModuleSelf(m, std::move(moduleMeta));
             m.class_compilation_unit()->define(
                 m.name(), script, pythonResolver(rcb), &self);
             didFinishEmitModule(m);
@@ -497,7 +493,6 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_create_methods",
           [](Module& m,
-             py::object py_m,
              std::shared_ptr<ModuleMetadata> moduleMeta,
              const std::vector<Def>& defs,
              const std::vector<ResolutionCallback>& rcbs,
@@ -509,7 +504,7 @@ void initJitScriptBindings(PyObject* module) {
               resolvers.push_back(pythonResolver(callback));
             }
             const auto& prefix = m.name();
-            const auto self = ModuleSelf(m, py_m, std::move(moduleMeta));
+            const auto self = ModuleSelf(m, std::move(moduleMeta));
             m.class_compilation_unit()->define(prefix, defs, resolvers, &self);
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
@@ -1041,6 +1036,20 @@ void initJitScriptBindings(PyObject* module) {
       m, "ModuleMetadata")
       .def(py::init<>())
       .def(
+          "get_constants",
+          [](const ModuleMetadata& self) {
+            // TODO: we only use this for bind_to_wrapper, and it should be
+            // unnecessary if we consider constants to be module attributes
+            //
+            // Convert to a more pybind-friendly representation, so we don't
+            // need to bind ModuleMetadata::Attribute as well.
+            std::unordered_map<std::string, py::object> ret;
+            for (const auto& pr : self.constants_){
+              ret.emplace(pr.first, pr.second.v_);
+            }
+            return ret;
+          })
+      .def(
           "get_attributes",
           [](ModuleMetadata& self) {
             // Convert to a more pybind-friendly representation, so we don't
@@ -1061,6 +1070,11 @@ void initJitScriptBindings(PyObject* module) {
                 self.modules_, [](const ModuleMetadata::ModuleInfo& info) {
                   return info.name;
                 });
+          })
+      .def_property_readonly(
+          "py_class",
+          [](const ModuleMetadata& self) {
+            return self.pyClass_;
           })
       .def("add_constant", &ModuleMetadata::addConstant)
       .def("add_attribute", &ModuleMetadata::addAttribute)

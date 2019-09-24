@@ -8,7 +8,7 @@ import functools
 import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args
 from torch.nn import Module, ModuleList, Sequential, ModuleDict
-from torch._six import get_function_from_type
+from torch._six import get_function_from_type, bind_method
 
 
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
@@ -225,20 +225,20 @@ def get_type(original, level=0):
     # printt("======================")
     return module_meta, type_
 
-def create_methods_from_stubs(script_module, module_meta, stubs):
+def create_methods_from_stubs(cpp_mod, module_meta, stubs):
     defs = [m.def_ for m in stubs]
     rcbs = [m.resolution_callback for m in stubs]
     defaults = [get_default_args(m.original_method) for m in stubs]
-    script_module._c._create_methods(script_module, module_meta, defs, rcbs, defaults)
+    cpp_mod._create_methods(module_meta, defs, rcbs, defaults)
 
-def compile_unbound_method(script_module, module_meta, fn):
+def compile_unbound_method(cpp_mod, module_meta, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
     stub = make_stub(fn)
     with torch.jit._disable_emit_hooks():
         # We don't want to call the hooks here since the graph that is calling
         # this function is not yet complete
-        create_methods_from_stubs(script_module, module_meta, (stub,))
+        create_methods_from_stubs(cpp_mod, module_meta, (stub,))
     return stub
 
 # This is called in the following ways:
@@ -300,7 +300,9 @@ def create_script_module(original_module, stubs):
         script_module._modules[name] = scripted
 
     # Copy @ignored/@unused methods from the original module to the new one.
-    # This ensures they are available during compilation.
+    # This ensures we can access these Python methods on the resulting ScriptModule.
+    # TODO: when we split the module stuff apart, this needs to go in the outer
+    # part (or does it?)
     for name in dir(original_module):
         item = getattr(original_module, name, None)
         if not inspect.ismethod(item):
@@ -317,10 +319,10 @@ def create_script_module(original_module, stubs):
     if module_type not in module_meta_store.methods_compiled:
         # 1. Compile any methods stored on _lazy_defines
         for src, rcb in script_module._lazy_defines:
-            cpp_mod._define(script_module, module_meta, src, rcb)
+            cpp_mod._define(module_meta, src, rcb)
 
         # 2. Compile the stubs the provided
-        create_methods_from_stubs(script_module, module_meta, stubs)
+        create_methods_from_stubs(cpp_mod, module_meta, stubs)
         module_meta_store.methods_compiled.add(module_type)
 
     # Make the compiled methods available to the Python ScriptModule class.
@@ -516,3 +518,28 @@ def is_module_dict(cls):
 
 def is_module_list(cls):
     return issubclass(cls, torch.jit._ConstModuleList) or issubclass(cls, torch.nn.ModuleList) or issubclass(cls, torch.nn.Sequential)
+
+def bind_to_dummy_module(module_meta, unbound_method, cpp_mod):
+    """
+    Create a dummy ScriptModule object for `unbound_method` to bind to.
+    This ScriptModule object should behave "as if" it was the actual
+    ScriptModule object holding `cpp_mod`, but since we constructed it only
+    from information in `module_meta` we can be sure that there is no dynamic
+    shenanigans that would ruin our type sharing.
+    """
+    script_module = torch.jit.ScriptModule(cpp_mod)
+    orig_class = module_meta.py_class
+
+    # Copy @ignored/@unused methods from the original module to the new one.
+    # This ensures they are available during compilation.
+    for name in dir(orig_class):
+        item = getattr(orig_class, name, None)
+        if _jit_internal.is_ignored_fn(item) or hasattr(item, "_parameter_names_fn"):
+            setattr(script_module, name, item)
+
+    for name, value in module_meta.get_constants().items():
+        setattr(script_module, name, value)
+
+    script_module._finalize()
+    method = bind_method(unbound_method, script_module, torch.jit.ScriptModule)
+    return method

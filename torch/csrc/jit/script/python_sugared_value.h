@@ -306,11 +306,9 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   ModuleValue(
       Value* self,
       Module module,
-      py::object pyModule,
       ModuleMetadata moduleMeta)
       : self_(self),
         module_(std::move(module)),
-        pyModule_(std::move(pyModule)),
         moduleMeta_(std::move(moduleMeta)) {}
 
   std::string kind() const override {
@@ -355,7 +353,6 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       Function& m);
   Value* self_;
   Module module_;
-  py::object pyModule_;
   ModuleMetadata moduleMeta_;
 };
 

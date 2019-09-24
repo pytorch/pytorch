@@ -305,7 +305,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       return std::make_shared<ModuleValue>(
           m.graph()->insertGetAttr(self_, field),
           module_.get_module(field),
-          pyModule_.attr(field.c_str()),
           *submoduleMeta);
     } else {
       // ...otherwise, methods, parameters, attributes, and buffers are all
@@ -363,13 +362,18 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       field.c_str(),
       pybind11::cast<pybind11::none>(Py_None));
   if (py::isinstance<py::function>(unboundMethod)) {
+    // For Python methods that we're trying to call directly, we need to bind
+    // the method to a self. TODO say more about tis
+    //
     // If the function is @ignored
     bool isIgnoredFn =
         py::cast<bool>(py::module::import("torch._jit_internal")
                            .attr("is_ignored_fn")(unboundMethod));
     if (isIgnoredFn) {
-      // TODO bind the method correctly (not rely on the shadowing)
-      auto boundMethod = py::getattr(pyModule_, field.c_str());
+      // Create a generated ScriptModule type with module_ set as cpp_module
+      auto boundMethod = py::module::import("torch.jit._recursive")
+                             .attr("bind_to_dummy_module")(
+                                 moduleMeta_, unboundMethod, module_);
       TORCH_CHECK(py::isinstance<py::function>(boundMethod));
       return std::make_shared<PythonValue>(boundMethod);
     }
@@ -384,11 +388,12 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     if (isParameterList) {
       // Fetch the names of the parameters in the list so they're in the
       // right order
-      auto boundMethod = py::getattr(pyModule_, field.c_str());
-      auto param_names = py::getattr(boundMethod, "_parameter_names_fn")(pyModule_);
-      // auto fn_self = py::getattr(unboundMethod, "__self__");
-      // auto param_names =
-      //     py::getattr(unboundMethod, "_parameter_names_fn")(fn_self);
+      auto unboundParamNamesMethod =
+          py::getattr(unboundMethod, "_parameter_names_fn");
+      auto boundMethod = py::module::import("torch.jit._recursive")
+                             .attr("bind_to_dummy_module")(
+                                 moduleMeta_, unboundParamNamesMethod, module_);
+      auto param_names = boundMethod();
 
       Graph& g = *m.graph();
       // Add all module parameters as inputs to the graph
@@ -405,7 +410,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     // step 1). Just compile it.
     auto stub = py::module::import("torch.jit._recursive")
                     .attr("compile_unbound_method")(
-                        pyModule_, moduleMeta_, unboundMethod);
+                        module_, moduleMeta_, unboundMethod);
     TORCH_INTERNAL_ASSERT(!stub.is_none());
     return SimpleValue(self_).attr(loc, m, field);
   }
@@ -471,7 +476,6 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::desugarModuleContainer(
     auto mod_v = std::make_shared<ModuleValue>(
         module_v,
         sub_module,
-        pyModule_.attr(name.c_str()),
         *moduleMeta_.findModuleMeta(name));
 
     if (get_keys && get_values) {
