@@ -995,7 +995,7 @@ class TestDynamicQuantizedLinear(TestCase):
         # W_scale = 1.0
         # W_zp = 0
         W_scales = np.ones(output_channels)
-        W_zps = np.zeros(output_channels)
+        W_zps = np.zeros(output_channels).astype(np.int)
         W_value_min = -128
         W_value_max = 127
         W_q0 = np.round(
@@ -1035,8 +1035,8 @@ class TestDynamicQuantizedLinear(TestCase):
         if use_channelwise:
             W_fp32 = torch.from_numpy(_dequantize(W_q0, W_scales.reshape(
                 (-1, 1)), W_zps.reshape((-1, 1)))).to(dtype=torch.float)
-            W_q = torch.quantize_per_channel(W_fp32, scales=torch.from_numpy(W_scales).to(
-                torch.double), zero_points=torch.from_numpy(W_zps).to(torch.int64), axis=0, dtype=torch.qint8)
+            W_q = torch.quantize_per_channel(W_fp32, scales=torch.from_numpy(W_scales),
+                                             zero_points=torch.from_numpy(W_zps), axis=0, dtype=torch.qint8)
             b_fp32 = torch.from_numpy(
                 _dequantize(b_q0, X_scale * W_scales, 0)
             ).to(dtype=torch.float) if use_bias else None
@@ -1108,7 +1108,7 @@ class TestQuantizedLinear(unittest.TestCase):
         ).astype(np.uint8)
 
         W_scales = np.random.rand(output_channels)
-        W_zps = np.round(np.random.rand(output_channels) * 100 - 50)
+        W_zps = np.round(np.random.rand(output_channels) * 100 - 50).astype(np.int)
         W_value_min = -128
         W_value_max = 127
         W_q0 = np.round(
@@ -1144,13 +1144,13 @@ class TestQuantizedLinear(unittest.TestCase):
         if use_channelwise:
             W = torch.from_numpy(_dequantize(W_q0, W_scales.reshape(
                 (-1, 1)), W_zps.reshape((-1, 1)))).to(dtype=torch.float)
-            W_q = torch.quantize_per_channel(W, scales=torch.from_numpy(W_scales).to(
-                torch.double), zero_points=torch.from_numpy(W_zps).to(torch.int64), axis=0, dtype=torch.qint8)
+            W_q = torch.quantize_per_channel(W, scales=torch.from_numpy(W_scales),
+                                             zero_points=torch.from_numpy(W_zps), axis=0, dtype=torch.qint8)
             b = torch.from_numpy(_dequantize(
                 b_q0, X_scale * W_scales, 0)).to(dtype=torch.float) if use_bias else None
-            b_q = torch.quantize_per_channel(b, scales=torch.from_numpy(X_scale * W_scales).to(
-                torch.double), zero_points=torch.zeros(output_channels, dtype=torch.long),
-                axis=0, dtype=torch.qint32) if use_bias else None
+            b_q = torch.quantize_per_channel(b, scales=torch.from_numpy(X_scale * W_scales),
+                                             zero_points=torch.zeros(output_channels, dtype=torch.long),
+                                             axis=0, dtype=torch.qint32) if use_bias else None
         else:
             W = torch.from_numpy(_dequantize(
                 W_q0, W_scales[0], W_zps[0])).to(dtype=torch.float)
@@ -1390,7 +1390,7 @@ class TestQuantizedConv(unittest.TestCase):
         X_q = torch.quantize_per_tensor(X, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
         if use_channelwise:
             W_q = torch.quantize_per_channel(W,
-                                             W_scales_tensor.to(dtype=torch.double),
+                                             W_scales_tensor,
                                              W_zero_points_tensor.to(dtype=torch.long),
                                              0,
                                              dtype=torch.qint8)
@@ -1453,8 +1453,8 @@ class TestQuantizedConv(unittest.TestCase):
 
         if channelwise:
             output_channels = filters.shape[0]
-            filters_scale = torch.tensor([filters_scale] * output_channels).to(torch.double)
-            filters_zero_point = torch.tensor([filters_zero_point] * output_channels).to(torch.long)
+            filters_scale = torch.tensor([filters_scale] * output_channels)
+            filters_zero_point = torch.tensor([filters_zero_point] * output_channels)
 
         qconv_prepack = torch.ops.quantized.conv_prepack
         qconv_unpack = torch.ops.quantized.conv_unpack

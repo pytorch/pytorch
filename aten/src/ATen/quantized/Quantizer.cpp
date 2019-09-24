@@ -339,6 +339,34 @@ QuantizerPtr make_per_channel_affine_quantizer(
                                                         scales, zero_points, axis);
 }
 
+QuantizerPtr make_per_channel_affine_quantizer(
+    const Tensor& scales,
+    const Tensor& zero_points,
+    int64_t axis,
+    ScalarType scalar_type) {
+  TORCH_CHECK(scales.dim() == 1, "scale tensor must have dimension 1");
+  TORCH_CHECK(
+      zero_points.dim() == 1, "zero_points tensor must have dimension 1");
+  TORCH_CHECK(
+      scales.numel() == zero_points.numel(),
+      "number of elements in scales and zero_points must match");
+  TORCH_CHECK(
+      isFloatingType(scales.scalar_type()),
+      "scale tensor must be floating point");
+  TORCH_CHECK(
+      isIntegralType(zero_points.scalar_type(), false /*includeBool*/),
+      "zero_points tensor must have integral type");
+  Tensor scales_double = scales.to(kDouble).contiguous();
+  Tensor zero_points_int64 = zero_points.to(kLong).contiguous();
+  double* scales_data = scales_double.data_ptr<double>();
+  int64_t* zero_points_data = zero_points_int64.data_ptr<int64_t>();
+  std::vector<double> scale_vals(scales_data, scales_data + scales.numel());
+  std::vector<int64_t> zero_point_vals(
+      zero_points_data, zero_points_data + zero_points.numel());
+  return make_per_channel_affine_quantizer(
+      scale_vals, zero_point_vals, axis, scalar_type);
+}
+
 QTensorImpl* get_qtensorimpl(const Tensor& self) {
   // TODO: remove this when Variable and Tensor are merged
   TORCH_INTERNAL_ASSERT(

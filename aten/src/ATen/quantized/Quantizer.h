@@ -255,6 +255,12 @@ CAFFE2_API QuantizerPtr
 make_per_channel_affine_quantizer(
     const std::vector<double>& scales, const std::vector<int64_t>& zero_points,
     int64_t axis, ScalarType scalar_type);
+// variant that unpacks scales and zero points from tensors
+CAFFE2_API QuantizerPtr make_per_channel_affine_quantizer(
+    const Tensor& scales,
+    const Tensor& zero_points,
+    int64_t axis,
+    ScalarType scalar_type);
 
 // Create a Quantized Tensor given arguments for normal Tensor and a quantizer
 CAFFE2_API Tensor new_qtensor_cpu(
