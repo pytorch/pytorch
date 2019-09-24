@@ -646,8 +646,9 @@ class TestJit(JitTestCase):
         self.checkScript(test_simple_grad_with_grad_outputs, (x, y), inputs_requires_grad=True)
 
     def test_script_backward(self):
-        def checkGradEquals(fn, inputs):
+        def checkBackwardScript(fn, inputs):
             scripted_fn = torch.jit.script(fn)
+            FileCheck().check("torch.autograd.backward").run(scripted_fn.code)
             recording_inputs = do_input_map(lambda t: t.detach().requires_grad_(), inputs)
 
             fn(*inputs)
@@ -677,9 +678,9 @@ class TestJit(JitTestCase):
             torch.autograd.backward((output,), grad_outputs)
 
         inp = torch.randn(2, 2, requires_grad=True)
-        checkGradEquals(test_tensor_backward, (inp,))
-        checkGradEquals(test_torch_autograd_backward, (inp,))
-        checkGradEquals(test_torch_autograd_backward_with_grad_tensors, (inp,))
+        checkBackwardScript(test_tensor_backward, (inp,))
+        checkBackwardScript(test_torch_autograd_backward, (inp,))
+        checkBackwardScript(test_torch_autograd_backward_with_grad_tensors, (inp,))
 
     def test_diff_subgraph_clones_constants(self):
         @torch.jit.script

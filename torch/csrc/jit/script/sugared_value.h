@@ -181,6 +181,12 @@ struct TORCH_API BuiltinModule : public SugaredValue {
       const SourceRange& loc,
       Function& m,
       const std::string& field) override {
+    if (field == "autograd") {
+      // When refering torch.autograd, it is also considered to be a
+      // BuiltinModule and we will dispatch to the aten operators for the
+      // methods under its module.
+      return std::make_shared<BuiltinModule>("aten", version);
+    }
     return std::make_shared<BuiltinFunction>(
         Symbol::fromQualString(name + "::" + field), c10::nullopt);
   }
