@@ -110,7 +110,7 @@ bool shape_is_fast_for_reduce(const at::Tensor& lhs, const at::Tensor& rhs) {
 
 RegisterOperators mm_tree_reduction_reg({Operator(
     prim::MMTreeReduce,
-    [](const Node* node) {
+    [](const Node* node) -> Operation {
       size_t num_inputs = node->inputs().size();
       return [num_inputs](Stack& stack) {
         std::vector<at::Tensor> inputs;
@@ -321,7 +321,7 @@ bool shape_is_fast_for_side(const at::Tensor& other_side_input) {
 
 RegisterOperators mm_batch_side_reg({Operator(
     prim::MMBatchSide,
-    [](const Node* node) {
+    [](const Node* node) -> Operation {
       size_t num_other_side_inputs = node->inputs().size() - 1;
       Side single_side = static_cast<Side>(node->i(Symbol::attr("side")));
       return [num_other_side_inputs, single_side](Stack& stack) {

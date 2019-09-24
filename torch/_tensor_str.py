@@ -201,7 +201,7 @@ def _tensor_str(self, indent):
         # - tensor data needs to be summarized
         # Some of the codepaths don't fully support named tensors, so we send in
         # an unnamed tensor to the formatting code as a workaround.
-        self = self.renamed(None)
+        self = self.rename(None)
 
     summarize = self.numel() > PRINT_OPTS.threshold
     if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
