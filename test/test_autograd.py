@@ -3074,16 +3074,18 @@ class TestAutograd(TestCase):
             c.sum().backward(torch.ones(1, requires_grad=True))
 
     def test_inplace_view_no_grad(self):
-        # See https://github.com/pytorch/pytorch/issues/26546
+        # Issue 26546: View should respect torch.no_grad() mode.
         x = torch.ones(1, requires_grad=True)
 
         with torch.no_grad():
             y = x.t()
             y.add_(0)
+
         assert y.grad_fn is None
 
     def test_inplace_view_in_autograd_function(self):
-        # See https://github.com/pytorch/pytorch/issues/26546
+        # Issue 26546: In-place operation on a view inside of a Python autograd
+        # function should not break the graph.
         class F(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
