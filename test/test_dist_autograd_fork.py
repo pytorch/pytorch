@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 from dist_autograd_test import TestDistAutograd
 from common_distributed import MultiProcessTestCase
+from common_utils import run_tests
 
 
 class TestDistAutogradWithFork(MultiProcessTestCase, TestDistAutograd):

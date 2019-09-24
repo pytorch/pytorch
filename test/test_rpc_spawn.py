@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 from rpc_test import RpcTest
 from common_distributed import MultiProcessTestCase
-from common_utils import TEST_WITH_ASAN
+from common_utils import TEST_WITH_ASAN, run_tests
 
 import unittest
 
