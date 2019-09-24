@@ -737,6 +737,41 @@ class TestQuantizedOps(TestCase):
             cat_q = q_cat_op(tensors_q, dim=ch_axis, scale=scale,
                              zero_point=zero_point)
 
+    """Tests quantize concatenation (both fused and not)."""
+    @no_deadline
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           relu=st.booleans())
+    def test_cat_nhwc(self, X, relu):
+        # X is NHWC
+        X, (scale, zero_point, torch_type) = X
+
+        # Tile out X so # channels is > 64
+        X = np.repeat(X, 70 / X.shape[3], 3)
+        X = torch.from_numpy(np.ascontiguousarray(X))
+        Y = X.clone()
+        Y = torch.from_numpy(np.ascontiguousarray(Y))
+        # Here, we quantize and get quantized tensors in NHWC for both dims and strides. The
+        # permute switches it so that the tensor looks like NCHW but it laid out in memory as
+        # NHWC.
+        qX = torch.quantize_per_tensor(X, scale, zero_point, torch_type).permute([0, 3, 1, 2])
+        qY = torch.quantize_per_tensor(Y, scale, zero_point, torch_type).permute([0, 3, 1, 2])
+
+        ref = torch.cat([qX.dequantize(), qY.dequantize()], dim=1)
+        if relu:
+            ref[ref < 0] = 0.0
+        ref = torch.quantize_per_tensor(ref, scale=scale, zero_point=zero_point, dtype=torch_type)
+
+        if relu:
+            out = torch.ops.quantized.cat_relu(
+                [qX, qY], dim=1, scale=scale, zero_point=zero_point)
+        else:
+            out = torch.ops.quantized.cat([qX, qY], dim=1, scale=scale, zero_point=zero_point)
+
+        torch.testing.assert_allclose(out.dequantize(), ref.dequantize())
+        self.assertNotEqual(out.stride(), sorted(out.stride()))
+
     """Tests the correctness of the quantized equal op."""
     @unittest.skip("temporarily disable until failures are fixed. " +
                    "See https://github.com/pytorch/pytorch/issues/26279")
