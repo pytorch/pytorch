@@ -1272,7 +1272,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
             def __init__(self):
                 super(TestModule, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1)
-                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.bn = torch.nn.BatchNorm2d(num_features=20, eps=1e-1)
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1280,7 +1280,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
                 return x
 
         eager = TestModule()
-        scripted = torch.jit.script(eager)
+        scripted = torch.jit.script(copy.deepcopy(eager))
         eager.eval()
         scripted.eval()
 
@@ -1312,7 +1312,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
             def __init__(self):
                 super(TestModule, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1, bias=False)
-                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.bn = torch.nn.BatchNorm2d(num_features=20, eps=1e-1)
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1320,7 +1320,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
                 return x
 
         eager = TestModule()
-        scripted = torch.jit.script(eager)
+        scripted = torch.jit.script(copy.deepcopy(eager))
         eager.eval()
         scripted.eval()
 
@@ -1352,7 +1352,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
             def __init__(self):
                 super(SubModule, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1)
-                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.bn = torch.nn.BatchNorm2d(num_features=20, eps=1e-1)
 
             def forward(self, x):
                 x = self.conv(x)
