@@ -198,11 +198,6 @@ double THLog1p(const double x)
 #endif
 }
 
-double THLog2(const double x)
-{
-  return log2(x);
-}
-
 double THExpm1(const double x)
 {
   return expm1(x);
