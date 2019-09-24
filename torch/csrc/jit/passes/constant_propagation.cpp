@@ -198,7 +198,10 @@ struct ConstantPropagator {
     auto input_bool = constant_as<bool>(n->input());
     AT_ASSERT(input_bool);
     GRAPH_UPDATE(
-        "Folding if\n", n->input()->debugName(), " with\n", *input_bool);
+        "Folding if\n",
+        n->input()->debugName(),
+        " if condition value:\n",
+        *input_bool);
     size_t block_index = *input_bool ? 0 : 1;
     ConstantPropagation(n->blocks().at(block_index));
     inlineIfBody(n->blocks().at(block_index));
