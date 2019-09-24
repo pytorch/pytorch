@@ -1684,23 +1684,43 @@
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
   use_c10_dispatcher: unboxed_only
 
+# The CPU and GPU dispatch variants are named weirdly here because otherwise there
+# are namespacing issues in C++
 - func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
+  dispatch:
+    CPU: mean_cpu_gpu
+    CUDA: mean_cpu_gpu
+    QuantizedCPU: quantized_mean_cpu
 
 - func: mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
+  dispatch:
+    CPU: mean_cpu_gpu
+    CUDA: mean_cpu_gpu
+    QuantizedCPU: quantized_mean_cpu
 
 - func: mean.out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
+  dispatch:
+    CPU: mean_out_cpu_gpu
+    CUDA: mean_out_cpu_gpu
+    QuantizedCPU: quantized_mean_out_cpu
 
 - func: mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
+  dispatch:
+    CPU: mean_cpu_gpu
+    CUDA: mean_cpu_gpu
 
 - func: mean.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
+  dispatch:
+    CPU: mean_out_cpu_gpu
+    CUDA: mean_out_cpu_gpu
 
 - func: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: unboxed_only
@@ -3560,11 +3580,6 @@
   dispatch:
     QuantizedCPU: dequantize_quant
 
-- func: _dequantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
-  variants: function
-  dispatch:
-    CPU: dequantize_per_tensor_cpu
-
 - func: q_scale(Tensor self) -> float
   use_c10_dispatcher: full
   variants: function, method
@@ -3872,9 +3887,6 @@
   use_c10_dispatcher: full
   variants: function, method
 
-- func: index_add_.dimname(Tensor(a!) self, Dimname dim, Tensor index, Tensor source) -> Tensor(a!)
-  variants: method
-
 - func: index_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor source) -> Tensor
   variants: function, method
 
@@ -3900,14 +3912,8 @@
   use_c10_dispatcher: full
   variants: function, method
 
-- func: index_fill_.dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)
-  variants: method
-
 - func: index_fill.dimname_Scalar(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
-
-- func: index_fill_.dimname_Tensor(Tensor(a!) self, Dimname dim, Tensor index, Tensor value) -> Tensor(a!)
-  variants: method
 
 - func: index_fill.dimname_Tensor(Tensor self, Dimname dim, Tensor index, Tensor value) -> Tensor
   variants: function, method
@@ -3934,14 +3940,8 @@
   use_c10_dispatcher: full
   variants: function, method
 
-- func: scatter_.dimname_src(Tensor(a!) self, Dimname dim, Tensor index, Tensor src) -> Tensor(a!)
-  variants: method
-
 - func: scatter.dimname_src(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
-
-- func: scatter_.dimname_value(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)
-  variants: method
 
 - func: scatter.dimname_value(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
@@ -3956,9 +3956,6 @@
 - func: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-
-- func: scatter_add_.dimname(Tensor(a!) self, Dimname dim, Tensor index, Tensor src) -> Tensor(a!)
-  variants: method
 
 - func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
