@@ -9,7 +9,7 @@ namespace jit {
 
 using Kwargs = std::unordered_map<std::string, IValue>;
 
-void preoptimizeGraph(std::shared_ptr<Graph>& graph);
+TORCH_API void preoptimizeGraph(std::shared_ptr<Graph>& graph);
 
 // A Function is a pure Graph with no implicit `self` object bound.
 // It contains schema information, and the executor that manages the
@@ -103,9 +103,13 @@ struct TORCH_API Function {
     if (executor_) {
       return executor_;
     }
+    // Make sure optimized graph is computed (do it before acquiring the lock to
+    // avoid deadlock).
+    (void)optimized_graph();
+
     std::lock_guard<std::mutex> lock(compile_mutex);
     check_single_output();
-    executor_ = GraphExecutor(graph());
+    executor_ = GraphExecutor(*optimized_graph_);
     return executor_;
   }
 
