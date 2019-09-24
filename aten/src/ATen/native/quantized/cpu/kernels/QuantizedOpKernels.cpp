@@ -3,6 +3,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/SortingUtils.h>
 
 namespace at {
 namespace native {
@@ -576,6 +577,79 @@ void qavg_pool2d_nhwc_kernel(
   });
 }
 
+void qtopk_kernel(Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t k,
+    int64_t dim,
+    bool largest,
+    bool sorted) {
+  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qtopk_cpu", [&] {
+    dim_apply(
+        {self, values, indices},
+        dim,
+        [&](int64_t i, TensorList tl) {
+          auto tmp_values = tl[0].accessor<scalar_t, 1>();
+          auto mode_values = tl[1].accessor<scalar_t, 1>();
+          auto mode_indices = tl[2].accessor<int64_t, 1>();
+
+          auto n = tmp_values.size(0);
+          auto use_partial_sort = k * 64 <= n;
+
+          using elem_t = std::pair<typename scalar_t::underlying, int64_t>;
+          std::vector<elem_t> queue(n);
+          for (int64_t j = 0; j < n; j++) {
+            queue[j].first = tmp_values[j].val_;
+            queue[j].second = j;
+          }
+
+          // we want NaN to be sorted as top for numpy compatibility
+          if (use_partial_sort) {
+            if (largest) {
+              std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
+                [](const elem_t& x, const elem_t& y) -> bool {
+                  return x.first > y.first;
+                });
+            } else {
+              std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
+                [](const elem_t& x, const elem_t& y) -> bool {
+                  return x.first < y.first;
+                });
+            }
+          } else {
+            if (largest) {
+              std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
+                [](const elem_t& x, const elem_t& y) -> bool {
+                  return x.first > y.first;
+                });
+              if (sorted) {
+                std::sort(queue.begin(), queue.begin() + k - 1,
+                  [](const elem_t& x, const elem_t& y) -> bool {
+                    return x.first > y.first;
+                  });
+              }
+            } else {
+              std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
+                [](const elem_t& x, const elem_t& y) -> bool {
+                  return x.first < y.first;
+                });
+              if (sorted) {
+                std::sort(queue.begin(), queue.begin() + k -1,
+                  [](const elem_t& x, const elem_t& y) -> bool {
+                    return x.first < y.first;
+                  });
+              }
+            }
+          }
+
+          for (int64_t j = 0; j < k; j++) {
+            mode_values[j] = scalar_t(queue[j].first);
+            mode_indices[j] = queue[j].second;
+          }
+        });
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
@@ -589,6 +663,7 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
 REGISTER_DISPATCH(qcat_nhwc_stub, &qcat_nhwc_kernel<false>);
 REGISTER_DISPATCH(qcat_relu_nhwc_stub, &qcat_nhwc_kernel<true>);
+REGISTER_DISPATCH(qtopk_stub, &qtopk_kernel);
 
 } // namespace native
 } // namespace at
