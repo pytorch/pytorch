@@ -107,11 +107,14 @@ void bitwise_xor_kernel(TensorIterator& iter) {
           });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_xor_cpu", [&]() {
-      cpu_kernel(
+      cpu_kernel_vec(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t {
             return a ^ b;
-      });
+          },
+          [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+            return a ^ b;
+          });
     });
   }
 }
