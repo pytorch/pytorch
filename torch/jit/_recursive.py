@@ -57,8 +57,8 @@ def _get_valid_constant(attr, v):
 
 
 def get_module_meta(original, level=0):
-    def printt(*args):
-        print("\t" * level, *args)
+    # def printt(*args):
+    #     print("\t" * level, *args)
     # Object + class -> class metadata
     # Metadata is the key for the class uniqueness.
     #   Constants as pyvalues
@@ -202,8 +202,8 @@ class ModuleMetaStore(object):
 module_meta_store = ModuleMetaStore()
 
 def get_type(original, level=0):
-    def printt(*args):
-        print("\t" * level, *args)
+    # def printt(*args):
+    #     print("\t" * level, *args)
     # printt("============================")
     # printt("CALLING GET TYPE ON,", type(original).__name__)
     assert isinstance(original, Module)
@@ -519,6 +519,7 @@ def is_module_dict(cls):
 def is_module_list(cls):
     return issubclass(cls, torch.jit._ConstModuleList) or issubclass(cls, torch.nn.ModuleList) or issubclass(cls, torch.nn.Sequential)
 
+import functools
 def bind_to_dummy_module(module_meta, unbound_method, cpp_mod):
     """
     Create a dummy ScriptModule object for `unbound_method` to bind to.

@@ -163,6 +163,7 @@ def istuple(obj):
 
 def bind_method(fn, obj, obj_type):
     if PY2:
+        fn = fn.__func__
         return types.MethodType(fn, obj, obj_type)
     else:
         return types.MethodType(fn, obj)
