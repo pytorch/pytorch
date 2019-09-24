@@ -4,6 +4,7 @@ tensors and modules.
 from __future__ import absolute_import, division, print_function, unicode_literals
 import numpy as np
 import torch
+from contextlib import contextmanager
 
 """Computes the output shape given convolution parameters."""
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
@@ -61,3 +62,15 @@ def _calculate_dynamic_qparams(X, dtype):
         zero_point = max(qmin, zero_point)
         zero_point = min(qmax, zero_point)
     return [float(scale), int(zero_point)]
+
+@contextmanager
+def enable_mobile_quantized_engine():
+    torch.backends.quantized.engine = 'qnnpack'
+    try:
+        yield
+    finally:
+        qengines = torch.backends.quantized.get_supported_qengines()
+        if 'fbgemm' in qengines:
+            torch.backends.quantized.engine = 'fbgemm'
+        else:
+            torch.backends.quantized.engine = 'none'
