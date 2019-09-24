@@ -192,6 +192,13 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
         from torch.onnx.symbolic_opset10 import _slice
         return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
 
+def _scatter_helper(g, self, dim, index, src):
+    if _export_onnx_opset_version <= 10:
+        from torch.onnx.symbolic_opset9 import scatter
+    else:
+        from torch.onnx.symbolic_opset11 import scatter
+    return scatter(g, self, dim, index, src)
+
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
