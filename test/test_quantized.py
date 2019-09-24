@@ -794,7 +794,7 @@ class TestQuantizedOps(TestCase):
                                               min_side=5, max_side=10),
                        qparams=hu.qparams()),
            size=st.sampled_from((1, 3, 5, 10)),
-           mode=st.sampled_from(("bilinear", "bilinear")),
+           mode=st.sampled_from(("bilinear", "nearest")),
            scale_factor=st.sampled_from((None, 1.5, 2.0)),
            align_corners=st.sampled_from((True, False)),
            nhwc_layout=st.sampled_from((True, False)))
@@ -832,6 +832,7 @@ class TestQuantizedOps(TestCase):
             "nn.functional": torch.nn.functional.interpolate,
             "nn.quantized.functional": torch.nn.quantized.functional.interpolate
         }
+
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
         for name, op in ops_under_test.items():
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
