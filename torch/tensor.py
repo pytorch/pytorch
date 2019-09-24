@@ -42,14 +42,27 @@ class Tensor(torch._C._TensorBase):
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         if self.is_quantized:
+            if self.qscheme() == torch.per_tensor_affine:
+                quantizer_params = (torch.per_tensor_affine,
+                                    self.q_scale(),
+                                    self.q_zero_point())
+            elif self.qscheme() == torch.per_channel_affine:
+                # convert scales and zero points to tuple to avoid recursive calls
+                # when/if we get multi-axis quantized tensors in the future, the shape
+                # is recoverable from the main tensor shape
+                quantizer_params = (torch.per_channel_affine,
+                                    [e.item() for e in self.q_per_channel_scales().reshape(-1)],
+                                    [e.item() for e in self.q_per_channel_zero_points().reshape(-1)],
+                                    list(self.q_per_channel_axis()))
+            else:
+                raise RuntimeError("Serialization is not supported for tensors of type {}".format(self.qscheme()))
             args = (self.storage(),
                     self.storage_offset(),
                     tuple(self.size()),
                     self.stride(),
-                    self.q_scale(),
-                    self.q_zero_point(),
+                    quantizer_params,
                     self.requires_grad,
-                    OrderedDict())  # TODO: self.qscheme()
+                    OrderedDict())
             return (torch._utils._rebuild_qtensor, args)
         else:
             args = (self.storage(),
@@ -270,12 +283,6 @@ class Tensor(torch._C._TensorBase):
         else:
             return LU, pivots
 
-    def gels(self, A):
-        r"""See :func:`torch.lstsq`"""
-        warnings.warn("torch.gels is deprecated in favour of torch.lstsq and will be "
-                      "removed in the next release. Please use torch.lstsq instead.", stacklevel=2)
-        return super(Tensor, self).lstsq(A)
-
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
         r"""See :func:`torch.stft`
@@ -491,29 +498,30 @@ class Tensor(torch._C._TensorBase):
         return super(Tensor, self).refine_names(names)
 
     def align_to(self, *names):
-        return super(Tensor, self).align_to(resolve_ellipsis(names, self.names, 'align_to'))
+        return super(Tensor, self).align_to(
+            resolve_ellipsis(names, self.names, 'align_to', is_positional=False))
 
     def unflatten(self, dim, namedshape):
         names, sizes = unzip_namedshape(namedshape)
         return super(Tensor, self).unflatten(dim, sizes, names)
 
-    def names_(self, *names, **rename_map):
-        # Note [names_ / renamed API]
+    def rename_(self, *names, **rename_map):
+        # Note [rename_ / rename API]
         # The Python API for these is different from the C++ API. In Python:
-        # 1) tensor.renamed(*names) takes a vararglist of names
-        # 2) tensor.renamed(**rename_map) takes a map of names to rename.
+        # 1) tensor.rename(*names) takes a vararglist of names
+        # 2) tensor.rename(**rename_map) takes a map of names to rename.
         # C++ is static, making it difficult to implement similar behavior.
         return update_names(self, names, rename_map, inplace=True)
 
-    def renamed(self, *names, **rename_map):
-        # See Note [names_ / renamed API]
+    def rename(self, *names, **rename_map):
+        # See Note [rename_ / rename API]
         return update_names(self, names, rename_map, inplace=False)
 
     def _update_names(self, names, inplace):
-        # See Note [names_ / renamed API]
+        # See Note [rename_ / rename API]
         if inplace:
-            return super(Tensor, self).names_(names)
+            return super(Tensor, self).rename_(names)
         else:
-            return super(Tensor, self).renamed(names)
+            return super(Tensor, self).rename(names)
 
     __module__ = 'torch'

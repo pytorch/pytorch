@@ -9,7 +9,7 @@ namespace jit {
 
 using Kwargs = std::unordered_map<std::string, IValue>;
 
-void preoptimizeGraph(std::shared_ptr<Graph>& graph);
+TORCH_API void preoptimizeGraph(std::shared_ptr<Graph>& graph);
 
 // A Function is a pure Graph with no implicit `self` object bound.
 // It contains schema information, and the executor that manages the

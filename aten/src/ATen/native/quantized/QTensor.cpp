@@ -6,7 +6,7 @@
 namespace at {
 namespace native {
 
-Tensor quantize_linear_cpu(
+Tensor quantize_per_tensor_cpu(
     const Tensor& self,
     double scale,
     int64_t zero_point,
@@ -15,7 +15,7 @@ Tensor quantize_linear_cpu(
   return quantizer->quantize(self);
 }
 
-Tensor quantize_linear_per_channel_cpu(
+Tensor quantize_per_channel_cpu(
     const Tensor& self,
     const Tensor& scales,
     const Tensor& zero_points,
@@ -42,7 +42,7 @@ Tensor dequantize_quant(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
-Tensor dequantize_linear_cpu(
+Tensor dequantize_per_tensor_cpu(
     const Tensor& self,
     double scale,
     int64_t zero_point,
@@ -116,7 +116,7 @@ Tensor int_repr_quant(const Tensor& self) {
   return dst;
 }
 
-Tensor per_tensor_affine_qtensor_cpu(
+Tensor make_per_tensor_quantized_tensor_cpu(
     const Tensor& self,
     double scale,
     int64_t zero_point) {
@@ -126,7 +126,7 @@ Tensor per_tensor_affine_qtensor_cpu(
       scale,
       zero_point);
   Tensor self_contig = self.contiguous();
-  AT_DISPATCH_QINT_TYPES(dst.scalar_type(), "per_tensor_affine_qtensor", [&]() {
+  AT_DISPATCH_QINT_TYPES(dst.scalar_type(), "make_per_tensor_quantized_tensor", [&]() {
     underlying_t* self_data = self_contig.data_ptr<underlying_t>();
     underlying_t* dst_data =
         reinterpret_cast<underlying_t*>(dst.data_ptr<scalar_t>());
@@ -137,7 +137,7 @@ Tensor per_tensor_affine_qtensor_cpu(
   return dst;
 }
 
-Tensor per_channel_affine_qtensor_cpu(
+Tensor make_per_channel_quantized_tensor_cpu(
     const Tensor& self,
     const Tensor& scales,
     const Tensor& zero_points,

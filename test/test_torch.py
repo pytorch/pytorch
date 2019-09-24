@@ -36,6 +36,7 @@ from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA
+import torch.backends.quantized
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -244,8 +245,8 @@ class _TestTorchMixin(object):
                        'sparse_resize_and_clear_',
                        'align_to',  # BUILD_NAMEDTENSOR only
                        'align_as',  # BUILD_NAMEDTENSOR only
-                       'renamed',  # BUILD_NAMEDTENSOR only
-                       'names_',  # BUILD_NAMEDTENSOR only
+                       'rename',  # BUILD_NAMEDTENSOR only
+                       'rename_',  # BUILD_NAMEDTENSOR only
                        'has_names',  # BUILD_NAMEDTENSOR only
                        'rename',  # BUILD_NAMEDTENSOR only
                        'refine_names',  # BUILD_NAMEDTENSOR only
@@ -2113,6 +2114,14 @@ class _TestTorchMixin(object):
         test_inference(torch.float64)
         test_inference(torch.float32)
 
+    def test_qengnie(self):
+        qengines = torch.backends.quantized.get_supported_qengines()
+        original_qe = torch.backends.quantized.engine
+        for qe in qengines:
+            torch.backends.quantized.engine = qe
+            assert torch.backends.quantized.engine == qe, 'qengine not set successfully'
+        torch.backends.quantized.engine = original_qe
+
     def test_new_tensor(self):
         expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
         # test data
@@ -3943,7 +3952,7 @@ class _TestTorchMixin(object):
             self.assertTensorsSlowEqual(byte_tensor, byte_tensor.abs(), 1e-16)
 
         # Checking that the right abs function is called for LongTensor
-        bignumber = 2 ^ 31 + 1
+        bignumber = 2 ** 31 + 1
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
 
@@ -11795,7 +11804,7 @@ class TestTorchDeviceType(TestCase):
             ("expm1", doubles, True, True, 'cpu'),
             ("expm1", doubles, False, True, 'cuda'),
             ("floor", doubles, True, True, 'cpu'),
-            ("floor", doubles, False, True, 'cuda'),
+            ("floor", doubles, True, True, 'cuda'),
             ("frac", doubles, True, True, 'cpu'),
             ("frac", doubles, False, True, 'cuda'),
             ("log", positives, True, True, 'cpu'),
