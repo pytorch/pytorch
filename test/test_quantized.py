@@ -680,6 +680,59 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                                                           X_hat.q_zero_point()))
 
+    @no_deadline
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           k=st.integers(1, 10),
+           dim=st.integers(1, 4),
+           largest=st.booleans(),
+           sorted=st.booleans())
+    def test_qtopk(self, X, k, dim, largest, sorted):
+        X, (scale, zero_point, torch_type) = X
+        qX = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type)
+        assume(dim < X.ndim)
+        assume(k < X.shape[dim])
+
+        unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=largest, sorted=sorted)
+
+        values = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type)
+        indices = torch.tensor(torch.from_numpy(X)).long()
+
+        quantized_out = torch.topk(qX, k, dim=dim, largest=largest, sorted=sorted)
+
+        assert(len(unquantized_out) == len(quantized_out))
+        torch.testing.assert_allclose(quantized_out[0].dequantize(), unquantized_out[0])
+        torch.testing.assert_allclose(quantized_out[1], unquantized_out[1])
+
+    @no_deadline
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           k=st.integers(1, 10),
+           dim=st.integers(1, 4),
+           largest=st.booleans(),
+           sorted=st.booleans())
+    def test_qtopk_nhwc(self, X, k, dim, largest, sorted):
+        # X is NHWC, we permute to view as NCHW but keep NHWC in memory
+        X, (scale, zero_point, torch_type) = X
+        qX = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type).permute([0, 3, 1, 2])
+        X = np.transpose(X, [0, 3, 1, 2])
+        assume(dim < X.ndim)
+        assume(k < X.shape[dim])
+
+        unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=largest, sorted=sorted)
+
+        values = torch.quantize_per_tensor(torch.from_numpy(X), scale, zero_point, torch_type)
+        indices = torch.tensor(torch.from_numpy(X)).long()
+
+        quantized_out = torch.topk(qX, k, dim=dim, largest=largest, sorted=sorted)
+
+        assert(len(unquantized_out) == len(quantized_out))
+        torch.testing.assert_allclose(quantized_out[0].dequantize(), unquantized_out[0])
+        torch.testing.assert_allclose(quantized_out[1], unquantized_out[1])
+
+
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
@@ -732,10 +785,65 @@ class TestQuantizedOps(TestCase):
         zero_points = torch.from_numpy(np.array([0] * X.shape[ch_axis]))
         zero_points = zero_points.to(torch.long)
         tensors_q[0] = torch.quantize_per_channel(
-            X, scales, zero_points, axis=[ch_axis], dtype=torch_type)
+            X, scales, zero_points, axis=ch_axis, dtype=torch_type)
         with self.assertRaisesRegex(RuntimeError, "supported.*cat"):
             cat_q = q_cat_op(tensors_q, dim=ch_axis, scale=scale,
                              zero_point=zero_point)
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
+                                              min_side=5, max_side=10),
+                       qparams=hu.qparams()),
+           size=st.sampled_from((1, 3, 5, 10)),
+           mode=st.sampled_from(("nearest", "nearest")),
+           scale_factor=st.sampled_from((None, 1.5, 2.0)),
+           align_corners=st.sampled_from((True, False)),
+           nhwc_layout=st.sampled_from((True, False)))
+    def test_interpolate(self, X, size, mode, scale_factor, align_corners, nhwc_layout):
+        """
+        This test cover upsample_nearest2d
+        """
+        X, (scale, zero_point, torch_type) = X
+        H, W = X.shape[-2:]
+
+        if scale_factor is not None:
+            size = None
+        if mode == "nearest":
+            align_corners = None
+
+        if nhwc_layout:
+            if X.shape[1] < 176:
+                X = np.repeat(X, 176 / X.shape[1], 1)
+
+            X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
+            X = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
+
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type).permute([0, 3, 1, 2])
+        else:
+            X = torch.from_numpy(X)
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+
+        X_ref = torch.nn.functional.interpolate(
+            qX.int_repr().to(torch.float), size=size, scale_factor=scale_factor,
+            mode=mode, align_corners=align_corners)
+
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.interpolate,
+            "nn.quantized.functional": torch.nn.quantized.functional.interpolate
+        }
+
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+        for name, op in ops_under_test.items():
+            qX_hat = op(qX, size=size, scale_factor=scale_factor,
+                        mode=mode, align_corners=align_corners)
+            self.assertEqual(X_ref, qX_hat.int_repr(), prec=1.0,
+                             message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+            self.assertEqual(scale, qX_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+            self.assertEqual(zero_point, qX_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                                                          qX_hat.q_zero_point()))
 
     """Tests quantize concatenation (both fused and not)."""
     @no_deadline
@@ -796,7 +904,7 @@ class TestQuantizedOps(TestCase):
                 scales=torch.tensor([scale] * channels),
                 zero_points=torch.tensor([zero_point] * channels),
                 dtype=torch_type,
-                axis=[X.ndim - 1])
+                axis=X.ndim - 1)
         else:
             X_scheme = 'per_tensor'
             qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
@@ -810,7 +918,7 @@ class TestQuantizedOps(TestCase):
                 scales=torch.tensor([scale2] * channels),
                 zero_points=torch.tensor([zero_point2] * channels),
                 dtype=torch_type2,
-                axis=[X2.ndim - 1])
+                axis=X2.ndim - 1)
         else:
             X2_scheme = 'per_tensor'
             qX2 = torch.quantize_per_tensor(X2, scale=scale2, zero_point=zero_point2,
@@ -851,6 +959,7 @@ class TestQuantizedOps(TestCase):
 )
 class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
+    @no_deadline
     @given(
         batch_size=st.integers(1, 4),
         input_channels=st.integers(16, 32),
@@ -886,7 +995,7 @@ class TestDynamicQuantizedLinear(TestCase):
         # W_scale = 1.0
         # W_zp = 0
         W_scales = np.ones(output_channels)
-        W_zps = np.zeros(output_channels)
+        W_zps = np.zeros(output_channels).astype(np.int)
         W_value_min = -128
         W_value_max = 127
         W_q0 = np.round(
@@ -926,8 +1035,8 @@ class TestDynamicQuantizedLinear(TestCase):
         if use_channelwise:
             W_fp32 = torch.from_numpy(_dequantize(W_q0, W_scales.reshape(
                 (-1, 1)), W_zps.reshape((-1, 1)))).to(dtype=torch.float)
-            W_q = torch.quantize_per_channel(W_fp32, scales=torch.from_numpy(W_scales).to(
-                torch.double), zero_points=torch.from_numpy(W_zps).to(torch.int64), axis=[0], dtype=torch.qint8)
+            W_q = torch.quantize_per_channel(W_fp32, scales=torch.from_numpy(W_scales),
+                                             zero_points=torch.from_numpy(W_zps), axis=0, dtype=torch.qint8)
             b_fp32 = torch.from_numpy(
                 _dequantize(b_q0, X_scale * W_scales, 0)
             ).to(dtype=torch.float) if use_bias else None
@@ -969,6 +1078,7 @@ class TestDynamicQuantizedLinear(TestCase):
 )
 class TestQuantizedLinear(unittest.TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
+    @no_deadline
     @given(batch_size=st.integers(1, 4),
            input_channels=st.integers(16, 32),
            output_channels=st.integers(4, 8),
@@ -998,7 +1108,7 @@ class TestQuantizedLinear(unittest.TestCase):
         ).astype(np.uint8)
 
         W_scales = np.random.rand(output_channels)
-        W_zps = np.round(np.random.rand(output_channels) * 100 - 50)
+        W_zps = np.round(np.random.rand(output_channels) * 100 - 50).astype(np.int)
         W_value_min = -128
         W_value_max = 127
         W_q0 = np.round(
@@ -1034,13 +1144,13 @@ class TestQuantizedLinear(unittest.TestCase):
         if use_channelwise:
             W = torch.from_numpy(_dequantize(W_q0, W_scales.reshape(
                 (-1, 1)), W_zps.reshape((-1, 1)))).to(dtype=torch.float)
-            W_q = torch.quantize_per_channel(W, scales=torch.from_numpy(W_scales).to(
-                torch.double), zero_points=torch.from_numpy(W_zps).to(torch.int64), axis=[0], dtype=torch.qint8)
+            W_q = torch.quantize_per_channel(W, scales=torch.from_numpy(W_scales),
+                                             zero_points=torch.from_numpy(W_zps), axis=0, dtype=torch.qint8)
             b = torch.from_numpy(_dequantize(
                 b_q0, X_scale * W_scales, 0)).to(dtype=torch.float) if use_bias else None
-            b_q = torch.quantize_per_channel(b, scales=torch.from_numpy(X_scale * W_scales).to(
-                torch.double), zero_points=torch.zeros(output_channels, dtype=torch.long),
-                axis=[0], dtype=torch.qint32) if use_bias else None
+            b_q = torch.quantize_per_channel(b, scales=torch.from_numpy(X_scale * W_scales),
+                                             zero_points=torch.zeros(output_channels, dtype=torch.long),
+                                             axis=0, dtype=torch.qint32) if use_bias else None
         else:
             W = torch.from_numpy(_dequantize(
                 W_q0, W_scales[0], W_zps[0])).to(dtype=torch.float)
@@ -1113,7 +1223,7 @@ class TestQuantizedLinear(unittest.TestCase):
 
         if use_channelwise:
             W_q = torch.quantize_per_channel(
-                W, W_scales, W_zps, [0], dtype=torch_type)
+                W, W_scales, W_zps, 0, dtype=torch_type)
         else:
             W_q = torch.quantize_per_tensor(W, scale=W_scale, zero_point=W_zp,
                                             dtype=torch_type)
@@ -1280,9 +1390,9 @@ class TestQuantizedConv(unittest.TestCase):
         X_q = torch.quantize_per_tensor(X, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
         if use_channelwise:
             W_q = torch.quantize_per_channel(W,
-                                             W_scales_tensor.to(dtype=torch.double),
+                                             W_scales_tensor,
                                              W_zero_points_tensor.to(dtype=torch.long),
-                                             [0],
+                                             0,
                                              dtype=torch.qint8)
         else:
             W_q = torch.quantize_per_tensor(W, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
@@ -1343,8 +1453,8 @@ class TestQuantizedConv(unittest.TestCase):
 
         if channelwise:
             output_channels = filters.shape[0]
-            filters_scale = torch.tensor([filters_scale] * output_channels).to(torch.double)
-            filters_zero_point = torch.tensor([filters_zero_point] * output_channels).to(torch.long)
+            filters_scale = torch.tensor([filters_scale] * output_channels)
+            filters_zero_point = torch.tensor([filters_zero_point] * output_channels)
 
         qconv_prepack = torch.ops.quantized.conv_prepack
         qconv_unpack = torch.ops.quantized.conv_unpack
@@ -1354,7 +1464,7 @@ class TestQuantizedConv(unittest.TestCase):
             W_q = torch.quantize_per_channel(W,
                                              scales=filters_scale,
                                              zero_points=filters_zero_point,
-                                             axis=[0],
+                                             axis=0,
                                              dtype=filters_qtype)
         else:
             W_q = torch.quantize_per_tensor(W, scale=filters_scale, zero_point=filters_zero_point, dtype=filters_qtype)

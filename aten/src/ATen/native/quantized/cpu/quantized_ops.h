@@ -63,6 +63,7 @@ using qcat_nhwc_fn = Tensor (*)(
     int64_t dim,
     double scale,
     int64_t zero_point);
+using qtopk_fn = void(*)(Tensor&, Tensor&, const Tensor&, int64_t, int64_t, bool, bool);
 
 // using qavg_pool2d_fn
 DECLARE_DISPATCH(qrelu_fn, qrelu_stub);
@@ -74,6 +75,7 @@ DECLARE_DISPATCH(qadaptive_avg_pool2d_fn, qadaptive_avg_pool2d_nhwc_stub);
 DECLARE_DISPATCH(qavg_pool2d_fn, qavg_pool2d_nhwc_stub);
 DECLARE_DISPATCH(qcat_nhwc_fn, qcat_nhwc_stub);
 DECLARE_DISPATCH(qcat_nhwc_fn, qcat_relu_nhwc_stub);
+DECLARE_DISPATCH(qtopk_fn, qtopk_stub);
 
 } // namespace native
 } // namespace at

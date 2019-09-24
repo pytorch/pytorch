@@ -1542,6 +1542,9 @@ if _enabled:
         def extra_repr(self):
             return 'original_name={}'.format(self.original_name)
 
+        def graph_for(self, *args, **kwargs):
+            return self.forward.graph_for(*args, **kwargs)
+
         @property
         def original_name(self):
             if type(self) == self._c.name:
