@@ -18,17 +18,17 @@
 #include <exception>
 
 #include <c10/macros/Macros.h>
-#include <c10/util/TypeIndex.h>
+#include <c10/util/BFloat16.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/IdWrapper.h>
 #include <c10/util/Type.h>
+#include <c10/util/TypeIndex.h>
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
-#include <c10/util/BFloat16.h>
 
 /*
  * TypeIdentifier is a small type containing an id.
@@ -84,7 +84,7 @@ class C10_API TypeIdentifier final
 
  private:
   constexpr explicit TypeIdentifier(c10::util::type_index id) : IdWrapper(id) {}
-  friend class TypeMeta;  // TODO Is this friend an issue?
+  friend class TypeMeta; // TODO Is this friend an issue?
 };
 
 // Allow usage in std::map / std::set
@@ -387,7 +387,9 @@ class C10_API TypeMeta {
     return data_->name_;
   }
 
-  friend constexpr bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
+  friend constexpr bool operator==(
+      const TypeMeta& lhs,
+      const TypeMeta& rhs) noexcept;
 
   template <typename T>
   constexpr bool Match() const noexcept {
@@ -447,10 +449,14 @@ C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<
 inline TypeMeta::TypeMeta() noexcept
     : data_(_typeMetaDataInstance<detail::_Uninitialized>()) {}
 
-inline constexpr bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+inline constexpr bool operator==(
+    const TypeMeta& lhs,
+    const TypeMeta& rhs) noexcept {
   return (lhs.data_ == rhs.data_);
 }
-inline constexpr bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+inline constexpr bool operator!=(
+    const TypeMeta& lhs,
+    const TypeMeta& rhs) noexcept {
   return !operator==(lhs, rhs);
 }
 
@@ -485,13 +491,13 @@ inline std::ostream& operator<<(
 #define EXPORT_IF_NOT_GCC
 #endif
 
-#define CAFFE_KNOWN_TYPE(T)                                               \
-  template <>                                                             \
-  EXPORT_IF_NOT_GCC const detail::TypeMetaData*                           \
-  TypeMeta::_typeMetaDataInstance<T>() noexcept {                         \
-    static constexpr detail::TypeMetaData singleton =                     \
-        detail::_makeTypeMetaDataInstance<T>();                           \
-    return &singleton;                                                    \
+#define CAFFE_KNOWN_TYPE(T)                           \
+  template <>                                         \
+  EXPORT_IF_NOT_GCC const detail::TypeMetaData*       \
+  TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
+    static constexpr detail::TypeMetaData singleton = \
+        detail::_makeTypeMetaDataInstance<T>();       \
+    return &singleton;                                \
   }
 
 } // namespace caffe2
