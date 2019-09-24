@@ -105,7 +105,7 @@ void Context::setQEngine(at::QEngine e) {
     quantized_engine = e;
     return;
   }
-  TORCH_CHECK(false, "quantized engine ", toString(e), "is not supported");
+  TORCH_CHECK(false, "quantized engine ", toString(e), " is not supported");
 }
 
 std::vector<at::QEngine> Context::supportedQEngines() const {
