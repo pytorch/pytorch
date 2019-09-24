@@ -497,23 +497,23 @@ class Tensor(torch._C._TensorBase):
         names, sizes = unzip_namedshape(namedshape)
         return super(Tensor, self).unflatten(dim, sizes, names)
 
-    def names_(self, *names, **rename_map):
-        # Note [names_ / renamed API]
+    def rename_(self, *names, **rename_map):
+        # Note [rename_ / rename API]
         # The Python API for these is different from the C++ API. In Python:
-        # 1) tensor.renamed(*names) takes a vararglist of names
-        # 2) tensor.renamed(**rename_map) takes a map of names to rename.
+        # 1) tensor.rename(*names) takes a vararglist of names
+        # 2) tensor.rename(**rename_map) takes a map of names to rename.
         # C++ is static, making it difficult to implement similar behavior.
         return update_names(self, names, rename_map, inplace=True)
 
-    def renamed(self, *names, **rename_map):
-        # See Note [names_ / renamed API]
+    def rename(self, *names, **rename_map):
+        # See Note [rename_ / rename API]
         return update_names(self, names, rename_map, inplace=False)
 
     def _update_names(self, names, inplace):
-        # See Note [names_ / renamed API]
+        # See Note [rename_ / rename API]
         if inplace:
-            return super(Tensor, self).names_(names)
+            return super(Tensor, self).rename_(names)
         else:
-            return super(Tensor, self).renamed(names)
+            return super(Tensor, self).rename(names)
 
     __module__ = 'torch'
