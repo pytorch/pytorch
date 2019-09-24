@@ -194,9 +194,9 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       TORCH_CHECK(false, "[QConv2D] Unknown quantization scheme");
     }
 
-    // TODO: change convOutputShape to return NCHW sizes once perf is fixed
-    auto outShape =
-        convOutputShape(N, K, H, W, kernel, stride, padding, dilation);
+    // TODO: change the following to NCHW sizes once perf is fixed
+    SmallVector<int64_t, 4> outShape{
+        N, conv_p.OUT_DIM[0], conv_p.OUT_DIM[1], K};
     TORCH_CHECK(
         std::all_of(
             outShape.begin(), outShape.end(), [](int64_t i) { return i > 0; }),
