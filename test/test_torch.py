@@ -11426,10 +11426,10 @@ class TestTorchDeviceType(TestCase):
 
         # Tests lerp, which has divergent CPU and CUDA behavior
         if 'cpu' in device:
-            self.check_internal_mem_overlap(torch.lerp_, num_inputs=3, device=device, expected_failure=False)
+            self.check_internal_mem_overlap(torch.Tensor.lerp_, num_inputs=3, device=device, expected_failure=False)
             self.ternary_check_input_output_mem_overlap(torch.lerp, device, expected_failure=False)
         if 'cuda' in device:
-            self.check_internal_mem_overlap(torch.lerp_, num_inputs=3, device=device, expected_failure=True)
+            self.check_internal_mem_overlap(torch.Tensor.lerp_, num_inputs=3, device=device, expected_failure=True)
             self.ternary_check_input_output_mem_overlap(torch.lerp, device, expected_failure=True)
 
     def test_copy_mem_overlap(self, device):
