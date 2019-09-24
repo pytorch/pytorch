@@ -128,7 +128,7 @@ TEST(TestQTensor, EmptyPerchannelQuantized) {
       {numel},
       scales,
       zero_points,
-      {ch_axis},
+      ch_axis,
       at::device(at::kCPU).dtype(kQUInt8));
   // Assigning to QTensor
   auto* q_data = q.data_ptr<quint8>();
