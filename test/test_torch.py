@@ -36,6 +36,7 @@ from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, skipCPUIfNoMkl, requiresMemory
+import torch.backends.quantized
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -2039,13 +2040,12 @@ class _TestTorchMixin(object):
         test_inference(torch.float32)
 
     def test_qengnie(self):
-        qengines = torch._C._supported_qengines()
-        # [TODO] Enable after the interface change
-        # original_qe = torch._C._get_qengine()
-        # for qe in qengines:
-        #     torch._C._set_qengine(qe)
-        #     assert torch._C._get_qengine() == qe, 'qengine not set successfully'
-        # torch._C._set_qengine(original_qe)
+        qengines = torch.backends.quantized.get_supported_qengines()
+        original_qe = torch.backends.quantized.engine
+        for qe in qengines:
+            torch.backends.quantized.engine = qe
+            assert torch.backends.quantized.engine == qe, 'qengine not set successfully'
+        torch.backends.quantized.engine = original_qe
 
     def test_new_tensor(self):
         expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
@@ -8326,8 +8326,8 @@ class TestTorchDeviceType(TestCase):
 
         # test invalid index fails
         reference = torch.empty(10, device=device)
-        # can't test cuda because it is a device assert
-        if not reference.is_cuda:
+        # only tests asserts on cpu
+        if 'cpu' in device:
             for err_idx in (10, -11):
                 with self.assertRaisesRegex(IndexError, r'out of'):
                     reference[err_idx]
@@ -8343,7 +8343,7 @@ class TestTorchDeviceType(TestCase):
 
             def tensor_indices_to_np(tensor, indices):
                 # convert the Torch Tensor to a numpy array
-                if (tensor.is_cuda):
+                if not 'cpu' in device:
                     tensor = tensor.cpu()
                 npt = tensor.numpy()
 
@@ -8361,7 +8361,7 @@ class TestTorchDeviceType(TestCase):
 
             def set_numpy(tensor, indices, value):
                 if not isinstance(value, int):
-                    if value.is_cuda:
+                    if 'cpu' not in device:
                         value = value.cpu()
                     value = value.numpy()
 
@@ -8385,10 +8385,10 @@ class TestTorchDeviceType(TestCase):
                 outcpu = cpu[indexer]
                 gOcpu = torch.rand_like(outcpu)
                 outcpu.backward(gOcpu)
-                gpu = cpu.cuda().detach().requires_grad_(True)
-                outgpu = gpu[indexer]
-                outgpu.backward(gOcpu.cuda())
-                self.assertEqual(cpu.grad, gpu.grad)
+                device_tensor = cpu.to(device).detach().requires_grad_(True)
+                outgpu = device_tensor[indexer]
+                outgpu.backward(gOcpu.to(device))
+                self.assertEqual(cpu.grad, device_tensor.grad)
 
             def get_set_tensor(indexed, indexer):
                 set_size = indexed[indexer].size()
@@ -8423,7 +8423,7 @@ class TestTorchDeviceType(TestCase):
 
             for indexer in get_indices_to_test:
                 assert_get_eq(reference, indexer)
-                if torch.cuda.is_available():
+                if 'cpu' not in device:
                     assert_backward_eq(reference, indexer)
 
             for indexer in indices_to_test:
@@ -8484,7 +8484,7 @@ class TestTorchDeviceType(TestCase):
                 assert_set_eq(reference,
                               indexer,
                               get_set_tensor(reference, indexer))
-                if torch.cuda.is_available():
+                if 'cpu' not in device:
                     assert_backward_eq(reference, indexer)
 
             reference = torch.arange(0., 1296).view(3, 9, 8, 6).to(device)
@@ -8565,7 +8565,7 @@ class TestTorchDeviceType(TestCase):
             for indexer in indices_to_test:
                 assert_get_eq(reference, indexer)
                 assert_set_eq(reference, indexer, 1333)
-                if torch.cuda.is_available():
+                if 'cpu' not in device:
                     assert_backward_eq(reference, indexer)
 
     def test_advancedindex_big(self, device):
@@ -9359,7 +9359,7 @@ class TestTorchDeviceType(TestCase):
             run_test(tensor_dims, some)
 
     def test_randperm(self, device):
-        if device == 'cpu':
+        if 'cpu' in device:
             rng_device = None
         else:
             rng_device = [0]
@@ -10388,7 +10388,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
                 continue
 
-            if dt == torch.half and device == 'cpu':
+            if dt == torch.half and 'cpu' in device:
                 # fix once random is implemented for Half on CPU
                 self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
             else:
@@ -10400,7 +10400,7 @@ class TestTorchDeviceType(TestCase):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
             x_clone = x.clone()
-            if (device == 'cuda' and dt == torch.bfloat16):
+            if ('cuda' in device and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: copy(x))
                 continue
             y = copy(x)
@@ -10426,7 +10426,7 @@ class TestTorchDeviceType(TestCase):
     def test_view_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
-            if (device == 'cuda' and dt == torch.bfloat16):
+            if ('cuda' in device and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: x.view(6))
                 continue
             self.assertEqual(x.view(6).shape, [6])
@@ -10434,7 +10434,7 @@ class TestTorchDeviceType(TestCase):
     def test_fill_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor((1, 1), dtype=dt, device=device)
-            if (device == 'cuda' and dt == torch.bfloat16):
+            if ('cuda' in device and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: x.fill_(1))
                 continue
             x.fill_(1)
@@ -10446,7 +10446,7 @@ class TestTorchDeviceType(TestCase):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor((1, 1), dtype=dt, device=device)
             y = x.clone()
-            if (device == 'cuda' and dt == torch.bfloat16):
+            if ('cuda' in device and dt == torch.bfloat16):
                 # `x - y` is used inside of the assertEqual
                 self.assertRaises(RuntimeError, lambda: x - y)
                 continue
@@ -10455,7 +10455,7 @@ class TestTorchDeviceType(TestCase):
     def test_cat_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
-            if (device == 'cuda' and dt == torch.bfloat16):
+            if ('cuda' in device and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: torch.cat((x, x), 0))
                 continue
 
@@ -10472,7 +10472,7 @@ class TestTorchDeviceType(TestCase):
         for shape in shapes:
             for dt in torch.testing.get_all_dtypes():
 
-                if (device == 'cuda' and dt == torch.bfloat16):
+                if ('cuda' in device and dt == torch.bfloat16):
                     self.assertRaises(RuntimeError, lambda: torch.zeros(shape, device=device, dtype=dt).shape)
                     self.assertRaises(RuntimeError, lambda: torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                     self.assertRaises(RuntimeError, lambda: torch.full(shape, 3, device=device, dtype=dt).shape)
@@ -10491,7 +10491,7 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(shape, torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                     self.assertEqual(shape, torch.empty_strided(shape, (0,) * len(shape), device=device, dtype=dt).shape)
 
-                if dt == torch.half and device == "cpu":
+                if dt == torch.half and 'cpu' in device:
                     # update once random is implemented for half on CPU
                     self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
                 else:
@@ -10629,7 +10629,7 @@ class TestTorchDeviceType(TestCase):
                 # in this test
                 continue
 
-            if device == 'cuda' and dt == torch.bfloat16:
+            if 'cuda' in device and dt == torch.bfloat16:
                 self.assertRaises(RuntimeError, lambda: x > b)
                 self.assertRaises(RuntimeError, lambda: x < b)
                 self.assertRaises(RuntimeError, lambda: x == b)
@@ -10829,12 +10829,12 @@ class TestTorchDeviceType(TestCase):
                     src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
                     mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
 
-                    if dt == torch.bfloat16 and device == 'cuda':
+                    if dt == torch.bfloat16 and 'cuda' in device:
                         # remove once bfloat16 implemented on CUDA
                         self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                         continue
 
-                    if dt == torch.half and device == 'cpu':
+                    if dt == torch.half and 'cpu' in device:
                         self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                         continue
 
@@ -11321,6 +11321,7 @@ class TestTorchDeviceType(TestCase):
                 non_zero_rand((2, 2), dtype=dtype, device=device),
                 non_zero_rand((2, 2), dtype=dtype, device=device))
 
+    # Note: not actually generic (only runs on CPU and CUDA)
     def test_unary_out_op_mem_overlap(self, device):
         sz = 3
         doubles = torch.randn(2 * sz, device=device)
@@ -11404,53 +11405,35 @@ class TestTorchDeviceType(TestCase):
                                             expected_failure=not has_internal_mem_overlap_check)
 
     def test_binary_op_mem_overlap(self, device):
-        ops = [
-            ("add", True, True, 'cpu'),
-            ("add", True, True, 'cuda'),
-            ("mul", True, True, 'cpu'),
-            ("mul", True, True, 'cuda'),
-            ("sub", True, True, 'cpu'),
-            ("sub", True, True, 'cuda'),
-            ("div", True, True, 'cpu'),
-            ("div", True, True, 'cuda'),
-            ("pow", True, True, 'cpu'),
-            ("pow", True, True, 'cuda')
-        ]
+        ops = ['add', 'mul', 'sub', 'div', 'pow']
 
-        for (fn, has_input_output_mem_overlap_check,
-             has_internal_mem_overlap_check, dev) in ops:
-            if dev != device:
-                continue
+        for fn in ops:
             out_op = getattr(torch, fn)
             inplace_op = getattr(torch.Tensor, fn + '_')
-            self.check_internal_mem_overlap(
-                inplace_op, num_inputs=2, device=device,
-                expected_failure=not has_internal_mem_overlap_check)
 
-            self.binary_check_input_output_mem_overlap(out_op, device,
-                                                       expected_failure=not has_input_output_mem_overlap_check)
+            self.check_internal_mem_overlap(inplace_op, num_inputs=2, device=device, expected_failure=False)
+            self.binary_check_input_output_mem_overlap(out_op, device, expected_failure=False)
 
     def test_ternary_op_mem_overlap(self, device):
-        ops = [
-            ("addcmul", True, True, 'cpu'),
-            ("addcmul", True, True, 'cuda'),
-            ("addcdiv", True, True, 'cpu'),
-            ("addcdiv", True, True, 'cuda'),
-            ("lerp", True, True, 'cpu'),
-            ("lerp", False, False, 'cuda')
-        ]
+        ops = ['addcmul', 'addcdiv']
 
-        for (fn, has_input_output_mem_overlap_check,
-             has_internal_mem_overlap_check, dev) in ops:
-            if dev != device:
-                continue
+        for fn in ops:
             out_op = getattr(torch, fn)
             inplace_op = getattr(torch.Tensor, fn + '_')
-            self.check_internal_mem_overlap(
-                inplace_op, num_inputs=3, device=device,
-                expected_failure=not has_internal_mem_overlap_check)
-            self.ternary_check_input_output_mem_overlap(out_op, dev,
-                                                        expected_failure=not has_input_output_mem_overlap_check)
+
+            self.check_internal_mem_overlap(inplace_op, num_inputs=3, device=device, expected_failure=False)
+            self.ternary_check_input_output_mem_overlap(out_op, device, expected_failure=False)
+
+        # Tests lerp, which has divergent CPU and CUDA behavior
+        out_op = getattr(torch, 'lerp')
+        inplace_op = getattr(torch.Tensor, 'lerp_')
+
+        if 'cpu' in device:
+            self.check_internal_mem_overlap(inplace_op, num_inputs=3, device=device, expected_failure=False)
+            self.ternary_check_input_output_mem_overlap(out_op, device, expected_failure=False)
+        if 'cuda' in device:
+            self.check_internal_mem_overlap(inplace_op, num_inputs=3, device=device, expected_failure=True)
+            self.ternary_check_input_output_mem_overlap(out_op, device, expected_failure=True)
 
     def test_copy_mem_overlap(self, device):
         self.check_internal_mem_overlap(
@@ -11954,7 +11937,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyCUDA
     def test_multinomial_device_constrain(self, device):
-        x = torch.empty(0, device="cpu")
+        x = torch.empty(0, device='cpu')
         y = torch.empty(0, device=device)
         self.assertRaisesRegex(
             RuntimeError, "multinomial arguments must have the same device",
@@ -12459,7 +12442,7 @@ class TestTorchDeviceType(TestCase):
                 a_LU, pivots = a.lu(pivot=pivot)
                 self.assertEqual(a_LU, a_LU_info)
                 self.assertEqual(pivots_info, pivots)
-                if a.is_cuda:
+                if 'cpu' not in device:
                     a_LU_info_nopiv, nopiv, info_nopiv = a.lu(pivot=False, get_infos=True)
                     self.assertEqual(nopiv, torch.arange(1, 1 + a.size(-1), device=device, dtype=torch.int32).expand(a.shape[:-1]))
                     self.assertEqual(info_, info_nopiv)
@@ -13084,7 +13067,8 @@ class DevicePrecision(TestCase):
         b = torch.logspace(1, 10, 10, 2)
         self.assertEqual(a, b.to(device))
 
-    @dtypes(torch.float, torch.double)
+    # Note: ROCm will fail when testing torch.float
+    @dtypes(torch.double)
     def test_polygamma(self, device, dtype):
         cpu_tensor = torch.randn(10, 10, 10, dtype=dtype)
         device_tensor = cpu_tensor.to(device)
