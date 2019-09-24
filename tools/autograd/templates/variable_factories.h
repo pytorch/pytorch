@@ -48,18 +48,10 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
         sizes_(),
         scalar_type_(),
         type_(InitListTensorType::InitList) {
-      // NOTE: `torch::tensor({})` doesn't work at the moment because we would need to solve the
-      // ambiguous overload problem (see https://github.com/pytorch/pytorch/pull/26210#discussion_r325336686).
-      // If the user wants to create an empty tensor, they can use `torch::randn({0})` for now.
       TORCH_CHECK(init_list.size() > 0, "Empty init-list is not supported");
       scalar_type_ = init_list.begin()->scalar_type_;
       const InitListTensor& first_elem = *(init_list.begin());
       for (const auto& elem : init_list) {
-        // NOTE: Currently `torch::tensor(...)` doesn't support mixed data types
-        // (i.e. `torch::tensor({{bool, 2.0}})` doesn't work). We might be able to
-        // support it in the future by iterating over all sub-lists to find
-        // the largest data type that can represent all of the elements, or by using
-        // variadic templates.
         TORCH_CHECK(elem.scalar_type_ == first_elem.scalar_type_,
           "Expected all elements of the tensor to have the same scalar type: ",
           first_elem.scalar_type_,
@@ -185,6 +177,15 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
 
+/// NOTE: `torch::tensor({})` doesn't work at the moment because we would need to solve the
+/// ambiguous overload problem (see https://github.com/pytorch/pytorch/pull/26210#discussion_r325336686).
+/// If the user wants to create an empty tensor, they can use `torch::randn({0})` for now.
+///
+/// NOTE: Currently `torch::tensor(...)` doesn't support mixed data types
+/// (i.e. `torch::tensor({{bool, 2.0}})` doesn't work). We might be able to
+/// support it in the future by iterating over all sub-lists to find
+/// the largest data type that can represent all of the elements, or by using
+/// variadic templates.
 inline at::Tensor tensor(detail::InitListTensor list_init_tensor, const at::TensorOptions& options) {
   return autograd::make_variable(list_init_tensor.to_tensor(options), options.requires_grad());
 }
