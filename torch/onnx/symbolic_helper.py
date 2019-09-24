@@ -219,6 +219,14 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
         scales = g.op("Constant", value_t=torch.tensor(scales_constant))
     return scales
 
+
+def _scatter_helper(g, self, dim, index, src):
+    if _export_onnx_opset_version <= 10:
+        from torch.onnx.symbolic_opset9 import scatter
+    else:
+        from torch.onnx.symbolic_opset11 import scatter
+    return scatter(g, self, dim, index, src)
+
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------

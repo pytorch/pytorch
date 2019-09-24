@@ -11,7 +11,7 @@ from torch.onnx.symbolic_helper import _black_list_in_opset
 # This file exports ONNX ops for opset 11
 
 black_listed_operators = [
-    "eq", "ne", "scatter", "sort", "topk", "hardtanh"
+    "eq", "ne", "sort", "topk", "hardtanh"
 ]
 
 for black_listed_op in black_listed_operators:
@@ -73,6 +73,22 @@ upsample_linear1d = _interpolate('upsample_linear1d', 3, "linear")
 upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 upsample_bicubic2d = _interpolate('upsample_bicubic2d', 4, "cubic")
+
+
+@parse_args('v', 'i', 'v', 'v')
+def gather(g, self, dim, index, sparse_grad=False):
+    if sym_help._maybe_get_const(sparse_grad, 'i'):
+        return _unimplemented("gather", "sparse_grad == True")
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", self, dim, index, sparse_grad, operator_s="gather")
+    return g.op("GatherElements", self, index, axis_i=dim)
+
+
+@parse_args('v', 'i', 'v', 'v')
+def scatter(g, self, dim, index, src):
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", self, dim, index, src, operator_s="scatter")
+    return g.op("ScatterElements", self, index, src, axis_i=dim)
 
 
 @parse_args('v', 'i', 'none')

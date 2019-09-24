@@ -945,6 +945,9 @@ inline Tensor & Tensor::resize_(IntArrayRef size) const {
         case Backend::CPU:
             return CPUType::resize_(const_cast<Tensor&>(*this), size);
             break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::resize_(const_cast<Tensor&>(*this), size);
+            break;
         default:
             AT_ERROR("resize_ not implemented for ", at::toString(type_set()));
     }
@@ -2556,13 +2559,7 @@ inline Tensor Tensor::trunc() const {
 }
 inline Tensor & Tensor::trunc_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::trunc_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("trunc_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::trunc_(const_cast<Tensor&>(*this));
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::trunc_", ""}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &>(
@@ -3249,7 +3246,7 @@ inline Tensor Tensor::q_per_channel_zero_points() const {
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this));
 #endif
 }
-inline IntArrayRef Tensor::q_per_channel_axis() const {
+inline int64_t Tensor::q_per_channel_axis() const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::QuantizedCPU:
@@ -3259,8 +3256,8 @@ inline IntArrayRef Tensor::q_per_channel_axis() const {
             AT_ERROR("q_per_channel_axis not implemented for ", at::toString(type_set()));
     }
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::q_per_channel_axis(Tensor self) -> int[]");
-    return table->getOp<IntArrayRef (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
+    static auto table = globalATenDispatch().getOpTable("aten::q_per_channel_axis(Tensor self) -> int");
+    return table->getOp<int64_t (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::int_repr() const {
@@ -5123,7 +5120,13 @@ inline Tensor Tensor::polygamma(int64_t n) const {
 }
 inline Tensor Tensor::erfinv() const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::erfinv(const_cast<Tensor&>(*this));
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::erfinv(const_cast<Tensor&>(*this));
+            break;
+        default:
+            AT_ERROR("erfinv not implemented for ", at::toString(type_set()));
+    }
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::erfinv", ""}).value();
     return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor &>(
@@ -5132,7 +5135,13 @@ inline Tensor Tensor::erfinv() const {
 }
 inline Tensor & Tensor::erfinv_() const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::erfinv_(const_cast<Tensor&>(*this));
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::erfinv_(const_cast<Tensor&>(*this));
+            break;
+        default:
+            AT_ERROR("erfinv_ not implemented for ", at::toString(type_set()));
+    }
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::erfinv_", ""}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &>(
@@ -5396,7 +5405,16 @@ inline Tensor Tensor::argsort(int64_t dim, bool descending) const {
 }
 inline std::tuple<Tensor,Tensor> Tensor::topk(int64_t k, int64_t dim, bool largest, bool sorted) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::topk(const_cast<Tensor&>(*this), k, dim, largest, sorted);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::topk(const_cast<Tensor&>(*this), k, dim, largest, sorted);
+            break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::topk(const_cast<Tensor&>(*this), k, dim, largest, sorted);
+            break;
+        default:
+            AT_ERROR("topk not implemented for ", at::toString(type_set()));
+    }
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::topk", ""}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool, bool>(
