@@ -3,12 +3,11 @@
 
 namespace c10d {
 
-std::once_flag ncclGetVersionFlag;
-
 std::string getNcclVersion() {
-  std::string versionString;
+  static std::once_flag ncclGetVersionFlag;
+  static std::string versionString;
 
-  std::call_once(ncclGetVersionFlag, [&versionString]() {
+  std::call_once(ncclGetVersionFlag, []() {
     int version;
     ncclResult_t status = ncclGetVersion(&version);
     if (status != ncclSuccess) {
