@@ -1465,7 +1465,7 @@ graph(%input, %weight):
                    .check('GetAttr[name="_packed_params"]') \
                    .run(m._c._get_method('forward').graph)
         # check values
-        ref_w =  m._c._get_attribute('_quantized_weight')
+        ref_w = m._c._get_attribute('_quantized_weight')
         ref_b = m._c._get_parameter('bias')
         w, b = m._c._get_module('_packed_linear_weight_bias')._get_method('_weight_bias')()
         self.assertEqual(ref_w, w)
@@ -1473,6 +1473,11 @@ graph(%input, %weight):
         self.assertEqual(ref_res, res)
 
         # test serialization
+        # print(m._c._get_attribute('_quantized_weight'))
+        pp = m._c._get_module('_packed_linear_weight_bias')
+        # print(pp._get_attribute('_packed_params'))
+        pp._dump(True, True, False)
+        # m._c._dump(True, False, False)
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
         buffer.seek(0)
