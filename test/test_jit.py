@@ -14569,6 +14569,69 @@ a")
             m = M({char : torch.ones(1) + ord(char) - ord("a") for char in "abcdefg"})
             self.assertEqual(m("c"), torch.tensor([103]))
 
+    def test_module_const_attrs(self):
+        class M(torch.nn.Module):
+            __constants__ = ['i', 'non']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.i = 10
+                self.non = None
+
+            def forward(self, x):
+                # type: (int) -> int
+                if self.non is None:
+                    return x + self.i
+                else:
+                    return -1
+
+        m = torch.jit.script(M())
+        self.assertEqual(m(5), 15)
+        self.assertTrue(m._c._has_attribute('i'))
+        self.assertFalse(m._c._has_attribute('non'))
+
+    def test_module_mutate_const_attrs(self):
+        # Check that we cannot mutate a constant
+        class M(torch.nn.Module):
+            __constants__ = ['i', 'non']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.i = 10
+                self.non = None
+
+            def forward(self, x):
+                # type: (int) -> int
+                self.i = 5
+                if self.non is None:
+                    return x + self.i
+                else:
+                    return -1
+
+        with self.assertRaises(RuntimeError):
+            m = torch.jit.script(M())
+
+    def test_module_mutate_const_attrs_2(self):
+        # Check that we cannot mutate constant of a mutable type (e.g. list)
+        class M(torch.nn.Module):
+            __constants__ = ['i', 'non']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.i = [10, 20]
+                self.non = None
+
+            def forward(self, x):
+                # type: (int) -> int
+                self.i.append(30)
+                if self.non is None:
+                    return x + self.i[0]
+                else:
+                    return -1
+
+        with self.assertRaises(RuntimeError):
+            m = torch.jit.script(M())
+
     def test_tensor_import_export(self):
         @torch.jit.script
         def foo(x):
