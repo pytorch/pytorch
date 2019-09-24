@@ -1489,15 +1489,12 @@
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _log10__cpu
-    CUDA: _log10__cuda
 
 - func: log10.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _log10_out_cpu
-    CUDA: _log10_out_cuda
+    CPU: log10_out
+    CUDA: log10_out
 
 - func: log1p(Tensor self) -> Tensor
   use_c10_dispatcher: full

@@ -188,11 +188,6 @@ void THFree(void *ptr)
   c10::free_cpu(ptr);
 }
 
-double THLog10(const double x)
-{
-  return log10(x);
-}
-
 double THLog1p(const double x)
 {
 #if (defined(_MSC_VER) || defined(__MINGW32__))
