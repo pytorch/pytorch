@@ -481,10 +481,10 @@ PickleOpCode Unpickler::readInstruction() {
                     zero_points_list.begin(), zero_points_list.end());
                 const auto& axis_list = qparams.at(3).toIntList();
                 std::vector<int64_t> axis(axis_list.begin(), axis_list.end());
-                result = _empty_per_channel_affine_quantized_like(
+                result = _empty_per_channel_affine_quantized(
+                    {0},
                     at::tensor(scales),
                     at::tensor(zero_points),
-                    {0},
                     axis,
                     storage_tensor.options());
               } break;

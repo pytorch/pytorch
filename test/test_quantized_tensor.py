@@ -74,7 +74,8 @@ class TestQuantizedTensor(TestCase):
         ch_axis = 0
         scales = torch.rand(numel, dtype=torch.double)
         zero_points = torch.randint(0, 10, size=(numel,), dtype=torch.long)
-        q = torch._empty_per_channel_affine_quantized_like(scales, zero_points, [numel], [ch_axis], dtype=torch.quint8)
+        q = torch._empty_per_channel_affine_quantized(
+            [numel], scales=scales, zero_points=zero_points, axis=[ch_axis], dtype=torch.quint8)
         self.assertEqual(scales, q.q_per_channel_scales())
         self.assertEqual(zero_points, q.q_per_channel_zero_points())
         self.assertEqual([ch_axis], q.q_per_channel_axis())
