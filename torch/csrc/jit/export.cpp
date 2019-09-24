@@ -538,6 +538,9 @@ class ScriptModuleSerializer {
       const script::ExtraFilesMap& extra_files) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
+    // try to find all the materialized interface instances to collect class
+    // types that is necessary for code info serialization
+    writeMaterializedInterfaceInstances(module);
     // Serialize all code info.
     writeCode(module.type());
     // The tensor constants from the code are written to a separate archive
@@ -550,6 +553,24 @@ class ScriptModuleSerializer {
   }
 
  private:
+  void writeMaterializedInterfaceInstances(const script::Module& module) {
+    auto module_obj = module.module_object();
+    const auto& moduleType = module_obj->type();
+    for (size_t i = 0, n = moduleType->numAttributes(); i < n; ++i) {
+      const auto& name = moduleType->getAttributeName(i);
+      const auto& attr_type = moduleType->getAttribute(name);
+      // for every attribute that is an interface type, we need to ensure
+      // that the instance type of that interface get converted during
+      // serialization so that we preserve all the class type code infos
+      if (attr_type->cast<InterfaceType>()) {
+        const IValue& materialized_instance = module_obj->getSlot(i);
+        AT_ASSERT(materialized_instance.isObject());
+        const auto& materialized_type =
+            materialized_instance.toObject()->type();
+        convertNamedType(materialized_type);
+      }
+    }
+  }
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
     Pickler data_pickle(
