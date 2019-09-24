@@ -17,7 +17,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
   # TODO: move this to Docker
   sudo apt-get -qq update
-  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.4.8-1+cuda9.0 libnccl2=2.4.8-1+cuda9.0
+  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then

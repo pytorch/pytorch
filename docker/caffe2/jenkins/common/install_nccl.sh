@@ -33,7 +33,7 @@ if [ -n "$NCCL_UBUNTU_VER" ]; then
   if [[ "$CUDA_VERSION" =~ ^10.* ]]; then
     NCCL_LIB_VERSION="2.4.8-1+cuda${CUDA_VERSION:0:4}"
   else
-    NCCL_LIB_VERSION="2.4.8-1+cuda${CUDA_VERSION:0:3}"
+    NCCL_LIB_VERSION="2.1.15-1+cuda${CUDA_VERSION:0:3}"
   fi
 
   apt update
