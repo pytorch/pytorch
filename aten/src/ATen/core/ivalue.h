@@ -364,16 +364,19 @@ struct CAFFE2_API IValue final {
   }
 
   // ScalarType
+  IValue(ScalarType s) : IValue(static_cast<int64_t>(s)) {}
   at::ScalarType toScalarType() const {
     return static_cast<at::ScalarType>(toInt());
   }
 
   // Layout
+  IValue(Layout l) : IValue(static_cast<int64_t>(l)) {}
   at::Layout toLayout() const {
     return static_cast<at::Layout>(toInt());
   }
 
   // MemoryFormat
+  IValue(MemoryFormat m) : IValue(static_cast<int64_t>(m)) {}
   at::MemoryFormat toMemoryFormat() const {
     return static_cast<at::MemoryFormat>(toInt());
   }
