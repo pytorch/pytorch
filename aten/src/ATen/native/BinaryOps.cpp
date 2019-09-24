@@ -232,11 +232,7 @@ Tensor& lt_(Tensor& self, const Tensor& other) {
 Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "lt_out", [&]{
     // Validate that is possible to convert scalar to tensor dtype without overflow
-    scalar_t val = other.to<scalar_t>();
-    Tensor other_tensor = at::empty({1}, self.options()).fill_(val);
-    auto iter = TensorIterator::comparison_op(result, self, other_tensor,
-      /*check_mem_overlap=*/true);
-    lt_stub(iter.device_type(), iter);
+    native::lt_out(result, self, wrapped_scalar_tensor(other.to<scalar_t>()));
   });
   return result;
 }
