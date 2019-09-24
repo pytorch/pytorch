@@ -987,12 +987,18 @@
 - func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
 
+# other overrides are to provide a more helpful error message that dtype is required
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
   dispatch:
+    CPU: empty_affine_quantized_other_backends_stub
     QuantizedCPU: empty_affine_quantized_cpu
 
-- func: _empty_per_channel_affine_quantized_like(Tensor self, Tensor zero_points, int[] size, int[] axis, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor
+# it's a factory function receiving a tensor argument, thus overriding explicitly
+# other overrides are to provide a more helpful error message that dtype is required
+- func: _empty_per_channel_affine_quantized(int[] size, *, Tensor scales, Tensor zero_points, int axis, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor
+  category_override: factory
   dispatch:
+    CPU: empty_per_channel_affine_quantized_other_backends_stub
     QuantizedCPU: empty_per_channel_affine_quantized_cpu
 
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
@@ -1003,6 +1009,7 @@
   dispatch:
     CPU: resize_cpu_
     CUDA: resize_cuda_
+    QuantizedCPU: quantized_resize_cpu_
 
 - func: empty.out(int[] size, *, MemoryFormat? memory_format=None, Tensor(a!) out) -> Tensor(a!)
   device_guard: False
@@ -3501,7 +3508,7 @@
   dispatch:
     CPU: quantize_per_tensor_cpu
 
-- func: quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int[] axis, ScalarType dtype) -> Tensor
+- func: quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
     CPU: quantize_per_channel_cpu
@@ -3541,7 +3548,7 @@
   dispatch:
     QuantizedCPU: q_per_channel_zero_points_quant
 
-- func: q_per_channel_axis(Tensor self) -> int[]
+- func: q_per_channel_axis(Tensor self) -> int
   variants: function, method
   dispatch:
     QuantizedCPU: q_per_channel_axis_quant
@@ -3552,15 +3559,15 @@
   dispatch:
     QuantizedCPU: int_repr_quant
 
-- func: _per_tensor_affine_qtensor(Tensor self, float scale, int zero_point) -> Tensor
+- func: _make_per_tensor_quantized_tensor(Tensor self, float scale, int zero_point) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    CPU: per_tensor_affine_qtensor_cpu
+    CPU: make_per_tensor_quantized_tensor_cpu
 
-- func: _per_channel_affine_qtensor(Tensor self, Tensor scale, Tensor zero_point, int[] axis) -> Tensor
+- func: _make_per_channel_quantized_tensor(Tensor self, Tensor scale, Tensor zero_point, int axis) -> Tensor
   use_c10_dispatcher: unboxed_only
   dispatch:
-    CPU: per_channel_affine_qtensor_cpu
+    CPU: make_per_channel_quantized_tensor_cpu
 
 - func: qscheme(Tensor self) -> QScheme
   variants: method
@@ -5035,6 +5042,10 @@
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: unboxed_only
   variants: method, function
+  dispatch:
+    CPU: topk
+    CUDA: topk
+    QuantizedCPU: quantized_topk_cpu
 
 - func: all(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -6332,6 +6343,7 @@
   dispatch:
     CPU: upsample_nearest2d_cpu
     CUDA: upsample_nearest2d_cuda
+    QuantizedCPU: quantized_upsample_nearest2d_cpu
 
 - func: upsample_nearest2d_backward.grad_input(Tensor grad_output, int[2] output_size, int[4] input_size, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
