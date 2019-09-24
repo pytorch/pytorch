@@ -107,12 +107,7 @@ template <typename T>
 inline constexpr string_view get_fully_qualified_type_name() noexcept {
   return detail::fully_qualified_type_name_impl<T>();
 }
-}
-}
-
-
-
-
-
+} // namespace util
+} // namespace c10
 
 C10_DEFINE_HASH_FOR_IDWRAPPER(c10::util::type_index);
