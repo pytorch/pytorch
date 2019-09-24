@@ -451,13 +451,10 @@ TEST_F(ModulesTest, L1Loss) {
 
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
-  float data1[] = {1, 2, 3, 4, 5, 6};
-  auto input1 = torch::from_blob(data1, {2, 3}, torch::requires_grad());
-  float data2[] = {1, 8, 3, 2, 1, 6};
-  auto input2 = torch::from_blob(data2, {2, 3}, torch::requires_grad());
+  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
+  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::requires_grad());
   auto output = cos->forward(input1, input2);
-  float data3[] = {0.8078, 0.8721};
-  auto expected = torch::from_blob(data3, {2});
+  auto expected = torch::tensor({0.8078, 0.8721}, torch::kFloat);
   auto s = output.sum();
   s.backward();
 
@@ -467,12 +464,10 @@ TEST_F(ModulesTest, CosineSimilarity) {
 
 TEST_F(ModulesTest, PairwiseDistance) {
   PairwiseDistance dist(PairwiseDistanceOptions(1));
-  float data1[] = {1, 2, 3, 4, 5, 6};
-  auto input1 = torch::from_blob(data1, {2, 3}, torch::requires_grad());
-  float data2[] = {1, 8, 3, 2, 1, 6};
-  auto input2 = torch::from_blob(data2, {2, 3}, torch::requires_grad());
+  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
+  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::requires_grad());
   auto output = dist->forward(input1, input2);
-  auto expected = torch::full({2}, 6);
+  auto expected = torch::tensor({6, 6}, torch::kFloat);
   auto s = output.sum();
   s.backward();
 
