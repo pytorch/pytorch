@@ -226,15 +226,7 @@ class Linear(torch.nn.Module):
             weight_observer(mod.weight)
         act_scale, act_zp = activation_observer.calculate_qparams()
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
-        wt_scale, wt_zp = weight_observer.calculate_qparams()
-        if weight_observer.qscheme in set([torch.per_tensor_symmetric, torch.per_tensor_affine]):
-            qweight = torch.quantize_per_tensor(
-                mod.weight.float(),
-                float(wt_scale), int(wt_zp), torch.qint8)
-        else:
-            qweight = torch.quantize_per_channel(
-                mod.weight.float(),
-                wt_scale.to(torch.double), wt_zp.to(torch.int64), [0], torch.qint8)
+        qweight = _quantize_weight(mod.weight.float(), weight_observer)
         qlinear = cls(mod.in_features, mod.out_features)
         qlinear.set_weight_bias(qweight, mod.bias)
         qlinear.scale = float(act_scale)

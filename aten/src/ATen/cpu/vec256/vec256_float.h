@@ -117,6 +117,9 @@ public:
   Vec256<float> erfc() const {
     return Vec256<float>(Sleef_erfcf8_u15(values));
   }
+  Vec256<float> erfinv() const {
+    return map(calc_erfinv);
+  }
   Vec256<float> exp() const {
     return Vec256<float>(Sleef_expf8_u10(values));
   }
