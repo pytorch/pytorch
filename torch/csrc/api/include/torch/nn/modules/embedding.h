@@ -12,7 +12,8 @@ namespace nn {
 
 /// Options for the `Embedding` module.
 struct TORCH_API EmbeddingOptions {
-  EmbeddingOptions(int64_t num_embeddings, int64_t embedding_dim);
+  EmbeddingOptions(int64_t num_embeddings, int64_t embedding_dim) :
+   num_embeddings_(num_embeddings), embedding_dim_(embedding_dim) {};
   /// The size of the dictionary of embeddings.
   TORCH_ARG(int64_t, num_embeddings);
   /// The size of each embedding vector.
@@ -33,7 +34,8 @@ struct TORCH_API EmbeddingOptions {
 
 /// Options for the `EmbeddingBag` module.
 struct TORCH_API EmbeddingBagOptions {
-  EmbeddingBagOptions(int64_t num_embeddings, int64_t embedding_dim);
+  EmbeddingBagOptions(int64_t num_embeddings, int64_t embedding_dim) :
+   num_embeddings_(num_embeddings), embedding_dim_(embedding_dim) {};
   /// The size of the dictionary of embeddings.
   TORCH_ARG(int64_t, num_embeddings);
   /// The size of each embedding vector.
@@ -52,12 +54,6 @@ struct TORCH_API EmbeddingBagOptions {
   /// The learnable weights of the module of shape (num_embeddings, embedding_dim)
   TORCH_ARG(c10::optional<torch::Tensor>, _weight) = c10::nullopt;
 };
-
-// class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
-// public:
-//     using torch::nn::ModuleHolder<EmbeddingImpl>::ModuleHolder;
-//     static Embedding from_pretrained(Tensor embeddings, EmbeddingOptions options, bool freeze= true);
-// };
 
 /// Performs a lookup in a fixed size embedding table.
 class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
@@ -83,6 +79,12 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
   Tensor weight;
 };
 
+class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
+public:
+    using torch::nn::ModuleHolder<EmbeddingImpl>::ModuleHolder;
+    static Embedding from_pretrained(torch::Tensor embeddings, c10::optional<EmbeddingOptions> options = c10::nullopt, bool freeze= true);
+};
+
 class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl> {
   public:
     EmbeddingBagImpl(int64_t num_embeddings, int64_t embedding_dim)
@@ -94,7 +96,7 @@ class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl>
     /// Pretty prints the `EmbeddingBag` module into the given `stream`.
     void pretty_print(std::ostream& stream) const override;
 
-    std::tuple<Tensor, Tensor, Tensor, Tensor> forward(const Tensor& input, c10::optional<torch::Tensor> offsets = c10::nullopt,
+    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> forward(const Tensor& input, c10::optional<torch::Tensor> offsets = c10::nullopt,
       c10::optional<torch::Tensor> per_sample_weights = c10::nullopt);
 
     /// The `Options` used to configure this `EmbeddingBag` module.
@@ -102,17 +104,16 @@ class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl>
     /// The embedding table
     Tensor weight;
 };
-//
-// class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBag> {
-// public:
-//     using torch::nn::ModuleHolder<EmbeddingBag>::ModuleHolder;
-//     static EmbeddingBag from_pretrained(Tensor embeddings, EmbeddingBagOptions options, bool freeze= true);
-// };
+
+class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
+public:
+    using torch::nn::ModuleHolder<EmbeddingBagImpl>::ModuleHolder;
+    static EmbeddingBag from_pretrained(torch::Tensor embeddings, c10::optional<EmbeddingBagOptions> options = c10::nullopt, bool freeze= true);
+};
 
 /// A `ModuleHolder` subclass for `EmbeddingImpl`.
 /// See the documentation for `EmbeddingImpl` class to learn what methods it
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
-TORCH_MODULE(Embedding);
 } // namespace nn
 } // namespace torch
