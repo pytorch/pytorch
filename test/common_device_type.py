@@ -187,7 +187,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
     # Creates device-specific test cases
     for base in device_type_test_bases:
         # Skips bases listed in except_for
-        if except_for and base.device_type in except_for:
+        if except_for is not None and base.device_type in except_for:
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()

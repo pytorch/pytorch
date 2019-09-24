@@ -11861,7 +11861,8 @@ class TestTorchDeviceType(TestCase):
             out_fn = getattr(torch, fn)
             in_fn = getattr(torch.Tensor, fn + '_')
 
-            self.unary_check_input_output_mem_overlap(inputs, sz, out_fn, expected_failure=not has_input_output_mem_overlap_check)
+            self.unary_check_input_output_mem_overlap(inputs, sz, out_fn,
+                                                      expected_failure=not has_input_output_mem_overlap_check)
 
             self.check_internal_mem_overlap(in_fn, num_inputs=1, device=dev,
                                             expected_failure=not has_internal_mem_overlap_check)
