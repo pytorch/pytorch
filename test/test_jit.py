@@ -3445,6 +3445,21 @@ def foo(x):
 
         FileCheck().check("NamedTuple").run(fn2.graph)
 
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+
+            @torch.jit.unused
+            def fn(self):
+                # type: () -> MyTuple
+                return MyTuple(1)
+
+            def forward(self, x):
+                return self.fn()
+
+        mod = torch.jit.script(MyMod())
+        FileCheck().check_dag("NamedTuple").check_dag("Exception").run(mod.forward.graph)
+
     def test_inherit_method(self):
         class A(torch.jit.ScriptModule):
             def __init__(self):
