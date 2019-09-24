@@ -779,7 +779,6 @@ class TestQuantizedOps(TestCase):
             "nn.functional": torch.nn.functional.interpolate,
             "nn.quantized.functional": torch.nn.quantized.functional.interpolate
         }
-
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
         for name, op in ops_under_test.items():
             qX_hat = op(qX, size=size, scale_factor=scale_factor,

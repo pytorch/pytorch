@@ -4,7 +4,7 @@
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <iostream>
+#include <ATen/quantized/Quantizer.h>
 
 namespace at {
 namespace native {
@@ -450,10 +450,9 @@ void qavg_pool2d_nhwc_kernel(
 }
 
 template <typename T>
-void do_bilinear_on_AVX2(
+int64_t do_quantized_bilinear_on_AVX2(
     const typename T::underlying*& pos1,
     typename T::underlying*& pos2,
-    int64_t& c,
     int64_t input_height,
     int64_t input_width,
     int64_t output_height,
@@ -467,6 +466,7 @@ void do_bilinear_on_AVX2(
     const float w1lambda,
     const int64_t h1p,
     const int64_t w1p) {
+  int64_t c = 0;
 #if defined(__AVX2__) && !defined(_MSC_VER)
   constexpr auto vec_width = Vec256<T>::size() / 4;
   if (vec_width == 8) {
@@ -503,9 +503,10 @@ void do_bilinear_on_AVX2(
     }
   }
 #endif
+  return c;
 }
 
-void upsample_bilinear2d_nhwc_kernel(
+void qupsample_bilinear2d_nhwc_kernel(
     Tensor& output,
     const Tensor& input,
     int64_t input_height,
@@ -520,10 +521,7 @@ void upsample_bilinear2d_nhwc_kernel(
         auto* idata = static_cast<scalar_t*>(input.data_ptr());
         auto* odata = static_cast<scalar_t*>(output.data_ptr());
         float multiplier = input.q_scale() / output.q_scale();
-        auto minimum =
-            std::numeric_limits<typename scalar_t::underlying>::lowest();
-        auto maximum =
-            std::numeric_limits<typename scalar_t::underlying>::max();
+        float output_scale = output.q_scale() / input.q_scale();
         const auto rheight = area_pixel_compute_scale<float>(
             input_height, output_height, align_corners);
         const auto rwidth = area_pixel_compute_scale<float>(
@@ -555,14 +553,15 @@ void upsample_bilinear2d_nhwc_kernel(
 
               int64_t c = 0;
               // We use float32 to do the computation
-              const auto* pos1 = i_p + (h1 * input_width + w1) * channels;
-              auto* pos2 = o_p + (h2 * output_width + w2) * channels;
+              const typename scalar_t::underlying* pos1 =
+                  i_p + (h1 * input_width + w1) * channels;
+              typename scalar_t::underlying* pos2 =
+                  o_p + (h2 * output_width + w2) * channels;
               // We have to isolate this function out because the VS does not
               // expand the macro correctly.
-              do_bilinear_on_AVX2<scalar_t>(
+              c = do_quantized_bilinear_on_AVX2<scalar_t>(
                   pos1,
                   pos2,
-                  c,
                   input_height,
                   input_width,
                   output_height,
@@ -582,13 +581,9 @@ void upsample_bilinear2d_nhwc_kernel(
                     h1lambda *
                         (w0lambda * pos1[h1p * input_width * channels] +
                          w1lambda * pos1[(h1p * input_width + w1p) * channels]);
-                pos2[0] = static_cast<typename scalar_t::underlying>(
-                    std::min<int32_t>(
-                        std::max<int32_t>(
-                            std::nearbyint(
-                                result * multiplier + output.q_zero_point()),
-                            minimum),
-                        maximum));
+                pos2[0] = at::quantize_val<scalar_t>(
+                              output_scale, output.q_zero_point(), result)
+                              .val_;
                 pos1 += 1;
                 pos2 += 1;
               } // c
@@ -610,8 +605,8 @@ REGISTER_DISPATCH(
     &qadaptive_avg_pool2d_nhwc_kernel);
 REGISTER_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
 REGISTER_DISPATCH(
-    upsample_bilinear2d_nhwc_stub,
-    &upsample_bilinear2d_nhwc_kernel);
+    qupsample_bilinear2d_nhwc_stub,
+    &qupsample_bilinear2d_nhwc_kernel);
 
 } // namespace native
 } // namespace at

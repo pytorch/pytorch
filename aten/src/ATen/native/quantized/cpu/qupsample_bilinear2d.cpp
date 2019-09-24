@@ -1,15 +1,11 @@
 #include <ATen/ATen.h>
-#include <ATen/core/op_registration/op_registration.h>
-#include <ATen/cpu/vec256/vec256.h>
-#include <ATen/native/SortingUtils.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/UpSample.h>
-#include <ATen/native/cpu/Loops.h>
-#include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/quantized/Quantizer.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 namespace at {
@@ -37,21 +33,11 @@ static void upsample_bilinear2d_out_frame(
 
   // special case: just copy
   if (input_height == output_height && input_width == output_width) {
-    for (int64_t h2 = 0; h2 < output_height; ++h2) {
-      const int64_t h1 = h2;
-
-      for (int64_t w2 = 0; w2 < output_width; ++w2) {
-        const int64_t w1 = w2;
-        const auto* pos1 = &i_p[h1 * input_width + w1];
-        auto* pos2 = &o_p[h2 * output_width + w2];
-
-        for (int64_t c = 0; c < channels; ++c) {
-          pos2[0] = pos1[0];
-          pos1 += input_height * input_width;
-          pos2 += output_height * output_width;
-        }
-      }
-    }
+    std::memcpy(
+        o_p,
+        i_p,
+        channels * input_height * input_width *
+            sizeof(typename scalar_t::underlying));
     return;
   }
 
@@ -60,10 +46,7 @@ static void upsample_bilinear2d_out_frame(
 
   const auto rwidth =
       area_pixel_compute_scale<float>(input_width, output_width, align_corners);
-
-  float multiplier = input.q_scale() / output.q_scale();
-  auto minimum = std::numeric_limits<typename scalar_t::underlying>::lowest();
-  auto maximum = std::numeric_limits<typename scalar_t::underlying>::max();
+  float output_scale = output.q_scale() / input.q_scale();
 
   for (int64_t h2 = 0; h2 < output_height; ++h2) {
     const auto h1r = area_pixel_compute_source_index<float>(
@@ -84,8 +67,8 @@ static void upsample_bilinear2d_out_frame(
 
       const float w1lambda = w1r - w1;
       const float w0lambda = static_cast<float>(1.) - w1lambda;
-      const auto* pos1 = i_p + h1 * input_width + w1;
-      auto* pos2 = o_p + h2 * output_width + w2;
+      const typename scalar_t::underlying* pos1 = i_p + h1 * input_width + w1;
+      typename scalar_t::underlying* pos2 = o_p + h2 * output_width + w2;
 
       for (int64_t c = 0; c < channels; ++c) {
         float result = h0lambda * (w0lambda * pos1[0] + w1lambda * pos1[w1p]) +
@@ -93,11 +76,9 @@ static void upsample_bilinear2d_out_frame(
                 (w0lambda * pos1[h1p * input_width] +
                  w1lambda * pos1[h1p * input_width + w1p]);
         // requantization
-        pos2[0] = static_cast<typename scalar_t::underlying>(std::min<int32_t>(
-            std::max<int32_t>(
-                std::nearbyint(result * multiplier + output.q_zero_point()),
-                minimum),
-            maximum));
+        pos2[0] = at::quantize_val<scalar_t>(
+                      output_scale, output.q_zero_point(), result)
+                      .val_;
         pos1 += input_width * input_height;
         pos2 += output_width * output_height;
       }
@@ -138,7 +119,7 @@ Tensor quantized_upsample_bilinear2d_cpu(
         input.q_zero_point(),
         input.suggest_memory_format());
 
-    upsample_bilinear2d_nhwc_stub(
+    qupsample_bilinear2d_nhwc_stub(
         input.device().type(),
         output,
         input,
@@ -175,6 +156,6 @@ Tensor quantized_upsample_bilinear2d_cpu(
   }
 }
 
-DEFINE_DISPATCH(upsample_bilinear2d_nhwc_stub);
+DEFINE_DISPATCH(qupsample_bilinear2d_nhwc_stub);
 } // namespace native
 } // namespace at

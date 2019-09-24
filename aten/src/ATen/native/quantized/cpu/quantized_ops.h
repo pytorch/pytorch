@@ -56,7 +56,7 @@ using qavg_pool2d_fn = void (*)(
     bool count_include_pad,
     c10::optional<int64_t> divisor_override);
 
-using upsample_bilinear2d_fn = void (*)(
+using qupsample_bilinear2d_fn = void (*)(
     Tensor& output,
     const Tensor& input,
     int64_t input_height,
@@ -75,7 +75,7 @@ DECLARE_DISPATCH(qadd_fn, qadd_relu_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
 DECLARE_DISPATCH(qadaptive_avg_pool2d_fn, qadaptive_avg_pool2d_nhwc_stub);
 DECLARE_DISPATCH(qavg_pool2d_fn, qavg_pool2d_nhwc_stub);
-DECLARE_DISPATCH(upsample_bilinear2d_fn, upsample_bilinear2d_nhwc_stub);
+DECLARE_DISPATCH(qupsample_bilinear2d_fn, qupsample_bilinear2d_nhwc_stub);
 
 } // namespace native
 } // namespace at
