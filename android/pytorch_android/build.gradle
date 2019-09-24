@@ -35,6 +35,10 @@ android {
         }
     }
 
+    packagingOptions {
+        exclude '**/libfbjni.so'
+    }
+
     useLibrary 'android.test.runner'
     useLibrary 'android.test.base'
     useLibrary 'android.test.mock'

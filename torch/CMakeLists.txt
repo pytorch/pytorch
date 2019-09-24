@@ -52,7 +52,6 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/Layout.cpp
     ${TORCH_SRC_DIR}/csrc/MemoryFormat.cpp
     ${TORCH_SRC_DIR}/csrc/python_dimname.cpp
-    ${TORCH_SRC_DIR}/csrc/QEngine.cpp
     ${TORCH_SRC_DIR}/csrc/QScheme.cpp
     ${TORCH_SRC_DIR}/csrc/Module.cpp
     ${TORCH_SRC_DIR}/csrc/PtrWrapper.cpp
@@ -77,6 +76,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/peephole.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/constant_fold.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/scalar_type_analysis.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_arg_flatten.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_interpreter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_ir.cpp
@@ -95,7 +95,6 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/utils/invalid_arguments.cpp
     ${TORCH_SRC_DIR}/csrc/utils/object_ptr.cpp
     ${TORCH_SRC_DIR}/csrc/utils/python_arg_parser.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/qengines.cpp
     ${TORCH_SRC_DIR}/csrc/utils/structseq.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_apply.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_dtypes.cpp

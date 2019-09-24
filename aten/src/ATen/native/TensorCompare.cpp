@@ -8,6 +8,7 @@
 #include <ATen/native/cpu/TensorCompareKernel.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 namespace {
 template <typename scalar_t>
@@ -169,7 +170,7 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
     Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
     at::native::max_out(max, max_indices, self.int_repr(), dim, keepdim);
     // TODO: qscheme
-    return std::tuple<Tensor, Tensor>(at::_per_tensor_affine_qtensor(max, self.q_scale(), self.q_zero_point()), max_indices);
+    return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(max, self.q_scale(), self.q_zero_point()), max_indices);
   } else {
     Tensor  max = at::empty({0}, self.options());
     return at::native::max_out(max, max_indices, self, dim, keepdim);
@@ -214,7 +215,7 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
   if (self.is_quantized()) {
     Tensor min = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
     at::native::min_out(min, min_indices, self.int_repr(), dim, keepdim);
-    return std::tuple<Tensor, Tensor>(at::_per_tensor_affine_qtensor(min, self.q_scale(), self.q_zero_point()), min_indices);
+    return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(min, self.q_scale(), self.q_zero_point()), min_indices);
   } else {
     Tensor min = at::empty({0}, self.options());
     return at::native::min_out(min, min_indices, self, dim, keepdim);

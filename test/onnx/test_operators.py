@@ -657,6 +657,23 @@ class TestOperators(TestCase):
         index = torch.tensor([2, 0]).view(1, 2, 1).expand(3, 2, 3)
         self.assertONNX(lambda data, index: data.gather(1, index), (data, index))
 
+    def test_gather_opset11(self):
+        data = torch.randn(3, 4, 3, requires_grad=True)
+        index = torch.tensor([2, 0]).view(1, 2, 1).expand(3, 2, 3)
+        self.assertONNX(lambda data, index: data.gather(1, index), (data, index), opset_version=11)
+
+    def test_scatter_add(self):
+        data = torch.tensor([[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]])
+        indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
+        values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
+        self.assertONNX(lambda data, index: data.scatter_add(1, indices, values), (data, (indices, values)))
+
+    def test_scatter_add_opset11(self):
+        data = torch.tensor([[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]])
+        indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
+        values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
+        self.assertONNX(lambda data, index: data.scatter_add(1, indices, values), (data, (indices, values)), opset_version=11)
+
     def test_master_opset(self):
         x = torch.randn(2, 3).float()
         y = torch.randn(2, 3).float()
@@ -664,7 +681,6 @@ class TestOperators(TestCase):
 
     def test_std(self):
         x = torch.randn(2, 3, 4).float()
-        y = torch.randn(2, 3, 4).float()
         self.assertONNX(lambda x: torch.std(x, dim=(0, 1), unbiased=True, keepdim=True), x)
 
     def test_cumsum(self):
@@ -734,6 +750,10 @@ class TestOperators(TestCase):
     def test_frobenius_norm(self):
         x = torch.randn(2, 3, 4).float()
         self.assertONNX(lambda x: torch.norm(x, p="fro", dim=(0, 1), keepdim=True), x)
+
+    def test_gelu(self):
+        x = torch.randn(2, 3, 4, 5, requires_grad=True)
+        self.assertONNX(lambda x: torch.nn.functional.gelu(x), x)
 
     def test_unique(self):
         x = torch.randint(3, (2, 3, 4, 5)).float()
