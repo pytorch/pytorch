@@ -3252,7 +3252,7 @@ inline Tensor Tensor::q_per_channel_zero_points() const {
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this));
 #endif
 }
-inline IntArrayRef Tensor::q_per_channel_axis() const {
+inline int64_t Tensor::q_per_channel_axis() const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::QuantizedCPU:
@@ -3262,8 +3262,8 @@ inline IntArrayRef Tensor::q_per_channel_axis() const {
             AT_ERROR("q_per_channel_axis not implemented for ", at::toString(type_set()));
     }
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::q_per_channel_axis(Tensor self) -> int[]");
-    return table->getOp<IntArrayRef (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
+    static auto table = globalATenDispatch().getOpTable("aten::q_per_channel_axis(Tensor self) -> int");
+    return table->getOp<int64_t (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::int_repr() const {

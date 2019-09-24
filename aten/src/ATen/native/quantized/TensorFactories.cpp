@@ -31,7 +31,7 @@ Tensor empty_per_channel_affine_quantized_cpu(
     IntArrayRef size,
     const Tensor& scales,
     const Tensor& zero_points,
-    IntArrayRef axis,
+    int64_t axis,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
@@ -46,7 +46,6 @@ Tensor empty_per_channel_affine_quantized_cpu(
   TORCH_CHECK(
       scales.numel() == zero_points.numel(),
       "number of elements in scales and zero_points must match");
-  TORCH_CHECK(axis.size() == 1, "only axis of size 1 is supported right now");
   double* scales_data = scales.data_ptr<double>();
   int64_t* zero_points_data = zero_points.data_ptr<int64_t>();
   std::vector<double> scale_vals(scales_data, scales_data + scales.numel());
@@ -77,7 +76,7 @@ Tensor empty_per_channel_affine_quantized_other_backends_stub(
     IntArrayRef,
     const Tensor&,
     const Tensor&,
-    IntArrayRef,
+    int64_t,
     const TensorOptions&,
     c10::optional<c10::MemoryFormat>) {
   TORCH_CHECK(false, "Creation of quantized tensor requires quantized dtype like torch.quint8");
