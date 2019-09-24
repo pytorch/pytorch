@@ -377,9 +377,9 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
             locations
         pickle_module: module used for unpickling metadata and objects (has to
             match the :attr:`pickle_module` used to serialize file)
-        pickle_load_args: optional keyword arguments passed over to
+        pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
-            :attr:`encoding=...`.
+            :attr:`errors=...`. By default only attr:`encoding='utf-8'` is used.
 
     .. note::
         When you call :func:`torch.load()` on a file which contains GPU tensors, those tensors
@@ -391,9 +391,12 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         ``UnicodeDecodeError: 'ascii' codec can't decode byte 0x...``. This is
         caused by the difference of handling in byte strings in Python2 and
         Python 3. You may use extra :attr:`encoding` keyword argument to specify how
-        these objects should be loaded, e.g., :attr:`encoding='latin1'` decodes them
-        to strings using ``latin1`` encoding, and :attr:`encoding='bytes'` keeps them
+        these objects should be loaded, e.g., :attr:`encoding='utf-8'` decodes them
+        to strings using ``utf-8`` encoding, and :attr:`encoding='bytes'` keeps them
         as byte arrays which can be decoded later with ``byte_array.decode(...)``.
+        Even though we are defaulting to ``utf-8`` (Python 3) you can still run into
+        this issue e.g. if you try to load a module with specified `encoding='ascii'`
+        and the module has Unicode characters inside.
 
     Example:
         >>> torch.load('tensors.pt')
@@ -409,6 +412,8 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         >>> with open('tensor.pt', 'rb') as f:
                 buffer = io.BytesIO(f.read())
         >>> torch.load(buffer)
+        # Load a module with 'ascii' encoding for unpickling
+        >>> torch.load('module.pt', encoding='ascii')
     """
     new_fd = False
     if isinstance(f, str) or \
@@ -419,6 +424,8 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         new_fd = True
         f = f.open('rb')
     try:
+        if sys.version_info >= (3, 0) and 'encoding' not in pickle_load_args.keys():
+            pickle_load_args['encoding'] = 'utf-8'
         return _load(f, map_location, pickle_module, **pickle_load_args)
     finally:
         if new_fd:
