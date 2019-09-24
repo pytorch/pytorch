@@ -12,8 +12,7 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.distributed.rpc import RpcBackend
-from common_distributed import MultiProcessTestCase
-from common_utils import load_tests, run_tests, TEST_WITH_ASAN
+from common_utils import load_tests
 from os import getenv
 
 BACKEND = getenv('RPC_BACKEND', RpcBackend.PROCESS_GROUP)
@@ -96,12 +95,7 @@ def _wrap_with_rpc(func):
     sys.version_info < (3, 0),
     "Pytorch distributed rpc package " "does not support python2",
 )
-@unittest.skipIf(TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues")
-class RpcTest(MultiProcessTestCase):
-    def setUp(self):
-        super(RpcTest, self).setUp()
-        self._spawn_processes()
-
+class RpcTest(object):
     @property
     def world_size(self):
         return 4
@@ -436,7 +430,3 @@ class RpcTest(MultiProcessTestCase):
 
         for i in range(m):
             self.assertEqual(rrefs[i].to_here(), expected[i])
-
-
-if __name__ == '__main__':
-    run_tests()
