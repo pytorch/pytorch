@@ -722,6 +722,7 @@ void qupsample_bilinear2d_nhwc_kernel(
           } // h2
         } // b
       });
+}
 
 void qtopk_kernel(Tensor& values,
     Tensor& indices,
