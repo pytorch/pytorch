@@ -20,16 +20,13 @@ docker_config_defaults: &docker_config_defaults
     aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4}
     aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
 
+orbs:
+  windows: circleci/windows@1.0.0
+
 executors:
   windows-gpu-prototype:
     machine:
       resource_class: windows.gpu.small.prototype
-      image: windows-server-2019-nvidia:201908-28
-      shell: powershell.exe -ExecutionPolicy Bypass
-
-  windows-cpu:
-    machine:
-      resource_class: windows.medium
       image: windows-server-2019-nvidia:201908-28
       shell: powershell.exe -ExecutionPolicy Bypass
 commands:
@@ -1149,7 +1146,7 @@ jobs:
   pytorch_windows_ws2019_cuda10_1_cudnn7_py3:
     environment:
       BUILD_ENVIRONMENT: pytorch-windows-ws2019-cuda10.1-cudnn7-py3
-    executor: windows-cpu
+    executor: vs2019
     steps:
     - should_run_job
     - run:

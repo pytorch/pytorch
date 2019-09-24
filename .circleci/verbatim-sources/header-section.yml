@@ -20,15 +20,12 @@ docker_config_defaults: &docker_config_defaults
     aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4}
     aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
 
+orbs:
+  windows: circleci/windows@1.0.0
+
 executors:
   windows-gpu-prototype:
     machine:
       resource_class: windows.gpu.small.prototype
-      image: windows-server-2019-nvidia:201908-28
-      shell: powershell.exe -ExecutionPolicy Bypass
-
-  windows-cpu:
-    machine:
-      resource_class: windows.medium
       image: windows-server-2019-nvidia:201908-28
       shell: powershell.exe -ExecutionPolicy Bypass
