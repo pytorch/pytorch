@@ -11,3 +11,8 @@
       - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
           requires:
             - setup
+
+      # Pytorch Windows builds
+      - pytorch_windows_ws2019_cuda10_1_cudnn7_py3:
+          requires:
+            - setup

@@ -235,6 +235,18 @@
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
 
+  pytorch_windows_ws2019_cuda10_1_cudnn7_py3:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-windows-ws2019-cuda10.1-cudnn7-py3
+    executor: windows-cpu
+    steps:
+    - should_run_job
+    - run:
+        command: |
+          choco install miniconda3
+          $env:Path += ";C:\tools\miniconda3\Scripts"
+          python --version
+
   pytorch_android_gradle_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build

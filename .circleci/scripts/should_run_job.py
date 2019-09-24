@@ -9,66 +9,8 @@ import sys
 # the set of jobs to run via the Workflows filters in CircleCI config.
 
 default_set = set([
-    # PyTorch CPU
-    # Selected oldest Python 2 version to ensure Python 2 coverage
-    'pytorch-linux-xenial-py2.7.9',
-    # PyTorch CUDA
-    'pytorch-linux-xenial-cuda9-cudnn7-py3',
-    # PyTorch ASAN
-    'pytorch-linux-xenial-py3-clang5-asan',
-    # PyTorch DEBUG
-    'pytorch-linux-xenial-py3.6-gcc5.4',
+    'pytorch-windows-ws2019-cuda10.1-cudnn7-py3',
 
-    # Caffe2 CPU
-    'caffe2-py2-mkl-ubuntu16.04',
-    # Caffe2 CUDA
-    'caffe2-py2-cuda9.1-cudnn7-ubuntu16.04',
-    # Caffe2 ONNX
-    'caffe2-onnx-py2-gcc5-ubuntu16.04',
-    'caffe2-onnx-py3.6-clang7-ubuntu16.04',
-    # Caffe2 Clang
-    'caffe2-py2-clang7-ubuntu16.04',
-    # Caffe2 CMake
-    'caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04',
-
-    # Binaries
-    'manywheel 2.7mu cpu devtoolset7',
-    'libtorch 2.7m cpu devtoolset7',
-    'libtorch 2.7m cpu gcc5.4_cxx11-abi',
-    'libtorch-ios-10.2.1-nightly-x86_64-build',
-    'libtorch-ios-10.2.1-nightly-arm64-build',
-    'libtorch-ios-10.2.1-nightly-binary-build-upload',
-
-    # Caffe2 Android
-    'caffe2-py2-android-ubuntu16.04',
-    # Caffe2 OSX
-    'caffe2-py2-system-macos10.13',
-    # PyTorch OSX
-    'pytorch-macos-10.13-py3',
-    'pytorch-macos-10.13-cuda9.2-cudnn7-py3',
-    # PyTorch Android
-    'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build',
-    # PyTorch Android gradle
-    'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-only-x86_32',
-    # Pytorch iOS builds
-    'pytorch-ios-10.2.1-x86_64_build',
-    'pytorch-ios-10.2.1-arm64_build',
-
-    # Pytorch backward compatibility check
-    'pytorch-linux-backward-compatibility-check-test',
-
-    # XLA
-    'pytorch-xla-linux-xenial-py3.6-clang7',
-
-    # Named tensor
-    "pytorch-namedtensor-linux-xenial-py3.6-gcc5.4",
-    "pytorch-namedtensor-linux-xenial-py3-clang5-asan",
-    "pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2",
-
-    # Other checks
-    'pytorch-short-perf-test-gpu',
-    'pytorch-python-doc-push',
-    'pytorch-cpp-doc-push',
 ])
 
 # Collection of jobs that are *temporarily* excluded from running on PRs.

@@ -19,6 +19,19 @@ docker_config_defaults: &docker_config_defaults
     # This IAM user only allows read-write access to ECR
     aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4}
     aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
+
+executors:
+  windows-gpu-prototype:
+    machine:
+      resource_class: windows.gpu.small.prototype
+      image: windows-server-2019-nvidia:201908-28
+      shell: powershell.exe -ExecutionPolicy Bypass
+
+  windows-cpu:
+    machine:
+      resource_class: windows.medium
+      image: windows-server-2019-nvidia:201908-28
+      shell: powershell.exe -ExecutionPolicy Bypass
 commands:
   # NB: This command must be run as the first command in a job. It
   # attaches the workspace at ~/workspace; this workspace is generated
@@ -1133,6 +1146,18 @@ jobs:
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
 
+  pytorch_windows_ws2019_cuda10_1_cudnn7_py3:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-windows-ws2019-cuda10.1-cudnn7-py3
+    executor: windows-cpu
+    steps:
+    - should_run_job
+    - run:
+        command: |
+          choco install miniconda3
+          $env:Path += ";C:\tools\miniconda3\Scripts"
+          python --version
+
   pytorch_android_gradle_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
@@ -1901,6 +1926,11 @@ workflows:
             - setup
             - pytorch_macos_10_13_py3_build
       - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
+          requires:
+            - setup
+
+      # Pytorch Windows builds
+      - pytorch_windows_ws2019_cuda10_1_cudnn7_py3:
           requires:
             - setup
       - pytorch_android_gradle_build-x86_32:
