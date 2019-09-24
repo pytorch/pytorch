@@ -137,12 +137,7 @@ class RpcTest(MultiProcessTestCase):
         store = dist.FileStore(self.file.name, self.world_size)
         dist.init_process_group(backend="gloo", rank=self.rank,
                                 world_size=self.world_size, store=store)
-        dist.init_model_parallel(self_name='worker{}'.format(self.rank),
-                                 backend=BACKEND,
-                                 self_rank=self.rank,
-                                 init_method=RPC_INIT_URL)
-        with self.assertRaisesRegex(RuntimeError,
-                                    "(is not unique|is already initialized)"):
+        with self.assertRaisesRegex(RuntimeError, "is not unique"):
             dist.init_model_parallel(self_name="duplicate_name",
                                      backend=BACKEND,
                                      self_rank=self.rank,
