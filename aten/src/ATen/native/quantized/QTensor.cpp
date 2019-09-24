@@ -116,7 +116,7 @@ Tensor int_repr_quant(const Tensor& self) {
   return dst;
 }
 
-Tensor per_tensor_affine_qtensor_cpu(
+Tensor make_per_tensor_quantized_tensor_cpu(
     const Tensor& self,
     double scale,
     int64_t zero_point) {
@@ -126,7 +126,7 @@ Tensor per_tensor_affine_qtensor_cpu(
       scale,
       zero_point);
   Tensor self_contig = self.contiguous();
-  AT_DISPATCH_QINT_TYPES(dst.scalar_type(), "per_tensor_affine_qtensor", [&]() {
+  AT_DISPATCH_QINT_TYPES(dst.scalar_type(), "make_per_tensor_quantized_tensor", [&]() {
     underlying_t* self_data = self_contig.data_ptr<underlying_t>();
     underlying_t* dst_data =
         reinterpret_cast<underlying_t*>(dst.data_ptr<scalar_t>());

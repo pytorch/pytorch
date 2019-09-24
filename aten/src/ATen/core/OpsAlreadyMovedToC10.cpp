@@ -455,7 +455,7 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::q_per_channel_scales", ""},
         {"aten::q_per_channel_zero_points", ""},
         {"aten::int_repr", ""},
-        {"aten::_per_tensor_affine_qtensor", ""},
+        {"aten::_make_per_tensor_quantized_tensor", ""},
         {"aten::_per_channel_affine_qtensor", ""},
         {"aten::fake_quantize_per_tensor_affine", ""},
         {"aten::fake_quantize_per_tensor_affine_backward", ""},
