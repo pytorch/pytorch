@@ -264,7 +264,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "prim::BailOut(...) -> Tensor(a)",
-         [](const Node* /* node */) -> Operation {
+         [](const Node * /* node */) -> Operation {
            return [](Stack& /* stack */) {
              AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
              return 0;
@@ -273,7 +273,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "prim::BailoutTemplate() -> int",
-         [](const Node* /* node */) -> Operation {
+         [](const Node * /* node */) -> Operation {
            return [](Stack& stack) {
              // TODO: today, we put a single bailout template at the front to
              // carry the un-optimized graph for bailout nodes to use. Ideally
@@ -1308,7 +1308,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          prim::isinstance,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            std::vector<TypePtr> types = node->tys(attr::types);
            bool is_list = false;
            bool is_tuple = false;
