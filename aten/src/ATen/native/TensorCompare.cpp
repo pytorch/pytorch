@@ -170,15 +170,15 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
     Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
     at::native::max_out(max, max_indices, self.int_repr(), dim, keepdim);
     // TODO: qscheme
-    return std::tuple<Tensor, Tensor>(at::_per_tensor_affine_qtensor(max, self.q_scale(), self.q_zero_point()), max_indices);
+    return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(max, self.q_scale(), self.q_zero_point()), max_indices);
   } else {
     Tensor  max = at::empty({0}, self.options());
     return at::native::max_out(max, max_indices, self, dim, keepdim);
   }
 }
 
-static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indices,
-                                                  const Tensor& self, int64_t dim, bool keepdim) {
+std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
+                                      const Tensor& self, int64_t dim, bool keepdim) {
   TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "max only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
@@ -193,21 +193,6 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
       return _max_out_cpu(max, max_indices, self, dim, keepdim);
     }
   }
-}
-
-std::tuple<Tensor&,Tensor&> max_out(Tensor& max, Tensor& max_indices,
-                                      const Tensor& self, int64_t dim, bool keepdim) {
-  auto result = [&]() {
-#ifdef BUILD_NAMEDTENSOR
-    NoNamesGuard guard;
-#endif
-    return max_out_impl(max, max_indices, self, dim, keepdim);
-  }();
-#ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names_for_reduction(max, self, dim, keepdim);
-  namedinference::propagate_names_for_reduction(max_indices, self, dim, keepdim);
-#endif
-  return result;
 }
 
 std::tuple<Tensor &,Tensor &> _min_out_cpu(Tensor& min, Tensor& min_indices,
@@ -230,15 +215,15 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
   if (self.is_quantized()) {
     Tensor min = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
     at::native::min_out(min, min_indices, self.int_repr(), dim, keepdim);
-    return std::tuple<Tensor, Tensor>(at::_per_tensor_affine_qtensor(min, self.q_scale(), self.q_zero_point()), min_indices);
+    return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(min, self.q_scale(), self.q_zero_point()), min_indices);
   } else {
     Tensor min = at::empty({0}, self.options());
     return at::native::min_out(min, min_indices, self, dim, keepdim);
   }
 }
 
-static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indices,
-                                                  const Tensor& self, int64_t dim, bool keepdim) {
+std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
+                                      const Tensor& self, int64_t dim, bool keepdim) {
   TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "min only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
@@ -254,22 +239,6 @@ static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indic
     }
   }
 }
-
-std::tuple<Tensor&,Tensor&> min_out(Tensor& min, Tensor& min_indices,
-                                    const Tensor& self, int64_t dim, bool keepdim) {
-  auto result = [&]() {
-#ifdef BUILD_NAMEDTENSOR
-    NoNamesGuard guard;
-#endif
-    return min_out_impl(min, min_indices, self, dim, keepdim);
-  }();
-#ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names_for_reduction(min, self, dim, keepdim);
-  namedinference::propagate_names_for_reduction(min_indices, self, dim, keepdim);
-#endif
-  return result;
-}
-
 
 // argmax and argmin
 
@@ -289,18 +258,31 @@ Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
 // Named tensor overloads
 
 std::tuple<Tensor, Tensor> min(const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: min with names");
   return at::min(self, dimname_to_position(self, dim), keepdim);
 }
 std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
                                       const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: min with names");
   return at::min_out(min, min_indices, self, dimname_to_position(self, dim), keepdim);
 }
 std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: max with names");
   return at::max(self, dimname_to_position(self, dim), keepdim);
 }
 std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
                                       const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: max with names");
   return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
+}
+Tensor argmax(const Tensor& self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("argmax");
+}
+Tensor argmin(const Tensor& self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("argmin");
+}
+Tensor argsort(const Tensor& self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("argsort");
 }
 #endif
 

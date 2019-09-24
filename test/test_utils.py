@@ -14,7 +14,7 @@ from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.hub as hub
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common_utils import skipIfRocm, load_tests, IS_MACOS
+from common_utils import skipIfRocm, load_tests
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -519,7 +519,6 @@ def sum_of_model_parameters(model):
 
 SUM_OF_PRETRAINED_RESNET18_PARAMS = -12703.992365
 
-@unittest.skipIf(IS_MACOS, 'Broken on macOS; see #26032')
 class TestHub(TestCase):
     @classmethod
     def setUpClass(cls):

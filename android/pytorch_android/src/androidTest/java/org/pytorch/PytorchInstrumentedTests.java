@@ -258,6 +258,46 @@ public class PytorchInstrumentedTests {
     tensorFloats.getDataAsByteArray();
   }
 
+
+  @Test
+  public void testEqString() throws IOException {
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    String[] values =
+        new String[] {
+            "smoketest",
+            "проверка не латинских символов", // not latin symbols check
+            "#@$!@#)($*!@#$)(!@*#$"
+        };
+    for (String value : values) {
+      final IValue input = IValue.string(value);
+      assertTrue(input.isString());
+      assertTrue(value.equals(input.getString()));
+      final IValue output = module.runMethod("eqStr", input);
+      assertTrue(output.isString());
+      assertTrue(value.equals(output.getString()));
+    }
+  }
+
+  @Test
+  public void testStr3Concat() throws IOException {
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    String[] values =
+        new String[] {
+            "smoketest",
+            "проверка не латинских символов", // not latin symbols check
+            "#@$!@#)($*!@#$)(!@*#$"
+        };
+    for (String value : values) {
+      final IValue input = IValue.string(value);
+      assertTrue(input.isString());
+      assertTrue(value.equals(input.getString()));
+      final IValue output = module.runMethod("str3Concat", input);
+      assertTrue(output.isString());
+      String expectedOutput = new StringBuilder().append(value).append(value).append(value).toString();
+      assertTrue(expectedOutput.equals(output.getString()));
+    }
+  }
+
   private static String assetFilePath(String assetName) throws IOException {
     final Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
     File file = new File(appContext.getFilesDir(), assetName);
