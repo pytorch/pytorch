@@ -45,6 +45,26 @@ class Test(torch.jit.ScriptModule):
         return input
 
     @torch.jit.script_method
+    def tensorAddInt(self, tensor, scalarInt):
+        # type: (Tensor, int) -> Tensor
+        return tensor + scalarInt
+
+    @torch.jit.script_method
+    def tensorDivInt(self, tensor, scalarInt):
+        # type: (Tensor, int) -> Tensor
+        return tensor / scalarInt
+
+    @torch.jit.script_method
+    def tensorMultInt(self, tensor, scalarInt):
+        # type: (Tensor, int) -> Tensor
+        return tensor * scalarInt
+
+    @torch.jit.script_method
+    def tensorModuloInt(self, tensor, scalarInt):
+        # type: (Tensor, int) -> Tensor
+        return tensor % scalarInt
+
+    @torch.jit.script_method
     def eqDictStrKeyIntValue(self, input):
         # type: (Dict[str, int]) -> Dict[str, int]
         return input
