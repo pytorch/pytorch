@@ -13,12 +13,17 @@ namespace at {
 namespace cpp_custom_type_hack {
 
 template <typename T>
+bool is_type(const Tensor& packed) {
+  return packed.storage().data_ptr().get_deleter() ==
+          caffe2::TypeMeta::Make<T>().deleteFn();
+}
+
+template <typename T>
 T& cast(const Tensor& packed) {
   TORCH_CHECK(
       packed.scalar_type() == kByte, "Expected temporary cpp type wrapper");
   TORCH_CHECK(
-      packed.storage().data_ptr().get_deleter() ==
-          caffe2::TypeMeta::Make<T>().deleteFn(),
+      is_type<T>(packed),
       "Expected temporary cpp type wrapper of type ",
       caffe2::TypeMeta::TypeName<T>());
   return *reinterpret_cast<T*>(packed.storage().data_ptr().get());

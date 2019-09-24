@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/quantized/cpu/qmkldnn_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 
 namespace at {
@@ -16,63 +16,6 @@ namespace {
  */
 class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
  public:
-#ifdef USE_FBGEMM
-  std::tuple<at::Tensor, c10::optional<Tensor>> fbgemm_conv_unpack(
-      at::Tensor packed_weights) {
-    // Pull out the packed weight instance from the owning tensor.
-    auto& pack_ptr =
-        cpp_custom_type_hack::cast<PackedConvWeight>(packed_weights);
-    auto packed_weights_p = pack_ptr.w.get();
-
-    // output channels
-    int output_channels = packed_weights_p->outputChannels();
-    int input_channels = packed_weights_p->inputChannels();
-    int groups = packed_weights_p->groups();
-    // R (kernel height)
-    int kernel_h = pack_ptr.kernel[0];
-    // S (kernel width)
-    int kernel_w = pack_ptr.kernel[1];
-
-    int C_per_G = input_channels / groups;
-
-    // Tensor for unpacked weights
-    // Unpacked format would be physical KRS(C/G) but logical KCRS (channels first)
-    // because that's how FBGEMM stores the weights
-    Tensor unpacked_weights;
-    if (pack_ptr.q_scheme == kPerTensorAffine) {
-      unpacked_weights = _empty_affine_quantized(
-          {output_channels, C_per_G, kernel_h, kernel_w},
-          device(kCPU).dtype(kQInt8),
-          pack_ptr.w_scale[0],
-          pack_ptr.w_zp[0],
-          MemoryFormat::ChannelsLast);
-    } else if (pack_ptr.q_scheme == kPerChannelAffine) {
-      auto scales = from_blob(
-          pack_ptr.w_scale.data(),
-          pack_ptr.w_scale.size(),
-          device(kCPU).dtype(kFloat));
-      auto zero_points = from_blob(
-          pack_ptr.w_zp.data(), pack_ptr.w_zp.size(), device(kCPU).dtype(kInt));
-
-      unpacked_weights = _empty_per_channel_affine_quantized(
-          {output_channels, C_per_G, kernel_h, kernel_w},
-          scales.toType(kDouble),
-          zero_points.toType(kLong),
-          0, /* The output channel axis is 0 */
-          device(kCPU).dtype(kQInt8),
-          MemoryFormat::ChannelsLast);
-    } else {
-      TORCH_CHECK(false, "Unsupported qscheme: ", toString(pack_ptr.q_scheme));
-    }
-    int8_t* unpacked_weights_p =
-        reinterpret_cast<int8_t*>(unpacked_weights.data_ptr<c10::qint8>());
-
-    packed_weights_p->unpack(unpacked_weights_p);
-
-    return std::tuple<at::Tensor, c10::optional<Tensor>>(
-        unpacked_weights, pack_ptr.bias);
-  }
-#endif
 #ifdef USE_PYTORCH_QNNPACK
   std::tuple<at::Tensor, c10::optional<Tensor>> qnnpack_conv_unpack(
       at::Tensor packed_weight) {
@@ -85,12 +28,18 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
   std::tuple<at::Tensor, c10::optional<at::Tensor>> operator()(
       Tensor packed_weights) {
     auto& ctx = at::globalContext();
-
 #ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM) {
-      return fbgemm_conv_unpack(packed_weights);
+#if AT_MKLDNN_ENABLED()
+    if (cpp_custom_type_hack::is_type<PackedConvWeightQmkldnn>(
+            packed_weights)) {
+      return mkldnn_conv_unpack(packed_weights);
     }
 #endif
+    if (cpp_custom_type_hack::is_type<PackedConvWeight>(
+            packed_weights)) {
+      return fbgemm_conv_unpack(packed_weights);
+    }
+#endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
       return qnnpack_conv_unpack(packed_weights);

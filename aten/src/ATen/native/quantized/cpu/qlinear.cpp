@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/quantized/cpu/qmkldnn_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
@@ -216,6 +216,97 @@ class QLinearInt8 final : public torch::OperatorKernel {
 
     return output;
   }
+
+#if AT_MKLDNN_ENABLED()
+  Tensor mkldnn_linear(
+      Tensor& input,
+      Tensor& packed_weight,
+      double output_scale,
+      int64_t output_zero_point) {
+    TORCH_CHECK(
+        input.dim() >= 2,
+        "The dimension of input tensor should be larger than or equal to 2");
+    TORCH_CHECK(
+        input.scalar_type() == ScalarType::QUInt8,
+        "Only QUInt8 ScalarType activations are support")
+    TORCH_CHECK(output_zero_point == 0, "Only 0 point are support for MKL-DNN")
+
+    auto& pack_ptr =
+        cpp_custom_type_hack::cast<PackedLinearWeightQmkldnn>(
+            packed_weight);
+    ideep::tensor weight_ = *pack_ptr.w.get();
+
+    // C(output) = A(input) x B(weight), where C, A, B are M x N, M x K, K x N
+    // matrices, respectively.
+    int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
+    int64_t K = input.size(input.dim() - 1);
+    int64_t N = weight_.get_dim(0);
+
+    // The resulting matrix here is 2-D, let's view it with the original
+    // left hand dimensions of the input. Here are two examples:
+    // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
+    // 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
+    std::vector<int64_t> out_sizes = input.sizes().vec();
+    out_sizes.back() = N;
+    auto output_scale_ = ConvertScales({output_scale});
+
+    ideep::tensor input_, output_;
+    float input_scale = input.q_scale();
+    Tensor input_contig = input.contiguous();
+    auto input_dtype = get_mkldnn_dtype(input.scalar_type());
+    auto input_ptr = reinterpret_cast<uint8_t*>(input_contig.data_ptr());
+
+    ideep::tensor::dims inputShape{M, K};
+    input_.init({inputShape, input_dtype}, input_ptr);
+    input_.set_scale(ConvertScales({input_scale}));
+
+    auto attr_ = ReluFused ? ideep::descriptor_group::attr_t::fuse_relu()
+                           : ideep::descriptor_group::attr_t();
+
+    Tensor output = _empty_affine_quantized(
+        {out_sizes},
+        device(kCPU).dtype(kQUInt8),
+        output_scale,
+        output_zero_point);
+    uint8_t* output_ptr = reinterpret_cast<uint8_t*>(output.data_ptr());
+
+    ideep::tensor::dims outShape_in{M, N};
+    output_.init({outShape_in, ideep::tensor::data_type::u8}, output_ptr);
+    output_.set_scale(output_scale_);
+
+    if (pack_ptr.bias.has_value()) {
+      auto bias = pack_ptr.bias.value();
+      bias = bias.contiguous();
+      TORCH_CHECK(bias.dim() == 1, "bias should be a vector (1D Tensor)");
+      TORCH_CHECK(
+          bias.size(0) == N,
+          "bias should have N elements: " + std::to_string(N));
+      auto bias_ptr = reinterpret_cast<float*>(bias.data_ptr<float>());
+
+      ideep::tensor bias_;
+      bias_.init({{N}, ideep::tensor::data_type::f32}, bias_ptr);
+      ideep::inner_product_forward::compute<AllocForMKLDNN>(
+          input_,
+          weight_,
+          bias_,
+          output_,
+          ideep::scale_t(),
+          ideep::scale_t(),
+          output_scale_,
+          attr_); // TODO s8s8
+    } else {
+      ideep::inner_product_forward::compute<AllocForMKLDNN>(
+          input_,
+          weight_,
+          output_,
+          ideep::scale_t(),
+          ideep::scale_t(),
+          output_scale_,
+          attr_);
+    }
+    return output;
+  }
+#endif // AT_MKLDNN_ENABLED()
 #endif
 #ifdef USE_PYTORCH_QNNPACK
   at::Tensor qnnpack_linear(
@@ -333,6 +424,25 @@ class QLinearInt8 final : public torch::OperatorKernel {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
+#if AT_MKLDNN_ENABLED()
+    bool is_mkldnn_weight =
+        cpp_custom_type_hack::is_type<PackedLinearWeightQmkldnn>(
+            packed_weight);
+    if (is_mkldnn_weight && use_mkldnn(input, output_zero_point, ReluFused)) {
+      return mkldnn_linear(input, packed_weight, output_scale, output_zero_point);
+
+    // We will fallback to FBGEMM if input don't meet mkldnn requirement even if
+    // weights is mkldnn tensor.
+    } else if (at::globalContext().qEngine() == at::kQMKLDNN) {
+      if (is_mkldnn_weight) {
+        auto weights_org = mkldnn_linear_unpack(packed_weight);
+        auto repacked_weight = fbgemm_linear_prepack(
+            std::get<0>(weights_org), std::get<1>(weights_org));
+        return fbgemm_linear(input, repacked_weight, output_scale, output_zero_point);
+      }
+      return fbgemm_linear(input, packed_weight, output_scale, output_zero_point);
+    }
+#endif // AT_MKLDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return fbgemm_linear(
           input, packed_weight, output_scale, output_zero_point);

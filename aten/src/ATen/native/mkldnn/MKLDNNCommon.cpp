@@ -75,6 +75,29 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
            ideep::tensor::data_type::f32},
           tensor.template data_ptr<float>()};
 }
+
+ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
+  switch(type) {
+    case ScalarType::Float:
+      return ideep::tensor::data_type::f32;
+    case ScalarType::QInt32:
+      return ideep::tensor::data_type::s32;
+    case ScalarType::QInt8:
+      return ideep::tensor::data_type::s8;
+    case ScalarType::QUInt8:
+      return ideep::tensor::data_type::u8;
+    default:
+      AT_ASSERTM(false, "get_mkldnn_dtype: unsupported data type");
+  }
+}
+
+ideep::scale_t ConvertScales(const std::vector<double> &scales_z) {
+  ideep::scale_t scales(scales_z.size());
+  for (int i = 0; i < scales_z.size(); i++) {
+    scales[i] = 1.0f / scales_z[i];
+  }
+  return scales;
+}
 }}
 
 #endif // AT_MKLDNN_ENABLED()

@@ -30,6 +30,12 @@ ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
 // Construct an `ideep::tensor` "view" from dense tensor, note the
 // ideep::tensor will share the underlying buffer
 ideep::tensor itensor_view_from_dense(const Tensor& tensor);
+
+// Mapping Aten ScalarType to MKL-DNN tensor type
+ideep::tensor::data_type get_mkldnn_dtype(ScalarType type);
+
+// Calculate MKL-DNN tensor scales from QTensor scales
+ideep::scale_t ConvertScales(const std::vector<double> &scales_z);
 }}
 
 #endif // AT_MKLDNN_ENABLED
