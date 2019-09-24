@@ -18,17 +18,17 @@
 #include <exception>
 
 #include <c10/macros/Macros.h>
-#include <c10/util/TypeIndex.h>
+#include <c10/util/BFloat16.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/IdWrapper.h>
 #include <c10/util/Type.h>
+#include <c10/util/TypeIndex.h>
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
-#include <c10/util/BFloat16.h>
 
 /*
  * TypeIdentifier is a small type containing an id.
@@ -79,12 +79,13 @@ class C10_API TypeIdentifier final
   }
 
   static constexpr TypeIdentifier uninitialized() {
-    return TypeIdentifier(c10::util::type_index{11});  // 11 is Undefined from ScalarType
+    return TypeIdentifier(
+        c10::util::type_index{11}); // 11 is Undefined from ScalarType
   }
 
  private:
   constexpr explicit TypeIdentifier(c10::util::type_index id) : IdWrapper(id) {}
-  friend class TypeMeta;  // TODO Is this friend an issue?
+  friend class TypeMeta; // TODO Is this friend an issue?
 };
 
 // Allow usage in std::map / std::set
@@ -509,7 +510,7 @@ inline std::ostream& operator<<(
   TypeMeta::_typeMetaDataInstance<T>() noexcept {                       \
     return &C10_CONCATENATE(detail::_typeMetaDataInstance_, Counter);   \
   }
-#define CAFFE_KNOWN_TYPE(T)                                             \
+#define CAFFE_KNOWN_TYPE(T) \
   _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, __COUNTER__)
 
 /**
