@@ -31,6 +31,11 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    torch
    nn
    nn.functional
+   quantized.modules
+   torch.nn.qat
+   quantization
+   qat.modules
+   quantized
    tensors
    tensor_attributes
    torch.autograd <autograd>
