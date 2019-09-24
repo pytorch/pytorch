@@ -134,7 +134,7 @@ namespace nn {
           reshape_input = true;
           //input = input.reshape(-1);
           if(per_sample_weights != c10::nullopt) {
-            *per_sample_weights = (*per_sample_weights).reshape(-1);
+            per_sample_weights = (*per_sample_weights).reshape(-1);
           }
       }
       else if(input.dim() == 1) {
@@ -201,7 +201,10 @@ namespace nn {
       if(options.sparse()) {
         stream << ", sparse=" << std::boolalpha << options.sparse();
       }
-      stream << ", mode=" << options.mode() << ")";
+      if(options.mode() != "mean"){
+          stream << ", mode=" << options.mode();
+      }
+      stream << ")";
     }
 
     EmbeddingBag EmbeddingBag::from_pretrained(torch::Tensor embeddings, c10::optional<EmbeddingBagOptions> options, bool freeze) {
