@@ -160,23 +160,6 @@ class ObserverBase(ABC, nn.Module):
 
     with_args = classmethod(_with_args)
 
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(ObserverBase, self)._save_to_state_dict(destination, prefix, keep_vars)
-
-        destination[prefix + 'dtype'] = self.dtype
-        destination[prefix + 'qscheme'] = self.qscheme
-        destination[prefix + 'reduce_range'] = self.reduce_range
-
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
-
-        self.dtype = state_dict.pop(prefix + 'dtype')
-        self.qscheme = state_dict.pop(prefix + 'qscheme')
-        self.reduce_range = state_dict.pop(prefix + 'reduce_range')
-        super(ObserverBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                        missing_keys, unexpected_keys, error_msgs)
-
-
 class MinMaxObserver(ObserverBase):
     r"""Default Observer Module
     A default implementation of the observer module, only works for
@@ -255,8 +238,8 @@ class PerChannelMinMaxObserver(ObserverBase):
     def __init__(self, ch_axis=0, **kwargs):
         super(PerChannelMinMaxObserver, self).__init__(**kwargs)
         self.ch_axis = ch_axis
-        self.min_vals = None
-        self.max_vals = None
+        self.register_buffer('min_vals', None)
+        self.register_buffer('max_vals', None)
         if (
             self.qscheme == torch.per_channel_symmetric
             and self.reduce_range
@@ -293,20 +276,12 @@ class PerChannelMinMaxObserver(ObserverBase):
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
 
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(PerChannelMinMaxObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'min_vals'] = self.min_vals
-        destination[prefix + 'max_vals'] = self.max_vals
-        destination[prefix + 'ch_axis'] = self.ch_axis
-
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-
         self.min_vals = state_dict.pop(prefix + 'min_vals')
         self.max_vals = state_dict.pop(prefix + 'max_vals')
-        self.ch_axis = state_dict.pop(prefix + 'ch_axis')
         super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                                    missing_keys, unexpected_keys, error_msgs)
+                                                             missing_keys, unexpected_keys, error_msgs)
 
 
 
@@ -320,14 +295,13 @@ class HistogramObserver(ObserverBase):
     __annotations__ = {
         "min_val": Optional[torch.Tensor],
         "max_val": Optional[torch.Tensor],
-        "histogram": Optional[torch.Tensor],
     }
 
     def __init__(self, bins=2048, **kwargs):
         # bins: The number of bins used for histogram calculation.
         super(HistogramObserver, self).__init__(**kwargs)
         self.bins = bins
-        self.histogram = None
+        self.register_buffer('histogram', torch.zeros(self.bins))
         self.min_val = None
         self.max_val = None
 
@@ -513,8 +487,7 @@ class HistogramObserver(ObserverBase):
         with torch.no_grad():
             min_val = self.min_val
             max_val = self.max_val
-            histogram = self.histogram
-            if min_val is None or max_val is None or histogram is None:
+            if min_val is None or max_val is None:
                 min_val = torch.min(x)
                 max_val = torch.max(x)
                 self.min_val = min_val
@@ -567,15 +540,11 @@ class HistogramObserver(ObserverBase):
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(HistogramObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'bins'] = self.bins
-        destination[prefix + 'histogram'] = self.histogram
         destination[prefix + 'min_val'] = self.min_val
         destination[prefix + 'max_val'] = self.max_val
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        self.bins = state_dict.pop(prefix + 'bins')
-        self.histogram = state_dict.pop(prefix + 'histogram')
         self.min_val = state_dict.pop(prefix + 'min_val')
         self.max_val = state_dict.pop(prefix + 'max_val')
         super(HistogramObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,

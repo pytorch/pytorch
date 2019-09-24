@@ -65,22 +65,14 @@ class FakeQuantize(Module):
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(FakeQuantize, self)._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'quant_min'] = self.quant_min
-        destination[prefix + 'quant_max'] = self.quant_max
         destination[prefix + 'scale'] = self.scale
         destination[prefix + 'zero_point'] = self.zero_point
-        destination[prefix + 'fake_quant_enabled'] = self.fake_quant_enabled
-        destination[prefix + 'observer_enabled'] = self.observer_enabled
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
 
-        self.quant_min = int(state_dict.pop(prefix + 'quant_min'))
-        self.quant_max = int(state_dict.pop(prefix + 'quant_max'))
-        self.scale = bool(state_dict.pop(prefix + 'scale'))
-        self.zero_point = bool(state_dict.pop(prefix + 'zero_point'))
-        self.fake_quant_enabled = bool(state_dict.pop(prefix + 'fake_quant_enabled'))
-        self.observer_enabled = bool(state_dict.pop(prefix + 'observer_enabled'))
+        self.scale = state_dict.pop(prefix + 'scale')
+        self.zero_point = state_dict.pop(prefix + 'zero_point')
         super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                         missing_keys, unexpected_keys, error_msgs)
 

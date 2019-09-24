@@ -128,17 +128,19 @@ class TestFakeQuantizePerTensorAffine(TestCase):
         X = torch.tensor([-5, -3.5, -2, 0, 3, 5, 7], dtype=torch.float32)
         y_ref = fq_module(X)
         state_dict = fq_module.state_dict()
-
-        self.assertEqual(state_dict['fake_quant_enabled'], True)
-        self.assertEqual(state_dict['observer_enabled'], True)
         self.assertEqual(state_dict['scale'], 0.094488)
         self.assertEqual(state_dict['zero_point'], 53)
         b = io.BytesIO()
         torch.save(state_dict, b)
         b.seek(0)
         loaded_dict = torch.load(b)
+        loaded_fq_module = FakeQuantize(observer, quant_min, quant_max)
+        loaded_fq_module.load_state_dict(loaded_dict)
         for key in state_dict:
-            self.assertEqual(state_dict[key], loaded_dict[key])
+            self.assertEqual(state_dict[key], loaded_fq_module.state_dict()[key])
+
+        self.assertEqual(loaded_fq_module.calculate_qparams(), fq_module.calculate_qparams())
+
 
 if __name__ == '__main__':
     run_tests()

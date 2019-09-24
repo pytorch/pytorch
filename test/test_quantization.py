@@ -800,7 +800,7 @@ class ObserverTest(QuantizationTestCase):
         loaded_dict = torch.load(b)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
-        loaded_obs = MinMaxObserver()
+        loaded_obs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
         loaded_obs.load_state_dict(loaded_dict)
         loaded_qparams = loaded_obs.calculate_qparams()
         self.assertEqual(myobs.min_val, loaded_obs.min_val)
@@ -874,7 +874,7 @@ class ObserverTest(QuantizationTestCase):
         loaded_dict = torch.load(b)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
-        loaded_obs = PerChannelMinMaxObserver()
+        loaded_obs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
         loaded_obs.load_state_dict(loaded_dict)
         loaded_qparams = loaded_obs.calculate_qparams()
         self.assertEqual(myobs.min_vals, loaded_obs.min_vals)
@@ -901,7 +901,7 @@ class ObserverTest(QuantizationTestCase):
                  'Quantization requires FBGEMM. FBGEMM does not play'
                  ' well with UBSAN at the moment, so we skip the test if'
                  ' we are in a UBSAN environment.')
-class QuantizationDebugTest(QuantizationTestCase):
+class NonScriptableObserverTest(QuantizationTestCase):
     def test_record_observer(self):
         model = SingleLayerLinearModel()
         model.qconfig = default_debug_qconfig
@@ -920,7 +920,7 @@ class QuantizationDebugTest(QuantizationTestCase):
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
-    def test_observer_observer_scriptable(self, qdtype, qscheme):
+    def test_observer_scriptable(self, qdtype, qscheme):
         obs = RecordingObserver(dtype=qdtype, qscheme=qscheme)
         scripted = torch.jit.script(obs)
 
@@ -975,7 +975,7 @@ class QuantizationDebugTest(QuantizationTestCase):
         loaded_dict = torch.load(b)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
-        loaded_obs = HistogramObserver()
+        loaded_obs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
         loaded_obs.load_state_dict(loaded_dict)
         loaded_qparams = loaded_obs.calculate_qparams()
         self.assertEqual(myobs.min_val, loaded_obs.min_val)

@@ -129,7 +129,6 @@ def add_observer(module):
     if hasattr(module, 'qconfig') and module.qconfig is not None and \
        len(module._modules) == 0:
         # observer and hook will be gone after we swap the module
-#        if module.training and type(module) != DeQuantStub or module.training is False:
             module.add_module('observer', module.qconfig.activation())
             module.register_forward_hook(_observer_forward_hook)
 
