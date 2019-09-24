@@ -204,6 +204,9 @@ void ivalue::Object::resizeObject(size_t slot) {
   slots_.resize(type()->numAttributes());
 }
 
+
+ivalue::Future::Future() : type_(c10::NoneType::get()) {}
+
 static bool CompareKeys(const std::pair<IValue, IValue>& aWrap,
                         const std::pair<IValue, IValue>& bWrap) {
   const auto a = aWrap.first;
