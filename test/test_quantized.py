@@ -790,6 +790,61 @@ class TestQuantizedOps(TestCase):
             cat_q = q_cat_op(tensors_q, dim=ch_axis, scale=scale,
                              zero_point=zero_point)
 
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
+                                              min_side=5, max_side=10),
+                       qparams=hu.qparams()),
+           size=st.sampled_from((1, 3, 5, 10)),
+           mode=st.sampled_from(("nearest", "nearest")),
+           scale_factor=st.sampled_from((None, 1.5, 2.0)),
+           align_corners=st.sampled_from((True, False)),
+           nhwc_layout=st.sampled_from((True, False)))
+    def test_interpolate(self, X, size, mode, scale_factor, align_corners, nhwc_layout):
+        """
+        This test cover upsample_nearest2d
+        """
+        X, (scale, zero_point, torch_type) = X
+        H, W = X.shape[-2:]
+
+        if scale_factor is not None:
+            size = None
+        if mode == "nearest":
+            align_corners = None
+
+        if nhwc_layout:
+            if X.shape[1] < 176:
+                X = np.repeat(X, 176 / X.shape[1], 1)
+
+            X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
+            X = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
+
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type).permute([0, 3, 1, 2])
+        else:
+            X = torch.from_numpy(X)
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+
+        X_ref = torch.nn.functional.interpolate(
+            qX.int_repr().to(torch.float), size=size, scale_factor=scale_factor,
+            mode=mode, align_corners=align_corners)
+
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.interpolate,
+            "nn.quantized.functional": torch.nn.quantized.functional.interpolate
+        }
+
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+        for name, op in ops_under_test.items():
+            qX_hat = op(qX, size=size, scale_factor=scale_factor,
+                        mode=mode, align_corners=align_corners)
+            self.assertEqual(X_ref, qX_hat.int_repr(), prec=1.0,
+                             message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+            self.assertEqual(scale, qX_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+            self.assertEqual(zero_point, qX_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                                                          qX_hat.q_zero_point()))
+
     """Tests quantize concatenation (both fused and not)."""
     @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
