@@ -2926,7 +2926,11 @@ RegisterOperators reg2({
         float,
         float),
     DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a, b), float),
-    DEFINE_SCALAR_BINARY_OP(aten::copysign, std::copysign(a, b), std::copysign(a, b), float),
+    DEFINE_SCALAR_BINARY_OP(
+        aten::copysign,
+        std::copysign(a, b),
+        std::copysign(a, b),
+        float),
 
     DEFINE_UNARY_OP(aten::gamma, std::tgamma(a), float, float),
     DEFINE_UNARY_OP(aten::erf, std::erf(a), float, float),
