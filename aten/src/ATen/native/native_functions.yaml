@@ -1652,23 +1652,43 @@
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
   use_c10_dispatcher: unboxed_only
 
+# The CPU and GPU dispatch variants are named weirdly here because otherwise there
+# are namespacing issues in C++
 - func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
+  dispatch:
+    CPU: mean_cpu_gpu
+    CUDA: mean_cpu_gpu
+    QuantizedCPU: quantized_mean_cpu
 
 - func: mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
+  dispatch:
+    CPU: mean_cpu_gpu
+    CUDA: mean_cpu_gpu
+    QuantizedCPU: quantized_mean_cpu
 
 - func: mean.out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
+  dispatch:
+    CPU: mean_out_cpu_gpu
+    CUDA: mean_out_cpu_gpu
+    QuantizedCPU: quantized_mean_out_cpu
 
 - func: mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
+  dispatch:
+    CPU: mean_cpu_gpu
+    CUDA: mean_cpu_gpu
 
 - func: mean.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
+  dispatch:
+    CPU: mean_out_cpu_gpu
+    CUDA: mean_out_cpu_gpu
 
 - func: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: unboxed_only
