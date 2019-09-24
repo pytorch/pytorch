@@ -25,7 +25,7 @@
 //       ('RET', 0, 0))),
 //     ('operators', (('_aten::add', 'Tensor'), ('_aten::add', 'Scalar'))),
 //     ('constants', (1, 4)),
-//     ('agg_output_size', 2))),)
+//     ('register_size', 2))),)
 
 // Note that currently the backward compatibility is not supported by bytecode.
 // This format and process need to be revisted and redesigned if we want to
@@ -48,7 +48,7 @@ void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::Compi
     auto comps = m_tuple[1].toTuple()->elements();
 
     // The sequence of the named tuple is 0: instructions, 1: operators,
-    // 2: constants, 3: agg_output_size
+    // 2: constants, 3: register_size
     auto named_ins = comps[0].toTuple()->elements();
     auto ins_name = named_ins[0].toString()->string();
     TORCH_CHECK(ins_name == "instructions",
@@ -87,8 +87,8 @@ void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::Compi
 
     auto named_agg_size = comps[3].toTuple()->elements();
     auto size_name = named_agg_size[0].toString()->string();
-    TORCH_CHECK(size_name == "agg_output_size",
-                "agg_output_size is expected, but get", ops_name);
+    TORCH_CHECK(size_name == "register_size",
+                "register_size is expected, but get", ops_name);
     function->set_register_size(named_agg_size[1].toInt());
 
     mcu->register_function(std::move(function));

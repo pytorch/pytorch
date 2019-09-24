@@ -1194,7 +1194,7 @@ const std::vector<c10::OperatorName>& Code::opname_table() const {
   return pImpl->opname_table();
 }
 
-int Code::agg_output_size() const {
+int Code::register_size() const {
   return pImpl->register_size_;
 }
 
