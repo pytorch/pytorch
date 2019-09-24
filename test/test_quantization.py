@@ -485,20 +485,8 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         ref = copy.deepcopy(cell)
 
-        qconfig_dynamic_dict = {
-            torch.nn.LSTM: default_dynamic_qconfig,
-        }
-        default_dynamic_module_mapping = {
-            torch.nn.LSTM: torch.nn.quantized.dynamic.LSTM,
-        }
-        model_int8 = quantize_dynamic(
-            model=model, qconfig_dict=qconfig_dynamic_dict, mapping=default_dynamic_module_mapping,
-            dtype=torch.qint8
-        )
-        model_fp16 = quantize_dynamic(
-            model=model, qconfig_dict=qconfig_dynamic_dict, mapping=default_dynamic_module_mapping,
-            dtype=torch.float16
-        )
+        model_int8 = quantize_dynamic(model=model, dtype=torch.qint8)
+        model_fp16 = quantize_dynamic(model=model, dtype=torch.float16)
         cell_int8 = model_int8.lstm
         cell_fp16 = model_fp16.lstm
 

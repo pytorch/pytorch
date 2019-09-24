@@ -39,21 +39,39 @@ _PartialWrapper.with_args = _with_args
 ABC = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
 
 
-class ObserverBase(ABC, nn.Module):
-    r"""Observer base Module
-    Any concrete observer implementation should derive from this class.
+class Observer(ABC, nn.Module):
+    r"""
+    Observer base Module. Any observer implementation should derive from this class.
 
     Concrete observers should follow the same API. In forward, they will update
     the statistics of the observed Tensor. And they should provide a
     `calculate_qparams` function that computes the quantization parameters given
     the collected statistics.
     """
+    def __init__(self, dtype):
+        super(Observer, self).__init__()
+        self.dtype = dtype
+
+    @abstractmethod
+    def forward(self, x):
+        pass
+
+    @abstractmethod
+    def calculate_qparams(self, **kwargs):
+        pass
+
+    with_args = classmethod(_with_args)
+
+
+class _ObserverBase(Observer):
+    r"""
+    Common base for all qint/quint8 observers
+    """
 
     def __init__(
         self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False
     ):
-        super(ObserverBase, self).__init__()
-        self.dtype = dtype
+        super(_ObserverBase, self).__init__(dtype=dtype)
         self.qscheme = qscheme
         self.reduce_range = reduce_range
 
@@ -70,14 +88,6 @@ class ObserverBase(ABC, nn.Module):
             torch.qint8,
             torch.quint8,
         ), "Default Observer only works for qint8 and quint8 data type"
-
-    @abstractmethod
-    def forward(self, x):
-        pass
-
-    @abstractmethod
-    def calculate_qparams(self, **kwargs):
-        pass
 
     def _calculate_per_channel_qparams(self, min_vals, max_vals):
         # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
@@ -158,10 +168,8 @@ class ObserverBase(ABC, nn.Module):
 
         return torch.tensor([scale]), torch.tensor([zero_point])
 
-    with_args = classmethod(_with_args)
 
-
-class MinMaxObserver(ObserverBase):
+class MinMaxObserver(_ObserverBase):
     r"""Default Observer Module
     A default implementation of the observer module, only works for
     `per_tensor_affine` quantization scheme.  The module will record the
@@ -216,7 +224,7 @@ class MinMaxObserver(ObserverBase):
         return "min_val={}, max_val={}".format(self.min_val, self.max_val)
 
 
-class PerChannelMinMaxObserver(ObserverBase):
+class PerChannelMinMaxObserver(_ObserverBase):
     r"""Per Channel Observer Module
     The module will record the running average of max and min value for each
     channel of the observed Tensor and calculate_qparams will calculate
@@ -266,7 +274,7 @@ class PerChannelMinMaxObserver(ObserverBase):
 
 
 
-class HistogramObserver(ObserverBase):
+class HistogramObserver(_ObserverBase):
     r"""
     The module records the running histogram of tensor values along with
     min/max values. calculate_qparams will calculate scale and zero_point
@@ -521,7 +529,7 @@ class HistogramObserver(ObserverBase):
         return self._calculate_qparams(new_min.item(), new_max.item())
 
 
-class RecordingObserver(ObserverBase):
+class RecordingObserver(_ObserverBase):
     r"""
     The module is mainly for debug and records the tensor values during runtime
     """
@@ -542,6 +550,26 @@ class RecordingObserver(ObserverBase):
     @torch.jit.export
     def get_tensor_value(self):
         return self.tensor_val
+
+
+class NoopObserver(Observer):
+    r"""
+    Observer that doesn't do anything and just passes its configuration to the
+    quantized module's ``.from_float()`.
+
+    Primarily used for quantization to float16 which doesn't require determining
+    ranges.
+    """
+    def __init__(self, dtype=torch.float16):
+        if dtype != torch.float16:
+            raise ValueError("Only float16 quantization can be used without calibration process")
+        super(NoopObserver, self).__init__(dtype=dtype)
+
+    def forward(self, x):
+        return x
+
+    def calculate_qparams(self):
+        raise Exception("calculate_qparams should not be called for NoopObserver")
 
 
 # Restrict activations to be in the range (0,127)
