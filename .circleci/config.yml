@@ -870,7 +870,7 @@ jobs:
       - checkout
       - run:
           name: Ensure config is up to date
-          command: ./ensure-consistency.py
+          command: env
           working_directory: .circleci
       - run:
           name: Save commit message
