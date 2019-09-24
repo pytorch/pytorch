@@ -375,7 +375,9 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
                              .attr("bind_to_dummy_module")(
                                  moduleMeta_, unboundMethod, module_);
       TORCH_CHECK(py::isinstance<py::function>(boundMethod));
-      return std::make_shared<PythonValue>(boundMethod);
+      // TODO: try to reduce our reliance on frame-based rcb
+      auto rcb = py::module::import("torch.jit").attr("_gen_rcb")(boundMethod, 0);
+      return std::make_shared<PythonValue>(boundMethod, rcb);
     }
 
     // HACK: This is used for rnn.py to get all the parameters of a Module as a

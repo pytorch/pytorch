@@ -517,7 +517,8 @@ def is_module_dict(cls):
     return issubclass(cls, torch.jit._ConstModuleDict) or issubclass(cls, torch.nn.ModuleDict)
 
 def is_module_list(cls):
-    return issubclass(cls, torch.jit._ConstModuleList) or issubclass(cls, torch.nn.ModuleList) or issubclass(cls, torch.nn.Sequential)
+    return issubclass(cls, torch.jit._ConstModuleList) or issubclass(cls, torch.nn.ModuleList) \
+        or issubclass(cls, torch.nn.Sequential)
 
 def bind_to_dummy_module(module_meta, unbound_method, cpp_mod):
     """
