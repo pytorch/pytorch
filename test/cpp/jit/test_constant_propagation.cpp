@@ -72,7 +72,7 @@ graph():
     RegisterOperators reg({
         Operator(
             "prim::test_tuple() -> (float[])",
-            [](const Node* node) {
+            [](const Node* node) -> Operation {
               return [](Stack& stack) {
                 c10::List<double> list;
                 auto li = IValue(list);
@@ -84,7 +84,7 @@ graph():
             _aliasAnalysisFromSchema()),
         Operator(
             "prim::run_float_list(float[] a) -> (int)",
-            [](const Node* node) {
+            [](const Node* node) -> Operation {
               return [](Stack& stack) {
                 pop(stack);
                 push(stack, 1);

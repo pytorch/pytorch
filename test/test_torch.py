@@ -36,6 +36,8 @@ from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, multidevice
+import torch.backends.quantized
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -244,8 +246,8 @@ class _TestTorchMixin(object):
                        'sparse_resize_and_clear_',
                        'align_to',  # BUILD_NAMEDTENSOR only
                        'align_as',  # BUILD_NAMEDTENSOR only
-                       'renamed',  # BUILD_NAMEDTENSOR only
-                       'names_',  # BUILD_NAMEDTENSOR only
+                       'rename',  # BUILD_NAMEDTENSOR only
+                       'rename_',  # BUILD_NAMEDTENSOR only
                        'has_names',  # BUILD_NAMEDTENSOR only
                        'rename',  # BUILD_NAMEDTENSOR only
                        'refine_names',  # BUILD_NAMEDTENSOR only
@@ -1346,51 +1348,6 @@ class _TestTorchMixin(object):
         res6 = torch.baddbmm(.1, res2, .5, b1, b2)
         self.assertEqual(res6, res2 * .1 + res * .5)
 
-    def test_pow(self):
-        # [res] torch.pow([res,] x)
-
-        # pow has dedicated implementation for different exponents
-        for exponent in [-2, -1, -0.5, 0.5, 1, 2, 3, 4]:
-            # base - tensor, exponent - number
-            # contiguous
-            m1 = torch.rand(100, 100) + 0.5
-            res1 = torch.pow(m1[4], exponent)
-            res2 = res1.clone().zero_()
-            for i in range(res2.size(0)):
-                res2[i] = math.pow(m1[4][i], exponent)
-            self.assertEqual(res1, res2)
-
-            # non-contiguous
-            m1 = torch.rand(100, 100) + 0.5
-            res1 = torch.pow(m1[:, 4], exponent)
-            res2 = res1.clone().zero_()
-            for i in range(res2.size(0)):
-                res2[i] = math.pow(m1[i, 4], exponent)
-            self.assertEqual(res1, res2)
-
-        # base - number, exponent - tensor
-        # contiguous
-        m1 = torch.randn(100, 100)
-        res1 = torch.pow(3, m1[4])
-        res2 = res1.clone().zero_()
-        for i in range(res2.size(0)):
-            res2[i] = math.pow(3, m1[4, i])
-        self.assertEqual(res1, res2)
-
-        # non-contiguous
-        m1 = torch.randn(100, 100)
-        res1 = torch.pow(3, m1[:, 4])
-        res2 = res1.clone().zero_()
-        for i in range(res2.size(0)):
-            res2[i] = math.pow(3, m1[i][4])
-        self.assertEqual(res1, res2)
-
-        # resize behavior for exp == 1
-        m1 = torch.randn(2, 2)
-        out = torch.randn([0])
-        torch.pow(m1, 1, out=out)
-        self.assertEqual(out, m1)
-
     def _test_cop(self, torchfn, mathfn):
         def reference_implementation(res2):
             for i, j in iter_indices(sm1):
@@ -2112,6 +2069,14 @@ class _TestTorchMixin(object):
 
         test_inference(torch.float64)
         test_inference(torch.float32)
+
+    def test_qengnie(self):
+        qengines = torch.backends.quantized.get_supported_qengines()
+        original_qe = torch.backends.quantized.engine
+        for qe in qengines:
+            torch.backends.quantized.engine = qe
+            assert torch.backends.quantized.engine == qe, 'qengine not set successfully'
+        torch.backends.quantized.engine = original_qe
 
     def test_new_tensor(self):
         expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
@@ -7013,6 +6978,66 @@ class TestTorchDeviceType(TestCase):
         expected = torch.diag(x, 17)
         self.assertEqual(result, expected)
 
+    def test_pow(self, device):
+        # [res] torch.pow([res,] x)
+
+        # pow has dedicated implementation for different exponents
+        for dtype in torch.testing.get_all_math_dtypes(device):
+
+            # This test won't work on torch.half because math.pow will generate a much more accurate result. We skip it
+            # for now.
+            if dtype == torch.half:
+                continue
+
+            m1 = torch.empty(0, dtype=dtype, device=device)
+            if m1.is_floating_point():
+                m1 = torch.rand(100, 100, dtype=dtype, device=device) + 0.5
+            else:
+                # math.pow will overflow and throw exceptions for large integers
+                range_high = 4 if dtype in (torch.int8, torch.uint8) else 10
+                m1 = torch.randint(1, range_high, (100, 100), dtype=dtype, device=device)
+
+            for num in [-2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4, 3.3]:
+                if isinstance(num, int) and num < 0 and not m1.is_floating_point():
+                    with self.assertRaisesRegex(RuntimeError,
+                                                r'Integers to negative integer powers are not allowed\.'):
+                        torch.pow(m1[4], num)
+                else:
+                    # base - tensor, exponent - number
+                    # contiguous
+                    res1 = torch.pow(m1[4], num)
+                    res2 = res1.clone().zero_()
+                    for i in range(res2.size(0)):
+                        res2[i] = math.pow(m1[4][i], num)
+                    self.assertEqual(res1, res2)
+
+                    # non-contiguous
+                    res1 = torch.pow(m1[:, 4], num)
+                    res2 = res1.clone().zero_()
+                    for i in range(res2.size(0)):
+                        res2[i] = math.pow(m1[i, 4], num)
+                    self.assertEqual(res1, res2)
+
+            # base - number, exponent - tensor
+            # contiguous
+            res1 = torch.pow(3, m1[4])
+            res2 = res1.clone().zero_()
+            for i in range(res2.size(0)):
+                res2[i] = math.pow(3, m1[4, i])
+            self.assertEqual(res1, res2)
+
+            # non-contiguous
+            res1 = torch.pow(3, m1[:, 4])
+            res2 = res1.clone().zero_()
+            for i in range(res2.size(0)):
+                res2[i] = math.pow(3, m1[i][4])
+            self.assertEqual(res1, res2)
+
+            # resize behavior for exp == 1
+            out = torch.zeros(1, dtype=dtype, device=device)
+            torch.pow(m1, 1, out=out)
+            self.assertEqual(out, m1)
+
     def test_neg(self, device):
         int_types = [torch.int, torch.short, torch.int8, torch.uint8]
         float_types = [torch.float, torch.double, torch.long]
@@ -9647,7 +9672,7 @@ class TestTorchDeviceType(TestCase):
 
         def _test_underdetermined(a, b, expectedNorm):
             # underdetermined systems are not supported on the GPU
-            if 'cuda' in device:
+            if not torch.device(device).type == 'cpu':
                 return
 
             m = a.size()[0]
@@ -10840,7 +10865,7 @@ class TestTorchDeviceType(TestCase):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
             x_clone = x.clone()
-            if ('cuda' in device and dt == torch.bfloat16):
+            if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: copy(x))
                 continue
             y = copy(x)
@@ -10866,7 +10891,7 @@ class TestTorchDeviceType(TestCase):
     def test_view_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
-            if ('cuda' in device and dt == torch.bfloat16):
+            if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: x.view(6))
                 continue
             self.assertEqual(x.view(6).shape, [6])
@@ -10874,7 +10899,7 @@ class TestTorchDeviceType(TestCase):
     def test_fill_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor((1, 1), dtype=dt, device=device)
-            if ('cuda' in device and dt == torch.bfloat16):
+            if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: x.fill_(1))
                 continue
             x.fill_(1)
@@ -10886,7 +10911,7 @@ class TestTorchDeviceType(TestCase):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor((1, 1), dtype=dt, device=device)
             y = x.clone()
-            if ('cuda' in device and dt == torch.bfloat16):
+            if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                 # `x - y` is used inside of the assertEqual
                 self.assertRaises(RuntimeError, lambda: x - y)
                 continue
@@ -10895,7 +10920,7 @@ class TestTorchDeviceType(TestCase):
     def test_cat_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
-            if ('cuda' in device and dt == torch.bfloat16):
+            if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: torch.cat((x, x), 0))
                 continue
 
@@ -10912,7 +10937,7 @@ class TestTorchDeviceType(TestCase):
         for shape in shapes:
             for dt in torch.testing.get_all_dtypes():
 
-                if ('cuda' in device and dt == torch.bfloat16):
+                if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                     self.assertRaises(RuntimeError, lambda: torch.zeros(shape, device=device, dtype=dt).shape)
                     self.assertRaises(RuntimeError, lambda: torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                     self.assertRaises(RuntimeError, lambda: torch.full(shape, 3, device=device, dtype=dt).shape)
@@ -11069,7 +11094,7 @@ class TestTorchDeviceType(TestCase):
                 # in this test
                 continue
 
-            if 'cuda' in device and dt == torch.bfloat16:
+            if torch.device(device).type == 'cuda' and dt == torch.bfloat16:
                 self.assertRaises(RuntimeError, lambda: x > b)
                 self.assertRaises(RuntimeError, lambda: x < b)
                 self.assertRaises(RuntimeError, lambda: x == b)
@@ -11269,12 +11294,12 @@ class TestTorchDeviceType(TestCase):
                     src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
                     mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
 
-                    if dt == torch.bfloat16 and 'cuda' in device:
+                    if dt == torch.bfloat16 and torch.device(device).type == 'cuda':
                         # remove once bfloat16 implemented on CUDA
                         self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                         continue
 
-                    if dt == torch.half and device == 'cpu':
+                    if dt == torch.half and torch.device(device).type == 'cpu':
                         self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                         continue
 
@@ -11827,7 +11852,7 @@ class TestTorchDeviceType(TestCase):
             ("tanh", doubles, True, True, 'cpu'),
             ("tanh", doubles, False, True, 'cuda'),
             ("trunc", doubles, True, True, 'cpu'),
-            ("trunc", doubles, False, True, 'cuda')
+            ("trunc", doubles, True, True, 'cuda')
         ]
 
         for (fn, inputs, has_input_output_mem_overlap_check,
@@ -12626,8 +12651,8 @@ class TestTorchDeviceType(TestCase):
             self.assertIsInstance(xc2, type(xc))
             self.assertEqual(xc.float(), xc2.float())
 
-    @multidevice(1)
     @onlyCUDA
+    @multidevice(1)  # Note: Tests works with one but prefers more devices
     def test_serialization(self, devices):
         def _test_serialization(filecontext_lambda):
             t0 = torch.cuda.FloatTensor(5).fill_(1)
