@@ -12,6 +12,135 @@ namespace {
 //
 // Please read the README.md in this directory before editing this file
 
+template <bool ReLUFused = false>
+Tensor qcat_nhwc_kernel(
+    const c10::List<Tensor>& qxs,
+    int64_t dim,
+    double scale,
+    int64_t zero_point) {
+  const at::Tensor& qx0 = qxs[0];
+  int64_t C_out = 0;
+  std::vector<int64_t> Cs_in;
+  // Prefix sum of input channels for fast indexing
+  std::vector<int64_t> Cs_sum;
+  std::vector<double> scales;
+  std::vector<int64_t> zero_pts;
+  std::vector<void*> data_ptrs;
+
+  for (const at::Tensor& qx : qxs) {
+    TORCH_CHECK(
+        qx.dim() == qx0.dim(),
+        "Tensors must have the same number of dimensions: got ",
+        qx.dim(),
+        " and ",
+        qx0.dim());
+#define CHECK_DIM(d)                                            \
+  TORCH_CHECK(                                                  \
+      qx.size(d) == qx0.size(d),                                \
+      "Sizes of tensors must match expect in dimension 1. Got", \
+      qx.size(d),                                               \
+      " and ",                                                  \
+      qx0.size(d));
+    CHECK_DIM(0);
+    CHECK_DIM(2);
+    CHECK_DIM(3);
+    TORCH_CHECK(
+        qx.scalar_type() == qx0.scalar_type(),
+        "Expected object of scalar type ",
+        toString(qx0.scalar_type()),
+        " but got scalar type ",
+        toString(qx.scalar_type()));
+    Cs_in.push_back(qx.size(1));
+    Cs_sum.push_back(C_out);
+    C_out += qx.size(1);
+    scales.push_back(qx.q_scale());
+    zero_pts.push_back(qx.q_zero_point());
+    data_ptrs.push_back(qx.data_ptr());
+  }
+
+  const int64_t N = qx0.size(0);
+  const int64_t H = qx0.size(2);
+  const int64_t W = qx0.size(3);
+  float inv_scale = 1.0 / scale;
+
+  auto output = at::_empty_affine_quantized(
+      {N, C_out, H, W},
+      qx0.options(),
+      scale,
+      zero_point,
+      MemoryFormat::ChannelsLast);
+
+  // N, H, and W are explicitly captured here because there's a bug in GCC5
+  // which causes an internal compiler error if they're not
+  AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, N, H, W]() {
+    using Vec = Vec256<scalar_t>;
+    for (int64_t batch = 0; batch < N; ++batch) {
+      for (int64_t row = 0; row < H; ++row) {
+        for (int64_t col = 0; col < W; ++col) {
+          // loop over input tensors
+          for (int64_t tidx = 0; tidx < Cs_in.size(); ++tidx) {
+            scalar_t::underlying* optr =
+                reinterpret_cast<scalar_t::underlying*>(output.data_ptr()) +
+                batch * H * W * C_out + row * W * C_out + col * C_out +
+                Cs_sum[tidx];
+
+            auto curr_C = Cs_in[tidx];
+            float curr_scale = scales[tidx];
+            int64_t curr_zero_pt = zero_pts[tidx];
+
+            scalar_t::underlying* iptr =
+                reinterpret_cast<scalar_t::underlying*>(data_ptrs[tidx]) +
+                batch * H * W * curr_C + row * W * curr_C + col * curr_C;
+
+            constexpr int64_t VLEN = Vec::size();
+            int64_t c = 0;
+
+            // Vectorized loop
+            if (c + VLEN <= curr_C) {
+              auto curr_scale_vec = Vec256<float>(curr_scale);
+              auto curr_zero_pt_vec = Vec256<float>((float)curr_zero_pt);
+              auto scale_neg_zp_premul = curr_scale_vec * curr_zero_pt_vec.neg();
+              for (; c + VLEN <= curr_C; c += VLEN) {
+                auto inp_vec = Vec::loadu(iptr + c);
+                auto float_values = inp_vec.dequantize(
+                    curr_scale_vec, curr_zero_pt_vec, scale_neg_zp_premul);
+                Vec::float_vec_return_type retvals;
+                for (int i = 0; i < Vec::float_num_vecs(); ++i) {
+                  if (ReLUFused) {
+                    retvals[i] =
+                        vec256::maximum(float_values[i], Vec256<float>(0.0f));
+                  } else {
+                    retvals[i] = float_values[i];
+                  }
+                }
+                auto quantized =
+                    Vec::quantize(retvals, scale, zero_point, inv_scale);
+                quantized.store(optr + c);
+              }
+            }
+
+            // Scalar loop
+            for (; c < curr_C; ++c) {
+              auto float_val = at::dequantize_val(
+                  curr_scale,
+                  curr_zero_pt,
+                  reinterpret_cast<scalar_t*>(iptr)[c]);
+              if (ReLUFused) {
+                float_val = std::max(0.0f, float_val);
+              }
+              optr[c] =
+                  at::quantize_val<scalar_t>(scale, zero_point, float_val).val_;
+            } // for c
+
+          } // for tidx
+        } // for col
+      } // for row
+    } // for b
+  });
+
+  return output;
+}
+
 void qrelu_kernel(const Tensor& qx, Tensor& qy) {
   const auto zero_point = qx.q_zero_point();
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {
@@ -80,7 +209,7 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
   auto other_zero_point_vec = Vec256<float>((float)other_zero_point);
   auto other_scale_vec = Vec256<float>(other_scale);
 
-  auto self_scale_zp_premul_vec = self_scale_vec * self_zero_point_vec.neg();
+  auto self_scale_neg_zp_premul_vec = self_scale_vec * self_zero_point_vec.neg();
   auto other_scale_zp_premul_vec = other_scale_vec * other_zero_point_vec.neg();
 
   auto iter = TensorIterator::binary_op(out, self, other);
@@ -100,7 +229,7 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
         },
         [&](Vec a, Vec b) -> Vec {
           const auto da = a.dequantize(
-              self_scale_vec, self_zero_point_vec, self_scale_zp_premul_vec);
+              self_scale_vec, self_zero_point_vec, self_scale_neg_zp_premul_vec);
           const auto db = b.dequantize(
               other_scale_vec, other_zero_point_vec, other_scale_zp_premul_vec);
           Vec::float_vec_return_type retvals;
@@ -458,6 +587,8 @@ REGISTER_DISPATCH(
     qadaptive_avg_pool2d_nhwc_stub,
     &qadaptive_avg_pool2d_nhwc_kernel);
 REGISTER_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
+REGISTER_DISPATCH(qcat_nhwc_stub, &qcat_nhwc_kernel<false>);
+REGISTER_DISPATCH(qcat_relu_nhwc_stub, &qcat_nhwc_kernel<true>);
 
 } // namespace native
 } // namespace at
