@@ -134,7 +134,11 @@ class RpcTest(MultiProcessTestCase):
         ):
             dist.rpc_sync(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
 
-    def test_reinit(self):
+    @unittest.skipIf(
+        BACKEND != RpcBackend.PROCESS_GROUP,
+        "PROCESS_GROUP rpc backend specific test, skip"
+    )
+    def test_duplicate_name(self):
         store = dist.FileStore(self.file.name, self.world_size)
         dist.init_process_group(
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
@@ -146,6 +150,22 @@ class RpcTest(MultiProcessTestCase):
                 self_rank=self.rank,
                 init_method=RPC_INIT_URL,
             )
+        dist.join_rpc()
+
+    def test_reinit(self):
+        store = dist.FileStore(self.file.name, self.world_size)
+        dist.init_process_group(backend="gloo", rank=self.rank,
+                                world_size=self.world_size, store=store)
+        dist.init_model_parallel(self_name='worker{}'.format(self.rank),
+                                 backend=BACKEND,
+                                 self_rank=self.rank,
+                                 init_method=RPC_INIT_URL)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "is already initialized"):
+            dist.init_model_parallel(self_name='worker{}'.format(self.rank),
+                                     backend=BACKEND,
+                                     self_rank=self.rank,
+                                     init_method=RPC_INIT_URL)
         dist.join_rpc()
 
     def test_init_invalid_backend(self):
