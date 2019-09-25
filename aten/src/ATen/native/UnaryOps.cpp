@@ -67,7 +67,7 @@ Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 
 Tensor& cosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, cosh_stub); }
 Tensor cosh(const Tensor& self) { return unary_op_impl(self, at::cosh_out); }
-Tensor& cosh_(Tensor& self) { return unary_op_impl(self, at::cosh_out); }
+Tensor& cosh_(Tensor& self) { return unary_op_impl_(self, at::cosh_out); }
 
 Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, erfinv_stub); }
 Tensor erfinv(const Tensor& self) { return unary_op_impl(self, at::erfinv_out); }
