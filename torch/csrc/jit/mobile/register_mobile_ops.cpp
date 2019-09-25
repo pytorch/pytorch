@@ -1,7 +1,6 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/ATen.h>
 #include <ATen/core/stack.h>
-//#include "torch/csrc/autograd/generated/VariableType.h"
 
 using Stack = std::vector<c10::IValue>;
 using torch::jit::peek;
@@ -269,8 +268,11 @@ torch::RegisterOperators::options().kernel<decltype(at::embedding), &at::embeddi
   to_dtype_layout_func
 )
 ).op(
-  "_aten::sort",
-  torch::RegisterOperators::options().kernel<decltype(at::sort), &at::sort>(c10::TensorTypeId::CPUTensorId)
+"_aten::sort",
+torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+[](at::Tensor a, int64_t dim, bool descending = false) ->std::tuple<at::Tensor, at::Tensor> {
+  return at::sort(a, dim, descending);
+})
 ).op(
   "_aten::index_select",
   torch::RegisterOperators::options().kernel<decltype(at::index_select), &at::index_select>(c10::TensorTypeId::CPUTensorId)
