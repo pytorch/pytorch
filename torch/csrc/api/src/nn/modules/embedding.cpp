@@ -37,7 +37,7 @@ namespace nn {
         }
       }
       else {
-        TORCH_CHECK((weight.size(0) == options.num_embeddings()) && (weight.size(1) == options.embedding_dim()), "Shape of _weight does not match num_embeddings and embedding_dim");
+        TORCH_CHECK(((*options._weight()).size(0) == options.num_embeddings()) && ((*options._weight()).size(1) == options.embedding_dim()), "Shape of _weight does not match num_embeddings and embedding_dim");
         weight = register_parameter("weight", *options._weight());
       }
     }
