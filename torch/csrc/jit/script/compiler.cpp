@@ -3117,14 +3117,14 @@ struct to_ir {
 
 struct FunctionResolver : public Resolver {
   explicit FunctionResolver(
-      const Resolver* otherResolver,
+      Resolver* otherResolver,
       const std::unordered_map<std::string, Function*>& functionTable)
       : otherResolver_(otherResolver), functionTable_(functionTable) {}
 
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
       Function& m,
-      const SourceRange& loc) const override {
+      const SourceRange& loc) override {
     auto it = functionTable_.find(name);
     if (it != functionTable_.end()) {
       return std::make_shared<FunctionValue>(it->second);
@@ -3133,12 +3133,12 @@ struct FunctionResolver : public Resolver {
   }
 
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
-      const override {
+      override {
     return otherResolver_->resolveType(name, loc);
   }
 
  private:
-  const Resolver* otherResolver_;
+  Resolver* otherResolver_;
   const std::unordered_map<std::string, Function*>& functionTable_;
 };
 

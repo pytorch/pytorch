@@ -69,7 +69,8 @@ void testImportTooNew() {
   Module m("__torch__.m");
   const std::vector<at::Tensor> constant_table;
   auto src = std::make_shared<Source>(pretty_printed);
-  ASSERT_ANY_THROW(LEGACY_import_methods(m, src, constant_table, nullptr));
+  SourceImporter si(m.class_compilation_unit(), &constant_table, nullptr);
+  ASSERT_ANY_THROW(si.LEGACY_import_methods(m, src));
 }
 
 } // namespace jit
