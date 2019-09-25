@@ -210,6 +210,18 @@ class TestNamedTensor(TestCase):
                                   [create('None:1,None:1,None:2,None:3'), '...', 'C', 'H'],
                                   [None, None, 'C', 'H'])
 
+    def test_detach(self):
+        names = ['N']
+        self._test_name_inference(
+            Tensor.detach_,
+            [torch.randn(3, requires_grad=True, names=names)],
+            names)
+        self._test_name_inference(
+            Tensor.detach,
+            [torch.randn(3, requires_grad=True, names=names)],
+            names)
+
+
     def test_repr(self):
         named_tensor = torch.zeros(2, 3).rename_('N', 'C')
         expected = "tensor([[0., 0., 0.],\n        [0., 0., 0.]], names=('N', 'C'))"
@@ -530,6 +542,13 @@ class TestNamedTensor(TestCase):
         tensor.item()
         tensor.type()
 
+        # autograd related attributes
+        tensor = torch.empty(1, 1, names=('N', 'D'), requires_grad=True)
+        tensor = tensor.relu()
+        tensor.output_nr
+        tensor.grad_fn
+        tensor.requires_grad
+
     def test_split_fns_propagates_names(self):
         fns = [
             lambda x: x.split(1, 0),
@@ -625,6 +644,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('mul'),
             fn_method_and_inplace('sub'),
             fn_method_and_inplace('pow'),
+            fn_method_and_inplace('atan2'),
             method('copy_'),
         ]
         tests = flatten(tests)
@@ -633,6 +653,27 @@ class TestNamedTensor(TestCase):
             test_basic(op)
             test_wildcard(op)
             test_mixed_unnamed_named(op, is_inplace=name.endswith('_'))
+
+    def test_logical_xor(self):
+        # Implemented via TensorIterator, so just check that each version
+        # (out-of-place, inplace, out=) propagates names.
+        def zeros(*args, **kwargs):
+            return torch.zeros(*args, dtype=torch.bool, **kwargs)
+
+        self._test_name_inference(
+            torch.logical_xor,
+            (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+            expected_names=['N', 'C'])
+
+        self._test_name_inference(
+            Tensor.logical_xor_,
+            (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+            expected_names=['N', 'C'])
+
+        self._test_name_inference(
+            lambda out, x, y: torch.logical_xor(x, y, out=out),
+            (create('0', zeros), create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+            expected_names=['N', 'C'])
 
     def test_pow_special(self):
         # There are a few pow cases that don't go through TensorIterator.
@@ -754,6 +795,7 @@ class TestNamedTensor(TestCase):
             method('random_', 1),
             method('random_'),
             method('relu_'),
+            method('requires_grad_'),
             method('relu'),
             fn_method_and_inplace('round'),
             fn_method_and_inplace('rsqrt'),
