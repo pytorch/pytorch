@@ -6,6 +6,9 @@
           ios_arch: "x86_64"
           requires: 
             - setup
+          filters:
+            branches:
+              only: nightly
       - binary_ios_build:
           name: pytorch_ios_10_2_1_nigthly_arm64_build
           build_environment: "libtorch-ios-10.2.1-nightly-arm64-build"
@@ -13,6 +16,9 @@
           ios_platform: "OS"
           requires: 
             - setup
+          filters:
+            branches:
+              only: nightly
       - binary_ios_upload:
           build_environment: "libtorch-ios-10.2.1-nightly-binary-build-upload"
           context: org-member
@@ -20,3 +26,6 @@
             - setup
             - pytorch_ios_10_2_1_nightly_x86_64_build
             - pytorch_ios_10_2_1_nigthly_arm64_build
+          filters:
+            branches:
+              only: nightly
