@@ -1,9 +1,7 @@
 #include <ATen/core/op_registration/op_registration.h>
-#include "torch/csrc/jit/custom_operator.h"
 #include <ATen/ATen.h>
 #include <ATen/core/stack.h>
-#include "torch/csrc/autograd/generated/VariableType.h"
-//#include <c10/core/TensorTypeId.h>
+//#include "torch/csrc/autograd/generated/VariableType.h"
 
 using Stack = std::vector<c10::IValue>;
 using torch::jit::peek;
