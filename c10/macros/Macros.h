@@ -222,4 +222,40 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
 #endif
 
+// AT_CPP14_CONSTEXPR: Make it constexpr if we're in C++14 or later
+#if defined(_MSC_VER) && defined(__CUDACC__) && \
+    (__CUDACC_VER_MAJOR__ >= 10 ||              \
+     (__CUDACC_VER_MAJOR__ == 9 && __CUDACC_VER_MINOR__ >= 2))
+// workaround: CUDA >= v9.2 compiler cannot compile correctly on Windows.
+#define AT_CPP14_CONSTEXPR
+#else
+#if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
+#define AT_CPP14_CONSTEXPR constexpr
+#else
+#define AT_CPP14_CONSTEXPR
+#endif
+#endif
+
+// We need --expt-relaxed-constexpr in CUDA because of Eigen. This flag allows
+// device code in CUDA to call host constexpr functions. Unfortunately,
+// the CUDA compiler (at least for CUDA 9.0, 9.1 and 9.2) isn't compatible
+// with many of the constexpr things we'd like to do and the device code
+// compiler crashes when it sees one of these host-only functions.
+// It works when nvcc builds host code, but not when it builds device code
+// and notices it can call these constexpr functions from device code.
+// As a workaround, we use C10_HOST_CONSTEXPR instead of constexpr for these
+// functions. This enables constexpr when compiled on the host and applies
+// __host__ when it is compiled on the device in an attempt to stop it from
+// being called from device functions. Not sure if the latter works, but
+// even if not, it not being constexpr anymore should be enough to stop
+// it from being called from device code.
+// TODO This occurred in CUDA 9 (9.0 to 9.2). Test if this is fixed in CUDA 10.
+#if defined(__CUDA_ARCH__)
+#define C10_HOST_CONSTEXPR __host__
+#define C10_CPP14_HOST_CONSTEXPR __host__
+#else
+#define C10_HOST_CONSTEXPR constexpr
+#define C10_CPP14_HOST_CONSTEXPR AT_CPP14_CONSTEXPR
+#endif
+
 #endif // C10_MACROS_MACROS_H_

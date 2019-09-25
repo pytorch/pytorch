@@ -18,16 +18,17 @@
 #include <exception>
 
 #include <c10/macros/Macros.h>
+#include <c10/util/BFloat16.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/IdWrapper.h>
 #include <c10/util/Type.h>
+#include <c10/util/TypeIndex.h>
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
-#include <c10/util/BFloat16.h>
 
 /*
  * TypeIdentifier is a small type containing an id.
@@ -60,17 +61,10 @@ namespace caffe2 {
  * dtype of tensors.
  */
 class C10_API TypeIdentifier final
-    : public at::IdWrapper<TypeIdentifier, uint16_t> {
+    : public at::IdWrapper<TypeIdentifier, c10::util::type_index> {
  public:
-  static TypeIdentifier createTypeId();
-
   friend std::ostream& operator<<(std::ostream& stream, TypeIdentifier typeId);
   friend bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
-
-  // 0 is uint8_t (due to ScalarType BC constraint)
-  static constexpr TypeIdentifier uninitialized() {
-    return TypeIdentifier(11);
-  }
 
   /**
    * Returns the unique id for the given type T. The id is unique for the type T
@@ -80,11 +74,18 @@ class C10_API TypeIdentifier final
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  C10_API static TypeIdentifier Get();
+  static C10_HOST_CONSTEXPR TypeIdentifier Get() noexcept {
+    return TypeIdentifier(c10::util::get_type_index<T>());
+  }
+
+  static constexpr TypeIdentifier uninitialized() {
+    return TypeIdentifier(
+        c10::util::type_index{11}); // 11 is Undefined from ScalarType
+  }
 
  private:
-  constexpr explicit TypeIdentifier(uint16_t id) : IdWrapper(id) {}
-  friend class TypeMeta;
+  constexpr explicit TypeIdentifier(c10::util::type_index id) : IdWrapper(id) {}
+  friend class TypeMeta; // TODO Is this friend an issue?
 };
 
 // Allow usage in std::map / std::set
@@ -509,73 +510,21 @@ inline std::ostream& operator<<(
   TypeMeta::_typeMetaDataInstance<T>() noexcept {                       \
     return &C10_CONCATENATE(detail::_typeMetaDataInstance_, Counter);   \
   }
-#define CAFFE_KNOWN_TYPE(T)                                               \
-  template <>                                                             \
-  EXPORT_IF_NOT_GCC TypeIdentifier TypeIdentifier::Get<T>() {             \
-    static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
-    return type_id;                                                       \
-  }                                                                       \
+#define CAFFE_KNOWN_TYPE(T) \
   _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, __COUNTER__)
 
 /**
  * CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE is used
- * to preallocate ids for types that are queried very often so that they
- * can be resolved at compile time. Please use CAFFE_KNOWN_TYPE() instead
- * for your own types to allocate dynamic ids for them.
+ * to preallocate numbers so they line up exactly
+ * with at::ScalarType's numbering.  All other numbers do not matter.
+ * Please use CAFFE_KNOWN_TYPE instead for your own types.
  */
-#ifdef _MSC_VER
-#define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T) \
-  template <>                                                    \
-  inline C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {    \
-    return TypeIdentifier(PreallocatedId);                       \
-  }                                                              \
-  namespace detail {                                             \
-  C10_API extern const TypeMetaData C10_CONCATENATE(             \
-      _typeMetaDataInstance_preallocated_,                       \
-      PreallocatedId);                                           \
-  }
-#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)         \
-  namespace detail {                                                    \
-  C10_EXPORT const TypeMetaData C10_CONCATENATE(                        \
-      _typeMetaDataInstance_preallocated_,                              \
-      PreallocatedId) = _makeTypeMetaDataInstance<T>(_typeName<T>(#T)); \
-  }                                                                     \
-  template <>                                                           \
-  C10_EXPORT const detail::TypeMetaData*                                \
-  TypeMeta::_typeMetaDataInstance<T>() noexcept {                       \
-    return &C10_CONCATENATE(                                            \
-        detail::_typeMetaDataInstance_preallocated_, PreallocatedId);   \
-  }
-#else // _MSC_VER
 #define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)      \
   template <>                                                         \
-  inline C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {         \
-    return TypeIdentifier(PreallocatedId);                            \
-  }                                                                   \
-  namespace detail {                                                  \
-  C10_EXPORT extern const TypeMetaData C10_CONCATENATE(               \
-      _typeMetaDataInstance_preallocated_,                            \
-      PreallocatedId);                                                \
-  }                                                                   \
-  template <>                                                         \
-  inline const detail::TypeMetaData*                                  \
-  TypeMeta::_typeMetaDataInstance<T>() noexcept {                     \
-    return &C10_CONCATENATE(                                          \
-        detail::_typeMetaDataInstance_preallocated_, PreallocatedId); \
+  constexpr inline TypeIdentifier TypeIdentifier::Get<T>() noexcept { \
+    return TypeIdentifier(c10::util::type_index{PreallocatedId});     \
   }
-#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)         \
-  namespace detail {                                                    \
-  const TypeMetaData C10_CONCATENATE(                                   \
-      _typeMetaDataInstance_preallocated_,                              \
-      PreallocatedId) = _makeTypeMetaDataInstance<T>(_typeName<T>(#T)); \
-  }
-#endif
 
-// Note: we have preallocated the numbers so they line up exactly
-// with at::ScalarType's numbering.  All other numbers do not matter.
-
-struct _CaffeHighestPreallocatedTypeId final {};
-// TODO static_assert number of declare/define align
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(0, uint8_t)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(1, int8_t)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(2, int16_t)
@@ -631,6 +580,5 @@ CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(29, c10::qint8)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(30, c10::quint8)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(31, c10::qint32)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(32, at::BFloat16)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(33, _CaffeHighestPreallocatedTypeId)
 
 } // namespace caffe2

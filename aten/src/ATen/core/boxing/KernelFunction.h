@@ -5,6 +5,7 @@
 #include <ATen/core/boxing/kernel_functor.h>
 #include <ATen/core/boxing/kernel_function.h>
 #include <ATen/core/boxing/kernel_lambda.h>
+#include <c10/util/TypeIndex.h>
 
 namespace c10 {
 
@@ -12,13 +13,11 @@ namespace detail {
 template<class Return, class... Args> struct boxAndCallBoxedFunc;
 
 template<class FuncType>
-constexpr uint64_t hashFunctionSignature() {
-  using func_traits = guts::infer_function_traits_t<FuncType>;
-  #ifdef __GXX_RTTI
-    return typeid(typename func_traits::func_type).hash_code();
-  #else
-    return 0;
-  #endif
+C10_HOST_CONSTEXPR c10::util::type_index hashFunctionSignature() {
+  // Decay functors, lambdas, function pointers, etc. into the plain function type
+  using decayed_function_type = typename guts::infer_function_traits_t<FuncType>::func_type;
+
+  return c10::util::get_type_index<decayed_function_type>();
 }
 }
 
@@ -355,12 +354,12 @@ public:
 
 private:
 
-  explicit KernelFunction(std::function<std::shared_ptr<OperatorKernel>()> functorFactory, std::shared_ptr<OperatorKernel> functor, BoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func, c10::optional<uint64_t> signature_hash)
+  explicit KernelFunction(std::function<std::shared_ptr<OperatorKernel>()> functorFactory, std::shared_ptr<OperatorKernel> functor, BoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func, c10::optional<c10::util::type_index> signature_hash)
   : functorFactory_(std::move(functorFactory))
   , functor_(std::move(functor))
   , boxed_kernel_func_(boxed_kernel_func)
   , unboxed_kernel_func_(unboxed_kernel_func)
-  , signature_hash_(signature_hash)
+  , signature_hash_(std::move(signature_hash))
   {}
 
   OperatorKernel* getFunctor_() const {
@@ -393,7 +392,7 @@ private:
   // KernelFunction was created in a way that allowed us to know the function
   // signature. If this is set, it will be used in unboxed function calls
   // to verify their arguments against the known function signature.
-  c10::optional<uint64_t> signature_hash_;
+  c10::optional<c10::util::type_index> signature_hash_;
 };
 
 namespace detail {
