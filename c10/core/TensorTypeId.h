@@ -49,8 +49,6 @@ enum class TensorTypeId : uint8_t {
 
   VariableTensorId,
 
-  TestingOnly_WrapperTensorId,  // FOR TESTING ONLY
-
   NumTensorIds, // Sentinel
 };
 
