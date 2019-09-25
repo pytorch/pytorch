@@ -707,7 +707,7 @@ class TestNamedTensor(TestCase):
                 out = testcase.lambd(tensor)
             except RuntimeError as err:
                 # Get a better error message by catching the error and asserting.
-                assert False, '{}: {}'.format(testcase.name, err)
+                raise RuntimeError('{}: {}'.format(testcase.name, err))
             self.assertEqual(out.names, tensor.names,
                              message=testcase.name)
 
