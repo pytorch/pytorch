@@ -327,8 +327,7 @@ class LegacyTracedModule(Module):
         in_vars, in_desc = _flatten(args)
         # NOTE: use full state, because we need it for BatchNorm export
         # This differs from the compiler path, which doesn't support it at the moment.
-        state_dict = _unique_state_dict(self, keep_vars=True)
-        module_state = list(_remove_unused_state_batchnorm(self, state_dict).values())
+        module_state = list(_unique_state_dict(self, keep_vars=True).values())
         try:
             trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
         except Exception as e:
