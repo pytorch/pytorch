@@ -6378,6 +6378,7 @@
   dispatch:
     CPU: upsample_bilinear2d_cpu
     CUDA: upsample_bilinear2d_cuda
+    QuantizedCPU: quantized_upsample_bilinear2d_cpu
 
 - func: upsample_bilinear2d_backward.grad_input(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
