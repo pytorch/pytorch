@@ -1,4 +1,9 @@
 #pragma once
+
+#ifdef __HIPCC__
+#include <hip/hip_runtime.h>
+#endif
+
 #include <cmath>
 #include <type_traits>
 #include <c10/util/BFloat16.h>
