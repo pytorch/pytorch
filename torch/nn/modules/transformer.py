@@ -1,4 +1,3 @@
-import torch
 import copy
 from .. import functional as F
 from .module import Module
