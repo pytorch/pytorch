@@ -191,11 +191,13 @@ class Test_PT_ONNX_TRT(unittest.TestCase):
         self._test_model("resnet50")
     def test_resnet101(self):
         self._test_model("resnet101")
+    @unittest.skip("Takes 2m")
     def test_resnet152(self):
         self._test_model("resnet152")
 
     def test_resnet50_2(self):
         self._test_model("resnet50_2")
+    @unittest.skip("Takes 2m")
     def test_resnet101_2(self):
         self._test_model("resnet101_2")
 
@@ -239,6 +241,7 @@ class Test_PT_ONNX_TRT(unittest.TestCase):
     def test_vgg19_bn(self):
         self._test_model("vgg19_bn")
 
+    @unittest.skip("Takes 13m")
     def test_densenet121(self):
         self._test_model("densenet121")
     @unittest.skip("Takes 25m")
