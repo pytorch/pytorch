@@ -46,29 +46,20 @@ for black_listed_op in black_listed_operators:
     vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
 
 
-def _interpolate(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, align_corners=None):
-        sym_help._interpolate_warning(interpolate_mode)
-        align_corners = sym_help._maybe_get_scalar(align_corners)
-        if align_corners:
-            return _unimplemented(name, "align_corners == True")
-        output_size = sym_help._maybe_get_const(output_size, 'is')
-        if sym_help._is_value(output_size):
-            return _unimplemented(name, "torch._C.Value (output_size) indexing")
-        else:
-            scales = [1. if i < 2 else
-                      float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
-                      for i in range(0, dim)]
-        return g.op("Upsample", input, mode_s=interpolate_mode, scales_f=scales)
-    return symbolic_fn
+def upsample_nearest2d(g, input, output_size, align_corners=None):
+    align_corners = sym_help._maybe_get_scalar(align_corners)
+    if align_corners:
+        return _unimplemented("upsample_neareset2d", "align_corners == True")
 
-
-upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
-upsample_nearest2d = _interpolate('upsample_nearest2d', 4, "nearest")
-upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
-upsample_linear1d = _interpolate('upsample_linear1d', 3, "linear")
-upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
-upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
+    output_size = sym_help._maybe_get_const(output_size, 'is')
+    if sym_help._is_value(output_size):
+        return _unimplemented("upsample_nearest2d", "torch._C.Value (output_size) indexing")
+    else:
+        height_scale = float(output_size[-2]) / input.type().sizes()[-2]
+        width_scale = float(output_size[-1]) / input.type().sizes()[-1]
+        scales = [1., 1., height_scale, width_scale]
+        return g.op("Upsample", input, mode_s="nearest",
+                    scales_f=scales)
 
 
 # NOTE: We should create a wrapper for this kind of operation, after resolving the shape/type propagation
