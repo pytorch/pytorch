@@ -76,6 +76,13 @@ bool Message::isResponse() const {
       MessageType::REMOTE_RET == type_;
 }
 
+bool Message::isInternal() const {
+  return !(MessageType::PYTHON_CALL == type_ ||
+      MessageType::PYTHON_REMOTE_CALL == type_ ||
+      MessageType::SCRIPT_CALL == type_ ||
+      MessageType::SCRIPT_REMOTE_CALL == type_);
+}
+
 bool Message::isShutdown() const {
   return MessageType::SHUTDOWN == type_;
 }

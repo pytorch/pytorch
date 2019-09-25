@@ -121,9 +121,9 @@ ProcessGroupAgent::ProcessGroupAgent(
     tmpWorkerIds[entry.second] = entry.first;
   }
 
-  workerInfos_.reserve(pg_->getSize());
+  allWorkerInfo_.reserve(pg_->getSize());
   for (int rank = 0; rank < (int)tmpWorkerIds.size(); ++rank) {
-    workerInfos_.emplace_back(std::move(tmpWorkerIds[rank]), rank);
+    allWorkerInfo_.emplace_back(std::move(tmpWorkerIds[rank]), rank);
   }
 
   // construct PythonRpcHandler singleton here
@@ -137,11 +137,11 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
   TORCH_CHECK(
       idIter != nameMap_.end(), "Unknown destination worker ", workerName);
 
-  return workerInfos_[idIter->second];
+  return allWorkerInfo_[idIter->second];
 }
 
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
-  return workerInfos_[id];
+  return allWorkerInfo_[id];
 }
 
 void ProcessGroupAgent::join() {
@@ -158,7 +158,7 @@ void ProcessGroupAgent::join() {
   pg_->barrier()->wait();
   int dst = (pg_->getRank() + 1) % pg_->getSize();
   enqueueSend(
-      SendWork(workerInfos_[dst], Message({}, {}, MessageType::SHUTDOWN)));
+      SendWork(allWorkerInfo_[dst], Message({}, {}, MessageType::SHUTDOWN)));
   threadPool_.waitWorkComplete();
   listenerThread_.join();
 }
@@ -210,7 +210,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::sendImpl(
   // will not keep the Python reference alive even if it originally comes from
   // the C++ land. Hence, we have to explicitly use the ``WorkerInfo`` in the
   // C++ land.
-  enqueueSend(SendWork(workerInfos_[to.id_], std::move(message)));
+  enqueueSend(SendWork(allWorkerInfo_[to.id_], std::move(message)));
   return future;
 }
 
@@ -316,7 +316,7 @@ void ProcessGroupAgent::listenLoop() {
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
     pg_->recv(tensors, srcRank, pg_->getRank())->wait();
 
-    enqueueRecv(RecvWork(workerInfos_[srcRank], type, std::move(tensors[0])));
+    enqueueRecv(RecvWork(allWorkerInfo_[srcRank], type, std::move(tensors[0])));
   }
 }
 

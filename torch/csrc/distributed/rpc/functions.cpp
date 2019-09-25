@@ -25,79 +25,22 @@ Message createException(const Message& request, const std::exception& e) {
 }
 
 Message processRequestBlocking(Message&& request) {
-  try {
-    switch (request.type()) {
-      case MessageType::SCRIPT_CALL: {
-        ScriptCall sc = ScriptCall::fromMessage(request);
-
-        // sc is only alive within this block, use reference to avoid copy
-        auto& stack = sc.stackRef();
-        sc.op()->getOperation()(stack);
-
-        AT_ASSERT(
-            stack.size() == 1,
-            "Return value of a builtin operator or a "
-            "TorchScript function should be a single IValue, got a vector of "
-            "size ",
-            stack.size());
-        return ScriptRet(std::move(stack.front())).toMessage();
-      }
-      case MessageType::PYTHON_CALL: {
-        auto payload =
-            PythonRpcHandler::getInstance().generatePythonUDFResult(request);
-        return Message(
-            std::move(payload),
-            std::vector<torch::Tensor>(),
-            MessageType::PYTHON_RET);
-      }
-      case MessageType::SCRIPT_REMOTE_CALL: {
-        ScriptRemoteCall src = ScriptRemoteCall::fromMessage(request);
-        auto& ctx = RRefContext::getInstance();
-
-        auto ownerRRef = ctx->getOrCreateOwnerRRef<IValue>(src.retRRefId());
-
-        // TODO: make this asynchronous
-        // src is only alive within this block, use reference to avoid copy
-        auto& stack = src.stackRef();
-        src.op()->getOperation()(stack);
-        AT_ASSERT(
-            stack.size() == 1,
-            "Return value of a builtin operator or a "
-            "TorchScript function should be a single IValue, got a vector of "
-            "size ",
-            stack.size());
-
-        ownerRRef->setValue(std::move(stack.front()));
-        ctx->addForkOfOwner(src.retRRefId(), src.retForkId());
-        return RemoteRet(src.retRRefId(), src.retForkId()).toMessage();
-      }
-      case MessageType::PYTHON_REMOTE_CALL: {
-        PythonRemoteCall prc = PythonRemoteCall::fromMessage(request);
-
-        auto rrefId = RRefId::fromIValue(prc.retRRefId());
-        auto forkId = ForkId::fromIValue(prc.retForkId());
-        auto& ctx = RRefContext::getInstance();
-
-        auto ownerRRef = ctx->getOrCreateOwnerRRef<py::object>(rrefId);
-        ownerRRef->setValue(
-            PythonRpcHandler::getInstance().runPythonUDF(prc.udf()));
-        ctx->addForkOfOwner(rrefId, forkId);
-        return RemoteRet(rrefId, forkId).toMessage();
-      }
+  if (request.isInternal()) {
+    switch(request.type()) {
       case MessageType::SCRIPT_RREF_FETCH_CALL: {
         ScriptRRefFetchCall srf = ScriptRRefFetchCall::fromMessage(request);
+        auto& ctx = RRefContext::getInstance();
         // TODO: make this asynchronous
         std::shared_ptr<OwnerRRef<IValue>> rref =
-            RRefContext::getInstance()->getOrCreateOwnerRRef<IValue>(
-                srf.rrefId());
+            ctx->getOrCreateOwnerRRef<IValue>(srf.rrefId());
         return RRefFetchRet(rref->getValue()).toMessage();
       }
       case MessageType::PYTHON_RREF_FETCH_CALL: {
         PythonRRefFetchCall prf = PythonRRefFetchCall::fromMessage(request);
+        auto& ctx = RRefContext::getInstance();
         // TODO: make this asynchronous
         std::shared_ptr<OwnerRRef<py::object>> rref =
-            RRefContext::getInstance()->getOrCreateOwnerRRef<py::object>(
-                prf.rrefId());
+            ctx->getOrCreateOwnerRRef<py::object>(prf.rrefId());
         return RRefFetchRet(
                    PythonRpcHandler::getInstance().serialize(rref->getValue()))
             .toMessage();
@@ -110,7 +53,8 @@ Message processRequestBlocking(Message&& request) {
       }
       case MessageType::RREF_USER_DELETE: {
         RRefUserDelete rud = RRefUserDelete::fromMessage(request);
-        RRefContext::getInstance()->delForkOfOwner(rud.rrefId(), rud.forkId());
+        auto& ctx = RRefContext::getInstance();
+        ctx->delForkOfOwner(rud.rrefId(), rud.forkId());
         return Message({}, {}, MessageType::ACK);
       }
       case MessageType::RREF_CHILD_ACCEPT: {
@@ -129,8 +73,73 @@ Message processRequestBlocking(Message&& request) {
         AT_ERROR("Request type ", request.type(), " not supported.");
       }
     }
-  } catch (std::exception& e) {
-    return createException(request, e);
+  } else {
+    try {
+      switch (request.type()) {
+        case MessageType::SCRIPT_CALL: {
+          ScriptCall sc = ScriptCall::fromMessage(request);
+
+          // sc is only alive within this block, use reference to avoid copy
+          auto& stack = sc.stackRef();
+          sc.op()->getOperation()(stack);
+
+          AT_ASSERT(
+              stack.size() == 1,
+              "Return value of a builtin operator or a "
+              "TorchScript function should be a single IValue, got a vector of "
+              "size ",
+              stack.size());
+          return ScriptRet(std::move(stack.front())).toMessage();
+        }
+        case MessageType::PYTHON_CALL: {
+          auto payload =
+              PythonRpcHandler::getInstance().generatePythonUDFResult(request);
+          return Message(
+              std::move(payload),
+              std::vector<torch::Tensor>(),
+              MessageType::PYTHON_RET);
+        }
+        case MessageType::SCRIPT_REMOTE_CALL: {
+          ScriptRemoteCall src = ScriptRemoteCall::fromMessage(request);
+          auto& ctx = RRefContext::getInstance();
+
+          auto ownerRRef = ctx->getOrCreateOwnerRRef<IValue>(src.retRRefId());
+
+          // TODO: make this asynchronous
+          // src is only alive within this block, use reference to avoid copy
+          auto& stack = src.stackRef();
+          src.op()->getOperation()(stack);
+          AT_ASSERT(
+              stack.size() == 1,
+              "Return value of a builtin operator or a "
+              "TorchScript function should be a single IValue, got a vector of "
+              "size ",
+              stack.size());
+
+          ownerRRef->setValue(std::move(stack.front()));
+          ctx->addForkOfOwner(src.retRRefId(), src.retForkId());
+          return RemoteRet(src.retRRefId(), src.retForkId()).toMessage();
+        }
+        case MessageType::PYTHON_REMOTE_CALL: {
+          PythonRemoteCall prc = PythonRemoteCall::fromMessage(request);
+
+          auto rrefId = RRefId::fromIValue(prc.retRRefId());
+          auto forkId = ForkId::fromIValue(prc.retForkId());
+          auto& ctx = RRefContext::getInstance();
+
+          auto ownerRRef = ctx->getOrCreateOwnerRRef<py::object>(rrefId);
+          ownerRRef->setValue(
+              PythonRpcHandler::getInstance().runPythonUDF(prc.udf()));
+          ctx->addForkOfOwner(rrefId, forkId);
+          return RemoteRet(rrefId, forkId).toMessage();
+        }
+        default: {
+          AT_ERROR("Request type ", request.type(), " not supported.");
+        }
+      }
+    } catch (std::exception& e) {
+      return createException(request, e);
+    }
   }
 }
 

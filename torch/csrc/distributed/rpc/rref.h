@@ -273,10 +273,12 @@ class OwnerRRef final : public RRef {
   }
 
   // Get a constant reference of the real value. This method will block if the
-  // value is not ready.
+  // value is not ready. This method does not need GIL as it does not create
+  // any new py::object.
   const T& getValue() const;
 
-  // Set the value of this ``OwnerRRef``.
+  // Set the value of this ``OwnerRRef``. This method does not need GIL as it
+  // does not create any new py::object.
   void setValue(T&& value);
 
  private:

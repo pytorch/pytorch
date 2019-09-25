@@ -47,11 +47,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
   auto pyRRef =
       shared_ptr_class_<PyRRef>(module, "RRef")
           .def(
+              // not releasing GIL here to avoid context switch on getters
               "is_owner",
-              &PyRRef::isOwner,
-              py::call_guard<py::gil_scoped_release>())
+              &PyRRef::isOwner)
           .def(
-              "owner", &PyRRef::owner, py::call_guard<py::gil_scoped_release>())
+              // not releasing GIL here to avoid context switch on getters
+              "owner", &PyRRef::owner)
           .def(
               "to_here",
               &PyRRef::toHere,

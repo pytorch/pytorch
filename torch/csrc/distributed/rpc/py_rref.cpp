@@ -11,7 +11,7 @@ namespace {
 
 // Constants below are used in PyRRef pickling and unpickling. PyRRef is
 // converted into a py::tuple in pickling, and reconstructed from the py::tuple
-// in pickling.
+// in unpickling.
 constexpr int RREF_TUPLE_SIZE = 2; // number of data fields in the py::tuple
 constexpr int RFD_IDX = 0; // index of RRefForkData
 constexpr int TYPE_IDX = 1; // index of type (py::object or IValue)
@@ -33,8 +33,10 @@ worker_id_t PyRRef::owner() const {
 py::object PyRRef::toHere() {
   if (rref_->isPyObj()) {
     if (rref_->isOwner()) {
-      auto& value =
+      const py::object& value =
           std::static_pointer_cast<OwnerRRef<py::object>>(rref_)->getValue();
+      // acquiring GIL as the return statement construct a new py::object from
+      // a const reference.
       AutoGIL ag;
       return value;
     } else {
@@ -47,27 +49,31 @@ py::object PyRRef::toHere() {
     } else {
       value = std::static_pointer_cast<UserRRef<IValue>>(rref_)->toHere();
     }
+    // acquiring GIL as torch::jit::toPyObject creates new py::object without
+    // grabbing the GIL.
     AutoGIL ag;
     return torch::jit::toPyObject(std::move(value));
   }
 }
 
 py::object PyRRef::localValue() {
-  if (!rref_->isOwner()) {
-    auto& ctx = RRefContext::getInstance();
-    AT_ERROR(
-        "Cannot call localValue() on a non-local reference. Call it on ",
-        ctx->getWorkerName());
-  }
+  TORCH_CHECK(
+      rref_->isOwner(),
+      "Cannot call localValue() on a non-local reference. Call it on ",
+      RRefContext::getInstance()->getWorkerName());
 
   if (rref_->isPyObj()) {
-    auto& value =
+    const py::object& value =
         std::dynamic_pointer_cast<OwnerRRef<py::object>>(rref_)->getValue();
+    // acquiring GIL as the return statement construct a new py::object from
+    // a const reference.
     AutoGIL ag;
     return value;
   } else {
     auto value =
         std::dynamic_pointer_cast<OwnerRRef<IValue>>(rref_)->getValue();
+    // acquiring GIL as torch::jit::toPyObject creates new py::object without
+    // grabbing the GIL.
     AutoGIL ag;
     return torch::jit::toPyObject(std::move(value));
   }
@@ -80,7 +86,6 @@ py::tuple PyRRef::pickle() const {
 }
 
 PyRRef PyRRef::unpickle(const py::tuple& t) {
-  // TODO: contact owner and tell caller when owner acks
   TORCH_INTERNAL_ASSERT(
       t.size() == RREF_TUPLE_SIZE, "Pickled RRef must contain 2 numbers.");
   auto& ctx = RRefContext::getInstance();
