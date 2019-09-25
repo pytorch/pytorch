@@ -15,6 +15,7 @@ from torch.distributed.rpc import RpcBackend
 from common_utils import load_tests
 from os import getenv
 from collections import namedtuple
+from torch.distributed.internal_rpc_utils import _internal_rpc_pickler, PythonUDF
 
 BACKEND = getenv('RPC_BACKEND', RpcBackend.PROCESS_GROUP)
 RPC_INIT_URL = getenv('RPC_INIT_URL', '')
@@ -24,13 +25,25 @@ RPC_INIT_URL = getenv('RPC_INIT_URL', '')
 # methods over rpc
 TensorClass = namedtuple("TensorClass", ["tensors"])
 
-def build_complex_tensors():
-    a = torch.ones(3, 3)
-    b = [a, a]
-    c = [b, b]
-    d = [a, b]
-    e = {a : d}
-    return [a, b, c, d, e]
+
+class MyPickleClass:
+    def __init__(self):
+        self.t = None
+
+    def __getstate__(self):
+        (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
+            PythonUDF(my_tensor_function,
+                      (torch.ones(2, 2), torch.ones(2, 2)),
+                      None))
+        return (pickled_python_udf, tensors)
+
+    def __setstate__(self, obj):
+        python_udf = _internal_rpc_pickler.deserialize(obj[0], obj[1])
+        result = python_udf.func(python_udf.args[0], python_udf.args[1])
+        self.t = result
+
+    def set(self, val):
+        self.t = val
 
 
 class MyClass:
@@ -47,6 +60,17 @@ class MyClass:
     @staticmethod
     def my_static_method(f):
         return f > 10
+
+def run_nested_pickle(pickle_cls_instance, tensor):
+    return pickle_cls_instance.t + tensor
+
+def build_complex_tensors():
+    a = torch.ones(3, 3)
+    b = [a, a]
+    c = [b, b]
+    d = [a, b]
+    e = {a : d}
+    return [a, b, c, d, e]
 
 
 def my_function(a, b, c):
@@ -153,12 +177,32 @@ class RpcTest(object):
         ):
             dist.rpc(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
 
-    def test_reinit(self):
+    @unittest.skipIf(
+        BACKEND != RpcBackend.PROCESS_GROUP,
+        "PROCESS_GROUP rpc backend specific test, skip"
+    )
+    def test_duplicate_name(self):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(backend="gloo", rank=self.rank,
                                 world_size=self.world_size, store=store)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
             dist.init_model_parallel(self_name="duplicate_name",
+                                     backend=BACKEND,
+                                     self_rank=self.rank,
+                                     init_method=RPC_INIT_URL)
+        dist.join_rpc()
+
+    def test_reinit(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(backend="gloo", rank=self.rank,
+                                world_size=self.world_size, store=store)
+        dist.init_model_parallel(self_name='worker{}'.format(self.rank),
+                                 backend=BACKEND,
+                                 self_rank=self.rank,
+                                 init_method=RPC_INIT_URL)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "is already initialized"):
+            dist.init_model_parallel(self_name='worker{}'.format(self.rank),
                                      backend=BACKEND,
                                      self_rank=self.rank,
                                      init_method=RPC_INIT_URL)
@@ -416,6 +460,19 @@ class RpcTest(object):
                        my_complex_tensor_function,
                        args=(a, b, c))
         self.assertEqual(ret, my_complex_tensor_function(a, b, c))
+
+    @_wrap_with_rpc
+    def test_py_nested_pickle(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+
+        ret = dist.rpc("worker{}".format(dst_rank),
+                       run_nested_pickle,
+                       args=(MyPickleClass(), torch.ones(2, 2)))
+
+        m = MyPickleClass()
+        m.set(my_tensor_function(torch.ones(2, 2), torch.ones(2, 2)))
+        self.assertEqual(ret, run_nested_pickle(m, torch.ones(2, 2)))
 
     @_wrap_with_rpc
     def test_py_function_exception(self):

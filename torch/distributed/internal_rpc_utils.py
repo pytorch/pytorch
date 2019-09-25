@@ -41,37 +41,54 @@ class InternalRPCPickler:
         tensor_index = len(_thread_local_tensor_tables.send_tables) - 1
         return (InternalRPCPickler._tensor_receiver, (tensor_index, ))
 
-    def _clear_tensor_tables(self):
-        global _thread_local_tensor_tables
-        if hasattr(_thread_local_tensor_tables, "send_tables"):
-            raise Exception("nested serialization is not supported right now")
-        _thread_local_tensor_tables.send_tables = []
-
-    def _set_tensor_tables(self, tensors):
-        global _thread_local_tensor_tables
-        if hasattr(_thread_local_tensor_tables, "recv_tables"):
-            raise Exception("nested deserialization is not supported right now")
-        _thread_local_tensor_tables.recv_tables = tensors
-
     # Serialize non tensor data into binary string, tensor data into
     # tensor table
     def serialize(self, obj):
         f = io.BytesIO()
         p = pickle.Pickler(f)
         p.dispatch_table = self._dispatch_table
-        # before serialization, clear tensor tables
-        self._clear_tensor_tables()
+
+        # save _thread_local_tensor_tables.send_tables if it is in nested call
+        global _thread_local_tensor_tables
+        if hasattr(_thread_local_tensor_tables, "send_tables"):
+            should_restore = True
+            old_send_tables = _thread_local_tensor_tables.send_tables
+        else:
+            should_restore = False
+        _thread_local_tensor_tables.send_tables = []
+
         p.dump(obj)
+
+        # restore _thread_local_tensor_tables.send_tables if return
+        # from nested call, otherwise clean up the table
         tensors = _thread_local_tensor_tables.send_tables
-        del _thread_local_tensor_tables.send_tables
+        if should_restore:
+            _thread_local_tensor_tables.send_tables = old_send_tables
+        else:
+            del _thread_local_tensor_tables.send_tables
+
         return (f.getvalue(), tensors)
 
     # Deserilize binary string + tensor table to original obj
     def deserialize(self, binary_data, tensor_table):
-        # before deserilaization, copy received tensors into tensor tables
-        self._set_tensor_tables(tensor_table)
+        # save _thread_local_tensor_tables.recv_tables if it is in nested call
+        global _thread_local_tensor_tables
+        if hasattr(_thread_local_tensor_tables, "recv_tables"):
+            should_restore = True
+            old_recv_tables = _thread_local_tensor_tables.recv_tables
+        else:
+            should_restore = False
+        _thread_local_tensor_tables.recv_tables = tensor_table
+
         ret = pickle.loads(binary_data)
-        del _thread_local_tensor_tables.recv_tables
+
+        # restore _thread_local_tensor_tables.recv_tables if return
+        # from nested call, otherwise clean up the table
+        if should_restore:
+            _thread_local_tensor_tables.recv_tables = old_recv_tables
+        else:
+            del _thread_local_tensor_tables.recv_tables
+
         return ret
 
 # Create _internal_rpc_pickler only once to initialize _dispatch_table only once

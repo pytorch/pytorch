@@ -78,7 +78,7 @@ def requires_mpi():
     )
 
 
-TIMEOUT_DEFAULT = 100
+TIMEOUT_DEFAULT = 30
 TIMEOUT_OVERRIDE = {}
 
 

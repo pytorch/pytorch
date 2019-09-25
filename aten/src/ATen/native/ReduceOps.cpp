@@ -716,6 +716,32 @@ Tensor norm(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdi
 Tensor norm(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim) {
   return at::norm(self, p, dimnames_to_positions(self, dim), keepdim);
 }
+
+Tensor any(const Tensor& self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("any");
+}
+Tensor& any_out(Tensor& result, const Tensor &self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("any");
+}
+Tensor all(const Tensor& self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("all");
+}
+Tensor& all_out(Tensor& result, const Tensor &self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("all");
+}
+Tensor cumsum(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+  reportNYIDimnameOverload("cumsum");
+}
+Tensor& cumsum_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+  reportNYIDimnameOverload("cumsum");
+}
+Tensor cumprod(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+  reportNYIDimnameOverload("cumprod");
+}
+Tensor& cumprod_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+  reportNYIDimnameOverload("cumprod");
+}
+
 #endif
 
 }} // namespace at::native
