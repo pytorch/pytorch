@@ -61,9 +61,6 @@
     THArgCheck(COND, ARG, FORMAT, s1.str);        \
   }
 
-#include <THNN/generic/AbsCriterion.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/BCECriterion.c>
 #include <TH/THGenerateFloatTypes.h>
 
