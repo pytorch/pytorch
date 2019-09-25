@@ -199,6 +199,18 @@ TEST_F(ModulesTest, AvgPool3d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
 }
 
+TEST_F(ModulesTest, Identity) {
+  Identity identity;
+  auto input = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::requires_grad());
+  auto output = identity->forward(input);
+  auto expected = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(torch::equal(output, expected));
+  ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
+}
+
 TEST_F(ModulesTest, Linear) {
   Linear model(5, 2);
   auto x = torch::randn({10, 5}, torch::requires_grad());
@@ -451,13 +463,10 @@ TEST_F(ModulesTest, L1Loss) {
 
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
-  float data1[] = {1, 2, 3, 4, 5, 6};
-  auto input1 = torch::from_blob(data1, {2, 3}, torch::requires_grad());
-  float data2[] = {1, 8, 3, 2, 1, 6};
-  auto input2 = torch::from_blob(data2, {2, 3}, torch::requires_grad());
+  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
+  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::requires_grad());
   auto output = cos->forward(input1, input2);
-  float data3[] = {0.8078, 0.8721};
-  auto expected = torch::from_blob(data3, {2});
+  auto expected = torch::tensor({0.8078, 0.8721}, torch::kFloat);
   auto s = output.sum();
   s.backward();
 
@@ -467,17 +476,19 @@ TEST_F(ModulesTest, CosineSimilarity) {
 
 TEST_F(ModulesTest, PairwiseDistance) {
   PairwiseDistance dist(PairwiseDistanceOptions(1));
-  float data1[] = {1, 2, 3, 4, 5, 6};
-  auto input1 = torch::from_blob(data1, {2, 3}, torch::requires_grad());
-  float data2[] = {1, 8, 3, 2, 1, 6};
-  auto input2 = torch::from_blob(data2, {2, 3}, torch::requires_grad());
+  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
+  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::requires_grad());
   auto output = dist->forward(input1, input2);
-  auto expected = torch::full({2}, 6);
+  auto expected = torch::tensor({6, 6}, torch::kFloat);
   auto s = output.sum();
   s.backward();
 
   ASSERT_TRUE(output.allclose(expected));
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
+}
+
+TEST_F(ModulesTest, PrettyPrintIdentity) {
+  ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
 
 TEST_F(ModulesTest, PrettyPrintLinear) {
