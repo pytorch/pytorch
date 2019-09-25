@@ -10,18 +10,20 @@
 #include <nccl.h>
 #include <memory>
 
-#define C10D_NCCL_CHECK(cmd)                                              \
-  do {                                                                    \
-    ncclResult_t error = cmd;                                             \
-    if (error != ncclSuccess) {                                           \
-      std::string err = "NCCL error in: " + std::string(__FILE__) + ":" + \
-          std::to_string(__LINE__) + ", " +                               \
-          std::string(ncclGetErrorString(error));                         \
-      throw std::runtime_error(err);                                      \
-    }                                                                     \
+#define C10D_NCCL_CHECK(cmd)                                                \
+  do {                                                                      \
+    ncclResult_t error = cmd;                                               \
+    if (error != ncclSuccess) {                                             \
+      std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +   \
+          std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(error); \
+      throw std::runtime_error(err);                                        \
+    }                                                                       \
   } while (0)
 
 namespace c10d {
+
+std::string getNcclVersion();
+std::string ncclGetErrorWithVersion(ncclResult_t error);
 
 // RAII wrapper for NCCL communicator
 class NCCLComm {
