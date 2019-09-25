@@ -36,6 +36,18 @@ class FooTest:
       self.dx = x
 )JIT";
 
+static void import_libs(
+    std::shared_ptr<CompilationUnit> cu,
+    const std::string& class_name,
+    const std::shared_ptr<Source>& src,
+    const std::vector<at::Tensor>& tensor_table) {
+  SourceImporter si(cu, &tensor_table, [&](const std::string& name) {
+    ASSERT_TRUE(name == "__torch__");
+    return src;
+  });
+  si.loadNamedType(QualifiedName(class_name));
+}
+
 void testClassImport() {
   auto cu1 = std::make_shared<CompilationUnit>();
   auto cu2 = std::make_shared<CompilationUnit>();
@@ -43,16 +55,14 @@ void testClassImport() {
   // Import different versions of FooTest into two namespaces.
   import_libs(
       cu1,
-      "__torch__",
+      "__torch__.FooTest",
       std::make_shared<Source>(classSrcs1),
-      constantTable,
-      nullptr);
+      constantTable);
   import_libs(
       cu2,
-      "__torch__",
+      "__torch__.FooTest",
       std::make_shared<Source>(classSrcs2),
-      constantTable,
-      nullptr);
+      constantTable);
 
   // We should get the correct version of `FooTest` for whichever namespace we
   // are referencing
@@ -79,16 +89,14 @@ void testScriptObject() {
   std::vector<at::Tensor> constantTable;
   import_libs(
       m1.class_compilation_unit(),
-      "__torch__",
+      "__torch__.FooTest",
       std::make_shared<Source>(classSrcs1),
-      constantTable,
-      nullptr);
+      constantTable);
   import_libs(
       m2.class_compilation_unit(),
-      "__torch__",
+      "__torch__.FooTest",
       std::make_shared<Source>(classSrcs2),
-      constantTable,
-      nullptr);
+      constantTable);
 
   // Incorrect arguments for constructor should throw
   c10::QualifiedName base("__torch__");
