@@ -344,7 +344,11 @@ class LegacyTracedModule(Module):
             # the inputs before (inputs_states[0]) and after (inputs_states[1])
             # the trace to verify if they were modified during the trace
             if self._return_inputs_states:
-                inputs_states = copy.deepcopy(trace_inputs)
+                # executing a deepcopy on trace_inputs will fail
+                # for tensors not explicitly created by the user.
+                # generating trace_inputs again by calling _unflatten
+                # for now.
+                inputs_states = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
             out = self.inner(*trace_inputs)
             if self._return_inputs_states:
                 inputs_states = (inputs_states, trace_inputs)
