@@ -2760,8 +2760,6 @@ Computes :math:`\text{input} < \text{other}` element-wise.
 
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
-If the second argument is the number then the type of the number will be casted to
-the type of the tensor with check that there is no overflow.
 
 Args:
     input (Tensor): the tensor to compare
