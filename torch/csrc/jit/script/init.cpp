@@ -541,14 +541,10 @@ void initJitScriptBindings(PyObject* module) {
               const auto classType =
                   pyCu->get_class(c10::QualifiedName(qualified_name));
               if (!classType) {
-                // throw ErrorReport("Assigning a Non-class instance to an
-                // interface attribute");
-                std::cout
-                    << "registering an attribute that is not a TorchScript compatible";
                 throw std::runtime_error(c10::str(
                     "registering the attribute ",
                     name,
-                    "as an interface fails because the value is not "
+                    " as an interface fails because the value is not "
                     "a TorchScript compatible type, did you forget to",
                     "turn it into a user defined TorchScript class?"));
               }
