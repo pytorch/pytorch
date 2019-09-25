@@ -6,7 +6,6 @@
 #undef log10
 #undef log1p
 #undef log2
-#undef expm1
 
 #include <c10/cuda/CUDAStream.h>
 
