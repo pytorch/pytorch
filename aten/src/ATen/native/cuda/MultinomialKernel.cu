@@ -35,15 +35,13 @@ __global__ void renormRowsL1(scalar_t* dist, long rows, long cols) {
     scalar_t sum = static_cast<scalar_t>(0);
     for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
       val = dist[row * cols + col];
-      assert(!THCNumerics<scalar_t>::isnan(val))
-      assert(val >= zero);
+      assert(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
       sum = sum + val;
     }
 
     sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<scalar_t>(), zero);
     if (threadIdx.x == 0) {
-      assert(!THCNumerics<scalar_t>::isnan(val))
-      assert(val >= zero);
+      assert(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
       smem[0] = sum;
     }
     __syncthreads();
