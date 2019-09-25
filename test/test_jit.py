@@ -4528,17 +4528,6 @@ a")
         self.checkScript(test_scalar_cast, (torch.tensor(1.0),))
         self.checkScript(test_scalar_cast, (torch.tensor(1),))
 
-        expected_str = r"Use int\(tensor\) or float\(tensor\) to retrieve"
-        with self.assertRaisesRegex(RuntimeError, expected_str):
-            @torch.jit.script
-            def int_fn(a):
-                # type: (int) -> int
-                return a
-
-            @torch.jit.script
-            def test_error_msg(x):
-                return int_fn(x.item())
-
     def test_method_on_number(self):
         def func():
             c = 1
@@ -6272,6 +6261,25 @@ a")
                 run_test(code)
             for func in funcs:
                 code = funcs_template.format(func=func, scalar1=scalar1, scalar2=scalar2)
+                run_test(code)
+
+        # test Scalar overloads
+        for scalar1, scalar2 in scalar_pairs:
+            item1 = 'torch.tensor(' + scalar1 + ').item()'
+            item2 = 'torch.tensor(' + scalar2 + ').item()'
+            for op in ops:
+                code = ops_template.format(op=op, scalar1=item1, scalar2=scalar2)
+                run_test(code)
+                code = ops_template.format(op=op, scalar1=scalar1, scalar2=item2)
+                run_test(code)
+                code = ops_template.format(op=op, scalar1=item1, scalar2=item2)
+                run_test(code)
+            for func in funcs:
+                code = funcs_template.format(func=func, scalar1=item1, scalar2=scalar2)
+                run_test(code)
+                code = funcs_template.format(func=func, scalar1=scalar1, scalar2=item2)
+                run_test(code)
+                code = funcs_template.format(func=func, scalar1=item1, scalar2=item2)
                 run_test(code)
 
     def test_number_abs(self):
