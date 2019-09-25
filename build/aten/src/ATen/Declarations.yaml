@@ -4144,8 +4144,7 @@
 - name: bartlett_window
   operator_name: bartlett_window
   overload_name: ''
-  use_c10_dispatcher: 'no'
-  category_override: ''
+  use_c10_dispatcher: false
   matches_jit_signature: true
   schema_string: aten::bartlett_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   method_prefix_derived: ''
@@ -4156,12 +4155,33 @@
     name: window_length
     type: int64_t
   - annotation: null
-    default: '{}'
-    dynamic_type: TensorOptions
-    is_nullable: false
+    default: c10::nullopt
+    dynamic_type: ScalarType
+    is_nullable: true
     kwarg_only: true
-    name: options
-    type: const TensorOptions &
+    name: dtype
+    type: c10::optional<ScalarType>
+  - annotation: null
+    default: c10::nullopt
+    dynamic_type: Layout
+    is_nullable: true
+    kwarg_only: true
+    name: layout
+    type: c10::optional<Layout>
+  - annotation: null
+    default: c10::nullopt
+    dynamic_type: Device
+    is_nullable: true
+    kwarg_only: true
+    name: device
+    type: c10::optional<Device>
+  - annotation: null
+    default: c10::nullopt
+    dynamic_type: bool
+    is_nullable: true
+    kwarg_only: true
+    name: pin_memory
+    type: c10::optional<bool>
   method_of:
   - Type
   - namespace
