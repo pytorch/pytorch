@@ -64,6 +64,9 @@ We provide a wide variety of tensor routines to accelerate and fit your scientif
 such as slicing, indexing, math operations, linear algebra, reductions.
 And they are fast!
 
+PyTorch is Python-centric, designed for deep integration in Python code instead of being an interface
+to a library written in some other language.
+
 ### Dynamic Neural Networks: Tape-Based Autograd
 
 PyTorch has a unique way of building neural networks: using and replaying a tape recorder.
