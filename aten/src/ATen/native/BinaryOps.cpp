@@ -141,6 +141,12 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
   return tensor;
 }
 
+// Validate that is possible to convert scalar to tensor dtype without overflow
+<template scalar_t>
+static Tensor wrapped_scalar_tensor_and_check_convert(Scalar scalar) {
+  return wrapped_scalar_tensor(scalar.to<scalar_t>());
+}
+
 Tensor add(const Tensor& self, Scalar other, Scalar alpha) {
   return native::add(self, wrapped_scalar_tensor(other), alpha);
 }
@@ -235,25 +241,20 @@ Tensor& lt_(Tensor& self, const Tensor& other) {
 // In the future, we should reconsider this inconsistency and decide if we're going to check overflow for arithmetic ops
 Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(), "lt_out", [&]{
-    // Validate that is possible to convert scalar to tensor dtype without overflow
-    native::lt_out(result, self, wrapped_scalar_tensor(other.to<scalar_t>()));
+    native::lt_out(result, self, wrapped_scalar_tensor_and_check_convert<scalar_t>(other));
   });
   return result;
 }
 
 Tensor lt(const Tensor& self, Scalar other) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
-  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(), "lt", [&]{
-    // Validate that is possible to convert scalar to tensor dtype without overflow
-    native::lt_out(result, self, wrapped_scalar_tensor(other.to<scalar_t>()));
-  });
+  native::lt_out(result, self, other);
   return result;
 }
 
 Tensor& lt_(Tensor& self, Scalar other) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(), "lt_", [&]{
-    // Validate that is possible to convert scalar to tensor dtype without overflow
-    auto iter = TensorIterator::comparison_op(self, self, wrapped_scalar_tensor(other.to<scalar_t>()),
+    auto iter = TensorIterator::comparison_op(self, self, wrapped_scalar_tensor_and_check_convert<scalar_t>(other)),
             /*check_mem_overlap=*/true);
     lt_stub(iter.device_type(), iter);
   });
