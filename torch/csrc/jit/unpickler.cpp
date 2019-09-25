@@ -546,32 +546,12 @@ PickleOpCode Unpickler::readInstruction() {
         AT_ASSERT(class_resolver_);
         at::StrongTypePtr type =
             class_resolver_(c10::QualifiedName(module_name, class_name));
-        auto cls = type.type_->expect<at::ClassType>();
-        size_t n = cls->numAttributes();
-        if (checkHasValidSetGetState(type.type_)) {
-          globals_.emplace_back([this, type, n] {
-            auto arg = std::move(stack_.back());
-            stack_.pop_back();
-            auto obj = c10::ivalue::Object::create(type, n);
-            // XXX: Do not optimize __setstate__, so that we don't try to
-            // specialize the class before it is initialized.
-            setGraphExecutorOptimize(false);
-            (*type.type_->getMethod("__setstate__"))({obj, arg});
-            setGraphExecutorOptimize(true);
-            postSetStateValidate(obj);
-            stack_.emplace_back(std::move(obj));
-          });
-        } else {
-          globals_.emplace_back([this, type, cls, n] {
-            auto dict = std::move(stack_.back()).toGenericDict();
-            stack_.pop_back();
-            auto obj = c10::ivalue::Object::create(type, n);
-            for (size_t i = 0; i < n; ++i) {
-              obj->setSlot(i, dict.at(cls->getAttributeName(i)));
-            }
-            stack_.emplace_back(std::move(obj));
-          });
-        }
+        globals_.emplace_back([this, type] {
+          auto val = stack_.back();
+          stack_.pop_back();
+          auto obj = obj_loader_(type, val);
+          stack_.emplace_back(std::move(obj));
+        });
       }
       stack_.emplace_back(int64_t(globals_.size() - 1));
     } break;
