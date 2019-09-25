@@ -14,7 +14,6 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/core/ATenDispatch.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
@@ -22,7 +21,7 @@ namespace at {
 ${type_method_definitions}
 
 #ifndef USE_STATIC_DISPATCH
-static auto registerer = torch::RegisterOperators()
+static auto& registerer = globalATenDispatch()
   ${function_registrations};
 #endif
 }

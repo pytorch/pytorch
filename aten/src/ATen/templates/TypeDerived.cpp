@@ -29,7 +29,6 @@ $storage_tensor_headers
 #include <utility>
 
 #include <ATen/Config.h>
-#include <ATen/core/op_registration/op_registration.h>
 $extra_cuda_headers
 $legacy_th_headers
 
@@ -45,7 +44,7 @@ Tensor * ${Type}::add(Tensor & a, Tensor & b) {
 ${type_derived_method_definitions}
 
 #ifndef USE_STATIC_DISPATCH
-static auto registerer = torch::RegisterOperators()
+static auto& registerer = globalATenDispatch()
   ${function_registrations};
 #endif
 }
