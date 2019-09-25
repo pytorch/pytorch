@@ -1,5 +1,6 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/EnableNamedTensor.h>
+#include <ATen/WrapDimUtilsMulti.h>
 #include <bitset>
 #include <sstream>
 
@@ -112,17 +113,11 @@ std::vector<Dimname> unify_from_right(
 
 namespace namedinference {
 
-static std::bitset<kMaxNamedTensorDim>
-compute_included_idxs(IntArrayRef excluded_idxs) {
-  std::bitset<kMaxNamedTensorDim> included_idxs;
-  for (auto i : excluded_idxs) {
-    TORCH_INTERNAL_ASSERT(
-        i <= kMaxNamedTensorDim,
-        "Only tensors with up to ", kMaxNamedTensorDim, " are supported.");
-    included_idxs.set(i);
-  }
-  included_idxs.flip();
-  return included_idxs;
+static std::bitset<dim_bitset_size>
+compute_included_idxs(IntArrayRef excluded_idxs, int64_t ndims) {
+  auto result = dim_list_to_bitset(excluded_idxs, ndims);
+  result.flip();
+  return result;
 }
 
 static void assert_names_equal(DimnameList a, DimnameList b) {
@@ -191,14 +186,14 @@ void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef exclu
   // fast path
   if (excluded_idxs.size() == 1) {
     std::vector<Dimname> outnames = src_names.vec();
-    outnames.erase(outnames.begin() + excluded_idxs[0]);
+    outnames.erase(outnames.begin() + maybe_wrap_dim(excluded_idxs[0], src_dim));
     propagate_names(result, std::move(outnames), /*validate_names=*/false);
     return;
   }
 
   std::vector<Dimname> outnames;
   outnames.reserve(result_dim);
-  auto included_idxs = compute_included_idxs(excluded_idxs);
+  auto included_idxs = compute_included_idxs(excluded_idxs, src_dim);
   for (size_t dim = 0; dim < src_dim; ++dim) {
     if (included_idxs[dim]) {
       outnames.push_back(src_names[dim]);
