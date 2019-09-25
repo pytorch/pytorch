@@ -3108,11 +3108,6 @@
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: resize_as_cpu_
-    CUDA: resize_as_cuda_
-    SparseCPU: resize_as_sparse_
-    SparseCUDA: resize_as_sparse_
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
