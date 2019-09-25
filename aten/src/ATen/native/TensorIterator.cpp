@@ -125,7 +125,12 @@ static void maybe_promote_common_dtype(OperandInfo& op, ScalarType common_dtype)
   {
     op.dtype = common_dtype;
     op.original_tensor = op.tensor;
-    op.tensor = op.tensor.to(common_dtype);
+    if (!op.is_output) {
+      op.tensor = op.tensor.to(common_dtype);
+    } else {
+      op.tensor =
+          at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype));
+    }
     auto original_element_size = op.original_tensor.element_size();
     auto new_element_size = op.tensor.element_size();
 
