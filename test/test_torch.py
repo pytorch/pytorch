@@ -1392,6 +1392,7 @@ class _TestTorchMixin(object):
     def test_cpow(self):
         self._test_cop(torch.pow, lambda x, y: nan if x < 0 else math.pow(x, y))
 
+    @slowTest
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_einsum(self):
         # test cases taken from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
@@ -1522,6 +1523,7 @@ class _TestTorchMixin(object):
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
                use_integral=use_integral), (0, 2, 1))
 
+    @slowTest
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_sum_dim(self):
         self._test_dim_ops(
@@ -7357,7 +7359,6 @@ class TestTorchDeviceType(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.cat([x, empty], dim=1))
         self.assertRaises(RuntimeError, lambda: torch.cat([empty, x], dim=1))
 
-    @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_inverse_many_batches(self, device):
@@ -7495,6 +7496,7 @@ class TestTorchDeviceType(TestCase):
         run_test([10, 20, 30, 5], device)
         run_test([15, 5, 10, 20, 25], device)
 
+    @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_det_logdet_slogdet(self, device):
@@ -7764,7 +7766,6 @@ class TestTorchDeviceType(TestCase):
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy())).to(device)
         self.assertEqual(x.data, x_exp)
 
-    @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_solve_batched_many_batches(self, device):
@@ -7848,7 +7849,6 @@ class TestTorchDeviceType(TestCase):
             x = torch.cholesky_solve(b, L, upper=upper)
             self.assertEqual(x, x_exp)
 
-    @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_cholesky_solve_batched_many_batches(self, device):
@@ -7915,7 +7915,6 @@ class TestTorchDeviceType(TestCase):
         inv1 = torch.cholesky_inverse(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
-    @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_cholesky_batched_many_batches(self, device):
@@ -9604,7 +9603,6 @@ class TestTorchDeviceType(TestCase):
             else:
                 self.assertLessEqual(b.dist(A.mm(x)), 4e-12)
 
-    @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_triangular_solve_batched_many_batches(self, device):
@@ -9880,6 +9878,7 @@ class TestTorchDeviceType(TestCase):
             self.assertLessEqual(res.max().item(), 9)
             self.assertGreaterEqual(res.min().item(), -10)
 
+    @slowTest
     def test_triu_tril(self, device):
         def gen_mask(shape, diagonal, device, upper):
             mask = torch.zeros(*shape[-2:]).byte()
