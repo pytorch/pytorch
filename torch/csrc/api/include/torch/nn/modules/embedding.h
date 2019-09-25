@@ -96,7 +96,7 @@ class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl>
     /// Pretty prints the `EmbeddingBag` module into the given `stream`.
     void pretty_print(std::ostream& stream) const override;
 
-    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> forward(const Tensor& input, c10::optional<torch::Tensor> offsets = c10::nullopt,
+    torch::Tensor forward(const Tensor& input, c10::optional<torch::Tensor> offsets = c10::nullopt,
       c10::optional<torch::Tensor> per_sample_weights = c10::nullopt);
 
     /// The `Options` used to configure this `EmbeddingBag` module.

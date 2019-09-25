@@ -452,15 +452,16 @@ TEST_F(ModulesTest, L1Loss) {
 TEST_F(ModulesTest, from_pretrained_Embedding) {
   auto weight = torch::tensor({{1., 2.3, 3.}, {4., 5.1, 6.3}});
   Embedding embedding = torch::nn::Embedding::from_pretrained(weight);
-  ASSERT_EQ(c10::str(embedding->weight[1]), " 4.0000\n 5.1000\n 6.3000\n[ Variable[CPUDoubleType]{3} ]");
+  auto input = torch::tensor({1}, torch::kLong);
+  ASSERT_TRUE(torch::allclose(embedding(input), torch::tensor({4.0000, 5.1000, 6.3000})));
 }
 
 TEST_F(ModulesTest, from_pretrained_EmbeddingBag) {
   auto weight = torch::tensor({{1., 2.3, 3.}, {4., 5.1, 6.3}});
   EmbeddingBag embeddingbag = torch::nn::EmbeddingBag::from_pretrained(weight);
-  //std::cout<<c10::str((std::get<1>(embeddingbag->forward(torch::tensor({1, 0}))))[0]);
-  // ASSERT_EQ(c10::str(embeddingbag->weight[torch::tensor({1, 0})]), " 2.5000\n 3.7000\n 4.6500\n[ Variable[CPUDoubleType]{3} ]");
-  ASSERT_EQ(c10::str(embeddingbag->weight[1]), " 2.5000\n 3.7000\n 4.6500\n[ Variable[CPUDoubleType]{3} ]");
+  auto input = torch::zeros({{1, 2}}, torch::kLong);
+  input[0] = torch::tensor({1, 0});
+  ASSERT_TRUE(torch::allclose(embeddingbag(input), torch::tensor({2.5000, 3.7000, 4.6500})));
 }
 
 TEST_F(ModulesTest, CosineSimilarity) {

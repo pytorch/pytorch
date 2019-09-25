@@ -114,7 +114,7 @@ namespace nn {
       }
     }
 
-    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> EmbeddingBagImpl::forward(const torch::Tensor& input, c10::optional<torch::Tensor> offsets,
+    torch::Tensor EmbeddingBagImpl::forward(const torch::Tensor& input, c10::optional<torch::Tensor> offsets,
     c10::optional<torch::Tensor> per_sample_weights) {
       bool reshape_input = false;
       TORCH_CHECK((per_sample_weights == c10::nullopt) || (input.sizes() == (*per_sample_weights).sizes()),
@@ -122,13 +122,13 @@ namespace nn {
       if(input.dim() == 2) {
         TORCH_CHECK(offsets == c10::nullopt,
           "If input is 2D, then offsets has to be null, as input is treated is a mini-batch of fixed length sequences. However, found offsets of type Tensor");
-          offsets = torch::arange(0, input.numel(), input.size(1),
+        offsets = torch::arange(0, input.numel(), input.size(1),
                                      torch::TensorOptions().dtype(torch::kLong).device(input.device()));
-          reshape_input = true;
-          //input = input.reshape(-1);
-          if(per_sample_weights != c10::nullopt) {
-            per_sample_weights = (*per_sample_weights).reshape(-1);
-          }
+        reshape_input = true;
+        //input = input.reshape(-1);
+        if(per_sample_weights != c10::nullopt) {
+          per_sample_weights = (*per_sample_weights).reshape(-1);
+        }
       }
       else if(input.dim() == 1) {
         TORCH_CHECK(offsets != c10::nullopt, "offsets has to be a 1D Tensor but got null");
@@ -172,10 +172,10 @@ namespace nn {
             "per_sample_weights is only supported for mode='sum' (got mode='",
             options.mode(), "').Please open a feature request on GitHub.");
       if(reshape_input){
-        return torch::embedding_bag(weight, input.reshape(-1), *offsets, options.scale_grad_by_freq(), mode_enum, options.sparse(), *per_sample_weights);
+        return std::get<0>(torch::embedding_bag(weight, input.reshape(-1), (offsets != c10::nullopt ? *offsets : Tensor()), options.scale_grad_by_freq(), mode_enum, options.sparse(), (per_sample_weights != c10::nullopt ? *per_sample_weights : Tensor())));
       }
       else{
-        return torch::embedding_bag(weight, input, *offsets, options.scale_grad_by_freq(), mode_enum, options.sparse(), *per_sample_weights);
+        return std::get<0>(torch::embedding_bag(weight, input, (offsets != c10::nullopt ? *offsets : Tensor()), options.scale_grad_by_freq(), mode_enum, options.sparse(), (per_sample_weights != c10::nullopt ? *per_sample_weights : Tensor())));
       }
     }
 
