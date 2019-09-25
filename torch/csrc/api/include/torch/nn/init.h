@@ -1,30 +1,20 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/enum.h>
 #include <torch/types.h>
 
 namespace torch {
 namespace nn {
 namespace init {
 
-enum class Nonlinearity {
-  Linear,
-  Conv1D,
-  Conv2D,
-  Conv3D,
-  ConvTranspose1D,
-  ConvTranspose2D,
-  ConvTranspose3D,
-  Sigmoid,
-  Tanh,
-  ReLU,
-  LeakyReLU
-};
-
-enum class FanMode { FanIn, FanOut };
-
 /// Return the recommended gain value for the given nonlinearity function.
-TORCH_API double calculate_gain(Nonlinearity nonlinearity, double param = 0.01);
+///
+/// NOTE: Please see `torch/enum.h` for the range of acceptable values for
+/// `Nonlinearity` type.
+TORCH_API double calculate_gain(
+  Nonlinearity nonlinearity,
+  double param = 0.01);
 
 /// Fills the given `tensor` with the provided `value` in-place, and returns it.
 /// No gradient will be recorded for this operation.
@@ -74,22 +64,28 @@ TORCH_API Tensor uniform_(Tensor tensor, double low = 0, double high = 1);
 /// performance on ImageNet classification" - He, K. et al. (2015), using a
 /// normal distribution. Also known as He initialization.
 /// No gradient will be recorded for this operation.
+///
+/// NOTE: Please see `torch/enum.h` for the range of acceptable values
+/// for `FanMode` type and `Nonlinearity` type.
 TORCH_API Tensor kaiming_normal_(
     Tensor tensor,
     double a = 0,
-    FanMode mode = FanMode::FanIn,
-    Nonlinearity nonlinearity = Nonlinearity::LeakyReLU);
+    FanMode mode = torch::kFanIn,
+    Nonlinearity nonlinearity = torch::kLeakyReLU);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Delving deep into rectifiers: Surpassing human-level
 /// performance on ImageNet classification" - He, K. et al. (2015), using a
 /// uniform distribution. Also known as He initialization.
 /// No gradient will be recorded for this operation.
+///
+/// NOTE: Please see `torch/enum.h` for the range of acceptable values
+/// for `FanMode` type and `Nonlinearity` type.
 TORCH_API Tensor kaiming_uniform_(
     Tensor tensor,
     double a = 0,
-    FanMode mode = FanMode::FanIn,
-    Nonlinearity nonlinearity = Nonlinearity::LeakyReLU);
+    FanMode mode = torch::kFanIn,
+    Nonlinearity nonlinearity = torch::kLeakyReLU);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Understanding the difficulty of training deep feedforward
