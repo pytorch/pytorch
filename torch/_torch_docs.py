@@ -3981,7 +3981,7 @@ add_docstr(torch.promote_types,
 promote_types(type1, type2) -> dtype
 
 Returns the :class:`torch.dtype` with the smallest size and scalar kind that is
-not smaller or of lower kind than `type1` or `type2`. See type promotion
+not smaller nor of lower kind than either `type1` or `type2`. See type promotion
 :ref:`documentation <type-promotion-doc>` for more information on the type
 promotion logic.
 
