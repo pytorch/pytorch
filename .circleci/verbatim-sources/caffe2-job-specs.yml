@@ -57,6 +57,9 @@
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
             docker images --digests
             docker save "${COMMIT_DOCKER_IMAGE}" | gzip -1 > built_image.tgz
+          else
+            # Shut up CircleCI about missing image for BUILD_ONLY jobs
+            touch built_image.tgz
           fi
     - persist_to_workspace:
         root: .
