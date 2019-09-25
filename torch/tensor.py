@@ -418,9 +418,6 @@ class Tensor(torch._C._TensorBase):
             array = array.astype('uint8')
         return torch.from_numpy(array)
 
-    def __torch_function__(self, func, types, args, kwargs):
-        return _torch_function(func, types, args, kwargs)
-
     def __contains__(self, element):
         r"""Check if `element` is present in tensor
 
@@ -506,9 +503,6 @@ class Tensor(torch._C._TensorBase):
     __module__ = 'torch'
 
 
-_TORCH_FUNCTION = Tensor.__torch_function__
-
-
 def _torch_function(func, types, args, kwargs):
     """TODO: move to C++, needs to have zero overhead.
 
@@ -521,17 +515,4 @@ def _torch_function(func, types, args, kwargs):
     See torch/_overrides.py for the decorator that can be used to override
     individual functions.
     """
-    for t in types:
-        if not issubclass(t, Tensor):
-            # This is a guard, it  errors if a "foreign" __torch_function__
-            # is encountered.  This makes sense, because the dispatcher for
-            # `func` should ensure that if another __torch_function__ is
-            # found, that is called instead (this method has lowest
-            # precedence).
-            method = getattr(t, '__torch_function__', _TORCH_FUNCTION)
-            if method is not _TORCH_FUNCTION:
-                return NotImplemented
-
-    # Arguments contain no overrides, so we can safely call the
-    # overloaded function again.
-    return func._implementation(*args, **kwargs)
+    pass

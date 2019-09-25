@@ -21,7 +21,7 @@ from numpy.compat._inspect import getargspec
 from .tensor import Tensor
 
 
-_TORCH_FUNCTION = Tensor.__torch_function__
+# _TORCH_FUNCTION = Tensor.__torch_function__
 _TENSOR_ONLY = [Tensor]
 
 def get_overloaded_types_and_args(relevant_args):
