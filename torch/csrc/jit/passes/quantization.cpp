@@ -251,20 +251,20 @@ graph(%self, %input, %inplace):
     %relu = prim::Constant[name="relu"]()
     %conv = match::module[name="Conv2d"](%self)
     %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
-    %r = prim::CallFunction(%relu, %output, %inplace)
+    %r = prim::CallFunction(%relu, %intermediate_val, %inplace)
     return (%r))";
   std::string conv_relu_module = R"(
 graph(%self, %input):
     %conv = match::module[name="Conv2d"](%self)
     %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
     %relu = match::module[name="ReLU"](%self)
-    %r = prim::CallMethod[name="forward"](%relu, %output)
+    %r = prim::CallMethod[name="forward"](%relu, %intermediate_val)
     return (%r))";
   std::string matmul_add = R"(
 graph(%input, %weight, %bias, %4):
      %weight_t = aten::t(%weight)
      %intermediate_val = aten::matmul(%input, %weight_t)
-     %res = aten::add_(%output, %bias, %4)
+     %res = aten::add_(%intermediate_val, %bias, %4)
      return (%res))";
   std::vector<std::string> patterns = {
       conv_functional_relu, conv_relu_module, matmul_add};

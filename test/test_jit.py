@@ -3665,6 +3665,17 @@ def foo(x):
         with self.assertRaisesRegex(Exception, "backward hooks assigned"):
             torch.jit.trace(n, (torch.tensor(1.0),))
 
+    def test_python_op_builtins(self):
+        @torch.jit.unused
+        def fn(x):
+            # type: (List[int]) -> int
+            return sum(x)
+
+        @torch.jit.script
+        def script_fn(x):
+            # type: (List[int]) -> int
+            return fn(x)
+
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
@@ -16942,7 +16953,7 @@ nn_functional_tests = [
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
     ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),
-        '', (True, 'aten::_batch_norm_impl_index')),
+        '', (False, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],), '',
      (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
@@ -19575,8 +19586,6 @@ class TestClassType(JitTestCase):
         # Test interface/class python assignment
         with torch.jit._disable_emit_hooks():
             class TestPyAssign(nn.Module):
-                proxy_mod: OneTwo
-
                 def __init__(self):
                     super(TestPyAssign, self).__init__()
                     self.proxy_mod = Foo()
@@ -19584,23 +19593,33 @@ class TestClassType(JitTestCase):
                 def forward(self, x):
                     return self.proxy_mod.two(x)
 
+            TestPyAssign.__annotations__ = {'proxy_mod': OneTwo}
+
             input = torch.rand(3, 4)
             scripted_pyassign_mod = torch.jit.script(TestPyAssign())
             self.assertEqual(scripted_pyassign_mod(input), 2 * input)
 
             class TestPyAssignError(nn.Module):
-                proxy_mod: OneTwoThree
-
-                def __init__(self):
+                def __init__(self, obj):
                     super(TestPyAssignError, self).__init__()
-                    self.proxy_mod = Foo()
+                    self.proxy_mod = obj
 
                 def forward(self, x):
                     return self.proxy_mod.two(x)
 
-            with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
-                torch.jit.script(TestPyAssignError())
+            TestPyAssignError.__annotations__ = {'proxy_mod': OneTwoThree}
 
+            with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
+                torch.jit.script(TestPyAssignError(Foo()))
+
+            # test pure python object assignment to interface fails
+            class PyClass(object):
+                def __init__(self):
+                    pass
+
+            with self.assertRaisesRegex(RuntimeError,
+                                        "the value is not a TorchScript compatible type"):
+                torch.jit.script(TestPyAssignError(PyClass()))
         # TODO test: interface-interface class-interface inheritance errors,
         # NamedTuple inheritance errors
 

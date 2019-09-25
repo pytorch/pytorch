@@ -473,6 +473,34 @@ inline IValue toIValue(
       }
       return userObj;
     }
+    case TypeKind::InterfaceType: {
+      auto interfaceType = type->expect<InterfaceType>();
+      // When converting an pyobj to an interface, we inspect the value
+      // to found the compiled TorchScript class, check if it conform
+      // with the interface or not, and then create a ivalue::Object
+      // from that class type.
+      py::str qualified_name = py::module::import("torch.jit")
+                                   .attr("_qualified_name")(obj.get_type());
+      auto pyCu = get_python_cu();
+      const auto classType =
+          pyCu->get_class(c10::QualifiedName(qualified_name));
+      if (!classType) {
+        throw std::runtime_error(c10::str(
+            "Assigning the object ",
+            py::str(obj),
+            " to an interface fails because the value is not "
+            "a TorchScript compatible type, did you forget to",
+            "turn it into a user defined TorchScript class?"));
+      }
+      if (!classType->isSubtypeOf(interfaceType)) {
+        throw py::cast_error(c10::str(
+            "Object ",
+            py::str(obj),
+            " is not compatible with interface ",
+            interfaceType->python_str()));
+      }
+      return toIValue(std::move(obj), classType);
+    }
     case TypeKind::NumberType: {
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
@@ -491,7 +519,6 @@ inline IValue toIValue(
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
-    case TypeKind::InterfaceType:
       break;
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
