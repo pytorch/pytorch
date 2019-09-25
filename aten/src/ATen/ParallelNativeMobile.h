@@ -46,6 +46,7 @@ inline void parallel_for(
   }
   if ((end - begin) < grain_size || in_parallel_region()) {
     f(begin, end);
+    return;
   }
   size_t num_tasks, chunk_size;
   std::tie(num_tasks, chunk_size) =
