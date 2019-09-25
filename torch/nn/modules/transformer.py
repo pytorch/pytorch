@@ -8,6 +8,7 @@ from ..init import xavier_uniform_
 from .dropout import Dropout
 from .linear import Linear
 from .normalization import LayerNorm
+from ..functional import generate_square_subsequent_mask
 
 class Transformer(Module):
     r"""A transformer model. User is able to modify the attributes as needed. The architechture
@@ -58,6 +59,9 @@ class Transformer(Module):
 
         self.d_model = d_model
         self.nhead = nhead
+
+        # generate_square_subsequent_mask function has been moved to nn.functional
+        self.generate_square_subsequent_mask = generate_square_subsequent_mask
 
     def forward(self, src, tgt, src_mask=None, tgt_mask=None,
                 memory_mask=None, src_key_padding_mask=None,
@@ -117,15 +121,6 @@ class Transformer(Module):
                               tgt_key_padding_mask=tgt_key_padding_mask,
                               memory_key_padding_mask=memory_key_padding_mask)
         return output
-
-    @staticmethod
-    def generate_square_subsequent_mask(sz):
-        r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
-            Unmasked positions are filled with float(0.0).
-        """
-        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-        return mask
 
     def _reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
