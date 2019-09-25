@@ -528,7 +528,7 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntArrayRef si
       int64_t out_cols = grad.size(1);
       Tensor t = at::zeros({}, grad.options()).expand({out_rows, out_cols}, true);
       Tensor r = at::empty({out_cols, out_rows}, grad.options()).t();
-      at::s_native_addmm_out(r, t, mat1.t(), grad, alpha, 1);
+      at::addmm_out(r, t, mat1.t(), grad, alpha, 1);
       return r;
     }
     return maybe_multiply(grad.t().mm(mat1).t(), alpha);
@@ -749,6 +749,22 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
 
   auto grad_input = at::matmul(at::matmul(L_inverse.transpose(-1, -2), phi), L_inverse);
   return grad_input.add(grad_input.transpose(-1, -2)).mul_(0.5);  // Symmetrizing the gradient
+}
+
+Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inverse) {
+  Tensor grad_L;
+  if (grad.defined()) {
+    Tensor common_term = grad + grad.transpose(-2, -1);
+    common_term = at::matmul(inverse, at::matmul(common_term, inverse));
+    if (upper) {
+      grad_L = -at::matmul(L, common_term);
+    } else {
+      grad_L = -at::matmul(common_term, L);
+    }
+  } else {
+    grad_L = at::zeros({1}, L.options()).expand_as(L);
+  }
+  return grad_L;
 }
 
 Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,

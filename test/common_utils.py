@@ -185,7 +185,7 @@ TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
 TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
-
+TEST_WITH_QNNPACK = os.getenv('PYTORCH_TEST_WITH_QNNPACK', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -491,7 +491,7 @@ class TestCase(expecttest.TestCase):
 
         # Wraps the tested method if we should enforce non default CUDA stream.
         self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
-        if self._do_cuda_non_default_stream and not IS_WINDOWS:
+        if self._do_cuda_non_default_stream and not IS_WINDOWS and not TEST_WITH_ROCM:
             self.wrap_with_cuda_policy(method_name, self.enforceNonDefaultStream)
 
     def assertLeaksNoCudaTensors(self, name=None):
@@ -676,11 +676,21 @@ class TestCase(expecttest.TestCase):
             elif x.is_quantized and y.is_quantized:
                 self.assertEqual(x.qscheme(), y.qscheme(), prec=prec,
                                  message=message, allow_inf=allow_inf)
-                self.assertEqual(x.q_scale(), y.q_scale(), prec=prec,
-                                 message=message, allow_inf=allow_inf)
-                self.assertEqual(x.q_zero_point(), y.q_zero_point(),
-                                 prec=prec, message=message,
-                                 allow_inf=allow_inf)
+                if x.qscheme() == torch.per_tensor_affine:
+                    self.assertEqual(x.q_scale(), y.q_scale(), prec=prec,
+                                     message=message, allow_inf=allow_inf)
+                    self.assertEqual(x.q_zero_point(), y.q_zero_point(),
+                                     prec=prec, message=message,
+                                     allow_inf=allow_inf)
+                elif x.qscheme() == torch.per_channel_affine:
+                    self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), prec=prec,
+                                     message=message, allow_inf=allow_inf)
+                    self.assertEqual(x.q_per_channel_zero_points(), y.q_per_channel_zero_points(),
+                                     prec=prec, message=message,
+                                     allow_inf=allow_inf)
+                    self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
+                                     prec=prec, message=message)
+                self.assertEqual(x.dtype, y.dtype)
                 self.assertEqual(x.int_repr().to(torch.int32),
                                  y.int_repr().to(torch.int32), prec=prec,
                                  message=message, allow_inf=allow_inf)
