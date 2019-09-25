@@ -78,6 +78,11 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
       memory_format != MemoryFormat::Preserve,
       "preserve memory format is unsupported by the contiguous operator");
 
+  // Fast path for Channels Last (until we solve TensorIterator write locality)
+  // TODO: https://github.com/pytorch/pytorch/issues/26812
+  if (memory_format == MemoryFormat::ChannelsLast) {
+    return self.permute({0,2,3,1}).contiguous(MemoryFormat::Contiguous).permute({0,3,1,2});
+  }
   auto result = at::empty_like(self, self.options(), memory_format);
   return result.copy_(self);
 }
