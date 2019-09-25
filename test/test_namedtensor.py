@@ -558,9 +558,8 @@ class TestNamedTensor(TestCase):
     def test_any_all(self):
         for device in torch.testing.get_all_device_types():
             x = torch.zeros(3, dtype=torch.bool, device=device, names=('C',))
-            # The result can't have any names so this is just a smoke test
-            x.any()
-            x.all()
+            self.assertEqual(x.any().names, [])
+            self.assertEqual(x.all().names, [])
 
     def test_binary_ops(self):
         def test_basic(op):
