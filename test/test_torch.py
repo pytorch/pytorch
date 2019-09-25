@@ -7359,6 +7359,7 @@ class TestTorchDeviceType(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.cat([x, empty], dim=1))
         self.assertRaises(RuntimeError, lambda: torch.cat([empty, x], dim=1))
 
+    @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_inverse_many_batches(self, device):
@@ -7766,6 +7767,7 @@ class TestTorchDeviceType(TestCase):
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy())).to(device)
         self.assertEqual(x.data, x_exp)
 
+    @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_solve_batched_many_batches(self, device):
@@ -7849,6 +7851,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.cholesky_solve(b, L, upper=upper)
             self.assertEqual(x, x_exp)
 
+    @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_cholesky_solve_batched_many_batches(self, device):
@@ -7915,6 +7918,7 @@ class TestTorchDeviceType(TestCase):
         inv1 = torch.cholesky_inverse(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
+    @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_cholesky_batched_many_batches(self, device):
@@ -9603,6 +9607,7 @@ class TestTorchDeviceType(TestCase):
             else:
                 self.assertLessEqual(b.dist(A.mm(x)), 4e-12)
 
+    @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_triangular_solve_batched_many_batches(self, device):
