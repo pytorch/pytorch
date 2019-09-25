@@ -897,9 +897,8 @@ target_compile_definitions(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 #  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
 #  TBB - using TBB for intra- and native thread pool for inter-op parallelism
-#  MOBILE - using mobile-optimized threadpool for intra- and native thread pool for inter-op parallelism
 if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
-  set(ATEN_THREADING "MOBILE" CACHE STRING "ATen parallel backend")
+  set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
 else()
   set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
 endif()
@@ -914,8 +913,6 @@ elseif ("${ATEN_THREADING}" STREQUAL "TBB")
     message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
   endif()
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_NATIVE_TBB=1")
-elseif ("${ATEN_THREADING}" STREQUAL "MOBILE")
-  target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_NATIVE_MOBILE=1")
 else()
   message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
 endif()
