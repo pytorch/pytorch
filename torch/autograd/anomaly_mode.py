@@ -10,6 +10,10 @@ class detect_anomaly(object):
     backward function.
     - Any backward computation that generate "nan" value will raise an error.
 
+    .. warning::
+        This mode should be enabled only for debugging as the different tests
+        will slow down your program execution.
+
     Example:
 
         >>> import torch
