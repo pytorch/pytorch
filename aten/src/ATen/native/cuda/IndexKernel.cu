@@ -4,7 +4,9 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/Assert.cuh>
 #include <ATen/core/Array.h>
+
 
 namespace at { namespace native {
 
@@ -17,40 +19,6 @@ static OffsetCalculator<N> index_make_offset_calculator(const TensorIterator& it
   }
   return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
 }
-
-__device__ char* device_strcpy(char* dst, const char* src, int n){
-  int i = 0;
-  while (i+1 < n && src[i]) {
-    dst[i] = src[i];
-    ++i;
-  }
-  if (i < n) {
-    dst[i] = '\0';
-  }
-  return dst;
-}
-
-__device__ bool _graceful_assert(c10::cuda::CUDAAssert* assert_state, bool condition, const char* message, uint32_t line, const char* file) {
-  if (!condition) { 
-    if (atomicCAS(&assert_state->error, 0, 1) == 0) {
-
-        // copy message
-        device_strcpy(assert_state->message, message, c10::cuda::MAX_ASSERT_MSG_LENGTH);
-        device_strcpy(assert_state->file, file, c10::cuda::MAX_ASSERT_MSG_LENGTH);
-        assert_state->line = line;
-        assert_state->type = 1;
-
-        // fill details
-        c10::cuda::CUDAAssertDetailIndexKernel* details = reinterpret_cast<c10::cuda::CUDAAssertDetailIndexKernel*>(assert_state->details);
-        details->index = 1234;  // write some dummy details
-    }
-  }
-
-  return !assert_state->error;    // return false if we are in error state, signals kernel to quit
-}
-
-#define graceful_assert(assert_state, exp, msg) \
-  _graceful_assert(assert_state, exp, msg, static_cast<uint32_t>(__LINE__), __FILE__)
 
 template <typename func_t>
 void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
@@ -95,23 +63,11 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
     for (int i = 0; i < num_indices; i++) {
       int64_t index = *(int64_t*)(index_ptrs[i] + offsets[2]);
 
-      if (!graceful_assert(assert_state, index >= -sizes[i] && index < sizes[i], "index out of bounds")) {
+      if (index < -sizes[i] || index >= sizes[i]) {
+        graceful_index_error(assert_state, index, i, sizes[i], "index out of bounds");
         return;
       }
 
-      /*if (index < -sizes[i] || index >= sizes[i]) {
-        if (atomicExch(&ds->err, 1) == 0) {
-          // Only the first thread that encounters an error records the set of values
-          // for the error message.
-          ds->index = index;
-          ds->axis = i;
-          ds->size = sizes[i];
-          __threadfence_system();
-          assert(0);
-        }
-        return;
-      }*/
-      
       if (index < 0) {
         index += sizes[i];
       }

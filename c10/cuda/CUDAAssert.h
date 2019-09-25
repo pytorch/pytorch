@@ -4,12 +4,18 @@
 
 namespace c10 { namespace cuda {
 
-constexpr int MAX_ERROR_DETAILS_SIZE = 1024;
+enum class CUDAAssertKind : int32_t {
+  ASSERTION_FAILED,
+  INDEX_OUT_OF_BOUNDS,
+  ZERO_DIVISION,
+};
+
 constexpr int MAX_ASSERT_MSG_LENGTH = 1024;
+constexpr int MAX_ERROR_DETAILS_SIZE = 1024;
 
 struct CUDAAssert {
-  int32_t error;
-  int32_t type;
+  volatile int32_t error;
+  CUDAAssertKind type;
   uint32_t line;
   uint32_t _reserved;  // round to 8 byte boundary
   char message[MAX_ASSERT_MSG_LENGTH];

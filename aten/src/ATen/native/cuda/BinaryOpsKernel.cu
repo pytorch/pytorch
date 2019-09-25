@@ -1,6 +1,7 @@
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/Assert.cuh>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
@@ -39,8 +40,13 @@ void div_kernel_cuda(TensorIterator& iter) {
       });
     });
   } else {
+    auto assert_state = at::cuda::getCurrentCUDAStream().assert_state();
     AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "div_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      gpu_kernel_with_scalars(iter, [=]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        if (b == 0) {
+            graceful_devision_by_zero(assert_state, "ZeroDivisionError: integer division by zero");
+            return 0;   // what to return in this case?
+        }
         return a / b;
       });
     });

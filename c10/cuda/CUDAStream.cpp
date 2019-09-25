@@ -315,12 +315,33 @@ void check_assert_state(const LeakyStreamInternals* ptr) {
     CUDAGuard device_guard(ptr->device_index);
 
     // wait for kernel to complete
-    C10_CUDA_CHECK(cudaDeviceSynchronize());    
-    CUDAAssert isolation_copy(*ptr->assert_state);
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
+    CUDAAssert assert_state(*ptr->assert_state);    // create local isolation copy
 
     // reset assert state
     std::memset(ptr->assert_state, 0, sizeof(CUDAAssert));
-    throw ::c10::Error({"CUDA Assertion", isolation_copy.file, isolation_copy.line}, isolation_copy.message);
+
+    switch (assert_state.type) {
+      case CUDAAssertKind::ASSERTION_FAILED:
+        // assertion failed
+        throw ::c10::Error({"unknown", assert_state.file, assert_state.line}, assert_state.message);
+
+      case CUDAAssertKind::INDEX_OUT_OF_BOUNDS: {
+        // index out of bounds
+        auto index_error = reinterpret_cast<CUDAAssertDetailIndexKernel*>(assert_state.details);
+        throw ::c10::IndexError({"unknown", assert_state.file, assert_state.line},
+          ::c10::str("index ", index_error->index, " is out of bounds for dimension ", index_error->axis, " with size ", index_error->size));
+        break;
+      }
+
+      case CUDAAssertKind::ZERO_DIVISION:
+        // zero division error
+        throw ::c10::Error({"unknown", assert_state.file, assert_state.line}, assert_state.message);
+
+      default:
+        AT_ASSERTM(0, "Unsupported assertion type");
+        break;
+    }
   }
 }
 
@@ -345,16 +366,16 @@ cudaStream_t CUDAStream::stream() const {
 CUDAAssert* CUDAStream::assert_state() const {
   auto ptr = CUDAStream_internals(*this);
   AT_ASSERT(ptr);
-  
+
   // lazy create assert state (TODO: support concurrent calls)
   if (ptr->assert_state == nullptr) {
-    // switch to device to associate host memory with it 
+    // switch to device to associate host memory with it
     CUDAGuard device_guard(device_index());
 
     // allocate assert memory
     C10_CUDA_CHECK(cudaHostAlloc(
       (void **)&ptr->assert_state, sizeof(ptr->assert_state),
-      cudaHostAllocMapped/* | cudaHostAllocPortable*/));    
+      cudaHostAllocMapped/* | cudaHostAllocPortable*/));
   }
 
   return ptr->assert_state;
