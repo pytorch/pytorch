@@ -41,49 +41,33 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
   /**
    * @param  name  The fully qualified path, which can resolve either to a
    *               namespace or a NamedType
-   * @param  cu    The compilation unit to search for classes in
+   * @param  si    The source importer that searches for and loads
+   * classes/functions.
    */
   explicit ClassNamespaceValue(
       c10::QualifiedName name,
-      const CompilationUnit& cu)
-      : basename_(std::move(name)), cu_(cu) {}
+      std::shared_ptr<SourceImporterImpl> si)
+      : basename_(std::move(name)), si_(std::move(si)) {}
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
       Function& m,
-      const std::string& name) override {
-    auto fullName = c10::QualifiedName(basename_, name);
-    // Could be a ClassType or NamedTuple constructor
-    if (auto serializable_type = cu_.get_type(fullName)) {
-      if (auto classType = serializable_type->cast<ClassType>()) {
-        return std::make_shared<ClassValue>(classType);
-      } else if (auto tupleType = serializable_type->cast<TupleType>()) {
-        return std::make_shared<NamedTupleConstructor>(tupleType);
-      }
-    }
-
-    // Or it could be a free function
-    if (auto fn = cu_.find_function(fullName)) {
-      return std::make_shared<FunctionValue>(fn);
-    }
-
-    // If it's none of those things, assume it's another namespace
-    return std::make_shared<ClassNamespaceValue>(std::move(fullName), cu_);
-  }
+      const std::string& name) override;
   std::string kind() const override {
     return "Class Namespace";
   }
 
  private:
   c10::QualifiedName basename_;
-  const CompilationUnit& cu_;
+  std::shared_ptr<SourceImporterImpl> si_;
 };
 
 // This value maps attributes CONSTANTS.c0 CONSTANTS.c1 to entries
 // in the 'constants' vector. This table is will be stored in a container format
 // and given to the import_method when restoring the code.
 struct ConstantTableValue : public SugaredValue {
-  ConstantTableValue(ArrayRef<at::Tensor> constants) : constants_(constants) {}
+  ConstantTableValue(const std::vector<at::Tensor>* constants)
+      : constants_(constants) {}
   std::string kind() const override {
     return "CONSTANTS";
   }
@@ -97,12 +81,12 @@ struct ConstantTableValue : public SugaredValue {
     int64_t offset = std::strtoll(field_s + 1, &end, 10);
     if (field.size() < 2 || *end != 0)
       throw ErrorReport(loc) << "invalid constant specifier: " << field;
-    if (offset < 0 || size_t(offset) >= constants_.size()) {
+    if (offset < 0 || size_t(offset) >= constants_->size()) {
       throw ErrorReport(loc) << "constant index " << offset
                              << " is out of bounds (constant table has "
-                             << constants_.size() << " entries)";
+                             << constants_->size() << " entries)";
     }
-    Value* value = m.graph()->insertConstant(constants_.at(offset), loc);
+    Value* value = m.graph()->insertConstant(constants_->at(offset), loc);
 
     // specializing tensor type on compilation messes up typing relations
     value->setType(unshapedType(value->type()));
@@ -111,20 +95,17 @@ struct ConstantTableValue : public SugaredValue {
   }
 
  private:
-  ArrayRef<at::Tensor> constants_;
+  const std::vector<at::Tensor>* constants_;
 };
 
-// A resolver that doesn't rely on Python, and understands references to model
-// constants.
-struct SourceResolver : public Resolver {
-  explicit SourceResolver(
-      std::shared_ptr<CompilationUnit> cu,
-      size_t version,
-      const std::vector<at::Tensor>& tensor_table)
-      : cu_(std::move(cu)) {
+struct SourceImporterImpl : public Resolver,
+                            std::enable_shared_from_this<SourceImporterImpl> {
+  SourceImporterImpl(
+      const std::shared_ptr<CompilationUnit> cu,
+      const std::vector<at::Tensor>* tensor_table,
+      SourceLoader source_loader)
+      : cu_(cu), source_loader_(source_loader) {
     env_ = {
-        {"torch", std::make_shared<BuiltinModule>("aten", version)},
-        {"ops", std::make_shared<OpsValue>(version)},
         // Constants present in the model. Used to resolve "CONSTANTS.n" to the
         // actual value
         {"CONSTANTS", std::make_shared<ConstantTableValue>(tensor_table)},
@@ -140,63 +121,62 @@ struct SourceResolver : public Resolver {
     };
   }
 
-  std::shared_ptr<SugaredValue> resolveValue(
-      const std::string& name,
-      Function& m,
-      const SourceRange& loc) const override {
-    auto it = env_.find(name);
-    if (it != env_.end()) {
-      return it->second;
+  TypePtr findNamedType(const QualifiedName& name) {
+    parseSourceIfNeeded(name.prefix());
+    auto it = to_be_defined_.find(name);
+    if (it != to_be_defined_.end() && it->second->kind() == TK_CLASS_DEF) {
+      ClassDef cd(it->second);
+      to_be_defined_.erase(it);
+      importNamedType(name.prefix(), cd);
     }
+    return cu_->get_type(name);
+  }
 
-    if (name == "__torch__") {
-      return std::make_shared<ClassNamespaceValue>(
-          c10::QualifiedName(name), *cu_);
+  Function* findFunction(const QualifiedName& name) {
+    parseSourceIfNeeded(name.prefix());
+    auto it = to_be_defined_.find(name);
+    if (it != to_be_defined_.end() && it->second->kind() == TK_DEF) {
+      Def d(it->second);
+      to_be_defined_.erase(it);
+      importFunction(name.prefix(), d);
     }
-    return nullptr;
+    return cu_->find_function(name);
   }
 
-  TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
-    return cu_->get_type(c10::QualifiedName(name));
-  }
+  void parseSourceIfNeeded(const std::string& qualifier) {
+    // qualifier may be blank, for instance checking if __torch__ is a class.
+    if (qualifier == "" || loaded_sources_.count(qualifier)) {
+      return;
+    }
+    loaded_sources_.insert(qualifier);
+    std::shared_ptr<Source> src = source_loader_(qualifier);
 
- private:
-  // Compilation unit to look classes up in
-  std::shared_ptr<CompilationUnit> cu_;
-  std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
-};
+    // The importer, when looking for classes/functions doesn't know if 'foo'
+    // contains definitions or if it is a prefix of 'foo.bar', we only figure it
+    // out by testing if `foo.py` exists in the source loader. If it doesn't
+    // then there is nothing to load here
+    if (!src) {
+      return;
+    }
+    Parser p(src);
+    parseAndCheckVersionNumber(p.lexer());
 
-struct SourceImporter {
-  SourceImporter(
-      const std::shared_ptr<CompilationUnit> cu,
-      const std::shared_ptr<Source>& src,
-      const std::vector<at::Tensor>& tensor_table,
-      const std::function<void(const std::string&)>& import_callback)
-      : p_(src),
-        cu_(cu),
-        import_callback_(import_callback),
-        tensor_table_(tensor_table) {
-    version_ = parseVersionNumber();
-    resolver_ = std::make_shared<SourceResolver>(cu_, version_, tensor_table_);
-  }
-
-  void import(const std::string& qualifier) {
-    checkVersionNumber();
-    auto& L = p_.lexer();
+    auto& L = p.lexer();
 
     while (L.cur().kind != TK_EOF) {
-      parseImportsAndDoCallback();
-
+      parseImports(L);
       auto tk = L.cur();
       auto kind = tk.kind;
       switch (kind) {
         case TK_CLASS_DEF: {
-          auto parsed_treeref = p_.parseClass();
-          importNamedType(qualifier, ClassDef(parsed_treeref));
+          auto parsed_treeref = ClassDef(p.parseClass());
+          to_be_defined_[QualifiedName(
+              qualifier, parsed_treeref.name().name())] = parsed_treeref;
         } break;
         case TK_DEF: {
-          auto parsed_treeref = p_.parseFunction(/*is_method=*/false);
-          importFunction(qualifier, Def(parsed_treeref));
+          auto parsed_treeref = Def(p.parseFunction(/*is_method=*/false));
+          to_be_defined_[QualifiedName(
+              qualifier, parsed_treeref.name().name())] = parsed_treeref;
         } break;
         default:
           throw ErrorReport(L.cur().range)
@@ -205,26 +185,52 @@ struct SourceImporter {
     }
   }
 
-  void LEGACY_importFunctions(
-      const c10::optional<c10::QualifiedName>& prefix,
-      const Self* self) {
-    checkVersionNumber();
-    parseImportsAndDoCallback();
+  void LEGACY_import_methods(
+      const script::Module& mod,
+      const std::shared_ptr<Source>& src) {
+    auto self = SimpleSelf(mod.type());
+    c10::QualifiedName prefix = mod.name();
+    Parser p(src);
+
+    parseAndCheckVersionNumber(p.lexer());
+
+    parseImports(p.lexer());
 
     std::vector<Def> definitions;
     std::vector<ResolverPtr> resolvers;
-    while (p_.lexer().cur().kind != TK_EOF) {
-      auto def = Def(p_.parseFunction(/*is_method=*/bool(self)));
+    while (p.lexer().cur().kind != TK_EOF) {
+      auto def = Def(p.parseFunction(/*is_method=*/true));
       definitions.emplace_back(def);
-      resolvers.emplace_back(resolver_);
+      resolvers.emplace_back(shared_from_this());
     }
-    cu_->define(prefix, definitions, resolvers, self);
+    cu_->define(prefix, definitions, resolvers, &self);
+  }
+
+  std::shared_ptr<SugaredValue> resolveValue(
+      const std::string& name,
+      Function& m,
+      const SourceRange& loc) override {
+    auto it = env_.find(name);
+    if (it != env_.end()) {
+      return it->second;
+    }
+
+    if (name == "__torch__") {
+      return std::make_shared<ClassNamespaceValue>(
+          c10::QualifiedName(name), shared_from_this());
+    }
+    return nullptr;
+  }
+
+  TypePtr resolveType(const std::string& name, const SourceRange& loc)
+      override {
+    return findNamedType(QualifiedName(name));
   }
 
  private:
   void importFunction(const std::string& qualifier, const Def& def) {
     std::vector<Def> definitions{def};
-    std::vector<ResolverPtr> resolvers{resolver_};
+    std::vector<ResolverPtr> resolvers{shared_from_this()};
     cu_->define(qualifier, definitions, resolvers, nullptr);
   }
 
@@ -245,7 +251,7 @@ struct SourceImporter {
       // ClassTypes)
       return importNamedTuple(qualified_name, class_def);
     } else if (superclass_name == "Interface") {
-      cu_->define_interface(qualified_name, class_def, resolver_);
+      cu_->define_interface(qualified_name, class_def, shared_from_this());
     } else {
       throw ErrorReport(class_def.range())
           << "Torchscript does not support class inheritance.";
@@ -322,7 +328,7 @@ struct SourceImporter {
         } break;
         case TK_DEF: {
           methods.emplace_back(Def(statement));
-          resolvers.push_back(resolver_);
+          resolvers.push_back(shared_from_this());
         } break;
         default: {
           TORCH_INTERNAL_ASSERT(
@@ -334,7 +340,7 @@ struct SourceImporter {
     }
 
     // Populate class attributes
-    ScriptTypeParser type_parser(resolver_);
+    ScriptTypeParser type_parser(shared_from_this());
     for (const auto& assign : attributes) {
       switch (assign.lhs().kind()) {
         case TK_VAR: {
@@ -363,7 +369,7 @@ struct SourceImporter {
   void importNamedTuple(
       const QualifiedName& qualified_name,
       const ClassDef& named_tuple_def) {
-    ScriptTypeParser type_parser(resolver_);
+    ScriptTypeParser type_parser(shared_from_this());
     std::vector<std::string> field_names;
     std::vector<TypePtr> field_types;
     for (const auto& statement : named_tuple_def.body()) {
@@ -388,19 +394,27 @@ struct SourceImporter {
     cu_->register_type(tt);
   }
 
-  void checkVersionNumber() {
+  void parseAndCheckVersionNumber(Lexer& L) {
+    size_t version = parseVersionNumber(L);
     // note: this cannot be called in the constructor because it may throw
-    if (version_ > CURRENT_OP_VERSION_SET) {
-      throw ErrorReport(p_.lexer().cur().range)
+    if (version > CURRENT_OP_VERSION_SET) {
+      throw ErrorReport(L.cur().range)
           << "Attempting to load a script generated from a newer version of "
           << "PyTorch. Maximum supported TorchScript version is "
           << CURRENT_OP_VERSION_SET
-          << " but the script being loaded is version " << version_;
+          << " but the script being loaded is version " << version;
+    }
+    // version numbers are specified per-file as a historic artifact.
+    // There really should be a version per entire source archive.
+    // We work around this by using the first version number in the components
+    // that need versions
+    if (env_.count("torch") == 0) {
+      env_["torch"] = std::make_shared<BuiltinModule>("aten", version);
+      env_["ops"] = std::make_shared<OpsValue>(version);
     }
   }
 
-  size_t parseVersionNumber() {
-    auto& L = p_.lexer();
+  size_t parseVersionNumber(Lexer& L) {
     auto range = L.cur().range;
     auto name = L.expect(TK_IDENT).text();
     L.expect('=');
@@ -415,10 +429,14 @@ struct SourceImporter {
     return size_t(version.asIntegral());
   }
 
-  void parseImportsAndDoCallback() {
-    // Gather all imports
-    auto& L = p_.lexer();
-    std::vector<std::string> imports;
+  // older versions of serialization required import statements,
+  // and defined classes file-at-a-time in import order.
+  // The problem is that in Python
+  // it is possible to construct cyclic dependencies between files even
+  // when there are none between individual classes. New versions of loading
+  // just compile class-at-a-time, so we no longer need to follow the import
+  // order. Future serialization may stop producing the import code.
+  void parseImports(Lexer& L) {
     while (L.nextIf(TK_IMPORT)) {
       std::ostringstream s;
       while (L.cur().kind != TK_NEWLINE) {
@@ -426,47 +444,64 @@ struct SourceImporter {
         L.next();
       }
       L.expect(TK_NEWLINE);
-      const auto str = s.str();
-      AT_ASSERT(!str.empty());
-      imports.push_back(str);
-    }
-
-    // Call theregister_typectually compile them
-    for (const auto& import : imports) {
-      if (import_callback_) {
-        import_callback_(import);
-      }
     }
   }
 
-  Parser p_;
-  size_t version_;
   std::shared_ptr<CompilationUnit> cu_;
-  const std::function<void(const std::string&)>& import_callback_;
-  const std::vector<at::Tensor>& tensor_table_;
-  std::shared_ptr<SourceResolver> resolver_;
+  std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
+  SourceLoader source_loader_;
+  std::unordered_set<std::string> loaded_sources_;
+  // named types and functions loaded from a file but not yet defined because
+  // their type has not been requested yet.
+  std::unordered_map<QualifiedName, TreeRef> to_be_defined_;
 };
 
-void LEGACY_import_methods(
-    const Module& mod,
-    const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& constant_table,
-    const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(
-      mod.class_compilation_unit(), src, constant_table, import_callback);
-  auto self = SimpleSelf(mod.type());
-  importer.LEGACY_importFunctions(mod.name(), &self);
+std::shared_ptr<SugaredValue> ClassNamespaceValue::attr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& name) {
+  auto fullName = c10::QualifiedName(basename_, name);
+  // Could be a ClassType or NamedTuple constructor
+  if (auto serializable_type = si_->findNamedType(fullName)) {
+    if (auto classType = serializable_type->cast<ClassType>()) {
+      return std::make_shared<ClassValue>(classType);
+    } else if (auto tupleType = serializable_type->cast<TupleType>()) {
+      return std::make_shared<NamedTupleConstructor>(tupleType);
+    }
+  }
+
+  // Or it could be a free function
+  if (auto fn = si_->findFunction(fullName)) {
+    return std::make_shared<FunctionValue>(fn);
+  }
+
+  // If it's none of those things, assume it's another namespace
+  return std::make_shared<ClassNamespaceValue>(std::move(fullName), si_);
 }
 
-void import_libs(
+SourceImporter::SourceImporter(
+    // The compilation unit that will own the imported source
     std::shared_ptr<CompilationUnit> cu,
-    const std::string& qualifier,
-    const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& tensor_table,
-    const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(std::move(cu), src, tensor_table, import_callback);
-  importer.import(qualifier);
+    const std::vector<at::Tensor>* tensor_table,
+    SourceLoader loader)
+    : pImpl(std::make_shared<SourceImporterImpl>(
+          std::move(cu),
+          tensor_table,
+          std::move(loader))) {}
+
+TypePtr SourceImporter::loadNamedType(const QualifiedName& name) const {
+  TypePtr t = pImpl->findNamedType(name);
+  TORCH_INTERNAL_ASSERT(t != nullptr);
+  return t;
 }
+
+void SourceImporter::LEGACY_import_methods(
+    const script::Module& mod,
+    const std::shared_ptr<Source>& src) {
+  pImpl->LEGACY_import_methods(mod, src);
+}
+SourceImporter::~SourceImporter() = default;
+
 } // namespace script
 } // namespace jit
 } // namespace torch

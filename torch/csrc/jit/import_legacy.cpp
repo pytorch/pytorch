@@ -25,15 +25,15 @@ using caffe2::serialize::PyTorchStreamReader;
 namespace {
 
 struct ClassResolver : public script::Resolver {
-  explicit ClassResolver(std::shared_ptr<script::CompilationUnit> cu)
-      : cu_(std::move(cu)) {}
+  explicit ClassResolver(script::SourceImporter source_importer)
+      : source_importer_(std::move(source_importer)) {}
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
-      const override {
-    return cu_->get_type(c10::QualifiedName(name));
+      override {
+    return source_importer_.loadNamedType(c10::QualifiedName(name));
   }
 
  private:
-  std::shared_ptr<script::CompilationUnit> cu_;
+  script::SourceImporter source_importer_;
 };
 
 class ScriptModuleDeserializer final {
@@ -44,11 +44,18 @@ class ScriptModuleDeserializer final {
       const c10::optional<at::Device>& device)
       : compilation_unit_(cu),
         reader_(std::move(reader)),
-        device_(device) {}
+        device_(device),
+        source_importer_(
+            compilation_unit_,
+            &constants_table_,
+            [this](const std::string& qualifier) {
+              return findSourceInArchiveFromQualifier(
+                  *reader_, export_prefix_, qualifier);
+            }) {}
 
   script::Module LEGACY_deserialize();
 
-private:
+ private:
   at::Tensor LEGACY_loadTensor(
       const torch::TensorDef& tensor_proto,
       std::unordered_map<std::string, at::Storage>& storageMap);
@@ -60,13 +67,13 @@ private:
   std::vector<IValue> LEGACY_pickled_ivalues_;
   std::vector<std::string> LEGACY_moduleStack_;
 
-  void importCallback(const std::string& qualifier);
+  std::shared_ptr<Source> sourceLoader(const std::string& qualifier);
 
   std::shared_ptr<script::CompilationUnit> compilation_unit_;
   std::unique_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
   std::vector<at::Tensor> constants_table_;
-  std::unordered_set<std::string> imported_libs_;
+  script::SourceImporter source_importer_;
   std::string export_prefix_ = "code/";
 };
 
@@ -130,9 +137,8 @@ IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
       reinterpret_cast<const char*>(attributes_ptr.get()),
       attributes_size,
       [&](const c10::QualifiedName& qn) {
-        importCallback(qn.prefix());
-        return c10::StrongTypePtr(
-            compilation_unit_, compilation_unit_->get_class(qn));
+        auto cls = source_importer_.loadNamedType(qn)->expect<ClassType>();
+        return c10::StrongTypePtr(compilation_unit_, std::move(cls));
       },
       &constants_table_);
   return ivalue;
@@ -284,7 +290,7 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
     }
   }
   script::ScriptTypeParser typeParser(
-      std::make_shared<ClassResolver>(compilation_unit_));
+      std::make_shared<ClassResolver>(source_importer_));
   for (int i = 0; i < module_def.attributes_size(); ++i) {
     const torch::AttributeDef& attr_def = module_def.attributes(i);
     if (module.find_buffer(attr_def.name())) {
@@ -329,10 +335,7 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
         1,
         std::move(gen_ranges));
 
-    std::function<void(const std::string&)> import_callback =
-        [&, this](const std::string& qualifier) { importCallback(qualifier); };
-    script::LEGACY_import_methods(
-        module, src, constants_table_, import_callback);
+    source_importer_.LEGACY_import_methods(module, src);
   }
 
   if (module_def.has_get_state_attribute_id()) {
@@ -360,40 +363,6 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
     LEGACY_moduleStack_.pop_back();
   }
   return module;
-}
-
-void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
-  if (imported_libs_.count(qualifier)) {
-    return;
-  }
-  imported_libs_.insert(qualifier);
-  std::function<void(const std::string&)> import_callback =
-      [this](const std::string& qualifier) { importCallback(qualifier); };
-  const std::string path =
-      ImportExportHelpers::qualifierToPath(qualifier, export_prefix_);
-  at::DataPtr data;
-  size_t size;
-  std::tie(data, size) = reader_->getRecord(path);
-
-  std::shared_ptr<ConcreteSourceRangeUnpickler> gen_ranges = nullptr;
-
-  std::string debug_file = path + ".debug_pkl";
-  if (reader_->hasRecord(debug_file)) {
-    at::DataPtr debug_data;
-    size_t debug_size;
-    std::tie(debug_data, debug_size) = reader_->getRecord(debug_file);
-    gen_ranges = std::make_shared<ConcreteSourceRangeUnpickler>(
-        std::move(debug_data), debug_size);
-  }
-
-  auto src = std::make_shared<Source>(
-      std::string(static_cast<const char*>(data.get()), size),
-      path,
-      1,
-      gen_ranges);
-
-  script::import_libs(
-      compilation_unit_, qualifier, src, constants_table_, import_callback);
 }
 
 } // namespace
