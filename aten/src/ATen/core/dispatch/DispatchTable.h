@@ -171,12 +171,10 @@ private:
   struct DispatchStrategy final {
     // this is caching the index so we don't have to parse the schema inputs
     // again and again for each dispatcher lookup.
-    // reverse_index means this is the distance from the first tensor argument
-    // to argument_list.end(), i.e. from the top of the stack.
-    // Since it is distance to end(), this means it's 1-indexed,
-    // i.e. '1' is the last argument.
-    size_t reverse_index_of_first_tensor_arg_;
-    bool first_tensor_arg_is_tensor_list_;
+    // num_args_ is allowed to be zero; that just means you must do the
+    // fallthrough
+    // TODO: a potential optimization is to store a bitfield of arg locations,
+    size_t num_args_;
 
     // An invalid dispatch strategy means we can't dispatch any kernels.
     // You're able to create a dispatch table with an invalid dispatch strategy,
@@ -186,40 +184,40 @@ private:
     bool is_valid_;
 
     TensorTypeId get_dispatch_key(const Stack* stack, const std::string& operator_name) const {
-      const IValue& first_tensor_arg = torch::jit::peek(
-        *stack,
-        0,
-        reverse_index_of_first_tensor_arg_
-      );
-      // TODO: This will need to get adjusted for multiple dispatch
-      if (C10_UNLIKELY(first_tensor_arg_is_tensor_list_)) {
-        auto tensor_list = first_tensor_arg.toTensorListRef();
-        if (tensor_list.size() == 0) {
-          throw std::runtime_error("Tried to dispatch operator " + operator_name + " based on an empty tensor list. When the first tensor argument of an operator is a tensor list, then it must not be empty.");
+
+      TensorTypeSet ts;
+      for (const auto& ivalue : torch::jit::last(*stack, num_args_)) {
+        if (C10_LIKELY(ivalue.isTensor())) {
+          // NB: Take care not to introduce a refcount bump (there's
+          // no safe toTensorRef method, alas)
+          ts = ts | ivalue.unsafeToTensorImpl()->type_set();
+        } else if (C10_UNLIKELY(ivalue.isTensorList())) {
+          for (const auto& tensor : ivalue.toTensorListRef()) {
+            ts = ts | tensor.type_set();
+          }
         }
-        // TODO: Don't use legacy extractor; blocked on c10 understanding
-        // variable
-        return c10::legacyExtractTypeId(tensor_list[0].type_set());
-      } else {
-        return c10::legacyExtractTypeId(first_tensor_arg.unsafeToTensorImpl()->type_set());
       }
+      // TODO: Don't use legacy extractor; blocked on c10 understanding
+      // variable
+      return c10::legacyExtractTypeId(ts);
     }
   };
 
   static DispatchStrategy get_dispatch_strategy_(const FunctionSchema& schema) {
+    bool is_valid = false;
     for (size_t i = 0; i < schema.arguments().size(); ++i) {
       const auto& type = schema.arguments()[i].type();
       if (type->isSubtypeOf(TensorType::get())) {
-        return {schema.arguments().size() - i, false, true};
+        is_valid = true;
+        break;
       }
       if (type->isSubtypeOf(ListType::ofTensors())) {
-        return {schema.arguments().size() - i, true, true};
+        is_valid = true;
+        break;
       }
     }
 
-    // The function schema doesn't have tensor arguments.
-    // Return an invalid dispatch strategy.
-    return {0, false, false};
+    return {schema.arguments().size(), is_valid};
   }
 
   template<class GetDispatchKeyFunc>
