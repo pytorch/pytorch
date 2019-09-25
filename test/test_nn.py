@@ -1793,7 +1793,7 @@ class TestNN(NNTestCase):
             # Without using `torch.no_grad()`, this will leak CUDA memory.
             # (Issue is filed at https://github.com/pytorch/pytorch/issues/21875)
             mw[0][0] = 5
-        with self.assertRaisesRegex(RuntimeError, "Expected object of backend CUDA but got backend CPU"):
+        with self.assertRaisesRegex(RuntimeError, "Expected object of device type cuda but got device type cpu"):
             mw[0][0] == mw._base[0][0]
 
         try:

@@ -1014,13 +1014,7 @@ inline Tensor Tensor::expm1() const {
 }
 inline Tensor & Tensor::expm1_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::expm1_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("expm1_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::expm1_(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::expm1_(Tensor(a!) self) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
