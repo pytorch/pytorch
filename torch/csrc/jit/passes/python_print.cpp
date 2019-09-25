@@ -769,18 +769,22 @@ struct PythonPrintPass {
     WithSourceRange guard(&source_range_stack_, node);
     // Check for class dependencies. If this node inputs or outputs a class
     // type, we need to add it to our table of dependencies.
+    std::cout << "printNode 1" << std::endl;
     for (const auto input : node->inputs()) {
       registerClassDependencies(input->type());
     }
+    std::cout << "printNode 2" << std::endl;
     for (const auto output : node->outputs()) {
       registerClassDependencies(output->type());
     }
 
+    std::cout << "printNode 3" << std::endl;
     if (!print_const && node->kind() == prim::Constant)
       return;
     splitLongInlines(node->inputs());
     switch (node->kind()) {
       case prim::Return:
+        std::cout << "prim::Return" << std::endl;
         if (enforce_importable_ && node->inputs().size() != 1) {
           throw script::ErrorReport(node->sourceRange())
               << "Exportable methods must have a single return value. "
@@ -794,13 +798,16 @@ struct PythonPrintPass {
         }
         break;
       case prim::Loop:
+        std::cout << "prim::Loop" << std::endl;
         printLoop(LoopView(node));
         break;
       case prim::If:
+        std::cout << "prim::If" << std::endl;
         printIf(IfView(node));
         break;
       case prim::TupleUnpack:
       case prim::ListUnpack:
+        std::cout << "prim::ListUnpack" << std::endl;
         assignValuesToTheirUniqueNames(node->outputs());
         indent();
         // TupleUnpack(unpacked) turns into an assignment op that forces
@@ -813,6 +820,7 @@ struct PythonPrintPass {
         body_ << useOf(node->input()) << "\n";
         break;
       case prim::SetAttr: {
+        std::cout << "printNode setattr" << std::endl;
         const auto obj = node->inputs().at(0);
         const auto newVal = node->inputs().at(1);
         const auto type = obj->type()->expect<ClassType>();
@@ -820,6 +828,7 @@ struct PythonPrintPass {
         indent();
         body_ << useOf(obj) << "." << attrname << " = " << useOf(newVal)
               << "\n";
+        std::cout << "after printNode setattr" << std::endl;
       } break;
       case prim::fork: {
         // the subgraph gets emitted as another function
@@ -836,6 +845,7 @@ struct PythonPrintPass {
         printOutputDefinition(node, ss.str());
       } break;
       case prim::Function: {
+        std::cout << "prim::Function" << std::endl;
         if (enforce_importable_) {
           throw script::ErrorReport(node->sourceRange())
               << "closures are not exportable";
@@ -857,7 +867,9 @@ struct PythonPrintPass {
         printBody(graph->block());
       } break;
       default:
+        std::cout << "default" << std::endl;
         auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
+        std::cout << "printRHS" << std::endl;
         printRHS(*ss, node);
 
         // we prevent long constants from inlining here.
@@ -865,10 +877,12 @@ struct PythonPrintPass {
         // because of [reordering of inlines]
         if (output_inline_.count(node) == 0 ||
             (node->kind() == prim::Constant && isLongLine(ss->str()))) {
+          std::cout << "printOutputDefinition" << std::endl;
           printOutputDefinition(node, *ss);
         } else {
           // this node is safe to inline, so assign the output value
           // to that expression directly
+          std::cout << "assignValue" << std::endl;
           assignValue(node->output(), ss);
         }
     }
@@ -947,8 +961,10 @@ struct PythonPrintPass {
 
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
   void printRHS(TaggedStringStream& stmt, Node* node) {
+    std::cout << "node->kind(): " << node->kind().toQualString() << std::endl;
     switch (node->kind()) {
       case prim::PythonOp: {
+        std::cout << "python op" << std::endl;
         auto value = static_cast<const PythonOp*>(node);
         if (enforce_importable_) {
           throw script::ErrorReport(node->sourceRange())
@@ -964,9 +980,11 @@ struct PythonPrintPass {
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
       case prim::Uninitialized: {
+        std::cout << "uninitialized" << std::endl;
         stmt << "uninitialized(" << node->output()->type()->python_str() << ")";
       } break;
       case prim::Constant: {
+        std::cout << "Constant" << std::endl;
         if (node->outputs().size() == 1 &&
             node->output()->type()->kind() == TypeKind::FunctionType) {
           auto fn = node->output()->type()->expect<FunctionType>();
@@ -980,6 +998,7 @@ struct PythonPrintPass {
         }
       } break;
       case prim::ImplicitTensorToNum: {
+        std::cout << "ImplicitTensorToNum" << std::endl;
         stmt << "annotate(" << node->output()->type()->python_str() << ", "
              << useOf(node->input()) << ")";
       } break;
@@ -1060,6 +1079,7 @@ struct PythonPrintPass {
       } break;
       case prim::GetAttr: {
         const auto obj = node->inputs().at(0);
+        std::cout << "trying to get: " << node->s(attr::name) << std::endl;
         const auto classType = obj->type()->expect<ClassType>();
         const auto& field = node->s(attr::name);
         if (isValidIdentifier(field)) {
@@ -1156,7 +1176,9 @@ struct PythonPrintPass {
       body_ << "pass\n";
     }
     for (auto* node : root->nodes()) {
+      std::cout << "printNode??" << std::endl;
       printNode(node, /*print_const=*/false);
+      std::cout << "after printNode??" << std::endl;
     }
     return body_;
   }
@@ -1180,21 +1202,27 @@ struct PythonPrintPass {
   void printBody(Block* body) {
     // we always print constants at the top of the function, in the order
     // in which they are used.
+    std::cout << "printBody 1" << std::endl;
     std::vector<Node*> constants;
     buildConstantList(body, constants);
 
     // current graph is used to de-dup names within a single graph
+    std::cout << "printBody 2" << std::endl;
     scanBlock(body);
     {
       auto guard = WithIndented();
       // Print initial constant table (most are just inlined into their use,
       // but some like long strings do get emitted)
       for (Node* n : constants) {
+        std::cout << "printBody 3" << std::endl;
         printNode(n, /*print_const=*/true);
       }
       // Print body
+      std::cout << "printBody 4" << std::endl;
       printBlock(body, body->return_node()->inputs().size() > 0);
+      std::cout << "printBody 5" << std::endl;
       printNode(body->return_node(), /*print_const=*/false);
+      std::cout << "printBody 6" << std::endl;
     }
   }
 
@@ -1202,16 +1230,18 @@ struct PythonPrintPass {
   void printFunction(
       const Function& func,
       bool print_first_argument_type = true) {
+    std::cout << "1 " << std::endl;
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
-
+    std::cout << "2 " << std::endl;
     WithSourceRange guard(&source_range_stack_, graph.param_node());
 
     indent();
     body_ << "def " << func.name() << "(";
     auto param_it = graph.inputs().begin();
     for (const Argument& arg : schema.arguments()) {
+      std::cout << "3 " << std::endl;
       std::string arg_name = genName(arg.name());
       if (param_it == graph.inputs().begin()) {
         // the first argument may omit its type when it is implied by context
@@ -1230,6 +1260,7 @@ struct PythonPrintPass {
     }
 
     body_ << ") -> " << schema.returns().at(0).type()->python_str() << ":\n";
+    std::cout << "4 " << std::endl;
     printBody(graph.block());
   }
 
@@ -1309,14 +1340,20 @@ struct PythonPrintPass {
   }
 
   void printNamedType(const c10::NamedTypePtr& type) {
+    std::cout << "printNamedType" << std::endl;
     if (auto functionType = type->cast<FunctionType>()) {
+      std::cout << "printing function" << std::endl;
       printFunction(*functionType->function());
     } else if (auto classType = type->cast<ClassType>()) {
+      std::cout << "printing class" << std::endl;
       bool is_module = classType->is_module();
+      std::cout << "printing class " << is_module << std::endl;
       if (legacy_module_printing_) {
         is_module = false;
       }
+      std::cout << "printing class name: " << std::endl;
       body_ << "class " << classType->name()->name();
+      std::cout << "after printing class name" << std::endl;
       if (is_module) {
         body_ << "(Module)";
       }
@@ -1327,14 +1364,19 @@ struct PythonPrintPass {
         // For modules, we need to print special information about the module's
         // attributes and parameters.
         if (is_module) {
+          std::cout << "print module meta data" << std::endl;
           printModuleMetadata(classType);
+          std::cout << "after print module meta data" << std::endl;
         }
         // TODO fields
         for (auto& method : classType->methods()) {
+          std::cout << "print method" << std::endl;
           printFunction(*method);
+          std::cout << "after print method" << std::endl;
         }
       }
     } else if (auto tupleType = type->cast<TupleType>()) {
+      std::cout << "printing tuple" << std::endl;
       TORCH_INTERNAL_ASSERT(tupleType->schema());
       body_ << "class " << tupleType->name()->name();
       body_ << "(NamedTuple):\n";
@@ -1347,6 +1389,7 @@ struct PythonPrintPass {
         }
       }
     } else if (auto interfaceType = type->cast<InterfaceType>()) {
+      std::cout << "printing interface" << std::endl;
       body_ << "class " << interfaceType->name()->name();
       body_ << "(Interface):\n";
       {
