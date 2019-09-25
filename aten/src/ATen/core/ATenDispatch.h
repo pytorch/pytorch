@@ -92,11 +92,6 @@ class CAFFE2_API ATenDispatch {
     return *this;
   }
 
-  template<class FuncType>
-  ATenDispatch& registerOp(Backend b, const char* schema, FuncType* fn) {
-    return registerOp(backendToTensorTypeId(b), schema, fn);
-  }
-
   const ATenOpTable* getOpTable(const char* schema) const {
     auto iter = op_tables_.find(schema);
     TORCH_CHECK(iter != op_tables_.end(),

@@ -342,7 +342,7 @@ static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
   return result;
 }
 
-Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
   // can't take max of empty tensor
   if (self.numel() != 0) {
     auto maxes = at::max_values(self, dims, true);
@@ -357,6 +357,19 @@ Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool
   return result;
 }
 
+Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+  {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    logsumexp_out_impl(result, self, dims, keepdim);
+  }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result, self, dims, keepdim);
+#endif
+  return result;
+}
+
 Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::logsumexp_out(result, self, dims, keepdim);
@@ -364,12 +377,10 @@ Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
 
 #ifdef BUILD_NAMEDTENSOR
 Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim) {
-  TORCH_CHECK(false, "NYI: logsumexp with names");
   return at::logsumexp(self, dimnames_to_positions(self, dims), keepdim);
 }
 
 Tensor& logsumexp_out(Tensor& result, const Tensor& self, DimnameList dims, bool keepdim) {
-  TORCH_CHECK(false, "NYI: logsumexp_out with names");
   return at::logsumexp_out(result, self, dimnames_to_positions(self, dims), keepdim);
 }
 #endif
