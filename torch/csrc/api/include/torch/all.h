@@ -8,5 +8,4 @@
 #include <torch/serialize.h>
 #include <torch/types.h>
 #include <torch/utils.h>
-#include <torch/variant.h>
 #include <torch/autograd.h>
