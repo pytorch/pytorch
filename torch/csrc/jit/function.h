@@ -46,7 +46,7 @@ struct TORCH_API Function {
     if (optimized_graph_) {
       return *optimized_graph_;
     }
-    std::lock_guard<std::mutex> lock(compile_mutex);
+    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
     optimized_graph_ = graph_->copy();
     preoptimizeGraph(*optimized_graph_);
     return *optimized_graph_;
@@ -103,13 +103,9 @@ struct TORCH_API Function {
     if (executor_) {
       return executor_;
     }
-    // Make sure optimized graph is computed (do it before acquiring the lock to
-    // avoid deadlock).
-    (void)optimized_graph();
-
-    std::lock_guard<std::mutex> lock(compile_mutex);
+    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
     check_single_output();
-    executor_ = GraphExecutor(*optimized_graph_);
+    executor_ = GraphExecutor(optimized_graph());
     return executor_;
   }
 
@@ -126,7 +122,10 @@ struct TORCH_API Function {
   // Functions are invokable from multiple threads, so this lock needs to be
   // held when we're initializing graph executor for the first time or computing
   // the optimized graph.
-  mutable std::mutex compile_mutex;
+  // We're using reentrant mutex so that we don't need to worry about causing a
+  // deadlock by calling one method from another (e.g. optimized_graph() from
+  // get_executor()).
+  mutable std::recursive_mutex compile_mutex;
 
   GraphExecutor executor_; // for execution
 
