@@ -115,10 +115,8 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
   // used in fast path for T == uint8_t
   std::shared_ptr<fbgemm::PackBMatrix<std::int8_t>> Wq_packed_;
 
-  // For depthwise 3x3 conv
-  std::shared_ptr<fbgemm::Packed3x3ConvMatrix> Wq_depthwise_3x3_packed_;
-  // For depthwise 3x3x3 conv
-  std::shared_ptr<fbgemm::Packed3x3x3ConvMatrix> Wq_depthwise_3x3x3_packed_;
+  // For depthwise conv
+  std::shared_ptr<fbgemm::PackedDepthWiseConvMatrix> Wq_depthwise_packed_;
   // For small gconv
   std::shared_ptr<fbgemm::PackWeightMatrixForGConv<std::int8_t>>
       Wq_gconv_packed_;
