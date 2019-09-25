@@ -97,5 +97,8 @@ using AdaptiveMaxPool1dOptions = AdaptiveMaxPoolOptions<1>;
 /// `AdaptiveMaxPoolOptions` specialized for 2-D adaptive maxpool.
 using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<2>;
 
+/// `AdaptiveMaxPoolOptions` specialized for 3-D adaptive maxpool.
+using AdaptiveMaxPool3dOptions = AdaptiveMaxPoolOptions<3>;
+
 } // namespace nn
 } // namespace torch

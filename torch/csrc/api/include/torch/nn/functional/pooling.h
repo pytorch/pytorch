@@ -92,6 +92,16 @@ inline std::tuple<Tensor, Tensor> adaptive_max_pool2d_with_indices(
    return torch::adaptive_max_pool2d(input, options.output_size());
 }
 
+inline Tensor adaptive_max_pool3d(const Tensor& input,
+  const AdaptiveMaxPool3dOptions& options) {
+   return std::get<0>(torch::adaptive_max_pool3d(input, options.output_size()));
+}
+
+inline std::tuple<Tensor, Tensor> adaptive_max_pool3d_with_indices(
+  const Tensor& input, const AdaptiveMaxPool3dOptions& options) {
+   return torch::adaptive_max_pool3d(input, options.output_size());
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

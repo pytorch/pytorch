@@ -100,8 +100,17 @@ std::tuple<Tensor, Tensor> AdaptiveMaxPool2dImpl::forward_with_indices(const Ten
   return F::adaptive_max_pool2d_with_indices(input, options);
 }
 
+Tensor AdaptiveMaxPool3dImpl::forward(const Tensor& input) {
+  return F::adaptive_max_pool3d(input, options);
+}
+
+std::tuple<Tensor, Tensor> AdaptiveMaxPool3dImpl::forward_with_indices(const Tensor& input) {
+  return F::adaptive_max_pool3d_with_indices(input, options);
+}
+
 template class AdaptiveMaxPoolImpl<1, AdaptiveMaxPool1dImpl>;
 template class AdaptiveMaxPoolImpl<2, AdaptiveMaxPool2dImpl>;
+template class AdaptiveMaxPoolImpl<3, AdaptiveMaxPool3dImpl>;
 
 } // namespace nn
 } // namespace torch
