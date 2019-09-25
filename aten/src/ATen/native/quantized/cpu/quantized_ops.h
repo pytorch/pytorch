@@ -38,24 +38,35 @@ using qadaptive_avg_pool2d_fn = void (*)(
     int64_t istrideH,
     int64_t istrideW);
 
-using qavg_pool2d_fn =
-    void (*)(const Tensor& qx,
-             Tensor& qy,
-             int64_t b,
-             int64_t nInputPlane,
-             int64_t inputWidth,
-             int64_t inputHeight,
-             int64_t outputWidth,
-             int64_t outputHeight,
-             int kW,
-             int kH,
-             int dW,
-             int dH,
-             int padW,
-             int padH,
-             bool count_include_pad,
-             c10::optional<int64_t> divisor_override
-            );
+using qavg_pool2d_fn = void (*)(
+    const Tensor& qx,
+    Tensor& qy,
+    int64_t b,
+    int64_t nInputPlane,
+    int64_t inputWidth,
+    int64_t inputHeight,
+    int64_t outputWidth,
+    int64_t outputHeight,
+    int kW,
+    int kH,
+    int dW,
+    int dH,
+    int padW,
+    int padH,
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override);
+
+using qupsample_bilinear2d_fn = void (*)(
+    Tensor& output,
+    const Tensor& input,
+    int64_t input_height,
+    int64_t input_width,
+    int64_t output_height,
+    int64_t output_width,
+    int64_t nbatch,
+    int64_t channels,
+    bool align_corners);
+
 using qcat_nhwc_fn = Tensor (*)(
     const c10::List<Tensor>& qxs,
     int64_t dim,
@@ -71,6 +82,7 @@ DECLARE_DISPATCH(qadd_fn, qadd_relu_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
 DECLARE_DISPATCH(qadaptive_avg_pool2d_fn, qadaptive_avg_pool2d_nhwc_stub);
 DECLARE_DISPATCH(qavg_pool2d_fn, qavg_pool2d_nhwc_stub);
+DECLARE_DISPATCH(qupsample_bilinear2d_fn, qupsample_bilinear2d_nhwc_stub);
 DECLARE_DISPATCH(qcat_nhwc_fn, qcat_nhwc_stub);
 DECLARE_DISPATCH(qcat_nhwc_fn, qcat_relu_nhwc_stub);
 DECLARE_DISPATCH(qtopk_fn, qtopk_stub);
