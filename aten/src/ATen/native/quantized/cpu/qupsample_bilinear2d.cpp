@@ -74,7 +74,7 @@ static void upsample_bilinear2d_out_frame(
         float result = h0lambda * (w0lambda * pos1[0] + w1lambda * pos1[w1p]) +
             h1lambda *
                 (w0lambda * pos1[h1p * input_width] +
-                 w1lambda * pos1[h1p * input_width + w1p]);
+                 w1lambda * pos1[h1p * input_width + w1p]) - input.q_zero_point();
         // requantization
         pos2[0] = at::quantize_val<scalar_t>(
                       output_scale, output.q_zero_point(), result)

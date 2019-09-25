@@ -590,6 +590,7 @@ int64_t do_quantized_bilinear_on_AVX2(
     int64_t output_width,
     int64_t channels,
     int32_t output_zero_point,
+    int32_t input_zero_point,
     float multiplier,
     const float h0lambda,
     const float h1lambda,
@@ -622,9 +623,10 @@ int64_t do_quantized_bilinear_on_AVX2(
       Vec256<float> h1lambda_v(h1lambda);
       Vec256<float> w0lambda_v(w0lambda);
       Vec256<float> w1lambda_v(w1lambda);
+      Vec256<float> input_zero_point_v(input_zero_point);
       Vec256<float> result =
           h0lambda_v * (w0lambda_v * pos1_fp_v[0] + w1lambda_v * pos1_fp_v[1]) +
-          h1lambda_v * (w0lambda_v * pos1_fp_v[2] + w1lambda_v * pos1_fp_v[3]);
+          h1lambda_v * (w0lambda_v * pos1_fp_v[2] + w1lambda_v * pos1_fp_v[3]) - input_zero_point_v;
       float result_fp[vec_width];
       result.store(result_fp);
       vec256::QuantizeAvx2<T>(
@@ -699,6 +701,7 @@ void qupsample_bilinear2d_nhwc_kernel(
                   output_width,
                   channels,
                   output.q_zero_point(),
+                  input.q_zero_point(),
                   multiplier,
                   h0lambda,
                   h1lambda,
@@ -713,7 +716,7 @@ void qupsample_bilinear2d_nhwc_kernel(
                         (w0lambda * pos1[h1p * input_width * channels] +
                          w1lambda * pos1[(h1p * input_width + w1p) * channels]);
                 pos2[0] = at::quantize_val<scalar_t>(
-                              output_scale, output.q_zero_point(), result)
+                              output_scale, output.q_zero_point(), result - input.q_zero_point())
                               .val_;
                 pos1 += 1;
                 pos2 += 1;
