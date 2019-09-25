@@ -55,11 +55,11 @@ double calculate_kaiming_std(
 
 double calculate_gain(Nonlinearity nonlinearity, double param) {
   if (c10::get_if<enumtype::Tanh>(&nonlinearity)) {
-    return 5.0 / 3.0;  // NOLINT(readability-magic-numbers)
+    return 5.0 / 3.0;  // NOLINT
   } else if (c10::get_if<enumtype::ReLU>(&nonlinearity)) {
-    return std::sqrt(2.0);  // NOLINT(readability-magic-numbers)
+    return std::sqrt(2.0);  // NOLINT
   } else if (c10::get_if<enumtype::LeakyReLU>(&nonlinearity)) {
-    return std::sqrt(2.0 / (1 + pow(param, 2)));  // NOLINT(readability-magic-numbers)
+    return std::sqrt(2.0 / (1 + pow(param, 2)));  // NOLINT
   }
 
   return 1.0;
