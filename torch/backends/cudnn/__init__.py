@@ -1,5 +1,6 @@
 import os
 import ctypes
+import ctypes.util
 import sys
 import torch
 import warnings
@@ -52,7 +53,7 @@ def _libcudnn():
         if sys.platform == "win32":
             lib = find_cudnn_windows_lib()
         else:
-            lib = ctypes.cdll.LoadLibrary(None)
+            lib = ctypes.cdll.LoadLibrary(ctypes.util.find_library("cudnn64"))
         if hasattr(lib, 'cudnnGetErrorString'):
             lib.cudnnGetErrorString.restype = ctypes.c_char_p
             __cudnn_version = lib.cudnnGetVersion()

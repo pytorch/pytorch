@@ -1,6 +1,7 @@
 import os
 import glob
 import ctypes
+import ctypes.util
 import platform
 
 lib = None
@@ -33,7 +34,8 @@ def _libnvToolsExt():
     global lib
     if lib is None:
         if platform.system() != 'Windows':
-            lib = ctypes.cdll.LoadLibrary(None)
+            lib = ctypes.cdll.LoadLibrary(
+                ctypes.util.find_library("nvToolsExt"))
         else:
             lib = windows_nvToolsExt_lib()
         lib.nvtxMarkA.restype = None

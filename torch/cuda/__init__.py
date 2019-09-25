@@ -11,6 +11,7 @@ It is lazily initialized, so you can always import it, and use
 import contextlib
 import platform
 import ctypes
+import ctypes.util
 import os
 import sys
 import torch
@@ -79,7 +80,8 @@ def _load_cudart():
     if platform.system() == 'Windows':
         lib = find_cuda_windows_lib()
     else:
-        lib = ctypes.cdll.LoadLibrary(None)
+        # TODO(eric.cousineau): How to use the library already loaded?
+        lib = ctypes.cdll.LoadLibrary(ctypes.util.find_library("cudart"))
     if hasattr(lib, 'cudaGetErrorName'):
         return lib
 
