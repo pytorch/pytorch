@@ -240,6 +240,24 @@ void SimpleValue::setAttr(
   g.insertNode(g.createSetAttr(value_, field, newValue));
 }
 
+std::shared_ptr<SugaredValue> callClassMethod(
+    const ClassTypePtr& class_ptr,
+    const std::string& desugared_name,
+    const SourceRange& loc,
+    Function& m,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  if (!class_ptr->getMethod(desugared_name)) {
+    throw ErrorReport(loc) << class_ptr->python_str() << " does not define a "
+                           << desugared_name << " method";
+  }
+
+  Value* self = inputs.at(0).value(*m.graph());
+  return MethodValue(self, desugared_name)
+      .call(loc, m, inputs.slice(1), attributes, n_binders);
+}
+
 std::shared_ptr<SugaredValue> SimpleValue::call(
     const SourceRange& loc,
     Function& m,
@@ -272,6 +290,15 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
     ctx_inputs.insert(ctx_inputs.end(), inputs.begin(), inputs.end());
     return FunctionValue(ret).call(loc, m, ctx_inputs, attributes, n_binders);
   }
+
+  if (auto class_type = getValue()->type()->cast<ClassType>()) {
+    auto self_nv = NamedValue(loc, "self", getValue());
+    std::vector<NamedValue> new_inputs(inputs.begin(), inputs.end());
+    new_inputs.insert(new_inputs.begin(), self_nv);
+    return callClassMethod(
+        class_type, "__call__", loc, m, new_inputs, attributes, 1);
+  }
+
   return SugaredValue::call(loc, m, inputs, attributes, n_binders);
 }
 
@@ -287,24 +314,6 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
     throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
                            << " object is not iterable";
   }
-}
-
-std::shared_ptr<SugaredValue> callClassMethod(
-    const ClassTypePtr& class_ptr,
-    const std::string& desugared_name,
-    const SourceRange& loc,
-    Function& m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    size_t n_binders) {
-  if (!class_ptr->getMethod(desugared_name)) {
-    throw ErrorReport(loc) << class_ptr->python_str() << " does not define a "
-                           << desugared_name << " method";
-  }
-
-  Value* self = inputs.at(0).value(*m.graph());
-  return MethodValue(self, desugared_name)
-      .call(loc, m, inputs.slice(1), attributes, n_binders);
 }
 
 Value* SimpleValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
@@ -434,8 +443,9 @@ std::shared_ptr<SugaredValue> MagicMethod::call(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
+  Value* self;
   if (inputs.size() > 0) {
-    Value* self = inputs[0].value(*m.graph());
+    self = inputs[0].value(*m.graph());
     if (auto class_ptr = self->type()->cast<ClassType>()) {
       return callClassMethod(
           class_ptr, desugared_name_, loc, m, inputs, attributes, n_binders);
@@ -443,6 +453,7 @@ std::shared_ptr<SugaredValue> MagicMethod::call(
   }
   return base_value_->call(loc, m, inputs, attributes, n_binders);
 }
+
 std::shared_ptr<SugaredValue> ClassValue::call(
     const SourceRange& loc,
     Function& m,
