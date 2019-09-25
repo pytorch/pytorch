@@ -470,6 +470,31 @@ TEST_F(ModulesTest, AdaptiveAvgPool2dUneven) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 2}));
 }
 
+TEST_F(ModulesTest, AdaptiveAvgPool3d) {
+  AdaptiveAvgPool3d model(3);
+  auto x = torch::arange(0, 64);
+  x.resize_({1, 4, 4, 4}).set_requires_grad(true);
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor({
+    {{10.5, 11.5, 12.5},
+     {14.5, 15.5, 16.5},
+     {18.5, 19.5, 20.5}},
+    {{26.5, 27.5, 28.5},
+     {30.5, 31.5, 32.5},
+     {34.5, 35.5, 36.5}},
+    {{42.5, 43.5, 44.5},
+     {46.5, 47.5, 48.5},
+     {50.5, 51.5, 52.5}},
+  }, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 3, 3, 3}));
+}
+
 TEST_F(ModulesTest, Linear) {
   Linear model(5, 2);
   auto x = torch::randn({10, 5}, torch::requires_grad());

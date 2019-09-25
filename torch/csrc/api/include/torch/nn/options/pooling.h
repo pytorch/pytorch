@@ -118,5 +118,8 @@ using AdaptiveAvgPool1dOptions = AdaptiveAvgPoolOptions<1>;
 /// `AdaptiveAvgPoolOptions` specialized for 2-D adaptive avgpool.
 using AdaptiveAvgPool2dOptions = AdaptiveAvgPoolOptions<2>;
 
+/// `AdaptiveAvgPoolOptions` specialized for 3-D adaptive avgpool.
+using AdaptiveAvgPool3dOptions = AdaptiveAvgPoolOptions<3>;
+
 } // namespace nn
 } // namespace torch

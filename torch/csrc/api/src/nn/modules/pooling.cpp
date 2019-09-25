@@ -135,8 +135,13 @@ Tensor AdaptiveAvgPool2dImpl::forward(const Tensor& input) {
   return F::adaptive_avg_pool2d(input, options);
 }
 
+Tensor AdaptiveAvgPool3dImpl::forward(const Tensor& input) {
+  return F::adaptive_avg_pool3d(input, options);
+}
+
 template class AdaptiveAvgPoolImpl<1, AdaptiveAvgPool1dImpl>;
 template class AdaptiveAvgPoolImpl<2, AdaptiveAvgPool2dImpl>;
+template class AdaptiveAvgPoolImpl<3, AdaptiveAvgPool3dImpl>;
 
 } // namespace nn
 } // namespace torch
