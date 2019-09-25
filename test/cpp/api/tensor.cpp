@@ -199,6 +199,13 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
 
 TEST(TensorTest, MultidimTensorCtor) {
   {
+    auto tensor = torch::tensor({{1, 2}});
+    ASSERT_EQ(tensor.dtype(), torch::kInt);
+    ASSERT_EQ(tensor.sizes(), torch::IntArrayRef({1, 2}));
+    ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 3, torch::kInt).view(tensor.sizes())));
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
     auto tensor = torch::tensor({{1, 2}, {3, 4}});
     ASSERT_EQ(tensor.dtype(), torch::kInt);
     ASSERT_EQ(tensor.sizes(), torch::IntArrayRef({2, 2}));
