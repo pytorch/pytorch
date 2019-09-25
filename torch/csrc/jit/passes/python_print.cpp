@@ -217,21 +217,6 @@ struct PythonPrintImpl {
       return ranges_;
     }
 
-    // Write out this TaggedStringStream's text and source ranges to
-    // os and source_ranges_out, respectively. stream_pos gives
-    // the byte offset into the current stream, so we can accurately
-    // record source ranges as byte offsets.
-    void print(
-        std::ostream& os,
-        SourceRangeRecords* source_ranges_out,
-        int64_t stream_pos) {
-      os << str();
-      for (const auto& x : ranges()) {
-        source_ranges_out->push_back(x);
-        source_ranges_out->back().bytes += stream_pos;
-      }
-    }
-
    private:
     std::ostringstream oss_;
     std::vector<TaggedRange> ranges_;
@@ -1245,34 +1230,14 @@ struct PythonPrintImpl {
     printFunction(func, /*print_first_argument_type=*/false);
   }
 
-  std::string getImports() {
-    std::ostringstream ret;
-    std::unordered_set<std::string> already_printed;
-    for (const auto& c : deps_table_) {
-      if (already_printed.count(c->name()->prefix())) {
-        continue;
-      }
-      // TODO we try to print a def for TestLinear in TestLinear.forward
-      ret << "import " << c->name()->prefix() << "\n";
-      already_printed.insert(c->name()->prefix());
-    }
-    return ret.str();
-  }
-
   PythonPrintImpl(
-      std::ostream& out,
-      SourceRangeRecords& source_ranges_out,
       std::vector<at::Tensor>& tensor_table,
       std::vector<c10::NamedTypePtr>& deps_table,
       bool enforce_importable)
-      : out_(out),
-        source_ranges_out_(source_ranges_out),
-        body_(&source_range_stack_),
+      : body_(&source_range_stack_),
         tensor_table_(tensor_table),
         deps_table_(deps_table),
-        enforce_importable_(enforce_importable) {
-    TORCH_INTERNAL_ASSERT(deps_table.empty());
-  }
+        enforce_importable_(enforce_importable) {}
 
   void printModuleMetadata(const ClassTypePtr& moduleType) {
     std::vector<std::string> params;
@@ -1380,23 +1345,11 @@ struct PythonPrintImpl {
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unhandled NamedType");
     }
-    // remove `classType` from the list of deps
-    deps_table_.erase(
-        std::remove(deps_table_.begin(), deps_table_.end(), type),
-        deps_table_.end());
-  }
-
-  void finish() {
-    TORCH_INTERNAL_ASSERT(!finished_);
-    finished_ = true;
-    out_ << getImports();
-    int64_t source_offset = out_.tellp();
-    body_.print(out_, &source_ranges_out_, source_offset);
   }
 
   ~PythonPrintImpl() {}
 
- private:
+  TaggedStringStream body_;
   // When printing this node, is it safe to write it inline (i.e. without
   // assigning a temporary variable
   std::unordered_set<Node*> output_inline_;
@@ -1404,9 +1357,6 @@ struct PythonPrintImpl {
   // what valid identifiers are in use for the current function
   std::unordered_set<std::string> used_names_;
 
-  std::ostream& out_;
-  SourceRangeRecords& source_ranges_out_;
-  TaggedStringStream body_;
   // constants are written to this table, and given then named CONSTANTS.cN
   // where N is the index into this table.
   std::vector<at::Tensor>& tensor_table_;
@@ -1418,21 +1368,13 @@ struct PythonPrintImpl {
   // when we print this, should we error if the resulting output would
   // not be able to be reparsed?
   bool enforce_importable_;
-
-  // have we already printed to out_? We can't print more because we need
-  // to output imports before everything else
-  bool finished_ = false;
 };
 
 PythonPrint::PythonPrint(
-    std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable)
-    : pImpl(new PythonPrintImpl(
-          out,
-          source_ranges_out,
+    : pImpl(std::make_shared<PythonPrintImpl>(
           tensor_table,
           deps_table,
           enforce_importable)) {}
@@ -1449,8 +1391,12 @@ void PythonPrint::printMethod(const Function& func) {
   pImpl->printMethod(func);
 }
 
-void PythonPrint::finish() {
-  pImpl->finish();
+std::string PythonPrint::str() const {
+  return pImpl->body_.str();
+}
+
+const SourceRangeRecords& PythonPrint::ranges() const {
+  return pImpl->body_.ranges();
 }
 
 PythonPrint::~PythonPrint() = default;

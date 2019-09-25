@@ -590,62 +590,27 @@ class ScriptModuleSerializer {
   }
 
   void writeCode(const at::NamedTypePtr& root_type) {
-    convertNamedType(root_type);
-    static const std::string opset_string =
-        c10::str("op_version_set = ", CURRENT_OP_VERSION_SET, "\n");
+    class_deps_.push_back(root_type);
+    for (size_t i = 0; i < class_deps_.size(); ++i) {
+      // note: convertNameType may extend class_deps_, so re-checking
+      // .size() is necessary
+      convertNamedType(class_deps_[i]);
+    }
 
     // Mapping of filename => src. We need this because multiple clases may go
     // in the same file (e.g. foo.bar.Baz and foo.bar.Qux)
+    for (auto& item : file_streams_) {
+      const std::string filename = qualifierToArchivePath(item.key(), "code/");
 
-    // Aggregate classes into files by their qualified names
-    std::unordered_map<std::string, std::ostringstream> fileToSrc;
-    std::unordered_map<std::string, SourceRangeRecords> fileToDebug;
-    for (auto& item : converted_types_) {
-      const auto& converted_type = item.key();
-      auto& type_info = item.value();
-
-      // For the type, foo.bar.Baz
-      const std::string filename =
-          qualifierToArchivePath(converted_type->name()->prefix(), "code/");
-      // End state: filename is "foo/bar.py", in which we will define a class
-      // named Baz
-      auto& stream = fileToSrc[filename];
-
-      // Adjust the SourceRange offsets since we are concatenating multiple
-      // classes to a single file.
-      // Need to add opset_string size as an offset because we will be
-      // prepending it to the file. (We should remove this opset_version string
-      // at some point and stash it in the model.json)
-      const auto offset =
-          static_cast<size_t>(stream.tellp()) + opset_string.size();
-      for (auto& sourceRange : type_info.debug_info) {
-        sourceRange.bytes += offset;
-      }
-
-      auto& debugInfo = fileToDebug[filename];
-      debugInfo.insert(
-          debugInfo.end(),
-          type_info.debug_info.begin(),
-          type_info.debug_info.end());
-      fileToSrc[filename] << type_info.source;
-    }
-
-    for (const auto& item : fileToSrc) {
-      const auto& filename = item.first;
-      const auto src = item.second.str();
-      const auto& debugInfo = fileToDebug.at(filename);
-
-      // Prepend the opset_version string
-      const auto lib_str = c10::str(opset_string, src);
-      writer_.writeRecord(
-          filename, lib_str.c_str(), lib_str.size(), /*compress=*/true);
+      const std::string src = item.value().str();
+      writer_.writeRecord(filename, src.c_str(), src.size(), /*compress=*/true);
 
       // Write out the debug information
       std::stringstream debugFilename;
       debugFilename << filename << ".debug_pkl";
       SourceRangePickler source_range_pickler;
-      const auto& range_data = source_range_pickler.pickle(debugInfo);
-
+      const auto& range_data =
+          source_range_pickler.pickle(item.value().ranges());
       writer_.writeRecord(
           debugFilename.str(),
           range_data.data(),
@@ -653,48 +618,32 @@ class ScriptModuleSerializer {
           /*compress=*/true);
     }
   }
+
   void convertNamedType(const c10::NamedTypePtr& class_type) {
-    if (converted_types_.contains(class_type)) {
+    if (converted_types_.count(class_type)) {
       return;
     }
-
-    std::vector<c10::NamedTypePtr> class_deps;
-    std::ostringstream source_stream;
-    SourceRangeRecords source_ranges;
-    PythonPrint pp(
-        source_stream,
-        source_ranges,
-        constant_table_,
-        class_deps,
-        /*enforce_importable=*/true);
-    pp.printNamedType(class_type);
-    pp.finish();
-
-    for (const auto& c : class_deps) {
-      if (c == class_type) {
-        // Don't re-process this class and enter an infinite loop. We need this
-        // because we insert to converted_classes_ post-traversal, so the
-        // current class isn't in there yet.
-        continue;
-      }
-      convertNamedType(c);
+    converted_types_.insert(class_type);
+    std::string qualifier = class_type->name()->prefix();
+    PythonPrint* pp = file_streams_.find(qualifier);
+    if (!pp) {
+      pp = &file_streams_.insert(
+          qualifier,
+          PythonPrint(
+              constant_table_, class_deps_, /*enforce_importable=*/true));
     }
-    // Insert *after* we've traversed the dependencies. This ensures that any
-    // given class will appear after its dependencies in the order.
-    TypeInfo info{source_stream.str(), std::move(source_ranges)};
-    converted_types_.insert(class_type, std::move(info));
+    pp->printNamedType(class_type);
   }
 
   std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::Tensor> constant_table_;
+  std::unordered_set<c10::NamedTypePtr> converted_types_;
+  std::vector<c10::NamedTypePtr> class_deps_;
 
-  // all deps used by this module hierarchy
-  struct TypeInfo {
-    std::string source;
-    SourceRangeRecords debug_info;
-  };
-  OrderedDict<c10::NamedTypePtr, TypeInfo> converted_types_;
+  // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
+  // created
+  OrderedDict<std::string, PythonPrint> file_streams_;
 };
 
 // Pretty printing for ONNX

@@ -62,7 +62,6 @@ namespace jit {
   _(SaveExtraFilesHook)                \
   _(DCE)                               \
   _(CustomFusionNestedBlocks)          \
-  _(ImportTooNew)                      \
   _(ClassDerive)                       \
   _(Inliner)
 
