@@ -86,10 +86,12 @@ void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
   for (size_t i = 1; i < range; ++i) {
     _get_intraop_pool().run([fn, i]() { fn((int)i, i); });
   }
+  // Run the first task on the current thread directly.
   fn(0, 0);
 #else
   caffe2::ThreadPool* pool = caffe2::mobile_threadpool();
   if (pool) {
+    // caffe2::ThreadPool can utilize the current thread.
     pool->run(fn, range);
   } else {
     for (size_t i = 0; i < range; ++i) {
@@ -165,6 +167,7 @@ bool in_parallel_region() {
 #ifndef C10_MOBILE
   return in_parallel_region_ || (
     num_intraop_threads.load() == CONSUMED &&
+    // Needed as intraop_launch() doesn't set in_parallel_region().
     _get_intraop_pool().inThreadPool()
   );
 #else
@@ -190,7 +193,7 @@ void intraop_launch(std::function<void()> func) {
 std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func) {
 #ifndef C10_MOBILE
-  auto future = std::make_shared<c10::ivalue::Future>(NoneType::get());
+  auto future = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
   if (!in_parallel_region() && get_num_threads() > 1) {
     _get_intraop_pool().run(
       [func, future]() {
