@@ -339,7 +339,6 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
-    case prim::unchecked_cast:
       return analyzeExtractor(node);
     case prim::ConstantChunk:
       return analyzeChunk(node);
@@ -362,7 +361,6 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeConservative(node);
     case prim::Print:
     case prim::Uninitialized:
-    case prim::isinstance:
       // These ops do nothing
       return;
     default:
@@ -1250,8 +1248,6 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::CallFunction,
       prim::CallMethod,
       aten::wait,
-      prim::isinstance,
-      prim::unchecked_cast,
   };
 
   // Operators that should not be used by alias analysis

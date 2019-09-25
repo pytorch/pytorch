@@ -109,7 +109,12 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
-      .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
+      .def("_jit_pass_onnx_peephole",
+          [](std::shared_ptr<Graph>& graph,
+             int opset_version,
+             bool fixed_batch_size) {
+            return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
+          })
       .def(
           "_jit_pass_onnx_cast_all_constant_to_floating",
           CastAllConstantToFloating)
@@ -180,11 +185,10 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
       .def("_jit_pass_fuse_linear", &FuseLinear)
-      .def(
-          "_jit_pass_fold_quantize",
-          [](script::Module& module, const std::string& method_name) {
-            FoldQuantizeCallIntoBuffer(module, method_name);
-          })
+      .def("_jit_pass_fold_quantize",
+           [](script::Module& module, const std::string& method_name) {
+             FoldQuantizeCallIntoBuffer(module, method_name);
+           })
       .def(
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
@@ -236,7 +240,7 @@ void initJITBindings(PyObject* module) {
             Stack stack;
             stack.reserve(inputs.size()); // captures?
             for (auto& obj : inputs) {
-              stack.push_back(toTypeInferredIValue(obj));
+              stack.push_back(toIValue(obj));
             }
             ArgumentSpec spec = arg_spec_creator.create(with_grad, stack);
             arg_spec_creator.specializeTypes(*graph, spec);
@@ -307,7 +311,7 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph> g,
              py::tuple args,
              const std::string& unqualified_op_name) {
-            auto stack = toTraceableStack(args);
+            auto stack = toStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
       .def(
@@ -528,7 +532,7 @@ void initJITBindings(PyObject* module) {
         // Convert the output of the user-supplied funciton to IValue. The type
         // information of this IValue is used both to record the correct type in
         // the trace.
-        output_ivalue = toTypeInferredIValue(py_func_output);
+        output_ivalue = toIValue(py_func_output);
         Value* out_val = jit::tracer::getValueTrace(output_ivalue);
         body_block->registerOutput(out_val);
         node_output =
@@ -549,7 +553,7 @@ void initJITBindings(PyObject* module) {
 
       return PythonFutureWrapper(retval);
     } else {
-      auto result = toTypeInferredIValue(f(*args_tup));
+      auto result = toIValue(f(*args_tup));
       auto retval = c10::make_intrusive<c10::ivalue::Future>(result.type());
       retval->markCompleted(std::move(result));
       return PythonFutureWrapper(retval);

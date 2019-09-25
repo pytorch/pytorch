@@ -50,7 +50,7 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
   return std::make_shared<SimpleValue>(
-      emitBuiltinCall(loc, *m.graph(), symbol, inputs, attributes, self));
+      emitBuiltinCall(loc, *m.graph(), symbol, self, inputs, attributes, true));
 }
 
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
@@ -473,7 +473,7 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
   if (field != "__new__") {
     throw ErrorReport(loc) << "Tried to lookup unknown attribute on class";
   }
-  return SpecialFormValue::create(prim::CreateObject);
+  return std::make_shared<ClassNewMethod>(type_);
 }
 
 std::shared_ptr<SugaredValue> NamedTupleConstructor::call(

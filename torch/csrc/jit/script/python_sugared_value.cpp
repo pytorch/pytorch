@@ -96,8 +96,18 @@ std::shared_ptr<SugaredValue> PythonValue::call(
   auto inputs = toValues(*m.graph(), inputs_);
   auto schema = getSchema(inputs.size(), n_binders, loc);
 
-  MatchedSchema matched_schema =
-      matchSchema(schema, loc, *m.graph(), inputs_, attributes);
+  std::stringstream failure_messages;
+  c10::optional<MatchedSchema> matched_schema = tryMatchSchema(
+      schema,
+      loc,
+      *m.graph(),
+      c10::nullopt,
+      inputs_,
+      attributes,
+      &failure_messages,
+      /*conv_tensor_to_num*/ true);
+  if (!matched_schema)
+    throw ErrorReport(loc) << failure_messages.str();
 
   // If if a function is marked as dropped,
   // we throw an exception if it is invoked.
@@ -110,7 +120,8 @@ std::shared_ptr<SugaredValue> PythonValue::call(
             "This Python function is annotated to be ignored and cannot be run"));
     g->insert(prim::RaiseException, {err_msg}, {}, loc);
     return std::make_shared<SimpleValue>(
-        g->insertNode(g->createUninitialized(matched_schema.return_types.at(0)))
+        g->insertNode(
+             g->createUninitialized(matched_schema->return_types.at(0)))
             ->output());
   }
 
@@ -121,11 +132,11 @@ std::shared_ptr<SugaredValue> PythonValue::call(
       m.graph()->createPythonOp(THPObjectPtr(func.release().ptr()), cconv, {}));
 
   new_node->setSourceRange(loc);
-  for (auto& i : matched_schema.inputs)
+  for (auto& i : matched_schema->inputs)
     new_node->addInput(i);
 
   Value* output =
-      new_node->addOutput()->setType(matched_schema.return_types.at(0));
+      new_node->addOutput()->setType(matched_schema->return_types.at(0));
   return std::make_shared<SimpleValue>(output);
 }
 
@@ -207,6 +218,71 @@ Value* ConstantPythonTupleValue::asValue(const SourceRange& loc, Function& m) {
   }
   auto node = m.graph()->createTuple(values);
   return m.graph()->insertNode(node)->output();
+}
+
+std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  std::stringstream err;
+  std::vector<NamedValue> new_inputs = inputs.vec();
+  new_inputs.insert(new_inputs.begin(), module_);
+
+  std::stringstream failure_messages;
+  for (bool allow_conversions : {false, true}) {
+    // clear previous error messages
+    failure_messages.str("");
+    for (const std::string& method_name : method_names_) {
+      auto cls = module_->type()->expect<ClassType>();
+      const auto fn = cls->getMethod(method_name);
+      TORCH_INTERNAL_ASSERT(fn, "Expected class to have method ", method_name);
+      auto match = tryMatchSchema(
+          fn->getSchema(),
+          loc,
+          *caller.graph().get(),
+          c10::nullopt,
+          new_inputs,
+          attributes,
+          &err,
+          allow_conversions);
+      if (match) {
+        return MethodValue(module_, method_name)
+            .call(loc, caller, inputs, attributes, n_binders);
+      }
+    }
+  }
+  throw ErrorReport(loc) << failure_messages.str();
+}
+
+std::shared_ptr<SugaredValue> OverloadedFunctionValue::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> inputs_,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  std::stringstream failure_messages;
+  for (bool allow_conversions : {false, true}) {
+    // clear previous error messages
+    failure_messages.str("");
+    for (const auto& compiled_overload : compiled_overloads_) {
+      const auto matched_schema = tryMatchSchema(
+          compiled_overload.function_->getSchema(),
+          loc,
+          *caller.graph(),
+          c10::nullopt,
+          inputs_,
+          attributes,
+          &failure_messages,
+          allow_conversions);
+      if (matched_schema) {
+        return FunctionValue(compiled_overload)
+            .call(loc, caller, inputs_, attributes, n_binders);
+      }
+    }
+  }
+  throw ErrorReport(loc) << failure_messages.str();
 }
 
 Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
@@ -294,7 +370,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   py::object overloads =
       py_module_.attr("_overloads").attr("get")(field, py::none());
   if (!overloads.is_none()) {
-    return std::make_shared<MethodValue>(
+    return std::make_shared<OverloadedMethodValue>(
         self_, py::cast<std::vector<std::string>>(overloads));
   }
   if (!py::hasattr(py_module_, field.c_str())) {
@@ -499,10 +575,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
   } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
-    return SpecialFormValue::create(prim::fork);
+    return std::make_shared<ForkValue>();
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
-    return SpecialFormValue::create(prim::annotate);
+    return std::make_shared<AnnotateValue>();
   } else if (auto callee = as_module(obj)) {
     throw ErrorReport(loc) << "Cannot call a ScriptModule that is not"
                            << " a submodule of the caller";
@@ -576,7 +652,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         py::module::import("torch.jit").attr("_get_overloads")(obj);
     if (!overloads.is_none()) {
       auto compiled_fns = py::cast<std::vector<StrongFunctionPtr>>(overloads);
-      return std::make_shared<FunctionValue>(std::move(compiled_fns));
+      return std::make_shared<OverloadedFunctionValue>(std::move(compiled_fns));
     }
 
     auto compiled_fn =
@@ -584,6 +660,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     if (auto callee = as_function(compiled_fn)) {
       return std::make_shared<FunctionValue>(*callee);
     }
+  }
+
+  py::bool_ isMethod = py::module::import("inspect").attr("ismethod")(obj);
+  // methods here have been explicitly annotated to not be compiled,
+  // so they do not have the same overload and compile checks as for functions
+  if (isFunction || isMethod) {
     auto rcb = py::module::import("torch.jit").attr("_gen_rcb")(obj, 0);
     return std::make_shared<PythonValue>(obj, rcb);
   }

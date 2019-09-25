@@ -66,7 +66,8 @@ std::shared_ptr<Graph> trace(
   auto input_typeptr = TupleType::create(std::move(input_types));
   std::shared_ptr<tracer::TracingState> state;
   Stack trace_stack_in;
-  std::tie(state, trace_stack_in) = tracer::enter(input_vars);
+  std::tie(state, trace_stack_in) =
+      tracer::enter(tracer::TypedStack(input_vars, input_typeptr));
   variable_list trace_vars_in = fmap(
       trace_stack_in, [](const IValue& v) { return Variable(v.toTensor()); });
   auto trace_vars_out = test(trace_vars_in);
