@@ -35,13 +35,15 @@ __global__ void renormRowsL1(scalar_t* dist, long rows, long cols) {
     scalar_t sum = static_cast<scalar_t>(0);
     for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
       val = dist[row * cols + col];
-      assert(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
+      assert(!THCNumerics<scalar_t>::isnan(val))
+      assert(val >= zero);
       sum = sum + val;
     }
 
     sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<scalar_t>(), zero);
     if (threadIdx.x == 0) {
-      assert(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
+      assert(!THCNumerics<scalar_t>::isnan(val))
+      assert(val >= zero);
       smem[0] = sum;
     }
     __syncthreads();
@@ -346,7 +348,6 @@ sampleMultinomialOnce(int64_t* dest,
   }
 }
 
-
 void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n_sample, const bool with_replacement, Generator* generator) {
   auto gen = get_generator_or_default<CUDAGenerator>(generator, cuda::detail::getDefaultCUDAGenerator());
 
@@ -357,13 +358,11 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
       inputSize == 1 ? self.size(0) : self.size(1);
 
   // Restructure data for 2d
-  if (inputSize == 1) {
-    self.unsqueeze_(0);
-  }
+  auto self_v = inputSize == 1 ? self.view({numDist, numCategories}) : self;
 
   result.resize_({numDist, n_sample});
 
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "multinomial_kernel_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self_v.scalar_type(), "multinomial_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto props = at::cuda::getCurrentDeviceProperties();
     assert(props != NULL);
@@ -378,7 +377,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
       // To exploit greater parallelism for the sampling, generate the
       // Uniform random samples in a separate kernel launch, into
       // temporarily allocated memory. The device RNG is thread-limited
-      Tensor sampled = at::empty({numDist, n_sample}, self.options());
+      Tensor sampled = native::empty({numDist, n_sample}, self_v.options());
       at::native::uniform_cuda_(sampled, 0.0, 1.0, gen);
 
       dim3 block(numCategories < maxThreads ? numCategories : maxThreads);
@@ -392,21 +391,21 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
                   numDist,
                   numCategories,
                   sampled.data_ptr<scalar_t>(),
-                  self.data_ptr<scalar_t>(),
-                  self.stride(0),
-                  self.stride(1)
+                  self_v.data_ptr<scalar_t>(),
+                  self_v.stride(0),
+                  self_v.stride(1)
           );
     } else {
       // Generic, slow implementation with memory allocations
 
       // For sampling without replacement, we modify the distribution
       // for subsequent samples in this space
-      Tensor origDist = at::empty_like(self);
-      origDist.copy_(self);
+      Tensor origDist = native::empty_like(self_v);
+      origDist.copy_(self_v);
 
-      Tensor normDist = at::empty_like(self);
+      Tensor normDist = native::empty_like(self_v);
 
-      Tensor prefixSum = at::empty_like(self);
+      Tensor prefixSum = native::empty_like(self_v);
 
       // Renorm along rows
       normDist.copy_(origDist);
@@ -496,7 +495,6 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
   });
 
   if (inputSize == 1) {
-    self.squeeze_(0);
     result.resize_({n_sample});
   }
 }

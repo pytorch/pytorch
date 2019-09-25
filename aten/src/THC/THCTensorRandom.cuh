@@ -62,40 +62,6 @@ condDiv(T *q, int64_t *J, int64_t inputsize, T q_max) {
 #undef MAX_NUM_BLOCKS
 #undef BLOCK_SIZE
 
-// Normalizes the L1 norm of every row to 1; used by multinomial
-template <typename T>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(1024)
-#endif
-__global__ void renormRowsL1(T* dist, long rows, long cols) {
-  extern __shared__  unsigned char my_smem[];
-  T *smem = reinterpret_cast<T *>(my_smem);
-  T zero = ScalarConvert<int, T>::to(0);
-  T val;
-  for (int64_t row = blockIdx.x; row < rows; row += gridDim.x) {
-    T sum = ScalarConvert<int, T>::to(0);
-    for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
-      val = dist[row * cols + col];
-      assert(! THCNumerics<T>::lt(val, zero)); // ! < 0 for NaN handling
-      sum = THCNumerics<T>::add(sum, val);
-    }
-
-    sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<T>(), zero);
-    if (threadIdx.x == 0) {
-      assert(! THCNumerics<T>::lt(sum, zero)); // ! < 0 for NaN handling
-      smem[0] = sum;
-    }
-    __syncthreads();
-
-    sum = smem[0];
-    if (THCNumerics<T>::gt(sum, ScalarConvert<int, T>::to(0))) {
-      for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
-        dist[row * cols + col] = THCNumerics<T>::div(dist[row * cols + col], sum);
-      }
-    }
-  }
-}
-
 template <typename T>
 __global__ void
 aliasMultinomialSetup(int64_t *J, T*q, int64_t inputsize, int64_t * smaller, int64_t *larger, int small_c, int large_c) {

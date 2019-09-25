@@ -9,27 +9,6 @@
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
-void THCTensor_(renormRows)(struct THCState* state,
-                             THCTensor* t) {
-  THAssert(THCTensor_(nDimensionLegacyAll)(state, t) == 2);
-  int64_t rows = THCTensor_(size)(state, t, 0);
-  int64_t cols = THCTensor_(size)(state, t, 1);
-
-  cudaDeviceProp* props = at::cuda::getCurrentDeviceProperties();
-  THAssert(props != NULL);
-
-  int numSM = props->multiProcessorCount;
-  int maxThreads = props->maxThreadsPerBlock;
-
-  dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
-  dim3 block(cols < maxThreads ? cols : maxThreads);
-
-  renormRowsL1<scalar_t>
-    <<<grid, block, block.x * sizeof(scalar_t),
-    THCState_getCurrentStream(state)>>>(THCTensor_(data)(state, t),
-                                        rows, cols);
-}
-
 void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCudaLongTensor *_J, THCTensor *_q){
   THArgCheck(_probs->dim() == 1, 1,
              "expected 1-D probability tensor, got %d-D probability tensor instead",
