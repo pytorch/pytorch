@@ -2,6 +2,7 @@
 #include "torch/csrc/jit/custom_operator.h"
 #include <ATen/ATen.h>
 #include <ATen/core/stack.h>
+#include "torch/csrc/autograd/generated/VariableType.h"
 //#include <c10/core/TensorTypeId.h>
 
 using Stack = std::vector<c10::IValue>;
@@ -101,7 +102,7 @@ void scatter__src_func(c10::OperatorKernel* kernel, Stack* stack) {
       (std::move(peek(*stack, 2, 4))).toTensor(),
       (std::move(peek(*stack, 3, 4))).toTensor()
       );
-  drop(*stack, 4);
+//auto result_ = torch::autograd::scatter_(const_cast<Tensor&>(*this), dim, index, src);  drop(*stack, 4);
   pack(*stack, std::move(result_));
 }
 
@@ -283,11 +284,11 @@ torch::RegisterOperators::options().kernel<decltype(at::embedding), &at::embeddi
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
   lstm_data_func
 )
-//).op(
-//  "_aten::scatter_.src(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)",
-//  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-//  scatter__src_func
-//)
+).op(
+  "_aten::scatter_.src(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  scatter__src_func
+).aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
 //).op(
 //  "_aten::zeros",
 //  torch::RegisterOperators::options().catchAllKernel(

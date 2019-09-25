@@ -18,7 +18,6 @@ void ListConstructFunc(int64_t num_inputs, Stack& stack) {
   push(stack, std::move(vals));
 }
 
->>>>>>> 34d5c6f588... Make it produce correct results for fbnet, after the recent updates of earlier commits:torch/csrc/jit/lite_interpreter/lite_interpreter.cpp
 namespace mobile {
 InterpreterState::InterpreterState(std::shared_ptr<Code> code) : code_(code) {
   registers_.resize(code_->register_size_);
@@ -32,21 +31,22 @@ InterpreterState::InterpreterState(std::shared_ptr<Code> code) : code_(code) {
 bool InterpreterState::run(Stack& stack) {
   size_t pc = 0;
   while (true) {
-    //    std::cout << "RUNNING " << pc << " " << instructions_[pc];
-    //    std::cout << std::endl;
-    //    for (auto val : stack) {
-    //      if (val.isTensor()) {
-    //        std::cout << val.toTensor().sizes() << std::endl;
-    //      } else {
-    //        std::cout << val << std::endl;
-    //      }
-    //    }
+    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
+    std::cout << std::endl;
+    for (auto val : stack) {
+      if (val.isTensor()) {
+        std::cout << val.toTensor().sizes() << std::endl;
+      } else {
+        std::cout << val << std::endl;
+      }
+    }
     Instruction inst = code_->instructions_[pc];
     TORCH_CHECK(isOpSupportedInMobile(inst.op), OpCode2Str(inst.op),
                 " is not supported in mobile module.");
     switch (inst.op) {
       case OP: {
         auto opname = code_->op_names_[inst.X];
+        std::cout << opname.name << "." << opname.overload_name << std::endl;
         auto op = c10::Dispatcher::singleton().findSchema(opname);
         assert(op.has_value());
         c10::Dispatcher::singleton().callBoxed(*op, &stack);
