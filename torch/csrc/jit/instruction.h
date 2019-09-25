@@ -1,6 +1,7 @@
 #pragma once
 #include <typeinfo>
 #include <stdint.h>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
@@ -52,5 +53,8 @@ struct Instruction {
   Instruction(OpCode op, int32_t X, uint16_t N)
       : op(op), padding(0), N(N), X(X) {}
 };
+
+bool isOpSupportedInMobile(OpCode op);
+
 }
 }
