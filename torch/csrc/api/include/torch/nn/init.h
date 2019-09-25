@@ -12,9 +12,7 @@ namespace init {
 ///
 /// NOTE: Please see `torch/enum.h` for the range of acceptable values for
 /// `Nonlinearity` type.
-TORCH_API double calculate_gain(
-  Nonlinearity nonlinearity,
-  double param = 0.01);
+TORCH_API double calculate_gain(Nonlinearity nonlinearity, double param = 0.01);
 
 /// Fills the given `tensor` with the provided `value` in-place, and returns it.
 /// No gradient will be recorded for this operation.
