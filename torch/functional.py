@@ -2,7 +2,6 @@ import torch
 import torch.nn.functional as F
 from torch._six import inf
 from itertools import product
-import warnings
 
 __all__ = [
     'align_tensors',  # BUILD_NAMEDTENSOR only
@@ -11,7 +10,6 @@ __all__ = [
     'cdist',
     'chain_matmul',
     'einsum',
-    'gels',
     'isfinite',
     'isinf',
     'lu',
@@ -862,22 +860,6 @@ def lu(A, pivot=True, get_infos=False, out=None):
         return result  # A_LU, pivots, infos
     else:
         return result[0], result[1]  # A_LU, pivots
-
-
-def gels(input, A, out=None):
-    r"""Computes the solution to the least squares and least norm problems for a full
-    rank matrix :math:`A` of size :math:`(m \times n)` and a matrix :math:`B` of
-    size :math:`(m \times k)`.
-
-    For more information regarding :func:`torch.gels`, please check :func:`torch.lstsq`.
-
-    .. warning::
-        :func:`torch.gels` is deprecated in favour of :func:`torch.lstsq` and will be removed in the
-        next release. Please use :func:`torch.lstsq` instead.
-    """
-    warnings.warn("torch.gels is deprecated in favour of torch.lstsq and will be removed in "
-                  "the next release. Please use torch.lstsq instead.", stacklevel=2)
-    return torch.lstsq(input, A, out=out)
 
 
 def align_tensors(*tensors):
