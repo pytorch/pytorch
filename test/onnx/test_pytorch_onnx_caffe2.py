@@ -1974,6 +1974,15 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         self.run_model_test(ArangeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_size(self):
+        class SizeModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.arange(input.size(0)), torch.arange(input.size(-1))
+
+        x = torch.randn(5, 3, 2)
+        self.run_model_test(SizeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
     def test_log2(self):
         class Log2Model(torch.nn.Module):
             def forward(self, input):
