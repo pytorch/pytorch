@@ -167,18 +167,6 @@ __inline double log1p(double x) { return THLog1p(x); }
 inline double log1p(double x) { return THLog1p(x); }
 #endif
 
-#if defined(_MSC_VER)
-<<<<<<< HEAD
-__inline double log2(double x) { return THLog2(x); }
-#else
-inline double log2(double x) { return THLog2(x); }
-=======
-__inline double expm1(double x) { return THExpm1(x); }
-#else
-inline double expm1(double x) { return THExpm1(x); }
->>>>>>> Move the CUDA implementation of log2 to ATen.
-#endif
-
 #define snprintf _snprintf
 #define popen _popen
 #define pclose _pclose
