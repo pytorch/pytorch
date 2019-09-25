@@ -60,7 +60,10 @@ inline void parallel_for(
       internal::_unset_thread_num();
     };
 
-    std::vector<c10::ivalue::Future> futures(num_tasks);
+    std::vector<std::shared_ptr<c10::ivalue::Future>> futures(num_tasks);
+    for (size_t i = 0; i < num_tasks; ++i) {
+      futures[i] = std::make_shared<c10::ivalue::Future>(NoneType::get());
+    }
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
       int64_t local_start = begin + task_id * chunk_size;
       if (local_start < end) {
@@ -69,11 +72,11 @@ inline void parallel_for(
           // copy task_id, local_start, local_end
           [&task, &futures, task_id, local_start, local_end]() {
             task(task_id, local_start, local_end);
-            futures[task_id].markCompleted();
+            futures[task_id]->markCompleted();
           }
         );
       } else {
-        futures[task_id].markCompleted();
+        futures[task_id]->markCompleted();
       }
     }
 
@@ -81,7 +84,7 @@ inline void parallel_for(
     task(0, begin, first_task_end);
     // wait for all tasks to finish
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
-      futures[task_id].wait();
+      futures[task_id]->wait();
     }
     if (eptr) {
       std::rethrow_exception(eptr);
@@ -128,7 +131,10 @@ inline scalar_t parallel_reduce(
       internal::_unset_thread_num();
     };
 
-    std::vector<c10::ivalue::Future> futures(num_tasks);
+    std::vector<std::shared_ptr<c10::ivalue::Future>> futures(num_tasks);
+    for (size_t i = 0; i < num_tasks; ++i) {
+      futures[i] = std::make_shared<c10::ivalue::Future>(NoneType::get());
+    }
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
       int64_t local_start = begin + task_id * chunk_size;
       if (local_start < end) {
@@ -137,18 +143,18 @@ inline scalar_t parallel_reduce(
           // copy task_id, local_start, local_end
           [&task, &futures, task_id, local_start, local_end]() {
             task(task_id, local_start, local_end);
-            futures[task_id].markCompleted();
+            futures[task_id]->markCompleted();
           }
         );
       } else {
-        futures[task_id].markCompleted();
+        futures[task_id]->markCompleted();
       }
     }
 
     int64_t first_task_end = std::min(end, (int64_t)(chunk_size + begin));
     task(0, begin, first_task_end);
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
-      futures[task_id].wait();
+      futures[task_id]->wait();
     }
     if (eptr) {
       std::rethrow_exception(eptr);

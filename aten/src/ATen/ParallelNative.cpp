@@ -125,7 +125,7 @@ void intraop_launch(std::function<void()> func) {
 
 std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func) {
-  auto future = std::make_shared<c10::ivalue::Future>();
+  auto future = std::make_shared<c10::ivalue::Future>(NoneType::get());
   if (!in_parallel_region() && get_num_threads() > 1) {
     internal::_get_intraop_pool().run(
       [func, future]() {
