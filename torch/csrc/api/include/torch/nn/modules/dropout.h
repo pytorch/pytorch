@@ -17,7 +17,7 @@ namespace detail {
 template <typename Derived>
 class DropoutImplBase : public torch::nn::Cloneable<Derived> {
  public:
-  explicit DropoutImplBase(DropoutOptions options_ = DropoutOptions());
+  explicit DropoutImplBase(const DropoutOptions& options_ = DropoutOptions());
 
   void reset() override;
 
@@ -32,7 +32,7 @@ class DropoutImplBase : public torch::nn::Cloneable<Derived> {
 /// about the exact semantics of this module.
 class TORCH_API DropoutImpl : public detail::DropoutImplBase<DropoutImpl> {
  public:
-  explicit DropoutImpl(DropoutOptions options_ = DropoutOptions());
+  explicit DropoutImpl(const DropoutOptions& options_ = DropoutOptions());
 
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.
@@ -54,7 +54,7 @@ class TORCH_API DropoutImpl : public detail::DropoutImplBase<DropoutImpl> {
 class TORCH_API FeatureDropoutImpl
     : public detail::DropoutImplBase<FeatureDropoutImpl> {
  public:
-  explicit FeatureDropoutImpl(DropoutOptions options_ = DropoutOptions());
+  explicit FeatureDropoutImpl(const DropoutOptions& options_ = DropoutOptions());
 
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.

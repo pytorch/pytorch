@@ -7,11 +7,11 @@
 //
 // From https://github.com/mpark/variant
 //
-// Libtorch
-// - Move to `torch` namespace.
+// C10
+// - Move to `c10` namespace.
 
-#ifndef TORCH_DETAIL_VARIANT_H_
-#define TORCH_DETAIL_VARIANT_H_
+#ifndef C10_UTIL_VARIANT_H_
+#define C10_UTIL_VARIANT_H_
 
 /*
    variant synopsis
@@ -2815,10 +2815,10 @@ namespace std {
 
 }  // namespace std
 
-namespace torch {
+namespace c10 {
 
 using namespace mpark;
 
-} // namespace torch
+} // namespace c10
 
-#endif  // TORCH_DETAIL_VARIANT_H_
+#endif  // C10_UTIL_VARIANT_H_
