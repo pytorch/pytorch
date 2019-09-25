@@ -800,7 +800,7 @@ class TestQuantizedOps(TestCase):
            nhwc_layout=st.sampled_from((True, False)))
     def test_interpolate(self, X, size, mode, scale_factor, align_corners, nhwc_layout):
         """
-        This test cover upsample_nearest2d
+        This test cover upsample_nearest2d and upsample_bilinear2d
         """
         X, (scale, zero_point, torch_type) = X
         H, W = X.shape[-2:]
