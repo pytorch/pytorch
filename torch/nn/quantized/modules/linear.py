@@ -72,6 +72,11 @@ class DeQuantize(Module):
     def from_float(mod):
         return DeQuantize()
 
+def _is_jit_script_DO_NOT_CALL_OR_YOU_WILL_BE_FIRED():
+    # type: () -> bool
+    x = 0x7FFFFFFFFFFFFFFF
+    return x + 1 < 0
+
 class Linear(torch.nn.Module):
     r"""
     A quantized linear module with quantized tensor as inputs and outputs.
@@ -145,6 +150,10 @@ class Linear(torch.nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
+        if (not _is_jit_script_DO_NOT_CALL_OR_YOU_WILL_BE_FIRED()):
+            raise RuntimeError('torch.save() is not currently supported for quantized modules.'
+                               ' See https://github.com/pytorch/pytorch/issues/24045.'
+                               ' Please use state_dict or torch.jit serialization.')
         (w, b) = self._weight_bias()
         return (
             self.in_features,
