@@ -270,7 +270,7 @@ void ArgumentSpecCreator::specializeTypes(
       // so we disconnect the input here and replace its uses with
       // a constant
       WithInsertPoint guard(*graph.nodes().begin());
-      auto c = graph.insertConstant({}, ot);
+      auto c = graph.insertConstant({});
       inputs[i]->replaceAllUsesWith(c);
     } else {
       inputs[i]->setType(t);

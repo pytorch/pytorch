@@ -292,6 +292,7 @@ Other Operations
 .. autofunction:: bincount
 .. autofunction:: broadcast_tensors
 .. autofunction:: cartesian_prod
+.. autofunction:: cdist
 .. autofunction:: combinations
 .. autofunction:: cross
 .. autofunction:: diag
@@ -330,7 +331,6 @@ BLAS and LAPACK Operations
 .. autofunction:: cholesky_solve
 .. autofunction:: dot
 .. autofunction:: eig
-.. autofunction:: gels
 .. autofunction:: geqrf
 .. autofunction:: ger
 .. autofunction:: inverse

@@ -76,6 +76,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/peephole.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/constant_fold.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/scalar_type_analysis.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_arg_flatten.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_interpreter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_ir.cpp
@@ -221,7 +222,7 @@ endif()
 
 if (USE_DISTRIBUTED)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
-    if (NOT MSVC AND NOT APPLE)
+    if (NOT MSVC)
       list(APPEND TORCH_PYTHON_SRCS
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
@@ -235,6 +236,9 @@ if (USE_DISTRIBUTED)
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_rpc_handler.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_context.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/types.cpp
         )
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)

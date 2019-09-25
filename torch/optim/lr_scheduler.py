@@ -1,8 +1,9 @@
 import types
 import math
 from torch._six import inf
-from functools import partial, wraps
+from functools import wraps
 import warnings
+import weakref
 from bisect import bisect_right
 
 from .optimizer import Optimizer
@@ -29,15 +30,32 @@ class _LRScheduler(object):
         # Following https://github.com/pytorch/pytorch/issues/20124
         # We would like to ensure that `lr_scheduler.step()` is called after
         # `optimizer.step()`
-        def with_counter(func, opt):
+        def with_counter(method):
+            if getattr(method, '_with_counter', False):
+                # `optimizer.step()` has already been replaced, return.
+                return method
+
+            # Keep a weak reference to the optimizer instance to prevent
+            # cyclic references.
+            instance_ref = weakref.ref(method.__self__)
+            # Get the unbound method for the same purpose.
+            func = method.__func__
+            cls = instance_ref().__class__
+            del method
+
             @wraps(func)
             def wrapper(*args, **kwargs):
-                opt._step_count += 1
-                return func(*args, **kwargs)
+                instance = instance_ref()
+                instance._step_count += 1
+                wrapped = func.__get__(instance, cls)
+                return wrapped(*args, **kwargs)
+
+            # Note that the returned function here is no longer a bound method,
+            # so attributes like `__func__` and `__self__` no longer exist.
             wrapper._with_counter = True
             return wrapper
 
-        self.optimizer.step = with_counter(self.optimizer.step, self.optimizer)
+        self.optimizer.step = with_counter(self.optimizer.step)
         self.optimizer._step_count = 0
         self._step_count = 0
         self.step(last_epoch)
@@ -366,7 +384,6 @@ class ReduceLROnPlateau(object):
         self.best = None
         self.num_bad_epochs = None
         self.mode_worse = None  # the worse value for the chosen mode
-        self.is_better = None
         self.eps = eps
         self.last_epoch = -1
         self._init_is_better(mode=mode, threshold=threshold,
@@ -415,20 +432,20 @@ class ReduceLROnPlateau(object):
     def in_cooldown(self):
         return self.cooldown_counter > 0
 
-    def _cmp(self, mode, threshold_mode, threshold, a, best):
-        if mode == 'min' and threshold_mode == 'rel':
-            rel_epsilon = 1. - threshold
+    def is_better(self, a, best):
+        if self.mode == 'min' and self.threshold_mode == 'rel':
+            rel_epsilon = 1. - self.threshold
             return a < best * rel_epsilon
 
-        elif mode == 'min' and threshold_mode == 'abs':
-            return a < best - threshold
+        elif self.mode == 'min' and self.threshold_mode == 'abs':
+            return a < best - self.threshold
 
-        elif mode == 'max' and threshold_mode == 'rel':
-            rel_epsilon = threshold + 1.
+        elif self.mode == 'max' and self.threshold_mode == 'rel':
+            rel_epsilon = self.threshold + 1.
             return a > best * rel_epsilon
 
         else:  # mode == 'max' and epsilon_mode == 'abs':
-            return a > best + threshold
+            return a > best + self.threshold
 
     def _init_is_better(self, mode, threshold, threshold_mode):
         if mode not in {'min', 'max'}:
@@ -441,10 +458,12 @@ class ReduceLROnPlateau(object):
         else:  # mode == 'max':
             self.mode_worse = -inf
 
-        self.is_better = partial(self._cmp, mode, threshold_mode, threshold)
+        self.mode = mode
+        self.threshold = threshold
+        self.threshold_mode = threshold_mode
 
     def state_dict(self):
-        return {key: value for key, value in self.__dict__.items() if key not in {'optimizer', 'is_better'}}
+        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
 
     def load_state_dict(self, state_dict):
         self.__dict__.update(state_dict)
@@ -611,6 +630,7 @@ class CyclicLR(_LRScheduler):
             self.max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
 
         super(CyclicLR, self).__init__(optimizer, last_epoch)
+        self.base_lrs = base_lrs
 
     def _format_param(self, name, optimizer, param):
         """Return correctly formatted lr/momentum for each param group."""

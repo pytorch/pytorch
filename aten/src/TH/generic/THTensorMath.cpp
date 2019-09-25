@@ -2,10 +2,9 @@
 #define TH_GENERIC_FILE "TH/generic/THTensorMath.cpp"
 #else
 
+#include <ATen/core/EnableNamedTensor.h>
 #include <TH/generic/THTensorApply.hpp>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 // HEY YOU!
 //
@@ -182,7 +181,7 @@ void THTensor_(bitor)(THTensor *r_, THTensor *t, scalar_t value)
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
-void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *m1, THTensor *m2)
+void THTensor_(addmm)(THTensor *r_, THTensor *t, THTensor *m1, THTensor *m2, scalar_t beta, scalar_t alpha)
 {
   char transpose_r, transpose_m1, transpose_m2;
   THTensor *r__, *m1_, *m2_;
@@ -338,7 +337,7 @@ void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
 #endif
 }
 
-void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *mat, THTensor *vec)
+void THTensor_(addmv)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha)
 {
   if( (mat->dim() != 2) || (THTensor_nDimension(vec) != 1) )
     THError("matrix and vector expected, got %dD, %dD",
@@ -414,7 +413,7 @@ void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
   #undef LDA_COND
 }
 
-void THTensor_(addr)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *vec1, THTensor *vec2)
+void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, scalar_t beta, scalar_t alpha)
 {
   if( (THTensor_nDimension(vec1) != 1) || (THTensor_nDimension(vec2) != 1) )
     THError("vector and vector expected, got %dD, %dD tensors",
@@ -794,7 +793,7 @@ void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, scalar_t gain)
   c10::raw::intrusive_ptr::decref(m2);
 }
 
-void THTensor_(addbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
+void THTensor_(addbmm)(THTensor *result, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha)
 {
   int64_t batch;
 
@@ -829,7 +828,7 @@ void THTensor_(addbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t al
     THTensor_(select)(matrix1, batch1, 0, batch);
     THTensor_(select)(matrix2, batch2, 0, batch);
 
-    THTensor_(addmm)(result, beta, result, alpha, matrix1, matrix2);
+    THTensor_(addmm)(result, result, matrix1, matrix2, beta, alpha);
     beta = 1; // accumulate output once
   }
 

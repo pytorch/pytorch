@@ -30,7 +30,7 @@ struct Node;
 using ::c10::Symbol;
 using ::c10::FunctionSchema;
 
-using OperationCreator = std::function<Operation(const Node*)>;
+using OperationCreator = Operation (*)(const Node*);
 
 /*
  * Note: JIT relies on Operator instances having static lifetime, because
@@ -115,7 +115,7 @@ struct TORCH_API Operator {
 
   Operator(
       const std::string& schema,
-      Operation op,
+      int(*op)(Stack&),
       c10::OperatorOptions options = c10::OperatorOptions())
       : schema_string_(schema),
         op_(std::make_shared<Operation>(std::move(op))),
@@ -167,6 +167,7 @@ struct TORCH_API Operator {
 
 TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
 
+TORCH_API const std::vector<std::shared_ptr<Operator>> getAllOperators();
 TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(
     Symbol name);
 

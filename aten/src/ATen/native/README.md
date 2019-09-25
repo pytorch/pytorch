@@ -99,7 +99,9 @@ signature.
 Functions with no tensor inputs are called *factory functions*, and
 are handled specially by code generation.  If your function is behaving
 differently than another example, check first and see if one is a
-factory while another is not.
+factory while another is not. In some rare cases, factory function might have a
+tensor argument. In this case mark it with 'category_override: factory'
+explicitly.
 
 **Argument names.** Argument names are meaningful; downstream binding code may make use of the specific
 argument name you provide, and a rename of an argument name is considered a BC-breaking
@@ -273,17 +275,17 @@ that case, code generation of the device guard can be disabled by adding
 in which case this field would go away. If you have an opinion on the
 matter, please write in at https://github.com/pytorch/pytorch/issues/14234
 
-### `named_guard`
+### `supports_named_tensor`
 
 ```
-named_guard: False
+supports_named_tensor: True
 ```
 
 Experimental: this option is ignored unless compiling with BUILD_NAMEDTENSOR=1.
-By default, (`named_guard: True`) ATen code generation will generate a check
+By default, (`supports_named_tensor: True`) ATen code generation will generate a check
 that all tensor inputs to the function are unnamed. This is used to incrementally
 implement named tensors; if a function supports named tensors, then it'll have
-`named_guard: False`; otherwise, passing it a named tensor will error out.
+`supports_named_tensor: True`; otherwise, passing it a named tensor will error out.
 
 ### `matches_jit_signature`
 
@@ -298,6 +300,21 @@ of tracking an ongoing schema unification with the goal of aligning func syntax
 with other components of PyTorch in order to reduce overall complexity.
 If you find yourself having to set this field to False add @gchanan to your PR's
 set of reviewers.
+
+### `use_c10_dispatcher`
+
+```
+use_c10_dispatcher: 'no'
+use_c10_dispatcher: 'unboxed_only'
+use_c10_dispatcher: 'full'
+```
+
+This will indicate that the func signature only uses features supported by
+the c10 dispatcher. With this flag, the operator will be added to the
+c10 operator library and be available there. If setting this to 'full' works for
+your operator, please do. For a few corner cases, enabling this might not compile
+successfully, so setting this to 'unboxed_only', or as last resort 'no' is a
+workaround. Also, 'no' is the default if you don't specify anything.
 
 ## Writing an implementation in C++
 

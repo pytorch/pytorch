@@ -13,12 +13,8 @@
 #include <thrust/unique.h>
 #include <TH/THHalf.h>
 #include <THC/THCTensorSort.cuh>
+#include <c10/macros/Macros.h>
 
-#if defined(__HIP_PLATFORM_HCC__)
-const int WARP_SIZE = 64;
-#else
-const int WARP_SIZE = 32;
-#endif
 const int MODE_SUM = 0;
 const int MODE_MEAN = 1;
 
@@ -109,7 +105,7 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++)
       {
-        int featureDim = startFeature + ii * WARP_SIZE;
+        int featureDim = startFeature + ii * C10_WARP_SIZE;
         if (featureDim < stride)
         {
           gradient[ii] = ScalarConvert<Dtype, Acctype>::to(gradOutput[gradOutputRow + featureDim]);
@@ -129,7 +125,7 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++)
       {
-        int featureDim = startFeature + ii * WARP_SIZE;
+        int featureDim = startFeature + ii * C10_WARP_SIZE;
         if (featureDim < stride)
         {
           gradWeight[weightRow + featureDim] = ScalarConvert<Acctype, Dtype>::to(weight[ii]);

@@ -1,17 +1,18 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
+import torch
 import torch.nn as nn
 import torch.nn._intrinsic as nni
 import torch.nn._intrinsic.quantized as nniq
 import torch.nn._intrinsic.qat as nniqat
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-from .QConfig import default_dynamic_qconfig
+from .QConfig import default_dynamic_qconfig, float16_dynamic_qconfig
 import torch.nn.qat as nnqat
 
 
-DEFAULT_SKIP_LIST = [nn.Identity, nn.MaxPool2d, nn.AvgPool2d, nn.AdaptiveAvgPool2d]
+DEFAULT_SKIP_LIST = [nn.Dropout, nn.Identity, nn.MaxPool2d, nn.AvgPool2d, nn.AdaptiveAvgPool2d]
 
 def propagate_qconfig_helper(module, qconfig_dict, skip_list=DEFAULT_SKIP_LIST, qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig`
@@ -226,7 +227,8 @@ DEFAULT_QAT_MODULE_MAPPING = {
 }
 
 DEFAULT_DYNAMIC_MODULE_MAPPING = {
-    nn.Linear: nnqd.Linear
+    nn.Linear: nnqd.Linear,
+    nn.LSTM: nnqd.LSTM,
 }
 
 def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
@@ -254,15 +256,43 @@ def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
     convert(model, mapping)
     return model
 
-DEFAULT_QCONFIG_DICT = {
-    nn.Linear : default_dynamic_qconfig
-}
+def quantize_dynamic(model, qconfig_dict=None, dtype=torch.qint8, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):
+    r"""Converts a float model to dynamic (i.e. weights-only) quantized model.
 
-def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):
-    r"""Converts a float model to dynamic quantized model.
+    Replaces specified modules with dynamic weight-only quantized versions and output the quantized model.
 
-    Perform dynamic training and output a quantized model.
+    For simplest usage provide `dtype` argument that can be float16 or qint8. Weight-only quantization
+    by default is performed for layers with large weights size - i.e. Linear and RNN variants.
+
+    Fine grained control is possible with `qconfig_dict` and `mapping` that act similarly to `quantize()`.
+    If `qconfig_dict` is provided, the `dtype` argument is ignored.
+
+    Args:
+        module: input model
+        qconfig_dict: dictionary that maps from name or type of submodule to quantization
+            configuration, qconfig applies to all submodules of a given
+            module unless qconfig for the submodules are specified (when the
+            submodule already has qconfig attribute). Entries in the dictionary
+            need to be QConfigDynamic instances.
+        mapping: maps type of a submodule to a type of corresponding dynamically quantized version
+            with which the submodule needs to be replaced
     """
+    if qconfig_dict is None:
+        if dtype == torch.qint8:
+            qconfig_dict = {
+                nn.Linear : default_dynamic_qconfig,
+                nn.LSTM : default_dynamic_qconfig,
+            }
+        elif dtype == torch.float16:
+            qconfig_dict = {
+                # TODO: uncomment when float16 Linear support is added
+                # nn.Linear : default_dynamic_qconfig,
+                nn.LSTM : float16_dynamic_qconfig,
+            }
+        else:
+            raise ValueError(
+                "Don't know how to quantize with default settings for {}. Provide full qconfig please".format(dtype))
+
     model = copy.deepcopy(model)
     model.eval()
     propagate_qconfig(model, qconfig_dict)
@@ -331,3 +361,20 @@ def swap_module(mod, mapping):
         if type(mod) in mapping:
             new_mod = mapping[type(mod)].from_float(mod)
     return new_mod
+
+def get_observer_dict(mod, target_dict, prefix=""):
+    r"""Traverse the modules and save all observers into dict.
+    This is mainly used for quantization accuracy debug
+    Args:
+        mod: the top module we want to save all observers
+        prefix: the prefix for the current module
+        target_dict: the dictionary used to save all the observers
+    """
+    def get_prefix(prefix):
+        return prefix if prefix == "" else prefix + '.'
+
+    if hasattr(mod, 'observer'):
+        target_dict[get_prefix(prefix) + 'observer'] = mod.observer
+    for name, child in mod.named_children():
+        module_prefix = get_prefix(prefix) + name if prefix else name
+        get_observer_dict(child, target_dict, module_prefix)

@@ -8,9 +8,11 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
-#ifdef BUILD_NAMEDTENSOR
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/Variadic.h>
 #include <ATen/core/NamedTensor.h>
-#endif
+#include <ATen/core/EnableNamedTensor.h>
+
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
 #include <ATen/CPUType.h>
@@ -19,6 +21,30 @@
 #endif
 
 namespace at {
+
+namespace detail {
+
+struct MultiDispatchTensorTypeSet : IterArgs<MultiDispatchTensorTypeSet> {
+  TensorTypeSet ts;
+  void operator()(const at::Tensor& x) {
+    ts = ts | x.type_set();
+  }
+  void operator()(TensorOptions x) {
+    ts = ts | x.type_set();
+  }
+  void operator()(at::ArrayRef<at::Tensor> xs) {
+    for (const auto& x : xs) {
+      ts = ts | x.type_set();
+    }
+  }
+};
+
+template <typename... Args>
+TensorTypeSet multi_dispatch_tensor_type_set(Args&&... args) {
+  return MultiDispatchTensorTypeSet().apply(std::forward<Args>(args)...).ts;
+}
+
+}
 
 struct Quantizer;
 // This is temporary typedef to enable Quantizer in aten native function API
@@ -57,10 +83,6 @@ inline TensorOptions Tensor::options() const {
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
 ${tensor_method_definitions}
-
-inline bool Tensor::is_variable() const noexcept {
-  return impl_->is_variable();
-}
 
 inline caffe2::TypeMeta Tensor::dtype() const noexcept {
   return impl_->dtype();
