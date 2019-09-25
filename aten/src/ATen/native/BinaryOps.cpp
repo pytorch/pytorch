@@ -237,10 +237,9 @@ Tensor& lt_(Tensor& self, const Tensor& other) {
   return self;
 }
 
-// First it will validate that is possible to convert scalar to tensor dtype without overflow.
-// It's different for arithmetic ops. For arithmetic ops we don't verify this.
-// The reason is because previous TH behavior checked for overflow in comparison ops but not arithmetic ops.
-// In the future, we should reconsider this inconsistency and decide if we're going to check overflow for arithmetic ops
+// `lt` validates that is possible to convert Scalar other to self's dtype without overflow.
+// This behavior is unique to comparison ops; arithmetic operations don't do this.
+// In the future, we should reconsider this inconsistency and decide if we want to add the same check to arithmetic ops.
 Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) {
   return native::lt_out(result, self, wrapped_scalar_tensor_and_check_convert(other, self));
 }
