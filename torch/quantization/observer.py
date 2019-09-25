@@ -202,7 +202,8 @@ class MinMaxObserver(_ObserverBase):
                 "Cannot reduce range for symmetric quantization for quint8"
             )
 
-    def forward(self, x):
+    def forward(self, x_orig):
+        x = x_orig.detach()  # avoid keeping autograd tape
         min_val = self.min_val
         max_val = self.max_val
         if min_val is None or max_val is None:
@@ -264,7 +265,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
                 max_vals = torch.max(torch.max(y, 1)[0], max_vals)
             self.min_vals = min_vals
             self.max_vals = max_vals
-            return x
+        return x
 
     def calculate_qparams(self):
         return self._calculate_per_channel_qparams(self.min_vals, self.max_vals)

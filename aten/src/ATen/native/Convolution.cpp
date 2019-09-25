@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/native/utils/ParamUtils.h>
 
 #include <ATen/Config.h>
@@ -10,6 +11,8 @@
 static const int MIOPEN_DIM_MAX = 4;
 
 namespace at { namespace native {
+
+DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
 
 struct ConvParams {
   std::vector<int64_t> stride;
@@ -30,6 +33,7 @@ struct ConvParams {
   bool is_padding_neg() const;
   bool is_stride_neg() const;
   void view1d_as_2d();
+  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_miopen(const at::Tensor& input) const;
@@ -117,6 +121,30 @@ auto ConvParams::view1d_as_2d() -> void {
     dilation.insert(dilation.begin(), 1);
     output_padding.insert(output_padding.begin(), 0);
   }
+}
+
+auto ConvParams::use_cpu_depthwise3x3_winograd(
+    const at::Tensor& input, const at::Tensor& weight) const -> bool {
+#ifdef __ARM_NEON__
+  // Currently only 3x3 depthwise convolutions on tensors of float are supported.
+  return (input.ndimension() == 4) &&
+         (input.size(1) == groups) &&
+         (weight.ndimension() == 4 ) &&
+         (weight.size(0) % input.size(1) == 0) &&
+         (weight.size(2) == 3) &&
+         (weight.size(3) == 3) &&
+         (input.device().type() == c10::DeviceType::CPU) &&
+         (input.scalar_type() == at::kFloat) &&
+         input.is_contiguous() &&
+         (weight.device().type() == c10::DeviceType::CPU) &&
+         (weight.scalar_type() == at::kFloat) &&
+         weight.is_contiguous() &&
+         !is_strided() &&
+         !is_dilated() &&
+         !transposed;
+#else
+  return false;
+#endif
 }
 
 auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
@@ -618,8 +646,10 @@ at::Tensor _convolution(
     }
 #endif
   } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
-    // TH/native only covers CPU/CUDA implementation.
-    if (params.groups == 1) {
+    if (params.use_cpu_depthwise3x3_winograd(input, weight)) {
+      output = convolution_depthwise3x3_winograd_stub(
+        input.device().type(), input, weight, bias, params.padding, params.stride, params.groups);
+    } else if (params.groups == 1) {
       output = at::_convolution_nogroup(
           input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
     } else {

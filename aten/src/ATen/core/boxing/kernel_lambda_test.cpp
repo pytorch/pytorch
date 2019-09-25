@@ -145,7 +145,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorOutput_whe
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::list_output(Tensor input1, Tensor input2, Tensor input3) -> Tensor[]",
-        RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, [] (const Tensor& a, const Tensor& b, const Tensor& c) -> c10::List<Tensor> {return c10::List<Tensor>({a, b, c});}));
+        RegisterOperators::options().kernel(TensorTypeId::CUDATensorId, [] (const Tensor& a, const Tensor& b, const Tensor& c) -> c10::List<Tensor> {return c10::List<Tensor>({a, b, c});}));
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
@@ -477,12 +477,12 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithOptionalInputs_w
   ASSERT_TRUE(op.has_value());
 
   called = false;
-  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId), c10::IValue(), std::string("text"));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CPUTensorId), c10::IValue(), std::string("text"));
   EXPECT_EQ(0, outputs.size());
 
   EXPECT_TRUE(called);
   EXPECT_TRUE(called_arg2.has_value());
-  EXPECT_EQ(extractTypeId(*called_arg2), TensorTypeId::CUDATensorId);
+  EXPECT_EQ(extractTypeId(*called_arg2), TensorTypeId::CPUTensorId);
   EXPECT_FALSE(called_arg3.has_value());
   EXPECT_TRUE(called_arg4.has_value());
   EXPECT_EQ(*called_arg4, "text");
@@ -512,13 +512,13 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithOptionalInputs_w
   ASSERT_TRUE(op.has_value());
 
   called = false;
-  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId), c10::IValue(), std::string("text"));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CPUTensorId), c10::IValue(), std::string("text"));
   EXPECT_EQ(1, outputs.size());
-  EXPECT_EQ(TensorTypeId::CUDATensorId, extractTypeId(outputs[0].toTensor()));
+  EXPECT_EQ(TensorTypeId::CPUTensorId, extractTypeId(outputs[0].toTensor()));
 
   EXPECT_TRUE(called);
   EXPECT_TRUE(called_arg2.has_value());
-  EXPECT_EQ(extractTypeId(*called_arg2), TensorTypeId::CUDATensorId);
+  EXPECT_EQ(extractTypeId(*called_arg2), TensorTypeId::CPUTensorId);
   EXPECT_FALSE(called_arg3.has_value());
   EXPECT_TRUE(called_arg4.has_value());
   EXPECT_EQ(*called_arg4, "text");
@@ -544,9 +544,9 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithOptionalInputs_w
   auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId), c10::IValue(), std::string("text"));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CPUTensorId), c10::IValue(), std::string("text"));
   EXPECT_EQ(3, outputs.size());
-  EXPECT_EQ(TensorTypeId::CUDATensorId, extractTypeId(outputs[0].toTensor()));
+  EXPECT_EQ(TensorTypeId::CPUTensorId, extractTypeId(outputs[0].toTensor()));
   EXPECT_TRUE(outputs[1].isNone());
   EXPECT_EQ("text", outputs[2].toString()->string());
 
