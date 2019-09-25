@@ -95,6 +95,17 @@ Value* tryConvertToType(
       value = graph.insertNode(n)->setSourceRange(loc)->output();
     }
 
+    if (*value->type() == *NumberType::get()) {
+      // convert Number to float
+      if (*concrete_type == *FloatType::get()) {
+        value = graph.insert(aten::Float, {value});
+      }
+      // convert Number to int
+      else if (*concrete_type == *IntType::get()) {
+        value = graph.insert(aten::Int, {value});
+      }
+    }
+
     // Convert strings to device
     if (value->type()->isSubtypeOf(StringType::get()) &&
         DeviceObjType::get()->isSubtypeOf(concrete_type)) {
@@ -169,11 +180,6 @@ static Value* tryMatchArgument(
         }
       }
 
-      if (value->type() == NumberType::get() &&
-          value->node()->kind() == aten::item) {
-        ostream << "Use int(tensor) or float(tensor) to retrieve item() from a "
-                << "tensor with the appropriate type.\n";
-      }
       ostream << ss.str();
     }
 
