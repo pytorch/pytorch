@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/variable_tensor_list.h>
+#include <torch/csrc/jit/update_graph_executor_opt.h>
 #include <memory>
 
 namespace torch {
@@ -58,9 +59,6 @@ TORCH_API void debugSetAutodiffSubgraphInlining(bool state);
 TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();
 
 TORCH_API bool& getProfilingMode();
-
-TORCH_API void setGraphExecutorOptimize(bool o);
-TORCH_API bool getGraphExecutorOptimize();
 
 struct TORCH_API GraphOptimizerEnabledGuard {
   GraphOptimizerEnabledGuard(bool state)

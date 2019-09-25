@@ -24,19 +24,13 @@ struct TORCH_API Function {
         graph_(std::move(graph)),
         function_creator_(std::move(function_creator)) {}
 
-  void run(Stack &stack) { get_executor().run(stack); }
+  void run(Stack& stack);
 
-  void run(Stack&& stack) {
-    run(stack);
-  }
+  void run(Stack&& stack);
 
   IValue operator()(
       std::vector<IValue> stack,
-      const Kwargs& kwargs = Kwargs()) {
-    getSchema().checkAndNormalizeInputs(stack, kwargs);
-    run(stack);
-    return stack.front();
-  }
+      const Kwargs& kwargs = Kwargs());
 
   std::shared_ptr<Graph> graph() const {
     return graph_;

@@ -11,9 +11,6 @@
 namespace torch {
 namespace jit {
 
-using ClassResolver =
-    std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
-
 // See Python's pickletools.py for a detailed description of each of these codes
 enum class PickleOpCode : char {
   MARK = '(',

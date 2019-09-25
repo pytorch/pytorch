@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/rpc/script_ret.h>
 #include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/unpickler.h>
 
 namespace torch {
 namespace distributed {

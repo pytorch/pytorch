@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/unpickler.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/jit/source_range_serialization.h>
 #include <torch/csrc/jit/source_range_serialization_impl.h>
@@ -31,14 +32,37 @@ using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
+void postSetStateValidate(const IValue& v) {
+  auto obj = v.toObject();
+  const auto& objType = obj->type();
+  for (size_t i = 0; i < objType->numAttributes(); i++) {
+    const auto& attrType = objType->getAttribute(i);
+    const auto& attrName = objType->getAttributeName(i);
+    const auto& slot = obj->getSlot(i);
+    // const auto attrType = objType->getAttribute(i);
+    // Verify that all the non-optional attributes have been initialized
+    // TODO: Issue #20497
+    if (attrType->kind() != TypeKind::OptionalType) {
+      TORCH_CHECK(
+          !slot.isNone(),
+          "The field '",
+          attrName,
+          "' was left unitialized after __setstate__, but expected a ",
+          "value of type '",
+          attrType->python_str(),
+          "'");
+    }
+  }
+}
+
 namespace {
 
-// this is a deserializer class which loads script modules from pt files. the
-// content of the file is written using PyTorchStreamWriter, for details please
-// check caffe2/serialize/inline_container.h. all the records except the last
-// one are tensor data, and the last record is a serialized ModelProto, defined
-// in caffe2/proto/torch.proto. ModelProto contains all the metadata of the
-// model, and it is serialized as json.
+
+// This is a deserializer class which loads script modules from pt files.
+// Content of the file is written using PyTorchStreamWriter, for details please
+// check caffe2/serialize/inline_container.h.
+// The module is saved in pickle. readArchive() is called to parse and construct
+// the constant table and the script module.
 class ScriptModuleDeserializer final {
  public:
   ScriptModuleDeserializer(
@@ -88,13 +112,41 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
     return c10::StrongTypePtr(
         compilation_unit_, compilation_unit_->get_class(qn));
   };
+
+  // Decouple how to get obj from type. In this file it's dependent on
+  // Method.run() and graph executor, etc.
+  // For bytecode import we need to decouple these dependencies.
+  auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
+    auto cls = type.type_->expect<at::ClassType>();
+    size_t n = cls->numAttributes();
+    if (checkHasValidSetGetState(type.type_)) {
+      auto obj = c10::ivalue::Object::create(type, n);
+      // XXX: Do not optimize __setstate__, so that we don't try to
+      // specialize the class before it is initialized.
+      setGraphExecutorOptimize(false);
+      (*type.type_->getMethod("__setstate__"))({obj, input});
+      setGraphExecutorOptimize(true);
+      postSetStateValidate(obj);
+      return std::move(obj);
+    } else {
+      auto dict = std::move(input).toGenericDict();
+      auto obj = c10::ivalue::Object::create(type, n);
+      for (size_t i = 0; i < n; ++i) {
+        obj->setSlot(i, dict.at(cls->getAttributeName(i)));
+      }
+      return obj;
+    }
+  };
+
   auto read_record = [&](const std::string& name) {
     std::stringstream ss;
     ss << archive_name << "/" << name;
     return std::get<0>(reader_->getRecord(ss.str()));
   };
+
   Unpickler unpickler(
-      reader, std::move(class_resolver), std::move(read_record), device_);
+      reader, std::move(class_resolver), std::move(obj_loader),
+      std::move(read_record), device_);
   return unpickler.parse_ivalue();
 }
 
