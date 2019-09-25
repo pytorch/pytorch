@@ -44,7 +44,7 @@ from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
 from textwrap import dedent
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Union
 import copy
 import inspect
 import math
@@ -1272,7 +1272,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
             def __init__(self):
                 super(TestModule, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1)
-                self.bn = torch.nn.BatchNorm2d(num_features=20, eps=1e-1)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1280,7 +1280,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
                 return x
 
         eager = TestModule()
-        scripted = torch.jit.script(copy.deepcopy(eager))
+        scripted = torch.jit.script(eager)
         eager.eval()
         scripted.eval()
 
@@ -1312,7 +1312,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
             def __init__(self):
                 super(TestModule, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1, bias=False)
-                self.bn = torch.nn.BatchNorm2d(num_features=20, eps=1e-1)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1320,7 +1320,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
                 return x
 
         eager = TestModule()
-        scripted = torch.jit.script(copy.deepcopy(eager))
+        scripted = torch.jit.script(eager)
         eager.eval()
         scripted.eval()
 
@@ -1352,7 +1352,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
             def __init__(self):
                 super(SubModule, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1)
-                self.bn = torch.nn.BatchNorm2d(num_features=20, eps=1e-1)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
 
             def forward(self, x):
                 x = self.conv(x)
@@ -3525,6 +3525,10 @@ def foo(x):
                     #     type: (Int) -> Int
                     return a + 2
 
+    def test_is_optional(self):
+        ann = Union[List[int], List[float]]
+        torch._jit_internal.is_optional(ann)
+
     def test_interpreter_fuzz(self):
         # This test generates random tree-like programs to fuzz test
         # that the interpreter does not have a bug in its stack manipulation
@@ -3660,6 +3664,17 @@ def foo(x):
         n.register_backward_hook(backward_hook)
         with self.assertRaisesRegex(Exception, "backward hooks assigned"):
             torch.jit.trace(n, (torch.tensor(1.0),))
+
+    def test_python_op_builtins(self):
+        @torch.jit.unused
+        def fn(x):
+            # type: (List[int]) -> int
+            return sum(x)
+
+        @torch.jit.script
+        def script_fn(x):
+            # type: (List[int]) -> int
+            return fn(x)
 
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
@@ -14568,69 +14583,6 @@ a")
             # supported
             m = M({char : torch.ones(1) + ord(char) - ord("a") for char in "abcdefg"})
             self.assertEqual(m("c"), torch.tensor([103]))
-
-    def test_module_const_attrs(self):
-        class M(torch.nn.Module):
-            __constants__ = ['i', 'non']
-
-            def __init__(self):
-                super(M, self).__init__()
-                self.i = 10
-                self.non = None
-
-            def forward(self, x):
-                # type: (int) -> int
-                if self.non is None:
-                    return x + self.i
-                else:
-                    return -1
-
-        m = torch.jit.script(M())
-        self.assertEqual(m(5), 15)
-        self.assertTrue(m._c._has_attribute('i'))
-        self.assertFalse(m._c._has_attribute('non'))
-
-    def test_module_mutate_const_attrs(self):
-        # Check that we cannot mutate a constant
-        class M(torch.nn.Module):
-            __constants__ = ['i', 'non']
-
-            def __init__(self):
-                super(M, self).__init__()
-                self.i = 10
-                self.non = None
-
-            def forward(self, x):
-                # type: (int) -> int
-                self.i = 5
-                if self.non is None:
-                    return x + self.i
-                else:
-                    return -1
-
-        with self.assertRaises(RuntimeError):
-            m = torch.jit.script(M())
-
-    def test_module_mutate_const_attrs_2(self):
-        # Check that we cannot mutate constant of a mutable type (e.g. list)
-        class M(torch.nn.Module):
-            __constants__ = ['i', 'non']
-
-            def __init__(self):
-                super(M, self).__init__()
-                self.i = [10, 20]
-                self.non = None
-
-            def forward(self, x):
-                # type: (int) -> int
-                self.i.append(30)
-                if self.non is None:
-                    return x + self.i[0]
-                else:
-                    return -1
-
-        with self.assertRaises(RuntimeError):
-            m = torch.jit.script(M())
 
     def test_tensor_import_export(self):
         @torch.jit.script
