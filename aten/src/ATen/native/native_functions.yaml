@@ -2840,7 +2840,6 @@
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: method
 
 - func: _has_compatible_shallow_copy_type(Tensor self, Tensor from) -> bool

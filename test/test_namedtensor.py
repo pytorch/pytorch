@@ -704,7 +704,11 @@ class TestNamedTensor(TestCase):
         def _test(testcase, names=('N', 'D'), device='cpu'):
             sizes = [2] * len(names)
             tensor = torch.empty(sizes, names=names, device=device)
-            out = testcase.lambd(tensor)
+            try:
+                out = testcase.lambd(tensor)
+            except RuntimeError as err:
+                # Get a better error message by catching the error and asserting.
+                assert False, '{}: {}'.format(testcase.name, err)
             self.assertEqual(out.names, tensor.names,
                              message=testcase.name)
 
@@ -786,7 +790,6 @@ class TestNamedTensor(TestCase):
             fn('threshold_', 0, 1),
             out_function('threshold', 0, 1),
             fn_method_and_inplace('trunc'),
-            method('type_as', torch.empty([], dtype=torch.float)),
             method('uniform_'),
             method('zero_'),
             method('fill_', 1),
