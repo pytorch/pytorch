@@ -95,6 +95,17 @@ Value* tryConvertToType(
       value = graph.insertNode(n)->setSourceRange(loc)->output();
     }
 
+    if (*value->type() == *NumberType::get()) {
+      // convert Number to float
+      if (*concrete_type == *FloatType::get()) {
+        value = graph.insert(aten::Float, {value});
+      }
+      // convert Number to int
+      else if (*concrete_type == *IntType::get()) {
+        value = graph.insert(aten::Int, {value});
+      }
+    }
+
     // Convert strings to device
     if (value->type()->isSubtypeOf(StringType::get()) &&
         DeviceObjType::get()->isSubtypeOf(concrete_type)) {
@@ -130,8 +141,8 @@ static Value* tryMatchArgument(
   }
 
   // Resolve VarType variables
-  const MatchTypeReturn matched =
-      matchTypeVariables(arg.type(), value->type(), type_env);
+  const MatchTypeReturn matched = matchTypeVariables(
+      arg.type(), value->type(), type_env);
   if (!matched.success()) {
     if (failure_messages) {
       err() << "Could not match type " << value->type()->python_str() << " to "
@@ -169,11 +180,6 @@ static Value* tryMatchArgument(
         }
       }
 
-      if (value->type() == NumberType::get() &&
-          value->node()->kind() == aten::item) {
-        ostream << "Use int(tensor) or float(tensor) to retrieve item() from a "
-                << "tensor with the appropriate type.\n";
-      }
       ostream << ss.str();
     }
 
@@ -242,11 +248,16 @@ static bool varargsCanBeUsedAsList(
   // The formal must be a list
   bool argument_is_list = arg.type()->kind() == TypeKind::ListType;
 
+  // matching varargs of typevar list nyi
+  bool typevar_list = argument_is_list &&
+      arg.type()->cast<ListType>()->getElementType()->cast<VarType>();
+
   // it must not be a broadcasting list like int[3],
   // otherwise a single int is a valid input
   bool arg_is_broadcasting_list = bool(arg.N());
 
-  return is_last_argument && argument_is_list & !arg_is_broadcasting_list;
+  return is_last_argument && argument_is_list & !arg_is_broadcasting_list &&
+      !typevar_list;
 }
 
 c10::optional<MatchedSchema> tryMatchSchema(

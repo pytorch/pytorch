@@ -70,7 +70,7 @@ struct C10_EXPORT SampleModuleOptions {
 struct C10_EXPORT SampleModuleImpl : public torch::nn::Cloneable<SampleModuleImpl> {
   SampleModuleImpl(bool has_submodule) : SampleModuleImpl(SampleModuleOptions(has_submodule)) {}
   explicit SampleModuleImpl(SampleModuleOptions options) : options(std::move(options)) {
-    if (options.has_submodule_) {
+    if (options.has_submodule()) {
       submodule = register_module("submodule", std::make_shared<SampleModuleImpl>(false));
     }
     reset();
@@ -117,6 +117,8 @@ torch_nn_modules.module_metadata_map['SampleModule'] = TorchNNModuleMetadata(
     cpp_default_constructor_args='(true)',
     num_attrs_recursive=20,
     cpp_sources=SAMPLE_MODULE_CPP_SOURCE,
+    python_ignored_constructor_args=['has_parity'],
+    python_ignored_attrs=['has_parity'],
 )
 
 torch.nn.SampleModule = SampleModule
