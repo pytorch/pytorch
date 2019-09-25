@@ -50,7 +50,7 @@ TORCH_API extern const enumtype::FanOut kFanOut;
 /// - `torch::kTanh`
 /// - `torch::kReLU`
 /// - `torch::kLeakyReLU`
-using Nonlinearity = torch::variant<
+using Nonlinearity = c10::variant<
   enumtype::Linear,
   enumtype::Conv1D,
   enumtype::Conv2D,
@@ -67,7 +67,7 @@ using Nonlinearity = torch::variant<
 /// Variable of `FanMode` type can take one of the following values:
 /// - `torch::kFanIn`
 /// - `torch::kFanOut`
-using FanMode = torch::variant<
+using FanMode = c10::variant<
   enumtype::FanIn,
   enumtype::FanOut
 >;
