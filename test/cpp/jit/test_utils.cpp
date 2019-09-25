@@ -25,6 +25,11 @@ std::vector<at::Tensor> run(
   return fmap(stack, [](const IValue& i) { return i.toTensor(); });
 }
 
+static void unpackReturnTuple(Stack &stack) {
+  auto tuple = pop(stack).toTuple();
+  stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
+}
+
 std::pair<tensor_list, tensor_list> runGradient(
     Gradient& grad_spec,
     tensor_list& tensors_in,
@@ -32,6 +37,7 @@ std::pair<tensor_list, tensor_list> runGradient(
   static const auto as_tensorlist = [](const Stack& stack) {
     return fmap(stack, [](const IValue& i) { return i.toTensor(); });
   };
+
   Code f_code{grad_spec.f}, df_code{grad_spec.df};
   InterpreterState f_interpreter{f_code}, df_interpreter{df_code};
 
@@ -46,7 +52,7 @@ std::pair<tensor_list, tensor_list> runGradient(
   for (auto offset : grad_spec.df_input_captured_outputs)
     df_stack.push_back(f_stack[offset]);
   df_interpreter.run(df_stack);
-
+  unpackReturnTuple(df_stack);
   // Outputs of f needs to be sliced
   f_stack.erase(f_stack.begin() + grad_spec.f_real_outputs, f_stack.end());
   return std::make_pair(as_tensorlist(f_stack), as_tensorlist(df_stack));

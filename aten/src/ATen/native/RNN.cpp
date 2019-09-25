@@ -1072,11 +1072,13 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
   check_device(_input, _params, hx);
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   TORCH_CHECK(has_biases, "quantized LSTM requires biases");
-  TORCH_CHECK(result_dtype == at::kChar || result_dtype == at::kHalf,
-              "dtype is not supported");
+  TORCH_CHECK(
+      result_dtype == at::kChar || result_dtype == at::kQInt8 ||
+          result_dtype == at::kHalf,
+      "dtype is not supported");
 
   std::tuple<Tensor, Tensor, Tensor> results;
-  if (result_dtype == at::kChar) {
+  if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
     if (use_dynamic) {
       auto params = gather_quantized_params_dynamic(_params);
       results = _lstm_impl<FullLayer, FullBidirectionalLayer>(

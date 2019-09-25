@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <ATen/core/op_registration/test_helpers.h>
+#include <ATen/core/boxing/test_helpers.h>
 
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
@@ -8,7 +8,6 @@
 using c10::RegisterOperators;
 using c10::OperatorKernel;
 using c10::TensorTypeId;
-using c10::KernelCache;
 using c10::Stack;
 using c10::guts::make_unique;
 using c10::intrusive_ptr;
@@ -184,7 +183,7 @@ struct KernelWithTensorListOutput final : OperatorKernel {
 
 TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op("_test::list_output(Tensor input1, Tensor input2, Tensor input3) -> Tensor[]", RegisterOperators::options().kernel<KernelWithTensorListOutput>(TensorTypeId::CPUTensorId));
+      .op("_test::list_output(Tensor input1, Tensor input2, Tensor input3) -> Tensor[]", RegisterOperators::options().kernel<KernelWithTensorListOutput>(TensorTypeId::CUDATensorId));
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
@@ -553,20 +552,19 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithCache_thenCache
 
   // expect first time calling returns a 4 (4 is the initial value in the cache)
   auto stack = makeStack(dummyTensor(TensorTypeId::CPUTensorId));
-  auto kernel = c10::Dispatcher::singleton().lookup(*op, &stack);
-  kernel.call(&stack);
+  c10::Dispatcher::singleton().callBoxed(*op, &stack);
   EXPECT_EQ(1, stack.size());
   EXPECT_EQ(4, stack[0].toInt());
 
   // expect second time calling returns a 5
   stack = makeStack(dummyTensor(TensorTypeId::CPUTensorId));
-  kernel.call(&stack);
+  c10::Dispatcher::singleton().callBoxed(*op, &stack);
   EXPECT_EQ(1, stack.size());
   EXPECT_EQ(5, stack[0].toInt());
 
   // expect third time calling returns a 6
   stack = makeStack(dummyTensor(TensorTypeId::CPUTensorId));
-  kernel.call(&stack);
+  c10::Dispatcher::singleton().callBoxed(*op, &stack);
   EXPECT_EQ(1, stack.size());
   EXPECT_EQ(6, stack[0].toInt());
 }
@@ -694,12 +692,12 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_
   ASSERT_TRUE(op.has_value());
 
   called = false;
-  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId), c10::IValue(), std::string("text"));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CPUTensorId), c10::IValue(), std::string("text"));
   EXPECT_EQ(0, outputs.size());
 
   EXPECT_TRUE(called);
   EXPECT_TRUE(called_arg2.has_value());
-  EXPECT_EQ(extractTypeId(*called_arg2), TensorTypeId::CUDATensorId);
+  EXPECT_EQ(extractTypeId(*called_arg2), TensorTypeId::CPUTensorId);
   EXPECT_FALSE(called_arg3.has_value());
   EXPECT_TRUE(called_arg4.has_value());
   EXPECT_EQ(*called_arg4, "text");
@@ -731,13 +729,13 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_
   ASSERT_TRUE(op.has_value());
 
   called = false;
-  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId), c10::IValue(), std::string("text"));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CPUTensorId), c10::IValue(), std::string("text"));
   EXPECT_EQ(1, outputs.size());
-  EXPECT_EQ(TensorTypeId::CUDATensorId, extractTypeId(outputs[0].toTensor()));
+  EXPECT_EQ(TensorTypeId::CPUTensorId, extractTypeId(outputs[0].toTensor()));
 
   EXPECT_TRUE(called);
   EXPECT_TRUE(called_arg2.has_value());
-  EXPECT_EQ(extractTypeId(*called_arg2), TensorTypeId::CUDATensorId);
+  EXPECT_EQ(extractTypeId(*called_arg2), TensorTypeId::CPUTensorId);
   EXPECT_FALSE(called_arg3.has_value());
   EXPECT_TRUE(called_arg4.has_value());
   EXPECT_EQ(*called_arg4, "text");
@@ -766,9 +764,9 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_
   auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId), c10::IValue(), std::string("text"));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CPUTensorId), c10::IValue(), std::string("text"));
   EXPECT_EQ(3, outputs.size());
-  EXPECT_EQ(TensorTypeId::CUDATensorId, extractTypeId(outputs[0].toTensor()));
+  EXPECT_EQ(TensorTypeId::CPUTensorId, extractTypeId(outputs[0].toTensor()));
   EXPECT_TRUE(outputs[1].isNone());
   EXPECT_EQ("text", outputs[2].toString()->string());
 
