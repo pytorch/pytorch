@@ -993,6 +993,7 @@ graph(%x : Tensor,
     @_tmp_donotuse_dont_inline_everything
     def test_insert_observers_skip_values(self):
         import torch.nn.functional as F
+
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
