@@ -1,11 +1,10 @@
 #include "interpreter.h"
 #include <torch/csrc/jit/mobile/function.h>
 #include <aten/src/ATen/core/operator_name.h>
-#include <aten/src/ATen/core/dispatch/Dispatcher.h>
 
 namespace torch{
 namespace jit{
-char const * OpCode2Str(OpCode op);
+char const * toString(OpCode op);
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 
 template <typename dtype> // int64_t, bool, double
@@ -41,15 +40,11 @@ bool InterpreterState::run(Stack& stack) {
       }
     }
     Instruction inst = code_->instructions_[pc];
-    TORCH_CHECK(isOpSupportedInMobile(inst.op), OpCode2Str(inst.op),
+    TORCH_CHECK(isOpSupportedInMobile(inst.op), toString(inst.op),
                 " is not supported in mobile module.");
     switch (inst.op) {
       case OP: {
-        auto opname = code_->op_names_[inst.X];
-        std::cout << opname.name << "." << opname.overload_name << std::endl;
-        auto op = c10::Dispatcher::singleton().findSchema(opname);
-        assert(op.has_value());
-        c10::Dispatcher::singleton().callBoxed(*op, &stack);
+        c10::Dispatcher::singleton().callBoxed(*code_->operators_[inst.X], &stack);
         ++pc;
       } break;
       case LOAD:
@@ -159,7 +154,7 @@ bool InterpreterState::run(Stack& stack) {
       case RET:
         return false;
       default:
-        AT_ERROR(OpCode2Str(inst.op), " is invalid.");
+        AT_ERROR(toString(inst.op), " is invalid.");
     }
   }
   return false;

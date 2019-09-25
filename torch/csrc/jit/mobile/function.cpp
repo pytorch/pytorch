@@ -11,9 +11,16 @@ void Function::append_instruction(OpCode op, int N, int X) {
   code_->instructions_.emplace_back(op, N, X);
 }
 
-void Function::append_opname(const std::string& name,
+void Function::append_operator(const std::string& name,
                              const std::string& overload_name) {
   code_->op_names_.emplace_back(name, overload_name);
+  auto opname = code_->op_names_.back();
+  // Add "_" prefix to work around the double registration both of jit/generated
+  // and here. TODO: remove it when we have separate build for lite interpreter.
+  opname.name = "_" + opname.name;
+  auto op = c10::Dispatcher::singleton().findSchema(opname);
+  assert(op.has_value());
+  code_->operators_.emplace_back(op);
 }
 
 void Function::append_constant(const c10::IValue& constant) {

@@ -72,7 +72,7 @@ void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::Compi
       auto op_item = op.toTuple()->elements();
       TORCH_CHECK(op_item.size() == 2,
                   "There should be two parts in an operator name.");
-      function->append_opname(op_item[0].toString()->string(),
+      function->append_operator(op_item[0].toString()->string(),
                            op_item[1].toString()->string());
     }
 
