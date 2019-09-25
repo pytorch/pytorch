@@ -16,7 +16,9 @@ Tensor& resize_cpu_(Tensor& self, IntArrayRef size) {
   return self;
 }
 
-// I am a naughty man
+// Call the sparse implementation in SparseTensor.cpp directly.
+// A dynamic dispatch here is NOT necessary, so I didn't put
+// this function in native_functions.yaml
 Tensor& resize_as_sparse_(Tensor& self, const Tensor& src);
 
 Tensor& resize_as_(Tensor& self, const Tensor& the_template) {
