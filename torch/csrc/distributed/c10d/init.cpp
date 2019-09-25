@@ -85,8 +85,8 @@ PyObject* c10d_init(PyObject* _unused) {
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats);
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
-An enum-like class of available reduce operations: ``SUM``, ``PRODUCT``,
-``MIN``, and ``MAX``.
+An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
+``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
@@ -94,7 +94,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .value("SUM", ::c10d::ReduceOp::SUM)
       .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
       .value("MIN", ::c10d::ReduceOp::MIN)
-      .value("MAX", ::c10d::ReduceOp::MAX);
+      .value("MAX", ::c10d::ReduceOp::MAX)
+      .value("BAND", ::c10d::ReduceOp::BAND)
+      .value("BOR", ::c10d::ReduceOp::BOR)
+      .value("BXOR", ::c10d::ReduceOp::BXOR);
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
