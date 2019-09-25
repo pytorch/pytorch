@@ -1,3 +1,4 @@
+import torch
 import copy
 from .. import functional as F
 from .module import Module
@@ -61,9 +62,6 @@ class Transformer(Module):
 
         self.d_model = d_model
         self.nhead = nhead
-
-        # generate_square_subsequent_mask function has been moved to nn.functional
-        self.generate_square_subsequent_mask = generate_square_subsequent_mask
 
     def forward(self, src, tgt, src_mask=None, tgt_mask=None,
                 memory_mask=None, src_key_padding_mask=None,
@@ -130,6 +128,14 @@ class Transformer(Module):
         for p in self.parameters():
             if p.dim() > 1:
                 xavier_uniform_(p)
+
+    def generate_square_subsequent_mask(self, sz):
+        r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
+        Unmasked positions are filled with float(0.0).
+    """
+    mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
+    mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+    return mask
 
 
 class TransformerEncoder(Module):
