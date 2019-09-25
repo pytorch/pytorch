@@ -784,7 +784,19 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::addmv", "out"},
         {"aten::addr", "out"},
         {"aten::all", "out"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::all", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::all", "dimname_out"},
+    #endif
         {"aten::any", "out"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::any", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::any", "dimname_out"},
+    #endif
         {"aten::arange", ""},
         {"aten::arange", "start"},
         {"aten::arange", "start_step"},
@@ -845,8 +857,20 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::cudnn_convolution_transpose", ""},
         {"aten::cumsum", ""},
         {"aten::cumsum", "out"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::cumsum", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::cumsum", "dimname_out"},
+    #endif
         {"aten::cumprod", ""},
         {"aten::cumprod", "out"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::cumprod", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::cumprod", "dimname_out"},
+    #endif
         {"aten::div", "out"},
         {"aten::dot", "out"},
         {"aten::embedding_bag", ""},
@@ -902,12 +926,24 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::_cufft_set_plan_cache_max_size", ""},
         {"aten::_cufft_clear_plan_cache", ""},
         {"aten::index", "Tensor"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_copy_", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_copy", "dimname"},
+    #endif
         {"aten::index_put_", ""},
         {"aten::index_put", ""},
         {"aten::_index_put_impl_", ""},
         {"aten::instance_norm", ""},
         {"aten::inverse", "out"},
         {"aten::kthvalue", "values"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::kthvalue", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::kthvalue", "dimname_out"},
+    #endif
         {"aten::layer_norm", ""},
         {"aten::native_layer_norm", ""},
         {"aten::native_layer_norm_backward", ""},
@@ -980,6 +1016,12 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::miopen_rnn_backward", ""},
         {"aten::mm", "out"},
         {"aten::mode", "values"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::mode", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::mode", "dimname_out"},
+    #endif
         {"aten::mul", "out"},
         {"aten::mv", "out"},
         {"aten::native_batch_norm", ""},
@@ -1055,6 +1097,12 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::softmax", ""},
     #ifdef BUILD_NAMEDTENSOR
         {"aten::softmax", ""},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::squeeze", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::squeeze_", "dimname"},
     #endif
         {"aten::sspaddmm", "out"},
         {"aten::stack", "out"},
@@ -1169,6 +1217,24 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::set_", "source_Storage"},
         {"aten::set_", "source_Storage_storage_offset"},
         {"aten::set_quantizer_", ""},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_add", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_fill", "dimname_Scalar"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_fill", "dimname_Tensor"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::scatter", "dimname_src"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::scatter", "dimname_value"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::scatter_add", "dimname"},
+    #endif
         {"aten::addbmm", "out"},
         {"aten::random_", "from"},
         {"aten::random_", "to"},
@@ -1199,9 +1265,21 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::lt", "Tensor_out"},
         {"aten::take", "out"},
         {"aten::index_select", "out"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_select", "dimname_out"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_select", "dimname"},
+    #endif
         {"aten::masked_select", "out"},
         {"aten::nonzero", "out"},
         {"aten::gather", "out"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::gather", "dimname_out"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::gather", "dimname"},
+    #endif
         {"aten::addcmul", "out"},
         {"aten::addcdiv", "out"},
         {"aten::lstsq", "X"},
@@ -1237,6 +1315,15 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::min", "out"},
         {"aten::max", "out"},
         {"aten::sort", "values"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::sort", "dimname_values"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::sort", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::argsort", "dimname"},
+    #endif
         {"aten::topk", "values"},
         {"aten::renorm", "out"},
         {"aten::pow", "Tensor_Tensor_out"},
