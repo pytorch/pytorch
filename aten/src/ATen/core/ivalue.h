@@ -55,8 +55,7 @@ struct Object;
   _(Device) \
   _(Object) \
   _(Uninitialized) \
-  _(Capsule) \
-
+  _(Capsule)
 
 struct CAFFE2_API IValue final {
   IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
@@ -364,19 +363,22 @@ struct CAFFE2_API IValue final {
   }
 
   // ScalarType
-  IValue(ScalarType s) : IValue(static_cast<int64_t>(s)) {}
+  IValue(ScalarType t)
+  : IValue(static_cast<std::underlying_type<ScalarType>::type>(t)) {}
   at::ScalarType toScalarType() const {
     return static_cast<at::ScalarType>(toInt());
   }
 
   // Layout
-  IValue(Layout l) : IValue(static_cast<int64_t>(l)) {}
+  IValue(Layout l)
+  : IValue(static_cast<std::underlying_type<Layout>::type>(l)) {}
   at::Layout toLayout() const {
     return static_cast<at::Layout>(toInt());
   }
 
   // MemoryFormat
-  IValue(MemoryFormat m) : IValue(static_cast<int64_t>(m)) {}
+  IValue(MemoryFormat m)
+  : IValue(static_cast<std::underlying_type<MemoryFormat>::type>(m)) {}
   at::MemoryFormat toMemoryFormat() const {
     return static_cast<at::MemoryFormat>(toInt());
   }
