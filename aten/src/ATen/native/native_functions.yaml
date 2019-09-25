@@ -52,6 +52,7 @@
 
 - func: output_nr(Tensor self) -> int
   variants: method
+  supports_named_tensor: True
 
 - func: _version(Tensor self) -> int
   variants: method
@@ -2424,10 +2425,12 @@
 
 - func: detach(Tensor self) -> Tensor
   use_c10_dispatcher: full
+  supports_named_tensor: True
   variants: function, method
 
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
+  supports_named_tensor: True
   variants: function, method
 
 - func: size.int(Tensor self, int dim) -> int
@@ -4194,6 +4197,7 @@
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
+  supports_named_tensor: True
   variants: method
 
 - func: tril_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
@@ -4971,9 +4975,11 @@
     CUDA: legacy::cuda::_th_dist
 
 - func: atan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
 
 - func: atan2(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
+  supports_named_tensor: True
   variants: method, function
 
 - func: lerp.Scalar_out(Tensor self, Tensor end, Scalar weight, *, Tensor(a!) out) -> Tensor(a!)
