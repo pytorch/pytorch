@@ -44,41 +44,42 @@ inline void parallel_for(
   if (begin >= end) {
     return;
   }
-
-  if (((end - begin) >= grain_size) && !in_parallel_region()) {
-    size_t num_tasks, chunk_size;
-    std::tie(num_tasks, chunk_size) =
-        internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);
-    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
-    std::exception_ptr eptr;
-    std::vector<c10::ivalue::Future> futures(num_tasks);
-    auto task = [f, &eptr, &err_flag, &futures, begin, end, chunk_size]
-        (int idx, size_t task_id) {
-      int64_t local_start = begin + task_id * chunk_size;
-      if (local_start < end) {
-        int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
-        try {
-          internal::ParallelRegionGuard guard(task_id);
-          f(local_start, local_end);
-        } catch (...) {
-          if (!err_flag.test_and_set()) {
-            eptr = std::current_exception();
-          }
+  if ((end - begin) < grain_size || in_parallel_region()) {
+    f(begin, end);
+  }
+  size_t num_tasks, chunk_size;
+  std::tie(num_tasks, chunk_size) =
+      internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);
+  std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
+  std::exception_ptr eptr;
+  std::vector<std::shared_ptr<c10::ivalue::Future>> futures(num_tasks);
+  for (size_t i = 0; i < num_tasks; ++i) {
+    futures[i] = std::make_shared<c10::ivalue::Future>(NoneType::get());
+  }
+  auto task = [f, &eptr, &err_flag, &futures, begin, end, chunk_size]
+      (int idx, size_t task_id) {
+    int64_t local_start = begin + task_id * chunk_size;
+    if (local_start < end) {
+      int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
+      try {
+        internal::ParallelRegionGuard guard(task_id);
+        f(local_start, local_end);
+      } catch (...) {
+        if (!err_flag.test_and_set()) {
+          eptr = std::current_exception();
         }
       }
-      futures[task_id].markCompleted();
-    };
-    internal::_run_with_pool(task, num_tasks);
+    }
+    futures[task_id]->markCompleted();
+  };
+  internal::_run_with_pool(task, num_tasks);
 
-    // wait for all tasks to finish
-    for (size_t task_id = 0; task_id < num_tasks; ++task_id) {
-      futures[task_id].wait();
-    }
-    if (eptr) {
-      std::rethrow_exception(eptr);
-    }
-  } else {
-    f(begin, end);
+  // Wait for all tasks to finish.
+  for (size_t task_id = 0; task_id < num_tasks; ++task_id) {
+    futures[task_id]->wait();
+  }
+  if (eptr) {
+    std::rethrow_exception(eptr);
   }
 }
 
@@ -94,29 +95,27 @@ inline scalar_t parallel_reduce(
   if (begin >= end) {
     return ident;
   }
-
-  if (((end - begin) >= grain_size) && !in_parallel_region()) {
-    size_t num_tasks, chunk_size;
-    std::tie(num_tasks, chunk_size) =
-        internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);
-    std::vector<scalar_t> results(num_tasks);
-    scalar_t* results_data = results.data();
-    parallel_for(
-      begin,
-      end,
-      grain_size,
-      [f, results_data, ident](int64_t local_start, int64_t local_end) {
-        results_data[get_thread_num()] = f(local_start, local_end, ident);
-      }
-    );
-    scalar_t result = ident;
-    for (auto partial_result : results) {
-      result = sf(result, partial_result);
-    }
-    return result;
-  } else {
+  if ((end - begin) < grain_size || in_parallel_region()) {
     return f(begin, end, ident);
   }
+  size_t num_tasks, chunk_size;
+  std::tie(num_tasks, chunk_size) =
+      internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);
+  std::vector<scalar_t> results(num_tasks);
+  scalar_t* results_data = results.data();
+  parallel_for(
+    begin,
+    end,
+    grain_size,
+    [f, results_data, ident](int64_t local_start, int64_t local_end) {
+      results_data[get_thread_num()] = f(local_start, local_end, ident);
+    }
+  );
+  scalar_t result = ident;
+  for (auto partial_result : results) {
+    result = sf(result, partial_result);
+  }
+  return result;
 }
 
 } // namespace at

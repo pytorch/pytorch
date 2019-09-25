@@ -83,7 +83,7 @@ std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func) {
   // TODO: caffe2::ThreadPool doesn't support submitting tasks separately and
   // running in parallel. Should fix it when this API becomes popular.
-  auto future = std::make_shared<c10::ivalue::Future>();
+  auto future = std::make_shared<c10::ivalue::Future>(NoneType::get());
   func();
   future->markCompleted();
   return future;
