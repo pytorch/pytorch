@@ -17,59 +17,28 @@ namespace torch {
 namespace jit {
 namespace {
 
-void findValuesInPattern(
-    Graph& graph,
-    const std::string& pattern,
-    std::unordered_set<Value*>& values_to_skip) {
-  Graph pattern_graph;
-  std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern, &pattern_graph, vmap);
-
-  const auto& matches = findPatternMatches(pattern_graph, graph);
-  for (const auto& match : matches) {
-    auto output_value = vmap.at("output");
-    TORCH_INTERNAL_ASSERT(
-        match.values_map.find(output_value) != match.values_map.end(),
-        "Didn't find Value output in match result.");
-    values_to_skip.emplace(match.values_map.at(output_value));
-  }
-}
-
-// TODO: move into ObserveHelper
-void addIntermediateValuesToSkipObserver(
+void fillQConfigMap(
     const script::Module& module,
-    const std::string& method_name,
-    std::unordered_set<Value*>& values_to_skip) {
-  script::Method method = module.get_method(method_name);
-  auto graph = method.graph();
+    const QConfigDict& qconfig_dict,
+    ModuleQConfigMap& map,
+    const std::string& key = "",
+    const c10::optional<QConfig>& parent_qconfig = c10::nullopt) {
+  c10::optional<QConfig> qconfig;
+  if (qconfig_dict.find(key) != qconfig_dict.end()) {
+    qconfig = qconfig_dict.at(key);
+  } else {
+    qconfig = parent_qconfig;
+  }
+  map[module.module_object()] = qconfig;
 
-  // Note that the name of the value we want to skip inserting observer for
-  // is hard coded as "output"
-  std::string conv_functional_relu = R"(
-graph(%self, %input, %inplace):
-    %relu = prim::Constant[name="relu"]()
-    %conv = match::module[name="Conv2d"](%self)
-    %output = prim::CallMethod[name="forward"](%conv, %input)
-    %r = prim::CallFunction(%relu, %output, %inplace)
-    return (%r))";
-  std::string conv_relu_module = R"(
-graph(%self, %input):
-    %conv = match::module[name="Conv2d"](%self)
-    %output = prim::CallMethod[name="forward"](%conv, %input)
-    %relu = match::module[name="ReLU"](%self)
-    %r = prim::CallMethod[name="forward"](%relu, %output)
-    return (%r))";
-  std::string matmul_add = R"(
-graph(%input, %weight, %bias, %4):
-     %weight_t = aten::t(%weight)
-     %output = aten::matmul(%input, %weight_t)
-     %res = aten::add_(%output, %bias, %4)
-     return (%res))";
-  std::vector<std::string> patterns = {
-      conv_functional_relu, conv_relu_module, matmul_add};
-
-  for (const auto& pattern : patterns) {
-    findValuesInPattern(*graph, pattern, values_to_skip);
+  for (script::Slot s : module.get_module_slots()) {
+    std::string child_key;
+    if (key == "") {
+      child_key = s.name();
+    } else {
+      child_key = key + "." + s.name();
+    }
+    fillQConfigMap(s.to_module(), qconfig_dict, map, child_key, qconfig);
   }
 }
 
@@ -184,6 +153,15 @@ class InsertObserversHelper {
       Graph* g,
       script::Module& module,
       const QConfig& qconfig);
+
+  void findIntermediateValuesInPattern(
+    Graph& graph,
+    const std::string& pattern);
+
+  void addIntermediateValuesToSkipObserver(
+      const script::Module& module,
+      const std::string& method_name);
+
   // Values that are the output of GetAttr[name="weight"] and GetAttr[name="bias"]
   // will be propagated from parent method call to the child graph
   void propagateValues(Node* n, std::shared_ptr<Graph>& graph);
@@ -243,28 +221,56 @@ Node* InsertObserversHelper::insertObserverFor(
   return call;
 }
 
-void fillQConfigMap(
-    const script::Module& module,
-    const QConfigDict& qconfig_dict,
-    ModuleQConfigMap& map,
-    const std::string& key = "",
-    const c10::optional<QConfig>& parent_qconfig = c10::nullopt) {
-  c10::optional<QConfig> qconfig;
-  if (qconfig_dict.find(key) != qconfig_dict.end()) {
-    qconfig = qconfig_dict.at(key);
-  } else {
-    qconfig = parent_qconfig;
-  }
-  map[module.module_object()] = qconfig;
+void InsertObserversHelper::findIntermediateValuesInPattern(
+    Graph& graph,
+    const std::string& pattern) {
+  Graph pattern_graph;
+  std::unordered_map<std::string, Value*> vmap;
+  script::parseIR(pattern, &pattern_graph, vmap);
 
-  for (script::Slot s : module.get_module_slots()) {
-    std::string child_key;
-    if (key == "") {
-      child_key = s.name();
-    } else {
-      child_key = key + "." + s.name();
-    }
-    fillQConfigMap(s.to_module(), qconfig_dict, map, child_key, qconfig);
+  cosnt auto& matches = findPatternMatches(pattern_graph, graph);
+  for (const auto& match : matches) {
+    auto output_value = vmap.at("intermediate_val");
+    TORCH_INTERNAL_ASSERT(
+        match.values_map.find(output_value) != match.values_map.end(),
+        "Didn't find Value output in match result.");
+    values_to_skip_.emplace(match.values_map.at(output_value));
+  }
+}
+
+void InsertObserversHelper::addIntermediateValuesToSkipObserver(
+    const script::Module& module,
+    const std::string& method_name) {
+  script::Method method = module.get_method(method_name);
+  auto graph = method.graph();
+
+  // Note that the name of the value we want to skip inserting observer for
+  // is hard coded as "intermediate_val"
+  std::string conv_functional_relu = R"(
+graph(%self, %input, %inplace):
+    %relu = prim::Constant[name="relu"]()
+    %conv = match::module[name="Conv2d"](%self)
+    %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
+    %r = prim::CallFunction(%relu, %intermediate_val, %inplace)
+    return (%r))";
+  std::string conv_relu_module = R"(
+graph(%self, %input):
+    %conv = match::module[name="Conv2d"](%self)
+    %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
+    %relu = match::module[name="ReLU"](%self)
+    %r = prim::CallMethod[name="forward"](%relu, %intermediate_val)
+    return (%r))";
+  std::string matmul_add = R"(
+graph(%input, %weight, %bias, %4):
+     %weight_t = aten::t(%weight)
+     %intermediate_val = aten::matmul(%input, %weight_t)
+     %res = aten::add_(%intermediate_val, %bias, %4)
+     return (%res))";
+  std::vector<std::string> patterns = {
+      conv_functional_relu, conv_relu_module, matmul_add};
+
+  for (const auto& pattern : patterns) {
+    findIntermediateValuesInPattern(*graph, pattern);
   }
 }
 
@@ -292,7 +298,7 @@ void InsertObserversHelper::insertObservers(
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   ConstantPropagation(graph);
-  addIntermediateValuesToSkipObserver(module, method_name, values_to_skip_);
+  addIntermediateValuesToSkipObserver(module, method_name);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -976,8 +982,7 @@ void FoldPrepackedWeightIntoModule(
 graph(%self):
    %b = prim::GetAttr[name="bias"](%self)
    %w_quant = prim::GetAttr[name="_quantized_weight"](%self)
-   %w_quant_t = aten::t(%w_quant)
-   %packed_params = quantized::linear_prepack(%w_quant_t, %b)
+   %packed_params = quantized::linear_prepack(%w_quant, %b)
    return (%packed_params))";
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
@@ -986,27 +991,50 @@ graph(%self):
   TORCH_CHECK(
       matches.size() <= 1, "We only support at most one match right now");
   for (const auto& match : matches) {
-    auto w_quant_t = module.get_attribute("_quantized_weight").toTensor();
+    auto w_quant = module.get_attribute("_quantized_weight").toTensor();
     auto b = module.get_parameter("bias").variable_data();
     auto wrapper = wrapper_module.clone();
     auto set_weight_bias = wrapper.get_method("set_weight_bias");
-    set_weight_bias(std::vector<IValue>{IValue(w_quant_t), IValue(b)});
+    set_weight_bias(std::vector<IValue>{IValue(w_quant), IValue(b)});
     // TODO: we need to make sure this name is unique
     module.register_module(
         "_packed_linear_weight_bias",
         wrapper
     );
+
+    auto values_map = match.values_map;
+    auto b_val = values_map.at(vmap.at("b"));
+    auto w_quant_val = values_map.at(vmap.at("w_quant"));
+    auto packed_params_val = values_map.at(vmap.at("packed_params"));
+
+    WithInsertPoint ins(b_val->node());
+    Node* packed_linear_weight_bias = graph->create(prim::GetAttr);
+    packed_linear_weight_bias->addInput(graph->inputs()[0]);
+    packed_linear_weight_bias->s_(attr::name, "_packed_linear_weight_bias");
+    packed_linear_weight_bias->output()->setDebugName("m");
+    packed_linear_weight_bias->output()->setType(wrapper.type());
+    packed_linear_weight_bias->insertAfter(b_val->node());
+
+    Node* rewritten_packed_params = graph->create(prim::GetAttr);
+    rewritten_packed_params->addInput(packed_linear_weight_bias->output());
+    rewritten_packed_params->s_(attr::name, "_packed_params");
+    rewritten_packed_params->output()->setDebugName("packed_params");
+    rewritten_packed_params->insertAfter(packed_linear_weight_bias);
+    packed_params_val->replaceAllUsesWith(rewritten_packed_params->output());
+
+    // Delete nodes
+    std::vector<Node*> nodes_to_delete;
+    nodes_to_delete.push_back(b_val->node());
+    nodes_to_delete.push_back(w_quant_val->node());
+    nodes_to_delete.push_back(packed_params_val->node());
+    for (auto n : nodes_to_delete) {
+      n->removeAllInputs();
+    }
+    for (auto n : nodes_to_delete) {
+      n->destroy();
+    }
   }
 
-  std::string replacement = R"(
-graph(%self):
-   %m: ClassType = prim::GetAttr[name="_packed_linear_weight_bias"](%self)
-   %packed_params = prim::GetAttr[name="_packed_params"](%m)
-   return (%packed_params))";
-
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(pattern, replacement);
-  rewriter.runOnGraph(graph);
 }
 
 } // namespace jit

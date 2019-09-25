@@ -1463,8 +1463,8 @@ graph(%input, %weight):
 
             def forward(self, x):
                 xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
-                params = torch.ops.quantized.linear_prepack(torch.t(self._quantized_weight), self.bias)
-                return torch.ops.quantized.linear(xq, params, 3.0, 1)
+                params = torch.ops.quantized.linear_prepack(self._quantized_weight, self.bias)
+                return torch.ops.quantized.linear(xq, params, 0.2, 1)
 
 
         m = torch.jit.script(M())
@@ -1487,17 +1487,6 @@ graph(%input, %weight):
         self.assertEqual(ref_res, res)
 
         # test serialization
-        # print(m._c._get_attribute('_quantized_weight'))
-        print(m._c._get_modules())
-        m._c._dump(True, False, False)
-        # for name, mod in m._c._get_modules():
-        #     print('name:', name)
-        #     mod._dump(False, False, False)
-        print('after print')
-        # pp = m._c._get_module('_packed_linear_weight_bias')
-        # print(pp._get_attribute('_packed_params'))
-        # pp._dump(True, True, False)
-        # m._c._dump(True, False, False)
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
         buffer.seek(0)
@@ -17034,7 +17023,7 @@ nn_functional_tests = [
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
     ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),
-        '', (True, 'aten::_batch_norm_impl_index')),
+        '', (False, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],), '',
      (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
