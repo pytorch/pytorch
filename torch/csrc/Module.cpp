@@ -161,22 +161,6 @@ static PyObject * THPModule_crashIfATenASAN(PyObject *module, PyObject *arg) {
   return PyLong_FromLong(at::_crash_if_asan(static_cast<int>(THPUtils_unpackLong(arg))));
 }
 
-static PyObject * THPModule_setMemoryFormatPropagation(PyObject *module, PyObject *arg)
-{
-  THPUtils_assert(PyBool_Check(arg), "set_memory_format_propagation expects a bool, "
-          "but got %s", THPUtils_typename(arg));
-  at::set_memory_format_propagation(arg == Py_True);
-  Py_RETURN_NONE;
-}
-
-PyObject* THPModule_getMemoryFormatPropagation(PyObject* _unused) {
-  if (at::get_memory_format_propagation()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-}
-
 static PyObject * THPModule_getNumThreads(PyObject *module, PyObject *noargs)
 {
   return PyLong_FromLong(at::get_num_threads());
@@ -569,8 +553,6 @@ static PyMethodDef TorchMethods[] = {
   {"_get_qengine", (PyCFunction)THPModule_qEngine, METH_NOARGS, nullptr},
   {"_set_qengine", (PyCFunction)THPModule_setQEngine, METH_O, nullptr},
   {"_supported_qengines", (PyCFunction)THPModule_supportedQEngines, METH_NOARGS, nullptr},
-  {"_set_memory_format_propagation", (PyCFunction)THPModule_setMemoryFormatPropagation, METH_O,  nullptr},
-  {"_get_memory_format_propagation", (PyCFunction)THPModule_getMemoryFormatPropagation, METH_NOARGS,  nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 
