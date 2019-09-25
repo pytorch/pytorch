@@ -8,12 +8,12 @@ namespace torch { \
 namespace enumtype { \
   struct name {}; \
 } \
-TORCH_API extern const enumtype::##name k##name; \
+TORCH_API extern const enumtype::name k##name; \
 }
 
 #define TORCH_ENUM_DEFINE(name) \
 namespace torch { \
-const enumtype::##name k##name; \
+const enumtype::name k##name; \
 }
 
 TORCH_ENUM_DECLARE(Linear)
