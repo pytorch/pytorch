@@ -1457,14 +1457,15 @@ graph(%input, %weight):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                w = torch.rand((5, 5), dtype=torch.float)
-                self._quantized_weight = torch.quantize_per_tensor(w, 0.3, 0, torch.qint8)
+                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
                 self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
 
             def forward(self, x):
                 xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
-                params = torch.ops.quantized.linear_prepack(self._quantized_weight, self.bias)
-                return torch.ops.quantized.linear(xq, params, 0.2, 1)
+                wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
+                r = torch.nn.functional.linear(xq.dequantize(), wq.dequantize(), self.bias)
+                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
+                return rq
 
 
         m = torch.jit.script(M())
@@ -1474,15 +1475,12 @@ graph(%input, %weight):
         res = m._c._get_method('forward')(data)
         # check attribute and graph
         self.assertTrue(m._c._has_module('_packed_linear_weight_bias'))
-        FileCheck().check_not('GetAttr[name="_quantized_weight"]') \
-                   .check('GetAttr[name="_packed_linear_weight_bias"]') \
-                   .check('GetAttr[name="_packed_params"]') \
-                   .run(m._c._get_method('forward').graph)
         # check values
-        ref_w = m._c._get_attribute('_quantized_weight')
+        original_w = m._c._get_parameter('weight')
+        ref_w = torch.quantize_per_tensor(original_w, 0.2, 1, torch.qint8).dequantize()
         ref_b = m._c._get_parameter('bias')
         w, b = m._c._get_module('_packed_linear_weight_bias')._get_method('_weight_bias')()
-        self.assertEqual(ref_w, w)
+        self.assertEqual(ref_w, w.dequantize())
         self.assertEqual(ref_b, b)
         self.assertEqual(ref_res, res)
 
@@ -4598,17 +4596,6 @@ a")
         self.checkScript(test_scalar_cast, (torch.tensor(1.0),))
         self.checkScript(test_scalar_cast, (torch.tensor(1),))
 
-        expected_str = r"Use int\(tensor\) or float\(tensor\) to retrieve"
-        with self.assertRaisesRegex(RuntimeError, expected_str):
-            @torch.jit.script
-            def int_fn(a):
-                # type: (int) -> int
-                return a
-
-            @torch.jit.script
-            def test_error_msg(x):
-                return int_fn(x.item())
-
     def test_method_on_number(self):
         def func():
             c = 1
@@ -6342,6 +6329,25 @@ a")
                 run_test(code)
             for func in funcs:
                 code = funcs_template.format(func=func, scalar1=scalar1, scalar2=scalar2)
+                run_test(code)
+
+        # test Scalar overloads
+        for scalar1, scalar2 in scalar_pairs:
+            item1 = 'torch.tensor(' + scalar1 + ').item()'
+            item2 = 'torch.tensor(' + scalar2 + ').item()'
+            for op in ops:
+                code = ops_template.format(op=op, scalar1=item1, scalar2=scalar2)
+                run_test(code)
+                code = ops_template.format(op=op, scalar1=scalar1, scalar2=item2)
+                run_test(code)
+                code = ops_template.format(op=op, scalar1=item1, scalar2=item2)
+                run_test(code)
+            for func in funcs:
+                code = funcs_template.format(func=func, scalar1=item1, scalar2=scalar2)
+                run_test(code)
+                code = funcs_template.format(func=func, scalar1=scalar1, scalar2=item2)
+                run_test(code)
+                code = funcs_template.format(func=func, scalar1=item1, scalar2=item2)
                 run_test(code)
 
     def test_number_abs(self):

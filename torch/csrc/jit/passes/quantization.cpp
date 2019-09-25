@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/quantization.h>
+#include <torch/csrc/jit/passes/quantization_patterns.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -662,67 +663,13 @@ void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph) {
-  const std::string quantized_linear_with_bias =
-      R"(
-graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %4):
-        %w_quant_t = aten::t(%w_quant)
-        %packed_params = quantized::linear_prepack(%w_quant_t, %b)
-        %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
-        return (%r))";
   const std::unordered_map<std::string, std::string> pattern_and_replacements =
-      {// quantized::conv2d
-       {R"(
-graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
-        %a_dequant = aten::dequantize(%a_quant)
-        %w_dequant = aten::dequantize(%w_quant)
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
-        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_quant))",
-        R"(
-graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
-        %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
-        %r_quant = quantized::conv2d(%a_quant, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
-        %0 : int = prim::Constant[value=0]()
-        %1 : int = prim::Constant[value=1]()
-        %2 : int = prim::Constant[value=2]()
-        %3 : int = prim::Constant[value=3]()
-        %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
-        %r_perm = aten::permute(%r_quant, %out_param)
-        return (%r_perm))"},
-       // addmm -> quantized::linear
-       {R"(
-graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %4):
-        %a_dequant = aten::dequantize(%a_quant)
-        %w_dequant = aten::dequantize(%w_quant)
-        %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
-        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_quant))",
-        quantized_linear_with_bias},
-       // matmul(with bias) -> quantized::linear
-       {R"(
-graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %4):
-        %a_dequant = aten::dequantize(%a_quant)
-        %w_dequant = aten::dequantize(%w_quant)
-        %output = aten::matmul(%a_dequant, %w_dequant)
-        %r = aten::add_(%output, %b, %4)
-        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_quant))",
-        quantized_linear_with_bias},
-       // matmul(without bias) -> quantized::linear
-       {R"(
-graph(%a_quant, %w_quant, %r_scale, %r_zero_point, %r_dtype):
-        %a_dequant = aten::dequantize(%a_quant)
-        %w_dequant = aten::dequantize(%w_quant)
-        %r = aten::matmul(%a_dequant, %w_dequant)
-        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_quant))",
-        R"(
-graph(%a_quant, %w_quant, %r_scale, %r_zero_point, %r_dtype):
-        %w_quant_t = aten::t(%w_quant)
-        %bias: Tensor? = prim::Constant()
-        %packed_params = quantized::linear_prepack(%w_quant_t, %bias)
-        %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
-        return (%r))"}};
+    {
+      {conv2d, quantized_conv2d},
+      {addmm, quantized_linear_with_bias},
+      {matmul_with_bias, quantized_linear_with_bias},
+      {matmul_no_bias, quantized_linear_no_bias}
+    };
   for (const auto& item : pattern_and_replacements) {
     SubgraphRewriter rewriter;
     rewriter.RegisterRewritePattern(item.first, item.second);
@@ -978,63 +925,34 @@ void FoldPrepackedWeightIntoModule(
     }
   }
 
-  const std::string pattern = R"(
-graph(%self):
-   %b = prim::GetAttr[name="bias"](%self)
-   %w_quant = prim::GetAttr[name="_quantized_weight"](%self)
-   %packed_params = quantized::linear_prepack(%w_quant, %b)
-   return (%packed_params))";
-  Graph pattern_graph;
-  std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern, &pattern_graph, vmap);
-  const auto& matches = findPatternMatches(pattern_graph, *graph);
-  TORCH_CHECK(
-      matches.size() <= 1, "We only support at most one match right now");
-  for (const auto& match : matches) {
-    auto w_quant = module.get_attribute("_quantized_weight").toTensor();
-    auto b = module.get_parameter("bias").variable_data();
-    auto wrapper = wrapper_module.clone();
-    auto set_weight_bias = wrapper.get_method("set_weight_bias");
-    set_weight_bias(std::vector<IValue>{IValue(w_quant), IValue(b)});
-    // TODO: we need to make sure this name is unique
-    module.register_module(
-        "_packed_linear_weight_bias",
-        wrapper
-    );
-
-    auto values_map = match.values_map;
-    auto b_val = values_map.at(vmap.at("b"));
-    auto w_quant_val = values_map.at(vmap.at("w_quant"));
-    auto packed_params_val = values_map.at(vmap.at("packed_params"));
-
-    WithInsertPoint ins(b_val->node());
-    Node* packed_linear_weight_bias = graph->create(prim::GetAttr);
-    packed_linear_weight_bias->addInput(graph->inputs()[0]);
-    packed_linear_weight_bias->s_(attr::name, "_packed_linear_weight_bias");
-    packed_linear_weight_bias->output()->setDebugName("m");
-    packed_linear_weight_bias->output()->setType(wrapper.type());
-    packed_linear_weight_bias->insertAfter(b_val->node());
-
-    Node* rewritten_packed_params = graph->create(prim::GetAttr);
-    rewritten_packed_params->addInput(packed_linear_weight_bias->output());
-    rewritten_packed_params->s_(attr::name, "_packed_params");
-    rewritten_packed_params->output()->setDebugName("packed_params");
-    rewritten_packed_params->insertAfter(packed_linear_weight_bias);
-    packed_params_val->replaceAllUsesWith(rewritten_packed_params->output());
-
-    // Delete nodes
-    std::vector<Node*> nodes_to_delete;
-    nodes_to_delete.push_back(b_val->node());
-    nodes_to_delete.push_back(w_quant_val->node());
-    nodes_to_delete.push_back(packed_params_val->node());
-    for (auto n : nodes_to_delete) {
-      n->removeAllInputs();
-    }
-    for (auto n : nodes_to_delete) {
-      n->destroy();
+  auto patterns = {linear_with_quant};
+  for (const auto& pattern: patterns) {
+    Graph pattern_graph;
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(pattern, &pattern_graph, vmap);
+    const auto& matches = findPatternMatches(pattern_graph, *graph);
+    TORCH_CHECK(
+        matches.size() <= 1, "We only support at most one match right now");
+    for (const auto& match : matches) {
+      const auto& match_vmap = match.values_map;
+      auto w_scale = toIValue(match_vmap.at(vmap.at("w_scale"))).value().toDouble();
+    auto w_zero_point =
+      toIValue(match_vmap.at(vmap.at("w_zero_point"))).value().toInt();
+    auto w_dtype =
+        toIValue(match_vmap.at(vmap.at("w_dtype"))).value().toScalarType();
+      auto w = module.get_parameter("weight").variable_data();
+      auto w_quant = at::quantize_per_tensor(w, w_scale, w_zero_point, w_dtype);
+      auto b = module.get_parameter("bias").variable_data();
+      auto wrapper = wrapper_module.clone();
+      auto set_weight_bias = wrapper.get_method("set_weight_bias");
+      set_weight_bias(std::vector<IValue>{IValue(w_quant), IValue(b)});
+      // TODO: we need to make sure this name is unique
+      module.register_module(
+          "_packed_linear_weight_bias",
+          wrapper
+      );
     }
   }
-
 }
 
 } // namespace jit
