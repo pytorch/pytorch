@@ -412,6 +412,20 @@ TEST_F(ModulesTest, AdaptiveMaxPool3dReturnIndices) {
   ASSERT_EQ(indices.sizes(), torch::IntArrayRef({1, 3, 3, 3}));
 }
 
+TEST_F(ModulesTest, AdaptiveAvgPool1d) {
+  AdaptiveAvgPool1d model(3);
+  auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor({{{1.5, 3.0, 4.5}}}, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 3}));
+}
+
 TEST_F(ModulesTest, Linear) {
   Linear model(5, 2);
   auto x = torch::randn({10, 5}, torch::requires_grad());
@@ -760,6 +774,12 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
   ASSERT_EQ(
       c10::str(AdaptiveMaxPool1d(options)),
       "torch::nn::AdaptiveMaxPool1d(output_size=3)");
+}
+
+TEST_F(ModulesTest, PrettyPrintAdaptiveAvgPool) {
+  ASSERT_EQ(
+      c10::str(AdaptiveAvgPool1d(5)),
+      "torch::nn::AdaptiveAvgPool1d(output_size=5)");
 }
 
 TEST_F(ModulesTest, PrettyPrintDropout) {

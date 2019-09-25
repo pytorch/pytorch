@@ -100,5 +100,20 @@ using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<2>;
 /// `AdaptiveMaxPoolOptions` specialized for 3-D adaptive maxpool.
 using AdaptiveMaxPool3dOptions = AdaptiveMaxPoolOptions<3>;
 
+// ============================================================================
+
+/// Options for a `D`-dimensional adaptive avgpool functional and module.
+template <size_t D>
+struct AdaptiveAvgPoolOptions {
+  AdaptiveAvgPoolOptions(ExpandingArray<D> output_size)
+      : output_size_(output_size) {}
+
+  /// the target output size
+  TORCH_ARG(ExpandingArray<D>, output_size);
+};
+
+/// `AdaptiveAvgPoolOptions` specialized for 1-D adaptive avgpool.
+using AdaptiveAvgPool1dOptions = AdaptiveAvgPoolOptions<1>;
+
 } // namespace nn
 } // namespace torch

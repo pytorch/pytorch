@@ -102,6 +102,13 @@ inline std::tuple<Tensor, Tensor> adaptive_max_pool3d_with_indices(
    return torch::adaptive_max_pool3d(input, options.output_size());
 }
 
+// ============================================================================
+
+inline Tensor adaptive_avg_pool1d(const Tensor& input,
+  const AdaptiveAvgPool1dOptions& options) {
+   return torch::adaptive_avg_pool1d(input, options.output_size());
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch
