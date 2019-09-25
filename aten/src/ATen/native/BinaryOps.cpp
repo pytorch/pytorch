@@ -222,31 +222,42 @@ Tensor lt(const Tensor& self, const Tensor& other) {
 Tensor& lt_(Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.dtype() == other.dtype(),
       "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-      other.dtype(), "for argument 'other' in call to lt_")
+      other.dtype(), " for argument 'other' in call to lt_")
   auto iter = TensorIterator::comparison_op(self, self, other,
       /*check_mem_overlap=*/true);
   lt_stub(iter.device_type(), iter);
   return self;
 }
 
+// First it will validate that is possible to convert scalar to tensor dtype without overflow.
+// It's different for arithmetic ops. For arithmetic ops we don't verify this.
+// The reason is because previous TH behavior checked for overflow in comparison ops but not arithmetic ops.
+// In the future, we should reconsider this inconsistency and decide if we're going to check overflow for arithmetic ops
 Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "lt_out", [&]{
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(), "lt_out", [&]{
     // Validate that is possible to convert scalar to tensor dtype without overflow
-    scalar_t val = other.to<scalar_t>();
-    Tensor other_tensor = at::empty({1}, self.options()).fill_(val);
-    auto iter = TensorIterator::comparison_op(result, self, other_tensor, true);
-    lt_stub(iter.device_type(), iter);
+    native::lt_out(result, self, wrapped_scalar_tensor(other.to<scalar_t>()));
   });
   return result;
 }
 
 Tensor lt(const Tensor& self, Scalar other) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
-  return native::lt_out(result, self, other);
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(), "lt", [&]{
+    // Validate that is possible to convert scalar to tensor dtype without overflow
+    native::lt_out(result, self, wrapped_scalar_tensor(other.to<scalar_t>()));
+  });
+  return result;
 }
 
 Tensor& lt_(Tensor& self, Scalar other) {
-  return native::lt_out(self, self, other);
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(), "lt_", [&]{
+    // Validate that is possible to convert scalar to tensor dtype without overflow
+    auto iter = TensorIterator::comparison_op(self, self, wrapped_scalar_tensor(other.to<scalar_t>()),
+            /*check_mem_overlap=*/true);
+    lt_stub(iter.device_type(), iter);
+  });
+  return self;
 }
 
 }
