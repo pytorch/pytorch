@@ -192,34 +192,6 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
         from torch.onnx.symbolic_opset10 import _slice
         return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
 
-def _interpolate_warning(interpolate_mode):
-    onnx_op = "onnx:Resize" if _export_onnx_opset_version >= 10 else "onnx:Upsample"
-    warnings.warn("You are trying to export the model with " + onnx_op + " for ONNX opset version "
-                  "" + str(_export_onnx_opset_version) + ". "
-                  "This operator might cause results to not match the expected results by PyTorch.\n"
-                  "ONNX's Upsample/Resize operator did not match Pytorch's Interpolation until opset 11. "
-                  "Attributes to determine how to transform the input were added in onnx:Resize in opset 11 "
-                  "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
-                  "We recommend using opset 11 and above for models using this operator. ")
-
-def _interpolate_size_to_scales(g, input, output_size, dim):
-    output_size = _maybe_get_const(output_size, 'is')
-    if _is_value(output_size):
-        offset = 2
-        offsets = g.op("Constant", value_t=torch.ones(offset))
-        dividend = g.op("Cast", output_size, to_i=cast_pytorch_to_onnx["Float"])
-        divisor = _slice_helper(g, g.op("Shape", input), axes=[0], ends=[dim], starts=[offset])
-        divisor = g.op("Cast", divisor, to_i=cast_pytorch_to_onnx["Float"])
-        scale_dims = g.op("Div", dividend, divisor)
-        scales = g.op("Concat", offsets, scale_dims, axis_i=0)
-    else:
-        scales_constant = [1. if i < 2 else
-                           float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
-                           for i in range(0, dim)]
-        scales = g.op("Constant", value_t=torch.tensor(scales_constant))
-    return scales
-
-
 def _scatter_helper(g, self, dim, index, src):
     if _export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import scatter
