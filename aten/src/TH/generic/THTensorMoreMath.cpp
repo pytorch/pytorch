@@ -326,6 +326,35 @@ void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension)
                        });
 }
 
+void THTensor_(logcumsumexp)(THTensor *r_, THTensor *t, int dimension)
+{
+  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
+      dimension);
+
+  THTensor_(resizeAs)(r_, t);
+
+  THTensor_(transpose)(r_, dimension, -1);
+
+  int64_t last_dim_size = r_.size()[-1];
+
+  THTensor t_resize = r_.reshape({-1, last_dim_size});
+
+  int64_t d1 = t_resize.size();
+
+  THTensor t_cummax = THTensor_(cummax)(t, dimension).reshape(d1, d1, 1);
+
+  THTensor t_expand = t_resize.unsqueeze1d().EXPAND().reshape(d1, d1, last_dim_size);
+
+  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
+                       accreal cumprod = 1;
+                       int64_t i;
+                       for(i = 0; i < t_size; i++)
+                       {
+                         cumprod *= t_data[i*t_stride];
+                         r__data[i*r__stride] = (scalar_t)cumprod;
+                       });
+}
+
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
 void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)

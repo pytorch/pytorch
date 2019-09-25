@@ -1624,6 +1624,22 @@
       wrap_dim: self
 ]]
 [[
+  name: _th_logcumsumexp
+  cname: logcumsumexp
+  cpu_bool: True
+  cuda_bool: True
+  variants: function
+  return: argument 0
+  variants: function
+  return: argument 0
+  arguments:
+    - arg: THTensor* self
+      output: True
+    - THTensor* self
+    - arg: long dim
+      wrap_dim: self
+]]
+[[
   name: _th_trace
   cname: trace
   variants:

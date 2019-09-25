@@ -847,6 +847,10 @@
 
 - func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
+- func: logcumsumexp(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+
+- func: logcumsumexp.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: ctc_loss.IntList(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
   use_c10_dispatcher: unboxed_only
@@ -5319,10 +5323,20 @@
     CPU: legacy::cpu::_th_cumsum
     CUDA: legacy::cuda::_th_cumsum
 
-- func: _cumsum.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+- func: _logcumsumexp.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_cumsum_out
-    CUDA: legacy::cuda::_th_cumsum_out
+    CPU: legacy::cpu::_th_logcumsumexp_out
+    CUDA: legacy::cuda::_th_logcumsumexp_out
+
+- func: _logcumsumexp(Tensor self, int dim) -> Tensor
+  dispatch:
+    CPU: legacy::cpu::_th_logcumsumexp
+    CUDA: legacy::cuda::_th_logcumsumexp
+
+- func: _cummax.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_cummax_out
+    CUDA: legacy::cuda::_th_cummax_out
 
 - func: _cumprod(Tensor self, int dim) -> Tensor
   use_c10_dispatcher: full

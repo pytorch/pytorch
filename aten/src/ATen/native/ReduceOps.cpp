@@ -174,6 +174,22 @@ Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optiona
   return at::_cumsum_out(result, self.toType(result.scalar_type()), dim);
 }
 
+Tensor logcumsumexp(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  return at::_logcumsumexp(integer_upcast(self, dtype), dim);
+}
+
+Tensor& logcumsumexp_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
+  TORCH_CHECK(
+      !dtype.has_value() || (result.scalar_type() == dtype.value()),
+      "provided dtype must match dtype of result in cumsum. Got ",
+      toString(result.scalar_type()),
+      " and ",
+      toString(dtype.value()),
+      ".");
+  return at::_logcumsumexp_out(result, self.toType(result.scalar_type()), dim);
+}
+
 Tensor cumprod(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
   return at::_cumprod(integer_upcast(self, dtype), dim);
 }

@@ -490,6 +490,7 @@ class CAFFE2_API Tensor {
   #ifdef BUILD_NAMEDTENSOR
   Tensor cumprod(Dimname dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
   #endif
+  Tensor logcumsumexp(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor det() const;
   Tensor diag_embed(int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) const;
   Tensor diagflat(int64_t offset=0) const;

@@ -821,6 +821,14 @@ inline Tensor Tensor::cumsum(int64_t dim, c10::optional<ScalarType> dtype) const
     return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
+inline Tensor Tensor::logcumsumexp(int64_t dim, c10::optional<ScalarType> dtype) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::logcumsumexp(const_cast<Tensor&>(*this), dim, dtype);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::logcumsumexp(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, dtype);
+#endif
+}
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor Tensor::cumsum(Dimname dim, c10::optional<ScalarType> dtype) const {
 #ifdef USE_STATIC_DISPATCH
