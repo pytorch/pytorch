@@ -12,9 +12,7 @@ $storage_tensor_headers
 #include <c10/core/Allocator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/NativeFunctions.h>
-#ifdef NAMEDTENSOR_ENABLED
 #include <ATen/NamedTensorUtils.h>
-#endif
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/Dispatch.h>
@@ -23,6 +21,7 @@ $storage_tensor_headers
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
 #include <ATen/core/ATenDispatch.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <cstddef>
 #include <functional>
@@ -30,25 +29,11 @@ $storage_tensor_headers
 #include <utility>
 
 #include <ATen/Config.h>
+#include <ATen/core/op_registration/op_registration.h>
 $extra_cuda_headers
 $legacy_th_headers
 
 namespace at {
-
-${Type}::${Type}()
-  : ${DeviceType}TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
-
-Backend ${Type}::backend() const {
-  return Backend::${Backend};
-}
-
-const char * ${Type}::toString() const {
-  return "${Type}";
-}
-
-TypeID ${Type}::ID() const {
-  return ${TypeID};
-}
 
 /* example
 Tensor * ${Type}::add(Tensor & a, Tensor & b) {
@@ -59,6 +44,8 @@ Tensor * ${Type}::add(Tensor & a, Tensor & b) {
 
 ${type_derived_method_definitions}
 
-static auto& registerer = globalATenDispatch()
+#ifndef USE_STATIC_DISPATCH
+static auto registerer = torch::RegisterOperators()
   ${function_registrations};
+#endif
 }

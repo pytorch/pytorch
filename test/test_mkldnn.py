@@ -372,7 +372,7 @@ class TestMkldnn(TestCase):
         # of type `OpaqueTensorImpl<IDeepTensorWrapperPtr>`.
         x = torch.randn((1, 2), dtype=torch.float, device=torch.device('cpu'))
         x_mkldnn = x.to_mkldnn()
-        with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
+        with self.assertRaisesRegex(RuntimeError, 'incompatible tensor type'):
             x.data = x_mkldnn
 
     def test_empty(self):
@@ -388,6 +388,24 @@ class TestMkldnn(TestCase):
             x1.zero_(),
             x2.zero_().to_dense(),
         )
+
+    def test_is_mkldnn(self):
+        x = torch.randn(1, dtype=torch.float32)
+        self.assertFalse(x.is_mkldnn)
+        self.assertTrue(x.to_mkldnn().is_mkldnn)
+
+    def test_is_mkldnn_jit(self):
+        class EnsureMkldnn(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                if not x.is_mkldnn:
+                    x = x.to_mkldnn()
+                return x
+
+        m = EnsureMkldnn()
+        x = torch.randn(1, dtype=torch.float32)
+        self.assertTrue(m(x).is_mkldnn)
+        self.assertTrue(m(x.to_mkldnn()).is_mkldnn)
 
     def _test_imagenet_model(self, model):
         model = model.train(False).float()

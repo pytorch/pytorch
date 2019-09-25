@@ -138,7 +138,7 @@ struct BailOutGraphBuilderForNode {
 // version of an original graph from a particular point
 struct BailOutInserter {
   explicit BailOutInserter(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)) {}
+      : graph_(std::move(graph)), bailout_index_(0) {}
 
   void run() {
     liveness_sets_ = BuildLivenessSets(graph_);
@@ -154,11 +154,12 @@ struct BailOutInserter {
   // any given bailout point
   void addUnoptimizedFuncToBailouts() {
     auto unoptimized_graph = graph_->copy();
-    auto func = std::make_shared<Function>(
-        std::string{"bailout"}, false, unoptimized_graph, nullptr);
-    auto unopt_func = graph_->create(prim::Constant);
-    unopt_func->output()->setType(FunctionType::create(std::move(func)));
-    unopt_func->insertBefore(*graph_->block()->nodes().begin());
+    auto unopt_func = graph_->create(prim::BailoutTemplate)
+                          ->insertAfter(graph_->param_node());
+
+    // Returns an int so that we have an easy way to do graph traversal
+    unopt_func->output()->setType(IntType::get());
+    unopt_func->g_(attr::Subgraph, unoptimized_graph);
     for (auto bn : bailouts_) {
       bn->insertInput(0, unopt_func->output());
     }
@@ -171,7 +172,7 @@ struct BailOutInserter {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
       if (it->kind() == prim::Guard) {
         // this will need to be profiled again
-        it->input()->setType(TensorType::create());
+        it->input()->setType(TensorType::get());
         // destroy the guard
         it->output()->replaceAllUsesWith(it->input());
         it.destroyCurrent();
@@ -273,7 +274,7 @@ static void removeBailouts(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
     if (it->kind() == prim::BailOut) {
       // clear profiling information
-      it->inputs().at(0)->setType(TensorType::create());
+      it->inputs().at(0)->setType(TensorType::get());
       it->output()->replaceAllUsesWith(it->inputs().at(0));
       it.destroyCurrent();
     } else {

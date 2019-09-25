@@ -1,35 +1,77 @@
 ## @package layers
 # Module caffe2.python.layers.layers
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import logging
+from collections import namedtuple
 
+import numpy as np
+from caffe2.proto import caffe2_pb2
 from caffe2.python import core, schema, scope, utils, workspace
 from caffe2.python.layers.tags import TagContext
-from caffe2.proto import caffe2_pb2
 
-from collections import namedtuple
-import numpy as np
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # Some types to simplify descriptions of things traveling between ops
 IdList = schema.List(np.int64)
 IdScoreList = schema.Map(np.int64, np.float32)
+IdListWithEvicted = schema.ListWithEvicted(np.int64)
+IdScoreListWithEvicted = schema.MapWithEvicted(np.int64, np.float32)
+
+
+def almost_equal_schemas(
+    record,
+    original_schema,
+    check_field_names=True,
+    check_field_types=True,
+    check_field_metas=False,
+):
+    if original_schema == IdList:
+        return schema.equal_schemas(
+            record,
+            IdList,
+            check_field_names=check_field_names,
+            check_field_types=check_field_types,
+            check_field_metas=check_field_metas,
+        ) or schema.equal_schemas(
+            record,
+            IdListWithEvicted,
+            check_field_names=check_field_names,
+            check_field_types=check_field_types,
+            check_field_metas=check_field_metas,
+        )
+    elif original_schema == IdScoreList:
+        return schema.equal_schemas(
+            record,
+            IdScoreList,
+            check_field_names=check_field_names,
+            check_field_types=check_field_types,
+            check_field_metas=check_field_metas,
+        ) or schema.equal_schemas(
+            record,
+            IdScoreListWithEvicted,
+            check_field_names=check_field_names,
+            check_field_types=check_field_types,
+            check_field_metas=check_field_metas,
+        )
+    else:
+        return schema.equal_schemas(record, original_schema)
 
 
 def get_key(record):
-    if schema.equal_schemas(record, IdList):
-        key = 'values'
-    elif schema.equal_schemas(record, IdScoreList, check_field_types=False):
-        key = 'values:keys'
+    if almost_equal_schemas(record, IdList):
+        key = "values"
+    elif almost_equal_schemas(
+        record, IdScoreList, check_field_types=False
+    ):
+        key = "values:keys"
     else:
-        raise NotImplementedError('Not implemented for {}'.format(record))
-    assert record[key].metadata is not None, (
-        "Blob {} doesn't have metadata".format(str(record[key]())))
+        raise NotImplementedError("Not implemented for {}".format(record))
+    assert record[key].metadata is not None, "Blob {} doesn't have metadata".format(
+        str(record[key]())
+    )
     return record[key]
 
 
@@ -39,22 +81,18 @@ def get_categorical_limit(record):
 
 
 def get_avg_length(record):
-    return record['lengths'].metadata.expected_value
+    return record["lengths"].metadata.expected_value
 
 
 def set_request_only(field):
     for f in field.all_scalars():
         categorical_limit, expected_value = None, None
         if not f.metadata:
-            feature_specs = schema.FeatureSpec(
-                feature_is_request_only=True,
-            )
+            feature_specs = schema.FeatureSpec(feature_is_request_only=True)
         elif not f.metadata.feature_specs:
             categorical_limit = f.metadata.categorical_limit
             expected_value = f.metadata.expected_value
-            feature_specs = schema.FeatureSpec(
-                feature_is_request_only=True,
-            )
+            feature_specs = schema.FeatureSpec(feature_is_request_only=True)
         else:
             categorical_limit = f.metadata.categorical_limit
             expected_value = f.metadata.expected_value
@@ -68,8 +106,9 @@ def set_request_only(field):
 
         # make sure not to set categorical_limit for a non-integer field
         if not np.issubdtype(f.field_type(), np.integer):
-            assert categorical_limit is None, \
-                "categorical_limit shouldn't be set for no-integer field"
+            assert (
+                categorical_limit is None
+            ), "categorical_limit shouldn't be set for no-integer field"
 
         f.set_metadata(
             schema.Metadata(
@@ -84,14 +123,15 @@ class InstantiationContext(object):
     """
     List of contexts where layer could be instantitated
     """
+
     # The layers support this context will accumulate predictions, labels,
     # weights. The accumulated data can later be used to compute
     # calibration or for other
     # purpose.
-    ACCUMULATE_PRED = 'accumulate_pred'
-    EVAL = 'eval'
-    PREDICTION = 'prediction'
-    TRAINING = 'training'
+    ACCUMULATE_PRED = "accumulate_pred"
+    EVAL = "eval"
+    PREDICTION = "prediction"
+    TRAINING = "training"
 
 
 _LAYER_REGISTRY = {}
@@ -114,15 +154,21 @@ def create_layer(layer_name, *args, **kwargs):
     return _LAYER_REGISTRY[layer_name](*args, **kwargs)
 
 
-LayerPsParam = namedtuple('LayerPsParam', ['sparse_key', 'average_length'])
+LayerPsParam = namedtuple("LayerPsParam", ["sparse_key", "average_length"])
 
 
 class LayerParameter(object):
-
-    def __init__(self, parameter=None, optimizer=None, initializer=None,
-                 ps_param=None, regularizer=None):
-        assert isinstance(parameter, core.BlobReference), \
-            "expect {0} to be a blob reference".format(str(parameter))
+    def __init__(
+        self,
+        parameter=None,
+        optimizer=None,
+        initializer=None,
+        ps_param=None,
+        regularizer=None,
+    ):
+        assert isinstance(
+            parameter, core.BlobReference
+        ), "expect {0} to be a blob reference".format(str(parameter))
         # need to put the following line (shape) before initialier
         # shape will be updated once initializer is (re)set
         self._shape = None
@@ -138,8 +184,9 @@ class LayerParameter(object):
 
     @initializer.setter
     def initializer(self, op):
-        assert op is None or core.IsOperator(getattr(op, 'type', None)), \
-            "initializer expects an operator, got type: {}".format(type(op))
+        assert op is None or core.IsOperator(
+            getattr(op, "type", None)
+        ), "initializer expects an operator, got type: {}".format(type(op))
         self._initializer = op
         if op is not None:
             self.shape = self._infer_shape_from_initializer()
@@ -150,14 +197,15 @@ class LayerParameter(object):
 
     @shape.setter
     def shape(self, shape):
-        assert self.shape is None or self.shape == shape, \
-            "inconsistent shape for layer parameter:"\
+        assert self.shape is None or self.shape == shape, (
+            "inconsistent shape for layer parameter:"
             " {}, expect: {}, but got {}".format(self, self.shape, shape)
+        )
         self._shape = shape
 
     def _infer_shape_from_initializer(self):
         for arg in self.initializer.arg:
-            if arg.name == 'shape':
+            if arg.name == "shape":
                 return list(arg.ints)
         with workspace.WorkspaceGuard("model_init_by_loading_params"):
             try:
@@ -173,7 +221,8 @@ class LayerParameter(object):
             except RuntimeError as exp:
                 logger.warning(
                     "Cannot infer the shape of blob {} from operator {}: {}".format(
-                        self.parameter, self.initializer.type, exp)
+                        self.parameter, self.initializer.type, exp
+                    )
                 )
                 workspace.ResetWorkspace()
                 return None
@@ -186,16 +235,29 @@ def is_request_only_scalar(scalar):
     if len(scalar.field_metadata()) == 0:
         return False
     for metadata in scalar.field_metadata():
-        if not (metadata and metadata.feature_specs and getattr(
-                metadata.feature_specs, 'feature_is_request_only', False)):
+        if not (
+            metadata
+            and metadata.feature_specs
+            and getattr(metadata.feature_specs, "feature_is_request_only", False)
+        ):
             return False
     return True
 
+# Contains features accessed in a model layer of a given type
+# type: A string representing the kind of feature, consistent with FeatureSpec
+# ids: A set of feature IDs that are accessed in the model layer
+AccessedFeatures = namedtuple("AccessedFeatures", ["type", "ids"])
 
 class ModelLayer(object):
-
-    def __init__(self, model, prefix, input_record,
-                 predict_input_record_fields=None, tags=None, **kwargs):
+    def __init__(
+        self,
+        model,
+        prefix,
+        input_record,
+        predict_input_record_fields=None,
+        tags=None,
+        **kwargs
+    ):
         """
         Base class for model layers. Layer is an abstraction that allows to
         provide model description in terms of meta-operators, where each of the
@@ -224,8 +286,7 @@ class ModelLayer(object):
         if predict_input_record_fields:
             if not isinstance(predict_input_record_fields, list):
                 predict_input_record_fields = [predict_input_record_fields]
-            self._predict_input_record = self._input_record[
-                predict_input_record_fields]
+            self._predict_input_record = self._input_record[predict_input_record_fields]
         else:
             self._predict_input_record = None
 
@@ -254,10 +315,9 @@ class ModelLayer(object):
 
     def _check_output_schema(self):
         assert self._output_schema is not None, "Schema is not initialized"
-        assert (self._predict_output_schema is None or
-                schema.is_schema_subset(self._predict_output_schema,
-                                        self._output_schema)), (
-            "predict_output_schema is not a subset of the output_schema")
+        assert self._predict_output_schema is None or schema.is_schema_subset(
+            self._predict_output_schema, self._output_schema
+        ), "predict_output_schema is not a subset of the output_schema"
 
     @property
     def predict_input_record(self):
@@ -299,10 +359,17 @@ class ModelLayer(object):
     def get_memory_usage(self):
         return 0
 
+    def get_accessed_features(self):
+        """
+        Return a map from field to list of AccessedFeatures, the map should
+        contain all features accessed in the model layer
+        """
+        return {}
+
     def add_init_params(self, init_net):
-        '''
+        """
         Adds layer initialization operators to passed net.
-        '''
+        """
         for param in self.params:
             # TODO(amalevich): Either return back to lambdas, that add
             # all params (looks a bit safer and breaking less
@@ -317,28 +384,32 @@ class ModelLayer(object):
             if not init_op:
                 continue
 
-            if not init_op.HasField('device_option') and\
-                    current_device_scope:
+            if not init_op.HasField("device_option") and current_device_scope:
                 init_op = caffe2_pb2.OperatorDef()
                 init_op.CopyFrom(param.initializer)
                 init_op.device_option.CopyFrom(current_device_scope)
 
             # do not add duplicated init ops
-            if any(utils.OpAlmostEqual(op, init_op, 'debug_info')
-                   for op in init_net._net.op):
+            if any(
+                utils.OpAlmostEqual(op, init_op, "debug_info")
+                for op in init_net._net.op
+            ):
                 continue
 
             init_net._net.op.extend([init_op])
 
-    def create_param(self, param_name, shape, initializer, optimizer,
-                     ps_param=None, regularizer=None):
+    def create_param(
+        self, param_name, shape, initializer, optimizer, ps_param=None, regularizer=None
+    ):
         with scope.NameScope(self.name, reset=True):
-            param = self.model.create_param(param_name=param_name,
-                                            shape=shape,
-                                            initializer=initializer,
-                                            optimizer=optimizer,
-                                            ps_param=ps_param,
-                                            regularizer=regularizer)
+            param = self.model.create_param(
+                param_name=param_name,
+                shape=shape,
+                initializer=initializer,
+                optimizer=optimizer,
+                ps_param=ps_param,
+                regularizer=regularizer,
+            )
 
             # make sure we don't share parameters in the same layer
             assert all(param.parameter != p.parameter for p in self.params)
@@ -350,20 +421,20 @@ class ModelLayer(object):
         with scope.NameScope(self.name, reset=True):
             return self.model.net.NextScopedBlob(name)
 
-    def add_operators(self, net, init_net=None,
-                      context=InstantiationContext.TRAINING):
-        '''
+    def add_operators(self, net, init_net=None, context=InstantiationContext.TRAINING):
+        """
         Adds layer trainig or initialization operators to the passed in net.
         init_net can be None and can be called independently from add_init_params
-        '''
+        """
         # Namescope below should warranty that all intermediate blobs will be
         # assiciated with the layer that produces them
         with scope.NameScope(self.name):
-            if context not in {InstantiationContext.PREDICTION,
-                               InstantiationContext.EVAL,
-                               InstantiationContext.ACCUMULATE_PRED}:
-                assert init_net, (
-                    "Only prediction and eval context don't need init_net")
+            if context not in {
+                InstantiationContext.PREDICTION,
+                InstantiationContext.EVAL,
+                InstantiationContext.ACCUMULATE_PRED,
+            }:
+                assert init_net, "Only prediction and eval context don't need init_net"
             if init_net:
                 self.add_init_params(init_net)
             if context == InstantiationContext.TRAINING:
@@ -375,9 +446,10 @@ class ModelLayer(object):
             else:
                 self.add_ops(net)
 
-            if context in {InstantiationContext.TRAINING,
-                           InstantiationContext.EVAL} \
-               and self._export_params_for_metrics:
+            if (
+                context in {InstantiationContext.TRAINING, InstantiationContext.EVAL}
+                and self._export_params_for_metrics
+            ):
                 self.add_param_copy_operators(net)
 
     def add_ops(self, net):
@@ -419,5 +491,6 @@ class ModelLayer(object):
         # Export copies of parameters
         for param in self.params:
             param_copy_ref = self.get_next_blob_reference(
-                str(param).split("/")[-1] + "_copy")
+                str(param).split("/")[-1] + "_copy"
+            )
             self.model.add_metric_field(str(param.parameter), param_copy_ref)

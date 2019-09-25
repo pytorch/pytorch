@@ -1,12 +1,12 @@
 #include <torch/csrc/autograd/variable.h>
 
+#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -34,7 +34,7 @@ Variable::AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_gr
       "requires_grad should be false if grad_fn is set");
 }
 
-std::shared_ptr<Function> Variable::grad_accumulator() const {
+std::shared_ptr<Node> Variable::grad_accumulator() const {
   auto autograd_meta = get_autograd_meta();
   if (autograd_meta->grad_fn_) {
     throw std::logic_error(
@@ -68,28 +68,19 @@ void Variable::detach_() {
 }
 
 void Variable::backward(
-    c10::optional<Tensor> gradient,
+    const Tensor& gradient,
     bool keep_graph,
     bool create_graph) const {
-  auto autograd_meta = get_autograd_meta();
-  std::vector<Edge> edges;
-  edges.emplace_back(autograd_meta->grad_fn_, autograd_meta->output_nr_);
-
-  std::vector<Variable> inputs;
-  if (!gradient.has_value()) {
-    gradient = at::ones_like(*this);
-  }
-  inputs.push_back(std::move(as_variable_ref(*gradient)));
-  Engine::get_default_engine().execute(edges, inputs, keep_graph, create_graph);
+  torch::autograd::backward({*this}, {gradient}, keep_graph, create_graph);
 }
 
-void Variable::set_data(const at::Tensor &new_data) {
+void Variable::set_data(const at::Tensor &new_data) const {
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
-  // from `new_data` to `var`. It requires that `new_data` has the same derived
-  // type of TensorImpl as `var`.
+  // from `new_data` to `var`. It requires that `new_data` and `var` have compatible
+  // tensor type.
   TORCH_CHECK(
-    _has_same_tensorimpl_type(*this, new_data),
-    "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have different types of TensorImpl.");
+    _has_compatible_shallow_copy_type(*this, new_data),
+    "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have incompatible tensor type.");
 
   // Resets gradient accumulator if metadata is out of date
   Variable::AutogradMeta* autograd_meta = get_autograd_meta();
@@ -131,7 +122,7 @@ Variable::DifferentiableViewMeta::~DifferentiableViewMeta() {
   base_.reset();
 }
 
-const std::shared_ptr<Function>& Variable::grad_fn() const {
+const std::shared_ptr<Node>& Variable::grad_fn() const {
   if (is_view()) {
     auto diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta());
     std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
@@ -177,6 +168,25 @@ void Variable::rebase_history(Edge gradient_edge) {
   } else {
     set_gradient_edge(std::move(gradient_edge));
   }
+}
+
+void Variable::create_cpp_hook() {
+  auto &list = get_autograd_meta()->cpp_hooks_list;
+  list.reset(new hooks_list());
+  std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, output_nr()));
+  clear_hooks();
+  add_hook(std::make_shared<CppFunctionPreHook>(list, 0));
+  auto fn = grad_fn();
+  if (fn) {
+    fn->add_pre_hook(std::move(hook_ptr));
+  }
+}
+
+void Variable::remove_hook(unsigned pos) {
+  auto &list = get_autograd_meta()->cpp_hooks_list;
+  TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
+  // Hook will be ignored
+  (*list)[pos] = nullptr;
 }
 
 }} // namespace torch::autograd

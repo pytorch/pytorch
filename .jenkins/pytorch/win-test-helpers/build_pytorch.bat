@@ -6,6 +6,12 @@ if "%DEBUG%" == "1" (
 
 set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;%PATH%
 
+:: This inflates our log size slightly, but it is REALLY useful to be
+:: able to see what our cl.exe commands are (since you can actually
+:: just copy-paste them into a local Windows setup to just rebuild a
+:: single file.)
+set CMAKE_VERBOSE_MAKEFILE=1
+
 
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
 
@@ -69,10 +75,17 @@ set CXX=sccache cl
 
 set CMAKE_GENERATOR=Ninja
 
+:: The following code will try to build PyTorch twice if USE_CUDA is neither 0
+:: nor 1. It is intended so that both builds can be folded into 1 CI run.
+
 if not "%USE_CUDA%"=="1" (
   if "%REBUILD%"=="" (
-    set NO_CUDA=1
+    :: Must save and restore the original value of USE_CUDA, otherwise the
+    :: `if not "%USE_CUDA%"=="0"` line can be messed up.
+    set OLD_USE_CUDA=%USE_CUDA%
+    set USE_CUDA=0
     python setup.py install
+    set USE_CUDA=%OLD_USE_CUDA%
   )
   if errorlevel 1 exit /b 1
   if not errorlevel 0 exit /b 1
@@ -96,7 +109,7 @@ if not "%USE_CUDA%"=="0" (
 
   set CUDA_NVCC_EXECUTABLE=%TMP_DIR_WIN%\bin\nvcc
 
-  if "%REBUILD%"=="" set NO_CUDA=0
+  if "%REBUILD%"=="" set USE_CUDA=1
 
   python setup.py install --cmake && sccache --show-stats && (
     if "%BUILD_ENVIRONMENT%"=="" (

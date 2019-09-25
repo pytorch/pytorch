@@ -52,7 +52,8 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/jit/ir.h>
-#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/core/EnableNamedTensor.h>
+#ifdef BUILD_NAMEDTENSOR
 #include <torch/csrc/python_dimname.h>
 #endif
 #include <torch/csrc/tensor/python_tensor.h>
@@ -76,7 +77,7 @@
 namespace torch {
 
 enum class ParameterType {
-  TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
+  TENSOR, SCALAR, INT64, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
   BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STRING,
   DIMNAME, DIMNAME_LIST, QSCHEME
 };
@@ -142,8 +143,9 @@ struct PythonArgs {
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
   inline at::Dimname dimname(int i);
+  inline std::vector<at::Dimname> dimnamelist(int i);
   inline c10::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
 #endif
   inline at::MemoryFormat memoryformat(int i);
@@ -155,9 +157,15 @@ struct PythonArgs {
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
   inline double toDouble(int i);
   inline double toDoubleWithDefault(int i, double default_double);
+  inline std::complex<double> toComplex(int i);
+  inline std::complex<double> toComplexWithDefault(int i, std::complex<double> default_complex);
   inline bool toBool(int i);
   inline bool toBoolWithDefault(int i, bool default_bool);
   inline bool isNone(int i);
+
+private:
+  at::Tensor tensor_slow(int i);
+  at::Scalar scalar_slow(int i);
 };
 
 struct FunctionSignature {
@@ -199,6 +207,7 @@ struct FunctionParameter {
     bool default_bool;
     int64_t default_int;
     double default_double;
+    double default_complex[2]; // see Scalar
     at::ScalarType default_scalartype;
     THPLayout* default_layout;
   };
@@ -214,60 +223,25 @@ inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, Parse
 }
 
 inline at::Tensor PythonArgs::tensor(int i) {
-  PyObject* obj = args[i];
-  if (!obj) return at::Tensor();
-  if (!THPVariable_Check(obj)) {
-    at::Scalar scalar;
-    if (THPUtils_checkLong(obj)) {
-      scalar = at::Scalar(THPUtils_unpackLong(obj));
-    } else if (THPUtils_checkDouble(obj)) {
-      scalar = at::Scalar(THPUtils_unpackDouble(obj));
-    } else {
-      // NB: Are you here because you passed None to a Variable method,
-      // and you expected an undefined tensor to be returned?   Don't add
-      // a test for Py_None here; instead, you need to mark the argument
-      // as *allowing none*; you can do this by writing 'Tensor?' instead
-      // of 'Tensor' in the ATen metadata.
-      throw TypeError("expected Tensor as argument %d, but got %s", i,
-          Py_TYPE(obj)->tp_name);
-    }
-    auto tensor = scalar_to_tensor(scalar);
-    tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-    return autograd::make_variable(tensor);
+  if (args[i] && THPVariable_CheckExact(args[i])) {
+    return reinterpret_cast<THPVariable*>(args[i])->cdata;
   }
-  return reinterpret_cast<THPVariable*>(obj)->cdata;
+  return tensor_slow(i);
 }
 
 inline at::Scalar PythonArgs::scalar(int i) {
   if (!args[i]) return signature.params[i].default_scalar;
-  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
-    auto& var = THPVariable_Unpack(args[i]);
-    jit::tracer::ArgumentStash::stashValue(
-        signature.params[i].name, idx, var, jit::NumberType::get());
-  }
-  return scalarWithDefault(i, signature.params[i].default_scalar);
+  return scalar_slow(i);
 }
 
 inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar) {
   if (!args[i]) return default_scalar;
-  // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
-  // handle most NumPy scalar types except np.float64.
-  if (THPVariable_Check(args[i])) {
-    return ((THPVariable*)args[i])->cdata.item();
-  }
-  if (THPUtils_checkLong(args[i])) {
-    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
-  }
-
-  if (PyComplex_Check(args[i])) {
-    return at::Scalar(THPUtils_unpackComplexDouble(args[i]));
-  }
-  return at::Scalar(THPUtils_unpackDouble(args[i]));
+  return scalar_slow(i);
 }
 
 inline c10::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
   if (!args[i]) return c10::nullopt;
-  return scalar(i);
+  return scalar_slow(i);
 }
 
 inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
@@ -389,15 +363,9 @@ inline const THPLayout& PythonArgs::layoutWithDefault(int i, const THPLayout& de
   return layout(i);
 }
 
-static std::string cuda_str = "cuda";
-static std::string cpu_str = "cpu";
-static std::string cuda_prefix = "cuda:";
-static std::string cpu_prefix = "cpu:";
-
 inline at::Device PythonArgs::device(int i) {
   if (!args[i]) {
-    const auto& default_tensor_type = torch::tensors::get_default_tensor_type();
-    return at::Device(default_tensor_type.device_type());
+    return at::Device(backendToDeviceType(tensorTypeIdToBackend(torch::tensors::get_default_tensor_type_id())));
   }
   if (THPDevice_Check(args[i])) {
     const auto device = reinterpret_cast<THPDevice*>(args[i]);
@@ -423,15 +391,13 @@ inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
   return device(i);
 }
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 inline at::Dimname PythonArgs::dimname(int i) {
   TORCH_INTERNAL_ASSERT(args[i] != nullptr);
   return THPDimname_parse(args[i]);
 }
 
-inline c10::optional<std::vector<at::Dimname>> PythonArgs::toDimnameListOptional(int i) {
-  if (!args[i]) return c10::nullopt;
-  PyObject* arg = args[i];
+inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
   auto tuple = PyTuple_Check(arg);
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<at::Dimname> res;
@@ -441,6 +407,22 @@ inline c10::optional<std::vector<at::Dimname>> PythonArgs::toDimnameListOptional
     res.push_back(THPDimname_parse(obj));
   }
   return res;
+}
+
+inline c10::optional<std::vector<at::Dimname>> PythonArgs::toDimnameListOptional(int i) {
+  if (!args[i]) return c10::nullopt;
+  return parseDimnameList(args[i]);
+}
+
+inline std::vector<at::Dimname> PythonArgs::dimnamelist(int i) {
+  TORCH_INTERNAL_ASSERT(args[i]);
+  PyObject* arg = args[i];
+  auto size = signature.params[i].size;
+  TORCH_INTERNAL_ASSERT(size == 0 || size == 1);
+  if (size == 1 && THPUtils_checkDimname(arg)) {
+    return { THPDimname_parse(arg) };
+  }
+  return parseDimnameList(arg);
 }
 #endif
 
@@ -504,6 +486,18 @@ inline double PythonArgs::toDouble(int i) {
 
 inline double PythonArgs::toDoubleWithDefault(int i, double default_double) {
   if (!args[i]) return default_double;
+  return toDouble(i);
+}
+
+inline std::complex<double> PythonArgs::toComplex(int i) {
+  std::complex<double> default_value = *const_cast<std::complex<double> *>(
+    reinterpret_cast<const std::complex<double> *>(signature.params[i].default_complex));
+  if (!args[i]) return default_value;
+  return THPUtils_unpackComplexDouble(args[i]);
+}
+
+inline std::complex<double> PythonArgs::toComplexWithDefault(int i, std::complex<double> default_value) {
+  if (!args[i]) return default_value;
   return toDouble(i);
 }
 

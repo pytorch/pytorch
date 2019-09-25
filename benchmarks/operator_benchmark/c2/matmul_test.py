@@ -33,10 +33,10 @@ mm_short_configs = op_bench.config_list(
 
 class MatMulBenchmark(op_bench.Caffe2BenchmarkBase):
     def init(self, M, N, K, trans_a, trans_b): 
-        self.input_one = self.tensor(N, M) if trans_a else self.tensor(M, N)
-        self.input_two = self.tensor(K, N) if trans_b else self.tensor(N, K)
+        self.input_one = self.tensor([N, M]) if trans_a else self.tensor([M, N])
+        self.input_two = self.tensor([K, N]) if trans_b else self.tensor([N, K])
         self.args = {'trans_a': trans_a, 'trans_b': trans_b}
-        self.output = self.tensor(M, K)
+        self.output = self.tensor([M, K])
         self.set_module_name("matmul")
 
     def forward(self):

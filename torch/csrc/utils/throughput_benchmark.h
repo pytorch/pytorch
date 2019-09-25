@@ -106,7 +106,7 @@ Input cloneInput(const Input& input);
 typedef BenchmarkHelper<
     ScriptModuleInput,
     at::IValue,
-    std::shared_ptr<jit::script::Module>>
+    jit::script::Module>
     ScriptModuleBenchmark;
 typedef BenchmarkHelper<ModuleInput, py::object, py::object> ModuleBenchmark;
 
@@ -150,7 +150,7 @@ void ModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs);
  */
 class C10_HIDDEN ThroughputBenchmark {
  public:
-  explicit ThroughputBenchmark(std::shared_ptr<jit::script::Module> module);
+  explicit ThroughputBenchmark(jit::script::Module module);
   explicit ThroughputBenchmark(py::object module);
 
   // Add one more input example. This input example should be in the exact

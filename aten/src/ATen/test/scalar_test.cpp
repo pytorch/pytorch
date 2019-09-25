@@ -20,7 +20,7 @@ struct Foo {
   static void apply(Tensor a, Tensor b) {
     scalar_type s = 1;
     std::stringstream ss;
-    ss << "hello, dispatch: " << a.dispatch_type().toString() << s << "\n";
+    ss << "hello, dispatch: " << a.type().toString() << s << "\n";
     auto data = (scalar_type*)a.data_ptr();
     (void)data;
   }
@@ -58,7 +58,7 @@ TEST(TestScalar, TestScalar) {
   Half h = bar.toHalf();
   Scalar h2 = h;
   cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " "
-       << bar.toDouble() << " " << what.isIntegral() << "\n";
+       << bar.toDouble() << " " << what.isIntegral(false) << "\n";
   auto gen = at::detail::getDefaultCPUGenerator();
   {
     // See Note [Acquire lock when using random generators]
@@ -110,7 +110,7 @@ TEST(TestScalar, TestScalar) {
       scalar_t s = 1;
       std::stringstream ss;
       ASSERT_NO_THROW(
-          ss << "hello, dispatch" << x.dispatch_type().toString() << s << "\n");
+          ss << "hello, dispatch" << x.type().toString() << s << "\n");
       auto data = (scalar_t*)x.data_ptr();
       (void)data;
     });

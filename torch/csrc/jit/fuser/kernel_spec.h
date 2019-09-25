@@ -41,32 +41,6 @@ struct TORCH_API PartitionInfo {
   int64_t dim_;
 };
 
-// This is a helper struct to record the following:
-// for each fusion group output, it records the corresponding
-// kernel output offset (in offset) and the fusion group input
-// to that is to be applied with sumtosize on the output (if any).
-// This mapping is necessar as a single kernel output might be
-// summed to different sizes.
-// These mappings are created during compilation in processGradSumToSize.
-struct TORCH_API OutputMapAndSize {
-  OutputMapAndSize(const int64_t _offset, const int64_t _sizeInput)
-      : offset_{_offset}, sizeInput_{_sizeInput} {};
-
-  int64_t offset() const {
-    return offset_;
-  }
-  int64_t sizeInput() const {
-    return sizeInput_;
-  }
-  bool needsSumToSize() const {
-    return sizeInput_ != -1;
-  }
-
- private:
-  int64_t offset_;
-  int64_t sizeInput_;
-};
-
 // "Kernel Specification." - Contains device-independent fusion information.
 // Each kernel specification contains a map of instantiated generated functions
 // that implement some or most of its functionality. Multiple generated
@@ -90,7 +64,6 @@ struct TORCH_API KernelSpec {
         nTensorInputs_{},
         inputBroadcastGroups_{},
         inputChunks_{},
-        outputMapAndSizes_{},
         has_random_{false},
         kernels_{} {
     for (const auto& n : graph_->nodes()) {
@@ -136,10 +109,6 @@ struct TORCH_API KernelSpec {
     return inputChunks_;
   }
 
-  std::vector<OutputMapAndSize>& outputMapAndSizes() {
-    return outputMapAndSizes_;
-  }
-
   bool hasRandom() const {
     return has_random_;
   }
@@ -167,11 +136,6 @@ struct TORCH_API KernelSpec {
   uint64_t nTensorInputs_;
   std::vector<std::vector<int64_t>> inputBroadcastGroups_;
   std::vector<PartitionInfo> inputChunks_;
-  // This will initially be an empty vector. During kernel compilation
-  // in processGradSumToSize it will be filled and will contain one
-  // element per fusion group output (which may be larger than the
-  // number of kernel outputs).
-  std::vector<OutputMapAndSize> outputMapAndSizes_;
   bool has_random_;
   mutable std::mutex mutex_;
   mutable std::

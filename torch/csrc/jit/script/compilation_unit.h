@@ -26,11 +26,16 @@ namespace jit {
 namespace script {
 
 struct Def;
+struct ClassDef;
 struct SugaredValue;
 struct Resolver;
 
 using ResolverPtr = std::shared_ptr<Resolver>;
-using Self = std::function<std::shared_ptr<SugaredValue>(Value*)>;
+struct Self {
+  virtual ~Self() {}
+  virtual std::shared_ptr<SugaredValue> makeSugared(Value* v) const = 0;
+  virtual ClassTypePtr getClassType() const = 0;
+};
 
 // A CompilationUnit is a list of named Functions
 // with helper methods to iterate the list, or invoke the function.
@@ -44,53 +49,84 @@ struct TORCH_API CompilationUnit {
   explicit CompilationUnit(const std::string& source);
   CompilationUnit() = default;
 
-  std::shared_ptr<Function> find_function(const std::string& name) const {
+  CompilationUnit& operator=(CompilationUnit&&) = default;
+  CompilationUnit(CompilationUnit&&) = default;
+  CompilationUnit& operator=(const CompilationUnit&) = delete;
+  CompilationUnit(const CompilationUnit&) = delete;
+
+  Function* find_function(const c10::QualifiedName& name) const {
     auto it = dict_.find(name);
-    if (it == dict_.end())
+    if (it == dict_.end()) {
       return nullptr;
-    return functions_[it->second];
+    }
+    return functions_[it->second].get();
   }
 
-  Function& get_function(const std::string& name) const {
-    if (auto r = find_function(name))
+  Function& get_function(const c10::QualifiedName& name) const {
+    if (auto r = find_function(name)) {
       return *r;
-    AT_ERROR("attempted to get undefined function ", name);
+    }
+    TORCH_CHECK(false, "attempted to get undefined function ", name.name());
   }
 
   void set_optimized(bool o) {
-    optimized_ = o;
+    AT_WARN(
+        "CompilationUnit::set_optimized() is deprecated and has no effect. "
+        "Please use setGraphExecutorOptimize()");
   }
 
-  bool is_optimized() const {
-    return optimized_;
+   bool is_optimized() const {
+    AT_WARN(
+        "CompilationUnit::is_optimized() is deprecated and always returns true. "
+        "Please use getGraphExecutorOptimize()");
+    return true;
   }
 
   // for historic reasons, these are defined in compiler.cpp
-  void define(
+  // Returns the list of Function's just defined.
+  std::vector<Function*> define(
+      const c10::optional<c10::QualifiedName>& prefix,
       const std::vector<Def>& definitions,
       const std::vector<ResolverPtr>&
           resolvers, /* determines how we handle free
                      variables in each definition*/
       // if non-null, the first argument to each def, is bound to this value
-      const Self& self);
+      const Self* self,
+      // see [name mangling]
+      bool shouldMangle = false);
 
   // same as above but parse the definitions from source
-  void define(
+  // Returns the list of Function's just defined.
+  std::vector<Function*> define(
+      // prefix namespace to put all the defined functions into
+      const c10::optional<c10::QualifiedName>& prefix,
       const std::string& source,
       const ResolverPtr& resolver,
-      const Self& self);
+      const Self* self);
 
-  std::shared_ptr<Function> create_function(
-      std::string name,
-      std::shared_ptr<Graph> graph) {
-    auto fn = std::make_shared<Function>(
-        std::move(name), is_optimized(), std::move(graph), nullptr);
-    register_function(fn);
-    return fn;
+  void define_interface(
+      const c10::QualifiedName& qualifiedName,
+      const ClassDef& classDef,
+      ResolverPtr rcb);
+
+  Function* create_function(
+      c10::QualifiedName name,
+      std::shared_ptr<Graph> graph,
+      bool shouldMangle = false) {
+    if (shouldMangle) {
+      name = mangle(name);
+    }
+    auto fn = torch::make_unique<Function>(
+        std::move(name), std::move(graph), nullptr);
+    auto ret = fn.get();
+    register_function(std::move(fn));
+    return ret;
   }
 
-  const std::vector<std::shared_ptr<Function>>& get_functions() const {
-    return functions_;
+  std::vector<Function*> get_functions() const {
+    return fmap(functions_, [](const std::unique_ptr<Function>& fn) {
+      return fn.get();
+    });
   }
 
   /// Run a method from this compilation.
@@ -107,7 +143,7 @@ struct TORCH_API CompilationUnit {
   /// @return An IValue containing the return value (or values if it is a tuple)
   /// from the method
   template <typename... Types>
-  IValue run_method(const std::string& method_name, Types&&... args) {
+  IValue run_method(const c10::QualifiedName& method_name, Types&&... args) {
     return get_function(method_name)({IValue(std::forward<Types>(args))...});
   }
 
@@ -119,22 +155,30 @@ struct TORCH_API CompilationUnit {
   /**
    * Register a class as being owned by this compilation unit.
    */
-  void register_class(c10::NamedTypePtr classType) {
-    classes_.push_back(std::move(classType));
+  void register_type(c10::NamedTypePtr namedType) {
+    // TODO: class types cannot be redefined because we have no way right now
+    // of invalidating their methods. NamedTuples are fine though, since they
+    // don't have methods.
+    TORCH_CHECK(
+        0 == classDict_.count(*namedType->name()),
+        "class '",
+        namedType->name()->qualifiedName(),
+        "' already defined.");
+    classes_.push_back(std::move(namedType));
+    classDict_[*classes_.back()->name()] = classes_.size() - 1;
   };
 
   c10::ClassTypePtr get_class(const c10::QualifiedName& name) const {
-    for (const auto& cls : classes_) {
-      if (cls->qualname() == name.qualifiedName()) {
-        return cls->expect<ClassType>();
-      }
+    auto type = get_type(name);
+    if (!type) {
+      return nullptr;
     }
-    return nullptr;
+    return type->cast<c10::ClassType>();
   }
 
   c10::TupleTypePtr get_named_tuple(const c10::QualifiedName& name) const {
     for (const auto& cls : classes_) {
-      if (cls->qualname() == name.qualifiedName()) {
+      if (cls->name()->qualifiedName() == name.qualifiedName()) {
         return cls->expect<TupleType>();
       }
     }
@@ -142,64 +186,93 @@ struct TORCH_API CompilationUnit {
   }
 
   c10::NamedTypePtr get_type(const c10::QualifiedName& name) const {
-    for (const auto& cls : classes_) {
-      if (cls->qualname() == name.qualifiedName()) {
-        return cls;
-      }
+    auto it = classDict_.find(name);
+    if (it == classDict_.end()) {
+      return nullptr;
     }
-    return nullptr;
+    return classes_[it->second];
   }
 
-  /**
-   * Python compilation unit methods
-   *
-   * Right now there is a single compilation unit that owns all ScriptClasses
-   * defined in Python. Below are accessors methods for it.
-   */
-  static const CompilationUnit& _get_python_cu_const() {
-    return _get_python_cu();
-  }
-  static CompilationUnit& _get_python_cu() {
-    static CompilationUnit pyCu;
-    return pyCu;
-  }
   // For testing: clear all Python-defined classes to ensure that unit tests
   // have isolation.
-  static void _clear_python_cu() {
-    _get_python_cu().classes_.clear();
+  void _clear_python_cu() {
+    // Delete all the associated class methods
+    for (auto type : classes_) {
+      if (auto cls = type->cast<ClassType>()) {
+        for (auto method : cls->methods()) {
+          // Tombstone the method in the compilation unit.
+          // Don't erase because the dict_
+          auto it = dict_.find(method->qualname());
+          TORCH_INTERNAL_ASSERT(it != dict_.end());
+          functions_[it->second] = nullptr;
+          // Erase in our big lookup table
+          dict_.erase(it);
+        }
+      }
+    }
+    classes_.clear();
+    classDict_.clear();
   }
+
+  // [name mangling] All code objects must have a unique qualified name in a
+  // CompilationUnit. In Python, sometimes functions won't have unique qualified
+  // name (for example, nested functions). So we mangle Python functions to
+  // ensure that they are uniquely named.
+  //
+  // We also use mangling to distinguish different Module instances. Since each
+  // Module is a singleton class instance, different instances of the same
+  // Python Module will have different types but the same qualified name.
+  c10::QualifiedName mangle(const c10::QualifiedName& name) const;
 
  private:
-  std::shared_ptr<Function> define(
+  std::unique_ptr<Function> define(
+      const c10::optional<c10::QualifiedName>& prefix,
       const Def& def,
       const ResolverPtr& resolver,
-      const Self& self,
-      const std::unordered_map<std::string, std::shared_ptr<Function>>&
-          function_table) const;
+      const Self* self,
+      const std::unordered_map<std::string, Function*>& function_table,
+      bool shouldMangle = false) const;
 
-  Function& register_function(std::shared_ptr<Function> fn) {
+  Function& register_function(std::unique_ptr<Function> fn) {
     TORCH_CHECK(
-        0 == dict_.count(fn->name()),
+        0 == dict_.count(fn->qualname().qualifiedName()),
         "method '",
-        fn->name(),
+        fn->qualname().qualifiedName(),
         "' already defined.");
     functions_.emplace_back(std::move(fn));
-    dict_[functions_.back()->name()] = functions_.size() - 1;
+    dict_[functions_.back()->qualname()] = functions_.size() - 1;
     return *functions_.back();
   }
-  std::vector<std::shared_ptr<Function>> functions_;
+  std::vector<std::unique_ptr<Function>> functions_;
   // for fast lookup
-  std::unordered_map<std::string, size_t> dict_;
-  bool optimized_ = true;
+  std::unordered_map<c10::QualifiedName, size_t> dict_;
+  std::unordered_map<c10::QualifiedName, size_t> classDict_;
 
-  // [class owernship] Right now there aree two relationships between classes
+  // [class ownership] Right now there aree two relationships between classes
   // and compilation units:
   // 1. Classes have compilation units internally that hold their methods.
   // 2. On load, the TypePtrs of any imported classes are owned by the main
   // module's compilation unit.
   std::vector<c10::NamedTypePtr> classes_;
+
+  mutable size_t mangleIndex_ = 0;
 };
 
 } // namespace script
+
+// An owning pointer to a Function. Just a pair of a raw Function ptr and it's
+// owning CU. We need this because pybind requires a ref-counted way to refer to
+// Functions.
+struct StrongFunctionPtr {
+  StrongFunctionPtr(
+      std::shared_ptr<script::CompilationUnit> cu,
+      Function* function)
+      : cu_(std::move(cu)), function_(function) {
+    TORCH_INTERNAL_ASSERT(cu_);
+    TORCH_INTERNAL_ASSERT(function_);
+  }
+  std::shared_ptr<script::CompilationUnit> cu_;
+  Function* function_;
+};
 } // namespace jit
 } // namespace torch

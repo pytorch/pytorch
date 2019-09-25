@@ -3,8 +3,6 @@
 // ${generated_comment}
 
 #include <c10/core/Scalar.h>
-#include <ATen/Type.h>
-#include <ATen/TypeExtendedInterface.h>
 #include <ATen/Tensor.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/Generator.h>
@@ -17,6 +15,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/core/ATenDispatch.h>
 #include <ATen/Context.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 
@@ -69,29 +68,6 @@ inline Tensor from_blob(
     const TensorOptions& options = {}) {
   return from_blob(data, sizes, detail::defaultStrides(sizes), [](void*) {}, options);
 }
-
-namespace detail {
-
-static inline Backend infer_backend(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return tensorTypeIdToBackend(t.type_id());
-}
-static inline Backend infer_backend(const TensorList & tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tensorTypeIdToBackend(tl[0].type_id());
-}
-
-static inline bool infer_is_variable(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return t.is_variable();
-}
-static inline bool infer_is_variable(const TensorList & tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tl[0].is_variable();
-}
-
-
-} // namespace detail
 
 // function definitions are all static inline because
 // they are one-line statically dispatched functions that

@@ -52,7 +52,7 @@ class NodePy(NodeBase):
                 io_tensor_sizes = []
                 for n in list_of_node:
                     io_unique_names.append(n.debugName())
-                    if n.type().kind() == 'CompleteTensorType':
+                    if n.isCompleteTensor():
                         io_tensor_sizes.append(n.type().sizes())
                     else:
                         io_tensor_sizes.append(None)
@@ -151,6 +151,11 @@ class GraphPy(object):
                 self.unique_name_to_scoped_name[input_node_id] = node.scopeName + '/' + input_node_id
 
         for key, node in self.nodes_io.items():
+            if type(node) == NodeBase:
+                self.unique_name_to_scoped_name[key] = node.scope + '/' + node.debugName
+            if hasattr(node, 'input_or_output'):
+                self.unique_name_to_scoped_name[key] = node.input_or_output + '/' + node.debugName
+
             if hasattr(node, 'scope') and node.scope is not None:
                 self.unique_name_to_scoped_name[key] = node.scope + '/' + node.debugName
                 if node.scope == '' and self.shallowest_scope_name:
@@ -224,8 +229,6 @@ def graph(model, args, verbose=False):
       verbose (bool): Whether to print out verbose information while
         processing.
     """
-
-
     with torch.onnx.set_training(model, False):  # TODO: move outside of torch.onnx?
         try:
             trace = torch.jit.trace(model, args)

@@ -13,8 +13,63 @@ CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
   return c10::make_intrusive<ConstantString>(std::move(str_));
 }
 
+TupleTypePtr Tuple::type() const {
+  if (!type_) {
+    type_ = TupleType::create(
+        fmap(elements_, [&](const IValue& v) { return v.type(); }));
+  }
+  return type_;
+}
+
 } // namespace ivalue
 
+
+TypePtr IValue::type() const {
+  switch(tag) {
+    case Tag::None:
+      return NoneType::get();
+    case Tag::Tensor:
+      return TensorType::create(toTensor());
+    case Tag::Double:
+      return FloatType::get();
+    case Tag::Int:
+      return IntType::get();
+    case Tag::Bool:
+      return BoolType::get();
+    case Tag::IntList:
+      return ListType::ofInts();
+    case Tag::DoubleList:
+      return ListType::ofFloats();
+    case Tag::BoolList:
+      return ListType::ofBools();
+    case Tag::TensorList:
+      return ListType::ofTensors();
+    case Tag::String:
+      return StringType::get();
+    case Tag::Blob:
+      return AnyType::get();
+    case Tag::GenericDict: {
+      auto d = toGenericDict();
+      return DictType::create(d.keyType(), d.valueType());
+    }
+    case Tag::GenericList:
+      return ListType::create(toGenericList().elementType());
+    case Tag::Future:
+      return toFuture()->type();
+    case Tag::Device:
+      return DeviceObjType::get();
+    case Tag::Object:
+      return toObjectRef().type();
+    case Tag::Uninitialized:
+      return AnyType::get();
+    case Tag::Capsule:
+      return CapsuleType::get();
+    case Tag::Tuple:
+      return toTuple()->type();
+  }
+  // switch above is complete but this silences compiler warnings
+  TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
+}
 namespace {
 
 template<class T>
@@ -102,6 +157,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printList(out, v.toTensorList(), "[", "]");
     case IValue::Tag::Blob:
       return out << *v.toBlob();
+    case IValue::Tag::Capsule:
+      return out << "Capsule";
     case IValue::Tag::GenericList:
       return printList(out, v.toGenericList(), "[", "]");
     case IValue::Tag::Future:
@@ -118,7 +175,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       // print this out the way python would do it
       return out << "<" << obj->name() << " object at " << obj.get() << ">";
   }
-  AT_ERROR("Tag not found\n");
+  AT_ERROR("Tag not found: ", v.tagKind());
 }
 
 #undef TORCH_FORALL_TAGS
@@ -129,16 +186,16 @@ void IValue::dump() const {
 
 
 std::string ivalue::Object::name() const {
-  return this->type_->qualname();
+  return this->type_.type_->name()->qualifiedName();
 }
 
 IValue ivalue::Object::getAttr(const std::string& name) const {
-  const size_t slot = type_->getAttributeSlot(name);
+  const size_t slot = type_.type_->getAttributeSlot(name);
   return getSlot(slot);
 }
 
 void ivalue::Object::setAttr(const std::string& name, IValue v) {
-  const size_t slot = type_->getAttributeSlot(name);
+  const size_t slot = type_.type_->getAttributeSlot(name);
   setSlot(slot, std::move(v));
 }
 
@@ -147,8 +204,8 @@ void ivalue::Object::resizeObject(size_t slot) {
   slots_.resize(type()->numAttributes());
 }
 
-static bool CompareIValue(const std::pair<IValue, IValue>& aWrap,
-                          const std::pair<IValue, IValue>& bWrap) {
+static bool CompareKeys(const std::pair<IValue, IValue>& aWrap,
+                        const std::pair<IValue, IValue>& bWrap) {
   const auto a = aWrap.first;
   const auto b = bWrap.first;
   if (a.isString() && b.isString()) {
@@ -157,6 +214,8 @@ static bool CompareIValue(const std::pair<IValue, IValue>& aWrap,
     return a.toInt() < b.toInt();
   } else if (a.isDouble() && b.isDouble()) {
     return a.toDouble() < b.toDouble();
+  } else if (a.isTensor() && b.isTensor()) {
+    return a.toTensor().unsafeGetTensorImpl() < b.toTensor().unsafeGetTensorImpl();
   }
   AT_ERROR("Illegal dict key");
 }
@@ -166,8 +225,19 @@ std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IV
   for (auto& element : dict) {
     ordered.emplace_back(element.key(), element.value());
   }
-  std::sort(ordered.begin(), ordered.end(), CompareIValue);
+  std::sort(ordered.begin(), ordered.end(), CompareKeys);
   return ordered;
 }
 
+std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap() {
+    static std::unordered_map<std::string, c10::StrongTypePtr> tmap;
+    return tmap;
+}
+
+std::unordered_map<std::string, std::function<PyObject*(void*)>>&
+getClassConverter() {
+  static std::unordered_map<std::string, std::function<PyObject*(void*)>>
+      classConverter;
+  return classConverter;
+}
 } // namespace c10

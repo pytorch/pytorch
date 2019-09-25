@@ -26,7 +26,7 @@ pushd /home/circleci/project/final_pkgs
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   retry conda install -yq anaconda-client
   retry timeout 30 /home/circleci/project/login_to_anaconda.sh
-  anaconda upload "$(ls)" -u pytorch --label main --no-progress --force
+  anaconda upload "$(ls)" -u pytorch-nightly --label main --no-progress --force
 elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
   retry pip install -q awscli
   s3_dir="s3://pytorch/libtorch/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"

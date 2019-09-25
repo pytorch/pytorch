@@ -3,8 +3,8 @@
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/Context.h>
 #include <c10/cuda/CUDAStream.h>
-#include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <ATen/cuda/Exceptions.h>
 
 #include <cstdint>
 

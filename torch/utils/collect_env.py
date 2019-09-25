@@ -1,6 +1,7 @@
 # This script outputs relevant system environment info
 # Run it with `python collect_env.py`.
 from __future__ import absolute_import, division, print_function, unicode_literals
+import locale
 import re
 import subprocess
 import sys
@@ -42,8 +43,9 @@ def run(command):
     output, err = p.communicate()
     rc = p.returncode
     if PY3:
-        output = output.decode("utf-8")
-        err = err.decode("utf-8")
+        enc = locale.getpreferredencoding()
+        output = output.decode(enc)
+        err = err.decode(enc)
     return rc, output.strip(), err.strip()
 
 

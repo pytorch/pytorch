@@ -6,7 +6,7 @@
 
 namespace torch { namespace autograd {
 
-struct TORCH_API AccumulateGrad : public Function {
+struct TORCH_API AccumulateGrad : public Node {
   explicit AccumulateGrad(Variable variable_);
 
   variable_list apply(variable_list&& grads) override;

@@ -12,13 +12,10 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/symbolic_variable.h>
 #include <torch/csrc/jit/ir.h>
 
 #include <torch/csrc/utils/variadic.h>
 #include <torch/csrc/autograd/functions/utils.h>
-
-#include <ATen/core/VariableHooksInterface.h>
 
 #include <array>
 #include <cstddef>
@@ -42,8 +39,6 @@ using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
 
-extern std::vector<std::unique_ptr<Type>> type_to_variable_type;
-
 inline void check_inplace(const Tensor& tensor) {
   auto& var = static_cast<const Variable&>(tensor);
   if (var.requires_grad() && var.is_leaf() && GradMode::is_enabled()) {
@@ -60,14 +55,14 @@ inline void throw_error_out_requires_grad(const char* name) {
 
 // TODO: Blegh, bare references
 
-inline void rebase_history(Variable& var, std::shared_ptr<Function> grad_fn) {
+inline void rebase_history(Variable& var, std::shared_ptr<Node> grad_fn) {
   if (grad_fn && var.defined()) {
     grad_fn->add_input_metadata(var);
     var.rebase_history({std::move(grad_fn), 0});
   }
 }
 
-inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Function> grad_fn) {
+inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Node> grad_fn) {
   if (grad_fn) {
     for (auto& var : vars) {
       if (var.defined()) {
@@ -75,7 +70,7 @@ inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Functio
         auto output_nr = grad_fn->add_input_metadata(var);
         var.rebase_history({std::move(grad_fn), output_nr});
       } else {
-        grad_fn->add_input_metadata(Function::undefined_input());
+        grad_fn->add_input_metadata(Node::undefined_input());
       }
     }
   }

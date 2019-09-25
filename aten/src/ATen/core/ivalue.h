@@ -2,17 +2,25 @@
 
 #include <ATen/core/blob.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/Tensor.h>
+#include <ATen/core/TensorBody.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
+class CustomClassHolder : public c10::intrusive_ptr_target {};
 struct Function;
+namespace script {
+struct CompilationUnit;
+}
 } // namespace jit
 } // namespace torch
 namespace c10 {
 template<class Key, class Value> class Dict;
 template<class T> class List;
 struct IValue;
+struct ClassType;
+struct Type;
+using TypePtr = std::shared_ptr<Type>;
 namespace ivalue {
 struct Tuple;
 struct Future;
@@ -45,8 +53,10 @@ struct Object;
   _(GenericDict) \
   _(Future) \
   _(Device) \
+  _(Object) \
   _(Uninitialized) \
-  _(Object)
+  _(Capsule) \
+
 
 struct CAFFE2_API IValue final {
   IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
@@ -98,6 +108,15 @@ struct CAFFE2_API IValue final {
     // Other types can be compared by their ptr value
     return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
   }
+
+  size_t use_count() const noexcept {
+    if (!is_intrusive_ptr) {
+      return 1;
+    }
+
+    return c10::raw::intrusive_ptr::use_count(payload.as_intrusive_ptr);
+  }
+
   void swap(IValue & rhs) noexcept {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
@@ -143,6 +162,14 @@ struct CAFFE2_API IValue final {
   }
   c10::intrusive_ptr<caffe2::Blob> toBlob() &&;
   c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
+
+  // Capsule
+  IValue(intrusive_ptr<torch::jit::CustomClassHolder> blob);
+  bool isCapsule() const {
+    return Tag::Capsule == tag;
+  }
+  c10::intrusive_ptr<torch::jit::CustomClassHolder> toCapsule() &&;
+  c10::intrusive_ptr<torch::jit::CustomClassHolder> toCapsule() const &;
 
   // Tuple
   IValue(c10::intrusive_ptr<ivalue::Tuple> v);
@@ -198,6 +225,9 @@ struct CAFFE2_API IValue final {
   // IntList
   IValue(c10::List<int64_t> v);
   IValue(c10::ArrayRef<int64_t> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
   IValue(std::vector<int64_t> v);
   bool isIntList() const { return Tag::IntList == tag; }
   c10::List<int64_t> toIntList() &&;
@@ -215,6 +245,9 @@ struct CAFFE2_API IValue final {
 
   // DoubleList
   IValue(c10::List<double> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
   IValue(std::vector<double> v);
   bool isDoubleList() const { return Tag::DoubleList == tag; }
   c10::List<double> toDoubleList() &&;
@@ -223,6 +256,9 @@ struct CAFFE2_API IValue final {
 
   // BoolList
   IValue(c10::List<bool> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
   IValue(std::vector<bool> v);
   bool isBoolList() const { return Tag::BoolList == tag; }
   c10::List<bool> toBoolList() &&;
@@ -230,6 +266,9 @@ struct CAFFE2_API IValue final {
 
   //TensorList
   IValue(c10::List<at::Tensor> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
   IValue(std::vector<at::Tensor> v);
   bool isTensorList() const { return Tag::TensorList == tag; }
   c10::List<at::Tensor> toTensorList() &&;
@@ -237,7 +276,6 @@ struct CAFFE2_API IValue final {
   c10::ArrayRef<at::Tensor> toTensorListRef() const;
 
   //GenericList
-  IValue(std::vector<IValue> v);
   IValue(c10::List<IValue> v);
   bool isGenericList() const { return Tag::GenericList == tag; }
   c10::List<IValue> toGenericList() &&;
@@ -247,6 +285,9 @@ struct CAFFE2_API IValue final {
   template<class T>
   IValue(c10::List<T> v);
   template<class T>
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
   IValue(std::vector<T> v);
 
   // GenericDict
@@ -259,6 +300,9 @@ struct CAFFE2_API IValue final {
   IValue(c10::Dict<Key, Value> v);
 
   template<class Key, class Value>
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map<K, V> are slow and deprecated. Please use c10::Dict<K, V> instead.")
+  /// \endcond
   IValue(std::unordered_map<Key, Value> v);
 
   template<class T>
@@ -389,6 +433,8 @@ struct CAFFE2_API IValue final {
     return payload.as_intrusive_ptr;
   }
 
+  TypePtr type() const;
+
  private:
   // NOTE: IValue tags are intentionally private. In the future we may encode
   // this value different (e.g. using NaN boxing), and this would make it more
@@ -412,7 +458,7 @@ struct CAFFE2_API IValue final {
     tag = Tag::None;
     is_intrusive_ptr = false;
   }
-private:
+
   union Payload {
     int64_t as_int;
     double as_double;
@@ -529,6 +575,57 @@ private:
   bool is_intrusive_ptr;
 };
 
+// An owning pointer to a Class. Just a pair of shared_ptrs to the class type
+// and its owning CU, so that the class type is guaranteed to stay alive as long
+// as we hold this object.
+struct StrongTypePtr {
+  StrongTypePtr(
+      std::shared_ptr<torch::jit::script::CompilationUnit> cu,
+      std::shared_ptr<ClassType> type)
+      : cu_(std::move(cu)), type_(type) {
+    TORCH_INTERNAL_ASSERT(cu_);
+    TORCH_INTERNAL_ASSERT(type_);
+  }
+  std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
+  std::shared_ptr<ClassType> type_;
+};
+
+TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap();
+
+#ifndef C10_MOBILE
+
+template<typename T>
+c10::StrongTypePtr getCustomClassType() {
+  auto tmap = c10::getCustomClassTypeMap();
+  auto res = tmap.find(typeid(T).name());
+  if (res == tmap.end()) {
+    throw c10::Error("Can't find class id in custom class type map", "");
+  }
+  return res->second;
+}
+
+template<typename T>
+inline bool isCustomClassRegistered() {
+  auto tmap = c10::getCustomClassTypeMap();
+  return tmap.find(typeid(T).name()) != tmap.end();
+}
+
+#else  // C10_MOBILE
+
+template<typename T>
+c10::StrongTypePtr getCustomClassType() {
+  throw c10::Error("Custom class is not supported on mobile.", "");
+}
+
+template<typename T>
+inline bool isCustomClassRegistered() {
+  return false;
+}
+
+#endif  // C10_MOBILE
+
+TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
+getClassConverter();
 }
 
 #include <ATen/core/ivalue_inl.h>

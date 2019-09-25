@@ -87,6 +87,7 @@ namespace script {
   _(TK_TUPLE_LITERAL, "tuple-literal", "")       \
   _(TK_FOR, "for", "for")                        \
   _(TK_IN, "in", "in")                           \
+  _(TK_NOTIN, "not in", "not in")                \
   _(TK_STARRED, "starred", "")                   \
   _(TK_UNARY_MINUS, "unary minus", "")           \
   _(TK_POW, "pow operator", "**")                \
@@ -98,12 +99,13 @@ namespace script {
   _(TK_ASSERT, "assert", "assert")               \
   _(TK_DOTS, "dots", "...")                      \
   _(TK_LIST_COMP, "list comprehension", "")      \
+  _(TK_BREAK, "break", "break")                  \
+  _(TK_CONTINUE, "continue", "continue")         \
   _(TK_PASS, "pass", "pass")                     \
   _(TK_CLASS_DEF, "class", "class")              \
-  _(TK_IMPORT, "import", "import")               \
-  _(TK_NAMED_TUPLE_DEF, "named tuple", "")
+  _(TK_IMPORT, "import", "import")
 
-static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|";
+static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|~";
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters

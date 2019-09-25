@@ -86,7 +86,8 @@ class LoadOp final : public Operator<Context> {
         allow_incomplete_(
             this->template GetSingleArgument<bool>("allow_incomplete", false)),
         blob_names_(
-            this->template GetRepeatedArgument<string>("source_blob_names")) {
+            this->template GetRepeatedArgument<string>("source_blob_names")),
+        shape_(this->template GetRepeatedArgument<int64_t>("shape")) {
     if (InputSize() == 0) {
       CAFFE_ENFORCE_GT(db_type_.size(), 0, "Must specify a db type.");
       if (db_names_.empty()) {
@@ -424,6 +425,7 @@ class LoadOp final : public Operator<Context> {
   std::map<string, int> output_indices_;
   std::map<string, int> key_to_dbid_;
   std::vector<std::string> blob_names_;
+  std::vector<int64_t> shape_;
 };
 
 template <class Context>

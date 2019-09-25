@@ -35,8 +35,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/Square.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Tanh.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalMaxPooling.cu
-${CMAKE_CURRENT_SOURCE_DIR}/TemporalRowConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricConvolution.cu
 PARENT_SCOPE)
 
 set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE}

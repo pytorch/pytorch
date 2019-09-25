@@ -13,6 +13,7 @@ import copy
 
 
 class TestUtilityFuns(TestCase):
+    opset_version = 9
 
     def test_is_in_onnx_export(self):
         test_self = self
@@ -26,9 +27,21 @@ class TestUtilityFuns(TestCase):
         x = torch.randn(3, 4)
         f = io.BytesIO()
         try:
-            torch.onnx.export(MyModule(), x, f)
+            torch.onnx.export(MyModule(), x, f, opset_version=self.opset_version)
         except ValueError:
             self.assertFalse(torch.onnx.is_in_onnx_export())
+
+    def test_validate_dynamic_axes_invalid_input_output_name(self):
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            utils._validate_dynamic_axes({'input1': {}, 'output': {},
+                                         'invalid_name1': {}, 'invalid_name2': {}},
+                                         None, ['input1', 'input2'], ['output'])
+            messages = [str(warning.message) for warning in w]
+        assert "Provided key invalid_name1 for dynamic axes is not a valid input/output name" in messages
+        assert "Provided key invalid_name2 for dynamic axes is not a valid input/output name" in messages
+        assert len(messages) == 2
 
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
@@ -37,7 +50,7 @@ class TestUtilityFuns(TestCase):
                 b = torch.transpose(a, 1, 0)
                 return b + x
 
-        _set_opset_version(9)
+        _set_opset_version(self.opset_version)
         x = torch.ones(3, 2)
         graph, _, __ = utils._model_to_graph(TransposeModule(), (x, ),
                                              do_constant_folding=True,
@@ -55,7 +68,7 @@ class TestUtilityFuns(TestCase):
                 b = torch.narrow(a, 0, 0, 1)
                 return b + x
 
-        _set_opset_version(9)
+        _set_opset_version(self.opset_version)
         x = torch.ones(1, 3)
         graph, _, __ = utils._model_to_graph(NarrowModule(), (x, ),
                                              do_constant_folding=True,
@@ -73,7 +86,7 @@ class TestUtilityFuns(TestCase):
                 b = a[1:10]         # index exceeds dimension
                 return b + x
 
-        _set_opset_version(9)
+        _set_opset_version(self.opset_version)
         x = torch.ones(1, 3)
         graph, _, __ = utils._model_to_graph(SliceIndexExceedsDimModule(), (x, ),
                                              do_constant_folding=True,
@@ -92,7 +105,7 @@ class TestUtilityFuns(TestCase):
                 b = a[0:-1]        # index relative to the end
                 return b + x
 
-        _set_opset_version(9)
+        _set_opset_version(self.opset_version)
         x = torch.ones(1, 3)
         graph, _, __ = utils._model_to_graph(SliceNegativeIndexModule(), (x, ),
                                              do_constant_folding=True,
@@ -110,7 +123,7 @@ class TestUtilityFuns(TestCase):
                 b = torch.unsqueeze(a, 0)
                 return b + x
 
-        _set_opset_version(9)
+        _set_opset_version(self.opset_version)
         x = torch.ones(1, 2, 3)
         graph, _, __ = utils._model_to_graph(UnsqueezeModule(), (x, ),
                                              do_constant_folding=True,
@@ -129,7 +142,7 @@ class TestUtilityFuns(TestCase):
                 c = torch.cat((a, b), 0)
                 return b + c
 
-        _set_opset_version(9)
+        _set_opset_version(self.opset_version)
         x = torch.ones(2, 3)
         graph, _, __ = utils._model_to_graph(ConcatModule(), (x, ),
                                              do_constant_folding=True,
@@ -149,7 +162,7 @@ class TestUtilityFuns(TestCase):
             def forward(self, input, initial_state):
                 return self.mygru(input, initial_state)
 
-        _set_opset_version(9)
+        _set_opset_version(self.opset_version)
         input = torch.randn(5, 3, 7)
         h0 = torch.randn(1, 3, 3)
         graph, _, __ = utils._model_to_graph(GruNet(), (input, h0),
@@ -169,7 +182,7 @@ class TestUtilityFuns(TestCase):
             def forward(self, A):
                 return torch.matmul(A, torch.transpose(self.B, -1, -2))
 
-        _set_opset_version(9)
+        _set_opset_version(self.opset_version)
         A = torch.randn(2, 3)
         graph, _, __ = utils._model_to_graph(MatMulNet(), (A),
                                              do_constant_folding=True)
@@ -185,9 +198,10 @@ class TestUtilityFuns(TestCase):
 
         def is_model_stripped(f, strip_doc_string=None):
             if strip_doc_string is None:
-                torch.onnx.export(MyModule(), x, f)
+                torch.onnx.export(MyModule(), x, f, opset_version=self.opset_version)
             else:
-                torch.onnx.export(MyModule(), x, f, strip_doc_string=strip_doc_string)
+                torch.onnx.export(MyModule(), x, f, strip_doc_string=strip_doc_string,
+                                  opset_version=self.opset_version)
             model = onnx.load(io.BytesIO(f.getvalue()))
             model_strip = copy.copy(model)
             onnx.helper.strip_doc_string(model_strip)
@@ -197,6 +211,24 @@ class TestUtilityFuns(TestCase):
         self.assertTrue(is_model_stripped(io.BytesIO()))
         # test strip_doc_string=False
         self.assertFalse(is_model_stripped(io.BytesIO(), False))
+
+    # NB: remove this test once DataParallel can be correctly handled
+    def test_error_on_data_parallel(self):
+        model = torch.nn.DataParallel(torch.nn.ReflectionPad2d((1, 2, 3, 4)))
+        x = torch.randn(1, 2, 3, 4)
+        f = io.BytesIO()
+        with self.assertRaisesRegex(ValueError,
+                                    'torch.nn.DataParallel is not supported by ONNX '
+                                    'exporter, please use \'attribute\' module to '
+                                    'unwrap model from torch.nn.DataParallel. Try '):
+            torch.onnx.export(model, x, f, opset_version=self.opset_version)
+
+
+# opset 10 tests
+TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
+                               (TestCase,),
+                               dict(TestUtilityFuns.__dict__, opset_version=10))
+
 
 if __name__ == '__main__':
     run_tests()

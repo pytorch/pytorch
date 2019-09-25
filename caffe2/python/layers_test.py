@@ -6,7 +6,6 @@ from __future__ import unicode_literals
 import hypothesis.strategies as st
 import numpy as np
 import numpy.testing as npt
-import unittest
 from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu
@@ -18,25 +17,59 @@ from caffe2.python import (
     workspace,
 )
 from caffe2.python.layers.layers import (
+    AccessedFeatures,
+    almost_equal_schemas,
+    get_key,
+    IdList,
+    IdScoreList,
     InstantiationContext,
+    is_request_only_scalar,
+    set_request_only,
 )
 from caffe2.python.layers.tags import Tags
 from caffe2.python.layer_test_util import (
     LayersTestCase,
     OpSpec,
 )
-from caffe2.python.layers.layers import (
-    IdList,
-    set_request_only,
-    is_request_only_scalar,
-    get_key,
-)
-
 import logging
 logger = logging.getLogger(__name__)
 
 
 class TestLayers(LayersTestCase):
+    def testSparseDropoutWithReplacement(self):
+        input_record = schema.NewRecord(self.model.net, IdList)
+        self.model.output_schema = schema.Struct()
+
+        lengths_blob = input_record.field_blobs()[0]
+        values_blob = input_record.field_blobs()[1]
+        lengths = np.array([1] * 10).astype(np.int32)
+        values = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).astype(np.int64)
+        workspace.FeedBlob(lengths_blob, lengths)
+        workspace.FeedBlob(values_blob, values)
+
+        out = self.model.SparseDropoutWithReplacement(
+            input_record, 0.0, 0.5, 1.0, -1, output_names_or_num=1)
+        self.assertEqual(schema.List(schema.Scalar(np.int64,)), out)
+
+        train_init_net, train_net = self.get_training_nets()
+        eval_net = self.get_eval_net()
+        predict_net = self.get_predict_net()
+
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+        out_values = workspace.FetchBlob(out.items())
+        out_lengths = workspace.FetchBlob(out.lengths())
+        self.assertBlobsEqual(out_values, values)
+        self.assertBlobsEqual(out_lengths, lengths)
+
+        workspace.RunNetOnce(eval_net)
+
+        workspace.RunNetOnce(predict_net)
+        predict_values = workspace.FetchBlob("values_auto_0")
+        predict_lengths = workspace.FetchBlob("lengths_auto_0")
+        self.assertBlobsEqual(predict_values, np.array([-1] * 10).astype(np.int64))
+        self.assertBlobsEqual(predict_lengths, lengths)
+
     def testAddLoss(self):
         input_record_LR = self.new_record(
             schema.Struct(
@@ -163,7 +196,7 @@ class TestLayers(LayersTestCase):
             self.model.add_output_schema('scalar', schema.Struct())
 
     def _test_net(self, net, ops_list):
-        """
+        '''
         Helper function to assert the net contains some set of operations and
         then to run the net.
 
@@ -171,7 +204,7 @@ class TestLayers(LayersTestCase):
             net -- the network to test and run
             ops_list -- the list of operation specifications to check for
                         in the net
-        """
+        '''
         ops_output = self.assertNetContainOps(net, ops_list)
         workspace.RunNetOnce(net)
         return ops_output
@@ -230,6 +263,45 @@ class TestLayers(LayersTestCase):
         )
 
         train_init_net, train_net = self.get_training_nets()
+
+    def testSparseLookupSumPoolingWithEviction(self):
+        # Create test embedding table of 1 row
+        record = schema.NewRecord(self.model.net, schema.Struct(
+            ('sparse', schema.Struct(
+                ('sparse_feature_0', schema.ListWithEvicted(
+                    schema.Scalar(np.int64,
+                                  metadata=schema.Metadata(categorical_limit=1)),)),)),
+        ))
+        embedding_dim = 8
+        lengths_blob = record.sparse.sparse_feature_0.lengths.get()
+        values_blob = record.sparse.sparse_feature_0.items.get()
+        evicted_values_blob = record.sparse.sparse_feature_0._evicted_values.get()
+        lengths = np.array([1]).astype(np.int32)
+        values = np.array([0]).astype(np.int64)
+        # Need to reset row 0
+        evicted_values = np.array([0]).astype(np.int64)
+        workspace.FeedBlob(lengths_blob, lengths)
+        workspace.FeedBlob(values_blob, values)
+        workspace.FeedBlob(evicted_values_blob, evicted_values)
+
+        embedding_after_pooling = self.model.SparseLookup(
+            record.sparse.sparse_feature_0, [embedding_dim], 'Sum', weight_init=("ConstantFill", {"value": 1.0}))
+
+        self.model.output_schema = schema.Struct()
+        self.assertEqual(
+            schema.Scalar((np.float32, (embedding_dim, ))),
+            embedding_after_pooling
+        )
+        train_init_net, train_net = self.get_training_nets()
+        workspace.RunNetOnce(train_init_net)
+        embedding_after_init = workspace.FetchBlob("sparse_lookup/w")
+        # Change row 0's value before reset
+        new_values = np.array([[2, 2, 2, 2, 2, 2, 2, 2]]).astype(np.float32)
+        workspace.FeedBlob("sparse_lookup/w", new_values)
+        workspace.RunNetOnce(train_net.Proto())
+        embedding_after_training = workspace.FetchBlob("sparse_lookup/w")
+        # Verify row 0's value does not change after reset
+        self.assertEquals(embedding_after_training.all(), embedding_after_init.all())
 
 
     def testSparseLookupSumPooling(self):
@@ -770,6 +842,24 @@ class TestLayers(LayersTestCase):
         loss = self.model.MarginRankLoss(input_record)
         self.run_train_net_forward_only()
         self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
+
+    def testBPRLoss(self):
+        input_record = self.new_record(schema.Struct(
+            ('pos_prediction', schema.Scalar((np.float32, (1,)))),
+            ('neg_prediction', schema.List(np.float32)),
+        ))
+        pos_items = np.array([0.8, 0.9], dtype=np.float32)
+        neg_lengths = np.array([1, 2], dtype=np.int32)
+        neg_items = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+        schema.FeedRecord(
+            input_record,
+            [pos_items, neg_lengths, neg_items]
+        )
+        loss = self.model.BPRLoss(input_record)
+        self.run_train_net_forward_only()
+        self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
+        result = workspace.FetchBlob('bpr_loss/output')
+        np.testing.assert_array_almost_equal(np.array(1.24386, dtype=np.float32), result)
 
     def testBatchMSELoss(self):
         input_record = self.new_record(schema.Struct(
@@ -1464,7 +1554,7 @@ class TestLayers(LayersTestCase):
     def testRandomFourierFeatures(self, batch_size, input_dims, output_dims, bandwidth):
 
         def _rff_hypothesis_test(rff_output, X, W, b, scale):
-            """
+            '''
             Runs hypothesis test for Semi Random Features layer.
 
             Inputs:
@@ -1473,7 +1563,7 @@ class TestLayers(LayersTestCase):
                 W -- weight parameter from train_init_net
                 b -- bias parameter from train_init_net
                 scale -- value by which to scale the output vector
-            """
+            '''
             output = workspace.FetchBlob(rff_output)
             output_ref = scale * np.cos(np.dot(X, np.transpose(W)) + b)
             npt.assert_allclose(output, output_ref, rtol=1e-3, atol=1e-3)
@@ -1542,7 +1632,7 @@ class TestLayers(LayersTestCase):
                                 set_weight_as_global_constant):
 
         def _arc_cosine_hypothesis_test(ac_output, X, W, b, s):
-            """
+            '''
             Runs hypothesis test for Arc Cosine layer.
 
             Inputs:
@@ -1551,7 +1641,7 @@ class TestLayers(LayersTestCase):
                 W -- weight parameter from train_init_net
                 b -- bias parameter from train_init_net
                 s -- degree parameter
-            """
+            '''
             # Get output from net
             net_output = workspace.FetchBlob(ac_output)
 
@@ -1661,7 +1751,7 @@ class TestLayers(LayersTestCase):
 
         def _semi_random_hypothesis_test(srf_output, X_full, X_random, rand_w,
                                          rand_b, s):
-            """
+            '''
             Runs hypothesis test for Semi Random Features layer.
 
             Inputs:
@@ -1672,7 +1762,7 @@ class TestLayers(LayersTestCase):
                 rand_b -- random-initialized bias parameter from train_init_net
                 s -- degree parameter
 
-            """
+            '''
             # Get output from net
             net_output = workspace.FetchBlob(srf_output)
 
@@ -2104,3 +2194,122 @@ class TestLayers(LayersTestCase):
         workspace.RunNetOnce(pred_net)
         output = workspace.FetchBlob(ws_output())
         npt.assert_almost_equal(get_blob_weighted_sum(), output, decimal=5)
+
+    def testFeatureSparseToDenseGetAccessedFeatures(self):
+        float_features_column = "float_features"
+        float_features_type = "FLOAT"
+        float_features_ids = [1, 2, 3]
+
+        id_list_features_column = "id_list_features"
+        id_list_features_type = "ID_LIST"
+        id_list_features_ids = [4, 5, 6]
+
+        id_score_list_features_column = "id_score_list_features"
+        id_score_list_features_type = "ID_SCORE_LIST"
+        id_score_list_features_ids = [7, 8 , 9]
+
+        feature_names = ["a", "b", "c"]
+
+        input_record = self.new_record(schema.Struct(
+            (float_features_column, schema.Map(np.int32, np.float32)),
+            (id_list_features_column,
+                schema.Map(np.int32, schema.List(np.int64))),
+            (id_score_list_features_column,
+                schema.Map(np.int32, schema.Map(np.int64, np.float32))),
+        ))
+
+        input_specs = [
+            (
+                float_features_column,
+                schema.FeatureSpec(
+                    feature_type=float_features_type,
+                    feature_ids=float_features_ids,
+                    feature_names=feature_names,
+                ),
+            ),
+            (
+                id_list_features_column,
+                schema.FeatureSpec(
+                    feature_type=id_list_features_type,
+                    feature_ids=id_list_features_ids,
+                    feature_names=feature_names,
+                ),
+            ),
+            (
+                id_score_list_features_column,
+                schema.FeatureSpec(
+                    feature_type=id_score_list_features_type,
+                    feature_ids=id_score_list_features_ids,
+                    feature_names=feature_names,
+                ),
+            ),
+        ]
+
+        self.model.FeatureSparseToDense(input_record, input_specs)
+
+        expected_accessed_features = {
+            float_features_column: [
+                AccessedFeatures(float_features_type, set(float_features_ids))],
+            id_list_features_column: [
+                AccessedFeatures(id_list_features_type, set(id_list_features_ids))],
+            id_score_list_features_column: [
+                AccessedFeatures(id_score_list_features_type, set(id_score_list_features_ids))],
+        }
+
+        self.assertEqual(len(self.model.layers), 1)
+        self.assertEqual(
+            self.model.layers[0].get_accessed_features(),
+            expected_accessed_features
+        )
+
+    def test_get_key(self):
+        def _is_id_list(input_record):
+            return almost_equal_schemas(input_record, IdList)
+
+
+        def _is_id_score_list(input_record):
+            return almost_equal_schemas(input_record,
+                                        IdScoreList,
+                                        check_field_types=False)
+
+        def old_get_sparse_key_logic(input_record):
+            if _is_id_list(input_record):
+                sparse_key = input_record.items()
+            elif _is_id_score_list(input_record):
+                sparse_key = input_record.keys()
+            else:
+                raise NotImplementedError()
+            return sparse_key
+
+        id_score_list_record = schema.NewRecord(
+            self.model.net,
+            schema.Map(
+                schema.Scalar(
+                    np.int64,
+                    metadata=schema.Metadata(
+                        categorical_limit=1000
+                    ),
+                ),
+                np.float32
+            )
+        )
+
+        self.assertEqual(
+            get_key(id_score_list_record)(),
+            old_get_sparse_key_logic(id_score_list_record)
+        )
+
+        id_list_record = schema.NewRecord(
+            self.model.net,
+            schema.List(
+                schema.Scalar(
+                    np.int64,
+                    metadata=schema.Metadata(categorical_limit=1000)
+                )
+            )
+        )
+
+        self.assertEqual(
+            get_key(id_list_record)(),
+            old_get_sparse_key_logic(id_list_record)
+        )

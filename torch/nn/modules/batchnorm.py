@@ -6,12 +6,10 @@ from .module import Module
 from torch.nn.parameter import Parameter
 from .. import functional as F
 from .. import init
-from ..._jit_internal import weak_module, weak_script_method
 
 
 # TODO: check contiguous in THNN
 # TODO: use separate backend functions?
-@weak_module
 class _BatchNorm(Module):
     _version = 2
     __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
@@ -57,11 +55,10 @@ class _BatchNorm(Module):
     def _check_input_dim(self, input):
         raise NotImplementedError
 
-    @weak_script_method
     def forward(self, input):
         self._check_input_dim(input)
 
-        # exponential_average_factor is self.momentum set to
+        # exponential_average_factor is set to self.momentum 
         # (when it is available) only so that if gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
@@ -103,7 +100,6 @@ class _BatchNorm(Module):
             missing_keys, unexpected_keys, error_msgs)
 
 
-@weak_module
 class BatchNorm1d(_BatchNorm):
     r"""Applies Batch Normalization over a 2D or 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
@@ -170,14 +166,12 @@ class BatchNorm1d(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
-    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError('expected 2D or 3D input (got {}D input)'
                              .format(input.dim()))
 
 
-@weak_module
 class BatchNorm2d(_BatchNorm):
     r"""Applies Batch Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
@@ -244,14 +238,12 @@ class BatchNorm2d(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
-    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 4:
             raise ValueError('expected 4D input (got {}D input)'
                              .format(input.dim()))
 
 
-@weak_module
 class BatchNorm3d(_BatchNorm):
     r"""Applies Batch Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
@@ -319,7 +311,6 @@ class BatchNorm3d(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
-    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 5:
             raise ValueError('expected 5D input (got {}D input)'
@@ -433,14 +424,17 @@ class SyncBatchNorm(_BatchNorm):
     def forward(self, input):
         # currently only GPU input is supported
         if not input.is_cuda:
-            raise ValueError('expected input tensor to be on GPU')
-
-        if not self.ddp_gpu_size:
-            raise AttributeError('SyncBatchNorm is only supported within torch.nn.parallel.DistributedDataParallel')
+            raise ValueError('SyncBatchNorm expected input tensor to be on GPU')
 
         self._check_input_dim(input)
 
-        exponential_average_factor = 0.0
+        # exponential_average_factor is set to self.momentum 
+        # (when it is available) only so that if gets updated
+        # in ONNX graph when this node is exported to ONNX.
+        if self.momentum is None:
+            exponential_average_factor = 0.0
+        else:
+            exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
             self.num_batches_tracked += 1
@@ -449,19 +443,24 @@ class SyncBatchNorm(_BatchNorm):
             else:  # use exponential moving average
                 exponential_average_factor = self.momentum
 
-        world_size = 1
-        process_group = torch.distributed.group.WORLD
-        if self.process_group:
-            process_group = self.process_group
-        world_size = torch.distributed.get_world_size(process_group)
+        need_sync = self.training or not self.track_running_stats
+        if need_sync:
+            process_group = torch.distributed.group.WORLD
+            if self.process_group:
+                process_group = self.process_group
+            world_size = torch.distributed.get_world_size(process_group)
+            need_sync = world_size > 1
 
         # fallback to framework BN when synchronization is not necessary
-        if world_size == 1 or (not self.training and self.track_running_stats):
+        if not need_sync:
             return F.batch_norm(
                 input, self.running_mean, self.running_var, self.weight, self.bias,
                 self.training or not self.track_running_stats,
                 exponential_average_factor, self.eps)
         else:
+            if not self.ddp_gpu_size:
+                raise AttributeError('SyncBatchNorm is only supported within torch.nn.parallel.DistributedDataParallel')
+
             return sync_batch_norm.apply(
                 input, self.weight, self.bias, self.running_mean, self.running_var,
                 self.eps, exponential_average_factor, process_group, world_size)
@@ -502,6 +501,9 @@ class SyncBatchNorm(_BatchNorm):
             if module.affine:
                 module_output.weight.data = module.weight.data.clone().detach()
                 module_output.bias.data = module.bias.data.clone().detach()
+                # keep reuqires_grad unchanged
+                module_output.weight.requires_grad = module.weight.requires_grad
+                module_output.bias.requires_grad = module.bias.requires_grad
             module_output.running_mean = module.running_mean
             module_output.running_var = module.running_var
             module_output.num_batches_tracked = module.num_batches_tracked

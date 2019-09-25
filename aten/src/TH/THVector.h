@@ -17,4 +17,7 @@
 #include <TH/generic/THVector.h>
 #include <TH/THGenerateBoolType.h>
 
+#include <TH/generic/THVector.h>
+#include <TH/THGenerateBFloat16Type.h>
+
 #endif // TH_VECTOR_INC

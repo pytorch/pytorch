@@ -2,7 +2,6 @@
 
 #include <c10/core/Scalar.h>
 #include <ATen/Tensor.h>
-#include <ATen/Type.h>
 
 #include <string>
 #include <stdexcept>
@@ -46,7 +45,7 @@ inline Tensor& Tensor::operator/=(Scalar other) {
   return div_(other);
 }
 inline Tensor Tensor::operator[](Scalar index) const {
-  if (!index.isIntegral()) {
+  if (!index.isIntegral(false)) {
     AT_INDEX_ERROR("Can only index tensors with integral scalars");
   }
   return select(0, index.toLong());

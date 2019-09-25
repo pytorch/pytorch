@@ -108,11 +108,17 @@ public:
   Vec256<float> atan() const {
     return Vec256<float>(Sleef_atanf8_u10(values));
   }
+  Vec256<float> atan2(const Vec256<float> &b) const {
+    return Vec256<float>(Sleef_atan2f8_u10(values, b));
+  }
   Vec256<float> erf() const {
     return Vec256<float>(Sleef_erff8_u10(values));
   }
   Vec256<float> erfc() const {
     return Vec256<float>(Sleef_erfcf8_u15(values));
+  }
+  Vec256<float> erfinv() const {
+    return map(calc_erfinv);
   }
   Vec256<float> exp() const {
     return Vec256<float>(Sleef_expf8_u10(values));
@@ -165,6 +171,9 @@ public:
   }
   Vec256<float> trunc() const {
     return _mm256_round_ps(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
+  }
+  Vec256<float> lgamma() const {
+    return Vec256<float>(Sleef_lgammaf8_u10(values));
   }
   Vec256<float> sqrt() const {
     return _mm256_sqrt_ps(values);
@@ -252,6 +261,21 @@ Vec256<float> inline minimum(const Vec256<float>& a, const Vec256<float>& b) {
 }
 
 template <>
+Vec256<float> inline clamp(const Vec256<float>& a, const Vec256<float>& min, const Vec256<float>& max) {
+  return _mm256_min_ps(max, _mm256_max_ps(min, a));
+}
+
+template <>
+Vec256<float> inline clamp_max(const Vec256<float>& a, const Vec256<float>& max) {
+  return _mm256_min_ps(max, a);
+}
+
+template <>
+Vec256<float> inline clamp_min(const Vec256<float>& a, const Vec256<float>& min) {
+  return _mm256_max_ps(min, a);
+}
+
+template <>
 Vec256<float> inline operator&(const Vec256<float>& a, const Vec256<float>& b) {
   return _mm256_and_ps(a, b);
 }
@@ -267,7 +291,7 @@ Vec256<float> inline operator^(const Vec256<float>& a, const Vec256<float>& b) {
 }
 
 template <>
-void convert(const float* src, float* dst, int64_t n) {
+inline void convert(const float* src, float* dst, int64_t n) {
   int64_t i;
 #pragma unroll
   for (i = 0; i <= (n - Vec256<float>::size()); i += Vec256<float>::size()) {

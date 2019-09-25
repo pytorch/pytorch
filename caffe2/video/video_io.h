@@ -14,9 +14,7 @@ namespace caffe2 {
 
 CAFFE2_API void ClipTransformRGB(
     const unsigned char* buffer_rgb,
-    const int multi_crop_count,
-    const int crop_height,
-    const int crop_width,
+    const int crop_size,
     const int length_rgb,
     const int channels_rgb,
     const int sampling_rate_rgb,
@@ -24,26 +22,14 @@ CAFFE2_API void ClipTransformRGB(
     const int width,
     const int h_off,
     const int w_off,
-    const int* multi_crop_h_off,
-    const int* multi_crop_w_off,
     const bool mirror_me,
-    const bool color_jitter,
-    const float saturation,
-    const float brightness,
-    const float contrast,
-    const bool color_lighting,
-    const float color_lighting_std,
-    const std::vector<std::vector<float>>& color_lighting_eigvecs,
-    const std::vector<float>& color_lighting_eigvals,
     const std::vector<float>& mean_rgb,
     const std::vector<float>& inv_std_rgb,
-    std::mt19937* randgen,
     float* transformed_clip);
 
 CAFFE2_API void ClipTransformOpticalFlow(
     const unsigned char* buffer_rgb,
-    const int crop_height,
-    const int crop_width,
+    const int crop_size,
     const int length_of,
     const int channels_of,
     const int sampling_rate_of,
@@ -59,21 +45,6 @@ CAFFE2_API void ClipTransformOpticalFlow(
     const std::vector<float>& mean_of,
     const std::vector<float>& inv_std_of,
     float* transformed_clip);
-
-CAFFE2_API void FreeDecodedData(
-    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames);
-
-CAFFE2_API bool DecodeMultipleClipsFromVideo(
-    const char* video_buffer,
-    const std::string& video_filename,
-    const int encoded_size,
-    const Params& params,
-    const int start_frm,
-    const int clip_per_video,
-    const bool use_local_file,
-    int& height,
-    int& width,
-    std::vector<unsigned char*>& buffer_rgb);
 
 } // namespace caffe2
 

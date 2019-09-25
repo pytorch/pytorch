@@ -30,6 +30,9 @@
 #include <TH/THGenerateBoolType.h>
 
 #include <torch/csrc/generic/Storage.cpp>
+#include <TH/THGenerateBFloat16Type.h>
+
+#include <torch/csrc/generic/Storage.cpp>
 #include <TH/THGenerateQTypes.h>
 
 template<>

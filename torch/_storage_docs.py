@@ -13,6 +13,7 @@ storage_classes = [
     'CharStorageBase',
     'ByteStorageBase',
     'BoolStorageBase',
+    'BFloat16StorageBase',
 ]
 
 

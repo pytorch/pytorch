@@ -57,7 +57,7 @@ namespace nn {
 ///
 /// Parameters are registered with a `Module` via `register_parameter`. Buffers
 /// are registered separately via `register_buffer`. These methods are part of
-/// the protected API of `Module` and are typically invoked from within a
+/// the public API of `Module` and are typically invoked from within a
 /// concrete `Module`s constructor.
 class TORCH_API Module : public std::enable_shared_from_this<Module> {
  public:
@@ -230,8 +230,8 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// \endrst
   std::vector<std::shared_ptr<Module>> modules(bool include_self = true) const;
 
-  /// Returns an `OrderedDict` of he submodules of this `Module` (the entire
-  /// submodule hierarchy) and thei keys, and if `include_self` is true, also
+  /// Returns an `OrderedDict` of the submodules of this `Module` (the entire
+  /// submodule hierarchy) and their keys, and if `include_self` is true, also
   /// inserts a `shared_ptr` to this module in the first position. If
   /// `name_prefix` is given, it is prepended to every key as
   /// `<name_prefix>.<key>` (and just `name_prefix` for the module itself).
@@ -406,7 +406,6 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// Returns whether the `Module` is serializable.
   virtual bool is_serializable() const;
 
- protected:
   /// Registers a parameter with this `Module`.
   ///
   /// A parameter should be any gradient-recording tensor used in the
@@ -475,6 +474,39 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   std::shared_ptr<ModuleType> register_module(
       std::string name,
       ModuleHolder<ModuleType> module_holder);
+
+  /// Replaces a registered submodule with this `Module`.
+  ///
+  /// This takes care of the registration, if you used submodule members, you should
+  //  assign the submodule as well, i.e. use as
+  ///     module->submodule_ = module->replace_module("linear", torch::nn::Linear(3, 4));
+  /// It only works when a module of the name is already registered.
+  ///
+  /// This is useful for replacing a module after initialization, e.g.
+  /// for finetuning.
+  template <typename ModuleType>
+  std::shared_ptr<ModuleType> replace_module(
+      const std::string& name,
+      std::shared_ptr<ModuleType> module);
+
+  /// Replaces a registered submodule with this `Module`.
+  /// This method deals with `ModuleHolder`s.
+  ///
+  /// This takes care of the registration, if you used submodule members, you should
+  //  assign the submodule as well, i.e. use as
+  ///     module->submodule_ = module->replace_module("linear", linear_holder);
+  /// It only works when a module of the name is already registered.
+  ///
+  /// This is useful for replacing a module after initialization, e.g.
+  /// for finetuning.
+  template <typename ModuleType>
+  std::shared_ptr<ModuleType> replace_module(
+      const std::string& name,
+      ModuleHolder<ModuleType> module_holder);
+
+  /// Unregisters a submodule from this `Module`. If there is no such module
+  /// with `name` an exception is thrown.
+  void unregister_module(const std::string& name);
 
  private:
   // Friend classes.
@@ -589,6 +621,21 @@ std::shared_ptr<ModuleType> Module::register_module(
     std::string name,
     ModuleHolder<ModuleType> module_holder) {
   return register_module(std::move(name), module_holder.ptr());
+}
+
+template <typename ModuleType>
+std::shared_ptr<ModuleType> Module::replace_module(
+    const std::string& name,
+    std::shared_ptr<ModuleType> module) {
+  auto& base_module = (children_[name] = std::move(module));
+  return std::dynamic_pointer_cast<ModuleType>(base_module);
+}
+
+template <typename ModuleType>
+std::shared_ptr<ModuleType> Module::replace_module(
+    const std::string& name,
+    ModuleHolder<ModuleType> module_holder) {
+  return replace_module(name, module_holder.ptr());
 }
 
 template <typename... Ts>

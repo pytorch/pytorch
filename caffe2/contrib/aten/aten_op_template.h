@@ -15,7 +15,7 @@ static std::unordered_map<std::string, int> op_to_key = {
 
 namespace caffe2 {
 
-using at::Half; // for AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT
+using at::Half; // for AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ...)
 
 template <class Context>
 class ATenOp : public Operator<Context> {
@@ -43,13 +43,13 @@ private:
     return typeMetaFor(t.scalar_type());
   }
   TypeMeta typeMetaFor(at::ScalarType st) {
-    #define DEFINE_CASE(ctype,aten_name,_) \
+    #define DEFINE_CASE(ctype,aten_name) \
       case at::k##aten_name: \
         return TypeMeta::Make<ctype>();
     switch(st) {
-      AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(DEFINE_CASE)
-      default:
-        CAFFE_THROW("Unknown ATen Type");
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CASE)
+    default:
+      CAFFE_THROW("Unknown ATen Type");
     }
     #undef DEFINE_CASE
   }
@@ -118,27 +118,28 @@ private:
     }
   }
 
-  // the AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT macro just gives a 'i' or
-  // 'd' argument for each type to specify if it is stored as a integer or a
-  // double. We need this workaround here to extract the value in the scalar
-  // losslessly because in some cases like 'sum' Torch promotes float to double
-  // and will complain if we downcast it with toFloat, causing it
-  // to lose precision
-  double extract_d(const at::Scalar & s) {
-    return s.toDouble();
-  }
-  int64_t extract_i(const at::Scalar & s) {
+  template<typename T,
+          typename std::enable_if<std::numeric_limits<T>::is_integer, bool>::type* =
+              nullptr>
+  int64_t extract(const at::Scalar &s) {
     return s.toLong();
+  }
+
+  template<typename T,
+          typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::type* =
+              nullptr>
+  int64_t extract(const at::Scalar &s) {
+    return s.toDouble();
   }
 
   void assignTo(Tensor* dst, at::ScalarType scalar_type, at::Scalar scalar) {
     switch(scalar_type) {
-      #define DEFINE_CASE(ctype,aten_name,native) \
+      #define DEFINE_CASE(ctype,aten_name) \
         case at::k##aten_name: { \
-          auto value = extract_##native(scalar); \
+          auto value = extract<ctype>(scalar); \
           assignToValue<ctype>(dst, at::convert<ctype,decltype(value)>(value)); \
         } break;
-      AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(DEFINE_CASE)
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CASE)
 #undef DEFINE_CASE
       default:
         CAFFE_THROW("Unknown ATen Type");

@@ -58,15 +58,17 @@ endif()
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
 
-if(NOT BUILD_ATEN_ONLY)
-  add_subdirectory(proto)
+add_subdirectory(core)
+add_subdirectory(serialize)
+add_subdirectory(utils)
+add_subdirectory(perfkernels)
+
+# Skip modules that are not used by libtorch mobile yet.
+if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
   add_subdirectory(contrib)
-  add_subdirectory(core)
-  add_subdirectory(utils)
   add_subdirectory(predictor)
   add_subdirectory(predictor/emulator)
   add_subdirectory(core/nomnigraph)
-  add_subdirectory(serialize)
   if (USE_NVRTC)
     add_subdirectory(cuda_rtc)
   endif()
@@ -92,7 +94,7 @@ if(NOT BUILD_ATEN_ONLY)
     endif()
   endif()
   add_subdirectory(opt)
-  add_subdirectory(perfkernels)
+  add_subdirectory(proto)
   add_subdirectory(python)
   add_subdirectory(queue)
   add_subdirectory(sgd)
@@ -168,8 +170,8 @@ if (FALSE)
   endforeach()
 endif()
 
-# ---[ List of libraries to link with
-if(NOT BUILD_ATEN_ONLY)
+if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
+  # ---[ List of libraries to link with
   add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe2_PROTO>)
   add_dependencies(caffe2_protos Caffe2_PROTO)
   # If we are going to link protobuf locally inside caffe2 libraries, what we will do is
@@ -205,7 +207,6 @@ if(NOT BUILD_ATEN_ONLY)
     INSTALL(TARGETS caffe2_protos ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
   endif()
 endif()
-
 
 # ==========================================================
 # formerly-libtorch
@@ -247,24 +248,31 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(GENERATED_CXX_TORCH
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
     "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp"
     "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
     "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
     )
 
+  if(NOT INTERN_DISABLE_AUTOGRAD)
+    list(APPEND GENERATED_CXX_TORCH
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
+    )
+  endif()
+
   set(GENERATED_H_TORCH
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
     )
 
-  set(GENERATED_THNN_CXX_CUDA ${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp)
-  set(GENERATED_THNN_CXX ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp)
+  if(NOT INTERN_DISABLE_AUTOGRAD)
+    list(APPEND GENERATED_H_TORCH
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
+    )
+  endif()
 
   set(GENERATED_CXX_PYTHON
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp"
@@ -281,14 +289,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
     )
 
-  set(GENERATED_THNN_SOURCES
-    ${GENERATED_THNN_CXX}
-    ${GENERATED_THNN_CXX_CUDA}
-    )
-
   set(TORCH_GENERATED_CODE
     ${GENERATED_CXX_TORCH}
-    ${GENERATED_THNN_SOURCES}
     ${GENERATED_H_TORCH}
     ${GENERATED_CXX_PYTHON}
     ${GENERATED_H_PYTHON}
@@ -301,6 +303,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
       --nn-path "aten/src"
+      $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${CMAKE_CURRENT_LIST_DIR}/../aten/src/THNN/generic/THNN.h"
@@ -345,6 +348,9 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${GENERATED_CXX_TORCH}
     ${GENERATED_H_TORCH}
     ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/autograd.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/custom_function.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/cpp_hook.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/function_hook.cpp
@@ -352,29 +358,29 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/autograd/functions/basic_ops.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/functions/tensor.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/functions/utils.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/grad_mode.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/input_buffer.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/record_function.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
-    ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
     ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
     ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
     ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/export.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pass_manager.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pickler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/unpickler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/import_source.cpp
     ${TORCH_SRC_DIR}/csrc/jit/import.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/pickle.cpp
     ${TORCH_SRC_DIR}/csrc/jit/import_export_helpers.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/instruction.cpp
     ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
     ${TORCH_SRC_DIR}/csrc/jit/node_hashing.cpp
     ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/irparser.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/jit_log.cpp
     ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_c10_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/subgraph_matcher.cpp
@@ -418,28 +424,30 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/check_alias_annotation.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/memory_dag.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/quantization.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/fuse_linear.cpp
     ${TORCH_SRC_DIR}/csrc/jit/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_string_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/register_quantized_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/exit_transforms.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/inline_loop_condition.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/class_type.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/canonicalize_modified_loop.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/logging.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/jit_exception.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/source_range_serialization.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
@@ -450,52 +458,60 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
-    ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
 
-  if (WIN32)
+  if (NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_win.cpp
+      ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
     )
-    if (USE_CUDA AND NOT USE_ROCM)
-      list(APPEND Caffe2_GPU_SRCS
-        ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
-      )
-      add_library(thnvrtc SHARED ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/thnvrtc.cpp)
-      target_link_libraries(thnvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
-      target_include_directories(thnvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
-      install(TARGETS thnvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-    endif()
-  else ()
+  endif()
+
+  if (NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_unix.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/sendrpc_backward.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/future_message.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/message.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_remote_call.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_rref_proto.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_ret.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/export.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/import_legacy.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
     )
-    if (USE_CUDA AND NOT USE_ROCM)
-      list(APPEND Caffe2_GPU_SRCS
-        ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
-      )
-      add_library(thnvrtc SHARED ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/thnvrtc.cpp)
-      target_link_libraries(thnvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
-      target_include_directories(thnvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
-      install(TARGETS thnvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-
-    endif()
-  endif ()
+  endif()
 
   if (USE_CUDA)
     list(APPEND Caffe2_GPU_SRCS
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
     )
+    add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
+    target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
+    target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+    install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
   if (USE_ROCM)
     list(APPEND Caffe2_HIP_SRCS
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
     )
+    # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
+    # See NOTE [ ATen NVRTC Stub and HIP ]
+    add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
+    target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${PYTORCH_HIP_HCC_LIBRARIES} ${ROCM_HIPRTC_LIB})
+    target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
+    target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+    target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_HCC__)
+    install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
   if (NOT NO_API)
@@ -506,17 +522,28 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/random.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/sequential.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/stream.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/serialize.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/dropout.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/distance.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/embedding.cpp
-      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/fold.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
-      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/named_any.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/loss.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/functional.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/named_any.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/batchnorm.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/conv.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/dropout.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/linear.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/pooling.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
@@ -573,14 +600,15 @@ ENDIF()
 # formerly-libtorch flags
 # ==========================================================
 
-if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
-
+if (NOT INTERN_BUILD_MOBILE)
   # Forces caffe2.pb.h to be generated before its dependents are compiled.
   # Adding the generated header file to the ${TORCH_SRCS} list is not sufficient
   # to establish the dependency, since the generation procedure is declared in a different CMake file.
   # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
   add_dependencies(torch Caffe2_PROTO)
+endif()
 
+if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   target_compile_definitions(torch PUBLIC _THP_CORE)
 
 
@@ -714,7 +742,7 @@ ENDIF()
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
     FILES_MATCHING PATTERN "*.h")
-  install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h"
+  install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h" "${TORCH_SRC_DIR}/custom_class.h"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 
@@ -724,8 +752,8 @@ ENDIF()
 
   if (BUILD_TEST AND NOT NO_API)
     add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/dist_autograd ${CMAKE_BINARY_DIR}/dist_autograd)
   endif()
-
 
   # XXX This ABI check cannot be run with arm-linux-androideabi-g++
   if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
@@ -769,7 +797,7 @@ ENDIF()
     DESTINATION share/cmake/Torch)
 
   if (USE_DISTRIBUTED)
-    if (NOT MSVC AND NOT APPLE)
+    if (NOT MSVC)
       add_subdirectory(${TORCH_SRC_DIR}/lib/c10d lib_c10d)
     endif()
   endif()
@@ -831,8 +859,7 @@ if (NOT WIN32 AND NOT USE_ASAN)
   target_compile_options(torch PRIVATE "-fvisibility=hidden")
 endif()
 
-
-if(NOT BUILD_ATEN_ONLY)
+if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
   caffe2_interface_library(caffe2_protos caffe2_protos_whole)
   target_link_libraries(torch PRIVATE caffe2_protos_whole)
   if (${CAFFE2_LINK_LOCAL_PROTOBUF})
@@ -866,23 +893,23 @@ target_compile_options(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 target_compile_definitions(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 
 
-# Parallelism settings
-#  OPENMP - OpenMP for intra-op, native thread pool for inter-op parallelism
+# ATen parallelism settings
+#  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
-#  NATIVE_TBB - using TBB for intra- and native thread pool for inter-op parallelism
-set(PARALLEL_BACKEND "OPENMP" CACHE STRING "ATen parallel backend")
-message(STATUS "Using parallel backend: ${PARALLEL_BACKEND}")
-if ("${PARALLEL_BACKEND}" STREQUAL "OPENMP")
+#  TBB - using TBB for intra- and native thread pool for inter-op parallelism
+set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+message(STATUS "Using ATen parallel backend: ${ATEN_THREADING}")
+if ("${ATEN_THREADING}" STREQUAL "OMP")
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_OPENMP=1")
-elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE")
+elseif ("${ATEN_THREADING}" STREQUAL "NATIVE")
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_NATIVE=1")
-elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE_TBB")
+elseif ("${ATEN_THREADING}" STREQUAL "TBB")
   if (NOT USE_TBB)
-    message(FATAL_ERROR "Using NATIVE_TBB backend but USE_TBB is off")
+    message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
   endif()
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_NATIVE_TBB=1")
 else()
-  message(FATAL_ERROR "Unknown parallel backend: ${PARALLEL_BACKEND}")
+  message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
 endif()
 set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
   "Experimental option to use a single thread pool for inter- and intra-op parallelism")
@@ -1166,7 +1193,9 @@ if (BUILD_PYTHON)
 
   # ---[ Python.
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
-  set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
+  if (NOT MSVC)
+    set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
+  endif()
   set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "" DEBUG_POSTFIX "")
   set_target_properties(caffe2_pybind11_state PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
   set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
@@ -1193,7 +1222,9 @@ if (BUILD_PYTHON)
 
   if(USE_CUDA)
     add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
-    set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
+    if (NOT MSVC)
+      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
+    endif()
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "" DEBUG_POSTFIX "")
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
@@ -1218,7 +1249,9 @@ if (BUILD_PYTHON)
 
   if(USE_ROCM)
     add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
-    target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
+    if (NOT MSVC)
+      target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
+    endif()
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")

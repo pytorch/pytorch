@@ -5,6 +5,7 @@ Checks: '
   ,bugprone-*
   ,-bugprone-forward-declaration-namespace
   ,-bugprone-macro-parentheses
+  ,-bugprone-lambda-function-name
   ,cppcoreguidelines-*
   ,-cppcoreguidelines-interfaces-global-init
   ,-cppcoreguidelines-owning-memory

@@ -14,25 +14,26 @@ add_long_configs = op_bench.cross_product_configs(
     M=[8, 64, 128],
     N=range(2, 10, 3),
     K=[2 ** x for x in range(0, 3)], 
+    dtype=["int", "float"],
     tags=["long"]
 )
 
 
 add_short_configs = op_bench.config_list(
     attrs=[
-        [8, 16, 32],
-        [16, 16, 64],
-        [64, 64, 128],
+        [8, 16, 32, "int"],
+        [16, 16, 64, "float"],
+        [64, 64, 128, "int"],
     ],
-    attr_names=["M", "N", "K"], 
+    attr_names=["M", "N", "K", "dtype"], 
     tags=["short"], 
 )
 
 class AddBenchmark(op_bench.Caffe2BenchmarkBase):
-    def init(self, M, N, K): 
-        self.input_one = self.tensor(M, N, K) 
-        self.input_two = self.tensor(M, N, K) 
-        self.output = self.tensor(M, N, K)
+    def init(self, M, N, K, dtype): 
+        self.input_one = self.tensor([M, N, K], dtype) 
+        self.input_two = self.tensor([M, N, K], dtype) 
+        self.output = self.tensor([M, N, K], dtype)
         self.set_module_name("add")
 
     def forward(self):

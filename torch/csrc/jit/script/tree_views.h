@@ -25,9 +25,9 @@ namespace script {
 //
 // Decl  = Decl(List<Param> params, Maybe<Expr> return_type)            TK_DECL
 // Def   = Def(Ident name, Decl decl, List<Stmt> body)                  TK_DEF
-// ClassDef = ClassDef(Ident name, List<Def> body)                      TK_CLASS_DEF
-// NamedTupleDef = NamedTupleDef(Ident name, List<Ident> fields,
-//                               List<Maybe<Expr>> types)
+// ClassDef = ClassDef(Ident name,                                      TK_CLASS_DEF
+//                     Maybe<Expr> superclass,
+//                     List<Stmt> body)
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
 //       | For(List<Expr> targets, List<Expr> iters, List<Stmt> body)   TK_FOR
@@ -35,7 +35,7 @@ namespace script {
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
 //       -- NB: the only type of Expr's allowed on lhs are Var
 //          Or a tuple containing Var with an optional terminating Starred
-//       | Assign(Expr lhs, Expr rhs, Maybe<Expr> type)                 TK_ASSIGN
+//       | Assign(Expr lhs, Maybe<Expr> rhs, Maybe<Expr> type)          TK_ASSIGN
 //       | AugAssign(Expr lhs, AugAssignKind aug_op, Expr rhs)          TK_AUG_ASSIGN
 //       | Return(List<Expr> values)                                    TK_RETURN
 //       | ExprStmt(List<Expr> expr)                                    TK_EXPR_STMT
@@ -248,6 +248,8 @@ struct Stmt : public TreeView {
       case TK_RAISE:
       case TK_ASSERT:
       case TK_PASS:
+      case TK_BREAK:
+      case TK_CONTINUE:
       case TK_DEF:
         return;
       default:
@@ -274,6 +276,7 @@ struct Expr : public TreeView {
       case '+':
       case '-':
       case TK_UNARY_MINUS:
+      case '~':
       case '*':
       case TK_STARRED:
       case '/':
@@ -394,6 +397,9 @@ struct Def : public TreeView {
     auto new_ident = Ident::create(name().range(), std::move(new_name));
     return create(range(), new_ident, decl(), statements());
   }
+  Def withDecl(Decl decl) const {
+    return create(range(), name(), decl, statements());
+  }
   Ident name() const {
     return Ident(subtree(0));
   }
@@ -418,42 +424,24 @@ struct ClassDef : public TreeView {
   }
   ClassDef withName(std::string new_name) const {
     auto new_ident = Ident::create(name().range(), std::move(new_name));
-    return create(range(), new_ident, defs());
+    return create(range(), new_ident, superclass(), body());
   }
   Ident name() const {
     return Ident(subtree(0));
   }
-  List<Def> defs() const {
-    return List<Def>(subtree(1));
+  Maybe<Expr> superclass() const {
+    return Maybe<Expr>(subtree(1));
+  }
+  List<Stmt> body() const {
+    return List<Stmt>(subtree(2));
   }
   static ClassDef create(
       const SourceRange& range,
       const Ident& name,
-      const List<Def>& defs) {
-    return ClassDef(Compound::create(TK_CLASS_DEF, range, {name, defs}));
-  }
-};
-
-struct NamedTupleDef : public TreeView {
-  explicit NamedTupleDef(const TreeRef& tree) : TreeView(tree) {
-    tree->match(TK_NAMED_TUPLE_DEF);
-  }
-  Ident name() const {
-    return Ident(subtree(0));
-  }
-  List<Ident> fields() const {
-    return List<Ident>(subtree(1));
-  }
-  List<Maybe<Expr>> type_exprs() const {
-    return List<Maybe<Expr>>(subtree(2));
-  }
-  static NamedTupleDef create(
-      const SourceRange& range,
-      const Ident& name,
-      const List<Ident>& fields,
-      const List<Maybe<Expr>>& type_exprs) {
-    return NamedTupleDef(Compound::create(
-        TK_NAMED_TUPLE_DEF, range, {name, fields, type_exprs}));
+      const Maybe<Expr>& superclass,
+      const List<Stmt>& body) {
+    return ClassDef(
+        Compound::create(TK_CLASS_DEF, range, {name, superclass, body}));
   }
 };
 
@@ -609,18 +597,24 @@ struct Assign : public Stmt {
   }
   static Assign create(
       const SourceRange& range,
-      const Expr& lhs,
-      const Expr& rhs,
+      const List<Expr>& lhs,
+      const Maybe<Expr>& rhs,
       const Maybe<Expr>& type) {
     return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs, type}));
   }
 
-  Expr lhs() const {
-    return Expr(subtree(0));
+  List<Expr> lhs_list() const {
+    return List<Expr>(subtree(0));
   }
 
-  Expr rhs() const {
-    return Expr(subtree(1));
+  Expr lhs() const {
+    const auto& li = lhs_list();
+    TORCH_INTERNAL_ASSERT(li.size() == 1);
+    return *li.begin();
+  }
+
+  Maybe<Expr> rhs() const {
+    return Maybe<Expr>(subtree(1));
   }
 
   Maybe<Expr> type() const {
@@ -649,6 +643,10 @@ struct Raise : public Stmt {
   }
   static Raise create(const SourceRange& range, const Maybe<Expr>& expr) {
     return Raise(Compound::create(TK_RAISE, range, {expr}));
+  }
+  static Raise create(const SourceRange& range) {
+    return Raise(
+        Compound::create(TK_RAISE, range, {Maybe<Expr>::create(range)}));
   }
 };
 
@@ -685,6 +683,24 @@ struct Dots : public Expr {
   }
   static Dots create(const SourceRange& range) {
     return Dots(Compound::create(TK_DOTS, range, {}));
+  }
+};
+
+struct Break : public Stmt {
+  explicit Break(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_BREAK);
+  }
+  static Break create(const SourceRange& range) {
+    return Break(Compound::create(TK_BREAK, range, {}));
+  }
+};
+
+struct Continue : public Stmt {
+  explicit Continue(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_CONTINUE);
+  }
+  static Continue create(const SourceRange& range) {
+    return Continue(Compound::create(TK_CONTINUE, range, {}));
   }
 };
 
@@ -757,6 +773,7 @@ struct UnaryOp : public Expr {
   explicit UnaryOp(const TreeRef& tree) : Expr(tree) {
     switch (tree->kind()) {
       case TK_UNARY_MINUS:
+      case '~':
       case TK_NOT:
         if (tree->trees().size() != 1)
           throw ErrorReport(tree)

@@ -7,12 +7,12 @@ namespace jit {
 static ModuleHook emit_module_callback;
 void didFinishEmitModule(script::Module module) {
   if (emit_module_callback) {
-    emit_module_callback(std::move(module));
+    emit_module_callback(module);
   }
 }
 
 static FunctionHook emit_function_callback;
-void didFinishEmitFunction(std::shared_ptr<Function> fn) {
+void didFinishEmitFunction(StrongFunctionPtr fn) {
   if (emit_function_callback) {
     emit_function_callback(fn);
   }

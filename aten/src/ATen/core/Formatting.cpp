@@ -33,10 +33,6 @@ private:
   std::ios saved;
 };
 
-std::ostream& operator<<(std::ostream & out, const Type& t) {
-  return out << t.toString();
-}
-
 std::ostream& operator<<(std::ostream & out, const DeprecatedTypeProperties& t) {
   return out << t.toString();
 }
@@ -47,7 +43,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
     return std::make_tuple(1., 0);
   }
   bool intMode = true;
-  auto self_p = self.data<double>();
+  auto self_p = self.data_ptr<double>();
   for(int64_t i = 0; i < size; i++) {
     auto z = self_p[i];
     if(std::isfinite(z)) {
@@ -169,7 +165,7 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
     }
     for(int64_t l = 0; l < self.size(0); l++) {
       Tensor row = self.select(0,l);
-      double *row_ptr = row.data<double>();
+      double *row_ptr = row.data_ptr<double>();
       for(int64_t c = firstColumn; c < lastColumn+1; c++) {
         stream << std::setw(sz) << row_ptr[c]/scale;
         if(c == lastColumn) {
@@ -242,10 +238,15 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     stream << "size:\n" << tensor_.sizes() << "\n";
     stream << "]";
   } else {
-    Tensor tensor = tensor_.to(kCPU, kDouble).contiguous();
+    Tensor tensor;
+    if (tensor_.is_quantized()) {
+      Tensor tensor = tensor_.dequantize().to(kCPU, kDouble).contiguous();
+    } else {
+      tensor = tensor_.to(kCPU, kDouble).contiguous();
+    }
     if(tensor.ndimension() == 0) {
-      stream << defaultfloat << tensor.data<double>()[0] << std::endl;
-      stream << "[ " << tensor_.toString() << "{} ]";
+      stream << defaultfloat << tensor.data_ptr<double>()[0] << std::endl;
+      stream << "[ " << tensor_.toString() << "{}";
     } else if(tensor.ndimension() == 1) {
       if (tensor.numel() > 0) {
         double scale;
@@ -254,17 +255,17 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
         if(scale != 1) {
           printScale(stream, scale);
         }
-        double* tensor_p = tensor.data<double>();
+        double* tensor_p = tensor.data_ptr<double>();
         for(int64_t i = 0; i < tensor.size(0); i++) {
           stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
         }
       }
-      stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "} ]";
+      stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "}";
     } else if(tensor.ndimension() == 2) {
       if (tensor.numel() > 0) {
         __printMatrix(stream, tensor, linesize, 0);
       }
-      stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "," <<  tensor.size(1) << "} ]";
+      stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "," <<  tensor.size(1) << "}";
     } else {
       if (tensor.numel() > 0) {
         __printTensor(stream, tensor, linesize);
@@ -273,8 +274,14 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       for(int64_t i = 1; i < tensor.ndimension(); i++) {
         stream << "," << tensor.size(i);
       }
-      stream << "} ]";
+      stream << "}";
     }
+    if (tensor_.is_quantized()) {
+      stream << ", qscheme: " << toString(tensor_.qscheme());
+      stream << ", scale: " << tensor_.q_scale();
+      stream << ", zero_point: " << tensor_.q_zero_point();
+    }
+    stream << " ]";
   }
   return stream;
 }

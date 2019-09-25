@@ -1,9 +1,7 @@
 from .module import Module
 from .. import functional as F
-from ..._jit_internal import weak_module, weak_script_method
 
 
-@weak_module
 class PixelShuffle(Module):
     r"""Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)`
     to a tensor of shape :math:`(*, C, H \times r, W \times r)`.
@@ -41,7 +39,6 @@ class PixelShuffle(Module):
         super(PixelShuffle, self).__init__()
         self.upscale_factor = upscale_factor
 
-    @weak_script_method
     def forward(self, input):
         return F.pixel_shuffle(input, self.upscale_factor)
 

@@ -273,6 +273,7 @@ class TestSparse(TestCase):
         else:
             return tensor.to_dense()
 
+    @skipIfRocm
     def test_to_sparse(self):
         shape = [10, 5, 19, 8]
         max_nnz = 1
@@ -810,6 +811,61 @@ class TestSparse(TestCase):
         # bounds
         test_shape(3, 10, [5, 7, 11, 13, 17], -7, "Dimension out of range")
         test_shape(3, 10, [5, 7, 11, 13, 17], 6, "Dimension out of range")
+
+    def test_select(self):
+        def test_shape(sparse_dims, nnz, sizes, select_dim, select_index, fail_message=None):
+            x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
+            if fail_message:
+                with self.assertRaisesRegex(IndexError, fail_message):
+                    torch.select(x, select_dim, select_index)
+            else:
+                result = torch.select(x, select_dim, select_index)
+                if result.is_sparse:
+                    result = result.to_dense()
+                dense_result = torch.select(x.to_dense(), select_dim, select_index)
+                self.assertEqual(dense_result, result)
+
+
+        sizes = [5, 7, 11, 13, 17]
+        # hybrid sparse/dense, select sparse dim, result is dense
+        for i in range(sizes[0]):
+            test_shape(1, 10, sizes, 0, i)
+        test_shape(1, 10, sizes, 0, sizes[0] + 1, r'select[(][)][:] index \d out of range.*')
+
+        # hybrid sparse/dense, select sparse dim, result is sparse
+        for d in range(3):
+            for i in range(sizes[d]):
+                test_shape(3, 10, sizes, d, i)
+
+        # hybrid sparse/dense, select dense dim, result is sparse
+        for d in range(1, 3):
+            for i in range(sizes[d]):
+                test_shape(1, 10, sizes, d, i)
+
+
+    def test_index_select(self):
+        def test_shape(sparse_dims, nnz, sizes, select_dim, select_index, fail_message=None):
+            if isinstance(select_index, int):
+                select_index = [select_index]
+            if isinstance(select_index, list):
+                select_index = torch.tensor(select_index, device=self.device, dtype=torch.long)
+            x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
+            if fail_message:
+                with self.assertRaisesRegex(IndexError, fail_message):
+                    torch.index_select(x, select_dim, select_index)
+            else:
+                result = torch.index_select(x, select_dim, select_index)
+                if result.is_sparse:
+                    result = result.to_dense()
+                dense_result = torch.index_select(x.to_dense(), select_dim, select_index)
+                self.assertEqual(dense_result, result)
+
+        sizes = [5, 7, 11, 13, 17]
+        for d in range(len(sizes)):
+            for index in [0, sizes[d] - 1, [0, sizes[d] // 2, sizes[d] - 1]]:
+                test_shape(1, 10, sizes, d, index)
+                test_shape(len(sizes) // 2, 10, sizes, d, index)
+                test_shape(len(sizes), 10, sizes, d, index)
 
     @cpu_only
     def test_mm(self):
@@ -1926,32 +1982,32 @@ class TestSparse(TestCase):
         def do_test(t):
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "raw_resize_ is not allowed on Tensor created from .data or .detach()"):
+                    "raw_resize_ is not allowed on a Tensor created from .data or .detach()"):
                 t.transpose_(0, 1)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "resize_ is not allowed on Tensor created from .data or .detach()"):
+                    "resize_ is not allowed on a Tensor created from .data or .detach()"):
                 t.resize_as_(self.sparse_empty(3, 3))
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "resize_and_clear_ is not allowed on Tensor created from .data or .detach()"):
+                    "resize_and_clear_ is not allowed on a Tensor created from .data or .detach()"):
                 t.mul_(t)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "set_coalesced is not allowed on Tensor created from .data or .detach()"):
+                    "set_coalesced is not allowed on a Tensor created from .data or .detach()"):
                 t._coalesced_(True)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "set_indices_and_values_unsafe is not allowed on Tensor created from .data or .detach()"):
+                    "set_indices_and_values_unsafe is not allowed on a Tensor created from .data or .detach()"):
                 a = self.sparse_tensor(torch.tensor([[0, 1, 1], [2, 0, 2]]), torch.tensor([3., 4., 5.])).data
                 a.add_(a)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "resize_and_clear_ is not allowed on Tensor created from .data or .detach()"):
+                    "resize_and_clear_ is not allowed on a Tensor created from .data or .detach()"):
                 a.zero_()
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "resize_ is not allowed on Tensor created from .data or .detach()"):
+                    "resize_ is not allowed on a Tensor created from .data or .detach()"):
                 a.copy_(self.sparse_empty(3, 3))
 
         do_test(self.sparse_empty(3, 0).data)
@@ -2051,21 +2107,21 @@ class TestSparseOneOff(TestCase):
         sparse_y = torch.cuda.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
                                                  torch.randn(4, 4, 4).cuda(),
                                                  [3, 4, 4])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'other' to be a CPU tensor\\, but got a CUDA tensor"):
+        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
         x = torch.zeros(3, 4, 4, 0)
         sparse_y = torch.cuda.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
                                                  torch.randn(4, 4, 4, 0).cuda(),
                                                  [3, 4, 4, 0])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'other' to be a CPU tensor\\, but got a CUDA tensor"):
+        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
         x = torch.zeros(0, 4, 4, 0)
         sparse_y = torch.cuda.sparse.FloatTensor(torch.LongTensor(1, 0).cuda(),
                                                  torch.randn(0, 4, 4, 0).cuda(),
                                                  [0, 4, 4, 0])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'other' to be a CPU tensor\\, but got a CUDA tensor"):
+        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
 

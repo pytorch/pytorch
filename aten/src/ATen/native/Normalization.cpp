@@ -66,12 +66,12 @@ void batch_norm_cpu_inference_contiguous(Tensor& output, const Tensor& input,
   int64_t n_channel = input.size(1);
   int64_t image_size = input.numel() / n_batch / n_channel;
 
-  scalar_t* output_data = output.data<scalar_t>();
-  const scalar_t* input_data = input.data<scalar_t>();
-  const scalar_t* weight_data = weight.defined() ? weight.data<scalar_t>() : nullptr;
-  const scalar_t* bias_data = bias.defined() ? bias.data<scalar_t>() : nullptr;
-  const scalar_t* mean_data = mean.data<scalar_t>();
-  const scalar_t* var_data = variance.data<scalar_t>();
+  scalar_t* output_data = output.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* weight_data = weight.defined() ? weight.data_ptr<scalar_t>() : nullptr;
+  const scalar_t* bias_data = bias.defined() ? bias.data_ptr<scalar_t>() : nullptr;
+  const scalar_t* mean_data = mean.data_ptr<scalar_t>();
+  const scalar_t* var_data = variance.data_ptr<scalar_t>();
 
   /// Collect the linear and constant terms regarding the input.
   /// output(n, c, h, w)
@@ -86,8 +86,8 @@ void batch_norm_cpu_inference_contiguous(Tensor& output, const Tensor& input,
   /// cases where image_size == 1 && batch_size == 1, it is slow.
   Tensor alpha = at::empty_like(mean);
   Tensor beta = at::empty_like(mean);
-  scalar_t* alpha_data = alpha.data<scalar_t>();
-  scalar_t* beta_data = beta.data<scalar_t>();
+  scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
+  scalar_t* beta_data = beta.data_ptr<scalar_t>();
   for (int64_t c = 0; c < n_channel; c++) {
     scalar_t inv_var = 1 / std::sqrt(var_data[c] + static_cast<scalar_t>(eps));
     scalar_t weight_v = weight_data ? weight_data[c] : 1;
@@ -167,8 +167,8 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
       }
 
       // compute output
-      scalar_t w = weight.defined() ? weight.data<scalar_t>()[f * weight.stride(0)] : 1;
-      scalar_t b = bias.defined() ? bias.data<scalar_t>()[f * bias.stride(0)] : 0;
+      scalar_t w = weight.defined() ? weight.data_ptr<scalar_t>()[f * weight.stride(0)] : 1;
+      scalar_t b = bias.defined() ? bias.data_ptr<scalar_t>()[f * bias.stride(0)] : 0;
 
       CPU_tensor_apply2<scalar_t,scalar_t>(out, in, [&](scalar_t& o, const scalar_t& i) {
         o = ((i - mean) * invstd) * w + b;

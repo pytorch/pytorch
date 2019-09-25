@@ -78,7 +78,7 @@ class C10_API intrusive_ptr_target {
 // We also have to disable -Wunknown-warning-option and -Wpragmas, because
 // some other compilers don't know about -Wterminate or -Wexceptions and
 // will show a warning about unknown warning options otherwise.
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
 #  pragma warning(push)
 #  pragma warning(disable: 4297) // function assumed not to throw an exception but does
 #else
@@ -94,7 +94,7 @@ class C10_API intrusive_ptr_target {
     AT_ASSERTM(
         weakcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
 #  pragma warning(pop)
 #else
 #  pragma GCC diagnostic pop
@@ -188,14 +188,14 @@ class intrusive_ptr final {
 
   void reset_() noexcept {
     if (target_ != NullType::singleton() && --target_->refcount_ == 0) {
-      // See comment above about weakcount. As long as refcount>0,
-      // weakcount is one larger than the actual number of weak references.
-      // So we need to decrement it here.
-      auto weak_count = --target_->weakcount_;
       // justification for const_cast: release_resources is basically a destructor
       // and a destructor always mutates the object, even for const objects.
       const_cast<c10::guts::remove_const_t<TTarget>*>(target_)->release_resources();
-      if (weak_count == 0) {
+
+      // See comment above about weakcount. As long as refcount>0,
+      // weakcount is one larger than the actual number of weak references.
+      // So we need to decrement it here.
+      if (--target_->weakcount_ == 0) {
         delete target_;
       }
     }

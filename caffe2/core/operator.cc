@@ -40,6 +40,15 @@ C10_DEFINE_bool(
     false,
     "If set, throws if floating point exception FE_OVERFLOW is detected when "
     "running any operator.");
+#ifdef __GNU_LIBRARY__
+C10_DEFINE_bool(
+    caffe2_operator_throw_on_first_occurrence_if_fp_exceptions,
+    false,
+    "If set with caffe2_operator_throw_if_fp_exceptions or "
+    "caffe2_operator_throw_if_fp_overflow_exceptions, throw on the first "
+    "occurrence of corresponding floating point exceptions that is detected when "
+    "running any operator.");
+#endif
 
 namespace caffe2 {
 

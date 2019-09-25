@@ -33,7 +33,7 @@ export ASAN_OPTIONS=detect_leaks=0:symbolize=1
 CC="clang" CXX="clang++" LDSHARED="clang --shared" \
   CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
-  USE_ASAN=1 NO_CUDA=1 USE_MKLDNN=0 \
+  USE_ASAN=1 USE_CUDA=0 USE_MKLDNN=0 \
   python setup.py install
 
 assert_git_not_dirty

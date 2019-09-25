@@ -9,7 +9,6 @@
 #include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHDispatcher.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
 #include <ATen/native/Resize.h>
@@ -18,9 +17,8 @@
 #include <TH/THAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
-#ifdef NAMEDTENSOR_ENABLED
 #include <ATen/NamedTensorUtils.h>
-#endif
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
 #include <cctype>
@@ -41,7 +39,7 @@ void window_function_checks(
       " is not implemented for sparse types, got: ",
       options);
   TORCH_CHECK(
-      at::isFloatingType(typeMetaToScalarType(options.dtype())),
+      at::isFloatingType(typeMetaToScalarType(options.dtype())) || at::isComplexType(typeMetaToScalarType(options.dtype())),
       function_name,
       " expects floating point dtypes, got: ",
       options);
@@ -50,11 +48,6 @@ void window_function_checks(
       function_name,
       " requires non-negative window_length, got window_length=",
       window_length);
-}
-
-// FIXME: point to LegacyTHDispatcher.
-const TypeExtendedInterface& getFactoryType(const TensorOptions& options) {
-  return at::getType(options);
 }
 
 } // namespace
@@ -92,7 +85,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  AT_ASSERT(options.backend() == Backend::CPU);
+  AT_ASSERT(options.device().type() == DeviceType::CPU);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
   check_size_nonnegative(size);
 
@@ -112,7 +105,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId());
+  auto tensor = detail::make_tensor<TensorImpl>(std::move(storage_impl), at::TensorTypeId::CPUTensorId);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -123,12 +116,20 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
   return tensor;
 }
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 Tensor empty(
     IntArrayRef size,
     at::optional<DimnameList> names,
-    const TensorOptions& options) {
-  auto result = at::empty(size, options);
+    const TensorOptions& options,
+    optional<MemoryFormat> optional_memory_format) {
+  if (!names.has_value()) {
+    return at::empty(size, options, optional_memory_format);
+  }
+  TORCH_CHECK(options.layout() == Layout::Strided,
+      "NYI: named tensors only support strided layout");
+  TORCH_CHECK(options.device().type() == DeviceType::CPU || options.device().type() == DeviceType::CUDA,
+      "NYI: named tensors only support CPU and CUDA tensors");
+  auto result = at::empty(size, options, optional_memory_format);
   internal_set_names_inplace(result, names);
   return result;
 }
@@ -164,14 +165,14 @@ Tensor& empty_out(
 // specialized operators for each datatype.
 // TODO: remove when we have Type support in the IR
 
-#define DEFINE_CAST_OP(_1, n, _2)                                \
+#define DEFINE_CAST_OP(_1, n)                                    \
   Tensor _cast_##n(const Tensor& self, bool non_blocking) {      \
     if (self.scalar_type() == ScalarType::n)                     \
       return self;                                               \
     return self.to(ScalarType::n, non_blocking);                 \
   }
 
-AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(DEFINE_CAST_OP)
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
@@ -211,17 +212,49 @@ Tensor empty_like(
   }
 
   if (self.is_quantized()) {
-    // TODO: uncomment when qscheme diff is landed
-    // TORCH_INTERNAL_ASSERT(self.qscheme(), at::kPerTensorAffine,
-    //                       "empty_like for quantized Tensor only works for
-    //                        PerTensorAffine scheme right now");
-    return at::_empty_affine_quantized(self.sizes(), self.options(),
-                                       self.q_scale(),
-                                       self.q_zero_point(),
-                                       use_memory_format);
+    // We could check if dtype is still quantized?  But then should we shift/scale
+    // the q_zero_point / q_scale or not?
+    TORCH_CHECK(!options.has_dtype() || options.dtype() == self.dtype(),
+                "It is currently not supported to specify a dtype that doesn't match "
+                "the input tensor's dtype via empty_like.  Specified: ", options.dtype(),
+                " Input tensor's dtype: ", self.dtype());
+    auto qscheme = self.qscheme();
+    if (qscheme == kPerTensorAffine) {
+      return at::_empty_affine_quantized(self.sizes(), options,
+                                         self.q_scale(),
+                                         self.q_zero_point(),
+                                         use_memory_format);
+    } else if (qscheme == kPerChannelAffine) {
+      // Copy the tensors with channels to avoid accidental overrides
+      return at::_empty_per_channel_affine_quantized(
+          self.sizes(),
+          self.q_per_channel_scales().clone(),
+          self.q_per_channel_zero_points().clone(),
+          self.q_per_channel_axis(),
+          options,
+          use_memory_format);
+    } else {
+      TORCH_CHECK(false, "Unsupported qscheme: ", toString(qscheme));
+    }
   }
 
+#ifdef BUILD_NAMEDTENSOR
+  if (self.opt_names()) {
+    return at::empty(self.sizes(), self.opt_names(), options, use_memory_format);
+  } else {
+    return at::empty(self.sizes(), options, use_memory_format);
+  }
+#else
   return at::empty(self.sizes(), options, use_memory_format);
+#endif
+}
+
+Tensor new_empty(
+    const Tensor& self,
+    IntArrayRef size,
+    const TensorOptions& options
+    ) {
+  return at::empty(size, self.options().merge_in(options));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -250,8 +283,8 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "eye", [&]() -> void {
-    scalar_t* result_data = result.data<scalar_t>();
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, result.scalar_type(), "eye", [&]() -> void {
+    scalar_t* result_data = result.data_ptr<scalar_t>();
     at::parallel_for(0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
       for(int64_t i = p_begin; i < p_end; i++)
         result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
@@ -286,6 +319,16 @@ Tensor full_like(const Tensor& self, Scalar fill_value) {
 Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& options) {
   return native::full(self.sizes(), fill_value, options);
 }
+
+Tensor new_full(
+    const Tensor& self,
+    IntArrayRef size,
+    Scalar fill_value,
+    const TensorOptions& options
+    ) {
+  return at::full(size, fill_value, self.options().merge_in(options));
+}
+
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -464,6 +507,18 @@ Tensor& randn_out(Tensor& result, IntArrayRef size, Generator* generator) {
   return result.normal_(0, 1, generator);
 }
 
+Tensor normal(double mean, double std, IntArrayRef size,
+              Generator* generator, const TensorOptions& options) {
+  auto result = at::empty(size, options);
+  return result.normal_(mean, std, generator);
+}
+
+Tensor& normal_out(Tensor& result, double mean, double std,
+                   IntArrayRef size, Generator* generator) {
+  result.resize_(size);
+  return result.normal_(mean, std, generator);
+}
+
 Tensor randn_like(const Tensor& self) {
   return native::randn_like(self, self.options());
 }
@@ -477,7 +532,7 @@ Tensor randn_like(const Tensor& self, const TensorOptions& options) {
 namespace {
 template <typename scalar_t>
 void randperm_cpu(Tensor& result, int64_t n, CPUGenerator* generator) {
-  scalar_t *r__data = result.data<scalar_t>();
+  scalar_t *r__data = result.data_ptr<scalar_t>();
 
   result.resize_({n});
   int64_t r__stride_0 = result.stride(0);
@@ -513,11 +568,12 @@ Tensor& randperm_out(Tensor& result, int64_t n) {
 
 Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
+  check_supported_max_int_with_precision(n, result);
   result.resize_({n});
   auto gen = get_generator_or_default<CPUGenerator>(generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, result.scalar_type(), "randperm", [&]() -> void {
     randperm_cpu<scalar_t>(result, n, gen);
   });
 
@@ -567,7 +623,7 @@ Tensor tril_indices_cpu(
   //    sequentially, and then transpose it.
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
-    scalar_t* result_data = result.data<scalar_t>();
+    scalar_t* result_data = result.data_ptr<scalar_t>();
     int64_t i = 0;
 
     scalar_t r = std::max<int64_t>(0, -offset), c = 0;
@@ -600,7 +656,7 @@ Tensor triu_indices_cpu(
 
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
-    scalar_t* result_data = result.data<scalar_t>();
+    scalar_t* result_data = result.data_ptr<scalar_t>();
     int64_t i = 0;
     // not typing std::max with scalar_t as it could be an unsigned type
     // NOTE: no need to check if the returned value of std::max overflows
@@ -770,26 +826,26 @@ Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
   AT_ASSERT(result.is_contiguous());
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tensor_cpu", [&] {
-    std::copy(values.begin(), values.end(), result.template data<scalar_t>());
+    std::copy(values.begin(), values.end(), result.template data_ptr<scalar_t>());
   });
   return result;
 }
 
 template <typename T>
-Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
+Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
   auto cpu_tensor = tensor_cpu(values, options.device(DeviceType::CPU));
   return cpu_tensor.to(options.device());
 }
 
-#define TENSOR(T, _1, _2)                                           \
+#define TENSOR(T, _1)                                               \
   Tensor tensor(ArrayRef<T> values, const TensorOptions& options) { \
-    if (options.device().is_cuda()) {                               \
-      return tensor_cuda(values, options);                          \
+    if (options.device().type() != c10::DeviceType::CPU) {          \
+      return tensor_backend(values, options);                       \
     } else {                                                        \
       return tensor_cpu(values, options);                           \
     }                                                               \
   }
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(TENSOR)
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
@@ -804,10 +860,81 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
           filename.c_str(), flags, my_size * dtype.itemsize(), nullptr),
       /*allocator=*/nullptr,
       /*resizable=*/false);
-    auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::CPUTensorId());
+    auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::TensorTypeId::CPUTensorId);
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous({storage_impl->numel()});
     return tensor;
 }
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ clone ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor clone(const Tensor& src) {
+  auto self = at::empty_like(src);
+  self.copy_(src);
+  return self;
+}
+
+#ifdef BUILD_NAMEDTENSOR
+// ~~~~~~~~~~~~~~~~~~~~~~~~~ named tensor overloads ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// In the short term, these exist.
+// In the long term, we should move DimnameList into TensorOptions to avoid
+// having these overloads.
+
+Tensor full(
+    IntArrayRef size,
+    Scalar fill_value,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  auto result = at::empty(size, names, options);
+  return result.fill_(fill_value);
+}
+
+Tensor ones(
+    IntArrayRef size,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  return native::full(size, /*fill_value=*/1, names, options);
+}
+
+Tensor zeros(
+    IntArrayRef size,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  return native::full(size, /*fill_value=*/0, names, options);
+}
+
+Tensor randn(
+    IntArrayRef size,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  return native::randn(size, nullptr, names, options);
+}
+
+Tensor randn(
+    IntArrayRef size,
+    Generator* generator,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  auto result = at::empty(size, names, options);
+  return result.normal_(0, 1, generator);
+}
+
+Tensor rand(
+    IntArrayRef size,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  return native::rand(size, nullptr, names, options);
+}
+
+Tensor rand(
+    IntArrayRef size,
+    Generator* generator,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  auto result = at::empty(size, names, options);
+  return result.uniform_(0, 1, generator);
+}
+
+#endif
 
 } // namespace native
 } // namespace at

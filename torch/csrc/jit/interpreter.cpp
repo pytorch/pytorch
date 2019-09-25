@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/instruction.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
@@ -195,6 +196,8 @@ void insertLastUses(Graph& g) {
 }
 } // namespace
 
+std::ostream& operator<<(std::ostream& out, Instruction inst);
+
 /*
 This is an optimization that reduces the number of store/load/move nodes needed
 by recognizing that parts of the graph are simple trees like a*x + b*y. When
@@ -293,87 +296,6 @@ struct PreprocessGraph {
   std::unordered_map<Node*, bool> can_emit_inline;
 };
 
-// instructs look like:
-// op_code X, N
-// meaning of X, N depend on the op:
-// O - index into operator table
-// R - index into register table
-// I - literal integer
-// C - index into constant table
-// P - jump offset relative to beginning of current instruction
-// F - index into function table
-// T - index into the type table, used for guard instructions
-
-#define FORALL_OPCODES(_)                                                   \
-  _(OP, "O") /* invoke operator X */                                        \
-  _(LOAD, "R") /* push a value from a register X */                         \
-  _(MOVE, "R") /* push a value from register X, clearing the register */    \
-  _(STOREN, "RI") /* store N values to registers [X, X+N) */                \
-  _(STORE, "R") /* store 1 value to registers X */                          \
-  _(DROP, "") /* drop 1 value from the top of the stack */                  \
-  _(DROPR, "R") /* clear register X */                                      \
-  _(LOADC, "C") /* push the constant X */                                   \
-  _(JF, "P") /* pop the top of the stack, if false, branch to P */          \
-  _(JMP, "P") /* unconditional branch to X */                               \
-  _(LOOP, "PI") /* perform a loop, X is where to branch if cond is false */ \
-  _(RET, "") /* exit execution */                                           \
-  _(WAIT, "") /* wait for a future to be complete */                        \
-  _(CALL, "F") /* call function X */                                        \
-  _(GUARD, "T") /* check guard against type_table, true if passes */        \
-  _(TAIL_CALL, "F") /* replace current frame with function F */
-
-enum OpCode : uint8_t {
-#define DEFINE_OP(op, _) op,
-  FORALL_OPCODES(DEFINE_OP)
-#undef DEFINE_OP
-};
-
-std::ostream& operator<<(std::ostream& out, OpCode op) {
-  switch (op) {
-#define OP_STRING(x, _) \
-  case x:               \
-    return out << #x;
-    FORALL_OPCODES(OP_STRING)
-#undef OP_STRING
-  }
-  return out;
-}
-
-const char* OpInfo(OpCode op) {
-  switch (op) {
-#define OP_INFO(x, info) \
-  case x:                \
-    return info;
-    FORALL_OPCODES(OP_INFO)
-#undef OP_INFO
-  }
-  return nullptr;
-}
-
-struct Instruction {
-  OpCode op;
-  uint8_t padding; // currently unused
-  uint16_t N;
-  int32_t X;
-  // TODO: check for overflow
-  Instruction(OpCode op, int32_t X, uint16_t N)
-      : op(op), padding(0), N(N), X(X) {}
-};
-
-static_assert(sizeof(Instruction) == 8, "Instructions should be 8 bytes");
-std::ostream& operator<<(std::ostream& out, Instruction inst) {
-  // TODO: use op info to print out the op in a more user-friendly way
-  int nargs = strlen(OpInfo(inst.op));
-  out << inst.op;
-  if (nargs > 0) {
-    out << " " << inst.X;
-  }
-  if (nargs > 1) {
-    out << " " << inst.N;
-  }
-  return out;
-}
-
 // for keeping track of the current node
 struct WithCurrentNode {
   WithCurrentNode(Node** loc, Node* new_value) : loc_(loc), old_value_(*loc_) {
@@ -409,11 +331,12 @@ struct CodeImpl {
 
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
-  std::vector<std::shared_ptr<Function>> function_table_;
+  std::vector<Function*> function_table_;
   std::vector<TypePtr> type_table_;
   int register_size_ = 0;
   size_t n_outputs;
   size_t n_inputs;
+  TypePtr return_type_;
 
   // We MUST hold onto graph here because some Operators stored in the
   // instruction lists have dependencies on meta-data stored in the graph
@@ -438,11 +361,18 @@ struct CodeImpl {
 
   // out-of-line jumps for bailouts that are patched in at the end
   std::vector<BailoutBlock> bailout_blocks_;
+  std::vector<std::unique_ptr<Function>> bailout_functions_;
 
   CodeImpl(const std::shared_ptr<Graph>& graph)
       : preprocess_(*graph), current_node_(preprocess_.graph->return_node()) {
     graph_ = preprocess_.graph;
     n_outputs = graph_->outputs().size();
+    if (n_outputs == 1) {
+      return_type_ = graph->outputs().at(0)->type();
+    } else {
+      return_type_ = TupleType::create(
+          fmap(graph->outputs(), [](const Value* v) { return v->type(); }));
+    }
     n_inputs = graph_->inputs().size();
     // std::cout << *graph_ << "\n";
     emitCodeForBlock(graph_->block());
@@ -602,7 +532,7 @@ struct CodeImpl {
   }
 
   void emitCall(
-      std::shared_ptr<Function> func,
+      Function* func,
       at::ArrayRef<Value*> inputs) {
     emitLoadInputs(inputs);
     insertInstruction(CALL, function_table_.size());
@@ -641,12 +571,7 @@ struct CodeImpl {
 
   void emitBailOut(Node* node) {
     auto jf_index = emitGuard(node);
-    auto unoptimized_graph = node->inputs()
-                                 .at(0)
-                                 ->type()
-                                 ->expect<FunctionType>()
-                                 ->function()
-                                 ->graph();
+    auto unoptimized_graph = node->inputs().at(0)->node()->g(attr::Subgraph);
     // note, guaded input is already loaded onto the stack
     // for GUARD instruction
     emitLoadInputs(node->inputs().slice(2));
@@ -661,10 +586,27 @@ struct CodeImpl {
     };
 
     auto empty_graph = std::make_shared<Graph>();
-    auto func = std::make_shared<Function>(
-        "bailout", /*optimize=*/true, empty_graph, build_bailout_graph);
-    function_table_.emplace_back(func);
+    auto func = torch::make_unique<Function>(
+        "bailout", empty_graph, build_bailout_graph);
+    function_table_.emplace_back(func.get());
+    bailout_functions_.emplace_back(std::move(func));
     createBailoutBlock(jf_index);
+  }
+
+  void emitGetAttr(Node* node) {
+    emitLoadInputs(node->inputs());
+    const auto type = node->input()->type()->expect<ClassType>();
+    const auto& field = node->s(attr::name);
+    uint64_t slot = type->getAttributeSlot(field);
+    insertInstruction(GET_ATTR, slot);
+  }
+
+  void emitSetAttr(Node* node) {
+    emitLoadInputs(node->inputs());
+    const auto type = node->inputs().at(0)->type()->expect<ClassType>();
+    const auto& field = node->s(attr::name);
+    const auto slot = type->getAttributeSlot(field);
+    insertInstruction(SET_ATTR, slot);
   }
 
   void insertBailoutBlocks() {
@@ -682,7 +624,13 @@ struct CodeImpl {
           instructions_source_[block.jf_instruction_index]);
     }
   }
-
+  void emitInterfaceCall(
+      std::string method_name_str,
+      c10::ArrayRef<Value*> inputs) {
+    emitLoadInputs(inputs);
+    auto method_name = insertConstant(std::move(method_name_str));
+    insertInstruction(INTERFACE_CALL, method_name, inputs.size());
+  }
   void emitNode(Node* node) {
     WithCurrentNode guard(&current_node_, node);
     switch (node->kind()) {
@@ -712,13 +660,20 @@ struct CodeImpl {
             node->inputs().slice(1));
         break;
       case prim::CallMethod:
-        emitCall(
-            node->inputs().at(0)->type()->expect<ClassType>()->getMethod(
-                node->s(attr::name)),
-            node->inputs());
+        if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
+          emitCall(class_type->getMethod(node->s(attr::name)), node->inputs());
+        } else {
+          emitInterfaceCall(node->s(attr::name), node->inputs());
+        }
         break;
       case prim::BailOut:
         emitBailOut(node);
+        break;
+      case prim::GetAttr:
+        emitGetAttr(node);
+        break;
+      case prim::SetAttr:
+        emitSetAttr(node);
         break;
     }
   }
@@ -808,7 +763,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     Instruction* instructions;
     IValue* constants;
     Operation* operators;
-    std::shared_ptr<Function>* functions;
+    Function** functions;
     TypePtr* types;
 
     ActiveFrame(const Frame& frame)
@@ -907,6 +862,18 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             stack.emplace_back(af.constants[inst.X]);
             ++af.pc;
             break;
+          case GET_ATTR: {
+            auto userObj = pop(stack).toObject();
+            auto value = userObj->getSlot(inst.X);
+            push(stack, std::move(value));
+            ++af.pc;
+          } break;
+          case SET_ATTR: {
+            auto v = pop(stack);
+            auto userObj = pop(stack).toObject();
+            userObj->setSlot(inst.X, std::move(v));
+            ++af.pc;
+          } break;
           case JF:
             af.pc += (pop(stack).toBool()) ? 1 : inst.X;
             break;
@@ -937,6 +904,20 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 af.functions[inst.X]->get_executor().getPlanFor(stack).code;
             frames.back().pc = af.pc + 1;
             enterFrame(code, stack.size() - code.num_inputs());
+            af = ActiveFrame(frames.back());
+          } break;
+          case INTERFACE_CALL: {
+            // note the hash table lookup to find the function
+            // this can be more optimized if necessary, caching parts
+            // of the hashing computation or storing the offset when
+            // the object is turned into an interface
+            auto function = peek(stack, 0, inst.N)
+                                .toObject()
+                                ->type()
+                                ->getMethod(af.constants[inst.X].toStringRef());
+            const Code& code = function->get_executor().getPlanFor(stack).code;
+            frames.back().pc = af.pc + 1;
+            enterFrame(code, stack.size() - inst.N);
             af = ActiveFrame(frames.back());
           } break;
           case RET:
@@ -1004,7 +985,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case GUARD: {
-            auto actual = ProfiledTensorType::create(stack.back().toTensor());
+            auto actual = TensorType::create(stack.back().toTensor());
             const TypePtr& expected = af.types[inst.X];
             push(stack, *expected == *actual);
             ++af.pc;
@@ -1067,7 +1048,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
  public:
   c10::intrusive_ptr<Future> getOrCreateFuture() {
     if (!future_) {
-      future_ = c10::make_intrusive<Future>();
+      future_ =
+          c10::make_intrusive<Future>(frames.front().function->return_type_);
     }
     return future_;
   }

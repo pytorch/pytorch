@@ -111,6 +111,8 @@ Algorithms
     :members:
 .. autoclass:: Adam
     :members:
+.. autoclass:: AdamW
+    :members:
 .. autoclass:: SparseAdam
     :members:
 .. autoclass:: Adamax
@@ -164,4 +166,8 @@ should write your code this way:
 .. autoclass:: torch.optim.lr_scheduler.ReduceLROnPlateau
     :members:
 .. autoclass:: torch.optim.lr_scheduler.CyclicLR
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.OneCycleLR
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
     :members:

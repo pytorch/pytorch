@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/jit/pybind_utils.h>
@@ -28,12 +27,16 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     SourceRange loc,
     bool is_constant = false);
 
-std::shared_ptr<Function> as_function(const py::object& obj);
+c10::optional<StrongFunctionPtr> as_function(const py::object& obj);
 
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
-  PythonValue(py::object self) : self(std::move(self)) {}
+  PythonValue(py::object the_self, c10::optional<py::object> rcb = c10::nullopt)
+      : self(std::move(the_self)), rcb(std::move(rcb)) {}
 
-  FunctionSchema getSchema(const size_t n_args, const size_t n_binders);
+  FunctionSchema getSchema(
+      const size_t n_args,
+      const size_t n_binders,
+      const SourceRange& loc);
 
   // call it like a function, e.g. `outputs = this(inputs)`
   std::shared_ptr<SugaredValue> call(
@@ -61,6 +64,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   void checkForAddToConstantsError(std::stringstream& ss);
 
   py::object self;
+  c10::optional<py::object> rcb;
 };
 
 struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
@@ -102,6 +106,54 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
   Value* the_list_;
 };
 
+struct VISIBILITY_HIDDEN ConstantTupleValue : public SugaredValue {
+  explicit ConstantTupleValue(
+      std::vector<std::shared_ptr<SugaredValue>> tup,
+      bool callable = false)
+      : tup_(tup){};
+
+  std::vector<std::shared_ptr<SugaredValue>> asTuple(
+      const SourceRange& loc,
+      Function& m,
+      const c10::optional<size_t>& size_hint = {}) override {
+    return tup_;
+  };
+
+  std::string kind() const override {
+    return "constant tuple";
+  }
+
+  std::vector<std::shared_ptr<SugaredValue>> tup_;
+  bool callable_;
+};
+
+struct VISIBILITY_HIDDEN ConstantTupleMethod : public SugaredValue {
+  explicit ConstantTupleMethod(
+      std::vector<std::shared_ptr<SugaredValue>> tup,
+      const std::string& name)
+      : tup_(tup), name_(name){};
+
+  std::string kind() const override {
+    return name_;
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& f,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    if (inputs.size() || attributes.size()) {
+      throw ErrorReport(loc)
+          << name_ << " method does not accept any arguments";
+    }
+    return std::make_shared<ConstantTupleValue>(tup_);
+  }
+
+  std::vector<std::shared_ptr<SugaredValue>> tup_;
+  const std::string name_;
+};
+
 struct VISIBILITY_HIDDEN OverloadedMethodValue : public SugaredValue {
   OverloadedMethodValue(Value* module, std::vector<std::string> method_names)
       : module_(module), method_names_(std::move(method_names)) {}
@@ -122,6 +174,25 @@ struct VISIBILITY_HIDDEN OverloadedMethodValue : public SugaredValue {
   std::vector<std::string> method_names_;
 };
 
+struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
+  OverloadedFunctionValue(std::vector<StrongFunctionPtr> compiled_overloads)
+      : compiled_overloads_(std::move(compiled_overloads)) {}
+
+  std::string kind() const override {
+    return "overloaded function";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+
+ private:
+  std::vector<StrongFunctionPtr> compiled_overloads_;
+};
+
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
 // in the future, we will add the ability to resolve `self.foo` to python
@@ -138,6 +209,8 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   std::string kind() const override {
     return "module";
   }
+
+  Value* asValue(const SourceRange& loc, Function& m) override;
 
   // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> attr(
@@ -171,6 +244,12 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   Value* self_;
   Module module_;
   py::object py_module_;
+
+  std::vector<std::shared_ptr<SugaredValue>> desugarModuleContainer(
+      bool get_keys,
+      bool get_values,
+      const SourceRange& loc,
+      Function& m);
 };
 
 struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
@@ -191,8 +270,6 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
  private:
   py::dict dispatched_fn_;
 };
-
-TORCH_API bool& getRecursiveScriptMode();
 
 } // namespace script
 } // namespace jit

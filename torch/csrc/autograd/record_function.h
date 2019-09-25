@@ -6,7 +6,7 @@
 
 namespace torch { namespace autograd {
 
-struct Function;
+struct Node;
 
 namespace profiler {
 
@@ -34,7 +34,7 @@ struct TORCH_API RecordFunction {
   // start callbacks
   void before(const char* name, int64_t sequence_nr = -1);
   void before(std::string name, int64_t sequence_nr = -1);
-  void before(Function* fn, int64_t sequence_nr = -1);
+  void before(Node* fn, int64_t sequence_nr = -1);
 
   template<typename F>
   void before(
@@ -57,7 +57,7 @@ struct TORCH_API RecordFunction {
   // Destructor calls end callbacks
   virtual ~RecordFunction();
 
-  inline Function* func() const {
+  inline Node* func() const {
     return fn_;
   }
 
@@ -84,7 +84,7 @@ struct TORCH_API RecordFunction {
  private:
   void processCallbacks();
 
-  Function* fn_ = nullptr;
+  Node* fn_ = nullptr;
   StringView name_;
   int64_t sequence_nr_ = -1;
   std::vector<c10::IValue> inputs_;

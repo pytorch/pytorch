@@ -4,6 +4,8 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import benchmark_core
+import torch
+import cpp_extension # noqa
 
 
 """PyTorch performance microbenchmarks.
@@ -21,9 +23,62 @@ class TorchBenchmarkBase(object):
 
     def __init__(self):
         self.user_given_name = None
+        self._jit_forward = None
+        self._pass_count = 0
+        self._num_inputs_require_grads = 0
+
+    def _set_backward_test(self, is_backward):
+        self._is_backward = is_backward
+
+    def auto_set(self):
+        """ This is used to automatically set the require_grad for the backward patch.
+            It is implemented based on two counters. One counter to save the number of 
+            times init has been called. The other counter to save the number of times 
+            this function itself has been called. In the very first time init is called, 
+            this function counts how many inputs require gradient. In each of the 
+            following init calls, this function will return only one true value. 
+            Here is an example: 
+                ...
+                self.v1 = torch.rand(M, N, K, requires_grad=self.auto_set())
+                self.v2 = torch.rand(M, N, K, requires_grad=self.auto_set())
+                ...
+        """
+        if not self._is_backward:
+            return False
+
+        if self._pass_count == 0:
+            self._num_inputs_require_grads += 1
+            return True
+        else: 
+            self._auto_set_counter += 1
+            return (self._pass_count == self._auto_set_counter)
 
     def forward(self):
         pass 
+
+    def _wrap_forward(self, foo):
+        """ The function passed to JIT trace must have at least one argument, 
+            this function is to wrap the forward method to meet that requirement. 
+            _consume op is used to avoid the dead-code-elimination optimization
+            in JIT. 
+        """
+        return torch.ops.operator_benchmark._consume(self.forward())
+
+    def _generate_jit_forward_graph(self):
+        """ generate a graph for the forward function via tracing 
+        """
+
+        func = torch.jit.trace(self._wrap_forward, torch.rand(1))
+        place_holder = torch.rand(1) # noqa
+
+        @torch.jit.script
+        def _jit_forward_graph(iters, place_holder):
+            # type: (int, Tensor)
+            result = torch.jit.annotate(torch.Tensor, None)
+            for _ in range(iters):
+                result = func(place_holder)
+            return result
+        return _jit_forward_graph
 
     def module_name(self):
         """ this is used to label the operator being benchmarked
@@ -61,17 +116,18 @@ class PyTorchOperatorTestCase(object):
     def __init__(self, op_bench, test_config):
         self.test_config = test_config
         self.op_bench = op_bench
+        self.place_holder_tensor = torch.ones(1)
         self.framework = "PyTorch"
 
     def run_jit_forward(self, num_runs):
-        """ This is a temp solution and will be removed later 
-            Run the forward op with JIT 
+        """ Run the forward path of an op with JIT mode
         """
-        self.op_bench.jit_forward(num_runs)
+        if self.op_bench._jit_forward is None:
+            self.op_bench._jit_forward = self.op_bench._generate_jit_forward_graph()
+        self.op_bench._jit_forward(num_runs, self.place_holder_tensor)
 
     def run_forward(self, num_runs):
-        """ TODO (mingzhe): when JIT is ready, switch this to JIT 
-            Run the forward path of an op in many iterations
+        """ Run the forward path of an op with eager mode
         """
         for _ in range(num_runs):
             self.output = self.op_bench.forward()

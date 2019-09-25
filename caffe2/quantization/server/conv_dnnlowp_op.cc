@@ -10,6 +10,7 @@
 #endif
 
 #include "caffe2/core/tensor_int8.h"
+#include "caffe2/operators/conv_op_impl.h"
 #include "caffe2/utils/cpuid.h"
 
 #include <fbgemm/src/RefImplementations.h>
@@ -1113,6 +1114,10 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
   const int M = filter.dim32(0);
   const int kernel_dim = KernelDim_();
   const int Y_HxW = this->GetDimsSize(*Y);
+
+  if (N == 0) {
+    LOG(WARNING) << "The batch size is 0 in ConvNHWCCore_ function!";
+  }
 
   if (FLAGS_caffe2_dnnlowp_dump_tensors) {
     // Dump input activation

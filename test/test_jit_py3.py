@@ -1,54 +1,12 @@
+from common_utils import run_tests
+from jit_utils import JitTestCase
+from torch.testing import FileCheck
+from typing import NamedTuple, List, Optional
+import unittest
 import sys
 import torch
-from torch.testing import FileCheck
-from common_utils import run_tests
-from contextlib import contextmanager
-from jit_utils import JitTestCase
-from typing import NamedTuple, List
-
-WINDOWS = sys.platform == 'win32'
 
 class TestScriptPy3(JitTestCase):
-    @contextmanager
-    def capture_stdout(self):
-        # No idea how to capture stdout from C++ on Windows
-        if WINDOWS:
-            yield ['']
-            return
-        import os
-        import fcntl
-        import errno
-        sys.stdout.flush()
-        stdout_fd = os.dup(1)
-        r, w = os.pipe()
-        try:
-            # Override stdout with r - dup is guaranteed to return the lowest free fd
-            os.close(1)
-            os.dup(w)
-
-            captured_stdout = ['']
-            yield captured_stdout
-            sys.stdout.flush()  # Make sure that Python hasn't buffered anything
-
-            # Do the ugly dance to read all the data that was written into the pipe
-            fcntl.fcntl(r, fcntl.F_SETFL, os.O_NONBLOCK)
-            total_stdout = ''
-            while True:
-                try:
-                    total_stdout += os.read(r, 1000).decode('ascii')
-                except OSError as e:
-                    if e.errno != errno.EAGAIN:
-                        raise
-                    break
-            captured_stdout[0] = total_stdout
-        finally:
-            # Revert the change, and clean up all fds
-            os.close(1)
-            os.dup(stdout_fd)
-            os.close(stdout_fd)
-            os.close(r)
-            os.close(w)
-
     def test_joined_str(self):
         def func(x):
             hello, test = "Hello", "test"
@@ -89,6 +47,21 @@ class TestScriptPy3(JitTestCase):
             return rv
 
         self.assertEqual(foo(torch.rand(3, 4)), 18.0)
+
+    @unittest.skipIf(sys.version_info[0] < 3 and sys.version_info[1] < 6, "dict not ordered")
+    def test_dict_preserves_order(self):
+        def dict_ordering():
+            a : Dict[int, int] = {}
+            for i in range(1000):
+                a[i] = i + 1
+            return a
+
+        self.checkScript(dict_ordering, ())
+        di = torch.jit.script(dict_ordering)()
+        res = list(di.items())
+        for i in range(1000):
+            key, value = res[i]
+            self.assertTrue(key == i and value == i + 1)
 
     def test_return_named_tuple(self):
         class FeatureVector(NamedTuple):
@@ -190,6 +163,7 @@ class TestScriptPy3(JitTestCase):
                 tup = MyCoolNamedTuple(c=[1, 2, 3], b=3.5, a=9)  # noqa
                 return tup
 
+    @unittest.skipIf(True, "broken while these tests were not in CI")
     def test_named_tuple_serialization(self):
         class MyCoolNamedTuple(NamedTuple):
             a : int
@@ -211,6 +185,47 @@ class TestScriptPy3(JitTestCase):
 
         for name in ['a', 'b', 'c']:
             self.assertEqual(getattr(out_loaded, name), getattr(out, name))
+
+    def test_type_annotate_py3(self):
+        def fn():
+            a : List[int] = []
+            b : torch.Tensor = torch.ones(2, 2)
+            c : Optional[torch.Tensor] = None
+            d : Optional[torch.Tensor] = torch.ones(3, 4)
+            for _ in range(10):
+                a.append(4)
+                c = torch.ones(2, 2)
+                d = None
+            return a, b, c, d
+
+        self.checkScript(fn, ())
+
+        def wrong_type():
+            wrong : List[int] = [0.5]
+            return wrong
+
+        with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
+            torch.jit.script(wrong_type)
+
+    def test_parser_bug(self):
+        def parser_bug(o: Optional[torch.Tensor]):
+            pass
+
+    def test_mismatched_annotation(self):
+        with self.assertRaisesRegex(RuntimeError, 'annotated with type'):
+            @torch.jit.script
+            def foo():
+                x : str = 4
+                return x
+
+    def test_reannotate(self):
+        with self.assertRaisesRegex(RuntimeError, 'declare and annotate'):
+            @torch.jit.script
+            def foo():
+                x = 5
+                if True:
+                    x : Optional[int] = 7
+
 
 if __name__ == '__main__':
     run_tests()

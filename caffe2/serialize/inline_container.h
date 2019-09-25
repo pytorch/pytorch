@@ -93,9 +93,6 @@ constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
 constexpr uint64_t kMaxSupportedFileFormatVersion = 0x1L;
 
 // Writer-specific constants
-constexpr uint64_t kFileFormatVersion = 0x2L;
-
-// Writer-specific constants
 constexpr uint64_t kFieldAlignment = 64;
 
 class CAFFE2_API PyTorchStreamReader final {
@@ -107,7 +104,7 @@ class CAFFE2_API PyTorchStreamReader final {
   // return dataptr, size
   std::tuple<at::DataPtr, size_t> getRecord(const std::string& name);
   size_t getRecordOffset(const std::string& name);
-  bool hasFile(const std::string& name);
+  bool hasRecord(const std::string& name);
 
   ~PyTorchStreamReader();
 
@@ -115,7 +112,7 @@ class CAFFE2_API PyTorchStreamReader final {
   void init();
   size_t read(uint64_t pos, char* buf, size_t n);
   void valid(const char* what);
-  size_t getFileID(const std::string& name);
+  size_t getRecordID(const std::string& name);
 
   friend size_t
   istream_read_func(void* pOpaque, uint64_t file_ofs, void* pBuf, size_t n);
@@ -130,7 +127,7 @@ class CAFFE2_API PyTorchStreamWriter final {
   PyTorchStreamWriter(std::ostream* out)
   : PyTorchStreamWriter("archive", out) {}
 
-  void writeRecord(const std::string& name, const void* data, size_t size);
+  void writeRecord(const std::string& name, const void* data, size_t size, bool compress = false);
   void writeEndOfFile();
 
   bool finalized() const {

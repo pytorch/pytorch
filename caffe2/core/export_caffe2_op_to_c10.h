@@ -2,6 +2,7 @@
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <ATen/core/function_schema.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/script/function_schema_parser.h>
 #include <vector>
@@ -27,44 +28,6 @@ inline c10::List<at::Tensor> _call_caffe2_op(
   return std::move(op).move_newstyle_outputs();
 }
 
-inline at::Tensor unwrap_tensor(at::Tensor&& tensor) {
-  if (tensor.is_variable()) {
-    auto tensor_impl = tensor.unsafeGetTensorImpl();
-    auto tensor_impl_copy = tensor_impl->shallow_copy_and_detach(
-    /*version_counter=*/tensor_impl->version_counter(),
-    /*allow_tensor_metadata_change=*/tensor_impl->allow_tensor_metadata_change());
-    return at::Tensor(tensor_impl_copy);
-  } else {
-    return std::move(tensor);
-  }
-}
-
-inline IValue unwrap(IValue&& ivalue) {
-  // TODO Remove the .defined() check once we don't have undefined tensors on the stack anymore (@wanchaol is working on this)
-  if (ivalue.isTensor() && ivalue.toTensor().defined()) {
-    return unwrap_tensor(std::move(ivalue).toTensor());
-  } else if (ivalue.isTensorList()) {
-    c10::List<at::Tensor> list = std::move(ivalue).toTensorList();
-    for (size_t i = 0; i < list.size(); ++i) {
-      list[i] = unwrap_tensor(list.extract(i));
-    }
-    return std::move(list);
-  } else if (ivalue.isGenericList()) {
-    c10::impl::GenericList list = std::move(ivalue).toGenericList();
-    for (size_t i = 0; i < list.size(); ++i) {
-      list[i] = unwrap(list.extract(i));
-    }
-    return std::move(list);
-  } else if (ivalue.isGenericDict()) {
-    for (auto& item : ivalue.toGenericDict()) {
-      item.setValue(unwrap(item.value()));
-    }
-    return std::move(ivalue);
-  } else {
-    return std::move(ivalue);
-  }
-}
-
 // This function is inline in the hope that compilers optimizing for speed will
 // inline it into call_caffe2_op_from_c10, allowing call_op to be inlined and
 // avoiding the function pointer indirection, while compilers optimizing for
@@ -81,6 +44,10 @@ inline void _call_caffe2_op_from_c10(
   // c10 schema. The last argument is an optional tensor list that
   // (if not ivalue::None) contains a preallocated output tensor for each
   // operator output.
+
+  // As an invariant, we don't want any autograd gradients to be tracked in
+  // Caffe2 operators.
+  at::NoGradGuard guard;
 
   AT_ASSERT(
       schema.arguments().size() != 0 &&
@@ -103,11 +70,6 @@ inline void _call_caffe2_op_from_c10(
     outputs = std::move(preallocated_outputs).toTensorList();
   }
 
-  // unwrap tensor inputs from variable
-  for (auto iter = stack->end() - num_inputs; iter != stack->end(); ++iter) {
-    *iter = unwrap(std::move(*iter));
-  }
-
   // TODO Avoid vector allocation. One idea would be to keep the std::vector
   // instances in the cache.
   std::vector<IValue> inputs = torch::jit::pop(*stack, num_inputs);
@@ -125,8 +87,8 @@ inline void _call_caffe2_op_from_c10(
 
 template <const c10::FunctionSchema& (*Schema)(), class Caffe2Operator>
 void call_caffe2_op_from_c10(
-    c10::Stack* stack,
-    c10::KernelCache* cache) { // TODO Pass in correct cache type
+    c10::OperatorKernel* functor,
+    c10::Stack* stack) {
   _call_caffe2_op_from_c10(stack, Schema(), &_call_caffe2_op<Caffe2Operator>);
 }
 
@@ -153,9 +115,6 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
 #endif
 }
 
-inline std::unique_ptr<c10::KernelCache> noCache() {
-  return nullptr;
-}
 }
 }
 
@@ -222,11 +181,10 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::RegisterOperators::options()                                \
               .kernel(                                                       \
-                  ::c10::CPUTensorId(),                                      \
+                  ::c10::TensorTypeId::CPUTensorId,                          \
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
-                      OperatorClass>,                                        \
-                  &::caffe2::detail::noCache));
+                      OperatorClass>));
 
 #define C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(OperatorName, OperatorClass)        \
   /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */ \
@@ -235,11 +193,10 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::RegisterOperators::options()                                \
               .kernel(                                                       \
-                  ::c10::CUDATensorId(),                                     \
+                  ::c10::TensorTypeId::CUDATensorId,                         \
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
-                      OperatorClass>,                                        \
-                  &::caffe2::detail::noCache));
+                      OperatorClass>));
 
 // You should never manually call the C10_EXPORT_CAFFE2_OP_TO_C10_HIP macro .
 // The C10_EXPORT_CAFFE2_OP_TO_C10_CUDA macro from above will be automatically
@@ -251,11 +208,10 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::RegisterOperators().options()                               \
               .kernel(                                                       \
-                  ::c10::HIPTensorId(),                                      \
+                  ::c10::TensorTypeId::HIPTensorId,                          \
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
-                      OperatorClass>,                                        \
-                  &::caffe2::detail::noCache));
+                      OperatorClass>));
 
 #else
 // Don't use c10 dispatcher on mobile because of binary size

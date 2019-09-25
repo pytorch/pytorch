@@ -2,30 +2,29 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/utils/memory.h>
+#include <mutex>
 
 namespace torch {
 namespace jit {
 
 using Kwargs = std::unordered_map<std::string, IValue>;
 
+TORCH_API void preoptimizeGraph(std::shared_ptr<Graph>& graph);
+
 // A Function is a pure Graph with no implicit `self` object bound.
 // It contains schema information, and the executor that manages the
 // execution of the function. script::Method is a wrapper around a
 // underlying Function that also provides a `self` object.
-struct TORCH_API Function : public std::enable_shared_from_this<Function> {
+struct TORCH_API Function {
   Function(
-      std::string name,
-      bool optimize,
+      c10::QualifiedName name,
       std::shared_ptr<Graph> graph,
       std::function<void(Function&)> function_creator)
       : name_(std::move(name)),
         graph_(std::move(graph)),
-        optimize_(optimize),
         function_creator_(std::move(function_creator)) {}
 
-  void run(Stack& stack) {
-    get_executor().run(stack);
-  }
+  void run(Stack &stack) { get_executor().run(stack); }
 
   void run(Stack&& stack) {
     run(stack);
@@ -43,8 +42,22 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
     return graph_;
   }
 
-  const std::string& name() const {
+  std::shared_ptr<Graph> optimized_graph() const {
+    if (optimized_graph_) {
+      return *optimized_graph_;
+    }
+    std::lock_guard<std::mutex> lock(compile_mutex);
+    optimized_graph_ = graph_->copy();
+    preoptimizeGraph(*optimized_graph_);
+    return *optimized_graph_;
+  }
+
+  const c10::QualifiedName& qualname() const {
     return name_;
+  }
+
+  const std::string& name() const {
+    return name_.name();
   }
 
   // if this isn't yet defined, run its method_creator function
@@ -59,12 +72,7 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
     return *this;
   }
 
-  const FunctionSchema& getSchema() const {
-    if (schema_ == nullptr) {
-      schema_ = make_unique<FunctionSchema>(defaultSchemaFor(*this));
-    }
-    return *schema_;
-  }
+  const FunctionSchema& getSchema() const;
 
   std::string pretty_print_schema() const {
     AT_ASSERT(schema_);
@@ -78,7 +86,10 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
   }
 
   bool is_optimized() const {
-    return optimize_;
+    AT_WARN(
+        "Function::is_optimized() is deprecated and always returns true. "
+        "Please use getGraphExecutorOptimize()");
+    return true;
   }
 
   void check_single_output() {
@@ -89,38 +100,31 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
 
   GraphExecutor& get_executor() {
     ensure_defined();
-    std::call_once(executor_init_, [&] {
-      check_single_output();
-      executor_ = GraphExecutor(graph(), optimize_);
-    });
+    if (executor_) {
+      return executor_;
+    }
+    std::lock_guard<std::mutex> lock(compile_mutex);
+    check_single_output();
+    executor_ = GraphExecutor(graph());
     return executor_;
   }
 
  private:
-  static FunctionSchema defaultSchemaFor(const Function& function) {
-    std::vector<Argument> args;
-    std::vector<Argument> returns;
-    Graph& g = *function.graph();
-    size_t num_inputs = function.num_inputs();
-    for (size_t i = 0; i < num_inputs; ++i) {
-      const Value* v = g.inputs().at(i);
-      std::string name = v->hasDebugName() ? v->debugNameBase()
-                                           : ("argument_" + std::to_string(i));
-      args.emplace_back(std::move(name), unshapedType(g.inputs()[i]->type()));
-    }
-    for (size_t i = 0; i < g.outputs().size(); ++i) {
-      returns.emplace_back("", unshapedType(g.outputs()[i]->type()));
-    }
-    return {function.name(), "", std::move(args), std::move(returns)};
-  }
-
-  std::string name_;
+  c10::QualifiedName name_;
+  // The original, non-optimized graph
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
-  bool optimize_;
+
+  // Optimized graph, computed lazily. Used for inlining.
+  // Note: this graph is not specialized, only generic optimizations are applied
+  // here.
+  mutable c10::optional<std::shared_ptr<Graph>> optimized_graph_;
+
+  // Functions are invokable from multiple threads, so this lock needs to be
+  // held when we're initializing graph executor for the first time or computing
+  // the optimized graph.
+  mutable std::mutex compile_mutex;
 
   GraphExecutor executor_; // for execution
-
-  std::once_flag executor_init_;
 
   // an optional function that actually creates the method when
   // ensure_defined() is called. This is used by the compiler so

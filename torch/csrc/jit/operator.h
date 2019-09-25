@@ -5,7 +5,6 @@
 
 #include <ATen/core/stack.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/function_schema_parser.h>
 #include <torch/csrc/jit/operator_options.h>
 #include <ATen/core/stack.h>
@@ -14,6 +13,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/interned_strings.h>
 
 #include <functional>
 #include <initializer_list>
@@ -26,9 +26,11 @@
 namespace torch {
 namespace jit {
 
+struct Node;
+using ::c10::Symbol;
 using ::c10::FunctionSchema;
 
-using OperationCreator = std::function<Operation(const Node*)>;
+using OperationCreator = Operation (*)(const Node*);
 
 /*
  * Note: JIT relies on Operator instances having static lifetime, because
@@ -105,15 +107,19 @@ struct TORCH_API Operator {
 
   Operator(
       FunctionSchema schema,
-      Operation op)
+      Operation op,
+      c10::OperatorOptions options = c10::OperatorOptions())
       : schema_(std::make_shared<FunctionSchema>(std::move(schema))),
-        op_(std::make_shared<Operation>(std::move(op))) {}
+        op_(std::make_shared<Operation>(std::move(op))),
+        options_(std::move(options)) {}
 
   Operator(
       const std::string& schema,
-      Operation op)
+      int(*op)(Stack&),
+      c10::OperatorOptions options = c10::OperatorOptions())
       : schema_string_(schema),
-        op_(std::make_shared<Operation>(std::move(op))) {}
+        op_(std::make_shared<Operation>(std::move(op))),
+        options_(std::move(options)) {}
 
   bool matches(const Node* node) const;
 
@@ -161,6 +167,7 @@ struct TORCH_API Operator {
 
 TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
 
+TORCH_API const std::vector<std::shared_ptr<Operator>> getAllOperators();
 TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(
     Symbol name);
 

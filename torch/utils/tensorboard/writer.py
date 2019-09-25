@@ -8,6 +8,7 @@ from __future__ import print_function
 import os
 import six
 import time
+import torch
 
 from tensorboard.compat.proto.event_pb2 import SessionLog
 from tensorboard.compat.proto.event_pb2 import Event
@@ -21,7 +22,7 @@ from ._pytorch_graph import graph
 from ._utils import figure_to_image
 from .summary import (
     scalar, histogram, histogram_raw, image, audio, text,
-    pr_curve, pr_curve_raw, video, custom_scalars, image_boxes, mesh
+    pr_curve, pr_curve_raw, video, custom_scalars, image_boxes, mesh, hparams
 )
 
 
@@ -201,6 +202,7 @@ class SummaryWriter(object):
             # folder location: runs/May04_22-14-54_s-MacBook-Pro.localLR_0.1_BATCH_16/
 
         """
+        torch._C._log_api_usage_once("tensorboard.create.summarywriter")
         if not log_dir:
             import socket
             from datetime import datetime
@@ -261,6 +263,40 @@ class SummaryWriter(object):
     def get_logdir(self):
         """Returns the directory where event files will be written."""
         return self.log_dir
+
+    def add_hparams(self, hparam_dict=None, metric_dict=None):
+        """Add a set of hyperparameters to be compared in TensorBoard.
+        Args:
+            hparam_dict (dictionary): Each key-value pair in the dictionary is the
+              name of the hyper parameter and it's corresponding value.
+            metric_dict (dictionary): Each key-value pair in the dictionary is the
+              name of the metric and it's corresponding value. Note that the key used
+              here should be unique in the tensorboard record. Otherwise the value
+              you added by `add_scalar` will be displayed in hparam plugin. In most
+              cases, this is unwanted.
+
+            p.s. The value in the dictionary can be `int`, `float`, `bool`, `str`, or
+            0-dim tensor
+        Examples::
+            from torch.utils.tensorboard import SummaryWriter
+            with SummaryWriter() as w:
+                for i in range(5):
+                    w.add_hparams({'lr': 0.1*i, 'bsize': i},
+                                  {'hparam/accuracy': 10*i, 'hparam/loss': 10*i})
+        Expected result:
+        .. image:: _static/img/tensorboard/add_hparam.png
+           :scale: 50 %
+        """
+        if type(hparam_dict) is not dict or type(metric_dict) is not dict:
+            raise TypeError('hparam_dict and metric_dict should be dictionary.')
+        exp, ssi, sei = hparams(hparam_dict, metric_dict)
+
+        with SummaryWriter(log_dir=os.path.join(self.file_writer.get_logdir(), str(time.time()))) as w_hp:
+            w_hp.file_writer.add_summary(exp)
+            w_hp.file_writer.add_summary(ssi)
+            w_hp.file_writer.add_summary(sei)
+            for k, v in metric_dict.items():
+                w_hp.add_scalar(k, v)
 
     def add_scalar(self, tag, scalar_value, global_step=None, walltime=None):
         """Add scalar data to summary.
@@ -497,6 +533,8 @@ class SummaryWriter(object):
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
+            dataformats (string): Image data format specification of the form
+              NCHW, NHWC, CHW, HWC, HW, WH, etc.
         Shape:
             img_tensor: Default is :math:`(N, 3, H, W)`. If ``dataformats`` is specified, other shape will be
             accepted. e.g. NCHW or NHWC.
@@ -527,7 +565,7 @@ class SummaryWriter(object):
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime)
 
     def add_image_with_boxes(self, tag, img_tensor, box_tensor, global_step=None,
-                             walltime=None, dataformats='CHW', **kwargs):
+                             walltime=None, rescale=1, dataformats='CHW'):
         """Add image and draw bounding boxes on the image.
 
         Args:
@@ -537,6 +575,9 @@ class SummaryWriter(object):
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
+            rescale (float): Optional scale override
+            dataformats (string): Image data format specification of the form
+              NCHW, NHWC, CHW, HWC, HW, WH, etc.
         Shape:
             img_tensor: Default is :math:`(3, H, W)`. It can be specified with ``dataformat`` agrument.
             e.g. CHW or HWC
@@ -549,7 +590,7 @@ class SummaryWriter(object):
         if self._check_caffe2_blob(box_tensor):
             box_tensor = workspace.FetchBlob(box_tensor)
         self._get_file_writer().add_summary(image_boxes(
-            tag, img_tensor, box_tensor, dataformats=dataformats, **kwargs), global_step, walltime)
+            tag, img_tensor, box_tensor, rescale=rescale, dataformats=dataformats), global_step, walltime)
 
     def add_figure(self, tag, figure, global_step=None, close=True, walltime=None):
         """Render matplotlib figure into an image and add it to summary.
@@ -625,7 +666,7 @@ class SummaryWriter(object):
     def add_onnx_graph(self, prototxt):
         self._get_file_writer().add_onnx_graph(load_onnx_graph(prototxt))
 
-    def add_graph(self, model, input_to_model=None, verbose=False, **kwargs):
+    def add_graph(self, model, input_to_model=None, verbose=False):
         # prohibit second call?
         # no, let tensorboard handle it and show its warning message.
         """Add graph data to summary.
@@ -635,26 +676,10 @@ class SummaryWriter(object):
             input_to_model (torch.Tensor or list of torch.Tensor): A variable or a tuple of
                 variables to be fed.
             verbose (bool): Whether to print graph structure in console.
-            omit_useless_nodes (bool): Default to ``true``, which eliminates unused nodes.
-            operator_export_type (string): One of: ``"ONNX"``, ``"RAW"``. This determines
-                the optimization level of the graph. If error happens during exporting
-                the graph, using ``"RAW"`` might help.
-
         """
         if hasattr(model, 'forward'):
             # A valid PyTorch model should have a 'forward' method
-            import torch
-            from distutils.version import LooseVersion
-            if LooseVersion(torch.__version__) >= LooseVersion("0.3.1"):
-                pass
-            else:
-                if LooseVersion(torch.__version__) >= LooseVersion("0.3.0"):
-                    print('You are using PyTorch==0.3.0, use add_onnx_graph()')
-                    return
-                if not hasattr(torch.autograd.Variable, 'grad_fn'):
-                    print('add_graph() only supports PyTorch v0.2.')
-                    return
-            self._get_file_writer().add_graph(graph(model, input_to_model, verbose, **kwargs))
+            self._get_file_writer().add_graph(graph(model, input_to_model, verbose))
         else:
             # Caffe2 models do not have the 'forward' method
             from caffe2.proto import caffe2_pb2
@@ -664,15 +689,12 @@ class SummaryWriter(object):
             )
             if isinstance(model, list):
                 if isinstance(model[0], core.Net):
-                    current_graph = nets_to_graph_def(
-                        model, **kwargs)
+                    current_graph = nets_to_graph_def(model)
                 elif isinstance(model[0], caffe2_pb2.NetDef):
-                    current_graph = protos_to_graph_def(
-                        model, **kwargs)
+                    current_graph = protos_to_graph_def(model)
             else:
                 # Handles cnn.CNNModelHelper, model_helper.ModelHelper
-                current_graph = model_to_graph_def(
-                    model, **kwargs)
+                current_graph = model_to_graph_def(model)
             event = event_pb2.Event(
                 graph_def=current_graph.SerializeToString())
             self._get_file_writer().add_event(event)

@@ -65,8 +65,8 @@ if (@USE_CUDA@)
       ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
       ${CUDA_LIBRARIES})
     list(APPEND TORCH_INCLUDE_DIRS ${NVTOOLEXT_HOME}/include)
-    find_library(THNVRTC_LIBRARY thnvrtc PATHS "${TORCH_INSTALL_PREFIX}/lib")
-    list(APPEND TORCH_CUDA_LIBRARIES ${THNVRTC_LIBRARY})
+    find_library(CAFFE2_NVRTC_LIBRARY caffe2_nvrtc PATHS "${TORCH_INSTALL_PREFIX}/lib")
+    list(APPEND TORCH_CUDA_LIBRARIES ${CAFFE2_NVRTC_LIBRARY})
   elseif(APPLE)
     set(TORCH_CUDA_LIBRARIES
       ${CUDA_TOOLKIT_ROOT_DIR}/lib/libcudart.dylib
