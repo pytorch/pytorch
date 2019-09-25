@@ -405,10 +405,10 @@ class CAFFE2_API Tensor {
   int64_t output_nr() const;
   int64_t _version() const;
   #ifdef BUILD_NAMEDTENSOR
-  Tensor & names_(c10::optional<DimnameList> names) const;
+  Tensor & rename_(c10::optional<DimnameList> names) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
-  Tensor renamed(c10::optional<DimnameList> names) const;
+  Tensor rename(c10::optional<DimnameList> names) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
   Tensor align_to(DimnameList names) const;
@@ -744,7 +744,7 @@ class CAFFE2_API Tensor {
   int64_t q_zero_point() const;
   Tensor q_per_channel_scales() const;
   Tensor q_per_channel_zero_points() const;
-  IntArrayRef q_per_channel_axis() const;
+  int64_t q_per_channel_axis() const;
   Tensor int_repr() const;
   QScheme qscheme() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
