@@ -14,14 +14,6 @@ ScriptRemoteCall::ScriptRemoteCall(
       retRRefId_(retRRefId),
       retForkId_(retForkId) {}
 
-const RRefId& ScriptRemoteCall::retRRefId() {
-  return retRRefId_;
-}
-
-const ForkId& ScriptRemoteCall::retForkId() {
-  return retForkId_;
-}
-
 Message ScriptRemoteCall::toMessage() const {
   std::vector<IValue> ivalues;
   ScriptCall::toIValues(ivalues);

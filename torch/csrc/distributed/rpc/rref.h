@@ -19,8 +19,6 @@ class UserRRef;
 
 // Represents fork of an RRef to be sent over the wire.
 struct RRefForkData {
-  at::IValue toIValue() const;
-
   py::tuple toPyTuple() const;
   static RRefForkData fromPyTuple(const py::tuple& obj);
 
@@ -51,75 +49,86 @@ static_assert(
 // Note [RRef Protocol]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
+// [Background]
+//
 // RRef stands for Remote REFerence. Each RRef is owned by a single worker
 // (i.e., owner) and can be used by multiple users. The owner stores the real
-// data referenced by its RRefs, and keeps track of the global reference counts
-// for its RRefs. Every RRef can be uniquely identified by a global id ref_id,
+// data referenced by its RRefs. RRef needs to support fast and scalable RPC.
+// Hence, in the design, we avoid using a single global master to keep RRef
+// states, instead owners will keep track of the global reference counts
+// for its RRefs. Every RRef can be uniquely identified by a global RRefId,
 // which is assigned at the time it is first created either on a user or on the
 // owner.
 //
-// The owner only keeps one RRef instance for each data object, while users can
-// fork as many RRef instances as necessary. All usage on the owner should
-// retrieve the unique RRef instance using the globally unique ``rrefId``. A
-// fork of RRef will be created when it is used as an argument in RPC or the
-// return value in a ``remote`` call, but users don't need to worry about
-// forking/forwarding and reference counting (RC) RRefs. These will be handled
-// transparently. Every fork will also have its own ``forkId``, which is
-// guaranteed to be globally unique.
+// On the owner worker, there is only one OwnerRRef instance, which contains the
+// real data, while on user workers, there can be as many UserRRefs as
+// necessary, and UserRRef does not hold the data. All usage on the OwnerRRef
+// should retrieve the unique OwnerRRef instance using the globally unique
+// RRefId. //A UserRRef will be created when it is used as an argument or return
+// value in dist.rpc or dist.remote call, but RRef forking and reference
+// counting (RC) are completely transparent to applications. Every UserRRef will
+// also have its globally unique ForkId.
 //
-// RRef needs to support fast and scalable RPC. Hence, in the RC design, we
-// avoid using a single global master to keep RRef states. Besides, when worker
-// X invokes RPC on worker Y, Y should be able to start immediately after
-// receiving the RPC request, without waiting for any third-party owner Z
-// (unless Y needs to pull real data from Z), even if neither X nor Y owns the
-// RRef. We propose the following algorithm:
+// [Assumptions]
 //
-// 1. If the owner is the RPC caller, the owner will update RC for the RRef
-//    accordingly.
-// 2. If the owner is the RPC callee, the owner will drop the new fork, and use
-//    the unique RRef id in the fork to access its singleton local RRef
-//    instance. At the same time, the caller holds its own RRef alive until it
-//    receives RREF_CHILD_ACCEPT from the owner.
-// 3. If the RPC is between two users:
-//    a. The caller serializes the RRef into a RRefForkData and includes it in
-//       the RPC message sent to the callee. At the time, the caller holds
-//       its own RRef alive until it receives RREF_CHILD_ACCEPT from the callee.
-//    b. Upon receiving the RPC message, the callee sends an RREF_FORK_REQUEST
-//       to the owner. When the RREF_USER_ACCEPT from owner arrives, the callee
-//       runs the UDF and sends a RREF_CHILD_ACCEPT message to the caller.
-//       TODO: Currently, the callee runs the UDF immediately after getting the
-//       RPC message instead of waiting for all UserRRefs being confirmed by the
-//       owner.
-//    b. The owner, upon receiving the notification, updates its local RC.
+// 1. Transient Network Failures
 //
-// NB: RREF_FORK_REQUEST only registers the callee UserRRef on the owner, not
-// the caller. So, it is possible that the owner knows the callee UserRRef
-// before knowing the caller UserRRef, and it is possible that the callee
-// UserRRef even gets deleted before the owner knows the caller RRef.
+// TODO: current RRef implementation does not tolerate failures
 //
+// The RRef design aims to handle transient network failures by retrying
+// messages. Node crashes or permanent network partition is beyond the scope.
+// When those incidents occur, the application may take down all workers, revert
+// to the previous checkpoint, and resume training.
 //
-// Note [RRef Reference Count]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~
+// 2. Non-idempotent UDFs
 //
+// We assume UDFs are not idempotent and therefore cannot be retried. However,
+// internal RRef control messages will be made idempotent and retryable.
+//
+// TODO: RRef internal messages are not yet idempotent
+//
+// 3. Out of Order Message Delivery
+//
+// We do not assume message delivery order between any pair of nodes, because
+// both sender and receiver are using multiple threads. There is no guarantee on
+// which message will be processed first.
+//
+// [RRef Lifetime]
+//
+// The goal of the protocol is to delete an OwnerRRef at an appropriate time.
 // The right time to delete an OwnerRRef is when there are no living UserRRefs
-// and Python GC also agrees to delete the OwnerRRef instance on the
-// owner. The tricky part is to determine if there are any living UserRRefs.
+// and Python GC also agrees to delete the OwnerRRef instance on the owner. The
+// tricky part is to determine if there are any living UserRRefs.
 //
 // A user can get a UserRRef in three situations:
 //
-// 1. Receiving a UserRRef from the owner.
-// 2. Receiving a UserRRef from another user.
-// 3. Creating a new UserRRef owned by another worker.
+// (1). Receiving a UserRRef from the owner.
+// (2). Receiving a UserRRef from another user.
+// (3). Creating a new UserRRef owned by another worker.
 //
-// #1 is the simplest case where the owner initiates the fork, and hence it can
+// (1) is the simplest case where the owner initiates the fork, and hence it can
 // easily increment local RC. The only requirement is that any UserRRef must
 // notify the owner before destruction. Hence, we need the first guarantee:
 //
-// G1. The owner will be notified when any UserRRef is deleted.*
+// G1. The owner will be notified when any UserRRef is deleted.
 //
-// Note that the notification might come delayed or out-of-order.
+// As messages might come delayed or out-of-order, we need more one guarantee to
+// make sure the delete message is not sent out too soon. Let us first introduce
+// a new concept. If A sends an RPC to B that involves an RRef, we call the RRef
+// on A the parent RRef and the RRef on B the child RRef.
 //
-// With #2 and #3, it is possible that the owner only partially knows the RRef
+// G2. Parent RRef cannot be deleted until the child RRef is confirmed by the
+//     owner.
+//
+// Under (1), where the caller is UserRRef and callee is OwnerRRef, it simply
+// means that the user will not send out the delete message until all previous
+// messages are ACKed. Note that ACKed does not mean the owner finishes
+// executing the function, instead, it only means the owner has retrieved its
+// local OwnerRRef and about to pass it to the function, which is sufficient to
+// keep the OwnerRRef alive even if the delete message from the user arrives at
+// the owner before the function finishes execution.
+//
+// With (2) and (3), it is possible that the owner only partially knows the RRef
 // fork graph or not even knowing it at all. For example, the RRef could be
 // constructed on a user, and before the owner receives the RPC call, the
 // creator user might have already shared the RRef with other users, and those
@@ -131,48 +140,46 @@ static_assert(
 // argument below.
 //
 // The owner's view on any node (fork) in the tree has three stages:
-//            1) unknown → 2) known → 3) deleted.
-// The owner's view on the entire tree keeps changing. The owner deletes its
-// OwnerRRef instance when it thinks there are no living UserRRefs, i.e., all
-// the UserRRefs could be either indeed deleted or unknown. The dangerous case
-// is when some forks are unknown and others are deleted. We only need a simple
-// guarantee to prevent this situation:
 //
-// * G2. Parent UserRRef cannot be deleted until the child UserRRef is confrimed
-//       by the owner.
+//       1) unknown → 2) known → 3) deleted.
+//
+// The owner's view on the entire tree keeps changing. The owner deletes its
+// OwnerRRef instance when it thinks there are no living UserRRefs, i.e., when
+// OwnerRRef is deleted, all UserRRefs could be either indeed deleted or
+// unknown. The dangerous case is when some forks are unknown and others are
+// deleted.
 //
 // G2 trivially guarantees that no parent UserRRef Y can be deleted before the
-// owner knows all Y's children UserRRefs.
+// owner knows all of Y's children UserRRefs.
 //
-// However, it is possible that a child UserRRef Z is deleted before the owner
-// knows its Z's parent Y. More specifically, this can happen when Z's
-// RREF_FORK_REQUEST was processed by the owner before any other messages from
-// Y, where Z receives RREF_USER_ACCEPT from the owner and then send out
-// RREF_USER_DELETE before the owner leanrs about Y. Nevertheless, this does not
-// cause any problem. Because, at least one of Y's ancestor will be alive if Z,
-// preventing the owner from deleting the OwnerRRef. Consider the following
-// example:
+// However, it is possible that the child UserRRef Z may be deleted before the
+// owner knows its parent Y. More specifically, this can happen when all of Z's
+// messages are processed by the owner before all messages from Y, including the
+// delete message. Nevertheless, this does not cause any problem. Because, at
+// least one of Y's ancestor will be alive, and it will prevent the owner from
+// deleting the OwnerRRef. Consider the following example:
 //
-//    OwnerRRef -> A -> Y -> Z
+//     OwnerRRef -> A -> Y -> Z
 //
-// OwnerRRef forks to A, then A forks to B, B forks to Y, and Y forks to Z. Z
-// can be deleted without OwnerRRef knowing Y or even B. However, the OwnerRRef
-// will at least know A, A won't die before the owner knows Y.
+// OwnerRRef forks to A, then A forks to Y, and Y forks to Z. Z can be deleted
+// without OwnerRRef knowing Y. However, the OwnerRRef will at least know A, as
+// the owner directly forks the RRef to A. A won't die before the owner knows Y.
 //
-// Things get a little trickier if the RRef starts from a user:
+// Things get a little trickier if the RRef is created on a user:
 //
-// OwnerRRef
-//     ^
-//     |
-//     A -> Y -> Z
+//  OwnerRRef
+//      ^
+//      |
+//      A -> Y -> Z
 //
 // If Z calls to_here on the UserRRef, the owner at least knows A when Z is
 // deleted, because otherwise to_here wouldn't finish. If Z does not call
 // to_here, it is possible that the owner receives all messages from Z before
-// any message from A and Y. In this case, as the OwnerRRef hasn't been created
-// on the owner yet (it is only created when owner receives a remote call or a
-// to_here() call), there is nothing to be deleted either. Hence, it's still OK.
+// any message from A and Y. In this case, as the real data of the OwnerRRef has
+// not been created yet, there is nothing to be deleted either. It is the same
+// as Z does not exist at all Hence, it's still OK.
 //
+// See #26759 for more details and discussions.
 //
 // TODO: make RRef an IValue, and edit createStackForSchema accordingly
 // TODO: make RRef system messages idempotent and retry on failures.

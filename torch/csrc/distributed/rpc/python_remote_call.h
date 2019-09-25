@@ -15,9 +15,17 @@ class TORCH_API PythonRemoteCall final {
       at::IValue retRRefId,
       at::IValue retForkId);
 
-  const std::string& udf();
-  at::IValue retRRefId();
-  at::IValue retForkId();
+  inline const std::string& udf() const {
+    return pickledPythonUDF_;
+  }
+
+  inline const at::IValue& retRRefId() const {
+    return retRRefId_;
+  }
+
+  inline const at::IValue& retForkId() const {
+    return retForkId_;
+  }
 
   Message toMessage() const;
   static PythonRemoteCall fromMessage(const Message& message);

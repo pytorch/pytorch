@@ -31,13 +31,6 @@ RRefForkData::RRefForkData(
     worker_id_t parent)
     : ownerId_(ownerId), rrefId_(rrefId), forkId_(forkId), parent_(parent) {}
 
-at::IValue RRefForkData::toIValue() const {
-  return c10::ivalue::Tuple::create({static_cast<int64_t>(ownerId_),
-                                     rrefId_.toIValue(),
-                                     forkId_.toIValue(),
-                                     static_cast<int64_t>(parent_)});
-}
-
 py::tuple RRefForkData::toPyTuple() const {
   return py::make_tuple(
       ownerId_,

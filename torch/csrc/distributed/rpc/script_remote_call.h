@@ -22,17 +22,22 @@ class TORCH_API ScriptRemoteCall final : public ScriptCall {
       std::shared_ptr<Operator> op,
       std::vector<at::IValue>&& args,
       const RRefId& retRRefId,
-      const RRefId& retForkId);
+      const ForkId& retForkId);
 
-  const RRefId& retRRefId();
-  const RRefId& retForkId();
+  inline const RRefId& retRRefId() const {
+    return retRRefId_;
+  }
+
+  inline const ForkId& retForkId() const {
+    return retForkId_;
+  }
 
   Message toMessage() const;
   static ScriptRemoteCall fromMessage(const Message& message);
 
  private:
   const RRefId retRRefId_;
-  const RRefId retForkId_;
+  const ForkId retForkId_;
 };
 
 } // namespace rpc

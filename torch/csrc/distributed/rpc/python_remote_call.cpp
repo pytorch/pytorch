@@ -13,18 +13,6 @@ PythonRemoteCall::PythonRemoteCall(
       retRRefId_(std::move(retRRefId)),
       retForkId_(std::move(retForkId)) {}
 
-const std::string& PythonRemoteCall::udf() {
-  return pickledPythonUDF_;
-}
-
-at::IValue PythonRemoteCall::retRRefId() {
-  return retRRefId_;
-}
-
-at::IValue PythonRemoteCall::retForkId() {
-  return retForkId_;
-}
-
 Message PythonRemoteCall::toMessage() const {
   std::vector<IValue> ivalues;
   ivalues.emplace_back(pickledPythonUDF_);

@@ -75,7 +75,7 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
             raise RuntimeError("self_rank argument {} doesn't match pg rank {}".format(
                                self_rank, group.rank()))
         # TODO: add try-except and destroy _agent in all processes if any fails.
-        _agent = ProcessGroupAgent(self_name, group)
+        _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
         _init_rref_context(_agent)
     elif is_backend_registered(backend):
         _agent = registered_init_rpc(backend,
