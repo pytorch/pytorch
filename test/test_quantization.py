@@ -31,9 +31,8 @@ import io
 import copy
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-    " with instruction set support avx2 or newer.",
-)
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class PostTrainingQuantTest(QuantizationTestCase):
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
@@ -284,9 +283,8 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-    " with instruction set support avx2 or newer.",
-)
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class PostTrainingDynamicQuantTest(QuantizationTestCase):
     def test_single_layer(self):
         r"""Dynamic Quantize SingleLayerLinearDynamicModel which has one Linear module,
@@ -552,9 +550,8 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             torch.testing.assert_allclose(out, ref)
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-    " with instruction set support avx2 or newer.",
-)
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
         model = ManualLinearQATModel()
@@ -638,9 +635,8 @@ class ScriptabilityTest(QuantizationTestCase):
         self.checkScriptable(self.model_under_test, [(xq.dequantize(), xq.dequantize())], check_save_load=True)
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                 'Quantization requires FBGEMM. FBGEMM does not play'
-                 ' well with UBSAN at the moment, so we skip the test if'
-                 ' we are in a UBSAN environment.')
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class FusionTest(QuantizationTestCase):
     def test_fuse_module_train(self):
         model = ModelForFusion(default_qat_qconfig).train()
@@ -853,9 +849,8 @@ class ObserverTest(QuantizationTestCase):
         self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                 'Quantization requires FBGEMM. FBGEMM does not play'
-                 ' well with UBSAN at the moment, so we skip the test if'
-                 ' we are in a UBSAN environment.')
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class QuantizationDebugTest(QuantizationTestCase):
     def test_record_observer(self):
         model = SingleLayerLinearModel()

@@ -35,9 +35,8 @@ class FunctionalAPITest(QuantizationTestCase):
 
     @no_deadline
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         use_bias=st.booleans(),
     )
@@ -89,9 +88,8 @@ class FunctionalAPITest(QuantizationTestCase):
 class DynamicModuleAPITest(QuantizationTestCase):
     @no_deadline
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -201,9 +199,8 @@ class ModuleAPITest(QuantizationTestCase):
 
     @no_deadline
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -325,9 +322,8 @@ class ModuleAPITest(QuantizationTestCase):
 
     @no_deadline
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         use_bias=st.booleans(),
         use_fused=st.booleans(),

@@ -967,9 +967,8 @@ class TestQuantizedOps(TestCase):
 
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-    " with instruction set support avx2 or newer.",
-)
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
     @no_deadline
@@ -1085,9 +1084,8 @@ class TestDynamicQuantizedLinear(TestCase):
                          message="torch.ops.quantized.linear_dynamic (fbgemm) results are off")
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-    " with instruction set support avx2 or newer.",
-)
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class TestQuantizedLinear(unittest.TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
     @no_deadline
@@ -1262,9 +1260,8 @@ class TestQuantizedLinear(unittest.TestCase):
 
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-    " with instruction set support avx2 or newer.",
-)
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class TestQuantizedConv(unittest.TestCase):
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),

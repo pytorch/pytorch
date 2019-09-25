@@ -37,9 +37,8 @@ class WeightObserver(Observer):
         self.dtype = torch.qint8
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-    " with instruction set support avx2 or newer.",
-)
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 @unittest.skip("temoprarily disable the test")
 class QuantizerTestCase(TestCase):
     @_tmp_donotuse_dont_inline_everything

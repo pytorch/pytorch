@@ -7167,8 +7167,8 @@ a")
         self.assertEqual(a.with_docstring.__doc__, 'test str')
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                     'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
-                     ' with instruction set support avx2 or newer.')
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
     def test_rnn_cell_quantized(self):
         d_in, d_hid = 2, 2
 
@@ -7261,8 +7261,8 @@ a")
                 torch.testing.assert_allclose(out, ref_out)
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                     'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
-                     ' with instruction set support avx2 or newer.')
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
     def test_rnn_quantized(self):
         d_in, d_hid = 2, 2
 

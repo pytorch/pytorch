@@ -2460,8 +2460,8 @@ class TestNN(NNTestCase):
         self.assertEqual(input.grad, inputf.grad.to(dtype), prec=0)
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                     'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
-                     ' with instruction set support avx2 or newer.')
+                         'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
     def test_fb_fc_packed(self):
         X = np.random.rand(16, 16).astype(np.float32) - 0.5
         W = np.random.rand(16, 16).astype(np.float32) - 0.5
