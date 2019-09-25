@@ -190,6 +190,14 @@ void lgamma_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void cosh_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "cosh_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return std::cosh(a);
+    });
+  });
+}
+
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
 REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda);
@@ -207,4 +215,5 @@ REGISTER_DISPATCH(digamma_stub, &digamma_kernel_cuda);
 REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel_cuda);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel_cuda);
 REGISTER_DISPATCH(lgamma_stub, &lgamma_kernel_cuda);
+REGISTER_DISPATCH(cosh_stub, &cosh_kernel_cuda);
 }}
