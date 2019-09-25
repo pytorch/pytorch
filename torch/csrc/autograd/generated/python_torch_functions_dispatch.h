@@ -923,10 +923,10 @@ inline Tensor dispatch_baddbmm(const Tensor & self, const Tensor & batch1, const
   AutoNoGIL no_gil;
   return self.baddbmm(batch1, batch2, beta, alpha);
 }
-inline Tensor dispatch_bartlett_window(int64_t window_length, const TensorOptions & options) {
-  torch::utils::maybe_initialize_cuda(options);
+inline Tensor dispatch_bartlett_window(int64_t window_length, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
+  //torch::utils::maybe_initialize_cuda(options); <--- THIS SHOULD BE FIXED
   AutoNoGIL no_gil;
-  return torch::bartlett_window(window_length, options);
+  return torch::bartlett_window(window_length, dtype, layout, device, pin_memory);
 }
 inline Tensor dispatch_bartlett_window(int64_t window_length, bool periodic, const TensorOptions & options) {
   torch::utils::maybe_initialize_cuda(options);

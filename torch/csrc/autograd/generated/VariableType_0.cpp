@@ -44,7 +44,7 @@ Tensor & VariableType::__ilshift__(Tensor & self, Scalar other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -83,7 +83,7 @@ Tensor & VariableType::__ilshift__(Tensor & self, const Tensor & other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -128,7 +128,7 @@ Tensor & VariableType::__ior__(Tensor & self, Scalar other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -167,7 +167,7 @@ Tensor & VariableType::__ior__(Tensor & self, const Tensor & other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -212,7 +212,7 @@ Tensor & VariableType::__ixor__(Tensor & self, Scalar other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -251,7 +251,7 @@ Tensor & VariableType::__ixor__(Tensor & self, const Tensor & other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -296,7 +296,7 @@ Tensor VariableType::__lshift__(const Tensor & self, Scalar other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -336,7 +336,7 @@ Tensor VariableType::__lshift__(const Tensor & self, const Tensor & other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -382,7 +382,7 @@ Tensor VariableType::__or__(const Tensor & self, Scalar other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -422,7 +422,7 @@ Tensor VariableType::__or__(const Tensor & self, const Tensor & other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -468,7 +468,7 @@ Tensor VariableType::__xor__(const Tensor & self, Scalar other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -508,7 +508,7 @@ Tensor VariableType::__xor__(const Tensor & self, const Tensor & other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -567,7 +567,7 @@ Tensor & VariableType::_addr_out(Tensor & out, const Tensor & self, const Tensor
     jit::tracer::addInputs(node, "beta", beta);
     jit::tracer::addInputs(node, "alpha", alpha);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -664,7 +664,7 @@ Tensor VariableType::_cast_Double(const Tensor & self, bool non_blocking) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "non_blocking", non_blocking);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::_cast_Double(self, non_blocking);
@@ -687,7 +687,7 @@ Tensor VariableType::_cast_Short(const Tensor & self, bool non_blocking) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "non_blocking", non_blocking);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::_cast_Short(self, non_blocking);
@@ -755,7 +755,7 @@ std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> VariableType::_cudnn_rnn(const Te
     jit::tracer::addInputs(node, "batch_sizes", batch_sizes);
     jit::tracer::addInputs(node, "dropout_state", dropout_state);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -857,7 +857,7 @@ Tensor & VariableType::_cumsum_out(Tensor & out, const Tensor & self, int64_t di
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "dim", dim);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -961,7 +961,7 @@ std::tuple<Tensor,Tensor,Tensor,Tensor> VariableType::_embedding_bag(const Tenso
     jit::tracer::addInputs(node, "sparse", sparse);
     jit::tracer::addInputs(node, "per_sample_weights", per_sample_weights);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -1038,7 +1038,7 @@ Tensor VariableType::_embedding_bag_sparse_backward(const Tensor & grad, const T
     jit::tracer::addInputs(node, "mode", mode);
     jit::tracer::addInputs(node, "per_sample_weights", per_sample_weights);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::_embedding_bag_sparse_backward(grad, indices, offsets, offset2bag, bag_size, num_weights, scale_grad_by_freq, mode, per_sample_weights);
@@ -1063,7 +1063,7 @@ Tensor VariableType::_gather_sparse_backward(const Tensor & self, int64_t dim, c
     jit::tracer::addInputs(node, "index", index);
     jit::tracer::addInputs(node, "grad", grad);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::_gather_sparse_backward(self, dim, index, grad);
@@ -1169,7 +1169,7 @@ Tensor VariableType::_indices(const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -1240,7 +1240,7 @@ std::tuple<Tensor &,Tensor &> VariableType::_max_out(Tensor & max, Tensor & max_
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "keepdim", keepdim);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "max", max);
     }
@@ -1309,7 +1309,7 @@ Tensor VariableType::_mkldnn_transpose(const Tensor & self, int64_t dim0, int64_
     jit::tracer::addInputs(node, "dim0", dim0);
     jit::tracer::addInputs(node, "dim1", dim1);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -1415,7 +1415,7 @@ std::tuple<Tensor &,Tensor &> VariableType::_mode_out(Tensor & values, Tensor & 
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "keepdim", keepdim);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "values", values);
     }
@@ -1479,7 +1479,7 @@ Tensor VariableType::_nnpack_spatial_convolution_backward_weight(const Tensor & 
     jit::tracer::addInputs(node, "grad_output", grad_output);
     jit::tracer::addInputs(node, "padding", padding);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::_nnpack_spatial_convolution_backward_weight(input, weightsize, grad_output, padding);
@@ -1510,7 +1510,7 @@ Tensor VariableType::_pdist_forward(const Tensor & self, double p) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "p", p);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -1563,7 +1563,7 @@ Tensor VariableType::_softmax(const Tensor & self, int64_t dim, bool half_to_flo
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "half_to_float", half_to_float);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -1610,7 +1610,7 @@ Tensor VariableType::_sparse_coo_tensor_with_dims(int64_t sparse_dim, int64_t de
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto tmp = ([&]() {
@@ -1636,7 +1636,7 @@ Tensor VariableType::_sparse_sum(const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::_sparse_sum(self);
@@ -1659,7 +1659,7 @@ Tensor VariableType::_sparse_sum(const Tensor & self, ScalarType dtype) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "dtype", dtype);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::_sparse_sum(self, dtype);
@@ -1690,7 +1690,7 @@ Tensor VariableType::_sparse_sum(const Tensor & self, IntArrayRef dim) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "dim", dim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -1732,7 +1732,7 @@ Tensor VariableType::_sparse_sum(const Tensor & self, IntArrayRef dim, ScalarTyp
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "dtype", dtype);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::_sparse_sum(self, dim, dtype);
@@ -1771,7 +1771,7 @@ std::tuple<Tensor,Tensor> VariableType::_thnn_fused_gru_cell(const Tensor & inpu
     jit::tracer::addInputs(node, "input_bias", input_bias);
     jit::tracer::addInputs(node, "hidden_bias", hidden_bias);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -1863,7 +1863,7 @@ std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> VariableType::_thnn_fused_lstm_ce
     jit::tracer::addInputs(node, "workspace", workspace);
     jit::tracer::addInputs(node, "has_bias", has_bias);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -1958,7 +1958,7 @@ Tensor VariableType::_trilinear(const Tensor & i1, const Tensor & i2, const Tens
     jit::tracer::addInputs(node, "sumdim", sumdim);
     jit::tracer::addInputs(node, "unroll_dim", unroll_dim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -2020,7 +2020,7 @@ Tensor VariableType::_unsafe_view(const Tensor & self, IntArrayRef size) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "size", size);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -2074,7 +2074,7 @@ std::tuple<Tensor,Tensor> VariableType::_weight_norm_cuda_interface(const Tensor
     jit::tracer::addInputs(node, "g", g);
     jit::tracer::addInputs(node, "dim", dim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -2132,7 +2132,7 @@ Tensor VariableType::abs(const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -2225,7 +2225,7 @@ Tensor VariableType::adaptive_avg_pool1d(const Tensor & self, IntArrayRef output
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "output_size", output_size);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::adaptive_avg_pool1d(self, output_size);
@@ -2257,7 +2257,7 @@ Tensor & VariableType::adaptive_avg_pool2d_out(Tensor & out, const Tensor & self
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "output_size", output_size);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -2322,7 +2322,7 @@ Tensor VariableType::adaptive_max_pool2d_backward(const Tensor & grad_output, co
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "indices", indices);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -2386,7 +2386,7 @@ std::tuple<Tensor,Tensor> VariableType::adaptive_max_pool3d(const Tensor & self,
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "output_size", output_size);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -2443,7 +2443,7 @@ Tensor & VariableType::adaptive_max_pool3d_backward_out(Tensor & grad_input, con
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "indices", indices);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "grad_input", grad_input);
     }
@@ -2527,7 +2527,7 @@ Tensor VariableType::addcmul(const Tensor & self, const Tensor & tensor1, const 
     jit::tracer::addInputs(node, "tensor2", tensor2);
     jit::tracer::addInputs(node, "value", value);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -2675,7 +2675,7 @@ Tensor VariableType::addmm(const Tensor & self, const Tensor & mat1, const Tenso
     jit::tracer::addInputs(node, "beta", beta);
     jit::tracer::addInputs(node, "alpha", alpha);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -2820,7 +2820,7 @@ Tensor & VariableType::addr_out(Tensor & out, const Tensor & self, const Tensor 
     jit::tracer::addInputs(node, "beta", beta);
     jit::tracer::addInputs(node, "alpha", alpha);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -2887,7 +2887,7 @@ Tensor VariableType::align_as(const Tensor & self, const Tensor & other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::align_as(self, other);
@@ -2909,7 +2909,7 @@ std::vector<Tensor> VariableType::align_tensors(TensorList tensors) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "tensors", tensors);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::align_tensors(tensors);
@@ -2932,7 +2932,7 @@ Tensor VariableType::align_to(const Tensor & self, DimnameList names) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "names", names);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::align_to(self, names);
@@ -2956,7 +2956,7 @@ Tensor VariableType::argmax(const Tensor & self, c10::optional<int64_t> dim, boo
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "keepdim", keepdim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::argmax(self, dim, keepdim);
@@ -2980,7 +2980,7 @@ Tensor VariableType::argsort(const Tensor & self, int64_t dim, bool descending) 
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "descending", descending);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::argsort(self, dim, descending);
@@ -3004,7 +3004,7 @@ Tensor VariableType::argsort(const Tensor & self, Dimname dim, bool descending) 
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "descending", descending);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::argsort(self, dim, descending);
@@ -3033,7 +3033,7 @@ Tensor VariableType::atan(const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -3083,7 +3083,7 @@ Tensor VariableType::atan2(const Tensor & self, const Tensor & other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -3263,7 +3263,7 @@ Tensor VariableType::avg_pool2d(const Tensor & self, IntArrayRef kernel_size, In
     jit::tracer::addInputs(node, "count_include_pad", count_include_pad);
     jit::tracer::addInputs(node, "divisor_override", divisor_override);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -3320,7 +3320,7 @@ Tensor & VariableType::avg_pool2d_backward_out(Tensor & grad_input, const Tensor
     jit::tracer::addInputs(node, "count_include_pad", count_include_pad);
     jit::tracer::addInputs(node, "divisor_override", divisor_override);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "grad_input", grad_input);
     }
@@ -3394,7 +3394,7 @@ Tensor & VariableType::avg_pool3d_out(Tensor & out, const Tensor & self, IntArra
     jit::tracer::addInputs(node, "count_include_pad", count_include_pad);
     jit::tracer::addInputs(node, "divisor_override", divisor_override);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -3461,7 +3461,7 @@ Tensor & VariableType::baddbmm_out(Tensor & out, const Tensor & self, const Tens
     jit::tracer::addInputs(node, "beta", beta);
     jit::tracer::addInputs(node, "alpha", alpha);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -3515,7 +3515,7 @@ Tensor & VariableType::baddbmm_out(Tensor & out, const Tensor & self, const Tens
   }
   return out;
 }
-Tensor VariableType::bartlett_window(int64_t window_length, const TensorOptions & options) {
+Tensor VariableType::bartlett_window(int64_t window_length, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
   RECORD_FUNCTION("bartlett_window", std::vector<c10::IValue>({}), Node::peek_at_next_sequence_nr());
   torch::jit::Node* node = nullptr;
   std::shared_ptr<jit::tracer::TracingState> tracer_state;
@@ -3526,12 +3526,15 @@ Tensor VariableType::bartlett_window(int64_t window_length, const TensorOptions 
     node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "window_length", window_length);
-    jit::tracer::addInputs(node, "options", options);
+    jit::tracer::addInputs(node, "dtype", dtype);
+    jit::tracer::addInputs(node, "layout", layout);
+    jit::tracer::addInputs(node, "device", device);
+    jit::tracer::addInputs(node, "pin_memory", pin_memory);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
-  auto result = TypeDefault::bartlett_window(window_length, options);
+  auto result = TypeDefault::bartlett_window(window_length, dtype, layout, device, pin_memory);
   if (tracer_state) {
     jit::tracer::setTracingState(std::move(tracer_state));
     jit::tracer::addOutput(node, result);
@@ -3552,7 +3555,7 @@ Tensor VariableType::bartlett_window(int64_t window_length, bool periodic, const
     jit::tracer::addInputs(node, "periodic", periodic);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::bartlett_window(window_length, periodic, options);
@@ -3587,7 +3590,7 @@ std::tuple<Tensor,Tensor> VariableType::batch_norm_update_stats(const Tensor & i
     jit::tracer::addInputs(node, "running_var", running_var);
     jit::tracer::addInputs(node, "momentum", momentum);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -3655,7 +3658,7 @@ Tensor VariableType::binary_cross_entropy_backward(const Tensor & grad_output, c
     jit::tracer::addInputs(node, "weight", weight);
     jit::tracer::addInputs(node, "reduction", reduction);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -3725,7 +3728,7 @@ Tensor & VariableType::bitwise_not_out(Tensor & out, const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -3788,7 +3791,7 @@ Tensor & VariableType::bmm_out(Tensor & out, const Tensor & self, const Tensor &
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "mat2", mat2);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -3859,7 +3862,7 @@ Tensor VariableType::cdist(const Tensor & x1, const Tensor & x2, double p) {
     jit::tracer::addInputs(node, "x2", x2);
     jit::tracer::addInputs(node, "p", p);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -3910,7 +3913,7 @@ Tensor VariableType::celu(const Tensor & self, Scalar alpha) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "alpha", alpha);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::celu(self, alpha);
@@ -3968,7 +3971,7 @@ Tensor VariableType::cholesky_inverse(const Tensor & self, bool upper) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "upper", upper);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -4021,7 +4024,7 @@ Tensor & VariableType::cholesky_out(Tensor & out, const Tensor & self, bool uppe
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "upper", upper);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -4084,7 +4087,7 @@ Tensor VariableType::clamp(const Tensor & self, c10::optional<Scalar> min, c10::
     jit::tracer::addInputs(node, "min", min);
     jit::tracer::addInputs(node, "max", max);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -4190,7 +4193,7 @@ Tensor & VariableType::clamp_max_out(Tensor & out, const Tensor & self, Scalar m
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "max", max);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -4275,7 +4278,7 @@ std::tuple<Tensor,Tensor,Tensor> VariableType::convolution_backward_overrideable
     jit::tracer::addInputs(node, "groups", groups);
     jit::tracer::addInputs(node, "output_mask", output_mask);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -4338,7 +4341,7 @@ Tensor VariableType::cos(const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -4462,7 +4465,7 @@ std::tuple<Tensor,Tensor,Tensor> VariableType::cudnn_batch_norm_backward(const T
     jit::tracer::addInputs(node, "save_var", save_var);
     jit::tracer::addInputs(node, "epsilon", epsilon);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -4558,7 +4561,7 @@ std::tuple<Tensor,Tensor> VariableType::cudnn_grid_sampler_backward(const Tensor
     jit::tracer::addInputs(node, "grid", grid);
     jit::tracer::addInputs(node, "grad_output", grad_output);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -4624,7 +4627,7 @@ Tensor & VariableType::cumsum_out(Tensor & out, const Tensor & self, int64_t dim
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "dtype", dtype);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -4678,7 +4681,7 @@ Tensor & VariableType::cumsum_out(Tensor & out, const Tensor & self, Dimname dim
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "dtype", dtype);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -4714,7 +4717,7 @@ Tensor VariableType::diag(const Tensor & self, int64_t diagonal) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "diagonal", diagonal);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -4761,7 +4764,7 @@ Tensor VariableType::digamma(const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -4865,7 +4868,7 @@ Tensor & VariableType::elu_out(Tensor & out, const Tensor & self, Scalar alpha, 
     jit::tracer::addInputs(node, "scale", scale);
     jit::tracer::addInputs(node, "input_scale", input_scale);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -4927,7 +4930,7 @@ std::tuple<Tensor,Tensor,Tensor,Tensor> VariableType::embedding_bag(const Tensor
     jit::tracer::addInputs(node, "sparse", sparse);
     jit::tracer::addInputs(node, "per_sample_weights", per_sample_weights);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   std::tie(result0, result1, result2, result3) = TypeDefault::embedding_bag(weight, indices, offsets, scale_grad_by_freq, mode, sparse, per_sample_weights);
@@ -4964,7 +4967,7 @@ Tensor VariableType::embedding_dense_backward(const Tensor & grad_output, const 
     jit::tracer::addInputs(node, "padding_idx", padding_idx);
     jit::tracer::addInputs(node, "scale_grad_by_freq", scale_grad_by_freq);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -5011,7 +5014,7 @@ Tensor VariableType::empty_like(const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::empty_like(self);
@@ -5035,7 +5038,7 @@ Tensor VariableType::empty_like(const Tensor & self, const TensorOptions & optio
     jit::tracer::addInputs(node, "options", options);
     jit::tracer::addInputs(node, "memory_format", memory_format);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::empty_like(self, options, memory_format);
@@ -5060,7 +5063,7 @@ Tensor VariableType::empty_strided(IntArrayRef size, IntArrayRef stride, const T
     jit::tracer::addInputs(node, "stride", stride);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto tmp = ([&]() {
@@ -5095,7 +5098,7 @@ Tensor & VariableType::erfc_out(Tensor & out, const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -5154,7 +5157,7 @@ Tensor VariableType::erfinv(const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -5255,7 +5258,7 @@ Tensor VariableType::expand(const Tensor & self, IntArrayRef size, bool implicit
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "implicit", implicit);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -5304,7 +5307,7 @@ Tensor & VariableType::expm1_out(Tensor & out, const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -5368,7 +5371,7 @@ Tensor VariableType::fake_quantize_per_tensor_affine_backward(const Tensor & gra
     jit::tracer::addInputs(node, "quant_min", quant_min);
     jit::tracer::addInputs(node, "quant_max", quant_max);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -5417,7 +5420,7 @@ Tensor VariableType::fft(const Tensor & self, int64_t signal_ndim, bool normaliz
     jit::tracer::addInputs(node, "signal_ndim", signal_ndim);
     jit::tracer::addInputs(node, "normalized", normalized);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::fft(self, signal_ndim, normalized);
@@ -5441,7 +5444,7 @@ Tensor VariableType::flatten(const Tensor & self, int64_t start_dim, int64_t end
     jit::tracer::addInputs(node, "start_dim", start_dim);
     jit::tracer::addInputs(node, "end_dim", end_dim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::flatten(self, start_dim, end_dim);
@@ -5466,7 +5469,7 @@ Tensor VariableType::flatten(const Tensor & self, int64_t start_dim, int64_t end
     jit::tracer::addInputs(node, "end_dim", end_dim);
     jit::tracer::addInputs(node, "out_dim", out_dim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::flatten(self, start_dim, end_dim, out_dim);
@@ -5491,7 +5494,7 @@ Tensor VariableType::flatten(const Tensor & self, Dimname start_dim, Dimname end
     jit::tracer::addInputs(node, "end_dim", end_dim);
     jit::tracer::addInputs(node, "out_dim", out_dim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::flatten(self, start_dim, end_dim, out_dim);
@@ -5515,7 +5518,7 @@ Tensor VariableType::flatten(const Tensor & self, DimnameList dims, Dimname out_
     jit::tracer::addInputs(node, "dims", dims);
     jit::tracer::addInputs(node, "out_dim", out_dim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::flatten(self, dims, out_dim);
@@ -5546,7 +5549,7 @@ Tensor & VariableType::floor_out(Tensor & out, const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -5601,7 +5604,7 @@ Tensor VariableType::full(IntArrayRef size, Scalar fill_value, c10::optional<Dim
     jit::tracer::addInputs(node, "names", names);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::full(size, fill_value, names, options);
@@ -5625,7 +5628,7 @@ Tensor VariableType::full(IntArrayRef size, Scalar fill_value, const TensorOptio
     jit::tracer::addInputs(node, "fill_value", fill_value);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::full(size, fill_value, options);
@@ -5662,7 +5665,7 @@ Tensor VariableType::gather(const Tensor & self, int64_t dim, const Tensor & ind
     jit::tracer::addInputs(node, "index", index);
     jit::tracer::addInputs(node, "sparse_grad", sparse_grad);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -5712,7 +5715,7 @@ Tensor VariableType::gather(const Tensor & self, Dimname dim, const Tensor & ind
     jit::tracer::addInputs(node, "index", index);
     jit::tracer::addInputs(node, "sparse_grad", sparse_grad);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::gather(self, dim, index, sparse_grad);
@@ -5742,7 +5745,7 @@ Tensor VariableType::gelu_backward(const Tensor & grad, const Tensor & self) {
     jit::tracer::addInputs(node, "grad", grad);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -5804,7 +5807,7 @@ std::tuple<Tensor,Tensor> VariableType::grid_sampler_3d_backward(const Tensor & 
     jit::tracer::addInputs(node, "padding_mode", padding_mode);
     jit::tracer::addInputs(node, "align_corners", align_corners);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -5865,7 +5868,7 @@ Tensor VariableType::hann_window(int64_t window_length, const TensorOptions & op
     jit::tracer::addInputs(node, "window_length", window_length);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::hann_window(window_length, options);
@@ -5889,7 +5892,7 @@ Tensor VariableType::hann_window(int64_t window_length, bool periodic, const Ten
     jit::tracer::addInputs(node, "periodic", periodic);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::hann_window(window_length, periodic, options);
@@ -5920,7 +5923,7 @@ Tensor VariableType::hardshrink(const Tensor & self, Scalar lambd) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "lambd", lambd);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -5962,7 +5965,7 @@ Tensor VariableType::ifft(const Tensor & self, int64_t signal_ndim, bool normali
     jit::tracer::addInputs(node, "signal_ndim", signal_ndim);
     jit::tracer::addInputs(node, "normalized", normalized);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::ifft(self, signal_ndim, normalized);
@@ -5996,7 +5999,7 @@ Tensor & VariableType::index_select_out(Tensor & out, const Tensor & self, int64
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "index", index);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -6057,7 +6060,7 @@ Tensor & VariableType::index_select_out(Tensor & out, const Tensor & self, Dimna
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "index", index);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -6085,7 +6088,7 @@ Tensor VariableType::indices(const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -6143,7 +6146,7 @@ Tensor & VariableType::l1_loss_out(Tensor & out, const Tensor & self, const Tens
     jit::tracer::addInputs(node, "target", target);
     jit::tracer::addInputs(node, "reduction", reduction);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -6207,7 +6210,7 @@ Tensor VariableType::layer_norm(const Tensor & input, IntArrayRef normalized_sha
     jit::tracer::addInputs(node, "eps", eps);
     jit::tracer::addInputs(node, "cudnn_enable", cudnn_enable);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::layer_norm(input, normalized_shape, weight, bias, eps, cudnn_enable);
@@ -6240,7 +6243,7 @@ Tensor VariableType::leaky_relu_backward(const Tensor & grad_output, const Tenso
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "negative_slope", negative_slope);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -6297,7 +6300,7 @@ Tensor VariableType::lerp(const Tensor & self, const Tensor & end, Scalar weight
     jit::tracer::addInputs(node, "end", end);
     jit::tracer::addInputs(node, "weight", weight);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -6356,7 +6359,7 @@ Tensor VariableType::lerp(const Tensor & self, const Tensor & end, const Tensor 
     jit::tracer::addInputs(node, "end", end);
     jit::tracer::addInputs(node, "weight", weight);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -6548,7 +6551,7 @@ Tensor VariableType::log_sigmoid(const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::log_sigmoid(self);
@@ -6583,7 +6586,7 @@ Tensor & VariableType::log_sigmoid_backward_out(Tensor & grad_input, const Tenso
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "buffer", buffer);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "grad_input", grad_input);
     }
@@ -6660,7 +6663,7 @@ Tensor & VariableType::logical_xor_out(Tensor & out, const Tensor & self, const 
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -6775,7 +6778,7 @@ Tensor & VariableType::logsumexp_out(Tensor & out, const Tensor & self, IntArray
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "keepdim", keepdim);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -6829,7 +6832,7 @@ Tensor & VariableType::logsumexp_out(Tensor & out, const Tensor & self, DimnameL
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "keepdim", keepdim);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -6857,7 +6860,7 @@ Tensor & VariableType::matmul_out(Tensor & out, const Tensor & self, const Tenso
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -6897,7 +6900,7 @@ std::tuple<Tensor &,Tensor &> VariableType::max_out(Tensor & max, Tensor & max_v
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "keepdim", keepdim);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "max", max);
     }
@@ -6960,7 +6963,7 @@ std::tuple<Tensor &,Tensor &> VariableType::max_out(Tensor & max, Tensor & max_v
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "keepdim", keepdim);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "max", max);
     }
@@ -6999,7 +7002,7 @@ Tensor & VariableType::max_out(Tensor & out, const Tensor & self, const Tensor &
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -7070,7 +7073,7 @@ Tensor VariableType::max_unpool2d(const Tensor & self, const Tensor & indices, I
     jit::tracer::addInputs(node, "indices", indices);
     jit::tracer::addInputs(node, "output_size", output_size);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -7131,7 +7134,7 @@ Tensor & VariableType::max_unpool2d_backward_out(Tensor & grad_input, const Tens
     jit::tracer::addInputs(node, "indices", indices);
     jit::tracer::addInputs(node, "output_size", output_size);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "grad_input", grad_input);
     }
@@ -7211,7 +7214,7 @@ Tensor & VariableType::max_unpool3d_out(Tensor & out, const Tensor & self, const
     jit::tracer::addInputs(node, "stride", stride);
     jit::tracer::addInputs(node, "padding", padding);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -7272,7 +7275,7 @@ Tensor VariableType::min_values(const Tensor & self, IntArrayRef dim, bool keepd
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "keepdim", keepdim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::min_values(self, dim, keepdim);
@@ -7296,7 +7299,7 @@ Tensor VariableType::min_values(const Tensor & self, DimnameList dim, bool keepd
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "keepdim", keepdim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::min_values(self, dim, keepdim);
@@ -7347,7 +7350,7 @@ std::tuple<Tensor,Tensor,Tensor> VariableType::miopen_convolution_backward(const
     jit::tracer::addInputs(node, "deterministic", deterministic);
     jit::tracer::addInputs(node, "output_mask", output_mask);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -7409,7 +7412,7 @@ Tensor VariableType::miopen_convolution_backward_bias(const Tensor & grad_output
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "grad_output", grad_output);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -7464,7 +7467,7 @@ Tensor VariableType::miopen_convolution_backward_input(IntArrayRef self_size, co
     jit::tracer::addInputs(node, "benchmark", benchmark);
     jit::tracer::addInputs(node, "deterministic", deterministic);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -7537,7 +7540,7 @@ Tensor VariableType::miopen_convolution_transpose(const Tensor & self, const Ten
     jit::tracer::addInputs(node, "benchmark", benchmark);
     jit::tracer::addInputs(node, "deterministic", deterministic);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -7598,7 +7601,7 @@ Tensor VariableType::mkldnn_adaptive_avg_pool2d(const Tensor & self, IntArrayRef
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "output_size", output_size);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -7658,7 +7661,7 @@ Tensor VariableType::mkldnn_convolution(const Tensor & self, const Tensor & weig
     jit::tracer::addInputs(node, "dilation", dilation);
     jit::tracer::addInputs(node, "groups", groups);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -7722,7 +7725,7 @@ Tensor VariableType::mkldnn_reorder_conv2d_weight(const Tensor & self, IntArrayR
     jit::tracer::addInputs(node, "dilation", dilation);
     jit::tracer::addInputs(node, "groups", groups);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -7775,7 +7778,7 @@ std::tuple<Tensor &,Tensor &> VariableType::mode_out(Tensor & values, Tensor & i
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "keepdim", keepdim);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "values", values);
     }
@@ -7838,7 +7841,7 @@ std::tuple<Tensor &,Tensor &> VariableType::mode_out(Tensor & values, Tensor & i
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "keepdim", keepdim);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "values", values);
     }
@@ -7882,7 +7885,7 @@ Tensor VariableType::mse_loss_backward(const Tensor & grad_output, const Tensor 
     jit::tracer::addInputs(node, "target", target);
     jit::tracer::addInputs(node, "reduction", reduction);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -7949,7 +7952,7 @@ Tensor VariableType::multilabel_margin_loss_backward(const Tensor & grad_output,
     jit::tracer::addInputs(node, "reduction", reduction);
     jit::tracer::addInputs(node, "is_target", is_target);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -8024,7 +8027,7 @@ std::tuple<Tensor &,Tensor &> VariableType::multilabel_margin_loss_forward_out(T
     jit::tracer::addInputs(node, "target", target);
     jit::tracer::addInputs(node, "reduction", reduction);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "output", output);
     }
@@ -8095,7 +8098,7 @@ Tensor VariableType::multinomial(const Tensor & self, int64_t num_samples, bool 
     jit::tracer::addInputs(node, "replacement", replacement);
     jit::tracer::addInputs(node, "generator", generator);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -8141,7 +8144,7 @@ Tensor VariableType::mvlgamma(const Tensor & self, int64_t p) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "p", p);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -8238,7 +8241,7 @@ Tensor VariableType::narrow(const Tensor & self, int64_t dim, int64_t start, int
     jit::tracer::addInputs(node, "start", start);
     jit::tracer::addInputs(node, "length", length);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::narrow(self, dim, start, length);
@@ -8288,7 +8291,7 @@ std::tuple<Tensor,Tensor,Tensor> VariableType::native_batch_norm(const Tensor & 
     jit::tracer::addInputs(node, "momentum", momentum);
     jit::tracer::addInputs(node, "eps", eps);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -8365,7 +8368,7 @@ Tensor & VariableType::ne_out(Tensor & out, const Tensor & self, Scalar other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -8417,7 +8420,7 @@ Tensor & VariableType::ne_out(Tensor & out, const Tensor & self, const Tensor & 
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -8475,7 +8478,7 @@ Tensor VariableType::new_full(const Tensor & self, IntArrayRef size, Scalar fill
     jit::tracer::addInputs(node, "fill_value", fill_value);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::new_full(self, size, fill_value, options);
@@ -8501,7 +8504,7 @@ Tensor VariableType::nll_loss(const Tensor & self, const Tensor & target, const 
     jit::tracer::addInputs(node, "reduction", reduction);
     jit::tracer::addInputs(node, "ignore_index", ignore_index);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::nll_loss(self, target, weight, reduction, ignore_index);
@@ -8527,7 +8530,7 @@ Tensor VariableType::nll_loss2d(const Tensor & self, const Tensor & target, cons
     jit::tracer::addInputs(node, "reduction", reduction);
     jit::tracer::addInputs(node, "ignore_index", ignore_index);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::nll_loss2d(self, target, weight, reduction, ignore_index);
@@ -8568,7 +8571,7 @@ Tensor & VariableType::nll_loss2d_backward_out(Tensor & grad_input, const Tensor
     jit::tracer::addInputs(node, "ignore_index", ignore_index);
     jit::tracer::addInputs(node, "total_weight", total_weight);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "grad_input", grad_input);
     }
@@ -8667,7 +8670,7 @@ Tensor & VariableType::nll_loss_backward_out(Tensor & grad_input, const Tensor &
     jit::tracer::addInputs(node, "ignore_index", ignore_index);
     jit::tracer::addInputs(node, "total_weight", total_weight);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "grad_input", grad_input);
     }
@@ -8748,7 +8751,7 @@ Tensor VariableType::nuclear_norm(const Tensor & self, bool keepdim) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "keepdim", keepdim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::nuclear_norm(self, keepdim);
@@ -8772,7 +8775,7 @@ Tensor VariableType::nuclear_norm(const Tensor & self, IntArrayRef dim, bool kee
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "keepdim", keepdim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::nuclear_norm(self, dim, keepdim);
@@ -8806,7 +8809,7 @@ Tensor VariableType::orgqr(const Tensor & self, const Tensor & input2) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "input2", input2);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -8868,7 +8871,7 @@ Tensor & VariableType::ormqr_out(Tensor & out, const Tensor & self, const Tensor
     jit::tracer::addInputs(node, "left", left);
     jit::tracer::addInputs(node, "transpose", transpose);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -8942,7 +8945,7 @@ Tensor VariableType::permute(const Tensor & self, IntArrayRef dims) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "dims", dims);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -8983,7 +8986,7 @@ Tensor VariableType::pixel_shuffle(const Tensor & self, int64_t upscale_factor) 
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "upscale_factor", upscale_factor);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::pixel_shuffle(self, upscale_factor);
@@ -9103,7 +9106,7 @@ Tensor VariableType::quantize_per_tensor(const Tensor & self, double scale, int6
     jit::tracer::addInputs(node, "zero_point", zero_point);
     jit::tracer::addInputs(node, "dtype", dtype);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -9150,7 +9153,7 @@ std::tuple<Tensor,Tensor> VariableType::quantized_gru(const Tensor & input, cons
     jit::tracer::addInputs(node, "bidirectional", bidirectional);
     jit::tracer::addInputs(node, "batch_first", batch_first);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   std::tie(result0, result1) = TypeDefault::quantized_gru(input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first);
@@ -9183,7 +9186,7 @@ std::tuple<Tensor,Tensor> VariableType::quantized_gru(const Tensor & data, const
     jit::tracer::addInputs(node, "train", train);
     jit::tracer::addInputs(node, "bidirectional", bidirectional);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   std::tie(result0, result1) = TypeDefault::quantized_gru(data, batch_sizes, hx, params, has_biases, num_layers, dropout, train, bidirectional);
@@ -9221,7 +9224,7 @@ std::tuple<Tensor,Tensor> VariableType::quantized_lstm_cell(const Tensor & input
     jit::tracer::addInputs(node, "zero_point_ih", zero_point_ih);
     jit::tracer::addInputs(node, "zero_point_hh", zero_point_hh);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   std::tie(result0, result1) = TypeDefault::quantized_lstm_cell(input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh);
@@ -9357,7 +9360,7 @@ Tensor VariableType::range(Scalar start, Scalar end, Scalar step, const TensorOp
     jit::tracer::addInputs(node, "step", step);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::range(start, end, step, options);
@@ -9381,7 +9384,7 @@ Tensor VariableType::range(Scalar start, Scalar end, const TensorOptions & optio
     jit::tracer::addInputs(node, "end", end);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::range(start, end, options);
@@ -9409,7 +9412,7 @@ Tensor VariableType::reciprocal(const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -9507,7 +9510,7 @@ Tensor VariableType::refine_names(const Tensor & self, DimnameList names) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "names", names);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::refine_names(self, names);
@@ -9538,7 +9541,7 @@ Tensor VariableType::reflection_pad1d(const Tensor & self, IntArrayRef padding) 
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "padding", padding);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -9590,7 +9593,7 @@ Tensor & VariableType::reflection_pad1d_backward_out(Tensor & grad_input, const 
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "padding", padding);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "grad_input", grad_input);
     }
@@ -9659,7 +9662,7 @@ Tensor & VariableType::reflection_pad2d_out(Tensor & out, const Tensor & self, I
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "padding", padding);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -9718,7 +9721,7 @@ Tensor VariableType::relu(const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -9822,7 +9825,7 @@ Tensor & VariableType::remainder_out(Tensor & out, const Tensor & self, Scalar o
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -9885,7 +9888,7 @@ Tensor & VariableType::remainder_out(Tensor & out, const Tensor & self, const Te
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -9954,7 +9957,7 @@ Tensor & VariableType::replication_pad1d_out(Tensor & out, const Tensor & self, 
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "padding", padding);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -10029,7 +10032,7 @@ Tensor VariableType::rrelu_with_noise(const Tensor & self, const Tensor & noise,
     jit::tracer::addInputs(node, "training", training);
     jit::tracer::addInputs(node, "generator", generator);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -10164,7 +10167,7 @@ Tensor & VariableType::rrelu_with_noise_backward_out(Tensor & grad_input, const 
     jit::tracer::addInputs(node, "upper", upper);
     jit::tracer::addInputs(node, "training", training);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "grad_input", grad_input);
     }
@@ -10233,7 +10236,7 @@ Tensor VariableType::scatter_add(const Tensor & self, int64_t dim, const Tensor 
     jit::tracer::addInputs(node, "index", index);
     jit::tracer::addInputs(node, "src", src);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::scatter_add(self, dim, index, src);
@@ -10258,7 +10261,7 @@ Tensor VariableType::scatter_add(const Tensor & self, Dimname dim, const Tensor 
     jit::tracer::addInputs(node, "index", index);
     jit::tracer::addInputs(node, "src", src);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::scatter_add(self, dim, index, src);
@@ -10356,7 +10359,7 @@ Tensor VariableType::select(const Tensor & self, Dimname dim, int64_t index) {
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "index", index);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::select(self, dim, index);
@@ -10389,7 +10392,7 @@ Tensor VariableType::select(const Tensor & self, int64_t dim, int64_t index) {
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "index", index);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -10436,7 +10439,7 @@ Tensor VariableType::sin(const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -10552,7 +10555,7 @@ std::tuple<Tensor,Tensor,Tensor> VariableType::slow_conv_dilated3d_backward(cons
     jit::tracer::addInputs(node, "dilation", dilation);
     jit::tracer::addInputs(node, "output_mask", output_mask);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -10620,7 +10623,7 @@ Tensor & VariableType::soft_margin_loss_out(Tensor & out, const Tensor & self, c
     jit::tracer::addInputs(node, "target", target);
     jit::tracer::addInputs(node, "reduction", reduction);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -10681,7 +10684,7 @@ Tensor VariableType::softmax(const Tensor & self, int64_t dim, c10::optional<Sca
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "dtype", dtype);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::softmax(self, dim, dtype);
@@ -10705,7 +10708,7 @@ Tensor VariableType::softmax(const Tensor & self, Dimname dim, c10::optional<Sca
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "dtype", dtype);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::softmax(self, dim, dtype);
@@ -10738,7 +10741,7 @@ Tensor & VariableType::softplus_out(Tensor & out, const Tensor & self, Scalar be
     jit::tracer::addInputs(node, "beta", beta);
     jit::tracer::addInputs(node, "threshold", threshold);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -10801,7 +10804,7 @@ Tensor VariableType::softshrink_backward(const Tensor & grad_output, const Tenso
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "lambd", lambd);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -10861,7 +10864,7 @@ std::tuple<Tensor &,Tensor &> VariableType::sort_out(Tensor & values, Tensor & i
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "descending", descending);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "values", values);
     }
@@ -10924,7 +10927,7 @@ std::tuple<Tensor &,Tensor &> VariableType::sort_out(Tensor & values, Tensor & i
     jit::tracer::addInputs(node, "dim", dim);
     jit::tracer::addInputs(node, "descending", descending);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "values", values);
     }
@@ -10959,7 +10962,7 @@ Tensor VariableType::squeeze(const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -11008,7 +11011,7 @@ Tensor VariableType::squeeze(const Tensor & self, int64_t dim) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "dim", dim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -11049,7 +11052,7 @@ Tensor VariableType::squeeze(const Tensor & self, Dimname dim) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "dim", dim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::squeeze(self, dim);
@@ -11216,7 +11219,7 @@ Tensor & VariableType::std_out(Tensor & out, const Tensor & self, IntArrayRef di
     jit::tracer::addInputs(node, "unbiased", unbiased);
     jit::tracer::addInputs(node, "keepdim", keepdim);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -11271,7 +11274,7 @@ Tensor & VariableType::std_out(Tensor & out, const Tensor & self, DimnameList di
     jit::tracer::addInputs(node, "unbiased", unbiased);
     jit::tracer::addInputs(node, "keepdim", keepdim);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -11308,7 +11311,7 @@ Tensor VariableType::sub(const Tensor & self, const Tensor & other, Scalar alpha
     jit::tracer::addInputs(node, "other", other);
     jit::tracer::addInputs(node, "alpha", alpha);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -11363,7 +11366,7 @@ Tensor VariableType::sub(const Tensor & self, Scalar other, Scalar alpha) {
     jit::tracer::addInputs(node, "other", other);
     jit::tracer::addInputs(node, "alpha", alpha);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -11530,7 +11533,7 @@ Tensor & VariableType::sum_out(Tensor & out, const Tensor & self, IntArrayRef di
     jit::tracer::addInputs(node, "keepdim", keepdim);
     jit::tracer::addInputs(node, "dtype", dtype);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -11585,7 +11588,7 @@ Tensor & VariableType::sum_out(Tensor & out, const Tensor & self, DimnameList di
     jit::tracer::addInputs(node, "keepdim", keepdim);
     jit::tracer::addInputs(node, "dtype", dtype);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -11623,7 +11626,7 @@ Tensor & VariableType::take_out(Tensor & out, const Tensor & self, const Tensor 
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "index", index);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -11703,7 +11706,7 @@ std::tuple<Tensor,Tensor,Tensor> VariableType::thnn_conv2d_forward(const Tensor 
     jit::tracer::addInputs(node, "stride", stride);
     jit::tracer::addInputs(node, "padding", padding);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -11791,7 +11794,7 @@ std::tuple<Tensor,Tensor,Tensor> VariableType::thnn_conv3d_backward(const Tensor
     jit::tracer::addInputs(node, "fgrad_input", fgrad_input);
     jit::tracer::addInputs(node, "output_mask", output_mask);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -11881,7 +11884,7 @@ std::tuple<Tensor &,Tensor &,Tensor &> VariableType::thnn_conv3d_forward_out(Ten
     jit::tracer::addInputs(node, "stride", stride);
     jit::tracer::addInputs(node, "padding", padding);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "output", output);
     }
@@ -11969,7 +11972,7 @@ Tensor & VariableType::thnn_conv_depthwise2d_out(Tensor & out, const Tensor & se
     jit::tracer::addInputs(node, "padding", padding);
     jit::tracer::addInputs(node, "dilation", dilation);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -11997,7 +12000,7 @@ Tensor VariableType::to_dense_backward(const Tensor & grad, const Tensor & input
     jit::tracer::addInputs(node, "grad", grad);
     jit::tracer::addInputs(node, "input", input);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::to_dense_backward(grad, input);
@@ -12034,7 +12037,7 @@ std::tuple<Tensor &,Tensor &> VariableType::topk_out(Tensor & values, Tensor & i
     jit::tracer::addInputs(node, "largest", largest);
     jit::tracer::addInputs(node, "sorted", sorted);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "values", values);
     }
@@ -12103,7 +12106,7 @@ Tensor & VariableType::trunc_out(Tensor & out, const Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -12163,7 +12166,7 @@ std::vector<Tensor> VariableType::unbind(const Tensor & self, int64_t dim) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "dim", dim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -12204,7 +12207,7 @@ std::vector<Tensor> VariableType::unbind(const Tensor & self, Dimname dim) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "dim", dim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::unbind(self, dim);
@@ -12238,7 +12241,7 @@ std::tuple<Tensor,Tensor,Tensor> VariableType::unique_consecutive(const Tensor &
     jit::tracer::addInputs(node, "return_counts", return_counts);
     jit::tracer::addInputs(node, "dim", dim);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -12291,7 +12294,7 @@ Tensor VariableType::upsample_bilinear2d_backward(const Tensor & grad_output, In
     jit::tracer::addInputs(node, "input_size", input_size);
     jit::tracer::addInputs(node, "align_corners", align_corners);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -12342,7 +12345,7 @@ Tensor VariableType::upsample_linear1d(const Tensor & self, IntArrayRef output_s
     jit::tracer::addInputs(node, "output_size", output_size);
     jit::tracer::addInputs(node, "align_corners", align_corners);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -12394,7 +12397,7 @@ Tensor & VariableType::upsample_linear1d_backward_out(Tensor & grad_input, const
     jit::tracer::addInputs(node, "input_size", input_size);
     jit::tracer::addInputs(node, "align_corners", align_corners);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "grad_input", grad_input);
     }
@@ -12455,7 +12458,7 @@ Tensor VariableType::upsample_nearest1d_backward(const Tensor & grad_output, Int
     jit::tracer::addInputs(node, "output_size", output_size);
     jit::tracer::addInputs(node, "input_size", input_size);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -12504,7 +12507,7 @@ Tensor VariableType::upsample_nearest2d(const Tensor & self, IntArrayRef output_
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "output_size", output_size);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   #ifndef NDEBUG
@@ -12555,7 +12558,7 @@ Tensor & VariableType::upsample_nearest2d_backward_out(Tensor & grad_input, cons
     jit::tracer::addInputs(node, "output_size", output_size);
     jit::tracer::addInputs(node, "input_size", input_size);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "grad_input", grad_input);
     }
@@ -12617,7 +12620,7 @@ Tensor & VariableType::upsample_nearest3d_out(Tensor & out, const Tensor & self,
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "output_size", output_size);
     if (tracer_state->force_outplace) {
-    
+
     } else {
       jit::tracer::addInputs(node, "out", out);
     }
@@ -12670,7 +12673,7 @@ Tensor VariableType::view_as(const Tensor & self, const Tensor & other) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "other", other);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   auto result = TypeDefault::view_as(self, other);
@@ -12958,7 +12961,7 @@ static auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::bartlett_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (int64_t, const TensorOptions &), &VariableType::bartlett_window>(TensorTypeId::VariableTensorId)
+    .impl_unboxedOnlyKernel<Tensor (int64_t, c10::optional<ScalarType> , c10::optional<Layout> , c10::optional<Device> , c10::optional<bool> ), &VariableType::bartlett_window>(TensorTypeId::VariableTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::bartlett_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")

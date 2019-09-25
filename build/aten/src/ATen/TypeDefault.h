@@ -124,7 +124,7 @@ struct TORCH_API TypeDefault {
   static Tensor asin(const Tensor & self);
   static Tensor atan(const Tensor & self);
   static Tensor & _baddbmm_mkl_(Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha);
-  static Tensor bartlett_window(int64_t window_length, const TensorOptions & options);
+  static Tensor bartlett_window(int64_t window_length, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory);
   static Tensor bartlett_window(int64_t window_length, bool periodic, const TensorOptions & options);
   static Tensor batch_norm(const Tensor & input, const Tensor & weight, const Tensor & bias, const Tensor & running_mean, const Tensor & running_var, bool training, double momentum, double eps, bool cudnn_enabled);
   static std::tuple<Tensor,Tensor,Tensor,int64_t> _batch_norm_impl_index(const Tensor & input, const Tensor & weight, const Tensor & bias, const Tensor & running_mean, const Tensor & running_var, bool training, double momentum, double eps, bool cudnn_enabled);

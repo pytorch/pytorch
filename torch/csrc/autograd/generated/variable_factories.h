@@ -19,6 +19,10 @@
 using at::DimnameList;
 #endif
 
+using at::Device;
+using at::ScalarType;
+using at::Layout;
+
 namespace torch {
 
 namespace detail {
@@ -279,7 +283,7 @@ inline at::Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t 
     jit::tracer::addInputs(node, "dropout_seed", dropout_seed);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -306,7 +310,7 @@ inline at::Tensor arange(at::Scalar end, const at::TensorOptions & options = {})
     jit::tracer::addInputs(node, "end", end);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -334,7 +338,7 @@ inline at::Tensor arange(at::Scalar start, at::Scalar end, const at::TensorOptio
     jit::tracer::addInputs(node, "end", end);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -363,7 +367,7 @@ inline at::Tensor arange(at::Scalar start, at::Scalar end, at::Scalar step, cons
     jit::tracer::addInputs(node, "step", step);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -378,7 +382,7 @@ inline at::Tensor arange(at::Scalar start, at::Scalar end, at::Scalar step, cons
   }
   return result;
 }
-inline at::Tensor bartlett_window(int64_t window_length, const at::TensorOptions & options = {}) {
+inline at::Tensor bartlett_window(int64_t window_length, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
   torch::jit::Node* node = nullptr;
   std::shared_ptr<jit::tracer::TracingState> tracer_state;
   if (jit::tracer::isTracing()) {
@@ -388,17 +392,20 @@ inline at::Tensor bartlett_window(int64_t window_length, const at::TensorOptions
     node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "window_length", window_length);
-    jit::tracer::addInputs(node, "options", options);
+    jit::tracer::addInputs(node, "dtype", dtype);
+    jit::tracer::addInputs(node, "layout", layout);
+    jit::tracer::addInputs(node, "device", device);
+    jit::tracer::addInputs(node, "pin_memory", pin_memory);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    return at::bartlett_window(window_length, at::TensorOptions(options).is_variable(false));
+    return at::bartlett_window(window_length, dtype, layout, device, pin_memory);
   })();
   at::Tensor result =
-    autograd::make_variable(std::move(tensor), /*requires_grad=*/options.requires_grad());
+    autograd::make_variable(std::move(tensor), /*requires_grad=*/false);
   if (tracer_state) {
     jit::tracer::setTracingState(std::move(tracer_state));
     jit::tracer::addOutput(node, result);
@@ -418,7 +425,7 @@ inline at::Tensor bartlett_window(int64_t window_length, bool periodic, const at
     jit::tracer::addInputs(node, "periodic", periodic);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -445,7 +452,7 @@ inline at::Tensor blackman_window(int64_t window_length, const at::TensorOptions
     jit::tracer::addInputs(node, "window_length", window_length);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -473,7 +480,7 @@ inline at::Tensor blackman_window(int64_t window_length, bool periodic, const at
     jit::tracer::addInputs(node, "periodic", periodic);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -502,7 +509,7 @@ inline at::Tensor empty(at::IntArrayRef size, c10::optional<DimnameList> names, 
     jit::tracer::addInputs(node, "options", options);
     jit::tracer::addInputs(node, "memory_format", memory_format);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -530,7 +537,7 @@ inline at::Tensor empty(at::IntArrayRef size, const at::TensorOptions & options 
     jit::tracer::addInputs(node, "options", options);
     jit::tracer::addInputs(node, "memory_format", memory_format);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -560,7 +567,7 @@ inline at::Tensor _empty_affine_quantized(at::IntArrayRef size, const at::Tensor
     jit::tracer::addInputs(node, "zero_point", zero_point);
     jit::tracer::addInputs(node, "memory_format", memory_format);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -591,7 +598,7 @@ inline at::Tensor _empty_per_channel_affine_quantized(at::IntArrayRef size, cons
     jit::tracer::addInputs(node, "options", options);
     jit::tracer::addInputs(node, "memory_format", memory_format);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -617,7 +624,7 @@ inline at::Tensor empty_like(const at::Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -645,7 +652,7 @@ inline at::Tensor empty_like(const at::Tensor & self, const at::TensorOptions & 
     jit::tracer::addInputs(node, "options", options);
     jit::tracer::addInputs(node, "memory_format", memory_format);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -673,7 +680,7 @@ inline at::Tensor empty_strided(at::IntArrayRef size, at::IntArrayRef stride, co
     jit::tracer::addInputs(node, "stride", stride);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -700,7 +707,7 @@ inline at::Tensor eye(int64_t n, const at::TensorOptions & options = {}) {
     jit::tracer::addInputs(node, "n", n);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -728,7 +735,7 @@ inline at::Tensor eye(int64_t n, int64_t m, const at::TensorOptions & options = 
     jit::tracer::addInputs(node, "m", m);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -757,7 +764,7 @@ inline at::Tensor full(at::IntArrayRef size, at::Scalar fill_value, c10::optiona
     jit::tracer::addInputs(node, "names", names);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -785,7 +792,7 @@ inline at::Tensor full(at::IntArrayRef size, at::Scalar fill_value, const at::Te
     jit::tracer::addInputs(node, "fill_value", fill_value);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -812,7 +819,7 @@ inline at::Tensor full_like(const at::Tensor & self, at::Scalar fill_value) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "fill_value", fill_value);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -840,7 +847,7 @@ inline at::Tensor full_like(const at::Tensor & self, at::Scalar fill_value, cons
     jit::tracer::addInputs(node, "fill_value", fill_value);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -869,7 +876,7 @@ inline at::Tensor from_file(std::string filename, c10::optional<bool> shared = c
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -896,7 +903,7 @@ inline at::Tensor hann_window(int64_t window_length, const at::TensorOptions & o
     jit::tracer::addInputs(node, "window_length", window_length);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -924,7 +931,7 @@ inline at::Tensor hann_window(int64_t window_length, bool periodic, const at::Te
     jit::tracer::addInputs(node, "periodic", periodic);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -951,7 +958,7 @@ inline at::Tensor hamming_window(int64_t window_length, const at::TensorOptions 
     jit::tracer::addInputs(node, "window_length", window_length);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -979,7 +986,7 @@ inline at::Tensor hamming_window(int64_t window_length, bool periodic, const at:
     jit::tracer::addInputs(node, "periodic", periodic);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1008,7 +1015,7 @@ inline at::Tensor hamming_window(int64_t window_length, bool periodic, double al
     jit::tracer::addInputs(node, "alpha", alpha);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1038,7 +1045,7 @@ inline at::Tensor hamming_window(int64_t window_length, bool periodic, double al
     jit::tracer::addInputs(node, "beta", beta);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1067,7 +1074,7 @@ inline at::Tensor linspace(at::Scalar start, at::Scalar end, int64_t steps = 100
     jit::tracer::addInputs(node, "steps", steps);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1097,7 +1104,7 @@ inline at::Tensor logspace(at::Scalar start, at::Scalar end, int64_t steps = 100
     jit::tracer::addInputs(node, "base", base);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1125,7 +1132,7 @@ inline at::Tensor ones(at::IntArrayRef size, c10::optional<DimnameList> names, c
     jit::tracer::addInputs(node, "names", names);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1152,7 +1159,7 @@ inline at::Tensor ones(at::IntArrayRef size, const at::TensorOptions & options =
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1178,7 +1185,7 @@ inline at::Tensor ones_like(const at::Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1205,7 +1212,7 @@ inline at::Tensor ones_like(const at::Tensor & self, const at::TensorOptions & o
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1232,7 +1239,7 @@ inline at::Tensor scalar_tensor(at::Scalar s, const at::TensorOptions & options 
     jit::tracer::addInputs(node, "s", s);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1260,7 +1267,7 @@ inline at::Tensor rand(at::IntArrayRef size, c10::optional<DimnameList> names, c
     jit::tracer::addInputs(node, "names", names);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1289,7 +1296,7 @@ inline at::Tensor rand(at::IntArrayRef size, at::Generator * generator, c10::opt
     jit::tracer::addInputs(node, "names", names);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1316,7 +1323,7 @@ inline at::Tensor rand(at::IntArrayRef size, const at::TensorOptions & options =
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1344,7 +1351,7 @@ inline at::Tensor rand(at::IntArrayRef size, at::Generator * generator, const at
     jit::tracer::addInputs(node, "generator", generator);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1370,7 +1377,7 @@ inline at::Tensor rand_like(const at::Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1397,7 +1404,7 @@ inline at::Tensor rand_like(const at::Tensor & self, const at::TensorOptions & o
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1425,7 +1432,7 @@ inline at::Tensor randint(int64_t high, at::IntArrayRef size, const at::TensorOp
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1454,7 +1461,7 @@ inline at::Tensor randint(int64_t high, at::IntArrayRef size, at::Generator * ge
     jit::tracer::addInputs(node, "generator", generator);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1483,7 +1490,7 @@ inline at::Tensor randint(int64_t low, int64_t high, at::IntArrayRef size, const
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1513,7 +1520,7 @@ inline at::Tensor randint(int64_t low, int64_t high, at::IntArrayRef size, at::G
     jit::tracer::addInputs(node, "generator", generator);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1540,7 +1547,7 @@ inline at::Tensor randint_like(const at::Tensor & self, int64_t high) {
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "high", high);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1568,7 +1575,7 @@ inline at::Tensor randint_like(const at::Tensor & self, int64_t low, int64_t hig
     jit::tracer::addInputs(node, "low", low);
     jit::tracer::addInputs(node, "high", high);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1596,7 +1603,7 @@ inline at::Tensor randint_like(const at::Tensor & self, int64_t high, const at::
     jit::tracer::addInputs(node, "high", high);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1625,7 +1632,7 @@ inline at::Tensor randint_like(const at::Tensor & self, int64_t low, int64_t hig
     jit::tracer::addInputs(node, "high", high);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1652,7 +1659,7 @@ inline at::Tensor randn(at::IntArrayRef size, const at::TensorOptions & options 
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1680,7 +1687,7 @@ inline at::Tensor randn(at::IntArrayRef size, at::Generator * generator, const a
     jit::tracer::addInputs(node, "generator", generator);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1708,7 +1715,7 @@ inline at::Tensor randn(at::IntArrayRef size, c10::optional<DimnameList> names, 
     jit::tracer::addInputs(node, "names", names);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1737,7 +1744,7 @@ inline at::Tensor randn(at::IntArrayRef size, at::Generator * generator, c10::op
     jit::tracer::addInputs(node, "names", names);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1763,7 +1770,7 @@ inline at::Tensor randn_like(const at::Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1790,7 +1797,7 @@ inline at::Tensor randn_like(const at::Tensor & self, const at::TensorOptions & 
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1817,7 +1824,7 @@ inline at::Tensor randperm(int64_t n, const at::TensorOptions & options = {}) {
     jit::tracer::addInputs(node, "n", n);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1845,7 +1852,7 @@ inline at::Tensor randperm(int64_t n, at::Generator * generator, const at::Tenso
     jit::tracer::addInputs(node, "generator", generator);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1874,7 +1881,7 @@ inline at::Tensor range(at::Scalar start, at::Scalar end, at::Scalar step = 1, c
     jit::tracer::addInputs(node, "step", step);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1902,7 +1909,7 @@ inline at::Tensor range(at::Scalar start, at::Scalar end, const at::TensorOption
     jit::tracer::addInputs(node, "end", end);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1930,7 +1937,7 @@ inline at::Tensor zeros(at::IntArrayRef size, c10::optional<DimnameList> names, 
     jit::tracer::addInputs(node, "names", names);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1957,7 +1964,7 @@ inline at::Tensor zeros(at::IntArrayRef size, const at::TensorOptions & options 
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -1983,7 +1990,7 @@ inline at::Tensor zeros_like(const at::Tensor & self) {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -2010,7 +2017,7 @@ inline at::Tensor zeros_like(const at::Tensor & self, const at::TensorOptions & 
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -2037,7 +2044,7 @@ inline at::Tensor sparse_coo_tensor(at::IntArrayRef size, const at::TensorOption
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -2065,7 +2072,7 @@ inline at::Tensor sparse_coo_tensor(const at::Tensor & indices, const at::Tensor
     jit::tracer::addInputs(node, "values", values);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -2094,7 +2101,7 @@ inline at::Tensor sparse_coo_tensor(const at::Tensor & indices, const at::Tensor
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -2123,7 +2130,7 @@ inline at::Tensor _sparse_coo_tensor_unsafe(const at::Tensor & indices, const at
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -2152,7 +2159,7 @@ inline at::Tensor _sparse_coo_tensor_with_dims(int64_t sparse_dim, int64_t dense
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -2183,7 +2190,7 @@ inline at::Tensor _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, i
     jit::tracer::addInputs(node, "values", values);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -2212,7 +2219,7 @@ inline at::Tensor tril_indices(int64_t row, int64_t col, int64_t offset = 0, con
     jit::tracer::addInputs(node, "offset", offset);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -2241,7 +2248,7 @@ inline at::Tensor triu_indices(int64_t row, int64_t col, int64_t offset = 0, con
     jit::tracer::addInputs(node, "offset", offset);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {
@@ -2271,7 +2278,7 @@ inline at::Tensor normal(double mean, double std, at::IntArrayRef size, at::Gene
     jit::tracer::addInputs(node, "generator", generator);
     jit::tracer::addInputs(node, "options", options);
     tracer_state->graph->insertNode(node);
-  
+
     jit::tracer::setTracingState(nullptr);
   }
   at::Tensor tensor = ([&]() {

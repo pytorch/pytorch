@@ -24,6 +24,7 @@ namespace torch { namespace autograd {
 struct Variable;
 using at::Context;
 using at::Device;
+using at::Layout;
 #ifdef BUILD_NAMEDTENSOR
 using at::Dimname;
 using at::DimnameList;
@@ -300,7 +301,7 @@ struct TORCH_API VariableType final {
   static Tensor baddbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) ;
   static Tensor & baddbmm_(Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) ;
   static Tensor & baddbmm_out(Tensor & out, const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) ;
-  static Tensor bartlett_window(int64_t window_length, const TensorOptions & options) ;
+  static Tensor bartlett_window(int64_t window_length, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory);
   static Tensor bartlett_window(int64_t window_length, bool periodic, const TensorOptions & options) ;
   static Tensor batch_norm(const Tensor & input, const Tensor & weight, const Tensor & bias, const Tensor & running_mean, const Tensor & running_var, bool training, double momentum, double eps, bool cudnn_enabled) ;
   static Tensor batch_norm_backward_elemt(const Tensor & grad_out, const Tensor & input, const Tensor & mean, const Tensor & invstd, const Tensor & weight, const Tensor & mean_dy, const Tensor & mean_dy_xmu) ;

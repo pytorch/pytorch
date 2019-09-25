@@ -713,7 +713,12 @@ Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ bartlett_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor bartlett_window(int64_t window_length, const TensorOptions& options) {
+Tensor bartlett_window(int64_t window_length, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory) {
+   const auto options = TensorOptions()
+        .dtype(dtype)
+        .device(device)
+        .layout(layout)
+        .pinned_memory(pin_memory);
   return native::bartlett_window(window_length, /*periodic=*/true, options);
 }
 

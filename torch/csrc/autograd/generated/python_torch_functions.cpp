@@ -34,6 +34,7 @@ using at::Tensor;
 using at::Device;
 using at::Scalar;
 using at::ScalarType;
+using at::Layout;
 using at::Backend;
 using at::OptionalDeviceGuard;
 using at::DeviceGuard;
@@ -2606,7 +2607,7 @@ static PyObject * THPVariable_bartlett_window(PyObject* self_, PyObject* args, P
         .layout(r.layout(2).layout)
         .requires_grad(r.toBool(5))
         .pinned_memory(r.toBool(4));
-    return wrap(dispatch_bartlett_window(window_length, options));
+    return wrap(dispatch_bartlett_window(window_length, r.scalartypeOptional(1), c10::optional<at::Layout>(r.layout(2).layout), r.deviceOptional(3), r.toBoolOptional(4)));
   } else if (r.idx == 1) {
     auto window_length = r.toInt64(0);
     auto periodic = r.toBool(1);

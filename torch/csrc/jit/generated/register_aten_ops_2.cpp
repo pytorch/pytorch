@@ -177,7 +177,7 @@ RegisterOperators reg(
      Operator(
          "aten::__or__.Tensor(Tensor self, Tensor other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::__or__(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -191,7 +191,7 @@ RegisterOperators reg(
      Operator(
          "aten::__or__.Scalar(Tensor self, Scalar other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::__or__(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toScalar()
@@ -205,7 +205,7 @@ RegisterOperators reg(
      Operator(
          "aten::__xor__.Tensor(Tensor self, Tensor other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::__xor__(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -219,7 +219,7 @@ RegisterOperators reg(
      Operator(
          "aten::__xor__.Scalar(Tensor self, Scalar other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::__xor__(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toScalar()
@@ -233,7 +233,7 @@ RegisterOperators reg(
      Operator(
          "aten::_addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_addr(
                  (std::move(peek(stack, 0, 5))).toTensor(),
                  (std::move(peek(stack, 1, 5))).toTensor(),
@@ -250,7 +250,7 @@ RegisterOperators reg(
      Operator(
          "aten::_cast_Double(Tensor self, bool non_blocking=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_cast_Double(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toBool()
@@ -264,7 +264,7 @@ RegisterOperators reg(
      Operator(
          "aten::_cast_Short(Tensor self, bool non_blocking=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_cast_Short(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toBool()
@@ -278,7 +278,7 @@ RegisterOperators reg(
      Operator(
          "aten::_cat(Tensor[] tensors, int dim=0) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_cat(
                  (std::move(peek(stack, 0, 2))).toTensorListRef(),
                  (std::move(peek(stack, 1, 2))).toInt()
@@ -292,7 +292,7 @@ RegisterOperators reg(
      Operator(
          "aten::_cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_cdist_backward(
                  (std::move(peek(stack, 0, 5))).toTensor(),
                  (std::move(peek(stack, 1, 5))).toTensor(),
@@ -322,7 +322,7 @@ RegisterOperators reg(
      Operator(
          "aten::_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::_ctc_loss(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toTensor(),
@@ -340,7 +340,7 @@ RegisterOperators reg(
      Operator(
          "aten::_cudnn_init_dropout_state(float dropout, bool train, int dropout_seed, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 3, 7))).toScalarType())
                      .layout((std::move(peek(stack, 4, 7))).toLayout())
@@ -366,7 +366,7 @@ RegisterOperators reg(
      Operator(
          "aten::_cudnn_rnn_flatten_weight(Tensor[] weight_arr, int weight_stride0, int input_size, int mode, int hidden_size, int num_layers, bool batch_first, bool bidirectional) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_cudnn_rnn_flatten_weight(
                  (std::move(peek(stack, 0, 8))).toTensorListRef(),
                  (std::move(peek(stack, 1, 8))).toInt(),
@@ -386,7 +386,7 @@ RegisterOperators reg(
      Operator(
          "aten::_cufft_get_plan_cache_max_size(int device_index) -> int",
          [](Stack & stack) {
-         
+
              auto result_ = at::_cufft_get_plan_cache_max_size(
                  (std::move(peek(stack, 0, 1))).toInt()
              );
@@ -399,7 +399,7 @@ RegisterOperators reg(
      Operator(
          "aten::_cumprod(Tensor self, int dim) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_cumprod(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toInt()
@@ -413,7 +413,7 @@ RegisterOperators reg(
      Operator(
          "aten::_cumsum(Tensor self, int dim) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_cumsum(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toInt()
@@ -427,7 +427,7 @@ RegisterOperators reg(
      Operator(
          "aten::_debug_has_internal_overlap(Tensor self) -> int",
          [](Stack & stack) {
-         
+
              auto result_ = at::_debug_has_internal_overlap(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -440,9 +440,9 @@ RegisterOperators reg(
      Operator(
          "aten::_dimI(Tensor self) -> int",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 1))).toTensor())._dimI(
-             
+
              );
              drop(stack, 1);
              pack(stack, std::move(result_));
@@ -453,7 +453,7 @@ RegisterOperators reg(
      Operator(
          "aten::_dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_dirichlet_grad(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toTensor(),
@@ -468,7 +468,7 @@ RegisterOperators reg(
      Operator(
          "aten::_embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None) -> (Tensor, Tensor, Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::_embedding_bag(
                  (std::move(peek(stack, 0, 7))).toTensor(),
                  (std::move(peek(stack, 1, 7))).toTensor(),
@@ -487,7 +487,7 @@ RegisterOperators reg(
      Operator(
          "aten::_embedding_bag_dense_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, int num_weights, bool scale_grad_by_freq, int mode, Tensor? per_sample_weights) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_embedding_bag_dense_backward(
                  (std::move(peek(stack, 0, 10))).toTensor(),
                  (std::move(peek(stack, 1, 10))).toTensor(),
@@ -509,7 +509,7 @@ RegisterOperators reg(
      Operator(
          "aten::_embedding_bag_per_sample_weights_backward(Tensor grad, Tensor weight, Tensor indices, Tensor offsets, Tensor offset2bag, int mode) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_embedding_bag_per_sample_weights_backward(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toTensor(),
@@ -527,7 +527,7 @@ RegisterOperators reg(
      Operator(
          "aten::_gather_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_gather_sparse_backward(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toInt(),
@@ -543,9 +543,9 @@ RegisterOperators reg(
      Operator(
          "aten::_indices(Tensor(a) self) -> Tensor(a)",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 1))).toTensor())._indices(
-             
+
              );
              drop(stack, 1);
              pack(stack, std::move(result_));
@@ -556,7 +556,7 @@ RegisterOperators reg(
      Operator(
          "aten::_lu_solve_helper(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_lu_solve_helper(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toTensor(),
@@ -571,7 +571,7 @@ RegisterOperators reg(
      Operator(
          "aten::_lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor, Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::_lu_with_info(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toBool(),
@@ -586,7 +586,7 @@ RegisterOperators reg(
      Operator(
          "aten::_make_per_channel_quantized_tensor(Tensor self, Tensor scale, Tensor zero_point, int axis) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_make_per_channel_quantized_tensor(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toTensor(),
@@ -602,7 +602,7 @@ RegisterOperators reg(
      Operator(
          "aten::_min(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::_min(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toInt(),
@@ -617,7 +617,7 @@ RegisterOperators reg(
      Operator(
          "aten::_multinomial_alias_draw(Tensor J, Tensor q, int num_samples, *, Generator? generator=None) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_multinomial_alias_draw(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toTensor(),
@@ -633,9 +633,9 @@ RegisterOperators reg(
      Operator(
          "aten::_nnpack_available() -> bool",
          [](Stack & stack) {
-         
+
              auto result_ = at::_nnpack_available(
-             
+
              );
              drop(stack, 0);
              pack(stack, std::move(result_));
@@ -646,7 +646,7 @@ RegisterOperators reg(
      Operator(
          "aten::_nnpack_spatial_convolution_backward(Tensor input, Tensor grad_output, Tensor weight, int[2] padding, bool[3] output_mask) -> (Tensor, Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::_nnpack_spatial_convolution_backward(
                  (std::move(peek(stack, 0, 5))).toTensor(),
                  (std::move(peek(stack, 1, 5))).toTensor(),
@@ -663,9 +663,9 @@ RegisterOperators reg(
      Operator(
          "aten::_nnz(Tensor self) -> int",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 1))).toTensor())._nnz(
-             
+
              );
              drop(stack, 1);
              pack(stack, std::move(result_));
@@ -676,7 +676,7 @@ RegisterOperators reg(
      Operator(
          "aten::_reshape_from_tensor(Tensor self, Tensor shape) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_reshape_from_tensor(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -690,7 +690,7 @@ RegisterOperators reg(
      Operator(
          "aten::_sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_sample_dirichlet(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  nullptr
@@ -721,7 +721,7 @@ RegisterOperators reg(
      Operator(
          "aten::_sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 3, 7))).toScalarType())
                      .layout((std::move(peek(stack, 4, 7))).toLayout())
@@ -747,7 +747,7 @@ RegisterOperators reg(
      Operator(
          "aten::_sparse_sum_backward(Tensor grad, Tensor self, int[] dim) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_sparse_sum_backward(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toTensor(),
@@ -762,7 +762,7 @@ RegisterOperators reg(
      Operator(
          "aten::_standard_gamma_grad(Tensor self, Tensor output) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::_standard_gamma_grad(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -776,7 +776,7 @@ RegisterOperators reg(
      Operator(
          "aten::_svd_helper(Tensor self, bool some, bool compute_uv) -> (Tensor, Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::_svd_helper(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toBool(),
@@ -791,7 +791,7 @@ RegisterOperators reg(
      Operator(
          "aten::_symeig_helper(Tensor self, bool eigenvectors, bool upper) -> (Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::_symeig_helper(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toBool(),
@@ -806,7 +806,7 @@ RegisterOperators reg(
      Operator(
          "aten::_thnn_fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor? input_bias=None, Tensor? hidden_bias=None) -> (Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::_thnn_fused_gru_cell(
                  (std::move(peek(stack, 0, 5))).toTensor(),
                  (std::move(peek(stack, 1, 5))).toTensor(),
@@ -823,7 +823,7 @@ RegisterOperators reg(
      Operator(
          "aten::_thnn_fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor? input_bias=None, Tensor? hidden_bias=None) -> (Tensor, Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::_thnn_fused_lstm_cell(
                  (std::move(peek(stack, 0, 5))).toTensor(),
                  (std::move(peek(stack, 1, 5))).toTensor(),
@@ -840,7 +840,7 @@ RegisterOperators reg(
      Operator(
          "aten::_unique(Tensor self, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::_unique(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toBool(),
@@ -855,9 +855,9 @@ RegisterOperators reg(
      Operator(
          "aten::_version(Tensor self) -> int",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 1))).toTensor())._version(
-             
+
              );
              drop(stack, 1);
              pack(stack, std::move(result_));
@@ -882,7 +882,7 @@ RegisterOperators reg(
      Operator(
          "aten::acos(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::acos(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -895,7 +895,7 @@ RegisterOperators reg(
      Operator(
          "aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::adaptive_avg_pool2d(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toIntListRef()
@@ -909,7 +909,7 @@ RegisterOperators reg(
      Operator(
          "aten::adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::adaptive_avg_pool3d_backward(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -923,7 +923,7 @@ RegisterOperators reg(
      Operator(
          "aten::adaptive_max_pool3d(Tensor self, int[3] output_size) -> (Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::adaptive_max_pool3d(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toIntListRef()
@@ -999,7 +999,7 @@ RegisterOperators reg(
      Operator(
          "aten::addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::addcdiv(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toTensor(),
@@ -1032,7 +1032,7 @@ RegisterOperators reg(
      Operator(
          "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::addmm(
                  (std::move(peek(stack, 0, 5))).toTensor(),
                  (std::move(peek(stack, 1, 5))).toTensor(),
@@ -1049,7 +1049,7 @@ RegisterOperators reg(
      Operator(
          "aten::addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::addmv(
                  (std::move(peek(stack, 0, 5))).toTensor(),
                  (std::move(peek(stack, 1, 5))).toTensor(),
@@ -1082,7 +1082,7 @@ RegisterOperators reg(
      Operator(
          "aten::affine_grid_generator_backward(Tensor grad, int[] size, bool align_corners) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::affine_grid_generator_backward(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toIntListRef(),
@@ -1097,7 +1097,7 @@ RegisterOperators reg(
      Operator(
          "aten::align_as(Tensor self, Tensor other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 2))).toTensor()).align_as(
                  (std::move(peek(stack, 1, 2))).toTensor()
              );
@@ -1110,7 +1110,7 @@ RegisterOperators reg(
      Operator(
          "aten::align_tensors(Tensor[] tensors) -> Tensor[]",
          [](Stack & stack) {
-         
+
              auto result_ = at::align_tensors(
                  (std::move(peek(stack, 0, 1))).toTensorListRef()
              );
@@ -1139,7 +1139,7 @@ RegisterOperators reg(
      Operator(
          "aten::alpha_dropout(Tensor input, float p, bool train) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::alpha_dropout(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toDouble(),
@@ -1200,7 +1200,7 @@ RegisterOperators reg(
      Operator(
          "aten::argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::argmin(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toOptional<int64_t>(),
@@ -1215,7 +1215,7 @@ RegisterOperators reg(
      Operator(
          "aten::argsort(Tensor self, int dim=-1, bool descending=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::argsort(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toInt(),
@@ -1230,7 +1230,7 @@ RegisterOperators reg(
      Operator(
          "aten::as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)",
          [](Stack & stack) {
-         
+
              auto result_ = at::as_strided(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toIntListRef(),
@@ -1260,7 +1260,7 @@ RegisterOperators reg(
      Operator(
          "aten::atan2(Tensor self, Tensor other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::atan2(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -1287,7 +1287,7 @@ RegisterOperators reg(
      Operator(
          "aten::avg_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::avg_pool1d(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toIntListRef(),
@@ -1305,7 +1305,7 @@ RegisterOperators reg(
      Operator(
          "aten::avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::avg_pool2d_backward(
                  (std::move(peek(stack, 0, 8))).toTensor(),
                  (std::move(peek(stack, 1, 8))).toTensor(),
@@ -1359,31 +1359,23 @@ RegisterOperators reg(
          atenOperatorOptions()
      ),
      Operator(
-         "aten::bartlett_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
-         [](Stack & stack) {
-         
-             const auto options = TensorOptions()
-                     .dtype((std::move(peek(stack, 1, 5))).toOptional<ScalarType>())
-                     .layout((std::move(peek(stack, 2, 5))).toOptional<c10::Layout>())
-                     .device((std::move(peek(stack, 3, 5))).toOptional<c10::Device>())
-                     .pinned_memory((std::move(peek(stack, 4, 5))).toOptional<bool>());
-             #ifdef USE_STATIC_DISPATCH
-                 auto result_ = at::bartlett_window((std::move(peek(stack, 0, 5))).toInt(),
-             options);
-             #else
-                 auto result_ = torch::bartlett_window((std::move(peek(stack, 0, 5))).toInt(),
-             options);
-             #endif
-             drop(stack, 5);
-             pack(stack, std::move(result_));
-             return 0;
-         },
-         atenOperatorOptions()
-     ),
+        "aten::bartlett_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
+        [](Stack & stack) {
+            #ifdef USE_STATIC_DISPATCH
+                auto result_ = at::bartlett_window((std::move(peek(stack, 0, 5))).toInt(), at::typeMetaToScalarType((std::move(peek(stack, 1, 5))).toOptional<ScalarType>()), (std::move(peek(stack, 2, 5))).toOptional<c10::Layout>(), (std::move(peek(stack, 3, 5))).toOptional<c10::Device>(), (std::move(peek(stack, 4, 5))).toOptional<bool>());
+            #else
+                auto result_ = torch::bartlett_window((std::move(peek(stack, 0, 5))).toInt(), (std::move(peek(stack, 1, 5))).toOptional<ScalarType>(), (std::move(peek(stack, 2, 5))).toOptional<c10::Layout>(), (std::move(peek(stack, 3, 5))).toOptional<c10::Device>(), (std::move(peek(stack, 4, 5))).toOptional<bool>());
+            #endif
+            drop(stack, 5);
+            pack(stack, std::move(result_));
+            return 0;
+        },
+        atenOperatorOptions()
+    ),
      Operator(
          "aten::bartlett_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 2, 6))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 3, 6))).toOptional<c10::Layout>())
@@ -1407,7 +1399,7 @@ RegisterOperators reg(
      Operator(
          "aten::batch_norm_backward_elemt(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, Tensor mean_dy, Tensor mean_dy_xmu) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::batch_norm_backward_elemt(
                  (std::move(peek(stack, 0, 7))).toTensor(),
                  (std::move(peek(stack, 1, 7))).toTensor(),
@@ -1454,7 +1446,7 @@ RegisterOperators reg(
      Operator(
          "aten::binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::binary_cross_entropy(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toTensor(),
@@ -1488,7 +1480,7 @@ RegisterOperators reg(
      Operator(
          "aten::bincount(Tensor self, Tensor? weights=None, int minlength=0) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::bincount(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  toOptionalTensor((std::move(peek(stack, 1, 3)))),
@@ -1505,7 +1497,7 @@ RegisterOperators reg(
          [](Stack & stack) {
              auto self = (std::move(peek(stack, 0, 1))).toTensor();
              auto result_ = (self).bitwise_not_(
-             
+
              );
              drop(stack, 1);
              pack(stack, std::move(result_));
@@ -1531,7 +1523,7 @@ RegisterOperators reg(
      Operator(
          "aten::ceil(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::ceil(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -1544,7 +1536,7 @@ RegisterOperators reg(
      Operator(
          "aten::celu(Tensor self, Scalar alpha=1.0) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::celu(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toScalar()
@@ -1558,7 +1550,7 @@ RegisterOperators reg(
      Operator(
          "aten::cholesky(Tensor self, bool upper=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::cholesky(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toBool()
@@ -1572,7 +1564,7 @@ RegisterOperators reg(
      Operator(
          "aten::cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::cholesky_solve(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toTensor(),
@@ -1617,7 +1609,7 @@ RegisterOperators reg(
      Operator(
          "aten::clamp_min(Tensor self, Scalar min) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::clamp_min(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toScalar()
@@ -1631,7 +1623,7 @@ RegisterOperators reg(
      Operator(
          "aten::col2im_backward(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::col2im_backward(
                  (std::move(peek(stack, 0, 5))).toTensor(),
                  (std::move(peek(stack, 1, 5))).toIntListRef(),
@@ -1648,7 +1640,7 @@ RegisterOperators reg(
      Operator(
          "aten::combinations(Tensor self, int r=2, bool with_replacement=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::combinations(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toInt(),
@@ -1663,7 +1655,7 @@ RegisterOperators reg(
      Operator(
          "aten::constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::constant_pad_nd(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toIntListRef(),
@@ -1678,7 +1670,7 @@ RegisterOperators reg(
      Operator(
          "aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::conv1d(
                  (std::move(peek(stack, 0, 7))).toTensor(),
                  (std::move(peek(stack, 1, 7))).toTensor(),
@@ -1697,7 +1689,7 @@ RegisterOperators reg(
      Operator(
          "aten::conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int pad) -> (Tensor, Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::conv_tbc_backward(
                  (std::move(peek(stack, 0, 5))).toTensor(),
                  (std::move(peek(stack, 1, 5))).toTensor(),
@@ -1714,7 +1706,7 @@ RegisterOperators reg(
      Operator(
          "aten::conv_transpose1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] output_padding=0, int groups=1, int[1] dilation=1) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::conv_transpose1d(
                  (std::move(peek(stack, 0, 8))).toTensor(),
                  (std::move(peek(stack, 1, 8))).toTensor(),
@@ -1734,7 +1726,7 @@ RegisterOperators reg(
      Operator(
          "aten::convolution_overrideable(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::convolution_overrideable(
                  (std::move(peek(stack, 0, 9))).toTensor(),
                  (std::move(peek(stack, 1, 9))).toTensor(),
@@ -1782,7 +1774,7 @@ RegisterOperators reg(
      Operator(
          "aten::cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::cosine_embedding_loss(
                  (std::move(peek(stack, 0, 5))).toTensor(),
                  (std::move(peek(stack, 1, 5))).toTensor(),
@@ -1799,7 +1791,7 @@ RegisterOperators reg(
      Operator(
          "aten::cross(Tensor self, Tensor other, int? dim=None) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::cross(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toTensor(),
@@ -1814,7 +1806,7 @@ RegisterOperators reg(
      Operator(
          "aten::cudnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::cudnn_convolution(
                  (std::move(peek(stack, 0, 9))).toTensor(),
                  (std::move(peek(stack, 1, 9))).toTensor(),
@@ -1835,7 +1827,7 @@ RegisterOperators reg(
      Operator(
          "aten::cudnn_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::cudnn_convolution_backward_input(
                  (std::move(peek(stack, 0, 9))).toIntListRef(),
                  (std::move(peek(stack, 1, 9))).toTensor(),
@@ -1856,7 +1848,7 @@ RegisterOperators reg(
      Operator(
          "aten::cudnn_convolution_transpose(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::cudnn_convolution_transpose(
                  (std::move(peek(stack, 0, 10))).toTensor(),
                  (std::move(peek(stack, 1, 10))).toTensor(),
@@ -1878,7 +1870,7 @@ RegisterOperators reg(
      Operator(
          "aten::cudnn_convolution_transpose_backward_input(Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::cudnn_convolution_transpose_backward_input(
                  (std::move(peek(stack, 0, 8))).toTensor(),
                  (std::move(peek(stack, 1, 8))).toTensor(),
@@ -1898,7 +1890,7 @@ RegisterOperators reg(
      Operator(
          "aten::cudnn_grid_sampler(Tensor self, Tensor grid) -> Tensor output",
          [](Stack & stack) {
-         
+
              auto result_ = at::cudnn_grid_sampler(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -1912,9 +1904,9 @@ RegisterOperators reg(
      Operator(
          "aten::data(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 1))).toTensor()).data(
-             
+
              );
              drop(stack, 1);
              pack(stack, std::move(result_));
@@ -1925,7 +1917,7 @@ RegisterOperators reg(
      Operator(
          "aten::dequantize(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::dequantize(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -1938,7 +1930,7 @@ RegisterOperators reg(
      Operator(
          "aten::det(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::det(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -1951,7 +1943,7 @@ RegisterOperators reg(
      Operator(
          "aten::detach(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::detach(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -1966,7 +1958,7 @@ RegisterOperators reg(
          [](Stack & stack) {
              auto self = (std::move(peek(stack, 0, 1))).toTensor();
              auto result_ = (self).digamma_(
-             
+
              );
              drop(stack, 1);
              pack(stack, std::move(result_));
@@ -1977,9 +1969,9 @@ RegisterOperators reg(
      Operator(
          "aten::dim(Tensor self) -> int",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 1))).toTensor()).dim(
-             
+
              );
              drop(stack, 1);
              pack(stack, std::move(result_));
@@ -1990,7 +1982,7 @@ RegisterOperators reg(
      Operator(
          "aten::div.Tensor(Tensor self, Tensor other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::div(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -2004,7 +1996,7 @@ RegisterOperators reg(
      Operator(
          "aten::div.Scalar(Tensor self, Scalar other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::div(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toScalar()
@@ -2018,7 +2010,7 @@ RegisterOperators reg(
      Operator(
          "aten::elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::elu(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toScalar(),
@@ -2052,7 +2044,7 @@ RegisterOperators reg(
      Operator(
          "aten::embedding_backward(Tensor grad, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::embedding_backward(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toTensor(),
@@ -2115,7 +2107,7 @@ RegisterOperators reg(
      Operator(
          "aten::equal(Tensor self, Tensor other) -> bool",
          [](Stack & stack) {
-         
+
              auto result_ = at::equal(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -2129,7 +2121,7 @@ RegisterOperators reg(
      Operator(
          "aten::erf(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::erf(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -2142,7 +2134,7 @@ RegisterOperators reg(
      Operator(
          "aten::erfc(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::erfc(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -2155,7 +2147,7 @@ RegisterOperators reg(
      Operator(
          "aten::erfinv(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::erfinv(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -2181,7 +2173,7 @@ RegisterOperators reg(
      Operator(
          "aten::expand_as(Tensor self, Tensor other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 2))).toTensor()).expand_as(
                  (std::move(peek(stack, 1, 2))).toTensor()
              );
@@ -2194,7 +2186,7 @@ RegisterOperators reg(
      Operator(
          "aten::expm1(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::expm1(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -2221,7 +2213,7 @@ RegisterOperators reg(
      Operator(
          "aten::eye(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 1, 5))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 2, 5))).toOptional<c10::Layout>())
@@ -2243,7 +2235,7 @@ RegisterOperators reg(
      Operator(
          "aten::eye.m(int n, int m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 2, 6))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 3, 6))).toOptional<c10::Layout>())
@@ -2267,7 +2259,7 @@ RegisterOperators reg(
      Operator(
          "aten::fake_quantize_per_tensor_affine_backward(Tensor grad, Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::fake_quantize_per_tensor_affine_backward(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toTensor(),
@@ -2285,9 +2277,9 @@ RegisterOperators reg(
      Operator(
          "aten::fbgemm_is_cpu_supported() -> bool",
          [](Stack & stack) {
-         
+
              auto result_ = at::fbgemm_is_cpu_supported(
-             
+
              );
              drop(stack, 0);
              pack(stack, std::move(result_));
@@ -2298,7 +2290,7 @@ RegisterOperators reg(
      Operator(
          "aten::fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::fbgemm_linear_fp16_weight(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toTensor(),
@@ -2313,7 +2305,7 @@ RegisterOperators reg(
      Operator(
          "aten::fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, float, int)",
          [](Stack & stack) {
-         
+
              auto result_ = at::fbgemm_linear_quantize_weight(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -2326,7 +2318,7 @@ RegisterOperators reg(
      Operator(
          "aten::feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::feature_alpha_dropout(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toDouble(),
@@ -2341,7 +2333,7 @@ RegisterOperators reg(
      Operator(
          "aten::fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::fft(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toInt(),
@@ -2397,7 +2389,7 @@ RegisterOperators reg(
      Operator(
          "aten::fmod.Tensor(Tensor self, Tensor other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::fmod(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -2411,7 +2403,7 @@ RegisterOperators reg(
      Operator(
          "aten::fmod.Scalar(Tensor self, Scalar other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::fmod(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toScalar()
@@ -2439,7 +2431,7 @@ RegisterOperators reg(
      Operator(
          "aten::fractional_max_pool3d(Tensor self, int[3] kernel_size, int[3] output_size, Tensor random_samples) -> (Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::fractional_max_pool3d(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toIntListRef(),
@@ -2473,7 +2465,7 @@ RegisterOperators reg(
      Operator(
          "aten::from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 3, 7))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 4, 7))).toOptional<c10::Layout>())
@@ -2499,7 +2491,7 @@ RegisterOperators reg(
      Operator(
          "aten::gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::gather(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toInt(),
@@ -2541,7 +2533,7 @@ RegisterOperators reg(
      Operator(
          "aten::gelu_backward(Tensor grad, Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::gelu_backward(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -2555,7 +2547,7 @@ RegisterOperators reg(
      Operator(
          "aten::geqrf(Tensor self) -> (Tensor a, Tensor tau)",
          [](Stack & stack) {
-         
+
              auto result_ = at::geqrf(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -2583,7 +2575,7 @@ RegisterOperators reg(
      Operator(
          "aten::grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> (Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::grid_sampler_2d_backward(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toTensor(),
@@ -2601,7 +2593,7 @@ RegisterOperators reg(
      Operator(
          "aten::gru_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih=None, Tensor? b_hh=None) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::gru_cell(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toTensor(),
@@ -2645,7 +2637,7 @@ RegisterOperators reg(
      Operator(
          "aten::hamming_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 1, 5))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 2, 5))).toOptional<c10::Layout>())
@@ -2667,7 +2659,7 @@ RegisterOperators reg(
      Operator(
          "aten::hamming_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 2, 6))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 3, 6))).toOptional<c10::Layout>())
@@ -2691,7 +2683,7 @@ RegisterOperators reg(
      Operator(
          "aten::hamming_window.periodic_alpha(int window_length, bool periodic, float alpha, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 3, 7))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 4, 7))).toOptional<c10::Layout>())
@@ -2717,7 +2709,7 @@ RegisterOperators reg(
      Operator(
          "aten::hamming_window.periodic_alpha_beta(int window_length, bool periodic, float alpha, float beta, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 4, 8))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 5, 8))).toOptional<c10::Layout>())
@@ -2745,7 +2737,7 @@ RegisterOperators reg(
      Operator(
          "aten::hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::hardshrink(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toScalar()
@@ -2759,7 +2751,7 @@ RegisterOperators reg(
      Operator(
          "aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::hardtanh(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toScalar(),
@@ -2791,7 +2783,7 @@ RegisterOperators reg(
      Operator(
          "aten::histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::histc(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toInt(),
@@ -2807,7 +2799,7 @@ RegisterOperators reg(
      Operator(
          "aten::ifft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::ifft(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toInt(),
@@ -2822,7 +2814,7 @@ RegisterOperators reg(
      Operator(
          "aten::im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::im2col_backward(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toIntListRef(),
@@ -2840,7 +2832,7 @@ RegisterOperators reg(
      Operator(
          "aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::index(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  toListOfOptionalTensor((std::move(peek(stack, 1, 2))))
@@ -2854,7 +2846,7 @@ RegisterOperators reg(
      Operator(
          "aten::index.Tensor(Tensor self, Tensor[] indices) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::index(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensorListRef()
@@ -2883,7 +2875,7 @@ RegisterOperators reg(
      Operator(
          "aten::index_select(Tensor self, int dim, Tensor index) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::index_select(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toInt(),
@@ -2898,7 +2890,7 @@ RegisterOperators reg(
      Operator(
          "aten::inverse(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::inverse(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -2911,7 +2903,7 @@ RegisterOperators reg(
      Operator(
          "aten::irfft(Tensor self, int signal_ndim, bool normalized=False, bool onesided=True, int[] signal_sizes=[]) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::irfft(
                  (std::move(peek(stack, 0, 5))).toTensor(),
                  (std::move(peek(stack, 1, 5))).toInt(),
@@ -2928,7 +2920,7 @@ RegisterOperators reg(
      Operator(
          "aten::is_distributed(Tensor self) -> bool",
          [](Stack & stack) {
-         
+
              auto result_ = at::is_distributed(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -2941,7 +2933,7 @@ RegisterOperators reg(
      Operator(
          "aten::is_nonzero(Tensor self) -> bool",
          [](Stack & stack) {
-         
+
              auto result_ = at::is_nonzero(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -2954,9 +2946,9 @@ RegisterOperators reg(
      Operator(
          "aten::is_pinned(Tensor self) -> bool",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 1))).toTensor()).is_pinned(
-             
+
              );
              drop(stack, 1);
              pack(stack, std::move(result_));
@@ -2967,9 +2959,9 @@ RegisterOperators reg(
      Operator(
          "aten::item(Tensor self) -> Scalar",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 1))).toTensor()).item(
-             
+
              );
              drop(stack, 1);
              pack(stack, std::move(result_));
@@ -2980,7 +2972,7 @@ RegisterOperators reg(
      Operator(
          "aten::kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::kl_div_backward(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toTensor(),
@@ -2996,7 +2988,7 @@ RegisterOperators reg(
      Operator(
          "aten::l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::l1_loss(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toTensor(),
@@ -3028,7 +3020,7 @@ RegisterOperators reg(
      Operator(
          "aten::le.Tensor(Tensor self, Tensor other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::le(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -3042,7 +3034,7 @@ RegisterOperators reg(
      Operator(
          "aten::le.Scalar(Tensor self, Scalar other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::le(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toScalar()
@@ -3099,7 +3091,7 @@ RegisterOperators reg(
      Operator(
          "aten::lgamma(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::lgamma(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -3112,7 +3104,7 @@ RegisterOperators reg(
      Operator(
          "aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::linear(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toTensor(),
@@ -3143,7 +3135,7 @@ RegisterOperators reg(
      Operator(
          "aten::log10(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::log10(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -3210,7 +3202,7 @@ RegisterOperators reg(
      Operator(
          "aten::log_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::log_softmax(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toInt(),
@@ -3225,7 +3217,7 @@ RegisterOperators reg(
      Operator(
          "aten::logical_not(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::logical_not(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -3253,7 +3245,7 @@ RegisterOperators reg(
      Operator(
          "aten::lstm_cell(Tensor input, Tensor[] hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih=None, Tensor? b_hh=None) -> (Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::lstm_cell(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toTensorListRef(),
@@ -3271,7 +3263,7 @@ RegisterOperators reg(
      Operator(
          "aten::lt.Tensor(Tensor self, Tensor other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::lt(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -3285,7 +3277,7 @@ RegisterOperators reg(
      Operator(
          "aten::lt.Scalar(Tensor self, Scalar other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::lt(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toScalar()
@@ -3313,7 +3305,7 @@ RegisterOperators reg(
      Operator(
          "aten::masked_select(Tensor self, Tensor mask) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::masked_select(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -3327,7 +3319,7 @@ RegisterOperators reg(
      Operator(
          "aten::matmul(Tensor self, Tensor other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::matmul(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -3341,7 +3333,7 @@ RegisterOperators reg(
      Operator(
          "aten::matrix_power(Tensor self, int n) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::matrix_power(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toInt()
@@ -3355,7 +3347,7 @@ RegisterOperators reg(
      Operator(
          "aten::matrix_rank(Tensor self, bool symmetric=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::matrix_rank(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toBool()
@@ -3369,7 +3361,7 @@ RegisterOperators reg(
      Operator(
          "aten::matrix_rank.tol(Tensor self, float tol, bool symmetric=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::matrix_rank(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toDouble(),
@@ -3384,7 +3376,7 @@ RegisterOperators reg(
      Operator(
          "aten::max(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::max(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -3397,7 +3389,7 @@ RegisterOperators reg(
      Operator(
          "aten::max.other(Tensor self, Tensor other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::max(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -3411,7 +3403,7 @@ RegisterOperators reg(
      Operator(
          "aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)",
          [](Stack & stack) {
-         
+
              auto result_ = at::max(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toInt(),
@@ -3426,7 +3418,7 @@ RegisterOperators reg(
      Operator(
          "aten::max_pool1d_with_indices(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::max_pool1d_with_indices(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toIntListRef(),
@@ -3444,7 +3436,7 @@ RegisterOperators reg(
      Operator(
          "aten::max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::max_pool2d(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toIntListRef(),
@@ -3462,7 +3454,7 @@ RegisterOperators reg(
      Operator(
          "aten::max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::max_pool2d_with_indices_backward(
                  (std::move(peek(stack, 0, 8))).toTensor(),
                  (std::move(peek(stack, 1, 8))).toTensor(),
@@ -3498,7 +3490,7 @@ RegisterOperators reg(
      Operator(
          "aten::max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::max_unpool3d(
                  (std::move(peek(stack, 0, 5))).toTensor(),
                  (std::move(peek(stack, 1, 5))).toTensor(),
@@ -3534,7 +3526,7 @@ RegisterOperators reg(
      Operator(
          "aten::meshgrid(Tensor[] tensors) -> Tensor[]",
          [](Stack & stack) {
-         
+
              auto result_ = at::meshgrid(
                  (std::move(peek(stack, 0, 1))).toTensorListRef()
              );
@@ -3547,7 +3539,7 @@ RegisterOperators reg(
      Operator(
          "aten::miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::miopen_batch_norm(
                  (std::move(peek(stack, 0, 8))).toTensor(),
                  (std::move(peek(stack, 1, 8))).toTensor(),
@@ -3567,7 +3559,7 @@ RegisterOperators reg(
      Operator(
          "aten::miopen_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::miopen_convolution_backward(
                  (std::move(peek(stack, 0, 10))).toTensor(),
                  (std::move(peek(stack, 1, 10))).toTensor(),
@@ -3589,7 +3581,7 @@ RegisterOperators reg(
      Operator(
          "aten::miopen_convolution_backward_bias(Tensor grad_output) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::miopen_convolution_backward_bias(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -3602,7 +3594,7 @@ RegisterOperators reg(
      Operator(
          "aten::miopen_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::miopen_convolution_transpose_backward(
                  (std::move(peek(stack, 0, 11))).toTensor(),
                  (std::move(peek(stack, 1, 11))).toTensor(),
@@ -3625,7 +3617,7 @@ RegisterOperators reg(
      Operator(
          "aten::miopen_depthwise_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::miopen_depthwise_convolution_backward(
                  (std::move(peek(stack, 0, 10))).toTensor(),
                  (std::move(peek(stack, 1, 10))).toTensor(),
@@ -3647,7 +3639,7 @@ RegisterOperators reg(
      Operator(
          "aten::miopen_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])",
          [](Stack & stack) {
-         
+
              auto result_ = at::miopen_rnn_backward(
                  (std::move(peek(stack, 0, 21))).toTensor(),
                  (std::move(peek(stack, 1, 21))).toTensorListRef(),
@@ -3680,7 +3672,7 @@ RegisterOperators reg(
      Operator(
          "aten::mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::mkldnn_convolution(
                  (std::move(peek(stack, 0, 7))).toTensor(),
                  (std::move(peek(stack, 1, 7))).toTensor(),
@@ -3699,7 +3691,7 @@ RegisterOperators reg(
      Operator(
          "aten::mkldnn_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::mkldnn_convolution_backward_input(
                  (std::move(peek(stack, 0, 8))).toIntListRef(),
                  (std::move(peek(stack, 1, 8))).toTensor(),
@@ -3719,7 +3711,7 @@ RegisterOperators reg(
      Operator(
          "aten::mm(Tensor self, Tensor mat2) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::mm(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -3733,7 +3725,7 @@ RegisterOperators reg(
      Operator(
          "aten::mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::mse_loss(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toTensor(),
@@ -3780,7 +3772,7 @@ RegisterOperators reg(
      Operator(
          "aten::multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::multi_margin_loss(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toTensor(),
@@ -3851,7 +3843,7 @@ RegisterOperators reg(
      Operator(
          "aten::mv(Tensor self, Tensor vec) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::mv(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -3865,7 +3857,7 @@ RegisterOperators reg(
      Operator(
          "aten::narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)",
          [](Stack & stack) {
-         
+
              auto result_ = at::narrow(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toInt(),
@@ -3911,7 +3903,7 @@ RegisterOperators reg(
      Operator(
          "aten::neg(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::neg(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -3924,7 +3916,7 @@ RegisterOperators reg(
      Operator(
          "aten::new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 3, 7))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 4, 7))).toOptional<c10::Layout>())
@@ -3942,7 +3934,7 @@ RegisterOperators reg(
      Operator(
          "aten::nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::nll_loss2d_backward(
                  (std::move(peek(stack, 0, 7))).toTensor(),
                  (std::move(peek(stack, 1, 7))).toTensor(),
@@ -3961,7 +3953,7 @@ RegisterOperators reg(
      Operator(
          "aten::nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::nll_loss_backward(
                  (std::move(peek(stack, 0, 7))).toTensor(),
                  (std::move(peek(stack, 1, 7))).toTensor(),
@@ -3980,7 +3972,7 @@ RegisterOperators reg(
      Operator(
          "aten::nonzero(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::nonzero(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -4089,7 +4081,7 @@ RegisterOperators reg(
      Operator(
          "aten::numel(Tensor self) -> int",
          [](Stack & stack) {
-         
+
              auto result_ = at::numel(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -4102,7 +4094,7 @@ RegisterOperators reg(
      Operator(
          "aten::ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 1, 5))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 2, 5))).toOptional<c10::Layout>())
@@ -4124,7 +4116,7 @@ RegisterOperators reg(
      Operator(
          "aten::ones_like(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::ones_like(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -4137,7 +4129,7 @@ RegisterOperators reg(
      Operator(
          "aten::ones_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 1, 5))).toScalarType())
                      .layout((std::move(peek(stack, 2, 5))).toLayout())
@@ -4159,7 +4151,7 @@ RegisterOperators reg(
      Operator(
          "aten::pdist(Tensor self, float p=2) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::pdist(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toDouble()
@@ -4173,7 +4165,7 @@ RegisterOperators reg(
      Operator(
          "aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 2))).toTensor()).permute(
                  (std::move(peek(stack, 1, 2))).toIntListRef()
              );
@@ -4186,7 +4178,7 @@ RegisterOperators reg(
      Operator(
          "aten::poisson(Tensor self, Generator? generator=None) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::poisson(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  nullptr
@@ -4241,7 +4233,7 @@ RegisterOperators reg(
      Operator(
          "aten::prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::prelu_backward(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toTensor(),
@@ -4256,7 +4248,7 @@ RegisterOperators reg(
      Operator(
          "aten::prod(Tensor self, *, ScalarType? dtype=None) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::prod(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toOptional<ScalarType>()
@@ -4270,7 +4262,7 @@ RegisterOperators reg(
      Operator(
          "aten::prod.dim_int(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::prod(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toInt(),
@@ -4301,7 +4293,7 @@ RegisterOperators reg(
      Operator(
          "aten::q_per_channel_zero_points(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::q_per_channel_zero_points(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -4314,7 +4306,7 @@ RegisterOperators reg(
      Operator(
          "aten::q_scale(Tensor self) -> float",
          [](Stack & stack) {
-         
+
              auto result_ = at::q_scale(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -4327,7 +4319,7 @@ RegisterOperators reg(
      Operator(
          "aten::qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)",
          [](Stack & stack) {
-         
+
              auto result_ = at::qr(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toBool()
@@ -4341,7 +4333,7 @@ RegisterOperators reg(
      Operator(
          "aten::quantized_rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::quantized_rnn_relu_cell(
                  (std::move(peek(stack, 0, 14))).toTensor(),
                  (std::move(peek(stack, 1, 14))).toTensor(),
@@ -4381,7 +4373,7 @@ RegisterOperators reg(
      Operator(
          "aten::randint(int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 2, 6))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 3, 6))).toOptional<c10::Layout>())
@@ -4405,7 +4397,7 @@ RegisterOperators reg(
      Operator(
          "aten::randint.low(int low, int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 3, 7))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 4, 7))).toOptional<c10::Layout>())
@@ -4431,7 +4423,7 @@ RegisterOperators reg(
      Operator(
          "aten::randint_like(Tensor self, int high) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::randint_like(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toInt()
@@ -4445,7 +4437,7 @@ RegisterOperators reg(
      Operator(
          "aten::randint_like.low(Tensor self, int low, int high) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::randint_like(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toInt(),
@@ -4460,7 +4452,7 @@ RegisterOperators reg(
      Operator(
          "aten::randint_like.dtype(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 2, 6))).toScalarType())
                      .layout((std::move(peek(stack, 3, 6))).toLayout())
@@ -4484,7 +4476,7 @@ RegisterOperators reg(
      Operator(
          "aten::randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 3, 7))).toScalarType())
                      .layout((std::move(peek(stack, 4, 7))).toLayout())
@@ -4510,7 +4502,7 @@ RegisterOperators reg(
      Operator(
          "aten::randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 1, 5))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 2, 5))).toOptional<c10::Layout>())
@@ -4546,7 +4538,7 @@ RegisterOperators reg(
      Operator(
          "aten::reflection_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::reflection_pad1d_backward(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toTensor(),
@@ -4576,7 +4568,7 @@ RegisterOperators reg(
      Operator(
          "aten::relu(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::relu(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -4615,7 +4607,7 @@ RegisterOperators reg(
      Operator(
          "aten::renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::renorm(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toScalar(),
@@ -4631,7 +4623,7 @@ RegisterOperators reg(
      Operator(
          "aten::repeat(Tensor self, int[] repeats) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 2))).toTensor()).repeat(
                  (std::move(peek(stack, 1, 2))).toIntListRef()
              );
@@ -4644,7 +4636,7 @@ RegisterOperators reg(
      Operator(
          "aten::replication_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::replication_pad1d_backward(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toTensor(),
@@ -4674,7 +4666,7 @@ RegisterOperators reg(
      Operator(
          "aten::replication_pad3d(Tensor self, int[6] padding) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::replication_pad3d(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toIntListRef()
@@ -4704,7 +4696,7 @@ RegisterOperators reg(
      Operator(
          "aten::rfft(Tensor self, int signal_ndim, bool normalized=False, bool onesided=True) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::rfft(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toInt(),
@@ -4720,7 +4712,7 @@ RegisterOperators reg(
      Operator(
          "aten::rnn_relu.data(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::rnn_relu(
                  (std::move(peek(stack, 0, 9))).toTensor(),
                  (std::move(peek(stack, 1, 9))).toTensor(),
@@ -4741,7 +4733,7 @@ RegisterOperators reg(
      Operator(
          "aten::rnn_relu.input(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)",
          [](Stack & stack) {
-         
+
              auto result_ = at::rnn_relu(
                  (std::move(peek(stack, 0, 9))).toTensor(),
                  (std::move(peek(stack, 1, 9))).toTensor(),
@@ -4762,7 +4754,7 @@ RegisterOperators reg(
      Operator(
          "aten::rnn_tanh_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih=None, Tensor? b_hh=None) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::rnn_tanh_cell(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toTensor(),
@@ -4780,7 +4772,7 @@ RegisterOperators reg(
      Operator(
          "aten::rot90(Tensor self, int k=1, int[] dims=[0,1]) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::rot90(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toInt(),
@@ -4808,7 +4800,7 @@ RegisterOperators reg(
      Operator(
          "aten::rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::rrelu(
                  (std::move(peek(stack, 0, 5))).toTensor(),
                  (std::move(peek(stack, 1, 5))).toScalar(),
@@ -4825,7 +4817,7 @@ RegisterOperators reg(
      Operator(
          "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::rrelu_with_noise(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toTensor(),
@@ -4862,7 +4854,7 @@ RegisterOperators reg(
      Operator(
          "aten::rsqrt(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::rsqrt(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -4875,7 +4867,7 @@ RegisterOperators reg(
      Operator(
          "aten::scatter.src(Tensor self, int dim, Tensor index, Tensor src) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::scatter(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toInt(),
@@ -4891,7 +4883,7 @@ RegisterOperators reg(
      Operator(
          "aten::scatter.value(Tensor self, int dim, Tensor index, Scalar value) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::scatter(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toInt(),
@@ -4961,7 +4953,7 @@ RegisterOperators reg(
      Operator(
          "aten::sinh(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::sinh(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -4974,7 +4966,7 @@ RegisterOperators reg(
      Operator(
          "aten::size.int(Tensor self, int dim) -> int",
          [](Stack & stack) {
-         
+
              auto result_ = at::size(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toInt()
@@ -4988,7 +4980,7 @@ RegisterOperators reg(
      Operator(
          "aten::slow_conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::slow_conv_dilated2d(
                  (std::move(peek(stack, 0, 7))).toTensor(),
                  (std::move(peek(stack, 1, 7))).toTensor(),
@@ -5007,7 +4999,7 @@ RegisterOperators reg(
      Operator(
          "aten::slow_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)",
          [](Stack & stack) {
-         
+
              auto result_ = at::slow_conv_dilated3d_backward(
                  (std::move(peek(stack, 0, 8))).toTensor(),
                  (std::move(peek(stack, 1, 8))).toTensor(),
@@ -5027,7 +5019,7 @@ RegisterOperators reg(
      Operator(
          "aten::slow_conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::slow_conv_transpose2d(
                  (std::move(peek(stack, 0, 8))).toTensor(),
                  (std::move(peek(stack, 1, 8))).toTensor(),
@@ -5047,7 +5039,7 @@ RegisterOperators reg(
      Operator(
          "aten::slow_conv_transpose3d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)",
          [](Stack & stack) {
-         
+
              auto result_ = at::slow_conv_transpose3d_backward(
                  (std::move(peek(stack, 0, 11))).toTensor(),
                  (std::move(peek(stack, 1, 11))).toTensor(),
@@ -5086,7 +5078,7 @@ RegisterOperators reg(
      Operator(
          "aten::soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::soft_margin_loss(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toTensor(),
@@ -5118,7 +5110,7 @@ RegisterOperators reg(
      Operator(
          "aten::softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::softmax(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toInt(),
@@ -5133,7 +5125,7 @@ RegisterOperators reg(
      Operator(
          "aten::softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::softplus(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toScalar(),
@@ -5181,7 +5173,7 @@ RegisterOperators reg(
      Operator(
          "aten::sparse_coo_tensor.size(int[] size, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 1, 5))).toScalarType())
                      .layout((std::move(peek(stack, 2, 5))).toLayout())
@@ -5203,7 +5195,7 @@ RegisterOperators reg(
      Operator(
          "aten::sparse_coo_tensor.indices(Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 2, 6))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 3, 6))).toOptional<c10::Layout>())
@@ -5227,7 +5219,7 @@ RegisterOperators reg(
      Operator(
          "aten::sparse_coo_tensor.indices_size(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 3, 7))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 4, 7))).toOptional<c10::Layout>())
@@ -5268,7 +5260,7 @@ RegisterOperators reg(
      Operator(
          "aten::split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]",
          [](Stack & stack) {
-         
+
              auto result_ = at::split_with_sizes(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toIntListRef(),
@@ -5283,7 +5275,7 @@ RegisterOperators reg(
      Operator(
          "aten::sqrt(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::sqrt(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -5296,7 +5288,7 @@ RegisterOperators reg(
      Operator(
          "aten::squeeze(Tensor(a) self) -> Tensor(a)",
          [](Stack & stack) {
-         
+
              auto result_ = at::squeeze(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -5309,7 +5301,7 @@ RegisterOperators reg(
      Operator(
          "aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)",
          [](Stack & stack) {
-         
+
              auto result_ = at::squeeze(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toInt()
@@ -5323,7 +5315,7 @@ RegisterOperators reg(
      Operator(
          "aten::sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::sspaddmm(
                  (std::move(peek(stack, 0, 5))).toTensor(),
                  (std::move(peek(stack, 1, 5))).toTensor(),
@@ -5357,7 +5349,7 @@ RegisterOperators reg(
      Operator(
          "aten::stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool onesided=True) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::stft(
                  (std::move(peek(stack, 0, 7))).toTensor(),
                  (std::move(peek(stack, 1, 7))).toInt(),
@@ -5404,7 +5396,7 @@ RegisterOperators reg(
      Operator(
          "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::sum(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toOptional<ScalarType>()
@@ -5418,7 +5410,7 @@ RegisterOperators reg(
      Operator(
          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::sum(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toIntListRef(),
@@ -5434,7 +5426,7 @@ RegisterOperators reg(
      Operator(
          "aten::t(Tensor(a) self) -> Tensor(a)",
          [](Stack & stack) {
-         
+
              auto result_ = at::t(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -5462,7 +5454,7 @@ RegisterOperators reg(
      Operator(
          "aten::tan(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::tan(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -5508,7 +5500,7 @@ RegisterOperators reg(
      Operator(
          "aten::thnn_conv3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::thnn_conv3d(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toTensor(),
@@ -5526,7 +5518,7 @@ RegisterOperators reg(
      Operator(
          "aten::thnn_conv3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding) -> (Tensor output, Tensor finput, Tensor fgrad_input)",
          [](Stack & stack) {
-         
+
              auto result_ = at::thnn_conv3d_forward(
                  (std::move(peek(stack, 0, 6))).toTensor(),
                  (std::move(peek(stack, 1, 6))).toTensor(),
@@ -5600,7 +5592,7 @@ RegisterOperators reg(
      Operator(
          "aten::to.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 4))).toTensor()).to(
                  (std::move(peek(stack, 1, 4))).toTensor(),
                  (std::move(peek(stack, 2, 4))).toBool(),
@@ -5615,7 +5607,7 @@ RegisterOperators reg(
      Operator(
          "aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 4))).toTensor()).to(
                  (std::move(peek(stack, 1, 4))).toScalarType(),
                  (std::move(peek(stack, 2, 4))).toBool(),
@@ -5630,7 +5622,7 @@ RegisterOperators reg(
      Operator(
          "aten::to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 5))).toTensor()).to(
                  (std::move(peek(stack, 1, 5))).toDevice(),
                  (std::move(peek(stack, 2, 5))).toScalarType(),
@@ -5646,7 +5638,7 @@ RegisterOperators reg(
      Operator(
          "aten::to.dtype_layout(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, bool non_blocking=False, bool copy=False) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 1, 7))).toScalarType())
                      .layout((std::move(peek(stack, 2, 7))).toLayout())
@@ -5664,7 +5656,7 @@ RegisterOperators reg(
      Operator(
          "aten::to_dense_backward(Tensor grad, Tensor input) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::to_dense_backward(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -5678,7 +5670,7 @@ RegisterOperators reg(
      Operator(
          "aten::to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::to_mkldnn_backward(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toTensor()
@@ -5692,7 +5684,7 @@ RegisterOperators reg(
      Operator(
          "aten::topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)",
          [](Stack & stack) {
-         
+
              auto result_ = at::topk(
                  (std::move(peek(stack, 0, 5))).toTensor(),
                  (std::move(peek(stack, 1, 5))).toInt(),
@@ -5709,7 +5701,7 @@ RegisterOperators reg(
      Operator(
          "aten::trace(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::trace(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -5722,7 +5714,7 @@ RegisterOperators reg(
      Operator(
          "aten::tril(Tensor self, int diagonal=0) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::tril(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toInt()
@@ -5736,7 +5728,7 @@ RegisterOperators reg(
      Operator(
          "aten::triu(Tensor self, int diagonal=0) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::triu(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toInt()
@@ -5827,7 +5819,7 @@ RegisterOperators reg(
      Operator(
          "aten::upsample_nearest1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::upsample_nearest1d_backward(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toIntListRef(),
@@ -5857,7 +5849,7 @@ RegisterOperators reg(
      Operator(
          "aten::upsample_nearest3d(Tensor self, int[3] output_size) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::upsample_nearest3d(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toIntListRef()
@@ -5887,7 +5879,7 @@ RegisterOperators reg(
      Operator(
          "aten::upsample_trilinear3d(Tensor self, int[3] output_size, bool align_corners) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::upsample_trilinear3d(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toIntListRef(),
@@ -5919,9 +5911,9 @@ RegisterOperators reg(
      Operator(
          "aten::values(Tensor(a) self) -> Tensor(a)",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 1))).toTensor()).values(
-             
+
              );
              drop(stack, 1);
              pack(stack, std::move(result_));
@@ -5932,7 +5924,7 @@ RegisterOperators reg(
      Operator(
          "aten::var(Tensor self, bool unbiased=True) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::var(
                  (std::move(peek(stack, 0, 2))).toTensor(),
                  (std::move(peek(stack, 1, 2))).toBool()
@@ -5946,7 +5938,7 @@ RegisterOperators reg(
      Operator(
          "aten::var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::var(
                  (std::move(peek(stack, 0, 4))).toTensor(),
                  (std::move(peek(stack, 1, 4))).toIntListRef(),
@@ -5962,7 +5954,7 @@ RegisterOperators reg(
      Operator(
          "aten::view(Tensor(a) self, int[] size) -> Tensor(a)",
          [](Stack & stack) {
-         
+
              auto result_ = ((std::move(peek(stack, 0, 2))).toTensor()).view(
                  (std::move(peek(stack, 1, 2))).toIntListRef()
              );
@@ -5975,7 +5967,7 @@ RegisterOperators reg(
      Operator(
          "aten::where(Tensor condition) -> Tensor[]",
          [](Stack & stack) {
-         
+
              auto result_ = at::where(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -5988,7 +5980,7 @@ RegisterOperators reg(
      Operator(
          "aten::where.self(Tensor condition, Tensor self, Tensor other) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::where(
                  (std::move(peek(stack, 0, 3))).toTensor(),
                  (std::move(peek(stack, 1, 3))).toTensor(),
@@ -6003,7 +5995,7 @@ RegisterOperators reg(
      Operator(
          "aten::zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 1, 5))).toOptional<ScalarType>())
                      .layout((std::move(peek(stack, 2, 5))).toOptional<c10::Layout>())
@@ -6025,7 +6017,7 @@ RegisterOperators reg(
      Operator(
          "aten::zeros_like(Tensor self) -> Tensor",
          [](Stack & stack) {
-         
+
              auto result_ = at::zeros_like(
                  (std::move(peek(stack, 0, 1))).toTensor()
              );
@@ -6038,7 +6030,7 @@ RegisterOperators reg(
      Operator(
          "aten::zeros_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor",
          [](Stack & stack) {
-         
+
              const auto options = TensorOptions()
                      .dtype((std::move(peek(stack, 1, 5))).toScalarType())
                      .layout((std::move(peek(stack, 2, 5))).toLayout())

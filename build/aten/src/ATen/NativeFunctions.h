@@ -184,7 +184,7 @@ CAFFE2_API Tensor & baddbmm__cuda(Tensor & self, const Tensor & batch1, const Te
 CAFFE2_API Tensor & _baddbmm_mkl_(Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
 CAFFE2_API Tensor & baddbmm_out_cpu(Tensor & out, const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
 CAFFE2_API Tensor & baddbmm_out_cuda(Tensor & out, const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
-CAFFE2_API Tensor bartlett_window(int64_t window_length, const TensorOptions & options={});
+CAFFE2_API Tensor bartlett_window(int64_t window_length, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory);
 CAFFE2_API Tensor bartlett_window(int64_t window_length, bool periodic, const TensorOptions & options={});
 CAFFE2_API Tensor batch_norm(const Tensor & input, const Tensor & weight, const Tensor & bias, const Tensor & running_mean, const Tensor & running_var, bool training, double momentum, double eps, bool cudnn_enabled);
 CAFFE2_API std::tuple<Tensor,Tensor,Tensor,int64_t> _batch_norm_impl_index(const Tensor & input, const Tensor & weight, const Tensor & bias, const Tensor & running_mean, const Tensor & running_var, bool training, double momentum, double eps, bool cudnn_enabled);
