@@ -20,7 +20,6 @@ namespace caffe2 {
 #ifdef CAFFE2_USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(UpsampleNearest, IDEEPUpsampleNearestOp);
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8UpsampleNearest, DNNLOWP, IDEEPUpsampleNearestOp);
-#endif
   
 OPERATOR_SCHEMA(Int8UpsampleNearest)
     .NumInputs(1)
@@ -41,6 +40,7 @@ Nearest neighbor upsampling operation with int8 data type.
         "4D feature map of shape (N, C, scale * H, scale * W) "
         "or (N, scale * H, scale * W, C); Values are "
         "neareast neighbor samples from X.");
+#endif
 
 REGISTER_CPU_OPERATOR(UpsampleNearest, UpsampleNearestOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(
