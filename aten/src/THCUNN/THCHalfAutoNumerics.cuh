@@ -51,10 +51,6 @@ inline __host__ __device__ THHalf log2(THHalf a) {
   return THCNumerics<THHalf>::log2(a);
 }
 
-inline __host__ __device__ THHalf expm1(THHalf a) {
-  return THCNumerics<THHalf>::expm1(a);
-}
-
 inline __host__ __device__ THHalf pow(THHalf a, THHalf b) {
   return THCNumerics<THHalf>::pow(a, b);
 }
