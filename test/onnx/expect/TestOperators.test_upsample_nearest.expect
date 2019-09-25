@@ -75,11 +75,11 @@ graph {
   }
   node {
     input: "input"
-    output: "8"
+    output: "9"
     op_type: "Shape"
   }
   node {
-    output: "9"
+    output: "10"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -91,9 +91,9 @@ graph {
     }
   }
   node {
-    input: "8"
     input: "9"
-    output: "10"
+    input: "10"
+    output: "11"
     op_type: "Gather"
     attribute {
       name: "axis"
