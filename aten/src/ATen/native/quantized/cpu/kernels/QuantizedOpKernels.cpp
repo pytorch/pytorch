@@ -1,12 +1,11 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/native/SortingUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/quantized/Quantizer.h>
-#include <ATen/native/SortingUtils.h>
-
 
 namespace at {
 namespace native {
@@ -103,7 +102,8 @@ Tensor qcat_nhwc_kernel(
             if (c + VLEN <= curr_C) {
               auto curr_scale_vec = Vec256<float>(curr_scale);
               auto curr_zero_pt_vec = Vec256<float>((float)curr_zero_pt);
-              auto scale_neg_zp_premul = curr_scale_vec * curr_zero_pt_vec.neg();
+              auto scale_neg_zp_premul =
+                  curr_scale_vec * curr_zero_pt_vec.neg();
               for (; c + VLEN <= curr_C; c += VLEN) {
                 auto inp_vec = Vec::loadu(iptr + c);
                 auto float_values = inp_vec.dequantize(
@@ -213,7 +213,8 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
   auto other_zero_point_vec = Vec256<float>((float)other_zero_point);
   auto other_scale_vec = Vec256<float>(other_scale);
 
-  auto self_scale_neg_zp_premul_vec = self_scale_vec * self_zero_point_vec.neg();
+  auto self_scale_neg_zp_premul_vec =
+      self_scale_vec * self_zero_point_vec.neg();
   auto other_scale_zp_premul_vec = other_scale_vec * other_zero_point_vec.neg();
 
   auto iter = TensorIterator::binary_op(out, self, other);
@@ -233,7 +234,9 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
         },
         [&](Vec a, Vec b) -> Vec {
           const auto da = a.dequantize(
-              self_scale_vec, self_zero_point_vec, self_scale_neg_zp_premul_vec);
+              self_scale_vec,
+              self_zero_point_vec,
+              self_scale_neg_zp_premul_vec);
           const auto db = b.dequantize(
               other_scale_vec, other_zero_point_vec, other_scale_zp_premul_vec);
           Vec::float_vec_return_type retvals;
@@ -395,8 +398,12 @@ void do_avg_pool_on_AVX2(
       float acc_fp[vec_width];
       acc.store(acc_int);
       vec256::convert(acc_int, acc_fp, vec_width);
-      vec256::QuantizeAvx2<T>(
-          acc_fp, o_p + c, vec_width, multiplier, output_zero_point);
+      at::quantize_vec<T>(
+          1 / multiplier,
+          output_zero_point,
+          acc_fp,
+          reinterpret_cast<T*>(o_p + c),
+          vec_width);
     }
   }
 #endif
@@ -470,11 +477,9 @@ void qadaptive_avg_pool2d_nhwc_kernel(
             }
           }
           // clamp
-          o_p[c] = std::min<int32_t>(
-              std::max<int32_t>(
-                  std::nearbyint(acc_int32 * multiplier + qy.q_zero_point()),
-                  minimum),
-              maximum);
+          o_p[c] = at::quantize_val<scalar_t>(
+                       1.0f / multiplier, qy.q_zero_point(), acc_int32)
+                       .val_;
         } // c
       } // oh
     } // ow
@@ -569,13 +574,11 @@ void qavg_pool2d_nhwc_kernel(
               acc_int32 += val;
             }
           }
-          double acc_fp = acc_int32 * 1.0;
+          double acc_fp = acc_int32 * 1.0 - qx.q_zero_point();
           // clamp
-          o_p[c] = std::min<int32_t>(
-              std::max<int32_t>(
-                  std::nearbyint(acc_fp * multiplier + qy.q_zero_point()),
-                  minimum),
-              maximum);
+          o_p[c] = at::quantize_val<scalar_t>(
+                       1.0f / multiplier, qy.q_zero_point(), acc_fp)
+                       .val_;
         } // c
       } // ow
     } // oh
@@ -593,7 +596,7 @@ int64_t do_quantized_bilinear_on_AVX2(
     int64_t channels,
     int32_t output_zero_point,
     int32_t input_zero_point,
-    float multiplier,
+    float inverse_scale,
     const float h0lambda,
     const float h1lambda,
     const float w0lambda,
@@ -628,11 +631,16 @@ int64_t do_quantized_bilinear_on_AVX2(
       Vec256<float> input_zero_point_v(input_zero_point);
       Vec256<float> result =
           h0lambda_v * (w0lambda_v * pos1_fp_v[0] + w1lambda_v * pos1_fp_v[1]) +
-          h1lambda_v * (w0lambda_v * pos1_fp_v[2] + w1lambda_v * pos1_fp_v[3]) - input_zero_point_v;
+          h1lambda_v * (w0lambda_v * pos1_fp_v[2] + w1lambda_v * pos1_fp_v[3]) -
+          input_zero_point_v;
       float result_fp[vec_width];
       result.store(result_fp);
-      vec256::QuantizeAvx2<T>(
-          result_fp, pos2, vec_width, multiplier, output_zero_point);
+      at::quantize_vec<T>(
+          inverse_scale,
+          output_zero_point,
+          result_fp,
+          reinterpret_cast<T*>(pos2),
+          vec_width);
       pos1 += vec_width;
       pos2 += vec_width;
     }
@@ -655,8 +663,7 @@ void qupsample_bilinear2d_nhwc_kernel(
       input.scalar_type(), "upsample_bilinear2d_nhwc", [&]() {
         auto* idata = static_cast<scalar_t*>(input.data_ptr());
         auto* odata = static_cast<scalar_t*>(output.data_ptr());
-        float multiplier = input.q_scale() / output.q_scale();
-        float output_scale = output.q_scale() / input.q_scale();
+        float inverse_scale = output.q_scale() / input.q_scale();
         const auto rheight = area_pixel_compute_scale<float>(
             input_height, output_height, align_corners);
         const auto rwidth = area_pixel_compute_scale<float>(
@@ -704,7 +711,7 @@ void qupsample_bilinear2d_nhwc_kernel(
                   channels,
                   output.q_zero_point(),
                   input.q_zero_point(),
-                  multiplier,
+                  inverse_scale,
                   h0lambda,
                   h1lambda,
                   w0lambda,
@@ -720,7 +727,9 @@ void qupsample_bilinear2d_nhwc_kernel(
                         (w0lambda * pos1[h1p * input_width * channels] +
                          w1lambda * pos1[(h1p * input_width + w1p) * channels]);
                 pos2[0] = at::quantize_val<scalar_t>(
-                              output_scale, output.q_zero_point(), result - input.q_zero_point())
+                              inverse_scale,
+                              output.q_zero_point(),
+                              result - input.q_zero_point())
                               .val_;
                 pos1 += 1;
                 pos2 += 1;
@@ -731,7 +740,8 @@ void qupsample_bilinear2d_nhwc_kernel(
       });
 }
 
-void qtopk_kernel(Tensor& values,
+void qtopk_kernel(
+    Tensor& values,
     Tensor& indices,
     const Tensor& self,
     int64_t k,
@@ -739,68 +749,81 @@ void qtopk_kernel(Tensor& values,
     bool largest,
     bool sorted) {
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qtopk_cpu", [&] {
-    dim_apply(
-        {self, values, indices},
-        dim,
-        [&](int64_t i, TensorList tl) {
-          auto tmp_values = tl[0].accessor<scalar_t, 1>();
-          auto mode_values = tl[1].accessor<scalar_t, 1>();
-          auto mode_indices = tl[2].accessor<int64_t, 1>();
+    dim_apply({self, values, indices}, dim, [&](int64_t i, TensorList tl) {
+      auto tmp_values = tl[0].accessor<scalar_t, 1>();
+      auto mode_values = tl[1].accessor<scalar_t, 1>();
+      auto mode_indices = tl[2].accessor<int64_t, 1>();
 
-          auto n = tmp_values.size(0);
-          auto use_partial_sort = k * 64 <= n;
+      auto n = tmp_values.size(0);
+      auto use_partial_sort = k * 64 <= n;
 
-          using elem_t = std::pair<typename scalar_t::underlying, int64_t>;
-          std::vector<elem_t> queue(n);
-          for (int64_t j = 0; j < n; j++) {
-            queue[j].first = tmp_values[j].val_;
-            queue[j].second = j;
-          }
+      using elem_t = std::pair<typename scalar_t::underlying, int64_t>;
+      std::vector<elem_t> queue(n);
+      for (int64_t j = 0; j < n; j++) {
+        queue[j].first = tmp_values[j].val_;
+        queue[j].second = j;
+      }
 
-          // we want NaN to be sorted as top for numpy compatibility
-          if (use_partial_sort) {
-            if (largest) {
-              std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
+      // we want NaN to be sorted as top for numpy compatibility
+      if (use_partial_sort) {
+        if (largest) {
+          std::partial_sort(
+              queue.begin(),
+              queue.begin() + k,
+              queue.end(),
+              [](const elem_t& x, const elem_t& y) -> bool {
+                return x.first > y.first;
+              });
+        } else {
+          std::partial_sort(
+              queue.begin(),
+              queue.begin() + k,
+              queue.end(),
+              [](const elem_t& x, const elem_t& y) -> bool {
+                return x.first < y.first;
+              });
+        }
+      } else {
+        if (largest) {
+          std::nth_element(
+              queue.begin(),
+              queue.begin() + k - 1,
+              queue.end(),
+              [](const elem_t& x, const elem_t& y) -> bool {
+                return x.first > y.first;
+              });
+          if (sorted) {
+            std::sort(
+                queue.begin(),
+                queue.begin() + k - 1,
                 [](const elem_t& x, const elem_t& y) -> bool {
                   return x.first > y.first;
                 });
-            } else {
-              std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return x.first < y.first;
-                });
-            }
-          } else {
-            if (largest) {
-              std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return x.first > y.first;
-                });
-              if (sorted) {
-                std::sort(queue.begin(), queue.begin() + k - 1,
-                  [](const elem_t& x, const elem_t& y) -> bool {
-                    return x.first > y.first;
-                  });
-              }
-            } else {
-              std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
-                [](const elem_t& x, const elem_t& y) -> bool {
-                  return x.first < y.first;
-                });
-              if (sorted) {
-                std::sort(queue.begin(), queue.begin() + k -1,
-                  [](const elem_t& x, const elem_t& y) -> bool {
-                    return x.first < y.first;
-                  });
-              }
-            }
           }
+        } else {
+          std::nth_element(
+              queue.begin(),
+              queue.begin() + k - 1,
+              queue.end(),
+              [](const elem_t& x, const elem_t& y) -> bool {
+                return x.first < y.first;
+              });
+          if (sorted) {
+            std::sort(
+                queue.begin(),
+                queue.begin() + k - 1,
+                [](const elem_t& x, const elem_t& y) -> bool {
+                  return x.first < y.first;
+                });
+          }
+        }
+      }
 
-          for (int64_t j = 0; j < k; j++) {
-            mode_values[j] = scalar_t(queue[j].first);
-            mode_indices[j] = queue[j].second;
-          }
-        });
+      for (int64_t j = 0; j < k; j++) {
+        mode_values[j] = scalar_t(queue[j].first);
+        mode_indices[j] = queue[j].second;
+      }
+    });
   });
 }
 
