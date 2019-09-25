@@ -903,7 +903,6 @@ class TestNamedTensor(TestCase):
             if isinstance(output, torch.Tensor):
                 self.assertEqual(output.names, expected_names)
                 return
-            assert isinstance(output, tuple)
             for out in output:
                 self.assertEqual(out.names, expected_names)
 
