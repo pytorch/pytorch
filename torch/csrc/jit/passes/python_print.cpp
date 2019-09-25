@@ -934,26 +934,22 @@ struct PythonPrintPass {
   }
 
   void printOpName(TaggedStringStream& stmt, Symbol kind) {
-    const static std::unordered_set<Symbol> autograd_ns_symbols = {
-        aten::backward,
-        aten::grad,
+    // Special overriding ops set that requires serializing differently to
+    // preserve the original code semantics.
+    // This will be more properly handled when we have namespace semantics
+    // for serializing the ops, and it right now hard coded these ops to
+    // ensure consistency and not breaking BC in the future.
+    const static std::unordered_map<Symbol, std::string> override_symbols = {
+        {aten::backward, "torch.autograd.backward"},
+        {aten::grad, "torch.autograd.grad"},
     };
-    if (kind.is_aten()) {
+    if (override_symbols.find(kind) != override_symbols.end()) {
+      stmt << override_symbols.at(kind);
+    } else if (kind.is_aten()) {
       // special case aten -> torch because we want to rename
       // the aten namespace, but this change will take more time
       // doing it here ensures we do not have fix up archives later
-      if (autograd_ns_symbols.find(kind) != autograd_ns_symbols.end()) {
-        // Autograd related ops are binded into the torch.autograd python
-        // namespace, so when printing the op name we special handle them to
-        // make sure they are in the correct namespace during import/export and
-        // preserve the original code semantics, this will be more properly
-        // handled when we have namespace semantics for serializing the ops, and
-        // it right now hard coded these ops to ensure consistency and not
-        // breaking BC in the future.
-        stmt << "torch.autograd." << kind.toUnqualString();
-      } else {
-        stmt << "torch." << kind.toUnqualString();
-      }
+      stmt << "torch." << kind.toUnqualString();
     } else {
       stmt << "ops." << kind.ns().toUnqualString() << "."
            << kind.toUnqualString();
