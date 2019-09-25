@@ -72,9 +72,6 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
       }
     }
   });
-#ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names_for_copy(self, src);
-#endif
 }
 
 // Devices directly supported by this copy implementation. Other device types
@@ -89,7 +86,7 @@ bool is_supported_device(Device device) {
 namespace at {
 namespace native {
 
-Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
+static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
@@ -148,6 +145,20 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
 
   copy_stub(device_type, iter, non_blocking);
+  return self;
+}
+
+Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_broadcast_outnames(self, src);
+  {
+    NoNamesGuard guard;
+#endif
+    copy_impl(self, src, non_blocking);
+#ifdef BUILD_NAMEDTENSOR
+  }
+  namedinference::propagate_names(self, std::move(outnames), /*validate_names=*/false);
+#endif
   return self;
 }
 
