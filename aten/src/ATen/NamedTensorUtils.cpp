@@ -225,14 +225,6 @@ void propagate_names(TensorImpl* result, TensorImpl* src) {
   propagate_names(result, impl::get_opt_names(src));
 }
 
-void propagate_names_for_copy(Tensor& result, const Tensor& src) {
-  if (!result.has_names() && !src.has_names()) {
-    return;
-  }
-  auto outnames = unify_from_right(result.names(), src.names());
-  propagate_names(result, std::move(outnames), /*validate_names=*/false);
-}
-
 // tensor_dotted_dim and other_dotted_dim are the dimensions of the two
 // tensors that we contract together. Usually other_dotted_dim is 0
 // and tensor_dotted_dim is the last dim of tensor, but there are some special
