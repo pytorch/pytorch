@@ -88,7 +88,7 @@ def simple_reduce_tests(rank, world_size):
     # The bit that is set changes in every iteration to check
     # that the output changes accordingly.
     for i in range(4):
-        vin = rank | (1 << i);
+        vin = rank | (1 << i)
         vout = (1 << i)
         tests.append(
             (
