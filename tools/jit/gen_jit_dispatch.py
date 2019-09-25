@@ -14,6 +14,7 @@ torch/csrc/jit/generated/
 
 import argparse
 import copy
+import re
 from itertools import groupby
 from ..autograd.utils import CodeTemplate, write
 from ..autograd.gen_autograd import load_aten_declarations
@@ -238,8 +239,17 @@ def is_out_variant(decl):
     return decl['name'].endswith('_out')
 
 
+# Copied from ..autograd.gen_python_functions.SKIP_PYTHON_BINDINGS
+BACKWARD_OP_PATTERNS = [
+    '.*_backward',
+    '.*_backward_(out|input|weight|bias)',
+]
+
 def is_backward_op(decl):
-    return decl['name'].endswith('_backward') or decl['name'].endswith('_backward_out')
+    for pattern in BACKWARD_OP_PATTERNS:
+        if re.match('^' + pattern + '$', decl['name']):
+            return True
+    return False
 
 
 # for each argument in decl, the location it should appear in the
