@@ -10,12 +10,13 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(add_stub);
-DEFINE_DISPATCH(atan2_stub);
-DEFINE_DISPATCH(div_stub);
-DEFINE_DISPATCH(logical_xor_stub);
-DEFINE_DISPATCH(mul_stub);
-DEFINE_DISPATCH(remainder_stub)
 DEFINE_DISPATCH(sub_stub);
+DEFINE_DISPATCH(mul_stub);
+DEFINE_DISPATCH(div_stub);
+DEFINE_DISPATCH(atan2_stub);
+DEFINE_DISPATCH(logical_xor_stub);
+DEFINE_DISPATCH(remainder_stub)
+
 
 static constexpr char alpha_mismatch_err[] =
   "For integral input tensors, argument alpha must not be a floating point number.";
@@ -230,15 +231,15 @@ Tensor& mul_(Tensor& self, Scalar other) {
 }
 
 Tensor remainder(const Tensor& self, Scalar other) {
-  return native::remainder(self, wrapped_scalar_tensor(other));
+  return at::remainder(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_(Tensor& self, Scalar other) {
-  return native::remainder_(self, wrapped_scalar_tensor(other));
+  return at::remainder_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_out(Tensor& result, const Tensor& self, Scalar other) {
-  return native::remainder_out(result, self, wrapped_scalar_tensor(other));
+  return at::remainder_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor sub(const Tensor& self, Scalar other, Scalar alpha) {
