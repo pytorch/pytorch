@@ -11818,7 +11818,7 @@ class TestTorchDeviceType(TestCase):
             ("exp", doubles, True, True, 'cpu'),
             ("exp", doubles, False, True, 'cuda'),
             ("expm1", doubles, True, True, 'cpu'),
-            ("expm1", doubles, False, True, 'cuda'),
+            ("expm1", doubles, True, True, 'cuda'),
             ("floor", doubles, True, True, 'cpu'),
             ("floor", doubles, True, True, 'cuda'),
             ("frac", doubles, True, True, 'cpu'),
