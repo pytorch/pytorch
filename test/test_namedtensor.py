@@ -953,6 +953,7 @@ class TestNamedTensor(TestCase):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
             op = getattr(torch, op_name)
             check_output(op(t, 1), ['N', 'L'])
+            check_output(op(t, -1), ['N', 'C'])
             check_output(op(t, 'C'), ['N', 'L'])
             with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
                 op(t, None)
@@ -969,6 +970,7 @@ class TestNamedTensor(TestCase):
             op = getattr(torch, op_name)
 
             check_output(op(t, [1, 2]), ['N'])
+            check_output(op(t, [0, -1]), ['C'])
             check_output(op(t, ['C', 'L']), ['N'])
             with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
                 op(t, [None, 'C'])
@@ -1723,6 +1725,11 @@ class TestNamedTensor(TestCase):
             self.assertEqual(len(warns), 1)
             self.assertTrue(
                 str(warns[0].message).startswith('Autograd was passed a named grad tensor'))
+
+    def test_nyi_dimname_overload_msg(self):
+        x = torch.randn(3, 3)
+        with self.assertRaisesRegex(RuntimeError, "squeeze: You passed a dimname"):
+            x.squeeze("N")
 
     def test_dot(self):
         for device in torch.testing.get_all_device_types():

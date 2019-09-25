@@ -32,6 +32,14 @@ CAFFE2_API std::vector<int64_t> dimnames_to_positions(const Tensor& tensor, Dimn
 CAFFE2_API std::vector<Dimname>
 unify_from_right(DimnameList names, DimnameList other, const char* action = "broadcast");
 
+[[noreturn]] inline void reportNYIDimnameOverload(const char* op_name) {
+  TORCH_CHECK(
+      false,
+      op_name, ": You passed a dimname (string) to this op in place of a dimension "
+      "index but it does not yet support this behavior. Please pass a dimension "
+      "index to work around this.");
+}
+
 namespace namedinference {
 
 // Names get propagated via the following rules:
