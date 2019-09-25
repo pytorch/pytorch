@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 #include <vector>
 
@@ -312,14 +313,16 @@ void check_assert_state(const LeakyStreamInternals* ptr) {
 
   if (ptr->assert_state->error != 0) {
     CUDAGuard device_guard(ptr->device_index);
-    C10_CUDA_CHECK(cudaDeviceSynchronize());    // wait for kernel to complete
+
+    // wait for kernel to complete
+    C10_CUDA_CHECK(cudaDeviceSynchronize());    
     CUDAAssert isolation_copy(*ptr->assert_state);
-    ptr->assert_state->error = 0;   // reset assert state
-    //std::memset(&ptr->assert_state, 0, sizeof(ptr->assert_state));
-    C10_THROW_ERROR(Error, "CUDA Assert failed.");
+
+    // reset assert state
+    std::memset(ptr->assert_state, 0, sizeof(CUDAAssert));
+    throw ::c10::Error({"CUDA Assertion", isolation_copy.file, isolation_copy.line}, isolation_copy.message);
   }
 }
-
 
 CUDAStream CUDAStream_fromInternals(const LeakyStreamInternals* ptr) {
   check_assert_state(ptr);
@@ -343,7 +346,7 @@ CUDAAssert* CUDAStream::assert_state() const {
   auto ptr = CUDAStream_internals(*this);
   AT_ASSERT(ptr);
   
-  // lazy create assert state (TODO: support corcurrent calls)
+  // lazy create assert state (TODO: support concurrent calls)
   if (ptr->assert_state == nullptr) {
     // switch to device to associate host memory with it 
     CUDAGuard device_guard(device_index());
