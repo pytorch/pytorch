@@ -187,7 +187,7 @@ void intraop_launch(std::function<void()> func) {
   // TODO: caffe2::ThreadPool doesn't support submitting tasks separately and
   // running in parallel. Should fix it when this API becomes popular.
   func();
-#endif // C10_MOBIL
+#endif // C10_MOBILE
 }
 
 std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
