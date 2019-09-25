@@ -264,7 +264,12 @@ struct VISIBILITY_HIDDEN ModuleMetadata {
     friend bool operator==(
         const Constant& lhs,
         const Constant& rhs) {
-      return lhs.v_.equal(rhs.v_);
+      // Perform the equivalent of `lhs == rhs` in Python.
+      int rv = PyObject_RichCompareBool(lhs.v_.ptr(), rhs.v_.ptr(), Py_EQ);
+      if (rv == -1) {
+        throw py::error_already_set();
+      }
+      return rv == 1;
     }
     py::object v_;
   };
