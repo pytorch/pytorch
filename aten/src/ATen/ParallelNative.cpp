@@ -84,7 +84,7 @@ namespace internal {
 void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
 #ifndef C10_MOBILE
   for (size_t i = 1; i < range; ++i) {
-    internal::_get_intraop_pool().run([i]() { fn((int)i, i); });
+    _get_intraop_pool().run([fn, i]() { fn((int)i, i); });
   }
   fn(0, 0);
 #else
@@ -148,7 +148,7 @@ int get_num_threads() {
     return intraop_default_num_threads();
   } else {
     TORCH_INTERNAL_ASSERT(nthreads == CONSUMED);
-    return internal::_get_intraop_pool().size() + 1;
+    return _get_intraop_pool().size() + 1;
   }
 #else
   caffe2::ThreadPool* pool = caffe2::mobile_threadpool();
@@ -165,7 +165,7 @@ bool in_parallel_region() {
 #ifndef C10_MOBILE
   return in_parallel_region_ || (
     num_intraop_threads.load() == CONSUMED &&
-    internal::_get_intraop_pool().inThreadPool()
+    _get_intraop_pool().inThreadPool()
   );
 #else
   return in_parallel_region_;
@@ -175,7 +175,7 @@ bool in_parallel_region() {
 void intraop_launch(std::function<void()> func) {
 #ifndef C10_MOBILE
   if (!in_parallel_region() && get_num_threads() > 1) {
-    internal::_get_intraop_pool().run(func);
+    _get_intraop_pool().run(func);
   } else {
     // execute inline if we're in parallel region
     func();
@@ -192,7 +192,7 @@ std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
 #ifndef C10_MOBILE
   auto future = std::make_shared<c10::ivalue::Future>(NoneType::get());
   if (!in_parallel_region() && get_num_threads() > 1) {
-    internal::_get_intraop_pool().run(
+    _get_intraop_pool().run(
       [func, future]() {
         func();
         future->markCompleted();

@@ -79,6 +79,9 @@ std::string get_parallel_info() {
   #elif AT_PARALLEL_NATIVE_TBB
   ss << "native thread pool and TBB";
   #endif
+  #ifdef C10_MOBILE
+  ss << " [mobile]";
+  #endif
   ss << std::endl;
 
   #if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
