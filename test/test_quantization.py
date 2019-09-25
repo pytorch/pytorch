@@ -59,9 +59,17 @@ class PostTrainingQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-        # test one line API
-        model = quantize(SingleLayerLinearModel(), test_only_eval_fn,
-                         self.calib_data)
+        # test one line API - out of place version
+        base = SingleLayerLinearModel()
+        keys_before = set(list(base.state_dict().keys()))
+        model = quantize(base, test_only_eval_fn, self.calib_data)
+        checkQuantized(model)
+        keys_after = set(list(base.state_dict().keys()))
+        self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
+
+        # in-place version
+        model = SingleLayerLinearModel()
+        quantize(model, test_only_eval_fn, self.calib_data, inplace=True)
         checkQuantized(model)
 
     def test_two_layers(self):
@@ -308,9 +316,17 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-        # test one line API
-        model = quantize_dynamic(SingleLayerLinearDynamicModel().eval(),
-                                 qconfig_dict)
+        # test one line API - out of place version
+        base = SingleLayerLinearDynamicModel()
+        keys_before = set(list(base.state_dict().keys()))
+        model = quantize_dynamic(base, qconfig_dict)
+        checkQuantized(model)
+        keys_after = set(list(base.state_dict().keys()))
+        self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
+
+        # in-place version
+        model = SingleLayerLinearDynamicModel()
+        quantize_dynamic(model, qconfig_dict, inplace=True)
         checkQuantized(model)
 
     def test_two_layers(self):
