@@ -123,15 +123,11 @@ device_type_test_bases = []
 class DeviceTypeTestBase(TestCase):
     device_type = 'generic_device_type'
 
-    # The device that single device tests run on
-    # Note: can be defined in setUpClass
-    primary_device = device_type
-
     # Returns a string representing the device that single device tests should use.
     # Note: single device tests use this device exclusively.
     @classmethod
     def get_primary_device(cls):
-        return cls.primary_device
+        return cls.device_type
 
     # Returns a list of strings representing all available devices of this
     # device type. The primary device must be the first string in the list
@@ -181,13 +177,16 @@ class DeviceTypeTestBase(TestCase):
 
 class CPUTestBase(DeviceTypeTestBase):
     device_type = 'cpu'
-    primary_device = device_type
 
 
 class CUDATestBase(DeviceTypeTestBase):
     device_type = 'cuda'
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+
+    @classmethod
+    def get_primary_device(cls):
+        return cls.primary_device
 
     @classmethod
     def get_all_devices(cls):
