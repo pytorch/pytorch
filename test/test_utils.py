@@ -14,7 +14,7 @@ from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.hub as hub
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common_utils import skipIfRocm, load_tests
+from common_utils import skipIfRocm, load_tests, IS_SANDCASTLE
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -511,50 +511,64 @@ class TestONNXUtils(TestCase):
         try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
-def sum_of_model_parameters(model):
+def sum_of_state_dict(state_dict):
     s = 0
-    for p in model.parameters():
-        s += p.sum()
+    for _, v in state_dict.items():
+        s += v.sum()
     return s
 
-SUM_OF_PRETRAINED_RESNET18_PARAMS = -12703.992365
+SUM_OF_HUB_EXAMPLE = 431080
+TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/releases/download/0.1/mnist_init_ones'
 
+@unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
 class TestHub(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        # Only run this check ONCE before all tests start.
-        # - If torchvision is imported before all tests start, e.g. we might find _C.so
-        #   which doesn't exist in downloaded zip but in the installed wheel.
-        # - After the first test is run, torchvision is already in sys.modules due to
-        #   Python cache as we run all hub tests in the same python process.
-        if 'torchvision' in sys.modules:
-            raise RuntimeError('TestHub must start without torchvision imported')
-
     def test_load_from_github(self):
         hub_model = hub.load(
-            'pytorch/vision',
-            'resnet18',
+            'ailzhang/torchhub_example',
+            'mnist',
             pretrained=True,
-            progress=False)
-        self.assertEqual(sum_of_model_parameters(hub_model),
-                         SUM_OF_PRETRAINED_RESNET18_PARAMS)
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
 
     def test_set_dir(self):
         temp_dir = tempfile.gettempdir()
         hub.set_dir(temp_dir)
         hub_model = hub.load(
-            'pytorch/vision',
-            'resnet18',
+            'ailzhang/torchhub_example',
+            'mnist',
             pretrained=True,
-            progress=False)
-        self.assertEqual(sum_of_model_parameters(hub_model),
-                         SUM_OF_PRETRAINED_RESNET18_PARAMS)
-        assert os.path.exists(temp_dir + '/pytorch_vision_master')
-        shutil.rmtree(temp_dir + '/pytorch_vision_master')
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+        assert os.path.exists(temp_dir + '/ailzhang_torchhub_example_master')
+        shutil.rmtree(temp_dir + '/ailzhang_torchhub_example_master')
 
     def test_list_entrypoints(self):
-        entry_lists = hub.list('pytorch/vision', force_reload=True)
-        self.assertObjectIn('resnet18', entry_lists)
+        entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
+        self.assertObjectIn('mnist', entry_lists)
+
+    def test_download_url_to_file(self):
+        temp_file = os.path.join(tempfile.gettempdir(), 'temp')
+        hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, temp_file, progress=False)
+        loaded_state = torch.load(temp_file)
+        self.assertEqual(sum_of_state_dict(loaded_state),
+                         SUM_OF_HUB_EXAMPLE)
+
+    def test_load_state_dict_from_url(self):
+        loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL)
+        self.assertEqual(sum_of_state_dict(loaded_state),
+                         SUM_OF_HUB_EXAMPLE)
+
+    def test_load_zip_checkpoint(self):
+        hub_model = hub.load(
+            'ailzhang/torchhub_example',
+            'mnist_zip',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
 
 if __name__ == '__main__':
     run_tests()

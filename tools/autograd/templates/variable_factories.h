@@ -22,35 +22,35 @@ using at::DimnameList;
 namespace torch {
 
 namespace detail {
-  enum class ListInitTensorType { Scalar, InitList };
+  enum class InitListTensorType { Scalar, InitList };
 
-  // We use `ListInitTensor` to support converting an arbitrarily nested braced-init-list
+  // We use `InitListTensor` to support converting an arbitrarily nested braced-init-list
   // (e.g. {{1, 2}, {3, 4}}) into the equivalent Tensor, taking advantage of the fact that
   // the constructor will automatically be called recursively until it reaches all innermost
   // scalar values.
   //
-  // At any time, a `ListInitTensor` object represents either of the following:
+  // At any time, a `InitListTensor` object represents either of the following:
   // 1. A scalar with value `scalar()` and type `scalar_type()`.
-  // 2. A Tensor represented in `std::initializer_list<ListInitTensor>` form, with value
+  // 2. A Tensor represented in `std::initializer_list<InitListTensor>` form, with value
   //    `init_list()`, Tensor scalar type `scalar_type()`, and Tensor sizes `sizes()`.
-  struct ListInitTensor {
+  struct InitListTensor {
 #define TENSOR(T, S)                   \
-    ListInitTensor(T scalar) :         \
+    InitListTensor(T scalar) :         \
         scalar_(scalar), init_list_(), \
         sizes_(),                      \
         scalar_type_(at::k##S),        \
-        type_(ListInitTensorType::Scalar) {}
+        type_(InitListTensorType::Scalar) {}
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
-    ListInitTensor(std::initializer_list<ListInitTensor> init_list) :
+    InitListTensor(std::initializer_list<InitListTensor> init_list) :
         scalar_(),
         init_list_(init_list),
         sizes_(),
         scalar_type_(),
-        type_(ListInitTensorType::InitList) {
+        type_(InitListTensorType::InitList) {
       TORCH_CHECK(init_list.size() > 0, "Empty init-list is not supported");
       scalar_type_ = init_list.begin()->scalar_type_;
-      const ListInitTensor& first_elem = *(init_list.begin());
+      const InitListTensor& first_elem = *(init_list.begin());
       for (const auto& elem : init_list) {
         TORCH_CHECK(elem.scalar_type_ == first_elem.scalar_type_,
           "Expected all elements of the tensor to have the same scalar type: ",
@@ -75,7 +75,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
       return scalar_;
     }
 
-    const std::initializer_list<ListInitTensor>& init_list() const {
+    const std::initializer_list<InitListTensor>& init_list() const {
       return init_list_;
     }
 
@@ -87,7 +87,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
       return scalar_type_;
     }
 
-    const ListInitTensorType& type() const {
+    const InitListTensorType& type() const {
       return type_;
     }
 
@@ -107,13 +107,13 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
     }
 
     void pretty_print_recursive(std::ostream& stream) const {
-      if (type_ == ListInitTensorType::Scalar) {
-        AT_DISPATCH_ALL_TYPES_AND3(at::kBool, at::kHalf, at::kBFloat16, scalar_type_, "ListInitTensor_pretty_print_scalar", [&] {
+      if (type_ == InitListTensorType::Scalar) {
+        AT_DISPATCH_ALL_TYPES_AND3(at::kBool, at::kHalf, at::kBFloat16, scalar_type_, "InitListTensor_pretty_print_scalar", [&] {
           stream << scalar_.to<scalar_t>();
         });
-      } else if (type_ == ListInitTensorType::InitList) {
+      } else if (type_ == InitListTensorType::InitList) {
         stream << "{";
-        for (const ListInitTensor* it = init_list_.begin(); it != init_list_.end(); it++) {
+        for (const InitListTensor* it = init_list_.begin(); it != init_list_.end(); it++) {
           it->pretty_print_recursive(stream);
           if (std::next(it) != init_list_.end()) stream << ", ";
         }
@@ -125,25 +125,25 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
     void fill_tensor(at::Tensor tensor) const {
       size_t index = 0;
       for (const auto& elem : init_list_) {
-        if (elem.type_ == ListInitTensorType::Scalar) {
+        if (elem.type_ == InitListTensorType::Scalar) {
           at::NoGradGuard guard;
           tensor[index].fill_(elem.scalar());
-        } else if (elem.type_ == ListInitTensorType::InitList) {
+        } else if (elem.type_ == InitListTensorType::InitList) {
           elem.fill_tensor(tensor[index]);
         } else {
-          TORCH_INTERNAL_ASSERT(false, "Invalid ListInitTensor");
+          TORCH_INTERNAL_ASSERT(false, "Invalid InitListTensor");
         }
         index++;
       }
     }
     c10::Scalar scalar_;
-    std::initializer_list<ListInitTensor> init_list_;
+    std::initializer_list<InitListTensor> init_list_;
     std::vector<int64_t> sizes_;
     c10::ScalarType scalar_type_;
-    ListInitTensorType type_;
+    InitListTensorType type_;
   };
 
-  inline std::ostream& operator<<(std::ostream& stream, const ListInitTensor& list_init_tensor) {
+  inline std::ostream& operator<<(std::ostream& stream, const InitListTensor& list_init_tensor) {
     list_init_tensor.pretty_print_recursive(stream);
     return stream;
   }
@@ -177,11 +177,20 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
 
-inline at::Tensor tensor(detail::ListInitTensor list_init_tensor, const at::TensorOptions& options) {
+/// NOTE: `torch::tensor({})` doesn't work at the moment because we would need to solve the
+/// ambiguous overload problem (see https://github.com/pytorch/pytorch/pull/26210#discussion_r325336686).
+/// If the user wants to create an empty tensor, they can use `torch::randn({0})` for now.
+///
+/// NOTE: Currently `torch::tensor(...)` doesn't support mixed data types
+/// (i.e. `torch::tensor({{bool, 2.0}})` doesn't work). We might be able to
+/// support it in the future by iterating over all sub-lists to find
+/// the largest data type that can represent all of the elements, or by using
+/// variadic templates.
+inline at::Tensor tensor(detail::InitListTensor list_init_tensor, const at::TensorOptions& options) {
   return autograd::make_variable(list_init_tensor.to_tensor(options), options.requires_grad());
 }
 
-inline at::Tensor tensor(detail::ListInitTensor list_init_tensor) {
+inline at::Tensor tensor(detail::InitListTensor list_init_tensor) {
   return torch::tensor(list_init_tensor, at::dtype(list_init_tensor.scalar_type()));
 }
 

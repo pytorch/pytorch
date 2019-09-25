@@ -379,6 +379,15 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={'input_1': [0],
                                     'output_1': [0]})
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_size(self):
+        class SizeModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.arange(input.size(0)), torch.arange(input.size(-1))
+
+        x = torch.randn(5, 3, 2)
+        self.run_test(SizeModel(), x)
+
     def _test_index_generic(self, fn):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -1065,6 +1074,28 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         model = CumSum()
         self.run_test(model, x)
+
+    def test_baddbmm(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input, batch1, batch2):
+                return torch.baddbmm(input, batch1, batch2, alpha=torch.tensor(5), beta=3.5)
+        x = torch.randn(10, 3, 5)
+        batch1 = torch.randn(10, 3, 4)
+        batch2 = torch.randn(10, 4, 5)
+        model = MyModule()
+        self.run_test(model, (x, batch1, batch2))
+
+    def test_baddbmm_dynamic(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input, batch1, batch2, alpha, beta):
+                return torch.baddbmm(input, batch1, batch2, alpha=alpha, beta=beta)
+        x = torch.randn(10, 3, 5)
+        batch1 = torch.randn(10, 3, 4)
+        batch2 = torch.randn(10, 4, 5)
+        alpha = torch.tensor(5)
+        beta = torch.tensor(3.5)
+        model = MyModule()
+        self.run_test(model, (x, batch1, batch2, alpha, beta))
 
     def test_log(self):
         class Log(torch.nn.Module):
