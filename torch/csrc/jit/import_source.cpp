@@ -127,7 +127,7 @@ struct SourceImporterImpl : public Resolver,
 
   TypePtr findNamedType(const QualifiedName& name) {
     parseSourceIfNeeded(name.prefix());
-    auto it = to_be_defined_.find(name.qualifiedName());
+    auto it = to_be_defined_.find(name);
     if (it != to_be_defined_.end() && it->second->kind() == TK_CLASS_DEF) {
       ClassDef cd(it->second);
       to_be_defined_.erase(it);
@@ -138,7 +138,7 @@ struct SourceImporterImpl : public Resolver,
 
   Function* findFunction(const QualifiedName& name) {
     parseSourceIfNeeded(name.prefix());
-    auto it = to_be_defined_.find(name.qualifiedName());
+    auto it = to_be_defined_.find(name);
     if (it != to_be_defined_.end() && it->second->kind() == TK_DEF) {
       Def d(it->second);
       to_be_defined_.erase(it);
@@ -174,13 +174,13 @@ struct SourceImporterImpl : public Resolver,
       switch (kind) {
         case TK_CLASS_DEF: {
           auto parsed_treeref = ClassDef(p.parseClass());
-          to_be_defined_[QualifiedName(qualifier, parsed_treeref.name().name())
-                             .qualifiedName()] = parsed_treeref;
+          to_be_defined_[QualifiedName(
+              qualifier, parsed_treeref.name().name())] = parsed_treeref;
         } break;
         case TK_DEF: {
           auto parsed_treeref = Def(p.parseFunction(/*is_method=*/false));
-          to_be_defined_[QualifiedName(qualifier, parsed_treeref.name().name())
-                             .qualifiedName()] = parsed_treeref;
+          to_be_defined_[QualifiedName(
+              qualifier, parsed_treeref.name().name())] = parsed_treeref;
         } break;
         default:
           throw ErrorReport(L.cur().range)
@@ -437,7 +437,7 @@ struct SourceImporterImpl : public Resolver,
   std::unordered_set<std::string> loaded_sources_;
   // named types and functions loaded from a file but not yet defined because
   // their type has not been requested yet.
-  std::unordered_map<std::string, TreeRef> to_be_defined_;
+  std::unordered_map<QualifiedName, TreeRef> to_be_defined_;
 };
 
 std::shared_ptr<SugaredValue> ClassNamespaceValue::attr(
