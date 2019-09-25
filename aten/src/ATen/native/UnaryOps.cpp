@@ -65,6 +65,10 @@ Tensor& ceil_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
 Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 
+Tensor& expm1_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, expm1_stub); }
+Tensor expm1(const Tensor& self) { return unary_op_impl(self, at::expm1_out); }
+Tensor& expm1_(Tensor& self) { return unary_op_impl_(self, at::expm1_out); }
+
 Tensor& floor_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, floor_stub); }
 Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
 Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
@@ -80,6 +84,10 @@ Tensor& digamma_(Tensor& self) { return unary_op_impl_(self, digamma_out); }
 Tensor& rsqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, rsqrt_stub); }
 Tensor rsqrt(const Tensor& self) { return unary_op_impl(self, at::rsqrt_out); }
 Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
+
+Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sign_stub); }
+Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
+Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
 
 Tensor& trunc_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, trunc_stub); }
 Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
@@ -193,23 +201,6 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
   return result;
 }
 
-Tensor sign(const Tensor& self) {
-    Tensor result = at::empty({0}, self.options());
-    return at::sign_out(result, self);
-}
-
-Tensor& sign_(Tensor& self) {
-    return at::sign_out(self, self);
-}
-
-Tensor& sign_out(Tensor& result, const Tensor& self) {
-    checkBackend("sign", result, self.type().backend());
-    auto iter = TensorIterator::unary_op(result, self,
-      /*check_internal_overlap=*/true);
-    sign_stub(iter.device_type(), iter);
-    return result;
-}
-
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
            "mvlgamma is not implemented for ", self.type());
@@ -279,7 +270,6 @@ IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
-IMPLEMENT_UNARY_OP_VEC(expm1)
 IMPLEMENT_UNARY_OP_VEC(frac)
 IMPLEMENT_UNARY_OP_VEC(log)
 IMPLEMENT_UNARY_OP_VEC(log10)
