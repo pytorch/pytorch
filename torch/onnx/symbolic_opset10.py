@@ -131,20 +131,29 @@ avg_pool3d = _avg_pool('avg_pool3d', _triple)
 
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, align_corners=None):
-        sym_help._interpolate_warning(interpolate_mode)
-        align_corners = sym_help._maybe_get_scalar(align_corners)
         if align_corners:
             return _unimplemented(name, "align_corners == True")
-        scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
+
+        output_size = sym_help._maybe_get_const(output_size, 'is')
+        if sym_help._is_value(output_size):
+            offset = 2
+            offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
+            dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+            divisor = sym_help._slice_helper(g, g.op("Shape", input), axes=[0], ends=[dim], starts=[offset])
+            divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+            scale_dims = g.op("Div", dividend, divisor)
+            scales = g.op("Concat", offsets, scale_dims, axis_i=0)
+        else:
+            scales_constant = [1. if i < 2 else
+                               float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
+                               for i in range(0, dim)]
+            scales = g.op("Constant", value_t=torch.tensor(scales_constant))
         return g.op("Resize", input, scales, mode_s=interpolate_mode)
     return symbolic_fn
 
 upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
 upsample_nearest2d = _interpolate('upsample_nearest2d', 4, "nearest")
 upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
-upsample_linear1d = _interpolate('upsample_linear1d', 3, "linear")
-upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
-upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
 
 def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
