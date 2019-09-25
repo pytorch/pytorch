@@ -620,6 +620,23 @@ void removeMaxPoolUnusedOutput(Block* b) {
   }
 }
 
+void removeBatchNormUnusedInput(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    auto n = *it;
+    for (auto* child_block : n->blocks()) {
+      removeBatchNormUnusedInput(child_block);
+    }
+    for (auto* input : n->inputs()) {
+      int ind = 0;
+      std::cout << input->debugName() << " has uses " << input->hasUses();
+      if (!input->hasUses()) {
+        n->removeInput(ind);
+        ind++;
+      }
+    }
+  }
+}
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -657,6 +674,7 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version, bool
   speculateOps(graph->block());
   eraseListConstruct(graph->block());
   fuseSplitListUnpack(graph->block());
+  removeBatchNormUnusedInput(graph->block());
   removeMaxPoolUnusedOutput(graph->block());
 }
 
