@@ -34,8 +34,7 @@ class FunctionalAPITest(QuantizationTestCase):
         self.assertEqual(qY, qY_hat)
 
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
@@ -89,8 +88,7 @@ class FunctionalAPITest(QuantizationTestCase):
 
 class DynamicModuleAPITest(QuantizationTestCase):
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
@@ -202,8 +200,7 @@ class ModuleAPITest(QuantizationTestCase):
 
 
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
@@ -327,8 +324,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(rqr, rqr2)
 
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )

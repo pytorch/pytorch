@@ -30,8 +30,7 @@ from hypothesis_utils import no_deadline
 import io
 import copy
 
-@unittest.skipIf(
-    not torch.fbgemm_is_cpu_supported(),
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
     " with instruction set support avx2 or newer.",
 )
@@ -284,8 +283,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-@unittest.skipIf(
-    not torch.fbgemm_is_cpu_supported(),
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
     " with instruction set support avx2 or newer.",
 )
@@ -553,8 +551,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         for out, ref in zip(final_hiddens_fp16, ref_hid):
             torch.testing.assert_allclose(out, ref)
 
-@unittest.skipIf(
-    not torch.fbgemm_is_cpu_supported(),
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
     " with instruction set support avx2 or newer.",
 )
@@ -640,7 +637,7 @@ class ScriptabilityTest(QuantizationTestCase):
         self.checkScriptable(self.qmodel_under_test, [(xq, xq)], check_save_load=True)
         self.checkScriptable(self.model_under_test, [(xq.dequantize(), xq.dequantize())], check_save_load=True)
 
-@unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                  'Quantization requires FBGEMM. FBGEMM does not play'
                  ' well with UBSAN at the moment, so we skip the test if'
                  ' we are in a UBSAN environment.')
@@ -855,7 +852,7 @@ class ObserverTest(QuantizationTestCase):
         loaded = torch.jit.load(buf)
         self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
 
-@unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                  'Quantization requires FBGEMM. FBGEMM does not play'
                  ' well with UBSAN at the moment, so we skip the test if'
                  ' we are in a UBSAN environment.')

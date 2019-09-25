@@ -11,6 +11,7 @@ from torch._C import parse_schema
 white_list = [
     ('quantize', datetime.date(2019, 10, 1)),
     ('q_per_channel_axis', datetime.date(2019, 10, 1)),
+    ('fbgemm_is_cpu_supported', datetime.date(2019, 10, 1)),
 ]
 
 

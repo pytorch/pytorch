@@ -214,7 +214,6 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::fbgemm_linear_fp16_weight", ""},
         {"aten::fbgemm_pack_quantized_matrix", ""},
         {"aten::fbgemm_pack_quantized_matrix", "KN"},
-        {"aten::fbgemm_is_cpu_supported", ""},
         {"aten::log", ""},
         {"aten::log_", ""},
         {"aten::log10", ""},
