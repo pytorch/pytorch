@@ -29,21 +29,7 @@ TORCH_API void PythonPrint(
     std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable = false);
 
-TORCH_API void LEGACY_PythonPrint(
-    std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
-    const c10::NamedTypePtr& type,
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
-    bool enforce_importable = false);
-
-TORCH_API void LEGACY_PythonPrint(
-    std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
-    const script::Module& module,
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
-    bool enforce_importable);
+struct PythonPrint {};
 
 TORCH_API bool printerHasSpecialCaseFor(c10::Symbol sym);
 } // namespace jit

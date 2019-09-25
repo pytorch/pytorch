@@ -249,16 +249,6 @@ struct PythonPrintPass {
   std::vector<c10::NamedTypePtr>& deps_table_;
   // Helper to avoid duplicating class types
   void registerDependency(const c10::NamedTypePtr& type) {
-    if (legacy_module_printing_) {
-      // we serialize module classes separately.
-      // Including them in the class table as well will cause the code
-      // to get imported twice.
-      if (auto classType = type->cast<ClassType>()) {
-        if (classType->is_module()) {
-          return;
-        }
-      }
-    }
     // Need to do actual equality comparison, not a pointer equality. This is
     // because for some types (e.g. FunctionType), we may have multiple
     // TypePtr's that represent the same underlying thing.
@@ -293,8 +283,6 @@ struct PythonPrintPass {
 
   // used method names
   std::unordered_set<std::string> used_method_names_;
-
-  bool legacy_module_printing_;
 
   // scanValue, scanNode, scanBlock:
   // decide if it is safe to omit the output of a temporary variable,
@@ -1312,13 +1300,11 @@ struct PythonPrintPass {
   PythonPrintPass(
       std::vector<at::Tensor>& tensor_table,
       std::vector<c10::NamedTypePtr>& deps_table,
-      bool enforce_importable,
-      bool legacy_module_printing)
+      bool enforce_importable)
       : body_(&source_range_stack_),
         tensor_table_(tensor_table),
         deps_table_(deps_table),
-        enforce_importable_(enforce_importable),
-        legacy_module_printing_(legacy_module_printing) {
+        enforce_importable_(enforce_importable) {
     TORCH_INTERNAL_ASSERT(deps_table.empty());
   }
 
@@ -1371,9 +1357,6 @@ struct PythonPrintPass {
       printFunction(*functionType->function());
     } else if (auto classType = type->cast<ClassType>()) {
       bool is_module = classType->is_module();
-      if (legacy_module_printing_) {
-        is_module = false;
-      }
       body_ << "class " << classType->name()->name();
       if (is_module) {
         body_ << "(Module)";
@@ -1458,11 +1441,7 @@ void PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable) {
-  PythonPrintPass pp(
-      tensor_table,
-      deps_table,
-      enforce_importable,
-      /*legacy_module_printing=*/false);
+  PythonPrintPass pp(tensor_table, deps_table, enforce_importable);
   if (is_method) {
     pp.printMethod(func);
   } else {
@@ -1478,44 +1457,8 @@ void PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable) {
-  PythonPrintPass pp(
-      tensor_table,
-      deps_table,
-      enforce_importable,
-      /*legacy_module_printing=*/false);
+  PythonPrintPass pp(tensor_table, deps_table, enforce_importable);
   pp.printNamedType(type);
-  pp.print(out, source_ranges_out);
-}
-
-void LEGACY_PythonPrint(
-    std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
-    const c10::NamedTypePtr& type,
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
-    bool enforce_importable) {
-  PythonPrintPass pp(
-      tensor_table,
-      deps_table,
-      enforce_importable,
-      /*legacy_module_printing=*/true);
-  pp.printNamedType(type);
-  pp.print(out, source_ranges_out);
-}
-
-void LEGACY_PythonPrint(
-    std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
-    const script::Module& module,
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
-    bool enforce_importable) {
-  PythonPrintPass pp(
-      tensor_table,
-      deps_table,
-      enforce_importable,
-      /*legacy_module_printing=*/true);
-  pp.LEGACY_printModuleMethods(module);
   pp.print(out, source_ranges_out);
 }
 
