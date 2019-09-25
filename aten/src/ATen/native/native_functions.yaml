@@ -3686,6 +3686,18 @@
   variants: method
   supports_named_tensor: True
 
+- func: result_type.Tensor(Tensor tensor, Tensor other) -> ScalarType
+  variants: function
+
+- func: result_type.Scalar(Tensor tensor, Scalar other) -> ScalarType
+  variants: function
+
+- func: result_type.Scalar_Tensor(Scalar scalar, Tensor tensor) -> ScalarType
+  variants: function
+
+- func: result_type.Scalar_Scalar(Scalar scalar1, Scalar scalar2) -> ScalarType
+  variants: function
+
 # NB: Does NOT check precondition that numel == 1
 - func: _local_scalar_dense(Tensor self) -> Scalar
   use_c10_dispatcher: full
