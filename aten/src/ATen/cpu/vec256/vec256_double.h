@@ -176,9 +176,6 @@ public:
   Vec256<double> reciprocal() const {
     return _mm256_div_pd(_mm256_set1_pd(1), values);
   }
-  Vec256<double> remainder() const {
-    return map(std::remainder);
-  }
   Vec256<double> rsqrt() const {
     return _mm256_div_pd(_mm256_set1_pd(1), _mm256_sqrt_pd(values));
   }

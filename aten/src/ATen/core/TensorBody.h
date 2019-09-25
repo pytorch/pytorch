@@ -822,6 +822,8 @@ class CAFFE2_API Tensor {
   Tensor & lerp_(const Tensor & end, const Tensor & weight) const;
   Tensor & fmod_(Scalar other) const;
   Tensor & fmod_(const Tensor & other) const;
+  Tensor & remainder_(Scalar other) const;
+  Tensor & remainder_(const Tensor & other) const;
   Tensor & addbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
   Tensor addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & addcdiv_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
@@ -891,8 +893,6 @@ class CAFFE2_API Tensor {
   Tensor fmod(const Tensor & other) const;
   Tensor remainder(Scalar other) const;
   Tensor remainder(const Tensor & other) const;
-  Tensor & remainder_(Scalar other) const;
-  Tensor & remainder_(const Tensor & other) const;
   Tensor min(const Tensor & other) const;
   Tensor min() const;
   Tensor max(const Tensor & other) const;
