@@ -1228,6 +1228,7 @@ def create_generic(top_env, declarations):
             elif option['use_c10_dispatcher'] == 'unboxed_only':
                 method_definition = C10_UNBOXEDONLY_TENSOR_METHOD_DEFINITION
             else:
+                assert option['use_c10_dispatcher'] == 'full'
                 method_definition = C10_TENSOR_METHOD_DEFINITION
             return FunctionCode(
                 declaration=TENSOR_METHOD_DECLARATION.substitute(
@@ -1263,13 +1264,14 @@ def create_generic(top_env, declarations):
                 fn_definition = FACTORY_DEFINITION.substitute(
                     option, static_dispatch_function_body=static_dispatch_function_body)
             else:
-                if (option['use_c10_dispatcher'] == 'no'):
+                if option['use_c10_dispatcher'] == 'no':
                     fn_definition = FUNCTION_DEFINITION.substitute(
                         option, static_dispatch_function_body=static_dispatch_function_body)
                 elif option['use_c10_dispatcher'] == 'unboxed_only':
                     fn_definition = C10_UNBOXEDONLY_FUNCTION_DEFINITION.substitute(
                         option, static_dispatch_function_body=static_dispatch_function_body)
                 else:
+                    assert option['use_c10_dispatcher'] == 'full'
                     fn_definition = C10_FUNCTION_DEFINITION.substitute(
                         option, static_dispatch_function_body=static_dispatch_function_body)
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
@@ -1342,7 +1344,7 @@ def create_generic(top_env, declarations):
         if not is_named_tensor_only:
             top_env['registration_declarations'].append(
                 REGISTRATION_DECLARATION.substitute(option))
-        if (option['use_c10_dispatcher'] != 'no'):
+        if option['use_c10_dispatcher'] != 'no':
             top_env['c10_ops_already_moved_from_aten_to_c10'].append(
                 check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
             )
@@ -1368,10 +1370,11 @@ def create_generic(top_env, declarations):
                 check_namedtensor_enabled(NATIVE_DISPATCH_DECLARATION.substitute(option)))
             top_env['type_method_definitions'].append(
                 check_namedtensor_enabled(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option)))
-            if (option['use_c10_dispatcher'] == 'full'):
+            if option['use_c10_dispatcher'] == 'full':
                 top_env['function_registrations'].append(
                     check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
             else:
+                assert option['use_c10_dispatcher'] in ['unboxed_only', 'no']
                 top_env['function_registrations'].append(
                     check_namedtensor_enabled(DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option)))
 
@@ -1837,10 +1840,11 @@ def create_derived(backend_type_env, declarations):
                     option['native_type_method_dispatch'] = native_dispatch
                     type_object_definitions.append(
                         NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
-                    if (option['use_c10_dispatcher'] == 'full'):
+                    if option['use_c10_dispatcher'] == 'full':
                         function_registrations.append(
                             BACKEND_FUNCTION_REGISTRATION.substitute(env))
                     else:
+                        assert option['use_c10_dispatcher'] in ['unboxed_only', 'no']
                         function_registrations.append(
                             BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env))
 
