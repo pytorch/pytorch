@@ -275,6 +275,15 @@ std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
   TORCH_CHECK(false, "NYI: max with names");
   return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
 }
+Tensor argmax(const Tensor& self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("argmax");
+}
+Tensor argmin(const Tensor& self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("argmin");
+}
+Tensor argsort(const Tensor& self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("argsort");
+}
 #endif
 
 }} // namespace at::native
