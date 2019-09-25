@@ -457,7 +457,8 @@ void qadaptive_avg_pool2d_nhwc_kernel(
             istrideD,
             istrideH,
             istrideW);
-        // remainer
+        // 1) The following loop handles the remaining channels
+        // 2) It also handles the Non-AVX2 path
         for (; c < sizeD; ++c) {
           int32_t acc_int32 = -qx.q_zero_point() * size;
           int64_t tcntr = 0;
@@ -556,7 +557,8 @@ void qavg_pool2d_nhwc_kernel(
             1,
             inputWidth,
             1);
-        // remainer
+        // 1) The following loop handles the remaining channels
+        // 2) It also handles the Non-AVX2 path
         for (; c < nInputPlane; ++c) {
           int32_t acc_int32 = -qx.q_zero_point() * size;
           int64_t tcntr = 0;
@@ -709,6 +711,8 @@ void qupsample_bilinear2d_nhwc_kernel(
                   w1lambda,
                   h1p,
                   w1p);
+              // 1) The following loop handles the remaining channels
+              // 2) It also handles the Non-AVX2 path
               for (; c < channels; ++c) {
                 float result = h0lambda *
                         (w0lambda * pos1[0] + w1lambda * pos1[w1p * channels]) +
