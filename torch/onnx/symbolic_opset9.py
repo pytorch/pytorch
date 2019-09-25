@@ -313,6 +313,11 @@ def embedding_bag(g,
 
 
 def size(g, self, dim):
+    if sym_help._maybe_get_const(dim, 'i') < 0:
+        rank = self.type().dim()
+        if rank:
+            dim = sym_help._maybe_get_const(dim, 'i') + rank
+            dim = g.op("Constant", value_t=torch.tensor(dim))
     full_shape = g.op("Shape", self)
     return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
 

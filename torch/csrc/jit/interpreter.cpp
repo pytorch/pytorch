@@ -985,8 +985,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case GUARD: {
-            auto actual = TensorType::create(stack.back().toTensor());
-            const TypePtr& expected = af.types[inst.X];
+            auto t = stack.back().toTensor();
+            auto actual = t.defined() ? TensorType::create(t)
+                                      : TensorType::get()->withUndefined();
+            const TypePtr &expected = af.types[inst.X];
             push(stack, *expected == *actual);
             ++af.pc;
           } break;

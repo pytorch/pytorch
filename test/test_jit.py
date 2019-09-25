@@ -3665,6 +3665,17 @@ def foo(x):
         with self.assertRaisesRegex(Exception, "backward hooks assigned"):
             torch.jit.trace(n, (torch.tensor(1.0),))
 
+    def test_python_op_builtins(self):
+        @torch.jit.unused
+        def fn(x):
+            # type: (List[int]) -> int
+            return sum(x)
+
+        @torch.jit.script
+        def script_fn(x):
+            # type: (List[int]) -> int
+            return fn(x)
+
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
@@ -16942,7 +16953,7 @@ nn_functional_tests = [
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
     ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),
-        '', (True, 'aten::_batch_norm_impl_index')),
+        '', (False, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],), '',
      (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
