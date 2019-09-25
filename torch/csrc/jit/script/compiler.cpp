@@ -1070,44 +1070,65 @@ struct to_ir {
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
-  // emit a single expr from the loop comprehension so that we can correctly
-  // type the list we create, then remove the nodes we emitted
-  TypePtr getListCompType(
-      const ListComp& lc,
-      const ListTypePtr& input_list_type) {
+  TypePtr emitInTempEnvironment(const std::function<TypePtr()>& fn) {
     auto b = graph->insertNode(graph->create(prim::Loop))->addBlock();
     pushFrame(b);
     WithInsertPoint guard(b);
-    auto li_elem = graph->insertNode(
-        graph->createUninitialized(input_list_type->getElementType()));
-    emitExprsAssign(
-        List<Expr>::create(lc.range(), {lc.target()}),
-        {std::make_shared<SimpleValue>(li_elem->output())},
-        lc.range(),
-        /*n_binders*/ 1);
-    auto ret_type = emitExpr(lc.elt())->type();
+    auto ret_type = fn();
     popFrame();
     b->owningNode()->destroy();
     return ret_type;
   }
 
+  // emit a single expr from the loop comprehension so that we can correctly
+  // type the list we create, then remove the nodes we emitted
+  TypePtr getListCompType(const ListComp& lc, const TypePtr type_ptr) {
+    return emitInTempEnvironment([&]() {
+      auto li_elem = graph->insertNode(graph->createUninitialized(type_ptr));
+      emitExprsAssign(
+          List<Expr>::create(lc.range(), {lc.target()}),
+          {std::make_shared<SimpleValue>(li_elem->output())},
+          lc.range(),
+          /*n_binders*/ 1);
+      return emitExpr(lc.elt())->type();
+    });
+  }
+
+  // emit a single index of the Iterable to get the children type
+  TypePtr getIterableChildrenType(const ListComp& lc, IterableTree& tree) {
+    return emitInTempEnvironment([&]() {
+      return tree.getitem(lc.range(), method, graph->insertConstant(0))->type();
+    });
+  }
+
   Value* emitListComprehension(const ListComp& lc) {
     const auto tmp_name = createTempName("$list_acc");
-    const auto list_value = emitExpr(lc.iter());
-    if (list_value->type()->kind() != TypeKind::ListType) {
-      // TODO: constraining iterators to be simple lists for now
-      // as it makes easy to get list's element type.
+    const auto sv = emitSugaredExpr(lc.iter(), 1);
+
+    TypePtr list_type;
+
+    auto siv = dynamic_cast<SimpleValue*>(sv.get());
+    if (siv && siv->getValue()->type()->cast<ListType>()) {
+      auto list_elem =
+          siv->getValue()->type()->cast<ListType>()->getElementType();
+      list_type = getListCompType(lc, list_elem);
+    } else if (auto iterable_tree = dynamic_cast<IterableTree*>(sv.get())) {
+      list_type =
+          getListCompType(lc, getIterableChildrenType(lc, *iterable_tree));
+    } else if (dynamic_cast<RangeValue*>(sv.get())) {
+      list_type = getListCompType(lc, IntType::get());
+    } else {
       throw ErrorReport(lc.range())
-          << "iterator expression is expected to be a list";
+          << "iterator expression is expected to be a list, iterable, or range, found "
+          << (siv ? siv->getValue()->type()->python_str() : siv->kind());
     }
 
     // given `[x*2 for x in my_list]` this generates the following AST:
     // __list_acc = []
     // for x in my_list:
     //  __list_acc.append(x*2)
-    const auto n = graph->insertNode(graph->createList(
-        getListCompType(lc, list_value->type()->expect<ListType>()),
-        at::ArrayRef<Value*>{}));
+    const auto n =
+        graph->insertNode(graph->createList(list_type, at::ArrayRef<Value*>{}));
     environment_stack->setVar(lc.range(), tmp_name, n->output());
     const auto tmp_list_ident = Ident::create(lc.range(), tmp_name);
     const auto tmp_list_var = Var::create(lc.range(), tmp_list_ident);
