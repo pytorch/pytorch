@@ -254,7 +254,7 @@ Tensor lt(const Tensor& self, Scalar other) {
 
 Tensor& lt_(Tensor& self, Scalar other) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(), "lt_", [&]{
-    auto iter = TensorIterator::comparison_op(self, self, wrapped_scalar_tensor_and_check_convert<scalar_t>(other)),
+    auto iter = TensorIterator::comparison_op(self, self, wrapped_scalar_tensor_and_check_convert<scalar_t>(other),
             /*check_mem_overlap=*/true);
     lt_stub(iter.device_type(), iter);
   });
