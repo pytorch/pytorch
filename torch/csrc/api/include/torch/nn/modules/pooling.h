@@ -16,7 +16,7 @@ class TORCH_API AvgPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   AvgPoolImpl(ExpandingArray<D> kernel_size)
       : AvgPoolImpl(AvgPoolOptions<D>(kernel_size)) {}
-  explicit AvgPoolImpl(AvgPoolOptions<D> options);
+  explicit AvgPoolImpl(const AvgPoolOptions<D>& options_);
 
   void reset() override;
 
@@ -86,7 +86,7 @@ class TORCH_API MaxPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   MaxPoolImpl(ExpandingArray<D> kernel_size)
       : MaxPoolImpl(MaxPoolOptions<D>(kernel_size)) {}
-  explicit MaxPoolImpl(MaxPoolOptions<D> options);
+  explicit MaxPoolImpl(const MaxPoolOptions<D>& options_);
 
   void reset() override;
 
@@ -106,6 +106,10 @@ class TORCH_API MaxPool1dImpl : public MaxPoolImpl<1, MaxPool1dImpl> {
  public:
   using MaxPoolImpl<1, MaxPool1dImpl>::MaxPoolImpl;
   Tensor forward(const Tensor& input);
+
+  /// Returns the outputs and the indices of the max values.
+  /// Useful for `torch::nn::MaxUnpool1d` later.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `MaxPool1dImpl`.
@@ -123,6 +127,10 @@ class TORCH_API MaxPool2dImpl : public MaxPoolImpl<2, MaxPool2dImpl> {
  public:
   using MaxPoolImpl<2, MaxPool2dImpl>::MaxPoolImpl;
   Tensor forward(const Tensor& input);
+
+  /// Returns the outputs and the indices of the max values.
+  /// Useful for `torch::nn::MaxUnpool2d` later.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `MaxPool2dImpl`.
@@ -140,6 +148,10 @@ class TORCH_API MaxPool3dImpl : public MaxPoolImpl<3, MaxPool3dImpl> {
  public:
   using MaxPoolImpl<3, MaxPool3dImpl>::MaxPoolImpl;
   Tensor forward(const Tensor& input);
+
+  /// Returns the outputs and the indices of the max values.
+  /// Useful for `torch::nn::MaxUnpool3d` later.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `MaxPool3dImpl`.

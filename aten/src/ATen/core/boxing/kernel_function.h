@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/op_registration/kernel_functor.h>
+#include <ATen/core/boxing/kernel_functor.h>
 
 namespace c10 {
 namespace detail {

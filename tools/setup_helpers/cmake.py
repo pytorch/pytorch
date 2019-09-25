@@ -215,6 +215,7 @@ class CMake:
             # adding a new build option to this block: Consider making these two names identical and adding this option
             # in the block below.
             '_GLIBCXX_USE_CXX11_ABI': 'GLIBCXX_USE_CXX11_ABI',
+            'CUDNN_LIB_DIR': 'CUDNN_LIBRARY',
             'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA',
             'USE_GLOO_IBVERBS': 'USE_IBVERBS'   # Backward compatibility. Will be removed in the future.
         }
@@ -226,6 +227,8 @@ class CMake:
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
              'CUDA_NVCC_EXECUTABLE',
+             'CUDNN_LIBRARY',
+             'CUDNN_INCLUDE_DIR',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'INSTALL_TEST',
              'MKL_THREADING',
