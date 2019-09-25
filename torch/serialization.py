@@ -379,7 +379,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
             match the :attr:`pickle_module` used to serialize file)
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
-            :attr:`errors=...`. By default only attr:`encoding='utf-8'` is used.
+            :attr:`errors=...`.
 
     .. note::
         When you call :func:`torch.load()` on a file which contains GPU tensors, those tensors
@@ -387,16 +387,13 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         and then :meth:`load_state_dict` to avoid GPU RAM surge when loading a model checkpoint.
 
     .. note::
-        In Python 3, when loading files saved by Python 2, you may encounter
-        ``UnicodeDecodeError: 'ascii' codec can't decode byte 0x...``. This is
-        caused by the difference of handling in byte strings in Python2 and
-        Python 3. You may use extra :attr:`encoding` keyword argument to specify how
-        these objects should be loaded, e.g., :attr:`encoding='utf-8'` decodes them
-        to strings using ``utf-8`` encoding, and :attr:`encoding='bytes'` keeps them
+        By default, we decode byte strings as ``utf-8``.  This is to avoid a common error
+        case ``UnicodeDecodeError: 'ascii' codec can't decode byte 0x...``
+        when loading files saved by Python 2 in Python 3.  If this default
+        is incorrect, you may use an extra :attr:`encoding` keyword argument to specify how
+        these objects should be loaded, e.g., :attr:`encoding='latin1'` decodes them
+        to strings using ``latin1`` encoding, and :attr:`encoding='bytes'` keeps them
         as byte arrays which can be decoded later with ``byte_array.decode(...)``.
-        Even though we are defaulting to ``utf-8`` (Python 3) you can still run into
-        this issue e.g. if you try to load a module with specified `encoding='ascii'`
-        and the module has Unicode characters inside.
 
     Example:
         >>> torch.load('tensors.pt')
