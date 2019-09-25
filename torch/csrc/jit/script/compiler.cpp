@@ -2366,6 +2366,15 @@ struct to_ir {
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
+
+      auto simple_value = std::dynamic_pointer_cast<SimpleValue>(sv);
+      if (simple_value && simple_value->getValue()->type()->cast<ClassType>()) {
+        auto self = NamedValue(loc, "self", simple_value->getValue());
+        inputs.insert(inputs.begin(), self);
+        return makeMagic("__call__", sv)
+            ->call(loc, method, inputs, attributes, n_binders);
+      }
+
       return sv->call(loc, method, inputs, attributes, n_binders);
     }
   }
