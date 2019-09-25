@@ -4,6 +4,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/EnableNamedTensor.h>
+#include <ATen/native/TypeProperties.h>
 
 namespace at {
 
@@ -71,79 +72,30 @@ void TensorIterator::reorder_dimensions() {
   permute_dimensions(perm_);
 }
 
-template <typename F>
-static std::tuple<Device, ScalarType>
-compute_result_type(at::ArrayRef<OperandInfo> operands, const F& predicate) {
-  Device device = kCPU;
-  ScalarType dtype = ScalarType::Undefined;
+Device compute_device(at::ArrayRef<OperandInfo> operands) {
   for (auto& op : operands) {
     if (!op.tensor.defined()) continue;
-    if (!predicate(op)) continue;
-    ScalarType tensor_dtype;
-    if (op.tensor.unsafeGetTensorImpl()->is_wrapped_number() && isFloatingType(op.tensor.scalar_type())) {
-      tensor_dtype = typeMetaToScalarType(caffe2::get_default_dtype());
-    } else {
-      tensor_dtype = op.tensor.scalar_type();
-    }
-    if (dtype == ScalarType::Undefined) {
-      dtype = tensor_dtype;
-      device = op.tensor.device();
-    } else {
-      dtype = promoteTypes(dtype, tensor_dtype);
-    }
+    if (op.tensor.dim() == 0) continue;
+    return op.tensor.device();
   }
-  return std::make_tuple(device, dtype);
-}
-
-template <typename F, typename... Preds>
-static std::tuple<Device, ScalarType>
-compute_result_type(at::ArrayRef<OperandInfo> operands,
-                    const F& first_predicate,
-                    Preds... predicates) {
-  auto result_type = compute_result_type(operands, first_predicate);
-  if (std::get<1>(result_type) != ScalarType::Undefined) {
-    return result_type;
+  for (auto& op : operands) {
+    if (!op.tensor.defined()) continue;
+    if (op.tensor.unsafeGetTensorImpl()->is_wrapped_number()) continue;
+    return op.tensor.device();
   }
-  return compute_result_type(operands, predicates...);
+  return kCPU;
 }
 
 static std::tuple<Device, ScalarType> compute_common_type_(at::ArrayRef<OperandInfo> operands) {
   // See [Result type computation] in TensorIterator.h
-
-  auto result_type =
-      compute_result_type(operands,
-        [](const OperandInfo& op) { return op.tensor.dim() > 0; },
-        [](const OperandInfo& op) { return !op.tensor.unsafeGetTensorImpl()->is_wrapped_number(); },
-        [](const OperandInfo& op) { return true; });
-
-  if (ScalarType::Bool == std::get<1>(result_type)) {
-    auto alternate = compute_result_type(operands,
-        [](const OperandInfo& op) {
-          return op.tensor.dim() == 0;
-        }
-    );
-    if (std::get<1>(alternate) != ScalarType::Undefined) {
-      // preserve device from original result
-      return std::make_tuple(std::get<0>(result_type), std::get<1>(alternate));
-    }
-  }
-
-  // if non-zero-dim tensor result is an integral type and there's a zero-dim
-  // floating point operand, we'll promote the floating point type.
-  if (isIntegralType(std::get<1>(result_type), false)) {
-    auto alternate = compute_result_type(operands,
-        [](const OperandInfo& op) {
-          return isFloatingType(op.tensor.scalar_type()) && op.tensor.dim() == 0;
-        }
-    );
-    if (std::get<1>(alternate) != ScalarType::Undefined) {
-      // preserve device from original result
-      return std::make_tuple(std::get<0>(result_type), std::get<1>(alternate));
-    }
-  }
-
-  TORCH_INTERNAL_ASSERT(std::get<1>(result_type) != ScalarType::Undefined);
-  return result_type;
+  auto device = compute_device(operands);
+  std::vector<Tensor> tensors;
+  std::transform(std::begin(operands), std::end(operands), std::back_inserter(tensors),
+                  [](const OperandInfo& op) { return op.tensor; });
+  auto dtype = at::native::result_type(tensors);
+  auto result = std::make_tuple(device, dtype);
+  TORCH_INTERNAL_ASSERT(dtype != ScalarType::Undefined);
+  return result;
 }
 
 std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {

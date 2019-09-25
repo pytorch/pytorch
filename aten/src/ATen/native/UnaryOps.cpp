@@ -81,6 +81,10 @@ Tensor& rsqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor rsqrt(const Tensor& self) { return unary_op_impl(self, at::rsqrt_out); }
 Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
 
+Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sign_stub); }
+Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
+Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
+
 Tensor& trunc_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, trunc_stub); }
 Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
 Tensor& trunc_(Tensor& self) { return unary_op_impl_(self, at::trunc_out); }
@@ -191,23 +195,6 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
       /*check_mem_overlap=*/true);
   clamp_min_stub(iter.device_type(), iter, min);
   return result;
-}
-
-Tensor sign(const Tensor& self) {
-    Tensor result = at::empty({0}, self.options());
-    return at::sign_out(result, self);
-}
-
-Tensor& sign_(Tensor& self) {
-    return at::sign_out(self, self);
-}
-
-Tensor& sign_out(Tensor& result, const Tensor& self) {
-    checkBackend("sign", result, self.type().backend());
-    auto iter = TensorIterator::unary_op(result, self,
-      /*check_internal_overlap=*/true);
-    sign_stub(iter.device_type(), iter);
-    return result;
 }
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {

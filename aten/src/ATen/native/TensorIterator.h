@@ -51,7 +51,8 @@
 // (See https://github.com/pytorch/pytorch/issues/9515)
 //
 // Note that TensorIterator currently supports type conversions on 0-dim
-// tensors. Other type conversions will raise an exception.
+// tensors and arithmetic operators. Other type conversions will raise an 
+// exception.
 
 namespace at {
 
