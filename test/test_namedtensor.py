@@ -911,6 +911,7 @@ class TestNamedTensor(TestCase):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
             op = getattr(torch, op_name)
             check_output(op(t, 1), ['N', 'L'])
+            check_output(op(t, -1), ['N', 'C'])
             check_output(op(t, 'C'), ['N', 'L'])
             with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
                 op(t, None)
@@ -927,6 +928,7 @@ class TestNamedTensor(TestCase):
             op = getattr(torch, op_name)
 
             check_output(op(t, [1, 2]), ['N'])
+            check_output(op(t, [0, -1]), ['C'])
             check_output(op(t, ['C', 'L']), ['N'])
             with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
                 op(t, [None, 'C'])
