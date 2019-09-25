@@ -645,7 +645,8 @@ class RpcTest(MultiProcessTestCase):
         )
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1)
 
-    def _test_rref_forward_chain(self):
+    @_wrap_with_rpc
+    def test_rref_forward_chain(self):
         ttl = 8
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -664,25 +665,6 @@ class RpcTest(MultiProcessTestCase):
 
         ret = ret_rref
         self.assertEqual(ret, torch.add(torch.ones(n, n), 1))
-
-    @_wrap_with_rpc
-    def test_rref_forward_chain(self):
-        self._test_rref_forward_chain()
-
-    @_wrap_with_rpc
-    def test_rref_forward_chain_stress(self):
-        # Ideally, we should collect all rrefs in a list and evaluate then
-        # together in another loop. However, it could block now, because
-        # rref_forward_chain calls to_here() and invokes nested remote calls,
-        # which would block one thread on the callee side and we have a limited
-        # number of threads in ProcessGroupAgent. However, this test is still
-        # useful now to make sure that messages from a past rref_forward_chain
-        # invocation does not mess up with followup ones.
-        #
-        # TODO: when to_here() becomes non-blocking on the callee side,
-        # modify this test to collect and evaluate all RRefs together.
-        for _ in range(20):
-            self._test_rref_forward_chain()
 
     @_wrap_with_rpc
     def test_remote_same_worker(self):
