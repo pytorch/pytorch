@@ -16,6 +16,9 @@ Tensor& resize_cpu_(Tensor& self, IntArrayRef size) {
   return self;
 }
 
+// I am a naughty man
+Tensor& resize_as_sparse_(Tensor& self, const Tensor& src);
+
 Tensor& resize_as_(Tensor& self, const Tensor& the_template) {
   if (self.is_sparse() && the_template.is_sparse()) {
     return native::resize_as_sparse_(self, the_template);
