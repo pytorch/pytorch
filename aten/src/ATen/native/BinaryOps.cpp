@@ -142,7 +142,7 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
 }
 
 // Validate that is possible to convert scalar to tensor dtype without overflow
-<template scalar_t>
+template <typename scalar_t>
 static Tensor wrapped_scalar_tensor_and_check_convert(Scalar scalar) {
   return wrapped_scalar_tensor(scalar.to<scalar_t>());
 }
