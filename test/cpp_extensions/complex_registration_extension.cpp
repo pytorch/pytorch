@@ -47,7 +47,7 @@ static Tensor empty_complex(IntArrayRef size, const TensorOptions & options, c10
 }
 
 static auto& complex_empty_registration = globalATenDispatch().registerOp(
-    Backend::ComplexCPU,
+    TensorTypeId::ComplexCPUTensorId,
     "aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
     &empty_complex);
 

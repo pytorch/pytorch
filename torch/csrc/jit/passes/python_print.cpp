@@ -136,8 +136,6 @@ const static std::unordered_set<std::string> reserved_names = {
     "while",
     "with",
     "yield",
-    "uninitialized",
-    "unchecked_cast",
 };
 
 struct PythonPrintPass {
@@ -343,12 +341,6 @@ struct PythonPrintPass {
 
     // subgraph may use this more than once, so disable inlining
     if (use.user->kind() == prim::fork)
-      return false;
-
-    // isinstance appearing in an if expression
-    // causes type refinement to occur, we dont
-    // want to since it has already been handled
-    if (v->node()->kind() == prim::isinstance)
       return false;
 
     return true;
@@ -772,7 +764,9 @@ struct PythonPrintPass {
       registerClassDependencies(containedType);
     }
   }
-  void scanTypeDependencies(Node* node) {
+
+  void printNode(Node* node, bool print_const) {
+    WithSourceRange guard(&source_range_stack_, node);
     // Check for class dependencies. If this node inputs or outputs a class
     // type, we need to add it to our table of dependencies.
     for (const auto input : node->inputs()) {
@@ -781,26 +775,7 @@ struct PythonPrintPass {
     for (const auto output : node->outputs()) {
       registerClassDependencies(output->type());
     }
-    for (const auto& name : node->attributeNames()) {
-      switch (node->kindOf(name)) {
-        case AttributeKind::ty:
-          registerClassDependencies(node->ty(name));
-          break;
-        case AttributeKind::tys:
-          for (const TypePtr& t : node->tys(name)) {
-            registerClassDependencies(t);
-          }
-          break;
-        default:
-          // noop
-          break;
-      }
-    }
-  }
 
-  void printNode(Node* node, bool print_const) {
-    WithSourceRange guard(&source_range_stack_, node);
-    scanTypeDependencies(node);
     if (!print_const && node->kind() == prim::Constant)
       return;
     splitLongInlines(node->inputs());
@@ -1127,6 +1102,7 @@ struct PythonPrintPass {
         }
 
       } break;
+      case prim::unchecked_unwrap_optional:
       case aten::_unwrap_optional: {
         printOpName(stmt, node->kind());
         stmt << "(";
@@ -1140,40 +1116,6 @@ struct PythonPrintPass {
                << useOf(node->input()) << ")";
         } else {
           stmt << useOf(node->input());
-        }
-        stmt << ")";
-      } break;
-      case prim::unchecked_cast: {
-        stmt << "unchecked_cast(" << node->output()->type()->python_str()
-             << ", " << useOf(node->input()) << ")";
-      } break;
-      case prim::isinstance: {
-        stmt << "isinstance(" << useOf(node->input()) << ", ";
-        const auto& types = node->tys(attr::types);
-        const auto& kinds = node->ss(attr::kinds);
-        if (types.size() == 1 && kinds.size() == 0) {
-          stmt << types.at(0)->python_str();
-        } else if (kinds.size() == 1 && types.size() == 0) {
-          stmt << kinds.at(0);
-        } else {
-          // check multiple things, e.g. (str, list, int)
-          stmt << "(";
-          bool first = true;
-          for (const TypePtr& typ : types) {
-            if (!first) {
-              stmt << ", ";
-            }
-            stmt << typ->python_str();
-            first = false;
-          }
-          for (const std::string& kind : kinds) {
-            if (!first) {
-              stmt << ", ";
-            }
-            stmt << kind;
-            first = false;
-          }
-          stmt << ")";
         }
         stmt << ")";
       } break;
@@ -1544,8 +1486,6 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::GetAttr,
       prim::SetAttr,
       prim::CallFunction,
-      prim::isinstance,
-      prim::unchecked_cast,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your
