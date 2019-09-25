@@ -248,7 +248,7 @@ Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) {
 
 Tensor lt(const Tensor& self, Scalar other) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
-  native::lt_out(result, self, wrapped_scalar_tensor_and_check_convert<scalar_t>(other));
+  native::lt_out(result, self, other);
   return result;
 }
 
