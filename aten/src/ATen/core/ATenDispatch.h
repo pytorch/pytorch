@@ -4,6 +4,8 @@
 #include <c10/core/Backend.h>
 #include <c10/core/impl/LocalTensorTypeSet.h>
 #include <unordered_map>
+#include <unordered_set>
+#include <ATen/core/OpsAlreadyMovedToC10.h>
 #include <c10/util/C++17.h>
 #include <memory>
 #include <mutex>
@@ -58,6 +60,8 @@ class CAFFE2_API ATenOpTable {
     function_table_[static_cast<int64_t>(tid)] = fn;
   }
 
+  void* getFallbackOp(TensorTypeId tid) const;
+
   void* getOp(TensorTypeId tid) const {
     // You might think we can minorly optimize this further by maintaining a
     // bitmask of registered operator keys, so we don't select dispatch ids
@@ -65,9 +69,7 @@ class CAFFE2_API ATenOpTable {
     // get a Variable CPUTensor, if there is no variable registration, you'll
     // fall back to the CPU implementation.  Is this what you want?  Unlikely...
     if (function_table_[static_cast<int64_t>(tid)] == nullptr) {
-      TORCH_CHECK(function_table_[static_cast<int64_t>(TensorTypeId::UndefinedTensorId)] != nullptr,
-          "No function is registered for schema ", schema_, " on tensor type ", toString(tid));
-      return function_table_[static_cast<int64_t>(TensorTypeId::UndefinedTensorId)];
+      return getFallbackOp(tid);
     }
     return function_table_[static_cast<int64_t>(tid)];
   }
@@ -88,11 +90,6 @@ class CAFFE2_API ATenDispatch {
     }
     op_tables_.at(schema).registerOp(id, reinterpret_cast<void*>(fn));
     return *this;
-  }
-
-  template<class FuncType>
-  ATenDispatch& registerOp(Backend b, const char* schema, FuncType* fn) {
-    return registerOp(backendToTensorTypeId(b), schema, fn);
   }
 
   const ATenOpTable* getOpTable(const char* schema) const {

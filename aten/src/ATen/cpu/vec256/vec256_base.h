@@ -8,6 +8,7 @@
 
 #include <ATen/Utils.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/Math.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
 #include <c10/util/BFloat16.h>
@@ -197,6 +198,9 @@ public:
   Vec256<T> erfc() const {
     return map(std::erfc);
   }
+  Vec256<T> erfinv() const {
+    return map(calc_erfinv);
+  }
   Vec256<T> exp() const {
     return map(std::exp);
   }
@@ -237,6 +241,7 @@ public:
     return map([](T x) -> T { return -x; });
   }
   Vec256<T> round() const {
+    // We do not use std::round because we would like to round midway numbers to the nearest even integer.
     return map(std::nearbyint);
   }
   Vec256<T> sin() const {
@@ -253,6 +258,9 @@ public:
   }
   Vec256<T> trunc() const {
     return map(std::trunc);
+  }
+  Vec256<T> lgamma() const {
+    return map(std::lgamma);
   }
   Vec256<T> sqrt() const {
     return map(std::sqrt);

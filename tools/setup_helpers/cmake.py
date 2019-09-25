@@ -215,6 +215,7 @@ class CMake:
             # adding a new build option to this block: Consider making these two names identical and adding this option
             # in the block below.
             '_GLIBCXX_USE_CXX11_ABI': 'GLIBCXX_USE_CXX11_ABI',
+            'CUDNN_LIB_DIR': 'CUDNN_LIBRARY',
             'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA',
             'USE_GLOO_IBVERBS': 'USE_IBVERBS'   # Backward compatibility. Will be removed in the future.
         }
@@ -226,6 +227,8 @@ class CMake:
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
              'CUDA_NVCC_EXECUTABLE',
+             'CUDNN_LIBRARY',
+             'CUDNN_INCLUDE_DIR',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'INSTALL_TEST',
              'MKL_THREADING',
@@ -290,9 +293,11 @@ class CMake:
 
         expected_wrapper = '/usr/local/opt/ccache/libexec'
         if IS_DARWIN and os.path.exists(expected_wrapper):
-            CMake.defines(args,
-                          CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
-                          CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
+            if 'CMAKE_C_COMPILER' not in build_options and 'CC' not in os.environ:
+                CMake.defines(args, CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper))
+            if 'CMAKE_CXX_COMPILER' not in build_options and 'CXX' not in os.environ:
+                CMake.defines(args, CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
+
         for env_var_name in my_env:
             if env_var_name.startswith('gh'):
                 # github env vars use utf-8, on windows, non-ascii code may

@@ -537,6 +537,32 @@ class TestLRScheduler(TestCase):
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
 
+    def test_no_cyclic_references(self):
+        import gc
+        param = Variable(torch.Tensor(10), requires_grad=True)
+        optim = SGD([param], lr=0.5)
+        scheduler = LambdaLR(optim, lambda epoch: 1.0)
+        del scheduler
+
+        # Prior to Python 3.7, local variables in a function will be referred by the current frame.
+        import sys
+        if sys.version_info < (3, 7):
+            import inspect
+            referrers = gc.get_referrers(optim)
+            self.assertTrue(
+                len(referrers) == 1 and referrers[0] is inspect.currentframe(),
+                "Optimizer should contain no cyclic references (except current frame)")
+            del referrers
+        else:
+            self.assertTrue(
+                len(gc.get_referrers(optim)) == 0,
+                "Optimizer should contain no cyclic references")
+
+        gc.collect()
+        del optim
+        self.assertEqual(
+            gc.collect(), 0, "Optimizer should be garbage-collected on __del__")
+
     def test_old_pattern_warning(self):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:
@@ -1282,6 +1308,29 @@ class TestLRScheduler(TestCase):
                         momentum_target[batch_num], param_group['momentum'],
                         msg='Momentum is wrong in batch_num {}: expected {}, got {}'.format(
                             batch_num, momentum_target[batch_num], param_group['momentum']), delta=1e-5)
+
+    def test_cosine_then_cyclic(self):
+        # https://github.com/pytorch/pytorch/issues/21965
+
+        max_lr = 0.3
+        base_lr = 0.1
+        optim_lr = 0.5
+
+        model = torch.nn.Linear(2, 1)
+        optimizer = torch.optim.SGD(model.parameters(), lr=optim_lr)
+        lr_scheduler_1 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20, eta_min=0.1)
+        lr_scheduler_2 = torch.optim.lr_scheduler.CyclicLR(
+            optimizer, base_lr=base_lr, max_lr=max_lr, step_size_up=1, step_size_down=3
+        )
+
+        for i in range(40):
+            if i <= lr_scheduler_1.T_max:
+                lr_scheduler_1.step()
+            else:
+                lr_scheduler_2.step()
+            last_lr = optimizer.param_groups[0]["lr"]
+
+        self.assertLessEqual(last_lr, max_lr)
 
 if __name__ == '__main__':
     run_tests()

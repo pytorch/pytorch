@@ -8,6 +8,7 @@
 #include <c10/util/Optional.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 // TensorIterator is a helper class for element-wise operations, such as
 // arithmetic, comparisions, and trigonometric functions. It handles
@@ -50,7 +51,8 @@
 // (See https://github.com/pytorch/pytorch/issues/9515)
 //
 // Note that TensorIterator currently supports type conversions on 0-dim
-// tensors. Other type conversions will raise an exception.
+// tensors and arithmetic operators. Other type conversions will raise an 
+// exception.
 
 namespace at {
 

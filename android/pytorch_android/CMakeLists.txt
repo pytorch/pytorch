@@ -6,16 +6,7 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 set(pytorch_android_DIR ${CMAKE_CURRENT_LIST_DIR}/src/main/cpp)
 set(libtorch_include_DIR ${pytorch_android_DIR}/libtorch_include/${ANDROID_ABI})
 
-set(libtorch_SO ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libtorch.so)
-set(libc10_SO ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libc10.so)
-
 message(STATUS "libtorch dir:${libtorch_DIR}")
-
-add_library(libtorch SHARED IMPORTED)
-set_property(TARGET libtorch PROPERTY IMPORTED_LOCATION ${libtorch_SO})
-
-add_library(libc10 SHARED IMPORTED ${libc10_SO})
-set_property(TARGET libc10 PROPERTY IMPORTED_LOCATION ${libc10_SO})
 
 file(GLOB pytorch_android_SOURCES
   ${pytorch_android_DIR}/*.cpp
@@ -41,8 +32,32 @@ set(fbjni_BUILD_DIR ${BUILD_DIR}/fbjni/${ANDROID_ABI})
 
 add_subdirectory(${fbjni_DIR} ${fbjni_BUILD_DIR})
 
+function(import_static_lib name)
+  add_library(${name} STATIC IMPORTED)
+  set_property(
+      TARGET ${name}
+      PROPERTY IMPORTED_LOCATION
+      ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/${name}.a)
+endfunction(import_static_lib)
+
+import_static_lib(libtorch)
+import_static_lib(libc10)
+import_static_lib(libnnpack)
+import_static_lib(libpytorch_qnnpack)
+import_static_lib(libeigen_blas)
+import_static_lib(libcpuinfo)
+import_static_lib(libclog)
+
 target_link_libraries(pytorch
     fbjni
+    -Wl,--gc-sections
+    -Wl,--whole-archive
     libtorch
+    -Wl,--no-whole-archive
     libc10
+    libnnpack
+    libpytorch_qnnpack
+    libeigen_blas
+    libcpuinfo
+    libclog
 )
