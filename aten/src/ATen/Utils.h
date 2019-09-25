@@ -65,14 +65,18 @@ static inline const Storage& checked_storage(
   return expr;
 }
 
-// TODO: Change Backend into TensorTypeId
-// TODO: Stop unwrapping (this is blocked on getting rid of TH ;)
-static inline TensorImpl* checked_tensor_unwrap(const Tensor& expr, const char * name, int pos, const char * api, bool allowNull, Backend backend, ScalarType scalar_type) {
+// TODO: This unwrapping code is ONLY used for TH bindings; once TH goes
+// away, we can delete this function
+static inline TensorImpl* checked_dense_tensor_unwrap(const Tensor& expr, const char * name, int pos, const char * api, bool allowNull, DeviceType device_type, ScalarType scalar_type) {
   if(allowNull && !expr.defined()) {
     return nullptr;
   }
-  if (tensorTypeIdToBackend(impl::dispatchTypeId(expr.type_set())) != backend) {
-    AT_ERROR("Expected object of backend ", backend, " but got backend ", tensorTypeIdToBackend(impl::dispatchTypeId(expr.type_set())),
+  if (expr.layout() != Layout::Strided) {
+    AT_ERROR("Expected dense tensor but got ", expr.layout(),
+             " for argument #", pos, " '", name, "' in call to ", api);
+  }
+  if (expr.device().type() != device_type) {
+    AT_ERROR("Expected object of device type ", device_type, " but got device type ", expr.device().type(),
              " for argument #", pos, " '", name, "' in call to ", api);
   }
   if (expr.scalar_type() != scalar_type) {
