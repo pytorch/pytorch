@@ -4,6 +4,10 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
 
+#include <ATen/core/ATenDispatch.h>
+
+#include <torch/csrc/jit/operator.h>
+
 using namespace at;
 
 static int test_int;
@@ -61,4 +65,43 @@ TEST(BackendExtensionTest, TestRegisterOp) {
         .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(TensorTypeId::MSNPUTensorId)
         .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   );
+}
+
+// This is a "shitty" version of lazy tensor, where we run every operator by
+// running it on JIT
+struct ViaJitTensorImpl : public c10::TensorImpl {
+  explicit ViaJitTensorImpl(at::Tensor rep)
+    : TensorImpl(
+        c10::TensorTypeSet(c10::TensorTypeId::TestingOnly_WrapperTensorId),
+        rep.dtype(),
+        rep.device()
+      )
+    , rep_(std::move(rep)) {}
+  at::Tensor rep_;
+};
+
+void generic_override(const char* schema_str, torch::jit::Stack* stack) {
+  auto schema = torch::jit::parseSchema(schema_str);
+  // TODO: This is a bit circuitous
+  auto s = Symbol::fromQualString(schema.name());
+  auto operators = torch::jit::getAllOperatorsFor(s);
+  // Find the exact match
+  std::shared_ptr<torch::jit::Operator> op;
+  for (const auto& candidate_op : operators) {
+    auto candidate_schema = candidate_op->schema();
+    // NB: this is a VERY slow equality test
+    if (candidate_schema == schema) {
+      op = candidate_op;
+      break;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(op);
+  auto operation = op->getOperation();
+  // TODO: what does the int mean
+  operation(*stack);
+}
+
+TEST(BackendExtensionTest, TestBoxedFallback) {
+  globalATenDispatch().registerFallbackBoxedOp(TensorTypeId::XLATensorId, &generic_override);
+  Tensor a = empty({5, 5}, at::DeviceType::XLA);
 }
