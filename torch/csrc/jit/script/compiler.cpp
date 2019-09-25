@@ -1107,7 +1107,7 @@ struct to_ir {
 
     TypePtr list_type;
 
-    auto siv = std::dynamic_pointer_cast<SimpleValue>(sv);
+    auto siv = dynamic_cast<SimpleValue*>(sv.get());
     if (siv && siv->getValue()->type()->cast<ListType>()) {
       auto list_elem =
           siv->getValue()->type()->cast<ListType>()->getElementType();
@@ -1115,11 +1115,12 @@ struct to_ir {
     } else if (auto iterable_tree = dynamic_cast<IterableTree*>(sv.get())) {
       list_type =
           getListCompType(lc, getIterableChildrenType(lc, *iterable_tree));
-    } else if (std::dynamic_pointer_cast<RangeValue>(sv)) {
+    } else if (dynamic_cast<RangeValue*>(sv.get())) {
       list_type = getListCompType(lc, IntType::get());
     } else {
       throw ErrorReport(lc.range())
-          << "iterator expression is expected to be a list, iterable, or range";
+          << "iterator expression is expected to be a list, iterable, or range, found "
+          << (siv ? siv->getValue()->type()->python_str() : siv->kind());
     }
 
     // given `[x*2 for x in my_list]` this generates the following AST:

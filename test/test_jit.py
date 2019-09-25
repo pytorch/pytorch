@@ -18314,6 +18314,10 @@ class TestList(JitTestCase):
             # type: (int)
             return [i for i in range(x)]
 
+        test_func(fn, (9,))
+        test_func(fn, (0,))
+        test_func(fn, (-1,))
+
         def changes_type():
             a = [float(i) for i in range(5)]
             b = [float(i) for i in [1, 2, 3, 4]]
@@ -18322,9 +18326,10 @@ class TestList(JitTestCase):
 
         test_func(changes_type, ())
 
-        test_func(fn, (9,))
-        test_func(fn, (0,))
-        test_func(fn, (-1,))
+        def test_zero_iter():
+            return [str(i) for i, j in zip("", "")]
+
+        test_func(test_zero_iter, ())
 
     def test_mutable_list_append_2(self):
         def test_append_2():
