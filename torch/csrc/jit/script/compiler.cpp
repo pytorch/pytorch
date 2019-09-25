@@ -1070,7 +1070,7 @@ struct to_ir {
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
-  TypePtr emitInTempEnvironment(std::function<TypePtr()> fn) {
+  TypePtr emitInTempEnvironment(const std::function<TypePtr()>& fn) {
     auto b = graph->insertNode(graph->create(prim::Loop))->addBlock();
     pushFrame(b);
     WithInsertPoint guard(b);
