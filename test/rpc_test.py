@@ -133,7 +133,7 @@ class RpcTest(object):
         "PROCESS_GROUP rpc backend specific test, skip"
     )
     def test_duplicate_name(self):
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(backend="gloo", rank=self.rank,
                                 world_size=self.world_size, store=store)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
@@ -144,7 +144,7 @@ class RpcTest(object):
         dist.join_rpc()
 
     def test_reinit(self):
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(backend="gloo", rank=self.rank,
                                 world_size=self.world_size, store=store)
         dist.init_model_parallel(self_name='worker{}'.format(self.rank),
