@@ -279,7 +279,7 @@ Tensor &mean_out(Tensor &result, const Tensor &self, IntArrayRef dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
   ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
-      at::isFloatingType(scalarType),
+      at::isFloatingType(scalarType) || at::isComplexType(scalarType),
       "Can only calculate the mean of floating types. Got ",
       toString(scalarType),
       " instead.");
@@ -382,7 +382,7 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt
 
   ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
-      at::isFloatingType(scalarType),
+      at::isFloatingType(scalarType) || at::isComplexType(scalarType),
       "Can only calculate the mean of floating types. Got ",
       toString(scalarType),
       " instead.");
@@ -403,7 +403,8 @@ static inline Tensor _norm(const Tensor &self, Scalar p) {
   } else {
     TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
              "norm only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-    TORCH_CHECK(at::isFloatingType(self.scalar_type()), "norm only supports floating-point dtypes");
+    TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+                "norm only supports floating-point dtypes");
 
     Tensor result;
     return at::native::norm_out(result, self, p, IntArrayRef{}, false, c10::nullopt);
@@ -569,7 +570,8 @@ Tensor max_values(const Tensor& self, DimnameList dims, bool keepdim) {
 static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
   TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "std and var only support CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "std and var only support floating-point dtypes");
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
+              "std and var only support floating-point dtypes");
   ScalarType dtype = get_dtype(result, self, {}, true);
   auto iter = make_reduction("std or var", result, self, dim, keepdim, dtype);
   if (iter.numel() == 0) {
@@ -584,7 +586,8 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
   AT_ASSERT(result1.defined() && result2.defined());
   TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            fname, " only support CPU and CUDA backend, got: ", toString(self.type().backend()));
-  TORCH_CHECK(at::isFloatingType(self.type().scalarType()), fname, " only support floating-point dtypes");
+  TORCH_CHECK(at::isFloatingType(self.type().scalarType()),
+              fname, " only support floating-point dtypes");
   TORCH_CHECK(result1.type().scalarType() == result2.type().scalarType(),
            "provided by result1 dtype must match dtype of result2. Got ",
            toString(result1.type().scalarType()),
@@ -645,7 +648,8 @@ std::tuple<Tensor,Tensor> var_mean(const Tensor& self, bool unbiased) {
 Tensor var(const Tensor& self, bool unbiased) {
   TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "var only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "var only supports floating-point dtypes");
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
+              "var only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
   return trivial_return.has_value() ? trivial_return.value() : at::_var(self, unbiased);
 }
@@ -662,7 +666,8 @@ Tensor &var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbias
 Tensor std(const Tensor& self, bool unbiased) {
   TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "std only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "std only supports floating-point dtypes");
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
+              "std only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
   return trivial_return.has_value() ? trivial_return.value() : at::_std(self, unbiased);
 }

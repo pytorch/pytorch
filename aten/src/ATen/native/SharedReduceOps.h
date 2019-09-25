@@ -3,6 +3,7 @@
 // used across both CPU and GPU.
 
 #include <c10/macros/Macros.h>
+#include <ATen/native/cpu/zmath.h>
 #if defined(__CUDACC__)
 #include <THC/THCDeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
@@ -19,8 +20,8 @@
 #define MAX(X, Y) ::max(X,Y)
 #define MIN(X, Y) ::min(X,Y)
 #else
-#define MAX(X, Y) std::max(X,Y)
-#define MIN(X, Y) std::min(X,Y)
+#define MAX(X, Y) max_impl(X,Y)
+#define MIN(X, Y) min_impl(X,Y)
 #endif
 
 // ROCM hcc doesn't work well with using std:: in kernel functions
@@ -140,7 +141,7 @@ template <typename acc_t>
 struct AbsMinOps {
 
   inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data) const {
-    return MIN(acc, std::abs(data));
+    return MIN(acc, acc_t(std::abs(data)));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -162,7 +163,7 @@ template <typename acc_t>
 struct AbsMaxOps {
 
   inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data) const {
-    return MAX(acc, std::abs(data));
+    return MAX(acc, acc_t(std::abs(data)));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
