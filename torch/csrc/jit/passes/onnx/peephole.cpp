@@ -626,12 +626,14 @@ void removeBatchNormUnusedInput(Block* b) {
     for (auto* child_block : n->blocks()) {
       removeBatchNormUnusedInput(child_block);
     }
-    for (auto* input : n->inputs()) {
+    if (strcmp(n->kind().toQualString(), "onnx::BatchNormalization") == 0) {
       int ind = 0;
-      std::cout << input->debugName() << " has uses " << input->hasUses();
-      if (!input->hasUses()) {
-        n->removeInput(ind);
-        ind++;
+      for (auto* input : n->inputs()) {
+        std::cout << input->debugName() << " has uses " << input->hasUses() << "\n";
+        if (!input->hasUses()) {
+          n->removeInput(ind);
+          ind++;
+        }
       }
     }
   }
