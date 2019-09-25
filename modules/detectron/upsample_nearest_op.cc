@@ -17,7 +17,7 @@
 #include "upsample_nearest_op.h"
 
 namespace caffe2 {
-#ifdef CAFFE2_USE_MKLDNN
+#if defined(CAFFE2_USE_MKLDNN) && !defined(USE_CUDA)
 REGISTER_IDEEP_OPERATOR(UpsampleNearest, IDEEPUpsampleNearestOp);
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8UpsampleNearest, DNNLOWP, IDEEPUpsampleNearestOp);
   
