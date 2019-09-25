@@ -149,11 +149,18 @@ class CUDATestBase(DeviceTypeTestBase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
+    def has_cudnn(self):
+        return not self.no_cudnn
+
     @classmethod
     def setUpClass(cls):
         # has_magma shows up after cuda is initialized
-        torch.ones(1).cuda()
+        t = torch.ones(1).cuda()
         cls.no_magma = not torch.cuda.has_magma
+
+        # Determines if cuDNN is available and its version
+        cls.no_cudnn = not (TEST_WITH_ROCM or torch.backends.cudnn.is_acceptable(t))
+        cls.cudnn_version = 0 if cls.no_cudnn else torch.backends.cudnn.version()
 
 
 # Adds available device-type-specific test base classes
@@ -342,3 +349,27 @@ def skipCUDAIfNoMagma(fn):
 # Skips a test on CUDA when using ROCm.
 def skipCUDAIfRocm(fn):
     return skipCUDAIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")(fn)
+
+
+# Skips a test on CUDA if cuDNN is unavailable or its version is lower than requested.
+def skipCUDAIfCudnnVersionLessThan(version=0):
+
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, device, *args, **kwargs):
+            if self.device_type == 'cuda':
+                if self.no_cudnn:
+                    reason = "cuDNN not available"
+                    raise unittest.SkipTest(reason)
+                if self.cudnn_version < version:
+                    reason = "cuDNN version {0} is available but {1} required".format(self.cudnn_version, version)
+                    raise unittest.SkipTest(reason)
+
+            return fn(self, device, *args, **kwargs)
+
+        return wrap_fn
+    return dec_fn
+
+
+def skipCUDAIfNoCudnn(fn):
+    return skipCUDAIfCudnnVersionLessThan(0)(fn)
