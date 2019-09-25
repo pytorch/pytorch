@@ -127,7 +127,7 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
       setupStatus == pytorch_qnnp_status_success,
       "failed to setup QNNPACK Add operator");
 
-  pthreadpool_t threadpool = caffe2::mobile_threadpool();
+  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
   const pytorch_qnnp_status runStatus =
       pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
 
