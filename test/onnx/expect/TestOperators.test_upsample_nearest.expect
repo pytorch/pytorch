@@ -36,7 +36,7 @@ graph {
     op_type: "Cast"
     attribute {
       name: "to"
-      i: 1
+      i: 11
       type: INT
     }
   }
@@ -46,8 +46,8 @@ graph {
     attribute {
       name: "value"
       t {
-        data_type: 1
-        raw_data: "\000\000\000@"
+        data_type: 11
+        raw_data: "\000\000\000\000\000\000\000@"
       }
       type: TENSOR
     }
@@ -107,7 +107,7 @@ graph {
     op_type: "Cast"
     attribute {
       name: "to"
-      i: 1
+      i: 11
       type: INT
     }
   }
@@ -117,8 +117,8 @@ graph {
     attribute {
       name: "value"
       t {
-        data_type: 1
-        raw_data: "\000\000\000@"
+        data_type: 11
+        raw_data: "\000\000\000\000\000\000\000@"
       }
       type: TENSOR
     }
