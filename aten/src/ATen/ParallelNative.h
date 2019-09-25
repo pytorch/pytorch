@@ -61,8 +61,8 @@ inline void parallel_for(
     };
 
     std::vector<std::shared_ptr<c10::ivalue::Future>> futures(num_tasks);
-    for (size_t i = 0; i < num_tasks; ++i) {
-      futures[i] = std::make_shared<c10::ivalue::Future>(NoneType::get());
+    for (size_t task_id = 0; task_id < num_tasks; ++task_id) {
+      futures[task_id] = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
     }
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
       int64_t local_start = begin + task_id * chunk_size;
@@ -132,8 +132,8 @@ inline scalar_t parallel_reduce(
     };
 
     std::vector<std::shared_ptr<c10::ivalue::Future>> futures(num_tasks);
-    for (size_t i = 0; i < num_tasks; ++i) {
-      futures[i] = std::make_shared<c10::ivalue::Future>(NoneType::get());
+    for (size_t task_id = 0; task_id < num_tasks; ++task_id) {
+      futures[task_id] = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
     }
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
       int64_t local_start = begin + task_id * chunk_size;
