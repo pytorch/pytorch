@@ -3,40 +3,34 @@
 #include <c10/util/variant.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+#define TORCH_ENUM_DECLARE(name) \
+namespace torch { \
+namespace enumtype { \
+  struct name {}; \
+} \
+TORCH_API extern const enumtype::##name k##name; \
+}
+
+#define TORCH_ENUM_DEFINE(name) \
+namespace torch { \
+const enumtype::##name k##name; \
+}
+
+TORCH_ENUM_DECLARE(Linear)
+TORCH_ENUM_DECLARE(Conv1D)
+TORCH_ENUM_DECLARE(Conv2D)
+TORCH_ENUM_DECLARE(Conv3D)
+TORCH_ENUM_DECLARE(ConvTranspose1D)
+TORCH_ENUM_DECLARE(ConvTranspose2D)
+TORCH_ENUM_DECLARE(ConvTranspose3D)
+TORCH_ENUM_DECLARE(Sigmoid)
+TORCH_ENUM_DECLARE(Tanh)
+TORCH_ENUM_DECLARE(ReLU)
+TORCH_ENUM_DECLARE(LeakyReLU)
+TORCH_ENUM_DECLARE(FanIn)
+TORCH_ENUM_DECLARE(FanOut)
+
 namespace torch {
-
-namespace enumtype {
-  // Nonlinearity
-  struct Linear {};
-  struct Conv1D {};
-  struct Conv2D {};
-  struct Conv3D {};
-  struct ConvTranspose1D {};
-  struct ConvTranspose2D {};
-  struct ConvTranspose3D {};
-  struct Sigmoid {};
-  struct Tanh {};
-  struct ReLU {};
-  struct LeakyReLU {};
-
-  // FanMode
-  struct FanIn {};
-  struct FanOut {};
-} // namespace enumtype
-
-TORCH_API extern const enumtype::Linear kLinear;
-TORCH_API extern const enumtype::Conv1D kConv1D;
-TORCH_API extern const enumtype::Conv2D kConv2D;
-TORCH_API extern const enumtype::Conv3D kConv3D;
-TORCH_API extern const enumtype::ConvTranspose1D kConvTranspose1D;
-TORCH_API extern const enumtype::ConvTranspose2D kConvTranspose2D;
-TORCH_API extern const enumtype::ConvTranspose3D kConvTranspose3D;
-TORCH_API extern const enumtype::Sigmoid kSigmoid;
-TORCH_API extern const enumtype::Tanh kTanh;
-TORCH_API extern const enumtype::ReLU kReLU;
-TORCH_API extern const enumtype::LeakyReLU kLeakyReLU;
-TORCH_API extern const enumtype::FanIn kFanIn;
-TORCH_API extern const enumtype::FanOut kFanOut;
 
 /// Variable of `Nonlinearity` type can take one of the following values:
 /// - `torch::kLinear`

@@ -522,6 +522,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/random.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/sequential.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/stream.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/enum.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp

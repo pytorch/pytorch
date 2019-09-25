@@ -184,6 +184,7 @@ def add_torch_libs():
         "torch/csrc/api/src/data/samplers/random.cpp",
         "torch/csrc/api/src/data/samplers/sequential.cpp",
         "torch/csrc/api/src/data/samplers/stream.cpp",
+        "torch/csrc/api/src/enum.cpp",
         "torch/csrc/api/src/jit.cpp",
         "torch/csrc/api/src/serialize.cpp",
         "torch/csrc/api/src/nn/init.cpp",
