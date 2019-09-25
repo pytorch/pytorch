@@ -579,3 +579,27 @@ def enable_cpu_fuser_if(cond):
                 return fn(*args, **kwargs)
             return wrapper
         return noop_fuser
+
+
+class Observer(torch.nn.Module):
+    def __init__(self, dtype=torch.quint8):
+        super(Observer, self).__init__()
+        self.dtype = dtype
+
+    def forward(self, x):
+        return x
+
+    @torch.jit.export
+    def calculate_qparams(self):
+        return torch.tensor([2.0]), torch.tensor([3])
+
+class WeightObserver(Observer):
+    def __init__(self):
+        super(WeightObserver, self).__init__(torch.qint8)
+
+def get_forward(c):
+    return c._get_method('forward')
+def get_forward_graph(c):
+    return c._get_method('forward').graph
+def get_module_method(m, module, method):
+    return m._c._get_module(module)._get_method(method)
