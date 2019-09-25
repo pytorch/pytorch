@@ -260,7 +260,7 @@ void AliasDb::analyze(Node* node) {
 // Returns true if analysis was run using
 // the registered analyzer.
 bool AliasDb::tryRegisteredAnalysis(Node* node) {
-  const Operator& op = getOperatorFor(node);
+  const Operator& op = node->getOperator();
   auto analysis = op.aliasAnalysisKind();
   if (AliasAnalysisKind::PURE == analysis) {
     analyzeCreator(node);
@@ -275,7 +275,7 @@ bool AliasDb::tryRegisteredAnalysis(Node* node) {
 //      information to the outputs. For unschematized nodes, a special analyzer
 //      will have to be handwritten.
 void AliasDb::analyzeImpl(Node* node) {
-  auto op = findOperatorFor(node);
+  auto op = node->maybeOperator();
   const bool hasSpecialCase = aliasAnalysisHasSpecialCaseFor(node->kind());
   if (op) {
     const auto analysis = op->aliasAnalysisKind();

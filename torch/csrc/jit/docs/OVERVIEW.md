@@ -329,8 +329,7 @@ Values are abstract representation of data in the program. When executing, the a
 
 TorchScript, unlike Python, is statically typed, so every Value has a Type associated with it, and every FunctionSchema has a list of argument types and a return type for a function. Type is the base class of a hierarchy of C++ objects that represent the built-in types of TorchScript. Types provide methods such as `Type::isSubtypeOf` that describe the typing relationships. Common type are:
 
-* TensorType - the root type of all Tensors in the system.
-* ProfiledTensorType - a tensor with optionally refined information. It may optional know its device, type, requires_grad state, the number of dimensions.
+* TensorType - a tensor with optionally refined information. It may optional know its device, type, requires_grad state, the number of dimensions.
   If it does know the number of dimensions it may optionally know the size of a particular dimension.
 * Tuples - e.g. Tuple[Tensor, Int]. Each member of the tuple is statically typed and the length of the tuple is statically known.
 * List[T] - e.g. List[Tensor]. Mutable lists of a particular type.
@@ -811,7 +810,7 @@ Execution starts in `GraphExecutor::run`, which takes takes a Stack of inputs.
 The ArgumentSpec object is used as a key into a cache that holds pre-optimized Code objects (held in an ExecutionPlan object). On a cache hit, an InterpreterState is created and the Code in the cache is run.
 
 
-*Pre-derivative Optimization* On a code cache miss, we generate a new optimized Graph on the fly (`compileSpec`). It starts by creating a copy of the initial Graph and setting the input types to the specialized Tensor types observed in this specialization. TensorType inputs to the Graph will get replaced with ProfiledTensorTypes that know the device, number of dimensions, and requires grad state.
+*Pre-derivative Optimization* On a code cache miss, we generate a new optimized Graph on the fly (`compileSpec`). It starts by creating a copy of the initial Graph and setting the input types to the specialized Tensor types observed in this specialization. TensorType inputs to the Graph will get refined with types that know the device, number of dimensions, and requires grad state.
 
 ```
 # post specialization, inputs are now specialized types
@@ -1148,7 +1147,7 @@ TODO: fusion, operators
 
 # Profiling Programs
 
-`prim::profile` nodes are inserted on every **use** of a value by `ProfilingRecord::instrumentBlock`. Every `prim::profile` node runs a lambda that uses a captured, initial type value and the type of an incoming tensor and merges the two into `ProfiledTensorType`
+`prim::profile` nodes are inserted on every **use** of a value by `ProfilingRecord::instrumentBlock`. Every `prim::profile` node runs a lambda that uses a captured, initial type value and the type of an incoming tensor and merges the two into a refined `TensorType`
 
 `prim::profile` nodes are replaced with `prim::Guard` nodes by `InsertGuards`. `prim::Guard` nodes are inserted to guarantee that beyond the guard a guarded tensor will always be of the profiled shape. This guarantee will enable optimizations and codegens to generate more efficient code.
 

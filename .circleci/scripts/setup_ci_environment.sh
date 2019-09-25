@@ -67,12 +67,14 @@ if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
   if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
     # This IAM user allows write access to S3 bucket for sccache & bazels3cache
     set +x
+    echo "declare -x XLA_CLANG_CACHE_S3_BUCKET_NAME=${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}" >> /home/circleci/project/env
     echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}" >> /home/circleci/project/env
     echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}" >> /home/circleci/project/env
     set -x
   else
     # This IAM user allows write access to S3 bucket for sccache
     set +x
+    echo "declare -x XLA_CLANG_CACHE_S3_BUCKET_NAME=${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}" >> /home/circleci/project/env
     echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}" >> /home/circleci/project/env
     echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}" >> /home/circleci/project/env
     set -x

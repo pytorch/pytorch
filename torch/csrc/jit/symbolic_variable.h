@@ -21,11 +21,7 @@ struct SymbolicVariable {
     return g.addInput()->setType(std::move(type));
   }
   std::vector<int64_t> sizes() const {
-    return v->type()
-        ->expect<ProfiledTensorType>()
-        ->sizes()
-        .concrete_sizes()
-        .value();
+    return v->type()->expect<TensorType>()->sizes().concrete_sizes().value();
   }
   void addAsOutput() const {
     v->owningGraph()->registerOutput(v);
@@ -317,7 +313,7 @@ struct SymbolicVariable {
     return v->owningGraph()->insertConstant(std::move(value));
   }
   SymbolicVariable typeLike(SymbolicVariable other) const {
-    if (auto other_type = other.v->type()->cast<ProfiledTensorType>())
+    if (auto other_type = other.v->type()->cast<TensorType>())
       v->setType(other_type->contiguous());
     return *this;
   }
@@ -340,7 +336,7 @@ struct SymbolicVariable {
   SymbolicVariable typeLikeWithScalarType(
       SymbolicVariable other,
       at::ScalarType type) const {
-    if (auto other_type = other.v->type()->cast<ProfiledTensorType>()) {
+    if (auto other_type = other.v->type()->cast<TensorType>()) {
       auto new_type = other_type->withScalarType(type)->contiguous();
       v->setType(new_type);
     }
@@ -349,8 +345,8 @@ struct SymbolicVariable {
   SymbolicVariable typeLikeWithRhsScalarType(
       SymbolicVariable other,
       SymbolicVariable rhs) const {
-    auto other_type = other.v->type()->cast<ProfiledTensorType>();
-    auto rhs_type = rhs.v->type()->cast<ProfiledTensorType>();
+    auto other_type = other.v->type()->cast<TensorType>();
+    auto rhs_type = rhs.v->type()->cast<TensorType>();
     if (other_type && rhs_type && other_type->isComplete() &&
         rhs_type->isComplete()) {
       auto new_type =

@@ -40,7 +40,7 @@ bool isDecomposableNorm(Node* normalize_op) {
   if (!input->type()->isSubtypeOf(TensorType::get())) {
     return false;
   }
-  auto device = ProfiledTensorType::create(input->type())->device();
+  auto device = input->type()->expect<TensorType>()->device();
   // As of now, we do the decomposition for batchnorm/layernorm on GPU device
   // only
   if (!device || (*device).is_cpu()) {

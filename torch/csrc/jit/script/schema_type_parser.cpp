@@ -147,7 +147,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       L.expect('*');
       num_dims++;
     });
-    ptr = at::ProfiledTensorType::create(
+    ptr = at::TensorType::create(
         dtype,
         at::DeviceType::CPU,
         c10::VaryingShape(num_dims),
@@ -166,8 +166,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       dims.push_back(dim);
     });
     at::IntArrayRef dims_ref(dims);
-    ptr = at::ProfiledTensorType::create(
-        dtype, at::DeviceType::CPU, dims_ref, false);
+    ptr = at::TensorType::create(dtype, at::DeviceType::CPU, dims_ref, false);
   }
   return ptr;
 }

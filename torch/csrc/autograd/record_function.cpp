@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <cstdlib>
 #include <random>
@@ -82,9 +83,10 @@ class CallbackManager {
   double sampling_prob = 1.0;
 
   static double sample_zero_one() {
-    static thread_local auto gen = std::mt19937(std::random_device()());
+    static thread_local auto gen =
+        torch::make_unique<std::mt19937>(std::random_device()());
     std::uniform_real_distribution<double> dist(0.0, 1.0);
-    return dist(gen);
+    return dist(*gen);
   }
 };
 

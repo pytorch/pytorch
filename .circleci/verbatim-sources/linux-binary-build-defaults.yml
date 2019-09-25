@@ -18,8 +18,16 @@ binary_linux_build: &binary_linux_build
       command: |
         set -eux -o pipefail
         source /env
-        retry yum -q -y install epel-release
-        retry yum -q -y install expect moreutils
+        OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
+        if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
+          retry yum -q -y install epel-release
+          retry yum -q -y install expect moreutils
+        elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
+          retry apt-get update
+          retry apt-get -y install expect moreutils
+          conda install -y -c eumetsat expect
+          conda install -y cmake
+        fi
   - run:
       name: Update compiler to devtoolset7
       command: |

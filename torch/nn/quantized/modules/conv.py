@@ -80,8 +80,8 @@ class Conv2d(torch.nn.Module):
         # Initialize as NCHW. set_weight will internally transpose to
         # NHWC
         qweight = torch._empty_affine_quantized(
-            [out_channels, in_channels // self.groups, kernel_size[0],
-             kernel_size[1]],
+            [out_channels, in_channels // self.groups, self.kernel_size[0],
+                self.kernel_size[1]],
             scale=1, zero_point=0, dtype=torch.qint8)
         self.set_weight(qweight)
         self.bias = torch._empty_affine_quantized([out_channels],

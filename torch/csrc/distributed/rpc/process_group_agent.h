@@ -2,10 +2,10 @@
 
 #include <c10/core/thread_pool.h>
 #include <c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/rpc/FutureMessage.h>
-#include <torch/csrc/distributed/rpc/RpcAgent.h>
 #include <torch/csrc/distributed/rpc/functions.h>
-#include <torch/csrc/distributed/rpc/PythonRpcHandler.h>
+#include <torch/csrc/distributed/rpc/future_message.h>
+#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 #include <thread>
 

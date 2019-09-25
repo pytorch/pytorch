@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/rpc/Message.h>
+#include <torch/csrc/distributed/rpc/message.h>
 
 namespace torch {
 namespace distributed {

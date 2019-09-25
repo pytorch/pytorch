@@ -5,7 +5,6 @@
 
 #include <ATen/core/stack.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/function_schema_parser.h>
 #include <torch/csrc/jit/operator_options.h>
 #include <ATen/core/stack.h>
@@ -14,6 +13,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/interned_strings.h>
 
 #include <functional>
 #include <initializer_list>
@@ -26,6 +26,8 @@
 namespace torch {
 namespace jit {
 
+struct Node;
+using ::c10::Symbol;
 using ::c10::FunctionSchema;
 
 using OperationCreator = std::function<Operation(const Node*)>;

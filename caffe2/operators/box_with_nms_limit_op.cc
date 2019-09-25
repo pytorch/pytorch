@@ -330,9 +330,9 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
       "Tensor scores, "
       "Tensor boxes, "
       "Tensor classes, "
-      "Tensor batch_splits"
-      //"Tensor keeps, "
-      //"Tensor keeps_size, "
+      "Tensor batch_splits, "
+      "Tensor keeps, "
+      "Tensor keeps_size"
     ")",
     caffe2::BoxWithNMSLimitOp<caffe2::CPUContext>);
 // clang-format on

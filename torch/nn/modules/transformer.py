@@ -27,8 +27,10 @@ class Transformer(Module):
         custom_decoder: custom decoder (default=None).
 
     Examples::
-        >>> transformer_model = nn.Transformer(src_vocab, tgt_vocab)
-        >>> transformer_model = nn.Transformer(src_vocab, tgt_vocab, nhead=16, num_encoder_layers=12)
+        >>> transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12)
+        >>> src = torch.rand((10, 32, 512))
+        >>> tgt = torch.rand((20, 32, 512))
+        >>> out = transformer_model(src, tgt)
     """
 
     def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,
@@ -139,8 +141,10 @@ class TransformerEncoder(Module):
         norm: the layer normalization component (optional).
 
     Examples::
-        >>> encoder_layer = nn.TransformerEncoderLayer(d_model, nhead)
-        >>> transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers)
+        >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
+        >>> transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=6)
+        >>> src = torch.rand(10, 32, 512)
+        >>> out = transformer_encoder(src)
     """
 
     def __init__(self, encoder_layer, num_layers, norm=None):
@@ -181,8 +185,11 @@ class TransformerDecoder(Module):
         norm: the layer normalization component (optional).
 
     Examples::
-        >>> decoder_layer = nn.TransformerDecoderLayer(d_model, nhead)
-        >>> transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers)
+        >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
+        >>> transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=6)
+        >>> memory = torch.rand(10, 32, 512)
+        >>> tgt = torch.rand(20, 32, 512)
+        >>> out = transformer_decoder(tgt, memory)
     """
 
     def __init__(self, decoder_layer, num_layers, norm=None):
@@ -235,7 +242,9 @@ class TransformerEncoderLayer(Module):
         dropout: the dropout value (default=0.1).
 
     Examples::
-        >>> encoder_layer = nn.TransformerEncoderLayer(d_model, nhead)
+        >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
+        >>> src = torch.rand(10, 32, 512)
+        >>> out = encoder_layer(src)
     """
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1):
@@ -287,7 +296,10 @@ class TransformerDecoderLayer(Module):
         dropout: the dropout value (default=0.1).
 
     Examples::
-        >>> decoder_layer = nn.TransformerDecoderLayer(d_model, nhead)
+        >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
+        >>> memory = torch.rand(10, 32, 512)
+        >>> tgt = torch.rand(20, 32, 512)
+        >>> out = decoder_layer(tgt, memory)
     """
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1):

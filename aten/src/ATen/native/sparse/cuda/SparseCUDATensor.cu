@@ -59,9 +59,9 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   LongTensor uniqueOffsets = at::empty({nnz}, self._indices().options());
 
   typedef thrust::device_ptr<int64_t> thrust_ptr;
-  thrust_ptr indicesIter(indices1D.data<int64_t>());
-  thrust_ptr origIndicesIter(origIndices.data<int64_t>());
-  thrust_ptr uniqueOffsetsIter(uniqueOffsets.data<int64_t>());
+  thrust_ptr indicesIter(indices1D.data_ptr<int64_t>());
+  thrust_ptr origIndicesIter(origIndices.data_ptr<int64_t>());
+  thrust_ptr uniqueOffsetsIter(uniqueOffsets.data_ptr<int64_t>());
 
 
   // Fill sortedOrigIndices with sequential indices
@@ -98,10 +98,10 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
       at::ScalarType::Half,values.scalar_type(), "coalesce_sparse_cuda", [&] {
           using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
           apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
-            uniqueOffsets.data<int64_t>(),
-            origIndices.data<int64_t>(),
-            values.data<scalar_t>(),
-            newValues.data<scalar_t>(),
+            uniqueOffsets.data_ptr<int64_t>(),
+            origIndices.data_ptr<int64_t>(),
+            values.data_ptr<scalar_t>(),
+            newValues.data_ptr<scalar_t>(),
             nnz,
             newNnz,
             stride

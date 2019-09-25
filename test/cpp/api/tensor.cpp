@@ -119,27 +119,27 @@ TEST(TensorTest, ToDoesNotCopyWhenOptionsAreAllTheSame) {
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(at::kFloat);
-    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+    ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   }
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(tensor.options());
-    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+    ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   }
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(tensor.dtype());
-    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+    ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   }
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(tensor.device());
-    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+    ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   }
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(tensor);
-    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+    ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   }
 }
 
@@ -303,4 +303,11 @@ TEST(TensorTest, Item_CUDA) {
     torch::Scalar scalar = tensor.item();
     ASSERT_EQ(scalar.to<int>(), 123);
   }
+}
+
+TEST(TensorTest, DataPtr) {
+  auto tensor = at::empty({3, 4}, at::kFloat);
+  auto tensor_not_copy = tensor.to(tensor.options());
+  ASSERT_EQ(tensor_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
+  ASSERT_EQ(tensor_not_copy.data_ptr(), tensor.data_ptr());
 }

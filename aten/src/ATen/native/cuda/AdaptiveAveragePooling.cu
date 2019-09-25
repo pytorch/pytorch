@@ -245,8 +245,8 @@ namespace {
     }
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input_.scalar_type(), "adaptive_avg_pool2d_cuda", [&] {
-          scalar_t *input_data = input_.data<scalar_t>();
-          scalar_t *output_data = output.data<scalar_t>();
+          scalar_t *input_data = input_.data_ptr<scalar_t>();
+          scalar_t *output_data = output.data_ptr<scalar_t>();
 
           // cuda blocks & threads:
           int blocksH = std::max<int64_t>((int)(16L / sizeD), 1);
@@ -291,8 +291,8 @@ namespace {
       //bool atomic = (isizeW%osizeW != 0) || (isizeH%osizeH != 0);
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(), "adaptive_avg_pool2d_backward_cuda", [&] {
-          scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-          scalar_t *gradInput_data = gradInput.data<scalar_t>();
+          scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+          scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
 
           // cuda blocks & threads:
           int blocksH = std::max((int)(16L / sizeD), 1);

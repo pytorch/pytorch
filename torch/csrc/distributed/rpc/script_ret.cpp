@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/rpc/ScriptRet.h>
+#include <torch/csrc/distributed/rpc/script_ret.h>
 #include <torch/csrc/jit/pickle.h>
 
 namespace torch {
@@ -29,7 +29,7 @@ Message ScriptRet::toMessage() {
 ScriptRet ScriptRet::fromMessage(const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
-  auto value = jit::unpickle(payload, payload_size, &message.tensors());
+  auto value = jit::unpickle(payload, payload_size, nullptr, &message.tensors());
   return ScriptRet(std::move(value));
 }
 

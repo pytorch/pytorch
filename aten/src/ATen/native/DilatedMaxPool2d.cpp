@@ -184,9 +184,9 @@ void max_pool2d_with_indices_out_cpu_template(
       "max_pool2d_with_indices_cpu",
       [&] {
         /* get raw pointers */
-        scalar_t *input_data = input.data<scalar_t>();
-        scalar_t *output_data = output.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *input_data = input.data_ptr<scalar_t>();
+        scalar_t *output_data = output.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         max_pool2d_with_indices_single_out_frame(
           input_data, output_data,
@@ -209,9 +209,9 @@ void max_pool2d_with_indices_out_cpu_template(
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
       "max_pool2d_with_indices_cpu",
       [&] {
-        scalar_t *input_data = input.data<scalar_t>();
-        scalar_t *output_data = output.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *input_data = input.data_ptr<scalar_t>();
+        scalar_t *output_data = output.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         max_pool2d_with_indices_out_frame(
           input_data,
@@ -368,9 +368,9 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
       "max_pool2d_with_indices_backward",
       [&] {
         /* get raw pointers */
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         max_pool2d_with_indices_backward_single_out_frame(
           gradInput_data, gradOutput_data,
@@ -388,9 +388,9 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
       "max_pool2d_with_indices_backward",
       [&] {
         /* get raw pointers */
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         max_pool2d_with_indices_backward_out_frame<scalar_t>(
           gradInput_data, gradOutput_data,

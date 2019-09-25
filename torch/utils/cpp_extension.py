@@ -953,10 +953,8 @@ def _get_cuda_arch_flags(cflags=None):
     # Note: keep combined names ("arch1+arch2") above single names, otherwise
     # string replacement may not do the right thing
     named_arches = collections.OrderedDict([
-        ('Fermi', '2.0;2.1'),
-        ('Kepler+Tegra', '3.2'),
         ('Kepler+Tesla', '3.7'),
-        ('Kepler', '3.0;3.5+PTX'),
+        ('Kepler', '3.5+PTX'),
         ('Maxwell+Tegra', '5.3'),
         ('Maxwell', '5.0;5.2+PTX'),
         ('Pascal', '6.0;6.1+PTX'),
@@ -964,8 +962,8 @@ def _get_cuda_arch_flags(cflags=None):
         ('Turing', '7.5+PTX'),
     ])
 
-    supported_arches = ['2.0', '2.1', '3.0', '3.2', '3.5', '3.7', '5.0', '5.2',
-                        '5.3', '6.0', '6.1', '6.2', '7.0', '7.2', '7.5']
+    supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
+                        '7.0', '7.2', '7.5']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x

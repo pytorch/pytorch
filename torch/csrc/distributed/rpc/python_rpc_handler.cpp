@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/rpc/PythonRpcHandler.h>
+#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 
 namespace torch {
 namespace distributed {

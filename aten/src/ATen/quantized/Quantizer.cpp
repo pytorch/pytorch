@@ -100,8 +100,8 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
-  const float* rd = rtensor.data<float>();
-  auto qd = reinterpret_cast<typename T::underlying*>(qtensor.data<T>());
+  const float* rd = rtensor.data_ptr<float>();
+  auto qd = reinterpret_cast<typename T::underlying*>(qtensor.data_ptr<T>());
   fbgemm::TensorQuantizationParams qparams;
   qparams.scale = scale;
   qparams.zero_point = zero_point;
@@ -129,12 +129,12 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t z
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
-  const auto* qd = reinterpret_cast<const typename T::underlying*>(qtensor.data<T>());
+  const auto* qd = reinterpret_cast<const typename T::underlying*>(qtensor.data_ptr<T>());
   fbgemm::TensorQuantizationParams qparams;
   qparams.scale = scale;
   qparams.zero_point = zero_point;
   qparams.precision = CHAR_BIT * sizeof(typename T::underlying);
-  float* rd = rtensor.data<float>();
+  float* rd = rtensor.data_ptr<float>();
   fbgemm::Dequantize<typename T::underlying>(/*src=*/qd,
                               /*dst=*/rd,
                               /*len=*/qtensor.numel(),
@@ -168,8 +168,8 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
-  const float* rdata = rtensor.data<float>();
-  auto qdata = qtensor.data<T>();
+  const float* rdata = rtensor.data_ptr<float>();
+  auto qdata = qtensor.data_ptr<T>();
   for (int i = 0; i < rtensor.numel(); ++i) {
     qdata[i] = quantize_val<T>(scale, zero_point, rdata[i]);
   }
@@ -189,8 +189,8 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t z
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
-  const auto* qd = qtensor.data<T>();
-  float* rd = rtensor.data<float>();
+  const auto* qd = qtensor.data_ptr<T>();
+  float* rd = rtensor.data_ptr<float>();
   for (auto i = 0; i < qtensor.numel(); ++i) {
     rd[i] = dequantize_val<T>(scale, zero_point, qd[i]);
   }
@@ -250,8 +250,8 @@ Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
               "length of scales must equal to channel");
   TORCH_CHECK(channel == int64_t(zero_points.size()),
               "length of zero_points must equal to channel");
-  const float* rdata = rtensor.data<float>();
-  auto qdata = qtensor.data<T>();
+  const float* rdata = rtensor.data_ptr<float>();
+  auto qdata = qtensor.data_ptr<T>();
   for (auto b = 0; b < batches; ++b) {
     for (auto c = 0; c < channel; ++c) {
       for (auto e = 0; e < elements_per_channel; ++e) {
@@ -283,8 +283,8 @@ Tensor dequantize_tensor_per_channel_affine(Tensor qtensor,
               "length of scales must equal to channel");
   TORCH_CHECK(channel == int64_t(zero_points.size()),
               "length of zero_points must equal to channel");
-  const auto* qd = qtensor.data<T>();
-  float* rd = rtensor.data<float>();
+  const auto* qd = qtensor.data_ptr<T>();
+  float* rd = rtensor.data_ptr<float>();
   for (auto b = 0; b < batches; ++b) {
     for (auto c = 0; c < channel; ++c) {
       for (auto e = 0; e < elements_per_channel; ++e) {

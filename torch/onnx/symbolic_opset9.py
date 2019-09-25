@@ -875,9 +875,9 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
     if (running_mean is None or running_mean.node().mustBeNone()) \
             and (running_var is None or running_var.node().mustBeNone()):
-        return _unimplemented("batch_norm", "running_mean and running_var are null. "
+        return _unimplemented("batch_norm", "running_mean and running_var are None. "
                                             "Check if track_running_stats == False in the batchNorm "
-                                            "model. This might cause null running_mean and running_var.")
+                                            "model. This might cause 'None' running_mean and running_var.")
     input_sizes = input.type().sizes()
     if len(input_sizes) == 2:
         # batchnorm1d accepts 2d and 3d array, but ONNX only accepts 3d
@@ -981,9 +981,10 @@ def selu(g, input):
 
 @parse_args('v', 'i', 'v')
 def index_select(g, self, dim, index):
-    # In case of a scaler index, index_select returns a tensor with the same rank as the input.
-    # To match this bahavior in ONNX, we make index a 1D tensor so that the following gather
+    # In case of a scalar index, index_select returns a tensor with the same rank as the input.
+    # To match this behavior in ONNX, we make index a 1D tensor so that the following gather
     # also produces a tensor with the same rank as the input.
+
     index_const = sym_help._maybe_get_scalar(index)
     index_dim = index.type().dim()
     if not sym_help._is_value(index_const):

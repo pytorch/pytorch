@@ -1709,7 +1709,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 super(MyModel, self).__init__()
 
             def forward(self, class_prob, pred_bbox, batch_splits):
-                a, b, c, d = torch.ops._caffe2.BoxWithNMSLimit(
+                a, b, c, d, e, f = torch.ops._caffe2.BoxWithNMSLimit(
                     class_prob,
                     pred_bbox,
                     batch_splits,
@@ -1726,7 +1726,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                     output_classes_include_bg_cls=True,
                     legacy_plus_one=True,
                 )
-                return a, b, c, d
+                return a, b, c, d, e, f
 
         inputs = (torch.tensor(class_prob), torch.tensor(pred_bbox), torch.tensor(batch_splits))
         self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3, use_gpu=False)

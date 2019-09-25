@@ -15,10 +15,10 @@
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/jit/dynamic_dag.h"
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/interpreter.h"
+#include "torch/csrc/jit/irparser.h"
 #include "torch/csrc/jit/pass_manager.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/passes/bailout_graph.h"
@@ -36,7 +36,6 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
 #include "torch/csrc/jit/symbolic_script.h"
-#include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/utils/hash.h"
 #include "torch/csrc/utils/memory.h"
@@ -73,8 +72,6 @@ c10::OperatorOptions aliasAnalysisFromSchema() {
   result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
   return result;
 }
-
-using Var = SymbolicVariable;
 
 using namespace torch::autograd;
 
@@ -359,23 +356,23 @@ void testATenNativeBatchNorm() {
 }
 
 void testCustomFusion() {
-  auto graph = std::make_shared<Graph>();
-  at::ScalarType s = at::ScalarType::Float;
-  auto type = ProfiledTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
-  auto a = SymbolicVariable::asNewInput(*graph, type);
-  auto b = SymbolicVariable::asNewInput(*graph, type);
-  auto c = a * b;
-  auto d = c * a;
-  graph->registerOutput(d.value());
+  auto graph_string = R"IR(
+    graph(%0 : Float(2, 3, 4),
+          %1 : Float(2, 3, 4)):
+      %2 : Tensor = aten::mul(%0, %1)
+      %3 : Tensor = aten::mul(%2, %0)
+      return (%3))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::script::parseIR(graph_string, g.get());
 
   torch::jit::overrideCanFuseOnCPU(true);
   CustomFuseGraph(
-      graph,
+      g,
       [](Node* n) { return n->kind() != prim::Param; },
       Symbol::fromQualString("prim::FusionGroup"));
   torch::jit::overrideCanFuseOnCPU(false);
 
-  const auto& nodes = graph->nodes();
+  const auto& nodes = g->nodes();
   auto fusion_group =
       std::find_if(nodes.begin(), nodes.end(), [](const Node* node) {
         return node->kind() == Symbol::fromQualString("prim::FusionGroup");
@@ -393,32 +390,24 @@ void testCustomFusion() {
 }
 
 void testCustomFusionNestedBlocks() {
+  auto graph_string = R"IR(
+  graph(%0 : Float(2, 3, 4),
+        %1 : Float(2, 3, 4),
+        %2 : Float(2, 3, 4)):
+    %3 : int = prim::Constant[value=1]()
+    %4 : Tensor = prim::If(%2)
+      block0():
+        %5 : Tensor = aten::mul(%0, %2)
+        %6 : Tensor = aten::mul(%5, %1)
+        -> (%6)
+      block1():
+        %7 : Tensor = aten::add(%0, %2, %3)
+        %8 : Tensor = aten::add(%7, %1, %3)
+        -> (%8)
+    %9 : Tensor = aten::add(%4, %2, %3)
+    return (%4))IR";
   auto g = std::make_shared<Graph>();
-  at::ScalarType s = at::ScalarType::Float;
-  auto type = ProfiledTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
-
-  // test CustomFusion in nested blocks;
-  auto a = SymbolicVariable::asNewInput(*g, type);
-  auto b = SymbolicVariable::asNewInput(*g, type);
-  auto c = SymbolicVariable::asNewInput(*g, type);
-
-  auto r =
-      g->appendNode(g->create(prim::If, {c.value()}));
-  auto then_block = r->addBlock();
-  auto else_block = r->addBlock();
-  {
-    WithInsertPoint guard(then_block);
-    auto d = c * a;
-    auto t = d * b;
-    then_block->registerOutput(t.value());
-  }
-  {
-    WithInsertPoint guard(else_block);
-    auto d = c + a;
-    auto t = d + b;
-    else_block->registerOutput(t.value());
-  }
-  g->registerOutput((Var(r->output()) + c).value());
+  torch::jit::script::parseIR(graph_string, g.get());
 
   CustomFuseGraph(
       g,
@@ -1021,7 +1010,7 @@ static void checkShape(
     bool prev = true) {
   auto profile = (prev) ? n->inputs().at(0)->node() : n;
   auto tp = profile->output()->type();
-  auto ptp = tp->expect<ProfiledTensorType>();
+  auto ptp = tp->expect<TensorType>();
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
 
@@ -1054,7 +1043,9 @@ void testInsertAndEliminateRedundantGuards() {
     return n->kind() == prim::Guard;
   });
   ASSERT_NE(guard, nodes.end());
-  ASSERT_EQ(guard->input()->type()->cast<ProfiledTensorType>(), nullptr);
+  ASSERT_EQ(
+      guard->input()->type()->expect<TensorType>()->sizes().size(),
+      c10::nullopt);
   checkShape(*guard, {2, 3}, false);
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
   int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);

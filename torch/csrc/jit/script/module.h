@@ -524,7 +524,7 @@ struct TORCH_API slot_list_impl {
   size_t size() const {
     if (!size_) {
       size_ = size_t(0);
-      for (Slot s : *(this)) {
+      for (T s : *(this)) {
         ++*size_;
       }
     }

@@ -141,8 +141,8 @@
   vec1: grad.mv(vec2) * alpha
   vec2: grad.t().mv(vec1) * alpha
 
-- name: affine_grid_generator(Tensor theta, int[] size) -> Tensor
-  theta: affine_grid_generator_backward(grad, size)
+- name: affine_grid_generator(Tensor theta, int[] size, bool align_corners) -> Tensor
+  theta: affine_grid_generator_backward(grad, size, align_corners)
 
 - name: alias(Tensor(a) self) -> Tensor(a)
   self: grad
@@ -370,11 +370,11 @@
 - name: _indices(Tensor(a) self) -> Tensor(a)
   output_differentiability: [False]
 
-- name: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> Tensor
-  input, grid: grid_sampler_2d_backward(grad, input, grid, interpolation_mode, padding_mode)
+- name: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
+  input, grid: grid_sampler_2d_backward(grad, input, grid, interpolation_mode, padding_mode, align_corners)
 
-- name: grid_sampler_3d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> Tensor
-  input, grid: grid_sampler_3d_backward(grad, input, grid, interpolation_mode, padding_mode)
+- name: grid_sampler_3d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
+  input, grid: grid_sampler_3d_backward(grad, input, grid, interpolation_mode, padding_mode, align_corners)
 
 - name: gt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)

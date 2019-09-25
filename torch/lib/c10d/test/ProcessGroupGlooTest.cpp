@@ -181,7 +181,7 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
   auto outputs = copyTensors(inputs);
   for (auto i = 0; i < size; i++) {
     auto& tensor = outputs[i][0];
-    auto data = tensor.data<float>();
+    auto data = tensor.data_ptr<float>();
     for (auto j = 0; j < tensor.numel(); j++) {
       if (data[j] != expected) {
         throw std::runtime_error("BOOM!");
@@ -234,7 +234,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
       for (auto k = 0; k < size; k++) {
         for (auto l = 0; l < stride; l++) {
           auto& tensor = outputs[k][l];
-          auto data = tensor.data<float>();
+          auto data = tensor.data_ptr<float>();
           for (auto n = 0; n < tensor.numel(); n++) {
             if (data[n] != expected) {
               throw std::runtime_error("BOOM!");

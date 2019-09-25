@@ -26,7 +26,11 @@ constexpr int MODE_SUM = 0;
 constexpr int MODE_MEAN = 1;
 constexpr int MODE_MAX = 2;
 
+#ifdef __HIP_PLATFORM_HCC__
+constexpr int WARP_SIZE = 64;
+#else
 constexpr int WARP_SIZE = 32;
+#endif
 
 
 // This kernel assumes that all input tensors except `weight` and
@@ -148,11 +152,11 @@ Tensor embedding_bag_backward_cuda_sum_avg(
 
     // Fill sortedOrigIndices with sequential indices
     auto count_iter = thrust::counting_iterator<int64_t>(0);
-    auto orig_data = device_ptr(orig_indices.data<int64_t>());
+    auto orig_data = device_ptr(orig_indices.data_ptr<int64_t>());
     thrust::copy(policy, count_iter, count_iter + numel, orig_data);
 
     // Sort; a stable sort is not required
-    auto sorted_data = device_ptr(sorted_indices.data<int64_t>());
+    auto sorted_data = device_ptr(sorted_indices.data_ptr<int64_t>());
     thrust::sort_by_key(policy, sorted_data, sorted_data + numel, orig_data,
                         ThrustLTOp<int64_t>());
   }
@@ -167,8 +171,8 @@ Tensor embedding_bag_backward_cuda_sum_avg(
     // Compute an increasing sequence per unique item in sortedIndices:
     // sorted: 2 5 5 5 7 7 8 9 9
     //  count: 1 1 2 3 1 2 1 1 2
-    auto sorted_data = device_ptr(sorted_indices.data<int64_t>());
-    auto count_data = device_ptr(count.data<int64_t>());
+    auto sorted_data = device_ptr(sorted_indices.data_ptr<int64_t>());
+    auto count_data = device_ptr(count.data_ptr<int64_t>());
     thrust::inclusive_scan_by_key(policy, sorted_data, sorted_data + numel,
                                   thrust::make_constant_iterator(1),
                                   count_data);
@@ -227,15 +231,19 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
+#ifdef __HIP_PLATFORM_HCC__
+  dim3 block = dim3(64, 4);
+#else
   dim3 block = dim3(32, 8);
+#endif
   int grid = 1024;
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad.scalar_type(), "embedding_bag_backward_cuda_max", [&] {
         EmbeddingBag_accGradParametersKernel_max<
             scalar_t><<<grid, block, 0, stream>>>(
-            max_indices.data<int64_t>(), grad.data<scalar_t>(),
-            grad_weight.data<scalar_t>(), stride, numBags);
+            max_indices.data_ptr<int64_t>(), grad.data_ptr<scalar_t>(),
+            grad_weight.data_ptr<scalar_t>(), stride, numBags);
       });
 
   THCudaCheck(cudaGetLastError());
@@ -279,16 +287,20 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
     max_indices = at::zeros({0}, indices.options());
   }
 
+#ifdef __HIP_PLATFORM_HCC__
+  dim3 block = dim3(64, 4);
+#else
   dim3 block = dim3(32, 8);
+#endif
   int grid = 1024;
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(weight.scalar_type(), "embedding_bag_cuda", [&] {
     EmbeddingBag_updateOutputKernel<scalar_t><<<grid, block, 0, stream>>>(
-        indices.data<int64_t>(), offsets.data<int64_t>(),
-        weight.data<scalar_t>(), output.data<scalar_t>(),
-        offset2bag.data<int64_t>(), numIndices, numBags, featureSize,
-        weight.stride(0), weight.stride(1), mode, bag_size.data<int64_t>(),
-        mode == MODE_MAX ? max_indices.data<int64_t>() : NULL,
-        per_sample_weights.defined() ? per_sample_weights.data<scalar_t>() : NULL,
+        indices.data_ptr<int64_t>(), offsets.data_ptr<int64_t>(),
+        weight.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+        offset2bag.data_ptr<int64_t>(), numIndices, numBags, featureSize,
+        weight.stride(0), weight.stride(1), mode, bag_size.data_ptr<int64_t>(),
+        mode == MODE_MAX ? max_indices.data_ptr<int64_t>() : NULL,
+        per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
         per_sample_weights.defined() ? per_sample_weights.stride(0) : 0);
   });
 
@@ -409,13 +421,13 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
     grad.scalar_type(), "_embedding_bag_per_sample_weights_backward_cuda", [&]() {
       _embedding_bag_per_sample_weights_backward_kernel<scalar_t>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-          grad.data<scalar_t>(), grad.stride(0), grad.stride(1),
-          weight.data<scalar_t>(), weight.stride(0), weight.stride(1),
-          indices.data<int64_t>(),
-          offset2bag.data<int64_t>(),
+          grad.data_ptr<scalar_t>(), grad.stride(0), grad.stride(1),
+          weight.data_ptr<scalar_t>(), weight.stride(0), weight.stride(1),
+          indices.data_ptr<int64_t>(),
+          offset2bag.data_ptr<int64_t>(),
           num_samples,
           embedding_features,
-          output.data<scalar_t>());
+          output.data_ptr<scalar_t>());
     }
   );
   return output;

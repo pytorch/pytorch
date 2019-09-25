@@ -474,11 +474,11 @@ class Tensor(torch._C._TensorBase):
 
         itemsize = self.storage().element_size()
 
-        shape = self.shape
+        shape = tuple(self.shape)
         strides = tuple(s * itemsize for s in self.stride())
         data = (self.data_ptr(), False)  # read-only is false
 
-        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=0)
+        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=1)
 
     def names_(self, *names, **rename_map):
         # Note [names_ / view_names API]

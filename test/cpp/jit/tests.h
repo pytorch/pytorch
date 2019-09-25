@@ -21,7 +21,6 @@ namespace jit {
   _(CustomFusion)                      \
   _(Differentiate)                     \
   _(DifferentiateWithRequiresGrad)     \
-  _(DynamicDAG)                        \
   _(FromQualString)                    \
   _(InternedStrings)                   \
   _(IValue)                            \

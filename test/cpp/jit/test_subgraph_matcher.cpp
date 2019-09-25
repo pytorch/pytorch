@@ -24,21 +24,23 @@ graph(%0):
 
 void testTrivial2() {
   Graph graph;
-  Var i0 = Var::asNewInput(graph);
-  auto o0 = i0.tanh();
-  graph.registerOutput(o0.value());
+  auto* g_in = graph.addInput();
+  auto* g_tanh = graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/ 1));
+  g_tanh->addInput(g_in);
+  graph.registerOutput(g_tanh->output());
 
   Graph pattern;
-  Var mi0 = Var::asNewInput(pattern);
-  auto mo0 = mi0.tanh();
-  pattern.registerOutput(mo0.value());
+  auto* p_in = pattern.addInput();
+  auto* p_tanh = pattern.insertNode(pattern.create(aten::tanh, /*num_outputs =*/ 1));
+  p_tanh->addInput(p_in);
+  pattern.registerOutput(p_tanh->output());
 
   auto matches = findPatternMatches(pattern, graph);
   AT_ASSERT(matches.size() == 1);
   for (const Match& m : matches) {
-    AT_ASSERT(m.values_map.at(mi0.value()) == i0.value());
-    AT_ASSERT(m.values_map.at(mo0.value()) == o0.value());
-    AT_ASSERT(m.nodes_map.at(mo0.value()->node()) == o0.value()->node());
+    AT_ASSERT(m.values_map.at(p_in) == g_in);
+    AT_ASSERT(m.values_map.at(p_tanh->output()) == g_tanh->output());
+    AT_ASSERT(m.nodes_map.at(p_tanh) == g_tanh);
   }
 }
 
@@ -63,24 +65,28 @@ graph(%a, %b):
 
 void testTrivial4() {
   Graph graph;
-  Var i0 = Var::asNewInput(graph);
-  Var i1 = Var::asNewInput(graph);
-  auto o0 = i0 * i1;
-  graph.registerOutput(o0.value());
+  auto* g_in0 = graph.addInput();
+  auto* g_in1 = graph.addInput();
+  auto* g_mul = graph.insertNode(graph.create(aten::mul, /*num_outputs =*/ 1));
+  g_mul->addInput(g_in0);
+  g_mul->addInput(g_in1);
+  graph.registerOutput(g_mul->output());
 
   Graph pattern;
-  auto m0 = Var::asNewInput(pattern);
-  auto m1 = Var::asNewInput(pattern);
-  auto m2 = m0 * m1;
-  pattern.registerOutput(m2.value());
+  auto* p_in0 = pattern.addInput();
+  auto* p_in1 = pattern.addInput();
+  auto* p_mul = pattern.insertNode(pattern.create(aten::mul, /*num_outputs =*/ 1));
+  p_mul->addInput(p_in0);
+  p_mul->addInput(p_in1);
+  pattern.registerOutput(p_mul->output());
 
   auto matches = findPatternMatches(pattern, graph);
   AT_ASSERT(matches.size() == 1);
   for (const Match& m : matches) {
-    AT_ASSERT(m.values_map.at(m0.value()) == i0.value());
-    AT_ASSERT(m.values_map.at(m1.value()) == i1.value());
-    AT_ASSERT(m.values_map.at(m2.value()) == o0.value());
-    AT_ASSERT(m.nodes_map.at(m2.value()->node()) == o0.value()->node());
+    AT_ASSERT(m.values_map.at(p_in0) == g_in0);
+    AT_ASSERT(m.values_map.at(p_in1) == g_in1);
+    AT_ASSERT(m.values_map.at(p_mul->output()) == g_mul->output());
+    AT_ASSERT(m.nodes_map.at(p_mul) == g_mul);
   }
 }
 
@@ -108,25 +114,35 @@ graph(%0):
 
 void testLinear2() {
   Graph graph;
-  Var i0 = Var::asNewInput(graph);
-  auto o0 = i0.tanh();
-  auto o1 = o0.tanh();
-  graph.registerOutput(o1.value());
+  auto* g_in = graph.addInput();
+
+  auto* g_tanh = graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/ 1));
+  g_tanh->addInput(g_in);
+
+  auto* g_tanh2 = graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/ 1));
+  g_tanh2->addInput(g_tanh->output());
+
+  graph.registerOutput(g_tanh2->output());
 
   Graph pattern;
-  auto m0 = Var::asNewInput(pattern);
-  auto m1 = m0.tanh();
-  auto m2 = m1.tanh();
-  pattern.registerOutput(m2.value());
+  auto* p_in = pattern.addInput();
+
+  auto* p_tanh = pattern.insertNode(pattern.create(aten::tanh, /*num_outputs =*/ 1));
+  p_tanh->addInput(p_in);
+
+  auto* p_tanh2 = pattern.insertNode(pattern.create(aten::tanh, /*num_outputs =*/ 1));
+  p_tanh2->addInput(p_tanh->output());
+
+  pattern.registerOutput(p_tanh2->output());
 
   auto matches = findPatternMatches(pattern, graph);
   AT_ASSERT(matches.size() == 1);
   for (const Match& m : matches) {
-    AT_ASSERT(m.values_map.at(m0.value()) == i0.value());
-    AT_ASSERT(m.values_map.at(m1.value()) == o0.value());
-    AT_ASSERT(m.values_map.at(m2.value()) == o1.value());
-    AT_ASSERT(m.nodes_map.at(m1.value()->node()) == o0.value()->node());
-    AT_ASSERT(m.nodes_map.at(m2.value()->node()) == o1.value()->node());
+    AT_ASSERT(m.values_map.at(p_in) == g_in);
+    AT_ASSERT(m.values_map.at(p_tanh->output()) == g_tanh->output());
+    AT_ASSERT(m.values_map.at(p_tanh2->output()) == g_tanh2->output());
+    AT_ASSERT(m.nodes_map.at(p_tanh) == g_tanh);
+    AT_ASSERT(m.nodes_map.at(p_tanh2) == g_tanh2);
   }
 }
 
@@ -196,24 +212,36 @@ graph(%0):
  */
 void testDiamond2() {
   Graph graph;
-  Var i0 = Var::asNewInput(graph);
-  auto os = i0.chunk(2, 0);
-  auto o1 = os[0] * os[1];
+  auto* g_in = graph.addInput();
+
+  auto* g_chunk = graph.insertNode(graph.create(prim::ConstantChunk, /*num_outputs =*/ 2));
+  g_chunk->i_(attr::chunks, 2)->i_(attr::dim, 0);
+  g_chunk->addInput(g_in);
+
+  auto* g_mul = graph.insertNode(graph.create(aten::mul, /*num_outputs =*/ 1));
+  g_mul->addInput(g_chunk->outputs()[0]);
+  g_mul->addInput(g_chunk->outputs()[1]);
+  graph.registerOutput(g_mul->output());
 
   Graph pattern;
-  auto mi0 = Var::asNewInput(pattern);
-  auto ms = mi0.chunk(2, 0);
-  auto mo = ms[0] * ms[1];
-  pattern.registerOutput(mo.value());
+  auto* p_in = pattern.addInput();
+  auto* p_chunk = pattern.insertNode(pattern.create(prim::ConstantChunk, /*num_outputs =*/ 2));
+  p_chunk->i_(attr::chunks, 2)->i_(attr::dim, 0);
+  p_chunk->addInput(p_in);
+
+  auto* p_mul = pattern.insertNode(pattern.create(aten::mul, /*num_outputs =*/ 1));
+  p_mul->addInput(p_chunk->outputs()[0]);
+  p_mul->addInput(p_chunk->outputs()[1]);
+  pattern.registerOutput(p_mul->output());
 
   auto matches = findPatternMatches(pattern, graph);
   AT_ASSERT(matches.size() == 1);
   for (const Match& m : matches) {
-    AT_ASSERT(m.values_map.at(mi0.value()) == i0.value());
-    AT_ASSERT(m.values_map.at(ms[0].value()) == os[0].value());
-    AT_ASSERT(m.values_map.at(ms[1].value()) == os[1].value());
-    AT_ASSERT(m.values_map.at(mo.value()) == o1.value());
-    AT_ASSERT(m.nodes_map.at(mo.value()->node()) == o1.value()->node());
+    AT_ASSERT(m.values_map.at(p_in) == g_in);
+    AT_ASSERT(m.values_map.at(p_chunk->outputs()[0]) == g_chunk->outputs()[0]);
+    AT_ASSERT(m.values_map.at(p_chunk->outputs()[1]) == g_chunk->outputs()[1]);
+    AT_ASSERT(m.values_map.at(p_mul->output()) == g_mul->output());
+    AT_ASSERT(m.nodes_map.at(p_mul) == g_mul);
   }
 }
 

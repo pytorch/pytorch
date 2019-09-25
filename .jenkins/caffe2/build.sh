@@ -156,7 +156,9 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   build_args+=("TORCH_CUDA_ARCH_LIST=Maxwell")
 
   # Explicitly set path to NVCC such that the symlink to ccache or sccache is used
-  build_args+=("CUDA_NVCC_EXECUTABLE=${CACHE_WRAPPER_DIR}/nvcc")
+  if [ -n "${CACHE_WRAPPER_DIR}" ]; then
+    build_args+=("CUDA_NVCC_EXECUTABLE=${CACHE_WRAPPER_DIR}/nvcc")
+  fi
 
   # Ensure FindCUDA.cmake can infer the right path to the CUDA toolkit.
   # Setting PATH to resolve to the right nvcc alone isn't enough.

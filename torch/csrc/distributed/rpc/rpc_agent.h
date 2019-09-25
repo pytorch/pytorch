@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/distributed/rpc/FutureMessage.h>
-#include <torch/csrc/distributed/rpc/Message.h>
+#include <torch/csrc/distributed/rpc/future_message.h>
+#include <torch/csrc/distributed/rpc/message.h>
 
 namespace torch {
 namespace distributed {
