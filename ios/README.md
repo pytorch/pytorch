@@ -1,5 +1,5 @@
 
-## LibTorch for iOS
+## PyTorch for iOS
 
 ### Cocoapods Developers
 
@@ -11,7 +11,7 @@ pod 'LibTorch'
 
 ### Import the library
 
-For Objective-C developers, simply just import the umbrella header
+For Objective-C developers, simply import the umbrella header
 
 ```
 #import <LibTorch/LibTorch.h>
@@ -21,7 +21,7 @@ For Swift developers, you need to create an Objective-C class as a bridge to cal
 
 ### Disable Bitcode 
 
-Since PyTorch is not yet built with bitcode support. You need to disable bitcode for your target by selecting the **Build Settings**, searching for **Enable Bitcode** and set the value to **NO**.
+Since PyTorch is not yet built with bitcode support, you need to disable bitcode for your target by selecting the **Build Settings**, searching for **Enable Bitcode** and set the value to **No**.
 
 ## LICENSE
 
