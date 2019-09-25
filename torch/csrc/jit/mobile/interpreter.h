@@ -2,6 +2,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/operator_name.h>
 #include <torch/csrc/jit/instruction.h>
+#include <aten/src/ATen/core/dispatch/Dispatcher.h>
 
 namespace torch{
 namespace jit{
@@ -11,6 +12,7 @@ using Stack = std::vector<c10::IValue>;
 struct Code {
   std::vector<Instruction> instructions_;
   std::vector<c10::OperatorName> op_names_;
+  std::vector<c10::optional<c10::OperatorHandle>> operators_;
   std::vector<c10::IValue> constants_;
   size_t register_size_; // Aggregated output size.
 };

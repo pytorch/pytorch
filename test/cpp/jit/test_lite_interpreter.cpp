@@ -31,7 +31,7 @@ void testLiteInterpreter() {
 
   std::stringstream ss;
   m._save_for_mobile(ss);
-  auto bc = _load_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;

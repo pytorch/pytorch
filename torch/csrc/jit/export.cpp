@@ -32,7 +32,7 @@
 
 namespace torch {
 namespace jit {
-char const * OpCode2Str(OpCode op);
+char const * toString(OpCode op);
 
 namespace {
 namespace onnx_torch = ::torch::onnx;
@@ -672,9 +672,9 @@ class ScriptModuleSerializer {
       // instructions
       std::vector<IValue> inss;
       for (const auto& ins : code.instructions()) {
-        TORCH_CHECK(isOpSupportedInMobile(ins.op), OpCode2Str(ins.op),
+        TORCH_CHECK(isOpSupportedInMobile(ins.op), toString(ins.op),
                     " is not supported in mobile module.");
-        std::vector<IValue> insv{OpCode2Str(ins.op), ins.X, ins.N};
+        std::vector<IValue> insv{toString(ins.op), ins.X, ins.N};
         inss.emplace_back(c10::ivalue::Tuple::create(std::move(insv)));
       }
       auto instructions = c10::ivalue::Tuple::create(std::move(inss));
@@ -683,9 +683,7 @@ class ScriptModuleSerializer {
       // operators
       std::vector<IValue> opss;
       for (const auto& opname : code.opname_table()) {
-        // Add "_" prefix to work around the double registration both of jit/generated
-        // and here. TODO: remove it when we have separate build for lite interpreter.
-        opss.emplace_back(c10::ivalue::Tuple::create({"_" + opname.name, opname.overload_name}));
+        opss.emplace_back(c10::ivalue::Tuple::create({opname.name, opname.overload_name}));
       }
       auto operators = c10::ivalue::Tuple::create(std::move(opss));
       auto named_ops = c10::ivalue::Tuple::create({"operators", operators});
@@ -694,10 +692,11 @@ class ScriptModuleSerializer {
       auto constants = c10::ivalue::Tuple::create(code.constant_table());
       auto named_consts = c10::ivalue::Tuple::create({"constants", constants});
 
-      // since the register location is embedded into the bytecode, pass the aggregated output size
-      auto named_aggsize = c10::ivalue::Tuple::create({"register_size", code.register_size()});
+      // since the register location is embedded into the bytecode, pass the register size
+      auto named_regsize = c10::ivalue::Tuple::create({"register_size",
+                                                       static_cast<int>(code.register_size())});
 
-      auto element = c10::ivalue::Tuple::create({named_ins, named_ops, named_consts, named_aggsize});
+      auto element = c10::ivalue::Tuple::create({named_ins, named_ops, named_consts, named_regsize});
       elements.push_back(c10::ivalue::Tuple::create({func.qualname().qualifiedName(), element}));
     }
     auto telements = c10::ivalue::Tuple::create(std::move(elements));

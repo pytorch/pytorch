@@ -15,7 +15,7 @@ std::ostream& operator<<(std::ostream& out, OpCode op) {
   return out;
 }
 
-char const * OpCode2Str(OpCode op) {
+char const * toString(OpCode op) {
   switch (op) {
 #define OP_STRING(x, _) \
   case x:               \
