@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/torch.h>
+#include <c10/util/variant.h>
 
 namespace testns {
 

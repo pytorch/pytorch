@@ -1,7 +1,7 @@
 #pragma once
 
+#include <c10/util/variant.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/variant.h>
 
 namespace torch {
 
