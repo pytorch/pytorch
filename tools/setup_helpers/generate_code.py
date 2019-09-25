@@ -48,11 +48,7 @@ def generate_code(ninja_global=None,
             'tools/autograd',
             disable_autograd=disable_autograd,
         )
-        gen_jit_dispatch(
-            declarations_path or DECLARATIONS_PATH,
-            jit_gen_dir,
-            'tools/jit/templates',
-            disable_autograd=disable_autograd)
+        gen_jit_dispatch(declarations_path or DECLARATIONS_PATH, jit_gen_dir, 'tools/jit/templates')
 
 
 def main():
