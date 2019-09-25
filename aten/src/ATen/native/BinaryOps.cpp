@@ -222,7 +222,7 @@ Tensor lt(const Tensor& self, const Tensor& other) {
 Tensor& lt_(Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.dtype() == other.dtype(),
       "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-      other.dtype(), "for argument 'other' in call to lt_")
+      other.dtype(), " for argument 'other' in call to lt_")
   auto iter = TensorIterator::comparison_op(self, self, other,
       /*check_mem_overlap=*/true);
   lt_stub(iter.device_type(), iter);
@@ -249,7 +249,9 @@ Tensor lt(const Tensor& self, Scalar other) {
 Tensor& lt_(Tensor& self, Scalar other) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(), "lt_", [&]{
     // Validate that is possible to convert scalar to tensor dtype without overflow
-    native::lt_(self, wrapped_scalar_tensor(other.to<scalar_t>()));
+    auto iter = TensorIterator::comparison_op(self, self, wrapped_scalar_tensor(other.to<scalar_t>()),
+            /*check_mem_overlap=*/true);
+    lt_stub(iter.device_type(), iter);
   });
   return self;
 }
