@@ -12,7 +12,7 @@ class RMSprop(Optimizer):
     With Recurrent Neural Networks <https://arxiv.org/pdf/1308.0850v5.pdf>`_.
 
     The implementation here takes the square root of the gradient average before
-    adding epsilon (note that Tensor Flow interchange these two operations). The effective
+    adding epsilon (note that TensorFlow interchanges these two operations). The effective
     learning rate is thus :math:`\alpha/(\sqrt{v} + \epsilon)` where :math:`\alpha`
     is the scheduled learning rate and :math:`v` is the weighted moving average
     of the squared gradient.
