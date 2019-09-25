@@ -661,13 +661,14 @@ class ScriptModuleSerializer {
     std::vector<c10::NamedTypePtr> class_deps;
     std::ostringstream source_stream;
     SourceRangeRecords source_ranges;
-    PythonPrint(
+    PythonPrint pp(
         source_stream,
         source_ranges,
-        class_type,
         constant_table_,
         class_deps,
         /*enforce_importable=*/true);
+    pp.printNamedType(class_type);
+    pp.finish();
 
     for (const auto& c : class_deps) {
       if (c == class_type) {

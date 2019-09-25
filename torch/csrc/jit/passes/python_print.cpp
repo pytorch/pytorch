@@ -140,7 +140,7 @@ const static std::unordered_set<std::string> reserved_names = {
     "unchecked_cast",
 };
 
-struct PythonPrintPass {
+struct PythonPrintImpl {
   using SourceRangeStack = std::vector<SourceRange>;
   SourceRangeStack source_range_stack_ = {SourceRange()};
 
@@ -238,15 +238,6 @@ struct PythonPrintPass {
     const SourceRangeStack* srs_;
   };
 
-  TaggedStringStream body_;
-
-  // constants are written to this table, and given then named CONSTANTS.cN
-  // where N is the index into this table.
-  std::vector<at::Tensor>& tensor_table_;
-
-  // Any NamedTypes (classes, functions, NamedTuples) used are written to this
-  // table.
-  std::vector<c10::NamedTypePtr>& deps_table_;
   // Helper to avoid duplicating class types
   void registerDependency(const c10::NamedTypePtr& type) {
     // Need to do actual equality comparison, not a pointer equality. This is
@@ -261,28 +252,6 @@ struct PythonPrintPass {
       deps_table_.push_back(type);
     }
   }
-
-  // When printing this node, is it safe to write it inline (i.e. without
-  // assigning a temporary variable
-  std::unordered_set<Node*> output_inline_;
-
-  // when we print this, should we error if the resulting output would
-  // not be able to be reparsed?
-  bool enforce_importable_;
-
-  // are funcitons being printed considered methods
-  // either of a class or some module?
-  // If true, this will surpress type annotation on their
-  // first (self) argument. And forked functions will
-  // be emitted as method calls (self.__fork...) rather
-  // than as method calls
-  bool is_method_;
-
-  // what valid identifiers are in use for the current function
-  std::unordered_set<std::string> used_names_;
-
-  // used method names
-  std::unordered_set<std::string> used_method_names_;
 
   // scanValue, scanNode, scanBlock:
   // decide if it is safe to omit the output of a temporary variable,
@@ -442,13 +411,6 @@ struct PythonPrintPass {
   }
   std::string genName(const std::string& candidate) {
     return genNameImpl(candidate, used_names_);
-  }
-
-  // methods self.foo are in a different namespace than
-  // global identifiers, so they have a different procedure for finding a
-  // uniquename
-  std::string genMethodName(const std::string& candidate) {
-    return genNameImpl(candidate, used_method_names_);
   }
 
   // unique names might not be valid identifiers,
@@ -1261,7 +1223,7 @@ struct PythonPrintPass {
       std::string arg_name = genName(arg.name());
       if (param_it == graph.inputs().begin()) {
         // the first argument may omit its type when it is implied by context
-        // the flag is_method_ determines when to do this
+        // the flag print_first_argument_type determines when to do this
         body_ << arg_name;
         if (print_first_argument_type) {
           body_ << ": " << arg.type()->python_str();
@@ -1297,11 +1259,15 @@ struct PythonPrintPass {
     return ret.str();
   }
 
-  PythonPrintPass(
+  PythonPrintImpl(
+      std::ostream& out,
+      SourceRangeRecords& source_ranges_out,
       std::vector<at::Tensor>& tensor_table,
       std::vector<c10::NamedTypePtr>& deps_table,
       bool enforce_importable)
-      : body_(&source_range_stack_),
+      : out_(out),
+        source_ranges_out_(source_ranges_out),
+        body_(&source_range_stack_),
         tensor_table_(tensor_table),
         deps_table_(deps_table),
         enforce_importable_(enforce_importable) {
@@ -1420,47 +1386,74 @@ struct PythonPrintPass {
         deps_table_.end());
   }
 
-  void print(std::ostream& out, SourceRangeRecords& source_ranges_out) {
-    out << getImports();
-    int64_t source_offset = out.tellp();
-    body_.print(out, &source_ranges_out, source_offset);
+  void finish() {
+    TORCH_INTERNAL_ASSERT(!finished_);
+    finished_ = true;
+    out_ << getImports();
+    int64_t source_offset = out_.tellp();
+    body_.print(out_, &source_ranges_out_, source_offset);
   }
 
-  void LEGACY_printModuleMethods(const script::Module& module) {
-    for (const auto method : module.type()->methods()) {
-      printMethod(*method);
-    }
-  }
+  ~PythonPrintImpl() {}
+
+ private:
+  // When printing this node, is it safe to write it inline (i.e. without
+  // assigning a temporary variable
+  std::unordered_set<Node*> output_inline_;
+
+  // what valid identifiers are in use for the current function
+  std::unordered_set<std::string> used_names_;
+
+  std::ostream& out_;
+  SourceRangeRecords& source_ranges_out_;
+  TaggedStringStream body_;
+  // constants are written to this table, and given then named CONSTANTS.cN
+  // where N is the index into this table.
+  std::vector<at::Tensor>& tensor_table_;
+
+  // Any NamedTypes (classes, functions, NamedTuples) used are written to this
+  // table.
+  std::vector<c10::NamedTypePtr>& deps_table_;
+
+  // when we print this, should we error if the resulting output would
+  // not be able to be reparsed?
+  bool enforce_importable_;
+
+  // have we already printed to out_? We can't print more because we need
+  // to output imports before everything else
+  bool finished_ = false;
 };
 
-void PythonPrint(
+PythonPrint::PythonPrint(
     std::ostream& out,
     SourceRangeRecords& source_ranges_out,
-    const Function& func,
-    bool is_method,
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& deps_table,
-    bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, deps_table, enforce_importable);
-  if (is_method) {
-    pp.printMethod(func);
-  } else {
-    pp.printFunction(func);
-  }
-  pp.print(out, source_ranges_out);
+    bool enforce_importable)
+    : pImpl(new PythonPrintImpl(
+          out,
+          source_ranges_out,
+          tensor_table,
+          deps_table,
+          enforce_importable)) {}
+
+void PythonPrint::printNamedType(const c10::NamedTypePtr& type) {
+  pImpl->printNamedType(type);
 }
 
-void PythonPrint(
-    std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
-    const c10::NamedTypePtr& type,
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
-    bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, deps_table, enforce_importable);
-  pp.printNamedType(type);
-  pp.print(out, source_ranges_out);
+void PythonPrint::printFunction(const Function& func) {
+  pImpl->printFunction(func);
 }
+
+void PythonPrint::printMethod(const Function& func) {
+  pImpl->printMethod(func);
+}
+
+void PythonPrint::finish() {
+  pImpl->finish();
+}
+
+PythonPrint::~PythonPrint() = default;
 
 bool printerHasSpecialCaseFor(Symbol sym) {
   // WARNING: by adding a value to this set, you are asserting
