@@ -267,7 +267,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: gather
    .. automethod:: ge
    .. automethod:: ge_
-   .. automethod:: gels
    .. automethod:: geometric_
    .. automethod:: geqrf
    .. automethod:: ger

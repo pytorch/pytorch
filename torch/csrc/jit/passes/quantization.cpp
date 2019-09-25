@@ -35,6 +35,7 @@ void findValuesInPattern(
   }
 }
 
+// TODO: move into ObserveHelper
 void addIntermediateValuesToSkipObserver(
     const script::Module& module,
     const std::string& method_name,
@@ -158,7 +159,7 @@ Node* createQuantNode(Value* v, Graph* g) {
 // Create Dequant node
 Node* createDeQuantNode(Value* v, Graph* g) {
   Node* dequant =
-      g->create(at::Symbol::fromQualString("aten::_dequantize_per_tensor"));
+      g->create(at::Symbol::fromQualString("aten::dequantize"));
   TORCH_INTERNAL_ASSERT(dequant != nullptr, "Failed to create dequant node");
   dequant->output()->setDebugName(v->debugName() + ".dequant");
   return dequant;
@@ -172,28 +173,53 @@ Node* createIntReprNode(Value* v, Graph* g) {
   return intrepr;
 }
 
+class InsertObserversHelper {
+ public:
+  InsertObserversHelper(const ModuleQConfigMap& map) : module_qconfig_map_(map) {}
+  void insertObservers(script::Module& module, const std::string& method_name);
+
+ private:
+  Node* insertObserverFor(
+      Value* v,
+      Graph* g,
+      script::Module& module,
+      const QConfig& qconfig);
+  // Values that are the output of GetAttr[name="weight"] and GetAttr[name="bias"]
+  // will be propagated from parent method call to the child graph
+  void propagateValues(Node* n, std::shared_ptr<Graph>& graph);
+
+  const ModuleQConfigMap& module_qconfig_map_;
+  // Values we want to skip observing, used to skip values in
+  // the middle of the ops that are supposed to be fused, e.g.
+  // the output value of conv in the conv - relu pattern
+  std::unordered_set<Value*> values_to_skip_;
+  // Values that are the output of GetAttr[name="weight"] and they
+  // will be propagated through the function call hierarchy
+  std::unordered_set<Value*> weight_values_;
+  // Values that are the output of GetAttr[name="bias"] and they
+  // will be propagated through the function call hierarchy
+  std::unordered_set<Value*> bias_values_;
+};
+
 // Clone observer module and add it to the original module,
 // and insert a call to observer forward function
-Node* insertObserver(
+Node* InsertObserversHelper::insertObserverFor(
     Value* v,
     Graph* g,
     script::Module& module,
-    const QConfig& qconfig,
-    const std::unordered_set<Value*>& weight_values) {
+    const QConfig& qconfig) {
+  // Skip observing bias
+  if (bias_values_.count(v)) {
+    return nullptr;
+  }
+
   script::Module observer_module;
-  if (weight_values.count(v)) {
+  if (weight_values_.count(v)) {
     observer_module = std::get<1>(qconfig);
   } else {
     observer_module = std::get<0>(qconfig);
   }
   std::string observer_name = "observer_for_" + v->debugName();
-  // Temporary workaround to skip inserting duplicate modules,
-  // full support will come in next PR
-  for (script::Slot s : module.get_module_slots()) {
-    if (s.name() == observer_name) {
-      return nullptr;
-    }
-  }
   script::Module observer = observer_module.clone();
   module.register_module(observer_name, observer);
   // Get handle of observer module
@@ -242,24 +268,23 @@ void fillQConfigMap(
   }
 }
 
-void propagateWeightValues(
+void InsertObserversHelper::propagateValues(
     Node* n,
-    std::shared_ptr<Graph>& graph,
-    std::unordered_set<Value*>& weight_values) {
+    std::shared_ptr<Graph>& graph) {
   for (auto i = 1; i < n->inputs().size(); ++i) {
-    if (weight_values.count(n->inputs()[i])) {
-      weight_values.emplace(graph->inputs()[i]);
+    if (weight_values_.count(n->inputs()[i])) {
+      weight_values_.emplace(graph->inputs()[i]);
+    }
+    if (bias_values_.count(n->inputs()[i])) {
+      bias_values_.emplace(graph->inputs()[i]);
     }
   }
 }
 
-void InsertObserversImpl(
+void InsertObserversHelper::insertObservers(
     script::Module& module,
-    const std::string& method_name,
-    const ModuleQConfigMap& module_qconfig_map,
-    std::unordered_set<Value*>& values_to_skip,
-    std::unordered_set<Value*>& weight_values) {
-  if (!module_qconfig_map.count(module.module_object())) {
+    const std::string& method_name) {
+  if (!module_qconfig_map_.count(module.module_object())) {
     // the module is added by us, e.g.: observer module
     return;
   }
@@ -267,7 +292,7 @@ void InsertObserversImpl(
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   ConstantPropagation(graph);
-  addIntermediateValuesToSkipObserver(module, method_name, values_to_skip);
+  addIntermediateValuesToSkipObserver(module, method_name, values_to_skip_);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -287,11 +312,11 @@ void InsertObserversImpl(
   // observing a potentially mutated value due to some in-place operation
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
-    if (!values_to_skip.count(v) && valueNeedsToBeQuantized(v)) {
-      auto qconfig = module_qconfig_map.at(module.module_object());
+    if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
+      auto qconfig = module_qconfig_map_.at(module.module_object());
       if (qconfig) {
-        auto observer_node = insertObserver(
-            v, v->owningGraph(), module, qconfig.value(), weight_values);
+        auto observer_node =
+            insertObserverFor(v, v->owningGraph(), module, qconfig.value());
         if (observer_node) {
           observer_for_input.emplace(observer_node);
         }
@@ -312,12 +337,15 @@ void InsertObserversImpl(
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
-        if (!values_to_skip.count(v) && valueNeedsToBeQuantized(v)) {
+        if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
         }
-        if (v->node()->kind() == prim::GetAttr &&
-            v->node()->s(attr::name) == "weight") {
-          weight_values.emplace(v);
+        if (v->node()->kind() == prim::GetAttr) {
+          if (v->node()->s(attr::name) == "weight") {
+            weight_values_.emplace(v);
+          } else if (v->node()->s(attr::name) == "bias") {
+            bias_values_.emplace(v);
+          }
         }
         if (v->node()->kind() == prim::CallMethod) {
           // If we find a call to a method of a child module,
@@ -343,18 +371,10 @@ void InsertObserversImpl(
             callee_module = module;
           }
           auto method_graph = callee_module.get_method(module_method_name).graph();
-          propagateWeightValues(
-              v->node(),
-              method_graph,
-              weight_values);
+          propagateValues(v->node(), method_graph);
           // Recursively insert observer for the forward function of child
           // module
-          InsertObserversImpl(
-              callee_module,
-              module_method_name,
-              module_qconfig_map,
-              values_to_skip,
-              weight_values);
+          insertObservers(callee_module, module_method_name);
         }
       }
 
@@ -366,16 +386,10 @@ void InsertObserversImpl(
 
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
-    // Skip inserting observer for bias
-    if (v->node()->kind() == prim::GetAttr &&
-        v->node()->s(c10::attr::name) == "bias") {
-      continue;
-    }
-    auto qconfig = module_qconfig_map.at(module.module_object());
+    auto qconfig = module_qconfig_map_.at(module.module_object());
     // Skip inserting observer if no qconfig is specified
     if (qconfig) {
-      insertObserver(
-          v, v->owningGraph(), module, qconfig.value(), weight_values);
+      insertObserverFor(v, v->owningGraph(), module, qconfig.value());
     }
   }
 }
@@ -387,7 +401,6 @@ Node* insertQuantDeQuantCall(
     bool insert_after = true) {
   Graph* g = v->node()->owningGraph();
   Node* quant = createQuantNode(v, g);
-  Node* intrepr = createIntReprNode(v, g);
   Node* dequant = createDeQuantNode(v, g);
   Node* insert_point = insert_after ? v->node() : *g->nodes().begin();
   WithCurrentScope scope_guard(
@@ -403,30 +416,24 @@ Node* insertQuantDeQuantCall(
   Value* scale_val = g->insertConstant(scale);
   Value* zero_point_val = g->insertConstant(zero_point);
 
-  // Insert quant/int_repr/dequant nodes
+  // Insert quant/dequant nodes
   if (insert_after) {
     quant->insertAfter(insert_point);
   } else {
     quant->insertBefore(insert_point);
   }
 
-  intrepr->insertAfter(quant);
-  dequant->insertAfter(intrepr);
+  dequant->insertAfter(quant);
 
-  // Attach inputs to quantization pattern nodes
+  // Attach inputs to quantize node
   quant->addInput(v);
-  intrepr->addInput(quant->output());
-  dequant->addInput(intrepr->output());
-
   quant->addInput(scale_val);
   quant->addInput(zero_point_val);
-  dequant->addInput(scale_val);
-  dequant->addInput(zero_point_val);
-
   Value* scalar_type_val = insertScalarType(quant, scalar_type.toScalarType());
   TORCH_INTERNAL_ASSERT(scalar_type_val != nullptr);
   quant->addInput(scalar_type_val);
-  dequant->addInput(scalar_type_val);
+
+  dequant->addInput(quant->output());
   return dequant;
 }
 
@@ -617,10 +624,8 @@ TORCH_API script::Module InsertObservers(
   script::Module module = inplace ? input_module : input_module.clone();
   ModuleQConfigMap module_qconfig_map;
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
-  std::unordered_set<Value*> values_to_skip;
-  std::unordered_set<Value*> weight_values;
-  InsertObserversImpl(
-      module, method_name, module_qconfig_map, values_to_skip, weight_values);
+  InsertObserversHelper helper(module_qconfig_map);
+  helper.insertObservers(module, method_name);
   return module;
 }
 
@@ -653,7 +658,7 @@ void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
 void QuantFusion(std::shared_ptr<Graph>& graph) {
   const std::string quantized_linear_with_bias =
       R"(
-graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %4):
         %w_quant_t = aten::t(%w_quant)
         %packed_params = quantized::linear_prepack(%w_quant_t, %b)
         %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
@@ -661,43 +666,37 @@ graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_ze
   const std::unordered_map<std::string, std::string> pattern_and_replacements =
       {// quantized::conv2d
        {R"(
-graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
-        %a_intrepr = aten::int_repr(%a_quant)
-        %a_dequant = aten::_dequantize_per_tensor(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
-        %w_intrepr = aten::int_repr(%w_quant)
-        %w_dequant = aten::_dequantize_per_tensor(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_dequant = aten::dequantize(%w_quant)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))",
         R"(
-graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
+graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
-        %r = quantized::conv2d(%a_quant, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
+        %r_quant = quantized::conv2d(%a_quant, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
         %0 : int = prim::Constant[value=0]()
         %1 : int = prim::Constant[value=1]()
         %2 : int = prim::Constant[value=2]()
         %3 : int = prim::Constant[value=3]()
         %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
-        %r_perm = aten::permute(%r, %out_param)
+        %r_perm = aten::permute(%r_quant, %out_param)
         return (%r_perm))"},
        // addmm -> quantized::linear
        {R"(
-graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
-        %a_intrepr = aten::int_repr(%a_quant)
-        %a_dequant = aten::_dequantize_per_tensor(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
-        %w_intrepr = aten::int_repr(%w_quant)
-        %w_dequant = aten::_dequantize_per_tensor(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %4):
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_dequant = aten::dequantize(%w_quant)
         %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))",
         quantized_linear_with_bias},
        // matmul(with bias) -> quantized::linear
        {R"(
-graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
-        %a_intrepr = aten::int_repr(%a_quant)
-        %a_dequant = aten::_dequantize_per_tensor(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
-        %w_intrepr = aten::int_repr(%w_quant)
-        %w_dequant = aten::_dequantize_per_tensor(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %4):
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_dequant = aten::dequantize(%w_quant)
         %output = aten::matmul(%a_dequant, %w_dequant)
         %r = aten::add_(%output, %b, %4)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
@@ -705,16 +704,14 @@ graph(%a_quant, %w_quant, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_ze
         quantized_linear_with_bias},
        // matmul(without bias) -> quantized::linear
        {R"(
-graph(%a_quant, %w_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype):
-        %a_intrepr = aten::int_repr(%a_quant)
-        %a_dequant = aten::_dequantize_per_tensor(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
-        %w_intrepr = aten::int_repr(%w_quant)
-        %w_dequant = aten::_dequantize_per_tensor(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+graph(%a_quant, %w_quant, %r_scale, %r_zero_point, %r_dtype):
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_dequant = aten::dequantize(%w_quant)
         %r = aten::matmul(%a_dequant, %w_dequant)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))",
         R"(
-graph(%a_quant, %w_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype):
+graph(%a_quant, %w_quant, %r_scale, %r_zero_point, %r_dtype):
         %w_quant_t = aten::t(%w_quant)
         %bias: Tensor? = prim::Constant()
         %packed_params = quantized::linear_prepack(%w_quant_t, %bias)
