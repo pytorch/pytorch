@@ -65,6 +65,10 @@ Tensor& ceil_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
 Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 
+Tensor& cosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, cosh_stub); }
+Tensor cosh(const Tensor& self) { return cosh_op_impl(self, at::cosh_out); }
+Tensor& cosh_(Tensor& self) { return cosh_op_impl(self, at::cosh_out); }
+
 Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, erfinv_stub); }
 Tensor erfinv(const Tensor& self) { return unary_op_impl(self, at::erfinv_out); }
 Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
@@ -269,7 +273,6 @@ IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
 IMPLEMENT_UNARY_OP_VEC(cos)
-IMPLEMENT_UNARY_OP_VEC(cosh)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC(exp)

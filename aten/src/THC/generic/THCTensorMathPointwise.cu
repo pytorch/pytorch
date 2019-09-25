@@ -212,7 +212,6 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(floor, THCNumerics<scalar_t>::floor, Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(trunc, THCNumerics<scalar_t>::trunc, Real)
 
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  acos, THCNumerics<scalar_t>::acos,  Real)
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  cosh, THCNumerics<scalar_t>::cosh,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  asin, THCNumerics<scalar_t>::asin,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  sinh, THCNumerics<scalar_t>::sinh,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(   tan, THCNumerics<scalar_t>::tan,   Real)

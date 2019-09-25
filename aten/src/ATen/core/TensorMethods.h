@@ -747,13 +747,7 @@ inline Tensor Tensor::cosh() const {
 }
 inline Tensor & Tensor::cosh_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::cosh_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("cosh_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::cosh_(const_cast<Tensor&>(*this));
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::cosh_", ""}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))

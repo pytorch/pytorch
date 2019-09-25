@@ -216,7 +216,6 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half floor(at::Half a) { return ::floor(a); }
   static inline __host__ __device__ at::Half trunc(at::Half a) { return ::trunc(a); }
   static inline __host__ __device__ at::Half acos(at::Half a) { return ::acos(a); }
-  static inline __host__ __device__ at::Half cosh(at::Half a) { return ::cosh(a); }
   static inline __host__ __device__ at::Half asin(at::Half a) { return ::asin(a); }
   static inline __host__ __device__ at::Half sinh(at::Half a) { return ::sinh(a); }
   static inline __host__ __device__ at::Half tan(at::Half a) { return ::tan(a); }
@@ -296,7 +295,6 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float floor(float a) { return floorf(a); }
   static inline __host__ __device__  float trunc(float a) { return truncf(a); }
   static inline __host__ __device__  float acos (float a) { return  acosf(a); }
-  static inline __host__ __device__  float cosh (float a) { return  coshf(a); }
   static inline __host__ __device__  float acosh(float a) { return acoshf(a); }
   static inline __host__ __device__  float asin (float a) { return  asinf(a); }
   static inline __host__ __device__  float sinh (float a) { return  sinhf(a); }
@@ -351,7 +349,6 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double floor(double a) { return ::floor(a); }
   static inline __host__ __device__  double trunc(double a) { return ::trunc(a); }
   static inline __host__ __device__  double acos (double a) { return  ::acos(a); }
-  static inline __host__ __device__  double cosh (double a) { return  ::cosh(a); }
   static inline __host__ __device__  double acosh(double a) { return ::acosh(a); }
   static inline __host__ __device__  double asin (double a) { return  ::asin(a); }
   static inline __host__ __device__  double sinh (double a) { return  ::sinh(a); }
