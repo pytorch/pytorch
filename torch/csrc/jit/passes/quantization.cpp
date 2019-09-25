@@ -228,7 +228,7 @@ void InsertObserversHelper::findIntermediateValuesInPattern(
   std::unordered_map<std::string, Value*> vmap;
   script::parseIR(pattern, &pattern_graph, vmap);
 
-  cosnt auto& matches = findPatternMatches(pattern_graph, graph);
+  const auto& matches = findPatternMatches(pattern_graph, graph);
   for (const auto& match : matches) {
     auto output_value = vmap.at("intermediate_val");
     TORCH_INTERNAL_ASSERT(
