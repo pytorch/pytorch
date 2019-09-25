@@ -7,11 +7,11 @@
 #ifdef BUILD_NAMEDTENSOR
 namespace at { namespace native {
 
-Tensor& names_(Tensor& self, optional<DimnameList> names) {
+Tensor& rename_(Tensor& self, optional<DimnameList> names) {
   return at::internal_set_names_inplace(self, names);
 }
 
-Tensor renamed(const Tensor& self, optional<DimnameList> names) {
+Tensor rename(const Tensor& self, optional<DimnameList> names) {
   auto result = self.alias();
   at::internal_set_names_inplace(result, names);
   return result;
@@ -105,12 +105,12 @@ Tensor refine_names(const Tensor& self, DimnameList names) {
     }
     if (out_name.isWildcard()) {
       TORCH_CHECK(false,
-          "refine_names: cannot coerse Tensor", self_names, " to Tensor", names,
+          "refine_names: cannot coerce Tensor", self_names, " to Tensor", names,
           " because ", self_name, " is more specific than ", out_name, " at index ",
           idx);
     }
     TORCH_CHECK(false,
-        "refine_names: cannot coerse Tensor", self_names, " to Tensor", names,
+        "refine_names: cannot coerce Tensor", self_names, " to Tensor", names,
         " because ", self_name, " is different from ", out_name, " at index ",
         idx);
     TORCH_INTERNAL_ASSERT(false); // done handling errors
@@ -136,7 +136,7 @@ static Tensor align(const Tensor& tensor, DimnameList names, bool is_aligning_tw
         tensor.names(),
         names,
         is_aligning_two_tensors);
-  auto result = tensor.renamed(nullopt).view(expanded_sizes);
+  auto result = tensor.rename(nullopt).view(expanded_sizes);
   at::internal_set_names_inplace(result, names);
   return result;
 }
