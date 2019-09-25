@@ -2840,16 +2840,7 @@ inline Tensor Tensor::clone() const {
 }
 inline Tensor & Tensor::resize_as_(const Tensor & the_template) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::resize_as_(const_cast<Tensor&>(*this), the_template);
-            break;
-        case Backend::SparseCPU:
-            return SparseCPUType::resize_as_(const_cast<Tensor&>(*this), the_template);
-            break;
-        default:
-            AT_ERROR("resize_as_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::resize_as_(const_cast<Tensor&>(*this), the_template);
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::resize_as_", ""}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, const Tensor &>(
