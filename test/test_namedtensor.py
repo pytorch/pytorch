@@ -529,6 +529,17 @@ class TestNamedTensor(TestCase):
         tensor.ndim
         tensor.item()
         tensor.type()
+        tensor.is_shared()
+        tensor.is_signed()
+
+    def test_autograd_smoke(self):
+        x = torch.randn(3, 3, names=('N', 'D'), requires_grad=True)
+
+        y = x.clone()
+        y.retain_grad()
+        y.register_hook(lambda x: x)
+
+        y.sum().backward()
 
     def test_split_fns_propagates_names(self):
         fns = [
@@ -543,6 +554,13 @@ class TestNamedTensor(TestCase):
                 splits = fn(orig_tensor)
                 for split in splits:
                     self.assertEqual(split.names, orig_tensor.names)
+
+    def test_any_all(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.zeros(3, dtype=torch.bool, device=device, names=('C',))
+            # The result can't have any names so this is just a smoke test
+            x.any()
+            x.all()
 
     def test_binary_ops(self):
         def test_basic(op):
@@ -768,6 +786,7 @@ class TestNamedTensor(TestCase):
             fn('threshold_', 0, 1),
             out_function('threshold', 0, 1),
             fn_method_and_inplace('trunc'),
+            method('type_as', torch.empty([], dtype=torch.float)),
             method('uniform_'),
             method('zero_'),
             method('fill_', 1),
@@ -788,6 +807,14 @@ class TestNamedTensor(TestCase):
             method('int'),
             method('short'),
             method('type', dtype=torch.long),
+
+            # cumsum and cumprod
+            fn('cumsum', 0),
+            fn('cumsum', 'D'),
+            out_function('cumsum', 'D'),
+            fn('cumprod', 0),
+            fn('cumprod', 'D'),
+            out_function('cumprod', 'D'),
 
             # views
             method('narrow', 0, 0, 1),
@@ -811,6 +838,26 @@ class TestNamedTensor(TestCase):
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             _test(testcase, device=device)
+
+    def test_bitwise_not(self):
+        for device in torch.testing.get_all_device_types():
+            names = ('N', 'D')
+            tensor = torch.zeros(2, 3, names=names, dtype=torch.bool)
+            result = torch.empty(0, dtype=torch.bool)
+
+            self.assertEqual(tensor.bitwise_not().names, names)
+            self.assertEqual(torch.bitwise_not(tensor, out=result).names, names)
+            self.assertEqual(tensor.bitwise_not_().names, names)
+
+    def test_logical_not(self):
+        for device in torch.testing.get_all_device_types():
+            names = ('N', 'D')
+            tensor = torch.zeros(2, 3, names=names, dtype=torch.bool)
+            result = torch.empty(0, dtype=torch.bool)
+
+            self.assertEqual(tensor.logical_not().names, names)
+            self.assertEqual(torch.logical_not(tensor, out=result).names, names)
+            self.assertEqual(tensor.logical_not_().names, names)
 
     def test_bernoulli(self):
         for device in torch.testing.get_all_device_types():
