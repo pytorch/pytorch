@@ -231,7 +231,7 @@ STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
 ${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
-switch(tensorTypeIdToBackend(impl::dispatchTypeId(${type_set}))) {
+switch(tensorTypeIdToBackend(legacyExtractTypeId(${type_set}))) {
     ${static_dispatch_function_switches}
     default:
         AT_ERROR("${api_name} not implemented for ", at::toString(${type_set}));
