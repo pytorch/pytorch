@@ -29,6 +29,7 @@ class Dataset(object):
 
     # No `def __len__(self)` default?
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
+    # in pytorch/torch/utils/data/sampler.py
 
 
 class IterableDataset(Dataset):

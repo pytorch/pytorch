@@ -26,18 +26,14 @@ Message::Message(Message&& other) noexcept = default;
 Message& Message::operator=(Message const& rhs) & {
   auto payload = rhs.payload_;
   auto tensors = rhs.tensors_;
-  Message(std::move(payload),
-          std::move(tensors),
-          rhs.type_,
-          rhs.id_).swap(*this);
+  Message(std::move(payload), std::move(tensors), rhs.type_, rhs.id_)
+      .swap(*this);
   return *this;
 }
 
 Message& Message::operator=(Message&& rhs) & {
-  Message(std::move(rhs.payload_),
-          std::move(rhs.tensors_),
-          rhs.type_,
-          rhs.id_).swap(*this);
+  Message(std::move(rhs.payload_), std::move(rhs.tensors_), rhs.type_, rhs.id_)
+      .swap(*this);
   return *this;
 }
 
@@ -61,13 +57,22 @@ const MessageType& Message::type() const {
 }
 
 bool Message::isRequest() const {
-  return MessageType::SCRIPT_CALL == type_
-      || MessageType::PYTHON_CALL == type_;
+  return MessageType::SCRIPT_CALL == type_ ||
+      MessageType::PYTHON_CALL == type_ || MessageType::REMOTE_CALL == type_ ||
+      MessageType::RREF_FETCH_CALL == type_ ||
+      MessageType::RREF_USER_CREATE == type_ ||
+      MessageType::RREF_USER_DELETE == type_;
+}
+
+bool Message::requiresResponse() const {
+  return MessageType::SCRIPT_CALL == type_ ||
+      MessageType::PYTHON_CALL == type_ ||
+      MessageType::RREF_FETCH_CALL == type_;
 }
 
 bool Message::isResponse() const {
-  return MessageType::SCRIPT_RET == type_
-      || MessageType::PYTHON_RET == type_;
+  return MessageType::SCRIPT_RET == type_ || MessageType::PYTHON_RET == type_ ||
+      MessageType::RREF_FETCH_RET == type_;
 }
 
 bool Message::isShutdown() const {
@@ -82,7 +87,6 @@ void Message::setId(int64_t id) {
   id_ = id;
 }
 
-
-}
-}
-}
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

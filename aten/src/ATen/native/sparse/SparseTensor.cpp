@@ -75,12 +75,12 @@ SparseTensor new_sparse(const TensorOptions& options) {
   AT_ASSERT(options.layout() == kSparse);
   TensorTypeId type_id;
   if (options.device().is_cuda()) {
-    type_id = SparseCUDATensorId();
+    type_id = TensorTypeId::SparseCUDATensorId;
   } else {
-    type_id = SparseCPUTensorId();
+    type_id = TensorTypeId::SparseCPUTensorId;
   }
   return detail::make_tensor<SparseTensorImpl>(
-      type_id, options.dtype());
+      TensorTypeSet(type_id), options.dtype());
 }
 
 /** Actual dispatched creation methods ***/

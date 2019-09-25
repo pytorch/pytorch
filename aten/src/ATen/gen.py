@@ -1,3 +1,4 @@
+
 import argparse
 import os
 
@@ -119,8 +120,9 @@ TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
 REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegistrationDeclarations.h")
+OPS_ALREADY_MOVED_TO_C10_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/OpsAlreadyMovedToC10.cpp")
 
-TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Tensor.h")
+TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
 TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
@@ -152,11 +154,13 @@ quantized_scalar_types = [
 ]
 
 
-# shared environment for non-derived base classes Tensor.h Storage.h
+# shared environment for non-derived base classes TensorBody.h Storage.h
 top_env = {
     'cpu_type_headers': [],
     'cuda_type_headers': [],
     'function_registrations': [],
+    'c10_ops_already_moved_from_aten_to_c10': [],
+    'c10_ops_not_moved_from_aten_to_c10_yet': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'tensor_method_declarations': [],
@@ -323,7 +327,7 @@ def iterate_types():
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    core_files = ['Tensor.h', 'TensorMethods.h']
+    core_files = ['TensorBody.h', 'TensorMethods.h']
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeDefault.cpp', 'TypeDefault.h',
@@ -369,6 +373,17 @@ def cmpfiles_with_eol_normalization(a, b, names):
                 results[0].append(x)
             else:
                 results[1].append(x)
+                import difflib
+                import sys
+                d = difflib.Differ()
+                sys.stdout.write('-' * 80 + '\n')
+                sys.stdout.write('x={}, a={}, b={}\n'.format(x, a, b))
+                for i, line in enumerate(list(d.compare(ax.splitlines(), bx.splitlines()))):
+                    if line[:2] != '  ':
+                        sys.stdout.write('{:5d}: {}\n'.format(i, line))
+                sys.stdout.write('-' * 80 + '\n')
+                sys.stdout.write(ax)
+                sys.stdout.write('-' * 80 + '\n')
         except OSError:
             results[2].append(x)
     return results
@@ -377,7 +392,7 @@ def cmpfiles_with_eol_normalization(a, b, names):
 def is_namedtensor_only_decl(decl):
     if 'Dimname' in decl['schema_string']:
         return True
-    if decl['name'] == 'align_tensors':
+    if decl['name'] == 'align_tensors' or decl['name'] == 'align_as':
         return True
     return False
 
@@ -403,7 +418,7 @@ def generate_outputs():
     file_manager.write("Declarations.yaml", format_yaml(output_declarations))
 
     # Filter out named-tensor only declarations.
-    # They are necessary in create_generic because that generates Type.h, Tensor.h,
+    # They are necessary in create_generic because that generates Type.h, TensorBody.h,
     # and TensorMethods.h, all of which are checked in to the codebase and therefore
     # need to be consistent whether or not BUILD_NAMEDTENSOR is on/off.
     if not BUILD_NAMEDTENSOR:
@@ -414,8 +429,9 @@ def generate_outputs():
         generate_storage_type_and_tensor(backend, density, declarations)
 
     core_files = {
-        'Tensor.h': TENSOR_H,
-        'TensorMethods.h': TENSOR_METHODS_H
+        'TensorBody.h': TENSOR_H,
+        'TensorMethods.h': TENSOR_METHODS_H,
+        'OpsAlreadyMovedToC10.cpp': OPS_ALREADY_MOVED_TO_C10_CPP,
     }
 
     for core_file, core_template_file in core_files.items():

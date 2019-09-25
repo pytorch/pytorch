@@ -68,6 +68,32 @@ class Fold(Module):
         copying from the large tensor. So, if the blocks overlap, they are not
         inverses of each other.
 
+        In general, folding and unfolding operations are related as
+        follows. Consider :class:`~torch.nn.Fold` and
+        :class:`~torch.nn.Unfold` instances created with the same
+        parameters:
+
+        >>> fold_params = dict(kernel_size=..., dilation=..., padding=..., stride=...)
+        >>> fold = nn.Fold(output_size=..., **fold_params)
+        >>> unfold = nn.Unfold(**fold_params)
+
+        Then for any (supported) ``input`` tensor the following
+        equality holds:
+
+        ::
+
+            fold(unfold(input)) == divisor * input
+
+        where ``divisor`` is a tensor that depends only on the shape
+        and dtype of the ``input``:
+
+        >>> input_ones = torch.ones(input.shape, dtype=input.dtype)
+        >>> divisor = fold(unfold(input_ones))
+
+        When the ``divisor`` tensor contains no zero elements, then
+        ``fold`` and ``unfold`` operations are inverses of each
+        other (upto constant divisor).
+
     .. warning::
         Currently, only 4-D output tensors (batched image-like tensors) are
         supported.
@@ -170,6 +196,32 @@ class Unfold(Module):
         :class:`~torch.nn.Unfold` extracts the values in the local blocks by
         copying from the large tensor. So, if the blocks overlap, they are not
         inverses of each other.
+
+        In general, folding and unfolding operations are related as
+        follows. Consider :class:`~torch.nn.Fold` and
+        :class:`~torch.nn.Unfold` instances created with the same
+        parameters:
+
+        >>> fold_params = dict(kernel_size=..., dilation=..., padding=..., stride=...)
+        >>> fold = nn.Fold(output_size=..., **fold_params)
+        >>> unfold = nn.Unfold(**fold_params)
+
+        Then for any (supported) ``input`` tensor the following
+        equality holds:
+
+        ::
+
+            fold(unfold(input)) == divisor * input
+
+        where ``divisor`` is a tensor that depends only on the shape
+        and dtype of the ``input``:
+
+        >>> input_ones = torch.ones(input.shape, dtype=input.dtype)
+        >>> divisor = fold(unfold(input_ones))
+
+        When the ``divisor`` tensor contains no zero elements, then
+        ``fold`` and ``unfold`` operations are inverses of each
+        other (upto constant divisor).
 
     .. warning::
         Currently, only 4-D input tensors (batched image-like tensors) are

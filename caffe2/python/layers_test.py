@@ -18,8 +18,10 @@ from caffe2.python import (
 )
 from caffe2.python.layers.layers import (
     AccessedFeatures,
+    almost_equal_schemas,
     get_key,
     IdList,
+    IdScoreList,
     InstantiationContext,
     is_request_only_scalar,
     set_request_only,
@@ -300,7 +302,6 @@ class TestLayers(LayersTestCase):
         embedding_after_training = workspace.FetchBlob("sparse_lookup/w")
         # Verify row 0's value does not change after reset
         self.assertEquals(embedding_after_training.all(), embedding_after_init.all())
-
 
 
     def testSparseLookupSumPooling(self):
@@ -2259,4 +2260,56 @@ class TestLayers(LayersTestCase):
         self.assertEqual(
             self.model.layers[0].get_accessed_features(),
             expected_accessed_features
+        )
+
+    def test_get_key(self):
+        def _is_id_list(input_record):
+            return almost_equal_schemas(input_record, IdList)
+
+
+        def _is_id_score_list(input_record):
+            return almost_equal_schemas(input_record,
+                                        IdScoreList,
+                                        check_field_types=False)
+
+        def old_get_sparse_key_logic(input_record):
+            if _is_id_list(input_record):
+                sparse_key = input_record.items()
+            elif _is_id_score_list(input_record):
+                sparse_key = input_record.keys()
+            else:
+                raise NotImplementedError()
+            return sparse_key
+
+        id_score_list_record = schema.NewRecord(
+            self.model.net,
+            schema.Map(
+                schema.Scalar(
+                    np.int64,
+                    metadata=schema.Metadata(
+                        categorical_limit=1000
+                    ),
+                ),
+                np.float32
+            )
+        )
+
+        self.assertEqual(
+            get_key(id_score_list_record)(),
+            old_get_sparse_key_logic(id_score_list_record)
+        )
+
+        id_list_record = schema.NewRecord(
+            self.model.net,
+            schema.List(
+                schema.Scalar(
+                    np.int64,
+                    metadata=schema.Metadata(categorical_limit=1000)
+                )
+            )
+        )
+
+        self.assertEqual(
+            get_key(id_list_record)(),
+            old_get_sparse_key_logic(id_list_record)
         )

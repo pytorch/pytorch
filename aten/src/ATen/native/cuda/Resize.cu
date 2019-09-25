@@ -2,10 +2,16 @@
 #include <ATen/cuda/CUDAContext.h>
 
 #include <ATen/native/cuda/Resize.cuh>
+#include <ATen/native/ResizeCommon.h>
 
 namespace at { namespace native {
 
 Tensor& resize_cuda_(Tensor& self, IntArrayRef size) {
+#ifdef BUILD_NAMEDTENSOR
+  if (self.has_names()) {
+    return resize_named_tensor_(self, size);
+  }
+#endif
   auto* self_ = self.unsafeGetTensorImpl();
   resize_impl_cuda_(self_, size, /*strides=*/c10::nullopt);
   self_->maybe_zero_dim(size.size() == 0);
@@ -13,9 +19,12 @@ Tensor& resize_cuda_(Tensor& self, IntArrayRef size) {
 }
 
 Tensor& resize_as_cuda_(Tensor& self, const Tensor& the_template) {
-  resize_cuda_(self, the_template.sizes());
-  self.unsafeGetTensorImpl()->empty_tensor_restride(the_template.suggest_memory_format());
-  return self;
+  Tensor& result = resize_cuda_(self, the_template.sizes());
+  result.unsafeGetTensorImpl()->empty_tensor_restride(the_template.suggest_memory_format());
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, the_template);
+#endif
+  return result;
 }
 
 }}

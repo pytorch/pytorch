@@ -30,6 +30,8 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_reduce_log_sum.*'  # Does not support ReduceLogSum.
                      '|test_reduce_prod.*'  # Does not support ReduceProd.
                      '|test_reduce_sum_square.*'  # Does not support ReduceSumSquare
+                     '|test_det.*'  # Does not support Det
+                     '|test_range.*'  # Does not support Range
                      '|test_tile.*'  # Tile's Caffe2 implementation needs some tweak
                      '|test_lstm.*'  # Seems LSTM case has some problem
                      '|test_simple_rnn.*'  # Seems simple RNN case has some problem
@@ -76,6 +78,15 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_gather_elements.*'  # opset 11 is not supported yet
                      '|test_scatter.*'  # opset 11 is not supported yet
                      '|test_unique.*'  # opset 11 is not supported yet
+                     '|test_gathernd.*'  # opset 11 is not supported yet
+                     '|test_constant_pad.*'  # 1d pad is not supported
+                     '|test_edge_pad.*'  # 1d pad is not supported
+                     '|test_reflect_pad.*'  # 1d pad is not supported
+                     '|test_gemm_default_no_bias.*'  # no bias is not supported
+                     '|test_gemm_default_scalar_bias.*'  # incorrect type
+                     '|test_sequence_.*'  # type sequence is not supported yet
+                     '|test_.*negative_ax.*'  # negative axis is not supported yet
+                     '|test_.*negative_ind.*'  # negative axis is not supported yet
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.

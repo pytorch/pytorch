@@ -48,6 +48,11 @@
 #endif // defined(__GNUC__)
 #endif  // _WIN32
 
+#ifdef NO_EXPORT
+#undef TH_CPP_API
+#define TH_CPP_API
+#endif
+
 #define TH_API TH_EXTERNC TH_CPP_API
 
 #ifdef _WIN32
@@ -85,7 +90,6 @@ typedef struct {
 
 TH_API double THLog1p(const double x);
 TH_API double THLog2(const double x);
-TH_API double THExpm1(const double x);
 TH_API THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim);
 TH_API TH_NO_RETURN void _THError(const char *file, const int line, const char *fmt, ...);
 TH_API void _THAssertionFailed(const char *file, const int line, const char *exp, const char *fmt, ...);
@@ -168,12 +172,6 @@ inline double log1p(double x) { return THLog1p(x); }
 __inline double log2(double x) { return THLog2(x); }
 #else
 inline double log2(double x) { return THLog2(x); }
-#endif
-
-#if defined(_MSC_VER)
-__inline double expm1(double x) { return THExpm1(x); }
-#else
-inline double expm1(double x) { return THExpm1(x); }
 #endif
 
 #define snprintf _snprintf

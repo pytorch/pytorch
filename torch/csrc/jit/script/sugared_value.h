@@ -20,8 +20,6 @@ namespace script {
 // that separates their behavior from the AST -> IR converter itself.
 // This allows us to keep dependencies on python minimal.
 
-enum NoneStatus { ALWAYS, MAYBE, NEVER };
-
 struct TORCH_API SugaredValue
     : public std::enable_shared_from_this<SugaredValue> {
   // what is this node? for error reporting (e.g. Module, python function)
@@ -49,9 +47,6 @@ struct TORCH_API SugaredValue
       Value* newValue) {
     throw ErrorReport(loc) << "attribute assignment is not defined on "
                            << kind();
-  }
-  virtual NoneStatus isNone() {
-    return NEVER;
   }
 
   // use it as a vector of values, e.g. a tuple of values as return value from
@@ -113,18 +108,12 @@ struct TORCH_API SugaredValue
 struct TORCH_API SimpleValue : public SugaredValue {
   SimpleValue(Value* value) : value_(value) {}
   std::string kind() const override {
-    return "value";
+    std::stringstream ss;
+    ss << "value of type '" << value_->type()->python_str() << "'";
+    return ss.str();
   }
   Value* asValue(const SourceRange& range, Function& m) override {
     return value_;
-  }
-  NoneStatus isNone() override {
-    if (value_->mustBeNone())
-      return ALWAYS;
-    else if (value_->type()->cast<OptionalType>())
-      return MAYBE;
-    else
-      return NEVER;
   }
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
@@ -305,11 +294,20 @@ struct MethodValue : public SugaredValue {
       size_t n_binders) override {
     std::vector<NamedValue> inputsWithSelf = {self_};
     inputsWithSelf.insert(inputsWithSelf.end(), inputs.begin(), inputs.end());
-    auto method = self_->type()->expect<ClassType>()->getMethod(method_name_);
-    TORCH_INTERNAL_ASSERT(method);
-    method->ensure_defined();
-    MatchedSchema match = matchSchema(
-        method->getSchema(), loc, *f.graph(), inputsWithSelf, attributes);
+    const FunctionSchema* schema = nullptr;
+    if (auto class_type = self_->type()->cast<ClassType>()) {
+      auto method = class_type->getMethod(method_name_);
+      TORCH_INTERNAL_ASSERT(method);
+      method->ensure_defined();
+      schema = &method->getSchema();
+    } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
+      schema = interface_type->getMethod(method_name_);
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "method constructed that is not a class or interface");
+    }
+    MatchedSchema match =
+        matchSchema(*schema, loc, *f.graph(), inputsWithSelf, attributes);
     Value* output = f.graph()->insertMethodCall(method_name_, match);
     output->node()->setSourceRange(loc);
     return std::make_shared<SimpleValue>(output);
@@ -375,23 +373,7 @@ struct TORCH_API MagicMethod : public SugaredValue {
       Function& m,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) override {
-    if (inputs.size() > 0) {
-      Value* self = inputs[0].value(*m.graph());
-
-      if (auto class_ptr = self->type()->cast<ClassType>()) {
-        if (!class_ptr->getMethod(desugared_name_)) {
-          throw ErrorReport(loc)
-              << class_ptr->python_str() << " does not define a "
-              << desugared_name_ << " method";
-        }
-
-        return MethodValue(self, desugared_name_)
-            .call(loc, m, inputs.slice(1), attributes, n_binders);
-      }
-    }
-    return base_value_->call(loc, m, inputs, attributes, n_binders);
-  }
+      size_t n_binders) override;
 
  private:
   SugaredValuePtr base_value_;
@@ -436,6 +418,14 @@ struct TORCH_API IsInstanceValue : SugaredValue {
   IsInstanceValue() = default;
   std::string kind() const override {
     return "isinstance";
+  }
+};
+
+// matched against for special handling of tuple() call
+struct TORCH_API TupleCallValue : SugaredValue {
+  TupleCallValue() = default;
+  std::string kind() const override {
+    return "tuple";
   }
 };
 

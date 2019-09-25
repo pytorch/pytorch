@@ -17,7 +17,7 @@ namespace cuda {
 enum class CUDAHistogramMemoryType { SHARED, MULTI_BLOCK, GLOBAL };
 namespace {
   template<typename input_t, typename IndexType>
-  __device__ static IndexType getBin(input_t bVal, input_t minvalue, input_t maxvalue, int nbins) {
+  __device__ static IndexType getBin(input_t bVal, input_t minvalue, input_t maxvalue, int64_t nbins) {
     IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
     // (only applicable for histc)
     // while each bin is inclusive at the lower end and exclusive at the higher, i.e. [start, end)
@@ -47,7 +47,7 @@ __global__ void kernelHistogram1D(
     detail::TensorInfo<output_t, IndexType> a, /* output */
     detail::TensorInfo<output_t, IndexType> p, /* partial output */
     detail::TensorInfo<input_t, IndexType> b, /* input */
-    int nbins,
+    int64_t nbins,
     input_t minvalue,
     input_t maxvalue,
     IndexType totalElements,
@@ -339,7 +339,7 @@ Tensor _bincount_cuda(
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
       return _bincount_cuda_template<scalar_t, float>(self, weights, minlength);
     return _bincount_cuda_template<scalar_t, double>(
-        self, weights.toType(CUDA(kDouble)), minlength);
+        self, weights.to(kDouble), minlength);
   });
 }
 

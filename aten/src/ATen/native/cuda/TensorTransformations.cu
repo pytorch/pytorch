@@ -124,8 +124,13 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
 
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, in_tensor.scalar_type(), "flip_cuda", [&] {
     flip_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-      in_tensor.data_ptr<scalar_t>(), out_tensor.data_ptr<scalar_t>(), N, flip_dims_t.toType(CUDA(kLong)).data_ptr<int64_t>(), flip_dims_size,
-      strides_t.toType(CUDA(kLong)).data_ptr<int64_t>(), stride_contiguous.toType(CUDA(kLong)).data_ptr<int64_t>(), shape_t.toType(CUDA(kLong)).data_ptr<int64_t>(), total_dims);
+      in_tensor.data_ptr<scalar_t>(), out_tensor.data_ptr<scalar_t>(), N,
+      flip_dims_t.cuda().data_ptr<int64_t>(),
+      flip_dims_size,
+      strides_t.cuda().data_ptr<int64_t>(),
+      stride_contiguous.cuda().data_ptr<int64_t>(),
+      shape_t.cuda().data_ptr<int64_t>(),
+      total_dims);
   });
 
   return out_tensor;

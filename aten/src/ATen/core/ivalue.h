@@ -2,7 +2,7 @@
 
 #include <ATen/core/blob.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/Tensor.h>
+#include <ATen/core/TensorBody.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
@@ -19,6 +19,8 @@ template<class Key, class Value> class Dict;
 template<class T> class List;
 struct IValue;
 struct ClassType;
+struct Type;
+using TypePtr = std::shared_ptr<Type>;
 namespace ivalue {
 struct Tuple;
 struct Future;
@@ -53,8 +55,7 @@ struct Object;
   _(Device) \
   _(Object) \
   _(Uninitialized) \
-  _(Capsule) \
-
+  _(Capsule)
 
 struct CAFFE2_API IValue final {
   IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
@@ -106,6 +107,15 @@ struct CAFFE2_API IValue final {
     // Other types can be compared by their ptr value
     return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
   }
+
+  size_t use_count() const noexcept {
+    if (!is_intrusive_ptr) {
+      return 1;
+    }
+
+    return c10::raw::intrusive_ptr::use_count(payload.as_intrusive_ptr);
+  }
+
   void swap(IValue & rhs) noexcept {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
@@ -176,6 +186,9 @@ struct CAFFE2_API IValue final {
     AT_ASSERT(isDouble());
     return payload.as_double;
   }
+
+  IValue(ScalarType t):
+  IValue(static_cast<std::underlying_type<ScalarType>::type>(t)) {}
 
   // Future
   IValue(c10::intrusive_ptr<ivalue::Future> v);
@@ -422,6 +435,8 @@ struct CAFFE2_API IValue final {
     return payload.as_intrusive_ptr;
   }
 
+  TypePtr type() const;
+
  private:
   // NOTE: IValue tags are intentionally private. In the future we may encode
   // this value different (e.g. using NaN boxing), and this would make it more
@@ -445,7 +460,7 @@ struct CAFFE2_API IValue final {
     tag = Tag::None;
     is_intrusive_ptr = false;
   }
-private:
+
   union Payload {
     int64_t as_int;
     double as_double;

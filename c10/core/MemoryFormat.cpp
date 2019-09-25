@@ -1,7 +1,7 @@
 #include <c10/core/MemoryFormat.h>
 namespace c10 {
 namespace {
-thread_local bool memory_format_propagation_enabled = false;
+thread_local bool memory_format_propagation_enabled = true;
 }
 
 bool get_memory_format_propagation() {
