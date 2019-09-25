@@ -16,8 +16,11 @@ Tensor& resize_cpu_(Tensor& self, IntArrayRef size) {
   return self;
 }
 
-Tensor& resize_as_cpu_(Tensor& self, const Tensor& the_template) {
-  Tensor& result = resize_cpu_(self, the_template.sizes());
+Tensor& resize_as_(Tensor& self, const Tensor& the_template) {
+  if (self.is_sparse() && the_template.is_sparse()) {
+    return native::resize_as_sparse_(self, the_template);
+  }
+  Tensor& result = self.resize_(the_template.sizes());
 #ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(result, the_template);
 #endif
