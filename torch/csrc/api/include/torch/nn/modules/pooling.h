@@ -274,5 +274,24 @@ class TORCH_API AdaptiveAvgPool1dImpl :
 /// module storage semantics.
 TORCH_MODULE(AdaptiveAvgPool1d);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveAvgPool2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies adaptive avgpool over a 2-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.AdaptiveAvgPool2d
+/// to learn about the exact behavior of this module.
+class TORCH_API AdaptiveAvgPool2dImpl :
+  public AdaptiveAvgPoolImpl<2, AdaptiveAvgPool2dImpl> {
+ public:
+  using AdaptiveAvgPoolImpl<2, AdaptiveAvgPool2dImpl>::AdaptiveAvgPoolImpl;
+
+  Tensor forward(const Tensor& input);
+};
+
+/// A `ModuleHolder` subclass for `AdaptiveAvgPool2dImpl`.
+/// See the documentation for `AdaptiveAvgPool2dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(AdaptiveAvgPool2d);
+
 } // namespace nn
 } // namespace torch

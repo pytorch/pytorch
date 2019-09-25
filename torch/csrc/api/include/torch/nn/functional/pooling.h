@@ -109,6 +109,11 @@ inline Tensor adaptive_avg_pool1d(const Tensor& input,
    return torch::adaptive_avg_pool1d(input, options.output_size());
 }
 
+inline Tensor adaptive_avg_pool2d(const Tensor& input,
+  const AdaptiveAvgPool2dOptions& options) {
+   return torch::adaptive_avg_pool2d(input, options.output_size());
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch
