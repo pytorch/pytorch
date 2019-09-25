@@ -271,9 +271,9 @@ class TestTypePromotion(TestCase):
     def test_lt_with_type_promotion(self):
         for dt in torch.testing.get_all_math_dtypes(self.device):
             actual = torch.tensor([0], dtype=dt) < 0.5
-            expected = torch.tensor([1], dtype=dt)
+            expected = torch.tensor([True], dtype=dt)
             self.assertTrue(actual, expected)
-            self.assertTrue(actual.dtype == dt)
+            self.assertTrue(actual.dtype == torch.bool)
 
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):
