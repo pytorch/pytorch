@@ -1,4 +1,4 @@
-//          Copyright Naoki Shibata 2010 - 2017.
+//          Copyright Naoki Shibata 2010 - 2019.
 // Distributed under the Boost Software License, Version 1.0.
 //    (See accompanying file LICENSE.txt or copy at
 //          http://www.boost.org/LICENSE_1_0.txt)
@@ -79,76 +79,76 @@ static int cpuSupportsFMA() {
  */
 
 #define DISPATCH_vf_vf(fptype, funcName, pfn, dfn, funcsse2, funcsse4, funcavx2) \
-  static CONST fptype (*pfn)(fptype arg0);				\
-  static CONST fptype dfn(fptype arg0) {				\
-    fptype CONST (*p)(fptype arg0) = funcsse2;				\
+  static CONST VECTOR_CC fptype (*pfn)(fptype arg0);			\
+  static CONST VECTOR_CC fptype dfn(fptype arg0) {			\
+    fptype CONST VECTOR_CC (*p)(fptype arg0) = funcsse2;		\
     SUBST_IF_SSE4(funcsse4);						\
     SUBST_IF_AVX2(funcavx2);						\
     pfn = p;								\
     return (*pfn)(arg0);						\
   }									\
-  static CONST fptype (*pfn)(fptype arg0) = dfn;			\
-  EXPORT CONST fptype funcName(fptype arg0) { return (*pfn)(arg0); }
+  static CONST VECTOR_CC fptype (*pfn)(fptype arg0) = dfn;		\
+  EXPORT CONST VECTOR_CC fptype funcName(fptype arg0) { return (*pfn)(arg0); }
 
 #define DISPATCH_vf_vf_vf(fptype, funcName, pfn, dfn, funcsse2, funcsse4, funcavx2) \
-  static CONST fptype (*pfn)(fptype arg0, fptype arg1);			\
-  static CONST fptype dfn(fptype arg0, fptype arg1) {			\
-    fptype CONST (*p)(fptype arg0, fptype arg1) = funcsse2;		\
+  static CONST VECTOR_CC fptype (*pfn)(fptype arg0, fptype arg1);	\
+  static CONST VECTOR_CC fptype dfn(fptype arg0, fptype arg1) {	\
+    fptype CONST VECTOR_CC (*p)(fptype arg0, fptype arg1) = funcsse2;	\
     SUBST_IF_SSE4(funcsse4);						\
     SUBST_IF_AVX2(funcavx2);						\
     pfn = p;								\
     return (*pfn)(arg0, arg1);						\
   }									\
-  static CONST fptype (*pfn)(fptype arg0, fptype arg1) = dfn;		\
-  EXPORT CONST fptype funcName(fptype arg0, fptype arg1) { return (*pfn)(arg0, arg1); }
+  static CONST VECTOR_CC fptype (*pfn)(fptype arg0, fptype arg1) = dfn; \
+  EXPORT CONST VECTOR_CC fptype funcName(fptype arg0, fptype arg1) { return (*pfn)(arg0, arg1); }
 
 #define DISPATCH_vf2_vf(fptype, fptype2, funcName, pfn, dfn, funcsse2, funcsse4, funcavx2) \
-  static CONST fptype2 (*pfn)(fptype arg0);				\
-  static CONST fptype2 dfn(fptype arg0) {				\
-    fptype2 CONST (*p)(fptype arg0) = funcsse2;				\
+  static CONST VECTOR_CC fptype2 (*pfn)(fptype arg0);			\
+  static CONST VECTOR_CC fptype2 dfn(fptype arg0) {			\
+    fptype2 CONST VECTOR_CC (*p)(fptype arg0) = funcsse2;		\
     SUBST_IF_SSE4(funcsse4);						\
     SUBST_IF_AVX2(funcavx2);						\
     pfn = p;								\
     return (*pfn)(arg0);						\
   }									\
-  static CONST fptype2 (*pfn)(fptype arg0) = dfn;			\
-  EXPORT CONST fptype2 funcName(fptype arg0) { return (*pfn)(arg0); }
+  static CONST VECTOR_CC fptype2 (*pfn)(fptype arg0) = dfn;		\
+  EXPORT CONST VECTOR_CC fptype2 funcName(fptype arg0) { return (*pfn)(arg0); }
 
 #define DISPATCH_vf_vf_vi(fptype, itype, funcName, pfn, dfn, funcsse2, funcsse4, funcavx2) \
-  static CONST fptype (*pfn)(fptype arg0, itype arg1);			\
-  static CONST fptype dfn(fptype arg0, itype arg1) {			\
-    fptype CONST (*p)(fptype arg0, itype arg1) = funcsse2;		\
+  static CONST VECTOR_CC fptype (*pfn)(fptype arg0, itype arg1);	\
+  static CONST VECTOR_CC fptype dfn(fptype arg0, itype arg1) {		\
+    fptype CONST VECTOR_CC (*p)(fptype arg0, itype arg1) = funcsse2;	\
     SUBST_IF_SSE4(funcsse4);						\
     SUBST_IF_AVX2(funcavx2);						\
     pfn = p;								\
     return (*pfn)(arg0, arg1);						\
   }									\
-  static CONST fptype (*pfn)(fptype arg0, itype arg1) = dfn;		\
-  EXPORT CONST fptype funcName(fptype arg0, itype arg1) { return (*pfn)(arg0, arg1); }
+  static CONST VECTOR_CC fptype (*pfn)(fptype arg0, itype arg1) = dfn;	\
+  EXPORT CONST VECTOR_CC fptype funcName(fptype arg0, itype arg1) { return (*pfn)(arg0, arg1); }
 
 #define DISPATCH_vi_vf(fptype, itype, funcName, pfn, dfn, funcsse2, funcsse4, funcavx2) \
-  static CONST itype (*pfn)(fptype arg0);				\
-  static CONST itype dfn(fptype arg0) {					\
-    itype CONST (*p)(fptype arg0) = funcsse2;				\
+  static CONST VECTOR_CC itype (*pfn)(fptype arg0);			\
+  static CONST VECTOR_CC itype dfn(fptype arg0) {			\
+    itype CONST VECTOR_CC (*p)(fptype arg0) = funcsse2;		\
     SUBST_IF_SSE4(funcsse4);						\
     SUBST_IF_AVX2(funcavx2);						\
     pfn = p;								\
     return (*pfn)(arg0);						\
   }									\
-  static CONST itype (*pfn)(fptype arg0) = dfn;				\
-  EXPORT CONST itype funcName(fptype arg0) { return (*pfn)(arg0); }
+  static CONST VECTOR_CC itype (*pfn)(fptype arg0) = dfn;		\
+  EXPORT CONST VECTOR_CC itype funcName(fptype arg0) { return (*pfn)(arg0); }
 
 #define DISPATCH_vf_vf_vf_vf(fptype, funcName, pfn, dfn, funcsse2, funcsse4, funcavx2) \
-  static CONST fptype (*pfn)(fptype arg0, fptype arg1, fptype arg2);	\
-  static CONST fptype dfn(fptype arg0, fptype arg1, fptype arg2) {	\
-    fptype CONST (*p)(fptype arg0, fptype arg1, fptype arg2) = funcsse2; \
+  static CONST VECTOR_CC fptype (*pfn)(fptype arg0, fptype arg1, fptype arg2); \
+  static CONST VECTOR_CC fptype dfn(fptype arg0, fptype arg1, fptype arg2) { \
+    fptype CONST VECTOR_CC (*p)(fptype arg0, fptype arg1, fptype arg2) = funcsse2; \
     SUBST_IF_SSE4(funcsse4);						\
     SUBST_IF_AVX2(funcavx2);						\
     pfn = p;								\
     return (*pfn)(arg0, arg1, arg2);					\
   }									\
-  static CONST fptype (*pfn)(fptype arg0, fptype arg1, fptype arg2) = dfn; \
-  EXPORT CONST fptype funcName(fptype arg0, fptype arg1, fptype arg2) { return (*pfn)(arg0, arg1, arg2); }
+  static CONST VECTOR_CC fptype (*pfn)(fptype arg0, fptype arg1, fptype arg2) = dfn; \
+  EXPORT CONST VECTOR_CC fptype funcName(fptype arg0, fptype arg1, fptype arg2) { return (*pfn)(arg0, arg1, arg2); }
 
 #define DISPATCH_i_i(funcName, pfn, dfn, funcsse2, funcsse4, funcavx2) \
   static CONST int (*pfn)(int arg0);					\
@@ -225,6 +225,15 @@ DISPATCH_vf_vf(__m128d, Sleef_coshd2_u10, pnt_coshd2_u10, disp_coshd2_u10, Sleef
 DISPATCH_vf_vf(__m128, Sleef_coshf4_u10, pnt_coshf4_u10, disp_coshf4_u10, Sleef_coshf4_u10sse2, Sleef_coshf4_u10sse4, Sleef_coshf4_u10avx2128)
 DISPATCH_vf_vf(__m128d, Sleef_tanhd2_u10, pnt_tanhd2_u10, disp_tanhd2_u10, Sleef_tanhd2_u10sse2, Sleef_tanhd2_u10sse4, Sleef_tanhd2_u10avx2128)
 DISPATCH_vf_vf(__m128, Sleef_tanhf4_u10, pnt_tanhf4_u10, disp_tanhf4_u10, Sleef_tanhf4_u10sse2, Sleef_tanhf4_u10sse4, Sleef_tanhf4_u10avx2128)
+DISPATCH_vf_vf(__m128d, Sleef_sinhd2_u35, pnt_sinhd2_u35, disp_sinhd2_u35, Sleef_sinhd2_u35sse2, Sleef_sinhd2_u35sse4, Sleef_sinhd2_u35avx2128)
+DISPATCH_vf_vf(__m128, Sleef_sinhf4_u35, pnt_sinhf4_u35, disp_sinhf4_u35, Sleef_sinhf4_u35sse2, Sleef_sinhf4_u35sse4, Sleef_sinhf4_u35avx2128)
+DISPATCH_vf_vf(__m128d, Sleef_coshd2_u35, pnt_coshd2_u35, disp_coshd2_u35, Sleef_coshd2_u35sse2, Sleef_coshd2_u35sse4, Sleef_coshd2_u35avx2128)
+DISPATCH_vf_vf(__m128, Sleef_coshf4_u35, pnt_coshf4_u35, disp_coshf4_u35, Sleef_coshf4_u35sse2, Sleef_coshf4_u35sse4, Sleef_coshf4_u35avx2128)
+DISPATCH_vf_vf(__m128d, Sleef_tanhd2_u35, pnt_tanhd2_u35, disp_tanhd2_u35, Sleef_tanhd2_u35sse2, Sleef_tanhd2_u35sse4, Sleef_tanhd2_u35avx2128)
+DISPATCH_vf_vf(__m128, Sleef_tanhf4_u35, pnt_tanhf4_u35, disp_tanhf4_u35, Sleef_tanhf4_u35sse2, Sleef_tanhf4_u35sse4, Sleef_tanhf4_u35avx2128)
+DISPATCH_vf_vf(__m128, Sleef_fastsinf4_u3500, pnt_fastsinf4_u3500, disp_fastsinf4_u3500, Sleef_fastsinf4_u3500sse2, Sleef_fastsinf4_u3500sse4, Sleef_fastsinf4_u3500avx2128)
+DISPATCH_vf_vf(__m128, Sleef_fastcosf4_u3500, pnt_fastcosf4_u3500, disp_fastcosf4_u3500, Sleef_fastcosf4_u3500sse2, Sleef_fastcosf4_u3500sse4, Sleef_fastcosf4_u3500avx2128)
+DISPATCH_vf_vf_vf(__m128, Sleef_fastpowf4_u3500, pnt_fastpowf4_u3500, disp_fastpowf4_u3500, Sleef_fastpowf4_u3500sse2, Sleef_fastpowf4_u3500sse4, Sleef_fastpowf4_u3500avx2128)
 DISPATCH_vf_vf(__m128d, Sleef_asinhd2_u10, pnt_asinhd2_u10, disp_asinhd2_u10, Sleef_asinhd2_u10sse2, Sleef_asinhd2_u10sse4, Sleef_asinhd2_u10avx2128)
 DISPATCH_vf_vf(__m128, Sleef_asinhf4_u10, pnt_asinhf4_u10, disp_asinhf4_u10, Sleef_asinhf4_u10sse2, Sleef_asinhf4_u10sse4, Sleef_asinhf4_u10avx2128)
 DISPATCH_vf_vf(__m128d, Sleef_acoshd2_u10, pnt_acoshd2_u10, disp_acoshd2_u10, Sleef_acoshd2_u10sse2, Sleef_acoshd2_u10sse4, Sleef_acoshd2_u10avx2128)
@@ -233,14 +242,20 @@ DISPATCH_vf_vf(__m128d, Sleef_atanhd2_u10, pnt_atanhd2_u10, disp_atanhd2_u10, Sl
 DISPATCH_vf_vf(__m128, Sleef_atanhf4_u10, pnt_atanhf4_u10, disp_atanhf4_u10, Sleef_atanhf4_u10sse2, Sleef_atanhf4_u10sse4, Sleef_atanhf4_u10avx2128)
 DISPATCH_vf_vf(__m128d, Sleef_exp2d2_u10, pnt_exp2d2_u10, disp_exp2d2_u10, Sleef_exp2d2_u10sse2, Sleef_exp2d2_u10sse4, Sleef_exp2d2_u10avx2128)
 DISPATCH_vf_vf(__m128, Sleef_exp2f4_u10, pnt_exp2f4_u10, disp_exp2f4_u10, Sleef_exp2f4_u10sse2, Sleef_exp2f4_u10sse4, Sleef_exp2f4_u10avx2128)
+DISPATCH_vf_vf(__m128d, Sleef_exp2d2_u35, pnt_exp2d2_u35, disp_exp2d2_u35, Sleef_exp2d2_u35sse2, Sleef_exp2d2_u35sse4, Sleef_exp2d2_u35avx2128)
+DISPATCH_vf_vf(__m128, Sleef_exp2f4_u35, pnt_exp2f4_u35, disp_exp2f4_u35, Sleef_exp2f4_u35sse2, Sleef_exp2f4_u35sse4, Sleef_exp2f4_u35avx2128)
 DISPATCH_vf_vf(__m128d, Sleef_exp10d2_u10, pnt_exp10d2_u10, disp_exp10d2_u10, Sleef_exp10d2_u10sse2, Sleef_exp10d2_u10sse4, Sleef_exp10d2_u10avx2128)
 DISPATCH_vf_vf(__m128, Sleef_exp10f4_u10, pnt_exp10f4_u10, disp_exp10f4_u10, Sleef_exp10f4_u10sse2, Sleef_exp10f4_u10sse4, Sleef_exp10f4_u10avx2128)
+DISPATCH_vf_vf(__m128d, Sleef_exp10d2_u35, pnt_exp10d2_u35, disp_exp10d2_u35, Sleef_exp10d2_u35sse2, Sleef_exp10d2_u35sse4, Sleef_exp10d2_u35avx2128)
+DISPATCH_vf_vf(__m128, Sleef_exp10f4_u35, pnt_exp10f4_u35, disp_exp10f4_u35, Sleef_exp10f4_u35sse2, Sleef_exp10f4_u35sse4, Sleef_exp10f4_u35avx2128)
 DISPATCH_vf_vf(__m128d, Sleef_expm1d2_u10, pnt_expm1d2_u10, disp_expm1d2_u10, Sleef_expm1d2_u10sse2, Sleef_expm1d2_u10sse4, Sleef_expm1d2_u10avx2128)
 DISPATCH_vf_vf(__m128, Sleef_expm1f4_u10, pnt_expm1f4_u10, disp_expm1f4_u10, Sleef_expm1f4_u10sse2, Sleef_expm1f4_u10sse4, Sleef_expm1f4_u10avx2128)
 DISPATCH_vf_vf(__m128d, Sleef_log10d2_u10, pnt_log10d2_u10, disp_log10d2_u10, Sleef_log10d2_u10sse2, Sleef_log10d2_u10sse4, Sleef_log10d2_u10avx2128)
 DISPATCH_vf_vf(__m128, Sleef_log10f4_u10, pnt_log10f4_u10, disp_log10f4_u10, Sleef_log10f4_u10sse2, Sleef_log10f4_u10sse4, Sleef_log10f4_u10avx2128)
 DISPATCH_vf_vf(__m128d, Sleef_log2d2_u10, pnt_log2d2_u10, disp_log2d2_u10, Sleef_log2d2_u10sse2, Sleef_log2d2_u10sse4, Sleef_log2d2_u10avx2128)
 DISPATCH_vf_vf(__m128, Sleef_log2f4_u10, pnt_log2f4_u10, disp_log2f4_u10, Sleef_log2f4_u10sse2, Sleef_log2f4_u10sse4, Sleef_log2f4_u10avx2128)
+DISPATCH_vf_vf(__m128d, Sleef_log2d2_u35, pnt_log2d2_u35, disp_log2d2_u35, Sleef_log2d2_u35sse2, Sleef_log2d2_u35sse4, Sleef_log2d2_u35avx2128)
+DISPATCH_vf_vf(__m128, Sleef_log2f4_u35, pnt_log2f4_u35, disp_log2f4_u35, Sleef_log2f4_u35sse2, Sleef_log2f4_u35sse4, Sleef_log2f4_u35avx2128)
 DISPATCH_vf_vf(__m128d, Sleef_log1pd2_u10, pnt_log1pd2_u10, disp_log1pd2_u10, Sleef_log1pd2_u10sse2, Sleef_log1pd2_u10sse4, Sleef_log1pd2_u10avx2128)
 DISPATCH_vf_vf(__m128, Sleef_log1pf4_u10, pnt_log1pf4_u10, disp_log1pf4_u10, Sleef_log1pf4_u10sse2, Sleef_log1pf4_u10sse4, Sleef_log1pf4_u10avx2128)
 DISPATCH_vf2_vf(__m128d, Sleef___m128d_2, Sleef_sincospid2_u05, pnt_sincospid2_u05, disp_sincospid2_u05, Sleef_sincospid2_u05sse2, Sleef_sincospid2_u05sse4, Sleef_sincospid2_u05avx2128)

@@ -6,6 +6,6 @@ includedir=/data/users/iuriiz/pytorch2/pytorch/torch/include
 Name: Protocol Buffers
 Description: Google's Data Interchange Format
 Version: 3.6.1
-Libs: -L${libdir} -lprotobuf -lpthread
-Cflags: -I${includedir} -lpthread
+Libs: -L${libdir} -lprotobuf -pthread
+Cflags: -I${includedir} -pthread
 Conflicts: protobuf-lite

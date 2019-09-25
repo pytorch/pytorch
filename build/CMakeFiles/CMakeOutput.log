@@ -1507,3 +1507,20 @@ Source file was:
     double a = __builtin_sqrt (2);
     float  b = __builtin_sqrtf(2);
   }
+Performing C SOURCE FILE Test COMPILER_SUPPORTS_SYS_GETRANDOM succeeded with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_56dd6 
+[1/2] Building C object CMakeFiles/cmTC_56dd6.dir/src.c.o
+[2/2] Linking C executable cmTC_56dd6
+
+Source file was:
+
+#define _GNU_SOURCE
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <linux/random.h>
+  int main(void) {
+    int i;
+    syscall(SYS_getrandom, &i, sizeof(i), 0);
+  }

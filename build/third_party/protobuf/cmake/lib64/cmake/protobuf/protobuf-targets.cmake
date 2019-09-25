@@ -46,7 +46,7 @@ add_library(protobuf::libprotobuf-lite STATIC IMPORTED)
 
 set_target_properties(protobuf::libprotobuf-lite PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "/data/users/iuriiz/pytorch2/pytorch/third_party/protobuf/src"
-  INTERFACE_LINK_LIBRARIES "-lpthread"
+  INTERFACE_LINK_LIBRARIES "-pthread"
 )
 
 # Create imported target protobuf::libprotobuf
@@ -54,7 +54,7 @@ add_library(protobuf::libprotobuf STATIC IMPORTED)
 
 set_target_properties(protobuf::libprotobuf PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "/data/users/iuriiz/pytorch2/pytorch/third_party/protobuf/src"
-  INTERFACE_LINK_LIBRARIES "-lpthread"
+  INTERFACE_LINK_LIBRARIES "-pthread"
 )
 
 # Create imported target protobuf::libprotoc
