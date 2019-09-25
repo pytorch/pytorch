@@ -108,6 +108,20 @@ TEST_F(ModulesTest, MaxPool1d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 }
 
+TEST_F(ModulesTest, MaxPool1dReturnIndices) {
+  MaxPool1d model(MaxPool1dOptions(3).stride(2));
+  auto x = torch::ones({1, 1, 5}, torch::requires_grad());
+  torch::Tensor y, indices;
+  std::tie(y, indices) = model->forward_with_indices(x);
+
+  ASSERT_EQ(y.dim(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1 ,2})));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+
+  ASSERT_TRUE(torch::allclose(indices, torch::tensor({{{0, 2}}}, torch::kLong)));
+  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({1, 1, 2}));
+}
+
 TEST_F(ModulesTest, MaxPool2dEven) {
   MaxPool2d model(MaxPool2dOptions(3).stride(2));
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
@@ -134,6 +148,24 @@ TEST_F(ModulesTest, MaxPool2dUneven) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
 }
 
+TEST_F(ModulesTest, MaxPool2dReturnIndices) {
+  MaxPool2d model(MaxPool2dOptions(3).stride(2));
+  auto x = torch::ones({2, 5, 5}, torch::requires_grad());
+  torch::Tensor y, indices;
+  std::tie(y, indices) = model->forward_with_indices(x);
+
+  ASSERT_EQ(y.dim(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2 ,2})));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
+  ASSERT_TRUE(torch::allclose(
+    indices,
+    torch::tensor({{{ 0,  2},
+                    {10, 12}},
+                   {{ 0,  2},
+                    {10, 12}}}, torch::kLong)));
+  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({2, 2, 2}));
+}
+
 TEST_F(ModulesTest, MaxPool3d) {
   MaxPool3d model(MaxPool3dOptions(3).stride(2));
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
@@ -145,6 +177,29 @@ TEST_F(ModulesTest, MaxPool3d) {
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
   ASSERT_EQ(s.ndimension(), 0);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
+}
+
+TEST_F(ModulesTest, MaxPool3dReturnIndices) {
+  MaxPool3d model(MaxPool3dOptions(3).stride(2));
+  auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
+  torch::Tensor y, indices;
+  std::tie(y, indices) = model->forward_with_indices(x);
+
+  ASSERT_EQ(y.dim(), 4);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
+
+  ASSERT_TRUE(torch::allclose(
+    indices,
+    torch::tensor({{{{ 0,  2},
+                     {10, 12}},
+                    {{50, 52},
+                     {60, 62}}},
+                   {{{ 0,  2},
+                     {10, 12}},
+                    {{50, 52},
+                     {60, 62}}}}, torch::kLong)));
+  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
 }
 
 TEST_F(ModulesTest, AvgPool1d) {
@@ -199,6 +254,18 @@ TEST_F(ModulesTest, AvgPool3d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
 }
 
+TEST_F(ModulesTest, Identity) {
+  Identity identity;
+  auto input = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::requires_grad());
+  auto output = identity->forward(input);
+  auto expected = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(torch::equal(output, expected));
+  ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
+}
+
 TEST_F(ModulesTest, Linear) {
   Linear model(5, 2);
   auto x = torch::randn({10, 5}, torch::requires_grad());
@@ -216,7 +283,7 @@ TEST_F(ModulesTest, Linear) {
 
 TEST_F(ModulesTest, Fold) {
   Fold model(FoldOptions({4, 5}, {2, 2}));
-  auto x = torch::randn({1, 3 * 2 * 2, 12});
+  auto x = torch::randn({1, 3 * 2 * 2, 12}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
 
@@ -240,7 +307,7 @@ TEST_F(ModulesTest, SimpleContainer) {
   x = l2(x).clamp_min(0);
   x = l3(x).clamp_min(0);
 
-  x.backward();
+  x.backward(torch::ones_like(x));
   ASSERT_EQ(x.ndimension(), 2);
   ASSERT_EQ(x.size(0), 1000);
   ASSERT_EQ(x.size(1), 100);
@@ -288,7 +355,7 @@ TEST_F(ModulesTest, Dropout) {
   torch::Tensor x = torch::ones(100, torch::requires_grad());
   torch::Tensor y = dropout(x);
 
-  y.backward();
+  y.backward(torch::ones_like(y));
   ASSERT_EQ(y.ndimension(), 1);
   ASSERT_EQ(y.size(0), 100);
   ASSERT_LT(y.sum().item<float>(), 130); // Probably
@@ -449,6 +516,36 @@ TEST_F(ModulesTest, L1Loss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, CosineSimilarity) {
+  CosineSimilarity cos(CosineSimilarityOptions().dim(1));
+  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
+  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::requires_grad());
+  auto output = cos->forward(input1, input2);
+  auto expected = torch::tensor({0.8078, 0.8721}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input1.sizes(), input1.grad().sizes());
+}
+
+TEST_F(ModulesTest, PairwiseDistance) {
+  PairwiseDistance dist(PairwiseDistanceOptions(1));
+  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
+  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::requires_grad());
+  auto output = dist->forward(input1, input2);
+  auto expected = torch::tensor({6, 6}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input1.sizes(), input1.grad().sizes());
+}
+
+TEST_F(ModulesTest, PrettyPrintIdentity) {
+  ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
+}
+
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in=3, out=4, with_bias=true)");
@@ -475,37 +572,49 @@ TEST_F(ModulesTest, PrettyPrintConv) {
 TEST_F(ModulesTest, PrettyPrintMaxPool) {
   ASSERT_EQ(
       c10::str(MaxPool1d(5)),
-      "torch::nn::MaxPool1d(kernel_size=5, stride=5)");
+      "torch::nn::MaxPool1d(kernel_size=5, stride=5, padding=0, dilation=1, ceil_mode=false)");
   ASSERT_EQ(
       c10::str(MaxPool2d(5)),
-      "torch::nn::MaxPool2d(kernel_size=[5, 5], stride=[5, 5])");
+      "torch::nn::MaxPool2d(kernel_size=[5, 5], stride=[5, 5], padding=[0, 0], dilation=[1, 1], ceil_mode=false)");
   ASSERT_EQ(
       c10::str(MaxPool2d(MaxPool2dOptions(5).stride(2))),
-      "torch::nn::MaxPool2d(kernel_size=[5, 5], stride=[2, 2])");
+      "torch::nn::MaxPool2d(kernel_size=[5, 5], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=false)");
+  ASSERT_EQ(
+      c10::str(MaxPool3d(5)),
+      "torch::nn::MaxPool3d(kernel_size=[5, 5, 5], stride=[5, 5, 5], padding=[0, 0, 0], dilation=[1, 1, 1], ceil_mode=false)");
+  ASSERT_EQ(
+      c10::str(MaxPool3d(MaxPool3dOptions(5).stride(2))),
+      "torch::nn::MaxPool3d(kernel_size=[5, 5, 5], stride=[2, 2, 2], padding=[0, 0, 0], dilation=[1, 1, 1], ceil_mode=false)");
 
   const auto options =
       MaxPool2dOptions(torch::IntArrayRef{5, 6}).stride({1, 2});
   ASSERT_EQ(
       c10::str(MaxPool2d(options)),
-      "torch::nn::MaxPool2d(kernel_size=[5, 6], stride=[1, 2])");
+      "torch::nn::MaxPool2d(kernel_size=[5, 6], stride=[1, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=false)");
 }
 
 TEST_F(ModulesTest, PrettyPrintAvgPool) {
   ASSERT_EQ(
       c10::str(AvgPool1d(5)),
-      "torch::nn::AvgPool1d(kernel_size=5, stride=5)");
+      "torch::nn::AvgPool1d(kernel_size=5, stride=5, padding=0)");
   ASSERT_EQ(
       c10::str(AvgPool2d(5)),
-      "torch::nn::AvgPool2d(kernel_size=[5, 5], stride=[5, 5])");
+      "torch::nn::AvgPool2d(kernel_size=[5, 5], stride=[5, 5], padding=[0, 0])");
   ASSERT_EQ(
       c10::str(AvgPool2d(AvgPool2dOptions(5).stride(2))),
-      "torch::nn::AvgPool2d(kernel_size=[5, 5], stride=[2, 2])");
+      "torch::nn::AvgPool2d(kernel_size=[5, 5], stride=[2, 2], padding=[0, 0])");
+  ASSERT_EQ(
+      c10::str(AvgPool3d(5)),
+      "torch::nn::AvgPool3d(kernel_size=[5, 5, 5], stride=[5, 5, 5], padding=[0, 0, 0])");
+  ASSERT_EQ(
+      c10::str(AvgPool3d(AvgPool3dOptions(5).stride(2))),
+      "torch::nn::AvgPool3d(kernel_size=[5, 5, 5], stride=[2, 2, 2], padding=[0, 0, 0])");
 
   const auto options =
       AvgPool2dOptions(torch::IntArrayRef{5, 6}).stride({1, 2});
   ASSERT_EQ(
       c10::str(AvgPool2d(options)),
-      "torch::nn::AvgPool2d(kernel_size=[5, 6], stride=[1, 2])");
+      "torch::nn::AvgPool2d(kernel_size=[5, 6], stride=[1, 2], padding=[0, 0])");
 }
 
 TEST_F(ModulesTest, PrettyPrintDropout) {
@@ -530,6 +639,24 @@ TEST_F(ModulesTest, PrettyPrintEmbedding) {
   ASSERT_EQ(
       c10::str(Embedding(10, 2)),
       "torch::nn::Embedding(count=10, dimension=2)");
+}
+
+TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
+  ASSERT_EQ(
+      c10::str(CosineSimilarity()),
+      "torch::nn::CosineSimilarity(dim=1, eps=1e-08)");
+  ASSERT_EQ(
+      c10::str(CosineSimilarity(CosineSimilarityOptions().dim(0).eps(0.5))),
+      "torch::nn::CosineSimilarity(dim=0, eps=0.5)");
+}
+
+TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {
+  ASSERT_EQ(
+      c10::str(PairwiseDistance()),
+      "torch::nn::PairwiseDistance(p=2, eps=1e-06, keepdim=false)");
+  ASSERT_EQ(
+      c10::str(PairwiseDistance(PairwiseDistanceOptions(3).eps(0.5).keepdim(true))),
+      "torch::nn::PairwiseDistance(p=3, eps=0.5, keepdim=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintNestedModel) {

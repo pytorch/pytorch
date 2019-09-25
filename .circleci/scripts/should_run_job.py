@@ -54,9 +54,16 @@ default_set = set([
     'pytorch-ios-10.2.1-x86_64_build',
     'pytorch-ios-10.2.1-arm64_build',
 
+    # Pytorch backward compatibility check
+    'pytorch-linux-backward-compatibility-check-test',
 
     # XLA
     'pytorch-xla-linux-xenial-py3.6-clang7',
+
+    # Named tensor
+    "pytorch-namedtensor-linux-xenial-py3.6-gcc5.4",
+    "pytorch-namedtensor-linux-xenial-py3-clang5-asan",
+    "pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2",
 
     # Other checks
     'pytorch-short-perf-test-gpu',
