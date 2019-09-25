@@ -94,5 +94,8 @@ struct AdaptiveMaxPoolOptions {
 /// `AdaptiveMaxPoolOptions` specialized for 1-D maxpool.
 using AdaptiveMaxPool1dOptions = AdaptiveMaxPoolOptions<1>;
 
+/// `AdaptiveMaxPoolOptions` specialized for 2-D adaptive maxpool.
+using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<2>;
+
 } // namespace nn
 } // namespace torch
