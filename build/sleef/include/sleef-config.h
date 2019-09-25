@@ -4,7 +4,7 @@
 #define CONFIG_H
 
 #define SLEEF_VERSION_MAJOR 3
-#define SLEEF_VERSION_MINOR 2
+#define SLEEF_VERSION_MINOR 4
 
 // FEATURE DETECTION ***********************************************************
 

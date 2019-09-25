@@ -2920,7 +2920,7 @@ rule CXX_EXECUTABLE_LINKER__data_filler_test
 #############################################
 # Rule for compiling C files.
 
-rule C_COMPILER__dispavx_obj
+rule C_COMPILER__sleefavx2128
   depfile = $DEP_FILE
   deps = gcc
   command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
@@ -2930,7 +2930,7 @@ rule C_COMPILER__dispavx_obj
 #############################################
 # Rule for compiling C files.
 
-rule C_COMPILER__sleefsse4
+rule C_COMPILER__sleeffma4
   depfile = $DEP_FILE
   deps = gcc
   command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
@@ -2940,46 +2940,7 @@ rule C_COMPILER__sleefsse4
 #############################################
 # Rule for compiling C files.
 
-rule C_COMPILER__sleefavx
-  depfile = $DEP_FILE
-  deps = gcc
-  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
-  description = Building C object $out
-
-
-#############################################
-# Rule for compiling C files.
-
-rule C_COMPILER__sleef
-  depfile = $DEP_FILE
-  deps = gcc
-  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
-  description = Building C object $out
-
-
-#############################################
-# Rule for linking C static library.
-
-rule C_STATIC_LIBRARY_LINKER__sleef
-  command = $PRE_LINK && /home/iuriiz/anaconda3/bin/cmake -E remove $TARGET_FILE && /bin/ar qc $TARGET_FILE $LINK_FLAGS $in && /bin/ranlib $TARGET_FILE && $POST_BUILD
-  description = Linking C static library $TARGET_FILE
-  restat = $RESTAT
-
-
-#############################################
-# Rule for compiling C files.
-
-rule C_COMPILER__sleefavx2
-  depfile = $DEP_FILE
-  deps = gcc
-  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
-  description = Building C object $out
-
-
-#############################################
-# Rule for compiling C files.
-
-rule C_COMPILER__mkalias
+rule C_COMPILER__mkrename_gnuabi
   depfile = $DEP_FILE
   deps = gcc
   command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
@@ -2989,10 +2950,40 @@ rule C_COMPILER__mkalias
 #############################################
 # Rule for linking C executable.
 
-rule C_EXECUTABLE_LINKER__mkalias
+rule C_EXECUTABLE_LINKER__mkrename_gnuabi
   command = $PRE_LINK && /bin/cc $FLAGS  $LINK_FLAGS $in  -o $TARGET_FILE $LINK_PATH $LINK_LIBRARIES && $POST_BUILD
   description = Linking C executable $TARGET_FILE
   restat = $RESTAT
+
+
+#############################################
+# Rule for compiling C files.
+
+rule C_COMPILER__sleefsse2
+  depfile = $DEP_FILE
+  deps = gcc
+  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
+  description = Building C object $out
+
+
+#############################################
+# Rule for compiling C files.
+
+rule C_COMPILER__sleefdetsse2
+  depfile = $DEP_FILE
+  deps = gcc
+  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
+  description = Building C object $out
+
+
+#############################################
+# Rule for compiling C files.
+
+rule C_COMPILER__dispsse_obj
+  depfile = $DEP_FILE
+  deps = gcc
+  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
+  description = Building C object $out
 
 
 #############################################
@@ -3036,27 +3027,7 @@ rule C_EXECUTABLE_LINKER__mkdisp
 #############################################
 # Rule for compiling C files.
 
-rule C_COMPILER__dispsse_obj
-  depfile = $DEP_FILE
-  deps = gcc
-  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
-  description = Building C object $out
-
-
-#############################################
-# Rule for compiling C files.
-
-rule C_COMPILER__sleefsse2
-  depfile = $DEP_FILE
-  deps = gcc
-  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
-  description = Building C object $out
-
-
-#############################################
-# Rule for compiling C files.
-
-rule C_COMPILER__mkrename_gnuabi
+rule C_COMPILER__mkalias
   depfile = $DEP_FILE
   deps = gcc
   command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
@@ -3066,10 +3037,109 @@ rule C_COMPILER__mkrename_gnuabi
 #############################################
 # Rule for linking C executable.
 
-rule C_EXECUTABLE_LINKER__mkrename_gnuabi
+rule C_EXECUTABLE_LINKER__mkalias
   command = $PRE_LINK && /bin/cc $FLAGS  $LINK_FLAGS $in  -o $TARGET_FILE $LINK_PATH $LINK_LIBRARIES && $POST_BUILD
   description = Linking C executable $TARGET_FILE
   restat = $RESTAT
+
+
+#############################################
+# Rule for compiling C files.
+
+rule C_COMPILER__sleefdetsse4
+  depfile = $DEP_FILE
+  deps = gcc
+  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
+  description = Building C object $out
+
+
+#############################################
+# Rule for compiling C files.
+
+rule C_COMPILER__sleefavx2
+  depfile = $DEP_FILE
+  deps = gcc
+  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
+  description = Building C object $out
+
+
+#############################################
+# Rule for compiling C files.
+
+rule C_COMPILER__sleef
+  depfile = $DEP_FILE
+  deps = gcc
+  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
+  description = Building C object $out
+
+
+#############################################
+# Rule for linking C static library.
+
+rule C_STATIC_LIBRARY_LINKER__sleef
+  command = $PRE_LINK && /home/iuriiz/anaconda3/bin/cmake -E remove $TARGET_FILE && /bin/ar qc $TARGET_FILE $LINK_FLAGS $in && /bin/ranlib $TARGET_FILE && $POST_BUILD
+  description = Linking C static library $TARGET_FILE
+  restat = $RESTAT
+
+
+#############################################
+# Rule for compiling C files.
+
+rule C_COMPILER__sleefdetfma4
+  depfile = $DEP_FILE
+  deps = gcc
+  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
+  description = Building C object $out
+
+
+#############################################
+# Rule for compiling C files.
+
+rule C_COMPILER__sleefdetavx2128
+  depfile = $DEP_FILE
+  deps = gcc
+  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
+  description = Building C object $out
+
+
+#############################################
+# Rule for compiling C files.
+
+rule C_COMPILER__sleefavx
+  depfile = $DEP_FILE
+  deps = gcc
+  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
+  description = Building C object $out
+
+
+#############################################
+# Rule for compiling C files.
+
+rule C_COMPILER__sleefdetavx
+  depfile = $DEP_FILE
+  deps = gcc
+  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
+  description = Building C object $out
+
+
+#############################################
+# Rule for compiling C files.
+
+rule C_COMPILER__sleefsse4
+  depfile = $DEP_FILE
+  deps = gcc
+  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
+  description = Building C object $out
+
+
+#############################################
+# Rule for compiling C files.
+
+rule C_COMPILER__sleefdetavx2
+  depfile = $DEP_FILE
+  deps = gcc
+  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
+  description = Building C object $out
 
 
 #############################################
@@ -3094,17 +3164,7 @@ rule C_EXECUTABLE_LINKER__mkmasked_gnuabi
 #############################################
 # Rule for compiling C files.
 
-rule C_COMPILER__sleefavx2128
-  depfile = $DEP_FILE
-  deps = gcc
-  command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in
-  description = Building C object $out
-
-
-#############################################
-# Rule for compiling C files.
-
-rule C_COMPILER__sleeffma4
+rule C_COMPILER__dispavx_obj
   depfile = $DEP_FILE
   deps = gcc
   command = /bin/cc $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out   -c $in

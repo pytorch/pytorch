@@ -129,6 +129,9 @@ BUILD_GMOCK:BOOL=ON
 //libsleefgnuabi will be built.
 BUILD_GNUABI_LIBS:BOOL=OFF
 
+//libsleef will be built.
+BUILD_LIBM:BOOL=ON
+
 //Experimental: compile with namedtensor support
 BUILD_NAMEDTENSOR:BOOL=OFF
 
@@ -137,6 +140,9 @@ BUILD_ONNX_PYTHON:BOOL=OFF
 
 //Build Python binaries
 BUILD_PYTHON:BOOL=True
+
+//libsleefquad will be built.
+BUILD_QUAD:BOOL=OFF
 
 //Build shared libs
 BUILD_SHARED_LIBS:BOOL=ON
@@ -522,11 +528,74 @@ Caffe2_perfkernels_avx2_LIB_DEPENDS:STATIC=general;c10;
 //Dependencies for the target
 Caffe2_perfkernels_avx_LIB_DEPENDS:STATIC=general;c10;
 
+//Disable AVX2
+DISABLE_AVX2:BOOL=OFF
+
+//Disable AVX512F
+DISABLE_AVX512F:BOOL=OFF
+
+//Disable float128
+DISABLE_FLOAT128:BOOL=OFF
+
+//Disable FMA4
+DISABLE_FMA4:BOOL=OFF
+
+//Disable long double
+DISABLE_LONG_DOUBLE:BOOL=OFF
+
+//Disable OPENMP
+DISABLE_OPENMP:BOOL=OFF
+
+//Disable SSE2
+DISABLE_SSE2:BOOL=OFF
+
+//Disable AVX
+DISABLE_SSE4:BOOL=OFF
+
+//Disable SVE
+DISABLE_SVE:BOOL=OFF
+
+//Disable VSX
+DISABLE_VSX:BOOL=OFF
+
 //Dot tool for use with Doxygen
 DOXYGEN_DOT_EXECUTABLE:FILEPATH=/bin/dot
 
 //Doxygen documentation generation tool (http://www.doxygen.org)
 DOXYGEN_EXECUTABLE:FILEPATH=/bin/doxygen
+
+//Build fails if AVX2 is not supported by the compiler
+ENFORCE_AVX2:BOOL=OFF
+
+//Build fails if AVX512F is not supported by the compiler
+ENFORCE_AVX512F:BOOL=OFF
+
+//Build fails if float128 is not supported by the compiler
+ENFORCE_FLOAT128:BOOL=OFF
+
+//Build fails if FMA4 is not supported by the compiler
+ENFORCE_FMA4:BOOL=OFF
+
+//Build fails if long double is not supported by the compiler
+ENFORCE_LONG_DOUBLE:BOOL=OFF
+
+//Build fails if OPENMP is not supported by the compiler
+ENFORCE_OPENMP:BOOL=OFF
+
+//Build fails if SSE2 is not supported by the compiler
+ENFORCE_SSE2:BOOL=OFF
+
+//Build fails if AVX is not supported by the compiler
+ENFORCE_SSE4:BOOL=OFF
+
+//Build fails if SVE is not supported by the compiler
+ENFORCE_SVE:BOOL=OFF
+
+//Build fails if tester3 is not built
+ENFORCE_TESTER3:BOOL=OFF
+
+//Build fails if VSX is not supported by the compiler
+ENFORCE_VSX:BOOL=OFF
 
 //Experimental option to use a single thread pool for inter- and
 // intra-op parallelism
@@ -534,6 +603,9 @@ EXPERIMENTAL_SINGLE_THREAD_POOL:STRING=0
 
 //FBGEMM source directory
 FBGEMM_SOURCE_DIR:STRING=/data/users/iuriiz/pytorch2/pytorch/third_party/fbgemm
+
+//Path to a file.
+FFTW3_INCLUDE_DIR:PATH=FFTW3_INCLUDE_DIR-NOTFOUND
 
 //Build with Werror
 FOXI_WERROR:BOOL=OFF
@@ -877,11 +949,23 @@ ONNX_NAMESPACE:STRING=onnx_torch
 //Use lite protobuf instead of full.
 ONNX_USE_LITE_PROTO:BOOL=OFF
 
+//Generate code by proto3
+ONNX_VERIFY_PROTO3:BOOL=OFF
+
 //Build with Werror
 ONNX_WERROR:BOOL=OFF
 
 //OpenMP Support found
 OPENMP_FOUND:BOOL=TRUE
+
+//Path to a library.
+OPENSSL_CRYPTO_LIBRARY:FILEPATH=/usr/lib64/libcrypto.so
+
+//Path to a file.
+OPENSSL_INCLUDE_DIR:PATH=/usr/include
+
+//Path to a library.
+OPENSSL_SSL_LIBRARY:FILEPATH=/usr/lib64/libssl.so
 
 //CXX compiler flags for OpenMP parallelization
 OpenMP_CXX_FLAGS:STRING=-fopenmp
@@ -900,6 +984,9 @@ OpenMP_gomp_LIBRARY:FILEPATH=/usr/lib/gcc/x86_64-redhat-linux/4.8.5/libgomp.so
 
 //Path to the pthread library for OpenMP
 OpenMP_pthread_LIBRARY:FILEPATH=/usr/lib64/libpthread.so
+
+//pkg-config executable
+PKG_CONFIG_EXECUTABLE:FILEPATH=/bin/pkg-config
 
 //PSimd source directory
 PSIMD_SOURCE_DIR:STRING=/data/users/iuriiz/pytorch2/pytorch/third_party/psimd
@@ -1059,9 +1146,6 @@ USE_MPI:BOOL=OFF
 
 //Use -march=native
 USE_NATIVE_ARCH:BOOL=OFF
-
-//Support using NCCL for local collectives
-USE_NCCL:BOOL=OFF
 
 //Use NNAPI
 USE_NNAPI:BOOL=OFF
@@ -1268,10 +1352,10 @@ gtest_hide_internal_symbols:BOOL=OFF
 gtest_main_LIB_DEPENDS:STATIC=general;gtest;
 
 //Dependencies for the target
-libprotobuf-lite_LIB_DEPENDS:STATIC=general;-lpthread;
+libprotobuf-lite_LIB_DEPENDS:STATIC=general;-pthread;
 
 //Dependencies for the target
-libprotobuf_LIB_DEPENDS:STATIC=general;-lpthread;
+libprotobuf_LIB_DEPENDS:STATIC=general;-pthread;
 
 //Dependencies for the target
 libprotoc_LIB_DEPENDS:STATIC=general;libprotobuf;
@@ -1314,6 +1398,12 @@ onnxifi_loader_LIB_DEPENDS:STATIC=general;dl;
 
 //Dependencies for the target
 onnxifi_wrapper_LIB_DEPENDS:STATIC=general;onnxifi_loader;
+
+//Path to a library.
+pkgcfg_lib__OPENSSL_crypto:FILEPATH=/usr/lib64/libcrypto.so
+
+//Path to a library.
+pkgcfg_lib__OPENSSL_ssl:FILEPATH=/usr/lib64/libssl.so
 
 //Value Computed by CMake
 protobuf_BINARY_DIR:STATIC=/data/users/iuriiz/pytorch2/pytorch/build/third_party/protobuf/cmake
@@ -1654,6 +1744,8 @@ COMPILER_SUPPORTS_SSE2:INTERNAL=1
 COMPILER_SUPPORTS_SSE4:INTERNAL=1
 //Test COMPILER_SUPPORTS_SVE
 COMPILER_SUPPORTS_SVE:INTERNAL=
+//Test COMPILER_SUPPORTS_SYS_GETRANDOM
+COMPILER_SUPPORTS_SYS_GETRANDOM:INTERNAL=1
 //Test COMPILER_SUPPORTS_WEAK_ALIASES
 COMPILER_SUPPORTS_WEAK_ALIASES:INTERNAL=1
 //Test COMPILER_WORKS
@@ -1719,11 +1811,13 @@ FIND_PACKAGE_MESSAGE_DETAILS_Doxygen:INTERNAL=[/bin/doxygen][cfound components: 
 //Details about finding Git
 FIND_PACKAGE_MESSAGE_DETAILS_Git:INTERNAL=[/bin/git][v2.17.1()]
 //Details about finding OpenMP
-FIND_PACKAGE_MESSAGE_DETAILS_OpenMP:INTERNAL=[TRUE][TRUE][c ][v3.1()]
+FIND_PACKAGE_MESSAGE_DETAILS_OpenMP:INTERNAL=[TRUE][TRUE][c ][v()]
 //Details about finding OpenMP_C
-FIND_PACKAGE_MESSAGE_DETAILS_OpenMP_C:INTERNAL=[-fopenmp][/usr/lib/gcc/x86_64-redhat-linux/4.8.5/libgomp.so][/usr/lib64/libpthread.so][/usr/lib/gcc/x86_64-redhat-linux/4.8.5/libgomp.so][/usr/lib64/libpthread.so][/usr/lib/gcc/x86_64-redhat-linux/4.8.5/libgomp.so][/usr/lib64/libpthread.so][v3.1()]
+FIND_PACKAGE_MESSAGE_DETAILS_OpenMP_C:INTERNAL=[-fopenmp][/usr/lib/gcc/x86_64-redhat-linux/4.8.5/libgomp.so][/usr/lib64/libpthread.so][/usr/lib/gcc/x86_64-redhat-linux/4.8.5/libgomp.so][/usr/lib64/libpthread.so][v()]
 //Details about finding OpenMP_CXX
-FIND_PACKAGE_MESSAGE_DETAILS_OpenMP_CXX:INTERNAL=[-fopenmp][/usr/lib/gcc/x86_64-redhat-linux/4.8.5/libgomp.so][/usr/lib64/libpthread.so][/usr/lib/gcc/x86_64-redhat-linux/4.8.5/libgomp.so][/usr/lib64/libpthread.so][/usr/lib/gcc/x86_64-redhat-linux/4.8.5/libgomp.so][/usr/lib64/libpthread.so][v3.1()]
+FIND_PACKAGE_MESSAGE_DETAILS_OpenMP_CXX:INTERNAL=[-fopenmp][/usr/lib/gcc/x86_64-redhat-linux/4.8.5/libgomp.so][/usr/lib64/libpthread.so][/usr/lib/gcc/x86_64-redhat-linux/4.8.5/libgomp.so][/usr/lib64/libpthread.so][v()]
+//Details about finding OpenSSL
+FIND_PACKAGE_MESSAGE_DETAILS_OpenSSL:INTERNAL=[/usr/lib64/libcrypto.so][/usr/include][c ][v1.0.2k()]
 //Details about finding PythonInterp
 FIND_PACKAGE_MESSAGE_DETAILS_PythonInterp:INTERNAL=[/home/iuriiz/anaconda3/bin/python][v3.7.2(2.7)]
 //Details about finding PythonLibs
@@ -1874,6 +1968,12 @@ NNPACK_BACKEND-STRINGS:INTERNAL=auto;psimd;scalar
 NNPACK_LIBRARY_TYPE-STRINGS:INTERNAL=default;static;shared
 //Test NO_GCC_EBX_FPIC_BUG
 NO_GCC_EBX_FPIC_BUG:INTERNAL=1
+//ADVANCED property for variable: OPENSSL_CRYPTO_LIBRARY
+OPENSSL_CRYPTO_LIBRARY-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: OPENSSL_INCLUDE_DIR
+OPENSSL_INCLUDE_DIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: OPENSSL_SSL_LIBRARY
+OPENSSL_SSL_LIBRARY-ADVANCED:INTERNAL=1
 //Result of TRY_COMPILE
 OpenMP_COMPILE_RESULT_CXX_fopenmp:INTERNAL=TRUE
 //Result of TRY_COMPILE
@@ -1898,6 +1998,8 @@ OpenMP_SPECTEST_C_:INTERNAL=TRUE
 OpenMP_gomp_LIBRARY-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: OpenMP_pthread_LIBRARY
 OpenMP_pthread_LIBRARY-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: PKG_CONFIG_EXECUTABLE
+PKG_CONFIG_EXECUTABLE-ADVANCED:INTERNAL=1
 //STRINGS property for variable: PTHREADPOOL_LIBRARY_TYPE
 PTHREADPOOL_LIBRARY_TYPE-STRINGS:INTERNAL=default;static;shared
 //ADVANCED property for variable: PYTHON_EXECUTABLE
@@ -1926,8 +2028,46 @@ SLEEF_ARCH_X86:INTERNAL=ON
 SUPPORT_GLIBCXX_USE_C99:INTERNAL=1
 //Result of TRY_COMPILE
 THREADS_HAVE_PTHREAD_ARG:INTERNAL=TRUE
+//Support using NCCL for local collectives
+USE_NCCL:INTERNAL=OFF
 //CMAKE_INSTALL_PREFIX during last run
 _GNUInstallDirs_LAST_CMAKE_INSTALL_PREFIX:INTERNAL=/data/users/iuriiz/pytorch2/pytorch/torch
+_OPENSSL_CFLAGS:INTERNAL=
+_OPENSSL_CFLAGS_I:INTERNAL=
+_OPENSSL_CFLAGS_OTHER:INTERNAL=
+_OPENSSL_FOUND:INTERNAL=1
+_OPENSSL_INCLUDEDIR:INTERNAL=/usr/include
+_OPENSSL_INCLUDE_DIRS:INTERNAL=
+_OPENSSL_LDFLAGS:INTERNAL=-lssl;-lcrypto
+_OPENSSL_LDFLAGS_OTHER:INTERNAL=
+_OPENSSL_LIBDIR:INTERNAL=/usr/lib64
+_OPENSSL_LIBRARIES:INTERNAL=ssl;crypto
+_OPENSSL_LIBRARY_DIRS:INTERNAL=
+_OPENSSL_LIBS:INTERNAL=
+_OPENSSL_LIBS_L:INTERNAL=
+_OPENSSL_LIBS_OTHER:INTERNAL=
+_OPENSSL_LIBS_PATHS:INTERNAL=
+_OPENSSL_PREFIX:INTERNAL=/usr
+_OPENSSL_STATIC_CFLAGS:INTERNAL=
+_OPENSSL_STATIC_CFLAGS_I:INTERNAL=
+_OPENSSL_STATIC_CFLAGS_OTHER:INTERNAL=
+_OPENSSL_STATIC_INCLUDE_DIRS:INTERNAL=
+_OPENSSL_STATIC_LDFLAGS:INTERNAL=-lssl;-lgssapi_krb5;-lkrb5;-lcom_err;-lk5crypto;-lcrypto;-ldl;-lz
+_OPENSSL_STATIC_LDFLAGS_OTHER:INTERNAL=
+_OPENSSL_STATIC_LIBDIR:INTERNAL=
+_OPENSSL_STATIC_LIBRARIES:INTERNAL=ssl;gssapi_krb5;krb5;com_err;k5crypto;crypto;dl;z
+_OPENSSL_STATIC_LIBRARY_DIRS:INTERNAL=
+_OPENSSL_STATIC_LIBS:INTERNAL=
+_OPENSSL_STATIC_LIBS_L:INTERNAL=
+_OPENSSL_STATIC_LIBS_OTHER:INTERNAL=
+_OPENSSL_STATIC_LIBS_PATHS:INTERNAL=
+_OPENSSL_VERSION:INTERNAL=1.0.2k
+_OPENSSL_openssl_INCLUDEDIR:INTERNAL=
+_OPENSSL_openssl_LIBDIR:INTERNAL=
+_OPENSSL_openssl_PREFIX:INTERNAL=
+_OPENSSL_openssl_VERSION:INTERNAL=
+__pkg_config_arguments__OPENSSL:INTERNAL=QUIET;openssl
+__pkg_config_checked__OPENSSL:INTERNAL=1
 //ADVANCED property for variable: gmock_build_tests
 gmock_build_tests-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: gtest_build_samples
@@ -1940,6 +2080,11 @@ gtest_disable_pthreads-ADVANCED:INTERNAL=1
 gtest_force_shared_crt-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: gtest_hide_internal_symbols
 gtest_hide_internal_symbols-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: pkgcfg_lib__OPENSSL_crypto
+pkgcfg_lib__OPENSSL_crypto-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: pkgcfg_lib__OPENSSL_ssl
+pkgcfg_lib__OPENSSL_ssl-ADVANCED:INTERNAL=1
+prefix_result:INTERNAL=/usr/lib64
 //ADVANCED property for variable: protobuf_DEBUG_POSTFIX
 protobuf_DEBUG_POSTFIX-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: protobuf_MODULE_COMPATIBLE
