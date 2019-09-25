@@ -199,6 +199,18 @@ TEST_F(ModulesTest, AvgPool3d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
 }
 
+TEST_F(ModulesTest, Identity) {
+  Identity identity;
+  auto input = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::requires_grad());
+  auto output = identity->forward(input);
+  auto expected = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(torch::equal(output, expected));
+  ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
+}
+
 TEST_F(ModulesTest, Linear) {
   Linear model(5, 2);
   auto x = torch::randn({10, 5}, torch::requires_grad());
@@ -473,6 +485,10 @@ TEST_F(ModulesTest, PairwiseDistance) {
 
   ASSERT_TRUE(output.allclose(expected));
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
+}
+
+TEST_F(ModulesTest, PrettyPrintIdentity) {
+  ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
 
 TEST_F(ModulesTest, PrettyPrintLinear) {
