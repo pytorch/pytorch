@@ -230,7 +230,7 @@ Tensor& lt_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "lt_out", [&]{
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(), "lt_out", [&]{
     // Validate that is possible to convert scalar to tensor dtype without overflow
     native::lt_out(result, self, wrapped_scalar_tensor(other.to<scalar_t>()));
   });
@@ -239,7 +239,7 @@ Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) {
 
 Tensor lt(const Tensor& self, Scalar other) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "lt", [&]{
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(), "lt", [&]{
     // Validate that is possible to convert scalar to tensor dtype without overflow
     native::lt_out(result, self, wrapped_scalar_tensor(other.to<scalar_t>()));
   });
@@ -247,7 +247,7 @@ Tensor lt(const Tensor& self, Scalar other) {
 }
 
 Tensor& lt_(Tensor& self, Scalar other) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "lt_", [&]{
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(), "lt_", [&]{
     // Validate that is possible to convert scalar to tensor dtype without overflow
     native::lt_(self, wrapped_scalar_tensor(other.to<scalar_t>()));
   });
