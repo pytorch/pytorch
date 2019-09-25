@@ -27,7 +27,7 @@ class Conf(object):
 
     def gen_docker_image(self):
         if self.gcc_config_variant == 'gcc5.4_cxx11-abi':
-            return miniutils.quote("yf225/pytorch-binary-docker-image-ubuntu16.04:latest")
+            return miniutils.quote("soumith/conda-cuda-cxx11-ubuntu1604:latest")
 
         docker_word_substitution = {
             "manywheel": "manylinux",
