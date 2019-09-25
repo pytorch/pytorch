@@ -1,0 +1,366 @@
+Performing C++ SOURCE FILE Test CAFFE2_IS_NUMA_AVAILABLE failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_a8c70 
+[1/2] Building CXX object CMakeFiles/cmTC_a8c70.dir/src.cxx.o
+FAILED: CMakeFiles/cmTC_a8c70.dir/src.cxx.o 
+/bin/c++    -DCAFFE2_IS_NUMA_AVAILABLE -std=c++11 -o CMakeFiles/cmTC_a8c70.dir/src.cxx.o -c src.cxx
+src.cxx:1:18: fatal error: numa.h: No such file or directory
+ #include <numa.h>
+                  ^
+compilation terminated.
+ninja: build stopped: subcommand failed.
+
+Source file was:
+#include <numa.h>
+    #include <numaif.h>
+
+    int main(int argc, char** argv) {
+    }
+Performing C++ SOURCE FILE Test CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_1de06 
+[1/2] Building CXX object CMakeFiles/cmTC_1de06.dir/src.cxx.o
+FAILED: CMakeFiles/cmTC_1de06.dir/src.cxx.o 
+/bin/c++    -DCAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING -std=c++11 -o CMakeFiles/cmTC_1de06.dir/src.cxx.o -c src.cxx
+src.cxx:1:30: fatal error: glog/stl_logging.h: No such file or directory
+ #include <glog/stl_logging.h>
+                              ^
+compilation terminated.
+ninja: build stopped: subcommand failed.
+
+Source file was:
+#include <glog/stl_logging.h>
+    int main(int argc, char** argv) {
+      return 0;
+    }
+Performing C++ SOURCE FILE Test CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_18dbe 
+[1/2] Building CXX object CMakeFiles/cmTC_18dbe.dir/src.cxx.o
+FAILED: CMakeFiles/cmTC_18dbe.dir/src.cxx.o 
+/bin/c++    -Wno-deprecated -DCAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS -mavx512f -mavx512dq -mavx512vl -o CMakeFiles/cmTC_18dbe.dir/src.cxx.o -c src.cxx
+c++: error: unrecognized command line option ‘-mavx512f’
+c++: error: unrecognized command line option ‘-mavx512dq’
+c++: error: unrecognized command line option ‘-mavx512vl’
+ninja: build stopped: subcommand failed.
+
+Source file was:
+#if defined(_MSC_VER)
+     #include <intrin.h>
+     #else
+     #include <immintrin.h>
+     #endif
+     // check avx512f
+     __m512 addConstant(__m512 arg) {
+       return _mm512_add_ps(arg, _mm512_set1_ps(1.f));
+     }
+     // check avx512dq
+     __m512 andConstant(__m512 arg) {
+       return _mm512_and_ps(arg, _mm512_set1_ps(1.f));
+     }
+     int main() {
+       __m512i a = _mm512_set1_epi32(1);
+       __m256i ymm = _mm512_extracti64x4_epi64(a, 0);
+       ymm = _mm256_abs_epi64(ymm); // check avx512vl
+       __mmask16 m = _mm512_cmp_epi32_mask(a, a, _MM_CMPINT_EQ);
+       __m512i r = _mm512_andnot_si512(a, a);
+     }
+Determining if the pthread_create exist failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_a19d9 
+[1/2] Building C object CMakeFiles/cmTC_a19d9.dir/CheckSymbolExists.c.o
+[2/2] Linking C executable cmTC_a19d9
+FAILED: cmTC_a19d9 
+: && /bin/cc   -rdynamic CMakeFiles/cmTC_a19d9.dir/CheckSymbolExists.c.o  -o cmTC_a19d9   && :
+CMakeFiles/cmTC_a19d9.dir/CheckSymbolExists.c.o: In function `main':
+CheckSymbolExists.c:(.text+0x1b): undefined reference to `pthread_create'
+collect2: error: ld returned 1 exit status
+ninja: build stopped: subcommand failed.
+
+File /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp/CheckSymbolExists.c:
+/* */
+#include <pthread.h>
+
+int main(int argc, char** argv)
+{
+  (void)argv;
+#ifndef pthread_create
+  return ((int*)(&pthread_create))[argc];
+#else
+  (void)argc;
+  return 0;
+#endif
+}
+
+Determining if the function pthread_create exists in the pthreads failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_67223 
+[1/2] Building C object CMakeFiles/cmTC_67223.dir/CheckFunctionExists.c.o
+[2/2] Linking C executable cmTC_67223
+FAILED: cmTC_67223 
+: && /bin/cc -DCHECK_FUNCTION_EXISTS=pthread_create  -rdynamic CMakeFiles/cmTC_67223.dir/CheckFunctionExists.c.o  -o cmTC_67223  -lpthreads && :
+/bin/ld: cannot find -lpthreads
+collect2: error: ld returned 1 exit status
+ninja: build stopped: subcommand failed.
+
+
+Performing C SOURCE FILE Test NNPACK_ARCH_IS_X86_32 failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_9d142 
+[1/2] Building C object CMakeFiles/cmTC_9d142.dir/src.c.o
+FAILED: CMakeFiles/cmTC_9d142.dir/src.c.o 
+/bin/cc   -DNNPACK_ARCH_IS_X86_32 -o CMakeFiles/cmTC_9d142.dir/src.c.o   -c src.c
+src.c:3:10: error: #error AVX only on x86_64
+         #error AVX only on x86_64
+          ^
+ninja: build stopped: subcommand failed.
+
+Source file was:
+
+      #if ! (defined(__i386) || defined(_M_IX86))
+        #error AVX only on x86_64
+      #endif
+      int main() {
+        return 0;
+      }
+Performing C++ SOURCE FILE Test HAVE_CXX_FLAG_WSHORTEN_64_TO_32 failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_8ed43 
+[1/2] Building CXX object CMakeFiles/cmTC_8ed43.dir/src.cxx.o
+FAILED: CMakeFiles/cmTC_8ed43.dir/src.cxx.o 
+/bin/c++    -Wno-deprecated -fvisibility-inlines-hidden  -std=c++11  -Wall  -Wextra  -Wshadow  -pedantic  -pedantic-errors -DHAVE_CXX_FLAG_WSHORTEN_64_TO_32  -Wshorten-64-to-32   -Wshorten-64-to-32 -o CMakeFiles/cmTC_8ed43.dir/src.cxx.o -c src.cxx
+c++: error: unrecognized command line option '-Wshorten-64-to-32'
+c++: error: unrecognized command line option '-Wshorten-64-to-32'
+ninja: build stopped: subcommand failed.
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test HAVE_CXX_FLAG_WD654 failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_4c04e 
+[1/2] Building CXX object CMakeFiles/cmTC_4c04e.dir/src.cxx.o
+FAILED: CMakeFiles/cmTC_4c04e.dir/src.cxx.o 
+/bin/c++    -Wno-deprecated -fvisibility-inlines-hidden  -std=c++11  -Wall  -Wextra  -Wshadow  -pedantic  -pedantic-errors  -Wfloat-equal  -fstrict-aliasing  -Wno-deprecated-declarations  -Wstrict-aliasing -DHAVE_CXX_FLAG_WD654  -wd654   -wd654 -o CMakeFiles/cmTC_4c04e.dir/src.cxx.o -c src.cxx
+c++: error: unrecognized command line option '-wd654'
+c++: error: unrecognized command line option '-wd654'
+ninja: build stopped: subcommand failed.
+
+Source file was:
+int main() { return 0; }
+Performing C++ SOURCE FILE Test HAVE_CXX_FLAG_WTHREAD_SAFETY failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_fc717 
+[1/2] Building CXX object CMakeFiles/cmTC_fc717.dir/src.cxx.o
+FAILED: CMakeFiles/cmTC_fc717.dir/src.cxx.o 
+/bin/c++    -Wno-deprecated -fvisibility-inlines-hidden  -std=c++11  -Wall  -Wextra  -Wshadow  -pedantic  -pedantic-errors  -Wfloat-equal  -fstrict-aliasing  -Wno-deprecated-declarations  -Wstrict-aliasing -DHAVE_CXX_FLAG_WTHREAD_SAFETY  -Wthread-safety   -Wthread-safety -o CMakeFiles/cmTC_fc717.dir/src.cxx.o -c src.cxx
+c++: error: unrecognized command line option '-Wthread-safety'
+c++: error: unrecognized command line option '-Wthread-safety'
+ninja: build stopped: subcommand failed.
+
+Source file was:
+int main() { return 0; }
+Performing C SOURCE FILE Test C_HAS_AVX_1 failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_47f2e 
+[1/2] Building C object CMakeFiles/cmTC_47f2e.dir/src.c.o
+FAILED: CMakeFiles/cmTC_47f2e.dir/src.c.o 
+/bin/cc   -fopenmp -DC_HAS_AVX_1 -fPIE -o CMakeFiles/cmTC_47f2e.dir/src.c.o   -c src.c
+src.c: In function ‘main’:
+src.c:6:5: error: unknown type name ‘__m256’
+     __m256 a;
+     ^
+ninja: build stopped: subcommand failed.
+
+Source file was:
+
+  #include <immintrin.h>
+
+  int main()
+  {
+    __m256 a;
+    a = _mm256_set1_ps(0);
+    return 0;
+  }
+
+Performing C SOURCE FILE Test C_HAS_AVX2_1 failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_86f1e 
+[1/2] Building C object CMakeFiles/cmTC_86f1e.dir/src.c.o
+FAILED: CMakeFiles/cmTC_86f1e.dir/src.c.o 
+/bin/cc   -fopenmp -DC_HAS_AVX2_1 -fPIE -o CMakeFiles/cmTC_86f1e.dir/src.c.o   -c src.c
+src.c: In function ‘main’:
+src.c:6:5: error: unknown type name ‘__m256i’
+     __m256i a = {0};
+     ^
+src.c:8:5: error: unknown type name ‘__m256i’
+     __m256i x;
+     ^
+ninja: build stopped: subcommand failed.
+
+Source file was:
+
+  #include <immintrin.h>
+
+  int main()
+  {
+    __m256i a = {0};
+    a = _mm256_abs_epi16(a);
+    __m256i x;
+    _mm256_extract_epi64(x, 0); // we rely on this in our AVX2 code
+    return 0;
+  }
+
+Performing C SOURCE FILE Test CXX_HAS_AVX_1 failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_0a847 
+[1/2] Building C object CMakeFiles/cmTC_0a847.dir/src.c.o
+FAILED: CMakeFiles/cmTC_0a847.dir/src.c.o 
+/bin/cc   -fopenmp -DCXX_HAS_AVX_1 -fPIE -o CMakeFiles/cmTC_0a847.dir/src.c.o   -c src.c
+src.c: In function ‘main’:
+src.c:6:5: error: unknown type name ‘__m256’
+     __m256 a;
+     ^
+ninja: build stopped: subcommand failed.
+
+Source file was:
+
+  #include <immintrin.h>
+
+  int main()
+  {
+    __m256 a;
+    a = _mm256_set1_ps(0);
+    return 0;
+  }
+
+Performing C SOURCE FILE Test CXX_HAS_AVX2_1 failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_4b2f1 
+[1/2] Building C object CMakeFiles/cmTC_4b2f1.dir/src.c.o
+FAILED: CMakeFiles/cmTC_4b2f1.dir/src.c.o 
+/bin/cc   -fopenmp -DCXX_HAS_AVX2_1 -fPIE -o CMakeFiles/cmTC_4b2f1.dir/src.c.o   -c src.c
+src.c: In function ‘main’:
+src.c:6:5: error: unknown type name ‘__m256i’
+     __m256i a = {0};
+     ^
+src.c:8:5: error: unknown type name ‘__m256i’
+     __m256i x;
+     ^
+ninja: build stopped: subcommand failed.
+
+Source file was:
+
+  #include <immintrin.h>
+
+  int main()
+  {
+    __m256i a = {0};
+    a = _mm256_abs_epi16(a);
+    __m256i x;
+    _mm256_extract_epi64(x, 0); // we rely on this in our AVX2 code
+    return 0;
+  }
+
+Performing C SOURCE FILE Test BLAS_F2C_DOUBLE_WORKS failed with the following compile output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_63327 
+[1/2] Building C object CMakeFiles/cmTC_63327.dir/src.c.o
+[2/2] Linking C executable cmTC_63327
+
+...and run output:
+
+Return value: 1
+Source file was:
+
+#include <stdlib.h>
+#include <stdio.h>
+float x[4] = { 1, 2, 3, 4 };
+float y[4] = { .1, .01, .001, .0001 };
+int four = 4;
+int one = 1;
+extern double sdot_();
+int main() {
+  int i;
+  double r = sdot_(&four, x, &one, y, &one);
+  exit((float)r != (float).1234);
+}
+Performing C SOURCE FILE Test COMPILER_SUPPORTS_LONG_DOUBLE failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_302c8 
+[1/2] Building C object CMakeFiles/cmTC_302c8.dir/src.c.o
+FAILED: CMakeFiles/cmTC_302c8.dir/src.c.o 
+/bin/cc   -fopenmp -Wno-ignored-qualifiers -Wno-absolute-value -DCOMPILER_SUPPORTS_LONG_DOUBLE -fPIE -o CMakeFiles/cmTC_302c8.dir/src.c.o   -c src.c
+src.c: In function ‘vcast_vl_l’:
+src.c:3:3: internal compiler error: in type_natural_mode, at config/i386/i386.c:6065
+   vlongdouble vcast_vl_l(long double d) { return (vlongdouble) { d, d }; }
+   ^
+Please submit a full bug report,
+with preprocessed source if appropriate.
+See <http://bugzilla.redhat.com/bugzilla> for instructions.
+Preprocessed source stored into /tmp/cccbwszY.out file, please attach this to your bugreport.
+ninja: build stopped: subcommand failed.
+
+Source file was:
+
+  typedef long double vlongdouble __attribute__((vector_size(sizeof(long double)*2)));
+  vlongdouble vcast_vl_l(long double d) { return (vlongdouble) { d, d }; }
+  int main() { vlongdouble vld = vcast_vl_l(0);
+  }
+Performing C SOURCE FILE Test COMPILER_SUPPORTS_SVE failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_7aef7 
+[1/2] Building C object CMakeFiles/cmTC_7aef7.dir/src.c.o
+FAILED: CMakeFiles/cmTC_7aef7.dir/src.c.o 
+/bin/cc   -fopenmp -Wno-ignored-qualifiers -Wno-absolute-value -DCOMPILER_SUPPORTS_SVE -march=armv8-a+sve -fPIE -o CMakeFiles/cmTC_7aef7.dir/src.c.o   -c src.c
+src.c:1:0: error: bad value (armv8-a+sve) for -march= switch
+ 
+ ^
+cc1: warning: unrecognized command line option "-Wno-absolute-value" [enabled by default]
+ninja: build stopped: subcommand failed.
+
+Source file was:
+
+  #include <arm_sve.h>
+  int main() {
+    svint32_t r = svdup_n_s32(1); }
+Performing C SOURCE FILE Test COMPILER_SUPPORTS_AVX512F failed with the following output:
+Change Dir: /data/users/iuriiz/pytorch2/pytorch/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/home/iuriiz/anaconda3/bin/ninja cmTC_14d49 
+[1/2] Building C object CMakeFiles/cmTC_14d49.dir/src.c.o
+FAILED: CMakeFiles/cmTC_14d49.dir/src.c.o 
+/bin/cc   -fopenmp -Wno-ignored-qualifiers -Wno-absolute-value -DCOMPILER_SUPPORTS_AVX512F -mavx512f -fPIE -o CMakeFiles/cmTC_14d49.dir/src.c.o   -c src.c
+cc: error: unrecognized command line option ‘-mavx512f’
+ninja: build stopped: subcommand failed.
+
+Source file was:
+
+  #if defined(_MSC_VER)
+  #include <intrin.h>
+  #else
+  #include <x86intrin.h>
+  #endif
+  __m512 addConstant(__m512 arg) {
+    return _mm512_add_ps(arg, _mm512_set1_ps(1.f));
+  }
+  int main() {
+    __m512i a = _mm512_set1_epi32(1);
+    __m256i ymm = _mm512_extracti64x4_epi64(a, 0);
+    __mmask16 m = _mm512_cmp_epi32_mask(a, a, _MM_CMPINT_EQ);
+    __m512i r = _mm512_andnot_si512(a, a); }

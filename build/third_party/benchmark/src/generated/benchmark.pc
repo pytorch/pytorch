@@ -1,0 +1,11 @@
+prefix=/data/users/iuriiz/pytorch2/pytorch/torch
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: benchmark
+Description: Google microbenchmark framework
+Version: 1.4.0
+
+Libs: -L${libdir} -lbenchmark
+Cflags: -I${includedir}

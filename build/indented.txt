@@ -1,0 +1,5 @@
+
+      from distutils import sysconfig
+      ext_suffix = sysconfig.get_config_var('EXT_SUFFIX')
+      print(ext_suffix if ext_suffix else '')
+  
