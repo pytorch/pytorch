@@ -35,8 +35,9 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
 from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
-    dtypes, dtypesIfCUDA
+    dtypes, dtypesIfCUDA, deviceCountAtLeast
 import torch.backends.quantized
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -9671,7 +9672,7 @@ class TestTorchDeviceType(TestCase):
 
         def _test_underdetermined(a, b, expectedNorm):
             # underdetermined systems are not supported on the GPU
-            if 'cuda' in device:
+            if not torch.device(device).type == 'cpu':
                 return
 
             m = a.size()[0]
@@ -9826,7 +9827,7 @@ class TestTorchDeviceType(TestCase):
         if device == 'cpu':
             rng_device = None
         else:
-            rng_device = [0]
+            rng_device = [device]
 
         # Test core functionality. On CUDA, for small n, randperm is offloaded to CPU instead. For large n, randperm is
         # executed on GPU.
@@ -10864,7 +10865,7 @@ class TestTorchDeviceType(TestCase):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
             x_clone = x.clone()
-            if (device == 'cuda' and dt == torch.bfloat16):
+            if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: copy(x))
                 continue
             y = copy(x)
@@ -10890,7 +10891,7 @@ class TestTorchDeviceType(TestCase):
     def test_view_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
-            if (device == 'cuda' and dt == torch.bfloat16):
+            if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: x.view(6))
                 continue
             self.assertEqual(x.view(6).shape, [6])
@@ -10898,7 +10899,7 @@ class TestTorchDeviceType(TestCase):
     def test_fill_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor((1, 1), dtype=dt, device=device)
-            if (device == 'cuda' and dt == torch.bfloat16):
+            if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: x.fill_(1))
                 continue
             x.fill_(1)
@@ -10910,7 +10911,7 @@ class TestTorchDeviceType(TestCase):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor((1, 1), dtype=dt, device=device)
             y = x.clone()
-            if (device == 'cuda' and dt == torch.bfloat16):
+            if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                 # `x - y` is used inside of the assertEqual
                 self.assertRaises(RuntimeError, lambda: x - y)
                 continue
@@ -10919,7 +10920,7 @@ class TestTorchDeviceType(TestCase):
     def test_cat_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
-            if (device == 'cuda' and dt == torch.bfloat16):
+            if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: torch.cat((x, x), 0))
                 continue
 
@@ -10936,7 +10937,7 @@ class TestTorchDeviceType(TestCase):
         for shape in shapes:
             for dt in torch.testing.get_all_dtypes():
 
-                if (device == 'cuda' and dt == torch.bfloat16):
+                if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                     self.assertRaises(RuntimeError, lambda: torch.zeros(shape, device=device, dtype=dt).shape)
                     self.assertRaises(RuntimeError, lambda: torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                     self.assertRaises(RuntimeError, lambda: torch.full(shape, 3, device=device, dtype=dt).shape)
@@ -11093,7 +11094,7 @@ class TestTorchDeviceType(TestCase):
                 # in this test
                 continue
 
-            if device == 'cuda' and dt == torch.bfloat16:
+            if torch.device(device).type == 'cuda' and dt == torch.bfloat16:
                 self.assertRaises(RuntimeError, lambda: x > b)
                 self.assertRaises(RuntimeError, lambda: x < b)
                 self.assertRaises(RuntimeError, lambda: x == b)
@@ -11293,12 +11294,12 @@ class TestTorchDeviceType(TestCase):
                     src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
                     mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
 
-                    if dt == torch.bfloat16 and device == 'cuda':
+                    if dt == torch.bfloat16 and torch.device(device).type == 'cuda':
                         # remove once bfloat16 implemented on CUDA
                         self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                         continue
 
-                    if dt == torch.half and device == 'cpu':
+                    if dt == torch.half and torch.device(device).type == 'cpu':
                         self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                         continue
 
@@ -12364,29 +12365,29 @@ class TestTorchDeviceType(TestCase):
         run_test(device, torch.long)
         run_test(device, torch.uint8)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    @deviceCountAtLeast(2)
     @onlyCUDA
-    def test_reverse_binary_ops_multiple_device(self, device):
-        self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to("cuda:1"))    # __radd__
-        self.assertEqual(2 - torch.tensor(3), 2 - torch.tensor(3).to("cuda:1"))    # __rsub__
-        self.assertEqual(2 * torch.tensor(3), 2 * torch.tensor(3).to("cuda:1"))    # __rmul__
-        self.assertEqual(2 / torch.tensor(3), 2 / torch.tensor(3).to("cuda:1"))    # __rtruediv__
-        self.assertEqual(2 // torch.tensor(3), 2 // torch.tensor(3).to("cuda:1"))  # __rfloordiv__
+    def test_reverse_binary_ops_multiple_device(self, devices):
+        self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to(devices[1]))    # __radd__
+        self.assertEqual(2 - torch.tensor(3), 2 - torch.tensor(3).to(devices[1]))    # __rsub__
+        self.assertEqual(2 * torch.tensor(3), 2 * torch.tensor(3).to(devices[1]))    # __rmul__
+        self.assertEqual(2 / torch.tensor(3), 2 / torch.tensor(3).to(devices[1]))    # __rtruediv__
+        self.assertEqual(2 // torch.tensor(3), 2 // torch.tensor(3).to(devices[1]))  # __rfloordiv__
 
         self.assertEqual(
-            torch.tensor(2).to("cuda:1") + torch.tensor(3).to("cuda:0"),
+            torch.tensor(2).to(devices[1]) + torch.tensor(3).to(devices[0]),
             torch.tensor(2) + torch.tensor(3))
         self.assertEqual(
-            torch.tensor(2).to("cuda:1") - torch.tensor(3).to("cuda:0"),
+            torch.tensor(2).to(devices[1]) - torch.tensor(3).to(devices[0]),
             torch.tensor(2) - torch.tensor(3))
         self.assertEqual(
-            torch.tensor(2).to("cuda:1") * torch.tensor(3).to("cuda:0"),
+            torch.tensor(2).to(devices[1]) * torch.tensor(3).to(devices[0]),
             torch.tensor(2) * torch.tensor(3))
         self.assertEqual(
-            torch.tensor(2).to("cuda:1") / torch.tensor(3).to("cuda:0"),
+            torch.tensor(2).to(devices[1]) / torch.tensor(3).to(devices[0]),
             torch.tensor(2) / torch.tensor(3))
         self.assertEqual(
-            torch.tensor(2).to("cuda:1") // torch.tensor(3).to("cuda:0"),
+            torch.tensor(2).to(devices[1]) // torch.tensor(3).to(devices[0]),
             torch.tensor(2) // torch.tensor(3))
 
     @onlyCUDA
@@ -12424,20 +12425,20 @@ class TestTorchDeviceType(TestCase):
             RuntimeError, "multinomial arguments must have the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    @deviceCountAtLeast(2)
     @onlyCUDA
-    def test_multinomial_gpu_device_constrain(self, device):
-        x = torch.empty(0, device="cuda:0")
-        y = torch.empty(0, device="cuda:1")
+    def test_multinomial_gpu_device_constrain(self, devices):
+        x = torch.empty(0, device=devices[0])
+        y = torch.empty(0, device=devices[1])
         self.assertRaisesRegex(
             RuntimeError, "multinomial arguments must have the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    @deviceCountAtLeast(2)
     @onlyCUDA
-    def test_zeros_like_multiple_device(self, device):
-        expected = torch.zeros(100, 100, device=device)
-        x = torch.randn(100, 100, device='cuda:1', dtype=torch.float32)
+    def test_zeros_like_multiple_device(self, devices):
+        expected = torch.zeros(100, 100, device=devices[0])
+        x = torch.randn(100, 100, device=devices[1], dtype=torch.float32)
         output = torch.zeros_like(x)
         self.assertEqual(output, expected)
 
@@ -12448,24 +12449,22 @@ class TestTorchDeviceType(TestCase):
         res1 = torch.ones_like(expected)
         self.assertEqual(res1, expected)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    @deviceCountAtLeast(2)
     @onlyCUDA
-    def test_ones_like_multiple_device(self, device):
-        expected = torch.ones(100, 100, device=device)
-        x = torch.randn(100, 100, device='cuda:1', dtype=torch.float32)
+    def test_ones_like_multiple_device(self, devices):
+        expected = torch.ones(100, 100, device=devices[0])
+        x = torch.randn(100, 100, device=devices[1], dtype=torch.float32)
         output = torch.ones_like(x)
         self.assertEqual(output, expected)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
+    @deviceCountAtLeast(2)
     @onlyCUDA
-    def test_device_guard(self, device):
+    def test_device_guard(self, devices):
         # verify that all operators with `device_guard: False` behave properly with multiple devices.
         # TODO: if we had operator introspection we could figure out this set of operators automatically...
-        current_device = torch.cuda.current_device()
-        device = torch.device('cuda:1') if current_device == 0 else torch.device('cuda:0')
-        x = torch.randn((1, 2, 3), device=device)
-        y = torch.zeros((1, 3, 2), device=device)
-        scalar = torch.tensor(5, device=device)
+        x = torch.randn((1, 2, 3), device=devices[1])
+        y = torch.zeros((1, 3, 2), device=devices[1])
+        scalar = torch.tensor(5, device=devices[1])
 
         # property ops
         torch.cudnn_is_acceptable(x)
@@ -12497,7 +12496,7 @@ class TestTorchDeviceType(TestCase):
 
         # in-place ops
         def inplace():
-            return torch.randn((1, 2, 3), device=device)
+            return torch.randn((1, 2, 3), device=devices[1])
         inplace().as_strided_(y.size(), y.stride())
         inplace().resize_(y.size())
         inplace().squeeze_()
@@ -12552,10 +12551,10 @@ class TestTorchDeviceType(TestCase):
         torch.set_default_tensor_type(torch.cuda.DoubleTensor)
         torch.set_default_dtype(torch.float32)
         self.assertIs(torch.float32, torch.tensor(0.).dtype)
-        self.assertEqual(torch.device('cuda:0'), torch.tensor(0.).device)
+        self.assertEqual(torch.device(device), torch.tensor(0.).device)
         torch.set_default_dtype(torch.float64)
         self.assertIs(torch.float64, torch.tensor(0.).dtype)
-        self.assertEqual(torch.device('cuda:0'), torch.tensor(0.).device)
+        self.assertEqual(torch.device(device), torch.tensor(0.).device)
         torch.set_default_tensor_type(saved_type)
 
     @onlyCUDA
@@ -12627,12 +12626,12 @@ class TestTorchDeviceType(TestCase):
                 torch.lu_solve(b, A, torch.rand(A.shape[:-1], device=b_device).int())
 
     # Note - reports a leak of 512 bytes on CUDA device 1
-    @unittest.skipIf(torch.cuda.device_count() < 2, 'less than 2 GPUs detected')
+    @deviceCountAtLeast(2)
     @skipCUDAMemoryLeakCheckIf(True)
     @onlyCUDA
-    def test_tensor_set_errors_multigpu(self, device):
-        f_cuda0 = torch.randn((2, 3), dtype=torch.float32, device='cuda:0')
-        f_cuda1 = torch.randn((2, 3), dtype=torch.float32, device='cuda:1')
+    def test_tensor_set_errors_multigpu(self, devices):
+        f_cuda0 = torch.randn((2, 3), dtype=torch.float32, device=devices[0])
+        f_cuda1 = torch.randn((2, 3), dtype=torch.float32, device=devices[1])
 
         self.assertRaises(RuntimeError, lambda: f_cuda0.set_(f_cuda1.storage()))
         self.assertRaises(RuntimeError,
@@ -12653,13 +12652,13 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(xc.float(), xc2.float())
 
     @onlyCUDA
-    def test_serialization(self, device):
+    @deviceCountAtLeast(1)  # Note: Tests works with one but prefers more devices
+    def test_serialization(self, devices):
         def _test_serialization(filecontext_lambda):
-            device_count = torch.cuda.device_count()
             t0 = torch.cuda.FloatTensor(5).fill_(1)
-            torch.cuda.set_device(device_count - 1)
-            tn = torch.cuda.FloatTensor(3).fill_(2)
-            torch.cuda.set_device(0)
+            with torch.cuda.device(devices[-1]):
+                tn = torch.cuda.FloatTensor(3).fill_(2)
+            torch.cuda.set_device(devices[0])
             b = (t0, tn)
             with filecontext_lambda() as f:
                 torch.save(b, f)
@@ -12667,8 +12666,8 @@ class TestTorchDeviceType(TestCase):
                 c = torch.load(f)
                 self.assertEqual(b, c, 0)
                 u0, un = c
-                self.assertEqual(u0.get_device(), 0)
-                self.assertEqual(un.get_device(), device_count - 1)
+                self.assertEqual(str(u0.device), devices[0])
+                self.assertEqual(str(un.device), devices[-1])
 
         _test_serialization(tempfile.NamedTemporaryFile)
         _test_serialization(BytesIOContext)
@@ -12899,10 +12898,9 @@ class TestTorchDeviceType(TestCase):
         x = torch.tensor([], device=device)
         self.assertEqual(x.dtype, x.storage().dtype)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, 'less than 2 GPUs detected')
+    @deviceCountAtLeast(2)
     @onlyCUDA
-    def test_storage_multigpu(self, device):
-        devices = ['cuda:0', 'cuda:1']
+    def test_storage_multigpu(self, devices):
         for device in devices:
             x = torch.tensor([], device=device)
             self.assertEqual(x.dtype, x.storage().dtype)
