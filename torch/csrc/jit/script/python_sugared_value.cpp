@@ -660,6 +660,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     if (auto callee = as_function(compiled_fn)) {
       return std::make_shared<FunctionValue>(*callee);
     }
+  }
+
+  py::bool_ isMethod = py::module::import("inspect").attr("ismethod")(obj);
+  // methods here have been explicitly annotated to not be compiled,
+  // so they do not have the same overload and compile checks as for functions
+  if (isFunction || isMethod) {
     auto rcb = py::module::import("torch.jit").attr("_gen_rcb")(obj, 0);
     return std::make_shared<PythonValue>(obj, rcb);
   }

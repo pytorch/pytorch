@@ -197,8 +197,8 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
   }
 }
 
-void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
-    const {
+void Node::printAttributes(std::ostream &out,
+                           bool ignore_subgraph = false) const {
   out << "[";
   auto names = attributeNames();
   int i = 0;
@@ -234,11 +234,10 @@ static std::ostream& indent(std::ostream& out, size_t level) {
   return out;
 }
 
-std::ostream& Node::print(
-    std::ostream& out,
-    size_t level,
-    std::vector<const Node*>* groups,
-    bool print_source_locations) const {
+std::ostream &Node::print(std::ostream &out, size_t level,
+                          std::vector<const Node *> *groups,
+                          bool print_source_locations, bool print_attributes,
+                          bool print_scopes, bool print_body) const {
   auto outs = outputs();
   indent(out, level) << const_value_list_with_types(outs);
   out << " = ";
@@ -246,7 +245,7 @@ std::ostream& Node::print(
     auto* pyOp = static_cast<const ::torch::jit::PythonOp*>(this);
     out << "^" << pyOp->name();
     pyOp->writeScalars(out);
-  } else {
+  } else if (print_attributes) {
     if (hasAttribute(attr::Subgraph) && groups) {
       out << kind().toQualString() << "_" << groups->size();
       if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
@@ -263,10 +262,13 @@ std::ostream& Node::print(
   }
 
   out << "(" << inputs() << ")";
-  std::string scName = scopeName();
-  if (!scName.empty()) {
-    out << ", ";
-    out << "scope: " << scName;
+
+  if (print_scopes) {
+    std::string scName = scopeName();
+    if (!scName.empty()) {
+      out << ", ";
+      out << "scope: " << scName;
+    }
   }
 
   // In debug print, append file:line:col as a comment after each node
@@ -277,6 +279,10 @@ std::ostream& Node::print(
       std::tie(filename, line, col) = *file_line_col;
       out << " # " << filename << ":" << line << ":" << col;
     }
+  }
+
+  if (!print_body) {
+    return out;
   }
 
   out << "\n";
