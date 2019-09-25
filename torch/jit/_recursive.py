@@ -3,7 +3,7 @@ import torch
 import collections
 
 import torch._jit_internal as _jit_internal
-from torch.nn import Module, ModuleList, Parameter, Sequential
+from torch.nn import Module, ModuleList, Parameter, Sequential, ModuleDict
 from torch._six import get_function_from_type
 
 
@@ -71,7 +71,13 @@ def copy_to_script_module(original, stubs):
         else:
             the_type = torch._C._jit_try_infer_type(item)
         if the_type is not None:
-            script_module._c._register_attribute(name, the_type, item)
+            try:
+                script_module._c._register_attribute(name, the_type, item)
+            except RuntimeError as e:
+                msg = "When compiling {}, could not register attribute {} of " \
+                      "type {} with value {}\nOriginal error: {}" \
+                      .format(type(original), name, the_type, item, str(e))
+                raise RuntimeError(msg)
 
     # Copy overloads
     script_module.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
@@ -105,7 +111,7 @@ def recursive_script(mod, exclude_methods=()):
     if isinstance(mod, torch.jit.ScriptModule):
         return mod
 
-    if isinstance(mod, (torch.nn.ModuleList, torch.nn.Sequential)):
+    if isinstance(mod, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)):
         # Create constant versions for the iterable modules
         return create_constant_iterable_module(mod)
 
@@ -220,7 +226,7 @@ def create_constant_iterable_module(module):
     modules = collections.OrderedDict()
 
     for key, submodule in module._modules.items():
-        if isinstance(submodule, (torch.nn.ModuleList, torch.nn.Sequential)):
+        if isinstance(submodule, (ModuleList, Sequential, ModuleDict)):
             # Make each item in the module a constant
             modules[key] = create_constant_iterable_module(submodule)
         else:
@@ -230,6 +236,8 @@ def create_constant_iterable_module(module):
         return torch.jit._ConstSequential(Sequential(modules))
     elif isinstance(module, ModuleList):
         return torch.jit._ConstModuleList(modules)
+    elif isinstance(module, ModuleDict):
+        return torch.jit._ConstModuleDict(modules)
     else:
-        raise RuntimeError("Only nn.ModuleList and nn.Sequential can be made "
+        raise RuntimeError("Only nn.ModuleList, nn.Sequential, and nn.ModuleDict can be made "
                            "into constant modules, found {}".format(module))

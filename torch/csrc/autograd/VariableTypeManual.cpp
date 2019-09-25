@@ -93,6 +93,22 @@ void VariableType::set_data(const Tensor & self, const Tensor & new_data) {
   as_variable_ref(self).set_data(new_data);
 }
 
+Tensor VariableType::data(const Tensor & self) {
+  return as_variable_ref(self).variable_data();
+}
+
+bool VariableType::is_leaf(const Tensor & self) {
+  return as_variable_ref(self).is_leaf();
+}
+
+int64_t VariableType::output_nr(const Tensor & self) {
+  return as_variable_ref(self).output_nr();
+}
+
+int64_t VariableType::_version(const Tensor & self) {
+  return as_variable_ref(self).current_version();
+}
+
 // We don't have an outplace copy, so this can't be generated automatically
 Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;
@@ -125,7 +141,7 @@ Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blockin
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
-    grad_fn->src_type = &src.type();
+    grad_fn->src_options = src.options();
     grad_fn->src_device = src.device();
   }
   {

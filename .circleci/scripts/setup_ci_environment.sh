@@ -45,7 +45,7 @@ retry () {
 retry sudo pip -q install awscli==1.16.35
 
 if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
-  DRIVER_FN="NVIDIA-Linux-x86_64-410.104.run"
+  DRIVER_FN="NVIDIA-Linux-x86_64-430.40.run"
   wget "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
   sudo /bin/bash "$DRIVER_FN" -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
   nvidia-smi
@@ -54,7 +54,6 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
   echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
   echo "declare -x COMMIT_SOURCE=${CIRCLE_BRANCH:-}" >> /home/circleci/project/env
-  echo "declare -x PYTHON_VERSION=${PYTHON_VERSION:-}" >> /home/circleci/project/env
   echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
   if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
     echo "declare -x TORCH_CUDA_ARCH_LIST=5.2" >> /home/circleci/project/env

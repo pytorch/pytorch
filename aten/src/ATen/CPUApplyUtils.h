@@ -334,7 +334,7 @@ apply_op(int64_t numel, int64_t offset, const Op& op, Args... iters) {
 /*
   Apply a pointwise operator to sequence of tensors
 
-  The calling convention for op is a function/functor that takes takes the same
+  The calling convention for op is a function/functor that takes the same
   number of pointers of type scalar as the number of given tensors. For example,
   to compute a = b * c, op would be of the form:
   [](scalar* a_val, const scalar* b_val, const scalar* c_val) { a_val[0] =

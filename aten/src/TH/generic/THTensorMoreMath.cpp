@@ -5,6 +5,7 @@
 #include <TH/generic/THTensorApply.hpp>
 #include <ATen/CPUGenerator.h>
 #include <ATen/Utils.h>
+#include <ATen/core/EnableNamedTensor.h>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
@@ -93,29 +94,6 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
                      })
   }
   return equal;
-}
-
-void THTensor_(sign)(THTensor *r_, THTensor *t)
-{
-  THTensor_(resizeAs)(r_, t);
-
-#if defined (TH_REAL_IS_BYTE)
-  TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-    if (*t_data > 0) *r__data = 1;
-    else *r__data = 0;);
-#elif defined (TH_REAL_IS_BOOL)
-TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-  if (*t_data == true) *r__data = false;
-  else *r__data = true;);
-#else
-  TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-    if (*t_data > 0) *r__data = 1;
-    else if (*t_data < 0) *r__data = -1;
-    else *r__data = 0;);
-#endif
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(r_, t);
-#endif
 }
 
 // Helper function to be used in a reduction operation.
@@ -314,18 +292,6 @@ void THTensor_(cmin)(THTensor *r, THTensor *t, THTensor *src) {
                    *r_data = *t_data < *src_data ? *t_data : *src_data;);
 }
 
-void THTensor_(cmaxValue)(THTensor *r, THTensor *t, scalar_t value) {
-  THTensor_(resizeAs)(r, t);
-  TH_TENSOR_APPLY2(scalar_t, r, scalar_t, t,
-                   *r_data = *t_data < value ? value : *t_data;);  // this order propagates NaN
-}
-
-void THTensor_(cminValue)(THTensor *r, THTensor *t, scalar_t value) {
-  THTensor_(resizeAs)(r, t);
-  TH_TENSOR_APPLY2(scalar_t, r, scalar_t, t,
-                   *r_data = *t_data > value ? value : *t_data;);  // this order propagates NaN
-}
-
 void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
@@ -401,7 +367,7 @@ void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t a
     THTensor_(select)(matrix2, batch2, 0, batch);
     THTensor_(select)(result_matrix, result, 0, batch);
 
-    THTensor_(addmm)(result_matrix, beta, result_matrix, alpha, matrix1, matrix2);
+    THTensor_(addmm)(result_matrix, result_matrix, matrix1, matrix2, beta, alpha);
   }
 
   c10::raw::intrusive_ptr::decref(matrix1);
@@ -1075,9 +1041,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,)
 #define TH_MATH_NAME(fn) fn
 #endif
 
-LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
@@ -1090,18 +1053,7 @@ LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_
 
 LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
-void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
-  switch (n) {
-    case 0: THTensor_(digamma)(r_, t); break;
-    case 1: THTensor_(trigamma)(r_, t); break;
-    default: THError("polygamma(n,x) is not implemented for n>=2");
-  }
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(r_, t);
-#endif
-}
-
-void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
+void THTensor_(std_single)(THTensor *r_, THTensor *t, int dimension, bool unbiased, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
       dimension);
@@ -1126,12 +1078,12 @@ void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
                          M2 += delta * delta2;
                        }
 
-                       if (biased && t_size >= 2)
+                       if (!unbiased && t_size >= 2)
                        {
                          *r__data = TH_MATH_NAME(sqrt)(M2 / t_size);
-                       } else if (!biased && t_size >= 2) {
+                       } else if (unbiased && t_size >= 2) {
                          *r__data = TH_MATH_NAME(sqrt)(M2 / (t_size - 1));
-                       } else if (biased && t_size == 1) {
+                       } else if (!unbiased && t_size == 1) {
                          *r__data = 0;
                        } else {
                          *r__data = NAN;
@@ -1142,7 +1094,7 @@ void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
   }
 }
 
-void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
+void THTensor_(var_single)(THTensor *r_, THTensor *t, int dimension, bool unbiased, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
       dimension);
@@ -1167,12 +1119,12 @@ void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
                          M2 += delta * delta2;
                        }
 
-                       if (biased && t_size >= 2)
+                       if (!unbiased && t_size >= 2)
                        {
                          *r__data = M2 / t_size;
-                       } else if (!biased && t_size >= 2) {
+                       } else if (unbiased && t_size >= 2) {
                          *r__data = M2 / (t_size - 1);
-                       } else if (biased && t_size == 1) {
+                       } else if (!unbiased && t_size == 1) {
                          *r__data = 0;
                        } else {
                          *r__data = NAN;
@@ -1348,18 +1300,18 @@ accreal THTensor_(meanall)(THTensor *tensor)
   return THTensor_(sumall)(tensor)/THTensor_(nElement)(tensor);
 }
 
-accreal THTensor_(varall)(THTensor *tensor, int biased)
+accreal THTensor_(var_all)(THTensor *tensor, bool unbiased)
 {
   accreal mean = THTensor_(meanall)(tensor);
   accreal sum = 0;
   TH_TENSOR_APPLY(scalar_t, tensor, sum += (*tensor_data - mean)*(*tensor_data - mean););
-  sum /= std::max<int64_t>(0, THTensor_(nElement)(tensor) - (biased ? 0 : 1));
+  sum /= std::max<int64_t>(0, THTensor_(nElement)(tensor) - (unbiased ? 1 : 0));
   return sum;
 }
 
-accreal THTensor_(stdall)(THTensor *tensor, int biased)
+accreal THTensor_(std_all)(THTensor *tensor, bool unbiased)
 {
-  return sqrt(THTensor_(varall)(tensor, biased));
+  return sqrt(THTensor_(var_all)(tensor, unbiased));
 }
 
 void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue)

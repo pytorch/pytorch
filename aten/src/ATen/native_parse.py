@@ -395,6 +395,7 @@ def run(paths):
                 assert arguments[-1] == ")", "Expecting closing ) for {}".format(func['func'])
                 arguments = arguments[:-1]  # Expect closing )
                 declaration['name'] = func.get('name', fn_name)
+                declaration['operator_name'] = func.get('name', fn_name)
                 declaration['overload_name'] = func.get('overload_name', overload_name)
                 declaration['inplace'] = re.search('(^__i|[^_]_$)', fn_name) is not None
                 return_arguments = parse_return_arguments(return_decl, declaration['inplace'], func)
@@ -411,7 +412,10 @@ def run(paths):
                 declaration['cuda_bool'] = func.get('cuda_bool', False)
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
-                declaration['named_guard'] = func.get('named_guard', True)
+                declaration['supports_named_tensor'] = func.get('supports_named_tensor', False)
+                declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', 'no')
+                assert declaration['use_c10_dispatcher'] in ['no', 'unboxed_only', 'full']
+                declaration['category_override'] = func.get('category_override', '')
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
                 declaration['python_module'] = func.get('python_module', '')

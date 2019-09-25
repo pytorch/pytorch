@@ -13,8 +13,8 @@ import numpy
 # An example input from this configuration is M=4, N=4, dim=0.
 configs = op_bench.config_list(
     attrs=[
-        [4, 4, 0],
-        [256, 256, 1],
+        [256, 512, 0],
+        [512, 512, 1],
     ],
     attr_names=["M", "N", "dim"],
     tags=["short"]

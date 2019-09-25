@@ -1,10 +1,6 @@
 #ifndef THCUNN_COMMON_H
 #define THCUNN_COMMON_H
 
-// CUDA: grid stride looping
-#define CUDA_KERNEL_LOOP(i, n) \
-  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < (n); i += blockDim.x * gridDim.x)
-
 #define THCUNN_assertSameGPU(...) THAssertMsg(THCTensor_(checkGPU)(__VA_ARGS__), \
   "Some of weight/gradient/input tensors are located on different GPUs. Please move them to a single one.")
 

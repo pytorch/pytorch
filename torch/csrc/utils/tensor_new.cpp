@@ -17,8 +17,10 @@
 
 #include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
+#include <ATen/NamedTensorUtils.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <stdexcept>
 #include <vector>
@@ -115,8 +117,9 @@ Tensor new_with_storage(c10::TensorTypeId type_id, at::ScalarType scalar_type, S
 }
 
 Tensor new_with_tensor(c10::TensorTypeId type_id, at::ScalarType scalar_type, const Tensor& other) {
-  if (other.type_id() != type_id) {
-    throw TypeError("expected %s (got %s)", type_id, other.type_id());
+  if (legacyExtractTypeId(other.type_set()) != type_id) {
+    // In temporary expression lifetime we trust
+    throw TypeError("expected %s (got %s)", type_id, toString(other.type_set()).c_str());
   }
   if (other.scalar_type() != scalar_type) {
     throw TypeError("expected %s (got %s)", toString(scalar_type), toString(other.scalar_type()));
@@ -166,7 +169,8 @@ ScalarType infer_scalar_type(PyObject *obj) {
     return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
   }
   if (PyArray_CheckScalar(obj)) {
-    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)(PyArray_FromScalar(obj, nullptr))));
+    THPObjectPtr arr(PyArray_FromScalar(obj, nullptr));
+    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*) arr.get()));
   }
 #endif
   if (THPUtils_checkString(obj)) {
@@ -534,7 +538,7 @@ Tensor sparse_coo_tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_t
     at::OptionalDeviceGuard device_guard(r.deviceOptional(3));
     // if no dtype provided, infer type based on value type.
     Tensor values = internal_new_from_data(inferred_type_id, inferred_scalar_type, r.deviceOptional(3), r.pyobject(1), false, true, type_inference);
-    Tensor indices = internal_new_from_data(values.type_id(), kLong, r.deviceOptional(3), r.pyobject(0), false, true, false);
+    Tensor indices = internal_new_from_data(legacyExtractTypeId(values.type_set()), kLong, r.deviceOptional(3), r.pyobject(0), false, true, false);
     return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparse)).set_requires_grad(r.toBool(4));
   } else if (r.idx == 1) {
     bool type_inference = r.isNone(3);
@@ -542,7 +546,7 @@ Tensor sparse_coo_tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_t
     const auto inferred_scalar_type = r.scalartypeWithDefault(3, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(4));
     Tensor values = internal_new_from_data(inferred_type_id, inferred_scalar_type, r.deviceOptional(4), r.pyobject(1), false, true, type_inference);
-    Tensor indices = internal_new_from_data(values.type_id(), kLong, r.deviceOptional(4), r.pyobject(0), false, true, false);
+    Tensor indices = internal_new_from_data(legacyExtractTypeId(values.type_set()), kLong, r.deviceOptional(4), r.pyobject(0), false, true, false);
     return at::sparse_coo_tensor(indices, values, r.intlist(2), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(5));
   } else if (r.idx == 2) {
     const auto inferred_type_id = typeIdWithDefault(r, 2, type_id);
@@ -555,10 +559,19 @@ Tensor sparse_coo_tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_t
 
 Tensor tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
+#ifdef BUILD_NAMEDTENSOR
+    "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, DimnameList? names=None)",
+#else
     "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
+#endif
   });
 
-  ParsedArgs<5> parsed_args;
+#ifdef BUILD_NAMEDTENSOR
+  constexpr int ctor_num_args = 6;
+#else
+  constexpr int ctor_num_args = 5;
+#endif
+  ParsedArgs<ctor_num_args> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     PyObject* data = r.pyobject(0);
@@ -580,6 +593,12 @@ Tensor tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObje
                true,
                type_inference,
                pin_memory);
+#ifdef BUILD_NAMEDTENSOR
+    auto names = r.toDimnameListOptional(5);
+    if (names) {
+      at::namedinference::propagate_names(new_tensor, std::move(names), /*validate_names=*/true);
+    }
+#endif
     new_tensor.detach_(); // ensure new_tensor a leaf node
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;
@@ -635,36 +654,6 @@ Tensor new_tensor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObjec
     return new_tensor;
   }
   throw std::runtime_error("new_tensor(): invalid arguments");
-}
-
-Tensor new_empty(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  static PythonArgParser parser({
-    "new_empty(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
-  }, /*traceable=*/true);
-
-  ParsedArgs<5> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.idx == 0) {
-    const auto actual_type_id = typeIdWithDefault(r, 2, type_id);
-    const auto actual_scalar_type = r.scalartypeWithDefault(1, scalar_type);
-    return new_with_sizes(actual_type_id, actual_scalar_type, r.deviceOptional(2), r.intlist(0)).set_requires_grad(r.toBool(4));
-  }
-  throw std::runtime_error("new_empty(): invalid arguments");
-}
-
-Tensor new_full(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  static PythonArgParser parser({
-    "new_full(IntArrayRef size, Scalar fill_value, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
-  }, /*traceable=*/true);
-
-  ParsedArgs<5> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.idx == 0) {
-    const auto actual_type_id = typeIdWithDefault(r, 3, type_id);
-    const auto actual_scalar_type = r.scalartypeWithDefault(2, scalar_type);
-    return dispatch_full(actual_type_id, actual_scalar_type, r.scalar(1), r.deviceOptional(3), r.intlist(0)).set_requires_grad(r.toBool(4));
-  }
-  throw std::runtime_error("new_full(): invalid arguments");
 }
 
 Tensor new_ones(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {

@@ -23,12 +23,6 @@ using at::IntArrayRef;
 using at::Generator;
 using at::Storage;
 
-static void maybe_initialize_cuda(const at::TensorOptions& options) {
-  if (options.device().is_cuda()) {
-    torch::utils::cuda_lazy_init();
-  }
-}
-
 ${py_method_dispatch}
 
 }} // namespace torch::autograd

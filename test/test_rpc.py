@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import sys
 import unittest
 
 import torch
 import torch.distributed as dist
+
+if not dist.is_available():
+    print("c10d not available, skipping tests")
+    sys.exit(0)
+
+from torch.distributed.rpc import RpcBackend
 from common_distributed import MultiProcessTestCase
 from common_utils import load_tests, run_tests
+from os import getenv
 
+BACKEND = getenv('RPC_BACKEND', RpcBackend.PROCESS_GROUP)
+RPC_INIT_URL = getenv('RPC_INIT_URL', '')
 
 # it is used to test python user defined function over rpc
 def my_function(a, b, c):
@@ -61,18 +71,21 @@ class my_class:
 load_tests = load_tests
 
 
-if not dist.is_available():
-    print("c10d not available, skipping tests")
-    sys.exit(0)
-
-
 def _wrap_with_rpc(func):
+    '''
+        We use this decorator for setting up and tearing down state since
+        MultiProcessTestCase runs each `test*` method in a separate process and
+        each process just runs the `test*` method without actually calling
+        'setUp' and 'tearDown' methods of unittest.
+    '''
     def wrapper(self):
         store = dist.FileStore(self.file.name, self.world_size)
-        dist.init_process_group(
-            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
-        )
-        dist.init_rpc("worker{}".format(self.rank))
+        dist.init_process_group(backend='gloo', rank=self.rank,
+                                world_size=self.world_size, store=store)
+        dist.init_model_parallel(self_name='worker%d' % self.rank,
+                                 backend=BACKEND,
+                                 self_rank=self.rank,
+                                 init_method=RPC_INIT_URL)
         func(self)
         dist.join_rpc()
 
@@ -89,6 +102,97 @@ class RpcTest(MultiProcessTestCase):
         return 4
 
     @_wrap_with_rpc
+    def test_worker_id(self):
+        n = self.rank + 1
+        peer_rank = n % self.world_size
+        self_worker_id = dist.get_worker_id()
+        peer_worker_id = dist.get_worker_id('worker{}'.format(peer_rank))
+
+        self.assertEqual(self_worker_id.name, 'worker{}'.format(self.rank))
+        self.assertEqual(peer_worker_id.name, 'worker{}'.format(peer_rank))
+
+        with self.assertRaisesRegex(RuntimeError, "Unknown destination worker"):
+            unknown_worker_id = dist.get_worker_id("WorkerUnknown")
+
+    @_wrap_with_rpc
+    def test_self_add(self):
+        self_worker_id = dist.get_worker_id()
+        self_worker_name = 'worker{}'.format(self.rank)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "does not support making RPC calls to self"
+        ):
+            dist.rpc(self_worker_id, torch.add, args=(torch.ones(2, 2), 1))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "does not support making RPC calls to self"
+        ):
+            dist.rpc(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
+
+    @unittest.skipIf(
+        BACKEND != RpcBackend.PROCESS_GROUP,
+        "PROCESS_GROUP rpc backend specific test, skip"
+    )
+    def test_duplicate_name(self):
+        store = dist.FileStore(self.file.name, self.world_size)
+        dist.init_process_group(backend="gloo", rank=self.rank,
+                                world_size=self.world_size, store=store)
+        with self.assertRaisesRegex(RuntimeError, "is not unique"):
+            dist.init_model_parallel(self_name="duplicate_name",
+                                     backend=BACKEND,
+                                     self_rank=self.rank,
+                                     init_method=RPC_INIT_URL)
+        dist.join_rpc()
+
+    def test_reinit(self):
+        store = dist.FileStore(self.file.name, self.world_size)
+        dist.init_process_group(backend="gloo", rank=self.rank,
+                                world_size=self.world_size, store=store)
+        dist.init_model_parallel(self_name='worker{}'.format(self.rank),
+                                 backend=BACKEND,
+                                 self_rank=self.rank,
+                                 init_method=RPC_INIT_URL)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "is already initialized"):
+            dist.init_model_parallel(self_name='worker{}'.format(self.rank),
+                                     backend=BACKEND,
+                                     self_rank=self.rank,
+                                     init_method=RPC_INIT_URL)
+        dist.join_rpc()
+
+    def test_init_invalid_backend(self):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Unrecognized RPC backend"):
+            dist.init_model_parallel(self_name='worker{}'.format(self.rank),
+                                     backend="invalid",
+                                     self_rank=self.rank,
+                                     init_method=RPC_INIT_URL)
+
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
+    def test_invalid_names(self):
+        store = dist.FileStore(self.file.name, self.world_size)
+        dist.init_process_group(backend="gloo", rank=self.rank,
+                                world_size=self.world_size, store=store)
+
+        with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
+            dist.init_model_parallel(self_name="abc*")
+
+        with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
+            dist.init_model_parallel(self_name=" ")
+
+        with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
+            dist.init_model_parallel(self_name="")
+
+        # If the number in the message does not match, it is likely that the
+        # value of MAX_NAME_LEN in RPC WorkerId has changed.
+        with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
+            dist.init_model_parallel(self_name="".join(["a" for _ in range(500)]),
+                                     backend=BACKEND,
+                                     self_rank=self.rank,
+                                     init_method=RPC_INIT_URL)
+        dist.join_rpc()
+
+    @_wrap_with_rpc
     def test_add(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -97,6 +201,16 @@ class RpcTest(MultiProcessTestCase):
             torch.add,
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
+        self.assertEqual(ret, torch.ones(n, n) * 2)
+
+    @_wrap_with_rpc
+    def test_add_with_id(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        workder_id = dist.get_worker_id('worker{}'.format(dst_rank))
+
+        ret = dist.rpc(workder_id, torch.add,
+                       args=(torch.ones(n, n), torch.ones(n, n)))
         self.assertEqual(ret, torch.ones(n, n) * 2)
 
     @_wrap_with_rpc
@@ -238,15 +352,15 @@ class RpcTest(MultiProcessTestCase):
     def test_py_multi_async_call(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        fut1 = dist.rpc(
-            "worker{}".format(dst_rank),
-            my_class.my_static_method,
-            args=(n + 10,),
-            async_call=True,
-        )
-        fut2 = dist.rpc(
-            "worker{}".format(dst_rank), min, args=(n, n + 1, n + 2), async_call=True
-        )
+        dst_worker_id = dist.get_worker_id('worker{}'.format(dst_rank))
+        fut1 = dist.rpc(dst_worker_id,
+                        my_class.my_static_method,
+                        args=(n + 10,),
+                        async_call=True)
+        fut2 = dist.rpc(dst_worker_id,
+                        min,
+                        args=(n, n + 1, n + 2),
+                        async_call=True)
         self.assertEqual(fut1.wait(), my_class.my_static_method(n + 10))
         self.assertEqual(fut2.wait(), min(n, n + 1, n + 2))
 
@@ -311,6 +425,33 @@ class RpcTest(MultiProcessTestCase):
     def test_stress_heavy_rpc(self):
         self._stress_test_rpc(heavy_rpc, repeat=20, args=(torch.ones(100, 100),))
 
+    @_wrap_with_rpc
+    def test_builtin_remote_ret(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref = dist.remote('worker{}'.format(dst_rank), torch.add,
+                           args=(torch.ones(n, n), torch.ones(n, n)))
+        self.assertEqual(rref.to_here(), torch.ones(n, n) * 2)
 
-if __name__ == "__main__":
+    @_wrap_with_rpc
+    def test_multi_builtin_remote_ret(self):
+        m = 10
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rrefs = []
+        expected = []
+        for i in range(m):
+            n = n + i
+            rrefs.append(dist.remote(
+                'worker{}'.format(dst_rank),
+                torch.add,
+                args=(torch.ones(n, n), torch.ones(n, n))
+            ))
+            expected.append(torch.ones(n, n) * 2)
+
+        for i in range(m):
+            self.assertEqual(rrefs[i].to_here(), expected[i])
+
+
+if __name__ == '__main__':
     run_tests()

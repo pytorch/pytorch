@@ -31,7 +31,7 @@ static void EraseNumberTypesOnBlock(Block* block) {
 
           WithInsertPoint guard(*it);
           Value* r = block->owningGraph()->insertConstant(
-              scalar_to_tensor(s), nullptr, c10::nullopt, it->scope());
+              scalar_to_tensor(s), c10::nullopt, it->scope());
           it->output()->replaceAllUsesWith(r);
           it.destroyCurrent();
         }

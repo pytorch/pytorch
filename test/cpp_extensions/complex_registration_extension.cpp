@@ -38,7 +38,7 @@ static Tensor empty_complex(IntArrayRef size, const TensorOptions & options, c10
       allocator,
       /*resizable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::ComplexCPUTensorId());
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::TensorTypeId::ComplexCPUTensorId);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);

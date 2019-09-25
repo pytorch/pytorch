@@ -185,7 +185,7 @@ pytest test/test_nn.py -k Loss -v
 The above is an example of testing a change to Loss functions: this command runs tests such as
 `TestNN.test_BCELoss` and `TestNN.test_MSELoss` and can be useful to save keystrokes.
 
-## Writing documentation
+## Writing Documentation
 
 PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
 for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
@@ -204,7 +204,87 @@ We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
 commands. To run this check locally, run `./check-doxygen.sh` from inside
 `docs/cpp`.
 
-## Managing multiple build trees
+### Building Documentation
+
+To build the documentation:
+
+1. Build and install PyTorch
+
+2. Install the prequesities
+
+```bash
+cd docs
+pip install -r requirements.txt
+# `katex` must also be available in your PATH.
+# If you are using Ubuntu or Debian, you can install it with:
+# sudo apt install katex
+```
+
+3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
+
+```bash
+cd docs
+make html
+```
+
+4. To view HTML files, you must start an HTTP server. For example
+
+```bash
+# Start a server from the current directory (Python 3 only)
+cd docs/build/html
+python -m http.server
+```
+
+If you are developing on a remote machine, you can set up an SSH tunnel so that
+you can access the HTTP server on the remote machine on your local machine. To map
+remote port 8086 to local port 8086, use either of the following commands.
+
+```bash
+# For SSH
+ssh my_machine -L 8086:my_machine:8086
+
+# For Eternal Terminal
+et my_machine -t="8086:8086"
+```
+
+Then navigate to `localhost:8086` in your web browser.
+
+#### Tips
+
+The `.rst` source files live in [docs/source](docs/source). Some of the `.rst`
+files pull in docstrings from PyTorch Python code (for example, via
+the `autofunction` or `autoclass` directives). To vastly shorten doc build times,
+it is helpful to remove the files you are not working on, only keeping the base
+`index.rst` file and the files you are editing. The Sphinx build will produce
+missing file warnings but will still complete. For example, to work on `jit.rst`:
+
+```bash
+cd docs/source
+ls | grep rst | grep -v index | grep -v jit | xargs rm
+
+# Make your changes, build the docs, etc.
+
+# Don't commit the deletions!
+git add index.rst jit.rst 
+...
+```
+
+
+### Adding Documentation Tests
+
+It is easy for code snippets in docstrings and `.rst` files to get out of date. The docs
+build includes the [Sphinx Doctest Extension](https://www.sphinx-doc.org/en/master/usage/extensions/doctest.html),
+which can run code in documentation as a unit test. To use the extension, use
+the `.. testcode::` directive in your `.rst` and docstrings.
+
+To manually run these tests, follow steps 1 and 2 above, then run:
+
+```bash
+cd docs
+make doctest
+```
+
+## Managing Multiple Build Trees
 
 One downside to using `python setup.py develop` is that your development
 version of PyTorch will be installed globally on your account (e.g., if
@@ -523,6 +603,11 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
   where it incorrectly tokenizes raw string literals, ending when it sees a `"`.
   This causes preprocessor tokens inside the literal like an`#endif`  to be incorrectly
   treated as preprocessor directives. See https://godbolt.org/z/eVTIJq as an example.
+
+* Either MSVC or the Windows headers have a PURE macro defined and will replace
+  any occurrences of the PURE token in code with an empty string. This is why
+  we have AliasAnalysisKind::PURE_FUNCTION and not AliasAnalysisKind::PURE.
+  The same is likely true for other identifiers that we just didn't try to use yet.
 
 ### Running Clang-Tidy
 

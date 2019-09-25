@@ -13,7 +13,7 @@ CONFIG_TREE_DATA = [
         ]),
         ("gcc", [
             ("4.8", [X("3.6")]),
-            ("5.4", [
+            ("5.4", [  # All this subtree rebases to master and then build
                 XImportant("3.6"),
                 ("3.6", [
                     ("namedtensor", [XImportant(True)]),
@@ -54,7 +54,14 @@ CONFIG_TREE_DATA = [
             ("10.1", [X("3.6")]),
         ]),
         ("android", [
-            ("r19c", [XImportant("3.6")]),
+            ("r19c", [
+                ("3.6", [
+                    ("android_abi", [XImportant("x86_32")]),
+                    ("android_abi", [X("x86_64")]),
+                    ("android_abi", [X("arm-v7a")]),
+                    ("android_abi", [X("arm-v8a")]),
+                ])
+            ]),
         ]),
     ]),
 ]
@@ -124,6 +131,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "xla": XlaConfigNode,
             "namedtensor": NamedTensorConfigNode,
             "important": ImportantConfigNode,
+            "android_abi": AndroidAbiConfigNode,
         }
         return next_nodes[experimental_feature]
 
@@ -149,6 +157,13 @@ class NamedTensorConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ImportantConfigNode
 
+class AndroidAbiConfigNode(TreeConfigNode):
+
+    def init2(self, node_name):
+        self.props["android_abi"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
 
 class ImportantConfigNode(TreeConfigNode):
     def modify_label(self, label):

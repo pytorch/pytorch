@@ -26,6 +26,7 @@ namespace jit {
 namespace script {
 
 struct Def;
+struct ClassDef;
 struct SugaredValue;
 struct Resolver;
 
@@ -102,6 +103,11 @@ struct TORCH_API CompilationUnit {
       const std::string& source,
       const ResolverPtr& resolver,
       const Self* self);
+
+  void define_interface(
+      const c10::QualifiedName& qualifiedName,
+      const ClassDef& classDef,
+      ResolverPtr rcb);
 
   Function* create_function(
       c10::QualifiedName name,

@@ -229,7 +229,9 @@ FullyConnectedDNNLowPPackWeightOp::FullyConnectedDNNLowPPackWeightOp(
     : DNNLowPOp<uint8_t, FCFp32Op>(operator_def, ws),
       axis_w_(this->GetSingleArgument<int32_t>("axis_w", 1)),
       quantize_channelwise_(
-          this->GetSingleArgument<bool>("quantize_channelwise", false)) {
+          this->GetSingleArgument<bool>("quantize_channelwise", false)),
+      save_unpacked_weights_(
+          this->GetSingleArgument<bool>("save_unpacked_weights", false)) {
   if (this->debug_def().engine() == "DNNLOWP_ROWWISE") {
     quantize_channelwise_ = true;
   }
@@ -258,6 +260,13 @@ bool FullyConnectedDNNLowPPackWeightOp::RunOnDevice() {
   QuantizeWeight<uint8_t>(
       InputBlob(0), K, N, Y->qparams, W_quantized, qfactory_.get());
 
+  if (save_unpacked_weights_) {
+    ReinitializeTensor(
+        &Y->original_tensor, filter.sizes(), at::dtype<int8_t>().device(CPU));
+    auto* buffer = Y->original_tensor.template mutable_data<int8_t>();
+    CAFFE_ENFORCE_EQ(Y->original_tensor.numel(), W_quantized.size());
+    memcpy(buffer, W_quantized.data(), W_quantized.size() * sizeof(int8_t));
+  }
   if (this->InputIsType<int8::Int8TensorCPU>(0) && quantize_channelwise_) {
     static int log_occurences = 0;
     if (log_occurences < 32) {
@@ -423,9 +432,9 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
       W_quantized,
       qfactory_.get());
   if (save_unpacked_weights_) {
-        ReinitializeTensor(&Y->original_tensor, filter.sizes(), at::dtype<int8_t>().device(CPU));
-    auto* buffer =
-        Y->original_tensor.template mutable_data<int8_t>();
+    ReinitializeTensor(
+        &Y->original_tensor, filter.sizes(), at::dtype<int8_t>().device(CPU));
+    auto* buffer = Y->original_tensor.template mutable_data<int8_t>();
     CAFFE_ENFORCE_EQ(Y->original_tensor.numel(), W_quantized.size());
     memcpy(buffer, W_quantized.data(), W_quantized.size() * sizeof(int8_t));
   }
@@ -528,11 +537,11 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
       fallback_to_32_bit_accumulation) {
     // acc32
     if (TakeDepthWise3x3FastPath_()) {
-      Y->W_depthwise_3x3.reset(
-          new fbgemm::Packed3x3ConvMatrix(group_, W_quantized.data()));
+      Y->W_depthwise.reset(new fbgemm::PackedDepthWiseConvMatrix(
+          group_, 3 * 3, W_quantized.data()));
     } else if (TakeDepthWise3x3x3FastPath_()) {
-      Y->W_depthwise_3x3x3.reset(
-          new fbgemm::Packed3x3x3ConvMatrix(group_, W_quantized.data()));
+      Y->W_depthwise.reset(new fbgemm::PackedDepthWiseConvMatrix(
+          group_, 3 * 3 * 3, W_quantized.data()));
     } else if (TakeGConvFastPath_()) {
       fbgemm::conv_param_t<> conv_p(
           1,

@@ -276,6 +276,7 @@ struct Expr : public TreeView {
       case '+':
       case '-':
       case TK_UNARY_MINUS:
+      case '~':
       case '*':
       case TK_STARRED:
       case '/':
@@ -772,6 +773,7 @@ struct UnaryOp : public Expr {
   explicit UnaryOp(const TreeRef& tree) : Expr(tree) {
     switch (tree->kind()) {
       case TK_UNARY_MINUS:
+      case '~':
       case TK_NOT:
         if (tree->trees().size() != 1)
           throw ErrorReport(tree)

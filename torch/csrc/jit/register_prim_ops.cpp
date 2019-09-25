@@ -50,13 +50,13 @@ namespace jit {
 
 namespace {
 
-template<class T>
-c10::List<T> make_result_list() {
+template <class T>
+c10::List<T> make_result_list(const TypePtr& elemType) {
   return c10::List<T>();
 }
-template<>
-c10::impl::GenericList make_result_list<IValue>() {
-  return c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+template <>
+c10::impl::GenericList make_result_list<IValue>(const TypePtr& elemType) {
+  return c10::impl::GenericList(elemType);
 }
 
 Operation noop(const Node* n) {
@@ -66,6 +66,12 @@ Operation noop(const Node* n) {
 c10::OperatorOptions aliasAnalysisFromSchema() {
   c10::OperatorOptions result;
   result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return result;
+}
+
+c10::OperatorOptions aliasAnalysisConservative() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
   return result;
 }
 
@@ -228,7 +234,7 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
 RegisterOperators reg(
     {Operator(
          prim::profile,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            auto callback = node->cast<ProfileOp>()->getCallback();
            return [callback](Stack& stack) {
              callback(stack);
@@ -238,7 +244,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          prim::FusionGroup,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            const auto key = registerFusion(node);
            return [key](Stack& stack) {
              RECORD_FUNCTION("FusionGroup", std::vector<c10::IValue>());
@@ -249,7 +255,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::Guard(Tensor(a) t) -> Tensor(a)",
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            return [](Stack& stack) {
              AT_ERROR("Should be replaced by prim::BailOut");
              return 0;
@@ -258,7 +264,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "prim::BailOut(...) -> Tensor(a)",
-         [](const Node* /* node */) {
+         [](const Node* /* node */) -> Operation {
            return [](Stack& /* stack */) {
              AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
              return 0;
@@ -267,7 +273,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "prim::BailoutTemplate() -> int",
-         [](const Node* /* node */) {
+         [](const Node* /* node */) -> Operation {
            return [](Stack& stack) {
              // TODO: today, we put a single bailout template at the front to
              // carry the un-optimized graph for bailout nodes to use. Ideally
@@ -578,8 +584,13 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::data(Tensor(b) a) -> Tensor(b)",
-         noop,
+         "prim::data(Tensor(a) a) -> Tensor(a)",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, autograd::Variable(a).variable_data());
+           return 0;
+         },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::is_cuda(Tensor a) -> bool",
@@ -677,9 +688,50 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
+     // NB: backward op might write to every input tensors in the graph and it's
+     // much more expensive to analayze the leaves and sometimes it might retain
+     // the whole gradients in every tensor of the Autograd graph with
+     // create_graph=True so we use aliasAnalysisConservative for these two OPs
+     Operator(
+         "aten::backward(Tensor[](a!) tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         [](Stack& stack) {
+           bool create_graph = pop(stack).toBool();
+           auto retain_graph = pop(stack).toOptional<bool>();
+           auto grad_tensors = pop(stack);
+           auto tensors = pop(stack).toTensorList();
+           std::vector<torch::autograd::Variable> output_vars(
+               tensors.begin(), tensors.end());
+           std::vector<torch::autograd::Variable> gradients;
+
+           if (!grad_tensors.isNone()) {
+             for (const IValue& v : grad_tensors.toGenericListRef()) {
+               gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
+             }
+           }
+
+           torch::autograd::backward(
+               output_vars, gradients, retain_graph, create_graph);
+           return 0;
+         },
+         aliasAnalysisConservative()),
+     Operator(
+         "aten::backward(Tensor(a!) self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         [](Stack& stack) {
+           bool create_graph = pop(stack).toBool();
+           auto retain_graph = pop(stack).toOptional<bool>();
+           IValue gradient_ivalue = pop(stack);
+           at::Tensor gradient = gradient_ivalue.isNone()
+               ? at::Tensor()
+               : gradient_ivalue.toTensor();
+           at::Tensor self = pop(stack).toTensor();
+           bool keep_graph = retain_graph ? retain_graph.value() : create_graph;
+           self.backward(gradient, keep_graph, create_graph);
+           return 0;
+         },
+         aliasAnalysisConservative()),
      Operator(
          "prim::AutogradZero() -> Tensor",
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            return [](Stack& stack) {
              stack.emplace_back(at::Tensor());
              return 0;
@@ -693,7 +745,7 @@ RegisterOperators reg(
            auto ivalue = pop(stack);
 
            // Pickle the tensor
-           auto data = pickle({ivalue});
+           auto data = jit::pickle_save(ivalue);
 
            // Write file
            std::fstream output(filename, std::ios::out | std::ios::binary);
@@ -703,7 +755,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          prim::Print,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            size_t num_inputs = node->inputs().size();
            return [num_inputs](Stack& stack) {
              std::stringstream ss;
@@ -777,7 +829,7 @@ RegisterOperators reg(
              {Argument("message", StringType::get()),
               Argument("stacklevel", IntType::get(), c10::nullopt, 2, true)},
              {}),
-         [](const Node* node) -> std::function<int(Stack&)> {
+         [](const Node* node) -> Operation {
            auto range = node->sourceRange().source();
            if (range->filename()) {
              auto line = range->starting_line_no() +
@@ -831,7 +883,7 @@ RegisterOperators reg(
      Operator(prim::Store, noop, aliasAnalysisSpecialCase()),
      Operator(
          prim::Drop,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            auto N = node->inputs().size();
            return [=](Stack& stack) {
              drop(stack, N);
@@ -841,7 +893,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          c10::onnx::Reshape,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            return [=](Stack& stack) {
              at::Tensor input, shape;
              pop(stack, input, shape);
@@ -855,7 +907,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          c10::onnx::Shape,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            return [=](Stack& stack) {
              auto t = pop(stack).toTensor();
              at::IntArrayRef sizes = t.sizes();
@@ -872,7 +924,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          prim::AutogradAnyNonZero,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            size_t num_inputs = node->inputs().size();
            return [=](Stack& stack) {
              bool result = false;
@@ -890,7 +942,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          prim::AutogradAdd,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            return [=](Stack& stack) {
              at::Tensor a, b;
              pop(stack, a, b);
@@ -935,7 +987,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          prim::TupleUnpack,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            size_t num_elems = node->outputs().size();
            return [=](Stack& stack) {
              auto tuple = pop(stack).toTuple();
@@ -956,7 +1008,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          prim::TupleSlice,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            int64_t beg_ind = node->i(attr::beg);
            int64_t end_ind = node->i(attr::end);
            return [=](Stack& stack) {
@@ -973,7 +1025,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          prim::TupleIndex,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            return [](Stack& stack) {
              int64_t index = pop(stack).toInt();
              auto tuple = pop(stack).toTuple();
@@ -989,22 +1041,26 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          prim::TupleConstruct,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            size_t num_inputs = node->inputs().size();
            auto type = node->output()->type()->expect<TupleType>();
+           bool named = type->name().has_value();
            return [=](Stack& stack) {
              std::vector<IValue> elems{
                  std::make_move_iterator(stack.end() - num_inputs),
                  std::make_move_iterator(stack.end())};
              drop(stack, num_inputs);
-             push(stack, c10::ivalue::Tuple::create(std::move(elems), type));
+             push(
+                 stack,
+                 named ? c10::ivalue::Tuple::createNamed(std::move(elems), type)
+                       : c10::ivalue::Tuple::create(std::move(elems)));
              return 0;
            };
          },
          aliasAnalysisSpecialCase()),
      Operator(
          prim::ConstantChunk,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            int64_t chunks = node->i(attr::chunks);
            int64_t dim = node->i(attr::dim);
            auto outputs_used = fmap(node->outputs(), [](const Value* v) {
@@ -1150,13 +1206,16 @@ RegisterOperators reg(
              throw std::runtime_error(
                  "DictConstruct must have an even number of inputs");
            }
-           TORCH_INTERNAL_ASSERT(node->outputs().size() == 1, "DictConstruct must have exactly one output");
+           TORCH_INTERNAL_ASSERT(
+               node->outputs().size() == 1,
+               "DictConstruct must have exactly one output");
            TypePtr output_type = node->outputs()[0]->type();
-           TORCH_INTERNAL_ASSERT(output_type->kind() == TypeKind::DictType, "DictConstruct output must be of Dict type.");
-           TypePtr key_type = static_cast<const DictType*>(output_type.get())->getKeyType();
-           TypePtr value_type = static_cast<const DictType*>(output_type.get())->getValueType();
+           auto dt = output_type->expect<DictType>();
+           TypePtr key_type = dt->getKeyType();
+           TypePtr value_type = dt->getValueType();
            return [=](Stack& stack) {
              auto vals = c10::impl::GenericDict(key_type, value_type);
+             vals.reserve(num_inputs / 2);
              for (size_t i = 0; i < num_inputs; i += 2) {
                auto val = pop(stack);
                auto key = pop(stack);
@@ -1167,6 +1226,16 @@ RegisterOperators reg(
            };
          },
          aliasAnalysisSpecialCase()),
+     Operator(
+         "aten::dict() -> Dict(str, Tensor)",
+         [](const Node* node) -> Operation {
+           return [](Stack& stack) {
+             auto dict =
+                 c10::impl::GenericDict(StringType::get(), TensorType::get());
+             push(stack, dict);
+             return 0;
+           };
+         }),
      Operator(
          "aten::_unwrap_optional(t(a)? optional) -> t(a)",
          [](Stack& stack) {
@@ -1185,7 +1254,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          prim::fork,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            Code code(node->g(attr::Subgraph));
            int n_inputs = node->inputs().size();
            AT_ASSERT(node->blocks().size() == 0);
@@ -1216,7 +1285,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          prim::Uninitialized,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            return [](Stack& stack) {
              push(stack, IValue::uninitialized());
              return 0;
@@ -1225,7 +1294,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          prim::CreateObject,
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            const auto type = node->output()->type()->expect<ClassType>();
            const size_t numAttrs = type->numAttributes();
            auto cu = type->compilation_unit();
@@ -1233,34 +1302,6 @@ RegisterOperators reg(
              auto userObj = c10::ivalue::Object::create(
                  c10::StrongTypePtr(cu, type), numAttrs);
              push(stack, std::move(userObj));
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::GetAttr,
-         [](const Node* node) {
-           const auto type = node->input()->type()->expect<ClassType>();
-           const auto& field = node->s(attr::name);
-           const auto slot = type->getAttributeSlot(field);
-           return [slot](Stack& stack) {
-             auto userObj = pop(stack).toObject();
-             auto value = userObj->getSlot(slot);
-             push(stack, std::move(value));
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::SetAttr,
-         [](const Node* node) {
-           const auto type = node->inputs().at(0)->type()->expect<ClassType>();
-           const auto& field = node->s(attr::name);
-           const auto slot = type->getAttributeSlot(field);
-           return [slot](Stack& stack) {
-             auto v = pop(stack);
-             auto userObj = pop(stack).toObject();
-             userObj->setSlot(slot, std::move(v));
              return 0;
            };
          },
@@ -1466,6 +1507,42 @@ int listReverse(Stack& stack) {
   return 0;
 }
 
+template <typename T> int minList(Stack &stack) {
+  c10::List<T> a = pop(stack).to<c10::List<T>>();
+  c10::List<T> b = pop(stack).to<c10::List<T>>();
+
+  size_t min_size = std::min(a.size(), b.size());
+  for (size_t i = 0; i < min_size; i++) {
+    if (a[i] == b[i]) {
+      continue;
+    }
+
+    push(stack, a[i] < b[i] ? a : b);
+    return 0;
+  }
+
+  push(stack, b.size() < a.size() ? b : a);
+  return 0;
+}
+
+template <typename T> int maxList(Stack &stack) {
+  c10::List<T> a = pop(stack).to<c10::List<T>>();
+  c10::List<T> b = pop(stack).to<c10::List<T>>();
+
+  size_t min_size = std::min(a.size(), b.size());
+  for (size_t i = 0; i < min_size; i++) {
+    if (a[i] == b[i]) {
+      continue;
+    }
+
+    push(stack, a[i] > b[i] ? a : b);
+    return 0;
+  }
+
+  push(stack, b.size() > a.size() ? b : a);
+  return 0;
+}
+
 template <typename T>
 int listPop(Stack& stack) {
   int64_t idx = pop(stack).to<int64_t>();
@@ -1527,6 +1604,42 @@ int listRemove(Stack& stack) {
     AT_ERROR("list.remove(x): x not in list");
   }
 
+  return 0;
+}
+
+template <typename T>
+int listMin(Stack& stack) {
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  size_t list_size = list.size();
+  if (list_size == 0) {
+    throw std::runtime_error("min() arg is an empty sequence");
+  }
+
+  T min_elem = list[0];
+  for (size_t i = 1; i < list_size; ++i) {
+    T elem = list[i];
+    min_elem = elem < min_elem ? elem : min_elem;
+  }
+
+  stack.push_back(min_elem);
+  return 0;
+}
+
+template <typename T>
+int listMax(Stack& stack) {
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
+  size_t list_size = list.size();
+  if (list_size == 0) {
+    throw std::runtime_error("max() arg is an empty sequence");
+  }
+
+  T max_elem = list[0];
+  for (size_t i = 1; i < list_size; ++i) {
+    T elem = list[i];
+    max_elem = elem > max_elem ? elem : max_elem;
+  }
+
+  stack.push_back(max_elem);
   return 0;
 }
 
@@ -1715,12 +1828,26 @@ int listList(Stack& stack) {
   return 0;
 }
 
+template <typename T>
+int listContains(Stack& stack) {
+  auto key = pop(stack).to<T>();
+  auto list = pop(stack).to<c10::List<T>>();
+  for (const T& item : list) {
+    if (item == key) {
+      push(stack, true);
+      return 0;
+    }
+  }
+  push(stack, false);
+  return 0;
+}
+
 template <class T>
 int listAdd(Stack& stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
   c10::List<T> a = pop(stack).to<c10::List<T>>();
 
-  c10::List<T> ret = make_result_list<T>();
+  c10::List<T> ret = make_result_list<T>(a.elementType());
 
   if (a.use_count() == 1) {
     ret = std::move(a);
@@ -1748,7 +1875,7 @@ int listMulIntLeft(Stack& stack) {
   int64_t n = pop(stack).to<int64_t>();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
 
-  c10::List<T> ret = make_result_list<T>();
+  c10::List<T> ret = make_result_list<T>(list.elementType());
   const auto size = list.size() * n;
   ret.reserve(size);
 
@@ -1767,7 +1894,7 @@ int listMulIntRight(Stack& stack) {
   c10::List<T> list = pop(stack).to<c10::List<T>>();
   int64_t n = pop(stack).to<int64_t>();
 
-  c10::List<T> ret = make_result_list<T>();
+  c10::List<T> ret = make_result_list<T>(list.elementType());
   const auto size = list.size() * n;
   ret.reserve(size);
 
@@ -1796,7 +1923,7 @@ int listSlice(Stack& stack) {
   const auto normalized_end =
       std::min(list_size, normalizeIndex(end, list_size));
 
-  c10::List<T> sliced_list = make_result_list<T>();
+  c10::List<T> sliced_list = make_result_list<T>(list.elementType());
   if (normalized_end <= normalized_start) {
     // early exit if the slice is trivially empty
     push(stack, std::move(sliced_list));
@@ -1924,12 +2051,10 @@ c10::List<Elem> makeListForDictKeysOrValues(
 
 template <unsigned int Index>
 c10::impl::GenericList makeGenericListForDictKeysOrValues(
-    const std::pair<c10::optional<TypePtr>, c10::optional<TypePtr>>& types,
+    const std::pair<TypePtr, TypePtr>& types,
     const std::vector<std::pair<IValue, IValue>>& order) {
   auto type = std::get<Index>(types);
-  auto values = type.has_value()
-    ? c10::impl::GenericList(*type)
-    : c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto values = c10::impl::GenericList(type);
   values.reserve(order.size());
   for (const auto& item : order) {
     values.push_back(std::get<Index>(item));
@@ -1943,7 +2068,7 @@ Operation dictKeysOrValues(const Node* n) {
   return [=](Stack& stack) -> int {
     auto dict = pop(stack).toGenericDict();
     const auto& order = iterationOrder(dict);
-    const auto types = std::make_pair(dict._keyType(), dict._valueType());
+    const auto types = std::make_pair(dict.keyType(), dict.valueType());
     if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
       push(stack, makeListForDictKeysOrValues<Index, at::Tensor>(types, order));
     } else if (outputType->getElementType() == IntType::get()) {
@@ -2021,18 +2146,19 @@ int dictPop(Stack& stack) {
   }
   auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(key);
-  if (value == dict.end()) {
+  auto iter = dict.find(key);
+  if (iter == dict.end()) {
     if (has_default) {
       push(stack, default_value);
     } else {
       AT_ERROR("KeyError: ", key);
     }
   } else {
+    // note: before erase
+    push(stack, iter->value());
     auto erase_count = dict.erase(key);
     TORCH_CHECK(
         erase_count == 1, "Expected to erase 1 item, found ", erase_count);
-    push(stack, value->value());
   }
   return 0;
 }
@@ -2077,11 +2203,10 @@ int dictUpdate(Stack& stack) {
 
 int dictItems(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  auto key_type = dict._keyType();
-  auto value_type = dict._valueType();
-  auto items = (key_type.has_value() && value_type.has_value())
-      ? c10::impl::GenericList(TupleType::create({*key_type, *value_type}))
-      : c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto key_type = dict.keyType();
+  auto value_type = dict.valueType();
+  auto items =
+      c10::impl::GenericList(TupleType::create({key_type, value_type}));
   items.reserve(dict.size());
   for (const auto& item : iterationOrder(dict)) {
     items.emplace_back(c10::ivalue::Tuple::create({item.first, item.second}));
@@ -2093,6 +2218,26 @@ int dictItems(Stack& stack) {
 int dictCopy(Stack& stack) {
   push(stack, pop(stack).toGenericDict().copy());
   return 0;
+}
+
+Operation dictConstructFromList(const Node* node) {
+  TypePtr output_type = node->outputs()[0]->type();
+  TypePtr key_type =
+      static_cast<const DictType*>(output_type.get())->getKeyType();
+  TypePtr value_type =
+      static_cast<const DictType*>(output_type.get())->getValueType();
+  return [key_type, value_type](Stack& stack) {
+    auto input_list = pop(stack);
+    auto list_ref = input_list.toGenericListRef();
+    auto dict = c10::impl::GenericDict(key_type, value_type);
+    dict.reserve(list_ref.size());
+    for (const auto& input : list_ref) {
+      const auto tup = input.toTuple()->elements();
+      dict.insert_or_assign(tup[0], tup[1]);
+    }
+    push(stack, dict);
+    return 0;
+  };
 }
 
 template <typename T>
@@ -2242,6 +2387,14 @@ RegisterOperators reg2({
           listSelect<value_type>,                                              \
           aliasAnalysisFromSchema()),                                          \
       Operator(                                                                \
+          "prim::min(" decl_type "[] l, " decl_type "[] r) -> " decl_type "[]",\
+          minList<value_type>,                                                 \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "prim::max(" decl_type "[] l, " decl_type "[] r) -> " decl_type "[]",\
+          maxList<value_type>,                                                 \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
           "aten::append(" decl_type "[](a!) self, " decl_type                  \
           " el) -> " decl_type "[](a!)",                                       \
           listAppend<value_type>,                                              \
@@ -2249,6 +2402,14 @@ RegisterOperators reg2({
       Operator(                                                                \
           "aten::reverse(" decl_type "[](a!) self) -> ()",                     \
           listReverse<value_type>,                                             \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "prim::min(" decl_type "[] self) -> " decl_type,                     \
+          listMin<value_type>,                                                 \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "prim::max(" decl_type "[] self) -> " decl_type,                     \
+          listMax<value_type>,                                                 \
           aliasAnalysisFromSchema()),                                          \
       Operator(                                                                \
           "aten::extend(" decl_type "[](a!) self, " decl_type                  \
@@ -2350,6 +2511,21 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("bool", c10::List<bool>),
     CREATE_LIST_OPS("Tensor", c10::List<at::Tensor>),
     CREATE_LIST_OPS("t", c10::List<IValue>),
+
+    // `listContains<T>` is not implemented for non-primitive types
+    // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
+    Operator(
+        "aten::__contains__(int[] l, int item) -> bool",
+        listContains<int64_t>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::__contains__(float[] l, float item) -> bool",
+        listContains<double>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::__contains__(str[] l, str item) -> bool",
+        listContains<std::string>,
+        aliasAnalysisFromSchema()),
 #undef CREATE_LIST_OPS
     Operator(
         "aten::sort(int[](a!) self, bool reverse=False) -> ()",
@@ -2521,22 +2697,6 @@ RegisterOperators reg2({
     // the python builtin 'min' and 'torch.min'
     DEFINE_BINARY_OP(prim::min, a < b ? a : b),
     DEFINE_BINARY_OP(prim::max, a > b ? a : b),
-
-    Operator(
-        "prim::min(int[] x) -> int",
-        [](Stack& stack) {
-          c10::List<int64_t> int_list = pop(stack).toIntList();
-          int64_t min_element = std::numeric_limits<int64_t>::max();
-
-          for(int64_t ele: int_list) {
-            if(ele < min_element) {
-              min_element = ele;
-            }
-          }
-          push(stack, min_element);
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
 
     // Pass in two ops for handling int and float separately as % in C++ only
     // works for int The modulus calculation is different between C++ and Python
@@ -2847,6 +3007,11 @@ RegisterOperators reg2({
           "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \
           " idx, t(b -> *) v) -> ()",                                         \
           dictSetItem,                                                        \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::dict((" key_type ", tVal)[] inputs) -> Dict(" key_type       \
+          ", tVal)",                                                          \
+          dictConstructFromList,                                              \
           aliasAnalysisFromSchema())
 
     CREATE_DICT_OPS("str"),
@@ -3005,7 +3170,7 @@ Function* getLtFuncFromListOfClassTypes(const Node* node) {
 RegisterOperators regSort({
     Operator(
         "aten::sorted(t[](a) self) -> (t[])",
-        [](const Node* node) {
+        [](const Node* node) -> Operation {
           return sort_op(
               getLtFuncFromListOfClassTypes(node),
               /*has_reverse_arg*/ false,
@@ -3014,7 +3179,7 @@ RegisterOperators regSort({
         aliasAnalysisFromSchema()),
     Operator(
         "aten::sort(t[](a!) self, bool reverse=False) -> ()",
-        [](const Node* node) {
+        [](const Node* node) -> Operation {
           return sort_op(
               getLtFuncFromListOfClassTypes(node),
               /*has_reverse_arg*/ true,

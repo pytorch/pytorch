@@ -28,15 +28,38 @@ class SimpleContainer : public nn::Cloneable<SimpleContainer> {
   }
 };
 
-inline bool pointer_equal(at::Tensor first, at::Tensor second) {
-  return first.data_ptr<float>() == second.data_ptr<float>();
-}
-
 struct SeedingFixture : public ::testing::Test {
   SeedingFixture() {
     torch::manual_seed(0);
   }
 };
+
+struct CerrRedirect {
+  CerrRedirect(std::streambuf * new_buffer) : prev_buffer(std::cerr.rdbuf(new_buffer)) {}
+
+  ~CerrRedirect( ) {
+    std::cerr.rdbuf(prev_buffer);
+  }
+
+private:
+  std::streambuf * prev_buffer;
+};
+
+inline bool pointer_equal(at::Tensor first, at::Tensor second) {
+  return first.data_ptr<float>() == second.data_ptr<float>();
+}
+
+inline int count_substr_occurrences(const std::string& str, const std::string& substr) {
+  int count = 0;
+  size_t pos = str.find(substr);
+
+  while (pos != std::string::npos) {
+    count++;
+    pos = str.find(substr, pos + substr.size());
+  }
+
+  return count;
+}
 
 } // namespace test
 } // namespace torch

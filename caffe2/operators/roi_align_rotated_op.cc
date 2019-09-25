@@ -169,8 +169,8 @@ void ROIAlignRotatedForward(
 
     if (continuous_coordinate) {
       CAFFE_ENFORCE(
-          roi_width > 0 && roi_height > 0,
-          "ROIs in ROIAlign do not have positive size!");
+          roi_width >= 0 && roi_height >= 0,
+          "ROIs in ROIAlign do not have non-negative size!");
     } else { // backward compatiblity
       // Force malformed ROIs to be 1x1
       roi_width = std::max(roi_width, (T)1.);
