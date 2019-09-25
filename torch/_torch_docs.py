@@ -834,6 +834,25 @@ Arguments:
     dim (int): dimension along which to split the tensor
 """)
 
+add_docstr(torch.can_cast,
+           r"""
+can_cast(from, to) -> bool
+
+Determines if a type conversion is allowed under PyTorch casting rules
+described in the type promotion :ref:`documentation <type-promotion-doc>`.
+
+Args:
+    from (dtype): The original :class:`torch.dtype`.
+    to (dtype): The target :class:`torch.dtype`.
+
+Example::
+
+    >>> torch.can_cast(torch.double, torch.float)
+    True
+    >>> torch.can_cast(torch.float, torch.int)
+    False
+""")
+
 add_docstr(torch.cat,
            r"""
 cat(tensors, dim=0, out=None) -> Tensor
