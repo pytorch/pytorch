@@ -171,6 +171,13 @@ TEST(TensorTest, ContainsCorrectValuesForManyValues) {
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
+  tensor = at::tensor(at::ArrayRef<int>({1, 2, 3}));
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kInt);
+  ASSERT_TRUE(exactly_equal(tensor[0], 1));
+  ASSERT_TRUE(exactly_equal(tensor[1], 2));
+  ASSERT_TRUE(exactly_equal(tensor[2], 3));
+
   tensor = at::tensor({1.5, 2.25, 3.125});
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kDouble);
@@ -188,6 +195,14 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
+  tensor = torch::tensor(at::ArrayRef<int>({1, 2, 3}));
+  ASSERT_TRUE(tensor.is_variable());
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kInt);
+  ASSERT_TRUE(exactly_equal(tensor[0], 1));
+  ASSERT_TRUE(exactly_equal(tensor[1], 2));
+  ASSERT_TRUE(exactly_equal(tensor[2], 3));
+
   tensor = torch::tensor({1.5, 2.25, 3.125});
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
@@ -198,6 +213,18 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
 }
 
 TEST(TensorTest, MultidimTensorCtor) {
+  {
+    auto tensor = torch::tensor({});
+    ASSERT_EQ(tensor.sizes(), torch::IntArrayRef({0}));
+    ASSERT_EQ(tensor.numel(), 0);
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
+    auto tensor = torch::tensor({{{}}, {{}}});
+    ASSERT_EQ(tensor.sizes(), torch::IntArrayRef({2, 1, 0}));
+    ASSERT_EQ(tensor.numel(), 0);
+    ASSERT_FALSE(tensor.requires_grad());
+  }
   {
     auto tensor = torch::tensor({{1, 2}});
     ASSERT_EQ(tensor.dtype(), torch::kInt);
@@ -255,25 +282,25 @@ TEST(TensorTest, MultidimTensorCtor_CUDA) {
   }
 }
 
-TEST(TensorTest, PrettyPrintInitListTensor) {
+TEST(TensorTest, PrettyPrintListInitTensor) {
   {
     ASSERT_EQ(
-      c10::str(torch::detail::InitListTensor(1.1)),
+      c10::str(torch::detail::ListInitTensor(1.1)),
       "1.1");
   }
   {
     ASSERT_EQ(
-      c10::str(torch::detail::InitListTensor({1.1, 2.2})),
+      c10::str(torch::detail::ListInitTensor({1.1, 2.2})),
       "{1.1, 2.2}");
   }
   {
     ASSERT_EQ(
-      c10::str(torch::detail::InitListTensor({{1, 2}, {3, 4}})),
+      c10::str(torch::detail::ListInitTensor({{1, 2}, {3, 4}})),
       "{{1, 2}, {3, 4}}");
   }
   {
     ASSERT_EQ(
-      c10::str(torch::detail::InitListTensor({{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}})),
+      c10::str(torch::detail::ListInitTensor({{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}})),
       "{{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}}");
   }
 }
