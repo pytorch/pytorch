@@ -62,9 +62,6 @@ void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef exclu
 // Used for reduction ops that have a `keepdim` arg.
 void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs, bool keepdim);
 
-// Tensor::copy_ name inference rule.
-void propagate_names_for_copy(Tensor& result, const Tensor& src);
-
 // result = m1 @ m2 + bias
 void propagate_names_for_addmm(
     TensorImpl* result,
