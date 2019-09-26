@@ -44,7 +44,7 @@ def _get_valid_min_max(qparams):
 # it is too old, removes the `width` parameter (which was introduced)
 # in 3.67.0
 def _floats_wrapper(*args, **kwargs):
-    if hypothesis.version.__version_info__ < (3, 67, 0):
+    if 'width' in kwargs and hypothesis.version.__version_info__ < (3, 67, 0):
         kwargs.pop('width')
     return st.floats(*args, **kwargs)
 
