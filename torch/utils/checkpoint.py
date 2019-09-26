@@ -155,7 +155,7 @@ def checkpoint(function, *args, **kwargs):
     return CheckpointFunction.apply(function, preserve, *args)
 
 
-def checkpoint_sequential(functions, segments, input, preserve_rng_state=True):
+def checkpoint_sequential(functions, segments, input, **kwargs):
     r"""A helper function for checkpointing sequential models.
 
     Sequential models execute a list of modules/functions in order
@@ -195,6 +195,11 @@ def checkpoint_sequential(functions, segments, input, preserve_rng_state=True):
         >>> model = nn.Sequential(...)
         >>> input_var = checkpoint_sequential(model, chunks, input_var)
     """
+    # Hack for keyword-only parameter in a python 2.7-compliant way
+    preserve = kwargs.pop('preserve_rng_state', True)
+    if kwargs:
+        raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
+
     def run_function(start, end, functions):
         def forward(*inputs):
             for j in range(start, end + 1):
@@ -214,5 +219,5 @@ def checkpoint_sequential(functions, segments, input, preserve_rng_state=True):
     for start in range(0, segment_size * (segments - 1), segment_size):
         end = start + segment_size - 1
         input = checkpoint(run_function(start, end, functions), input,
-                           preserve_rng_state=preserve_rng_state)
+                           preserve_rng_state=preserve)
     return run_function(end + 1, len(functions) - 1, functions)(input)
