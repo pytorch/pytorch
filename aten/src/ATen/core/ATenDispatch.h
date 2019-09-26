@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <ATen/core/OpsAlreadyMovedToC10.h>
+#include <ATen/core/Variadic.h>
+#include <ATen/core/TensorBody.h>
 #include <c10/util/C++17.h>
 #include <memory>
 #include <mutex>
@@ -40,6 +42,32 @@ static inline TensorTypeId dispatchTypeId(TensorTypeSet ts) {
 
 }
 
+namespace detail {
+  struct MultiDispatchTensorTypeSet : IterArgs<MultiDispatchTensorTypeSet> {
+    TensorTypeSet ts;
+    void operator()(const at::Tensor& x) {
+      ts = ts | x.type_set();
+    }
+    void operator()(TensorOptions x) {
+      ts = ts | x.type_set();
+    }
+    void operator()(at::ArrayRef<at::Tensor> xs) {
+      for (const auto& x : xs) {
+        ts = ts | x.type_set();
+      }
+    }
+    template <typename T>
+    void operator()(const T& x) {
+      // do nothing
+    }
+  };
+
+  template <typename... Args>
+  TensorTypeSet multi_dispatch_tensor_type_set(const Args&... args) {
+    return MultiDispatchTensorTypeSet().apply(args...).ts;
+  }
+}
+
 // ATenOpTable stores the implementations for each backend, in addition to
 // an implementation for variables.
 class CAFFE2_API ATenOpTable {
@@ -47,10 +75,14 @@ class CAFFE2_API ATenOpTable {
   ATenOpTable(std::string schema)
     : schema_(std::move(schema)) {}
 
-  template<class FuncType>
-  FuncType* getOp(TensorTypeSet ts) const {
-    return reinterpret_cast<FuncType*>(getOp(impl::dispatchTypeId(ts)));
+  template<class Result, class... Args>
+  Result callUnboxed(Args... args) const {
+    using FuncType = Result(Args...);
+    TensorTypeSet ts = detail::multi_dispatch_tensor_type_set(args...);
+    FuncType *fn = reinterpret_cast<FuncType*>(getOp(impl::dispatchTypeId(ts)));
+    return fn(args...);
   }
+
  private:
   void registerOp(TensorTypeId tid, void* fn) {
     TORCH_CHECK(function_table_[static_cast<int64_t>(tid)] == nullptr,
