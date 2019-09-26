@@ -10,7 +10,7 @@ namespace torch { \
 } \
 } \
 TORCH_API extern const enumtype::torch::k##name k##name; \
-} \
+}
 
 #define TORCH_ENUM_DEFINE(name) \
 namespace torch { \
