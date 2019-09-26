@@ -79,7 +79,11 @@ struct createReturns<void, void> final {
   }
 };
 
-C10_API FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, std::vector<Argument>&& arguments, std::vector<Argument>&& returns);
+// This is intentionally a separate function and not part of createFunctionSchemaFromTraits
+// because then the template is smaller and that benefits binary size
+inline FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, std::vector<Argument>&& arguments, std::vector<Argument>&& returns) {
+  return FunctionSchema(std::move(name), std::move(overload_name), std::move(arguments), std::move(returns));
+}
 
 /// Creates a `FunctionSchema` object from a `FunctionTraits` type for a
 /// function.
