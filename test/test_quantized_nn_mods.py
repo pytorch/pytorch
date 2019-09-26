@@ -41,7 +41,7 @@ class FunctionalAPITest(QuantizationTestCase):
     )
     @given(
         use_bias=st.booleans(),
-        per_channel = st.booleans()
+        per_channel=st.booleans()
     )
     def test_conv_api(self, use_bias, per_channel):
         """Tests the correctness of the conv module.
