@@ -200,20 +200,11 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     for (int64_t f = b_begin; f < b_end; ++f) {
       Tensor in = input.select(1, f);
 
-      // compute mean per input
-      accscalar_t sum = 0;
-      CPU_tensor_apply1<scalar_t>(in, [&] (const scalar_t& i) {
-          sum += i;
-        });
-      scalar_t mean = sum / n;
+      auto var_mean = native::var_mean(in);
+      scalar_t var = std::get<0>(var_mean);
+      scalar_t mean = std::get<1>(var_mean);
       save_mean_a[f] = mean;
-
-      // compute variance per input
-      accscalar_t var_sum = 0;
-      CPU_tensor_apply1<scalar_t>(in, [&] (const scalar_t& i) {
-        var_sum += (i - mean) * (i - mean);
-      });
-      save_var_transform_a[f] = VarTransform<accscalar_t>{}(var_sum / n, eps);
+      save_var_transform_a[f] = VarTransform<accscalar_t>{}(var, eps);
 
       // update running averages
       if (running_mean.defined()) {
