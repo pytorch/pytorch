@@ -107,7 +107,7 @@ class TestFakeQuantizePerTensorAffine(TestCase):
 
         X = torch.tensor(X).to(dtype=torch.float, device=device)
         X.requires_grad_()
-        fq_module = FakeQuantize(default_observer(), quant_min, quant_max)
+        fq_module = FakeQuantize(default_observer, quant_min, quant_max)
         Y_prime = fq_module(X)
         assert fq_module.scale is not None
         assert fq_module.zero_point is not None
