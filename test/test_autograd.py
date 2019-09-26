@@ -3891,6 +3891,30 @@ class TestAutogradDeviceType(TestCase):
             out.sum().backward()
             self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
+    def _test_rnn_mod(self, mod, inp):
+        from functools import partial
+
+        def flatten_out(mod, inp):
+            out = mod(inp)
+            return tuple([t if isinstance(t, torch.Tensor) else tt for t in out for tt in t])
+        gradcheckfunc = partial(flatten_out, mod)
+        with torch.backends.cudnn.flags(enabled=False):
+            torch.autograd.gradcheck(gradcheckfunc, inp)
+            torch.autograd.gradgradcheck(gradcheckfunc, inp)
+
+    def test_LSTM_grad_and_gradgrad(self, device):
+        hsize = 4
+        inp = torch.rand(1, 3, hsize, device=device, dtype=torch.float64, requires_grad=True)
+        for bias in [True, False]:
+            mod = torch.nn.LSTM(hsize, hsize, bias=bias).to(device).to(torch.float64)
+            self._test_rnn_mod(mod, inp)
+
+    def test_GRU_grad_and_gradgrad(self, device):
+        hsize = 4
+        inp = torch.rand(1, 3, hsize, device=device, dtype=torch.float64, requires_grad=True)
+        for bias in [True, False]:
+            mod = torch.nn.GRU(hsize, hsize, bias=bias).to(device).to(torch.float64)
+            self._test_rnn_mod(mod, inp)
 
 instantiate_device_type_tests(TestAutogradDeviceType, globals())
 
