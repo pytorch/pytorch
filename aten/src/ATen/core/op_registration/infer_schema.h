@@ -24,16 +24,21 @@ struct ArgumentDef final {
   GetTypeFn* getTypeFn;
 };
 
+template<bool V>
+struct bool_t {};
+template<> struct bool_t<true> : std::true_type {};
+template<> struct bool_t<false> : std::false_type {};
+
 /// Checks the static C++ types `Types` for correctness to catch common error cases.
 template <class... Types>
 constexpr int checkStaticTypes() {
  // Give nice error messages for some of the common error cases.
  // Use a LOUD ERROR MESSAGE SO USERS SEE THE STATIC_ASSERT
  static_assert(guts::conjunction<
-     guts::bool_constant<!std::is_integral<Types>::value || std::is_same<Types, int64_t>::value || std::is_same<Types, bool>::value>...
+     bool_t<!std::is_integral<Types>::value || std::is_same<Types, int64_t>::value || std::is_same<Types, bool>::value>...
    >::value, "INVALID TYPE: Only int64_t and bool are supported as an integral argument type");
  static_assert(guts::conjunction<
-     guts::bool_constant<!std::is_same<Types, float>::value>...
+     bool_t<!std::is_same<Types, float>::value>...
    >::value, "INVALID TYPE: float is not supported as an argument type, use double instead");
  return 0;
 }
@@ -45,7 +50,7 @@ constexpr std::array<ArgumentDef, sizeof...(Ts)> createArgumentVectorFromTypes(g
     checkStaticTypes<Ts...>(),
 
     // Create the return value
-    std::array<ArgumentDef, sizeof...(Ts)>{ArgumentDef{&getTypePtr_<guts::decay_t<Ts>>::call}...}
+    std::array<ArgumentDef, sizeof...(Ts)>{{ArgumentDef{&getTypePtr_<guts::decay_t<Ts>>::call}...}}
   );
 }
 
