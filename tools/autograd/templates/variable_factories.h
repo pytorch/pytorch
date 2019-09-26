@@ -20,6 +20,10 @@
 using at::DimnameList;
 #endif
 
+using at::Device;
+using at::ScalarType;
+using at::Layout;
+
 namespace torch {
 
 /// NOTE: Currently `torch::tensor(...)` doesn't support mixed data types

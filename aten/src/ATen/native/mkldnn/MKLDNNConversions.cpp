@@ -30,7 +30,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
              "Can't convert cpu tensor with the number of dimensions > 5");
   // TODO: consider to convert non-contiguous tensor to `ideep::tensor` directly.
   auto cpu_tensor_cont = cpu_tensor.contiguous();
-  Tensor mkldnn_tensor = empty_mkldnn(cpu_tensor_cont.sizes(), cpu_tensor_cont.options());
+  Tensor mkldnn_tensor = empty_mkldnn(cpu_tensor_cont.sizes(), typeMetaToScalarType(cpu_tensor_cont.options().dtype()), cpu_tensor_cont.options().layout(), cpu_tensor_cont.options().device(), cpu_tensor_cont.options().pinned_memory());
   ideep::tensor& dtensor = itensor_from_mkldnn(mkldnn_tensor);
   dtensor.feed_from(dtensor.get_dims(),
                     ideep::tensor::data_type::f32,

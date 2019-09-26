@@ -100,7 +100,7 @@ Tensor& mkldnn_mul_out(Tensor& result, const Tensor& self, const Tensor& other) 
 }
 
 Tensor mkldnn_mul(const Tensor& self, const Tensor& other) {
-  Tensor result = empty_mkldnn(self.sizes(), self.options());
+  Tensor result = empty_mkldnn(self.sizes(), typeMetaToScalarType(self.options().dtype()), self.options().layout(), self.options().device(), self.options().pinned_memory());
   return native::mkldnn_mul_out(result, self, other);
 }
 

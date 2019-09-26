@@ -150,7 +150,7 @@ Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
     }
   }
 
-  Tensor pow2s = at::pow(2, at::native::arange((MAXBIT - 1), -1, -1, sobolstate.options()));
+  Tensor pow2s = at::pow(2, at::native::arange((MAXBIT - 1), -1, -1, typeMetaToScalarType(sobolstate.options().dtype()), sobolstate.options().layout(), sobolstate.options().device(), sobolstate.options().pinned_memory()));
   sobolstate.mul_(pow2s);
   return sobolstate;
 }
