@@ -146,16 +146,16 @@ if [[ $BUILD_ENVIRONMENT == *caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04* ]]; then
   export PATH=/opt/conda/bin:$PATH
   LIB_FOLDER="https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64"
   declare -a TRT_DEBS
-  TRT_DEBS=("libnvinfer6_6.0.1-1+cuda9.0_amd64.deb"
-    "libnvinfer-dev_6.0.1-1+cuda9.0_amd64.deb"
-    "libnvinfer-plugin6_6.0.1-1+cuda9.0_amd64.deb"
-    "libnvinfer-plugin-dev_6.0.1-1+cuda9.0_amd64.deb"
-    "libnvonnxparsers6_6.0.1-1+cuda9.0_amd64.deb"
-    "libnvonnxparsers-dev_6.0.1-1+cuda9.0_amd64.deb"
-    "libnvparsers6_6.0.1-1+cuda9.0_amd64.deb"
-    "libnvparsers-dev_6.0.1-1+cuda9.0_amd64.deb"
-    "python3-libnvinfer-dev_6.0.1-1+cuda9.0_amd64.deb"
-    "python3-libnvinfer_6.0.1-1+cuda9.0_amd64.deb")
+  TRT_DEBS=("libnvinfer6_6.0.1-1+cuda10.1_amd64.deb"
+    "libnvinfer-dev_6.0.1-1+cuda10.1_amd64.deb"
+    "libnvinfer-plugin6_6.0.1-1+cuda10.1_amd64.deb"
+    "libnvinfer-plugin-dev_6.0.1-1+cuda10.1_amd64.deb"
+    "libnvonnxparsers6_6.0.1-1+cuda10.1_amd64.deb"
+    "libnvonnxparsers-dev_6.0.1-1+cuda10.1_amd64.deb"
+    "libnvparsers6_6.0.1-1+cuda10.1_amd64.deb"
+    "libnvparsers-dev_6.0.1-1+cuda10.1_amd64.deb"
+    "python3-libnvinfer-dev_6.0.1-1+cuda10.1_amd64.deb"
+    "python3-libnvinfer_6.0.1-1+cuda10.1_amd64.deb")
 
   for l in "${TRT_DEBS[@]}"
   do
