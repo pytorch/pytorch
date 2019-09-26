@@ -55,6 +55,7 @@ class RpcBackend(Enum):
 # TODO: add a context manager to wrap _init_rpc and join_rpc
 def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
               self_name=None,
+              self_rank=-1,
               init_method=None,
               num_send_recv_threads=4):
     if sys.version_info < (3, 0):
