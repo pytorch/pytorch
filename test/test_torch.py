@@ -6645,13 +6645,13 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(clone.is_contiguous(memory_format=torch.channels_last))
         self.assertEqual(nhwc, clone)
 
-         nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
+        nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
         clone = nhwc.clone(memory_format=torch.contiguous_format)
         self.assertTrue(clone.is_contiguous())
         self.assertFalse(clone.is_contiguous(memory_format=torch.channels_last))
         self.assertEqual(nhwc, clone)
 
-         nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
+        nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
         clone = nhwc.clone()
         self.assertTrue(clone.is_contiguous())
         self.assertFalse(clone.is_contiguous(memory_format=torch.channels_last))
