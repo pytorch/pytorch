@@ -201,8 +201,10 @@ test_backward_compatibility() {
   assert_git_not_dirty
 }
 
-(cd test && python -c "import torch; print(torch.__config__.show())")
-(cd test && python -c "import torch; print(torch.__config__.parallel_info())")
+if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
+  (cd test && python -c "import torch; print(torch.__config__.show())")
+  (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
+fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   test_backward_compatibility
