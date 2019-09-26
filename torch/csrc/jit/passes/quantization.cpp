@@ -666,8 +666,8 @@ void QuantFusion(std::shared_ptr<Graph>& graph) {
   const std::unordered_map<std::string, std::string> pattern_and_replacements =
     {
       {conv2d, quantized_conv2d},
-      {addmm, quantized_linear_with_bias},
-      {matmul_with_bias, quantized_linear_with_bias},
+      {addmm, quantized_linear},
+      {matmul_with_bias, quantized_linear},
       {matmul_no_bias, quantized_linear_no_bias}
     };
   for (const auto& item : pattern_and_replacements) {
