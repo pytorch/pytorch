@@ -89,7 +89,8 @@ Tensor q_maxpool_2d(
     int64_t pH,
     int64_t pW, // padding
     int64_t dH,
-    int64_t dW) { // dilation
+    int64_t dW,
+    bool ceil_mode) { // dilation
   // Check input dimensions.
   TORCH_CHECK(kH > 0 && kW > 0, "kernel_size should be greater than zero.");
   TORCH_CHECK(sH > 0 && sW > 0, "strides should be greater than zero.");
@@ -130,8 +131,8 @@ Tensor q_maxpool_2d(
 
   // Check output dimensions.
   int64_t oC = iC;
-  int64_t oH = pooling_output_shape(iH, kH, pH, sH, dH, false);
-  int64_t oW = pooling_output_shape(iW, kW, pW, sW, dW, false);
+  int64_t oH = pooling_output_shape(iH, kH, pH, sH, dH, ceil_mode);
+  int64_t oW = pooling_output_shape(iW, kW, pW, sW, dW, ceil_mode);
   TORCH_CHECK(oH > 0 && oW > 0, "the resulting Tensor is too small.");
 
   std::vector<int64_t> oSizes;
@@ -217,7 +218,8 @@ Tensor quantized_max_pool2d(
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
-    IntArrayRef dilation) {
+    IntArrayRef dilation,
+    bool ceil_mode) {
   TORCH_CHECK(
       (kernel_size.size() == 1 || kernel_size.size() == 2) &&
           (stride.empty() || stride.size() == 2) &&
@@ -238,7 +240,8 @@ Tensor quantized_max_pool2d(
         padding[0],
         padding[1],
         dilation[0],
-        dilation[1]);
+        dilation[1],
+        ceil_mode);
   });
   return qy;
 }
@@ -253,7 +256,8 @@ class QMaxPool2D_arr_args final : public torch::OperatorKernel {
        IntArrayRef kernel_size,
        IntArrayRef stride,
        IntArrayRef padding,
-       IntArrayRef dilation) {
+       IntArrayRef dilation,
+       bool ceil_mode) {
      Tensor qy;
 
      TORCH_CHECK(
@@ -329,9 +333,9 @@ class QMaxPool2D_arr_args final : public torch::OperatorKernel {
 
      int64_t outC = inC;
      int64_t outH =
-         pooling_output_shape(inH, kH, padH, strideH, dilationH, false);
+         pooling_output_shape(inH, kH, padH, strideH, dilationH, ceil_mode);
      int64_t outW =
-         pooling_output_shape(inW, kW, padW, strideW, dilationW, false);
+         pooling_output_shape(inW, kW, padW, strideW, dilationW, ceil_mode);
 
      TORCH_CHECK(
          outH > 0 && outW > 0,
@@ -377,13 +381,14 @@ class QMaxPool2D_arr_args final : public torch::OperatorKernel {
       std::vector<int64_t> kernel_size,
       std::vector<int64_t> stride,
       std::vector<int64_t> padding,
-      std::vector<int64_t> dilation) {
+      std::vector<int64_t> dilation,
+      bool ceil_mode) {
     #ifdef USE_PYTORCH_QNNPACK
     if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
-      return qnnpack_maxpool(qx, kernel_size, stride, padding, dilation);
+      return qnnpack_maxpool(qx, kernel_size, stride, padding, dilation, ceil_mode);
     }
     #endif
-    return at::max_pool2d(qx, kernel_size, stride, padding, dilation);
+    return at::max_pool2d(qx, kernel_size, stride, padding, dilation, ceil_mode);
   }
 };
 
@@ -392,7 +397,8 @@ static auto registry = torch::RegisterOperators().op(
     "int[] kernel_size, "
     "int[] stride, "
     "int[] padding, "
-    "int[] dilation) -> Tensor",
+    "int[] dilation,"
+    "bool ceil_mode) -> Tensor",
     torch::RegisterOperators::options().kernel<QMaxPool2D_arr_args>(
         TensorTypeId::QuantizedCPUTensorId));
 
