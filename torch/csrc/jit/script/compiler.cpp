@@ -2366,7 +2366,6 @@ struct to_ir {
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
-
       return sv->call(loc, method, inputs, attributes, n_binders);
     }
   }

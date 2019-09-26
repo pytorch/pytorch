@@ -443,9 +443,8 @@ std::shared_ptr<SugaredValue> MagicMethod::call(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  Value* self;
   if (inputs.size() > 0) {
-    self = inputs[0].value(*m.graph());
+    Value* self = inputs[0].value(*m.graph());
     if (auto class_ptr = self->type()->cast<ClassType>()) {
       return callClassMethod(
           class_ptr, desugared_name_, loc, m, inputs, attributes, n_binders);
