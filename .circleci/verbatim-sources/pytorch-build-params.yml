@@ -14,7 +14,7 @@ pytorch_params: &pytorch_params
       default: ""
     saved_docker_filename:
       type: string
-      default: "built_image.tgz"
+      default: "built_image.tar"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     DOCKER_IMAGE: << parameters.docker_image >>

@@ -74,7 +74,7 @@ jobs:
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
             docker images --digests
-            time docker save "${COMMIT_DOCKER_IMAGE}" | gzip -1 > << parameters.saved_docker_filename >>
+            time docker save "${COMMIT_DOCKER_IMAGE}" > << parameters.saved_docker_filename >>
           fi
     - persist_to_workspace:
         root: .
@@ -107,7 +107,7 @@ jobs:
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          gunzip --stdout ~/workspace/built_image.tgz | docker load
+          time docker load < ~/workspace/built_image.tar
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
             export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else

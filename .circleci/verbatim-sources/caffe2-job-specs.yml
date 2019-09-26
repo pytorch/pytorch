@@ -56,14 +56,14 @@
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
             docker images --digests
-            time docker save "${COMMIT_DOCKER_IMAGE}" | gzip -1 > built_image.tgz
+            time docker save "${COMMIT_DOCKER_IMAGE}" > built_image.tar
           else
             # Shut up CircleCI about missing image for BUILD_ONLY jobs
-            touch built_image.tgz
+            touch built_image.tar
           fi
     - persist_to_workspace:
         root: .
-        paths: built_image.tgz
+        paths: built_image.tar
 
   caffe2_linux_test:
     <<: *caffe2_params
@@ -119,7 +119,7 @@
             export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           fi
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          gunzip --stdout ~/workspace/built_image.tgz | docker load
+          time docker load < ~/workspace/built_image.tar
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
             export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else

@@ -178,7 +178,7 @@ pytorch_params: &pytorch_params
       default: ""
     saved_docker_filename:
       type: string
-      default: "built_image.tgz"
+      default: "built_image.tar"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     DOCKER_IMAGE: << parameters.docker_image >>
@@ -365,7 +365,7 @@ jobs:
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
             docker images --digests
-            time docker save "${COMMIT_DOCKER_IMAGE}" | gzip -1 > << parameters.saved_docker_filename >>
+            time docker save "${COMMIT_DOCKER_IMAGE}" > << parameters.saved_docker_filename >>
           fi
     - persist_to_workspace:
         root: .
@@ -398,7 +398,7 @@ jobs:
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          gunzip --stdout ~/workspace/built_image.tgz | docker load
+          time docker load < ~/workspace/built_image.tar
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
             export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
@@ -468,14 +468,14 @@ jobs:
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
             docker images --digests
-            time docker save "${COMMIT_DOCKER_IMAGE}" | gzip -1 > built_image.tgz
+            time docker save "${COMMIT_DOCKER_IMAGE}" > built_image.tar
           else
             # Shut up CircleCI about missing image for BUILD_ONLY jobs
-            touch built_image.tgz
+            touch built_image.tar
           fi
     - persist_to_workspace:
         root: .
-        paths: built_image.tgz
+        paths: built_image.tar
 
   caffe2_linux_test:
     <<: *caffe2_params
@@ -531,7 +531,7 @@ jobs:
             export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           fi
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          gunzip --stdout ~/workspace/built_image.tgz | docker load
+          time docker load < ~/workspace/built_image.tar
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
             export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
@@ -936,7 +936,7 @@ jobs:
           set -e
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          gunzip --stdout ~/workspace/built_image.tgz | docker load
+          time docker load < ~/workspace/built_image.tar
           export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           docker cp $id:/var/lib/jenkins/workspace/env /home/circleci/project/env
@@ -972,7 +972,7 @@ jobs:
           set -ex
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          gunzip --stdout ~/workspace/built_image.tgz | docker load
+          time docker load < ~/workspace/built_image.tar
           export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           # master branch docs push
@@ -1020,7 +1020,7 @@ jobs:
           set -ex
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          gunzip --stdout ~/workspace/built_image.tgz | docker load
+          time docker load < ~/workspace/built_image.tar
           export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           # master branch docs push
@@ -1192,14 +1192,14 @@ jobs:
           echo "docker_image_libtorch_android_arm_v8a: "${docker_image_libtorch_android_arm_v8a}
 
           # x86_32
-          gunzip --stdout ~/workspace/built_image_x86_32.tgz | docker load
+          time docker load < ~/workspace/built_image_x86_32.tar
           export id_x86_32=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_x86_32" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
           # arm-v7a
-          gunzip --stdout ~/workspace/built_image_arm_v7a.tgz | docker load
+          time docker load < ~/workspace/built_image_arm_v7a.tar
           export id_arm_v7a=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v7a})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_arm_v7a" bash) 2>&1'
@@ -1209,7 +1209,7 @@ jobs:
           docker cp $id_arm_v7a:/var/lib/jenkins/workspace/build_android/install ~/workspace/build_android_install_arm_v7a
 
           # x86_64
-          gunzip --stdout ~/workspace/built_image_x86_64.tgz | docker load
+          time docker load < ~/workspace/built_image_x86_64.tar
           export id_x86_64=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_64})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_x86_64" bash) 2>&1'
@@ -1219,7 +1219,7 @@ jobs:
           docker cp $id_x86_64:/var/lib/jenkins/workspace/build_android/install ~/workspace/build_android_install_x86_64
 
           # arm-v8a
-          gunzip --stdout ~/workspace/built_image_arm_v8a.tgz | docker load
+          time docker load < ~/workspace/built_image_arm_v8a.tar
           export id_arm_v8a=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v8a})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_arm_v8a" bash) 2>&1'
@@ -1242,13 +1242,13 @@ jobs:
           output_image=$docker_image_libtorch_android_x86_32-gradle
           docker commit "$id_x86_32" ${output_image}
           docker images --digests
-          time docker save "${output_image}" | gzip -1 > built_image_x86_32_gradle.tgz
+          time docker save "${output_image}" > built_image_x86_32_gradle.tar
     - store_artifacts:
         path: ~/workspace/build_android_artifacts/artifacts.tgz
         destination: artifacts.tgz
     - persist_to_workspace:
         root: .
-        paths: built_image_x86_32_gradle.tgz
+        paths: built_image_x86_32_gradle.tar
 
   pytorch_android_publish_snapshot:
     environment:
@@ -1278,7 +1278,7 @@ jobs:
           echo "docker_image_libtorch_android_x86_32_gradle: "${docker_image_libtorch_android_x86_32_gradle}
 
           # x86_32
-          gunzip --stdout ~/workspace/built_image_x86_32_gradle.tgz | docker load
+          time docker load < ~/workspace/built_image_x86_32_gradle.tar
           export id_x86_32=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32_gradle})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export SONATYPE_NEXUS_USERNAME=${SONATYPE_NEXUS_USERNAME}" && echo "export SONATYPE_NEXUS_PASSWORD=${SONATYPE_NEXUS_PASSWORD}" && echo "export ANDROID_SIGN_KEY=${ANDROID_SIGN_KEY}" && echo "export ANDROID_SIGN_PASS=${ANDROID_SIGN_PASS}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/publish_android_snapshot.sh") | docker exec -u jenkins -i "$id_x86_32" bash) 2>&1'
@@ -1287,10 +1287,10 @@ jobs:
           output_image=${docker_image_libtorch_android_x86_32_gradle}-publish-snapshot
           docker commit "$id_x86_32" ${output_image}
 #         docker images --digests
-#         time docker save "${output_image}" | gzip -1 > built_image_publish_snapshot.tgz
+#         time docker save "${output_image}" > built_image_publish_snapshot.tar
 #   - persist_to_workspace:
 #       root: .
-#       paths: built_image_publish_snapshot.tgz
+#       paths: built_image_publish_snapshot.tar
 
   pytorch_android_gradle_build-x86_32:
     environment:
@@ -1322,7 +1322,7 @@ jobs:
           echo "docker_image_libtorch_android_x86_32: "${docker_image_libtorch_android_x86_32}
 
           # x86
-          gunzip --stdout ~/workspace/built_image_x86_32.tgz | docker load
+          time docker load < ~/workspace/built_image_x86_32.tar
           export id=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32})
 
           export COMMAND='((echo "source ./workspace/env" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
@@ -1334,13 +1334,13 @@ jobs:
           output_image=${docker_image_libtorch_android_x86_32}-gradle
           docker commit "$id" ${output_image}
           docker images --digests
-          time docker save "${output_image}" | gzip -1 > built_image_x86_32.tgz
+          time docker save "${output_image}" > built_image_x86_32.tar
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
     - persist_to_workspace:
         root: .
-        paths: built_image_x86_32.tgz
+        paths: built_image_x86_32.tar
 
   pytorch_ios_build:
     <<: *pytorch_ios_params
@@ -1911,7 +1911,7 @@ workflows:
             - setup
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:347"
-          saved_docker_filename: built_image_x86_32.tgz
+          saved_docker_filename: built_image_x86_32.tar
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
           requires:
@@ -1923,7 +1923,7 @@ workflows:
 #               - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_64-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:347"
-          saved_docker_filename: built_image_x86_64.tgz
+          saved_docker_filename: built_image_x86_64.tar
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
           requires:
@@ -1935,7 +1935,7 @@ workflows:
 #               - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v7a-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:347"
-          saved_docker_filename: built_image_arm_v7a.tgz
+          saved_docker_filename: built_image_arm_v7a.tar
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
           requires:
@@ -1947,7 +1947,7 @@ workflows:
 #               - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v8a-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:347"
-          saved_docker_filename: built_image_arm_v8a.tgz
+          saved_docker_filename: built_image_arm_v8a.tar
 
       - pytorch_android_gradle_build-x86_32:
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32
