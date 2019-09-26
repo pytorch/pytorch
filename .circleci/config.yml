@@ -1777,6 +1777,21 @@ workflows:
           requires:
             - pytorch_linux_xenial_cuda9_cudnn7_py3_build
       - pytorch_linux_build:
+          name: pytorch_libtorch_linux_xenial_cuda9_cudnn7_py3_build
+          requires:
+            - setup
+          build_environment: "pytorch-libtorch-linux-xenial-cuda9-cudnn7-py3-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
+      - pytorch_linux_test:
+          name: pytorch_libtorch_linux_xenial_cuda9_cudnn7_py3_test
+          requires:
+            - setup
+            - pytorch_libtorch_linux_xenial_cuda9_cudnn7_py3_build
+          build_environment: "pytorch-libtorch-linux-xenial-cuda9-cudnn7-py3-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - pytorch_linux_build:
           name: pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_build
           requires:
             - setup

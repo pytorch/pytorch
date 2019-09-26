@@ -138,7 +138,6 @@ test_torchvision() {
 }
 
 test_libtorch() {
-  if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
     echo "Testing libtorch"
     python test/cpp/jit/tests_setup.py setup
     CPP_BUILD="$PWD/../cpp-build"
@@ -151,7 +150,6 @@ test_libtorch() {
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/build/bin/test_api
     assert_git_not_dirty
-  fi
 }
 
 test_custom_script_ops() {
@@ -212,19 +210,25 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   test_torchvision
   test_xla
+elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
+  test_libtorch
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
   test_torchvision
   test_python_nn
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   test_python_all_except_nn
   test_aten
-  test_libtorch
+  if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
+    test_libtorch
+  fi
   test_custom_script_ops
 else
   test_torchvision
   test_python_nn
   test_python_all_except_nn
   test_aten
-  test_libtorch
+  if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
+    test_libtorch
+  fi
   test_custom_script_ops
 fi
