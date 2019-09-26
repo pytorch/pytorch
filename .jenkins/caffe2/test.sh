@@ -100,6 +100,7 @@ fi
 ##############################
 if [[ $BUILD_ENVIRONMENT == *caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04* ]]; then
   pip install -q --user torchvision
+  ignore_tests+=( --ignore $caffe2_pypath/python/trt/test_trt.py )
 else
   ignore_tests+=( --ignore $caffe2_pypath/python/trt/test_pt_onnx_trt.py )
 fi
