@@ -363,7 +363,7 @@ jobs:
               export COMMIT_DOCKER_IMAGE=$output_image
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
-            docker push ${COMMIT_DOCKER_IMAGE}
+            time docker push ${COMMIT_DOCKER_IMAGE}
           fi
 
   pytorch_linux_test:
@@ -460,7 +460,7 @@ jobs:
               export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
-            docker push ${COMMIT_DOCKER_IMAGE}
+            time docker push ${COMMIT_DOCKER_IMAGE}
           fi
 
   caffe2_linux_test:
@@ -976,7 +976,7 @@ jobs:
           # Save the docs build so we can debug any problems
           export DEBUG_COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}-debug
           docker commit "$id" ${DEBUG_COMMIT_DOCKER_IMAGE}
-          docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
+          time docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
 
   pytorch_cpp_doc_push:
     environment:
@@ -1021,7 +1021,7 @@ jobs:
           # Save the docs build so we can debug any problems
           export DEBUG_COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}-debug
           docker commit "$id" ${DEBUG_COMMIT_DOCKER_IMAGE}
-          docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
+          time docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
 
   pytorch_macos_10_13_py3_build:
     environment:
@@ -1215,7 +1215,7 @@ jobs:
 
           output_image=$docker_image_libtorch_android_x86_32-gradle
           docker commit "$id_x86_32" ${output_image}
-          docker push ${output_image}
+          time docker push ${output_image}
     - store_artifacts:
         path: ~/workspace/build_android_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -1254,7 +1254,7 @@ jobs:
 
           output_image=${docker_image_libtorch_android_x86_32_gradle}-publish-snapshot
           docker commit "$id_x86_32" ${output_image}
-          docker push ${output_image}
+          time docker push ${output_image}
 
   pytorch_android_gradle_build-x86_32:
     environment:
@@ -1297,7 +1297,7 @@ jobs:
 
           output_image=${docker_image_libtorch_android_x86_32}-gradle
           docker commit "$id" ${output_image}
-          docker push ${output_image}
+          time docker push ${output_image}
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
