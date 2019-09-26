@@ -11,6 +11,8 @@
 #include <c10/util/C++17.h>
 #include <memory>
 #include <mutex>
+#include <ATen/core/interned_strings.h>
+#include <ATen/core/stack.h>
 
 // TODO: Rewrite this comment
 //
@@ -79,8 +81,26 @@ class CAFFE2_API ATenOpTable {
   Result callUnboxed(Args... args) const {
     using FuncType = Result(Args...);
     TensorTypeSet ts = detail::multi_dispatch_tensor_type_set(args...);
-    FuncType *fn = reinterpret_cast<FuncType*>(getOp(impl::dispatchTypeId(ts)));
-    return fn(args...);
+    TensorTypeId tid = impl::dispatchTypeId(ts);
+
+    // You might think we can eliminate the second branch by maintaining a
+    // bitmask of registered operator keys, so we don't select dispatch ids
+    // which don't have implementations here.  But the net effect is that if you
+    // get a Variable CPUTensor, if there is no variable registration, you'll
+    // fall back to the CPU implementation.  Is this what you want?  Unlikely...
+
+    auto* unboxed_fn = reinterpret_cast<FuncType*>(function_table_[static_cast<int64_t>(tid)]);
+    if (C10_LIKELY(unboxed_fn != nullptr)) {
+      return (*unboxed_fn)(args...);
+    }
+
+    auto* unboxed_fallback_fn = reinterpret_cast<FuncType*>(function_table_[static_cast<int64_t>(TensorTypeId::UndefinedTensorId)]);
+    if (C10_LIKELY(unboxed_fallback_fn != nullptr)) {
+      return (*unboxed_fallback_fn)(args...);
+    }
+
+    reportError(tid);
+    TORCH_INTERNAL_ASSERT(0);
   }
 
  private:
@@ -92,19 +112,7 @@ class CAFFE2_API ATenOpTable {
     function_table_[static_cast<int64_t>(tid)] = fn;
   }
 
-  void* getFallbackOp(TensorTypeId tid) const;
-
-  void* getOp(TensorTypeId tid) const {
-    // You might think we can minorly optimize this further by maintaining a
-    // bitmask of registered operator keys, so we don't select dispatch ids
-    // which don't have implementations here.  But the net effect is that if you
-    // get a Variable CPUTensor, if there is no variable registration, you'll
-    // fall back to the CPU implementation.  Is this what you want?  Unlikely...
-    if (function_table_[static_cast<int64_t>(tid)] == nullptr) {
-      return getFallbackOp(tid);
-    }
-    return function_table_[static_cast<int64_t>(tid)];
-  }
+  C10_NORETURN void reportError(TensorTypeId tid) const;
 
   friend class ATenDispatch;
 
