@@ -47,6 +47,7 @@ static const std::unordered_set<NodeKind> standardOps = {
   onnx::Gemm,
   onnx::Pow,
   onnx::Mod,
+  onnx::Range,
 };
 
 static bool IsStandardOp(const NodeKind& nkind) {
