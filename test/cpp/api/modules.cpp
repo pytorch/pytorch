@@ -572,6 +572,39 @@ TEST_F(ModulesTest, MaxUnpool1d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 5}));
 }
 
+TEST_F(ModulesTest, MaxUnpool2d) {
+  auto indices = torch::tensor({
+  {{{ 6,  8,  9},
+    {16, 18, 19},
+    {21, 23, 24}}},
+  {{{ 6,  8,  9},
+    {16, 18, 19},
+    {21, 23, 24}}}}, torch::kLong);
+  auto x = torch::tensor({
+  {{{ 6,  8,  9},
+    {16, 18, 19},
+    {21, 23, 24}}},
+  {{{31, 33, 34},
+    {41, 43, 44},
+    {46, 48, 49}}}}, torch::requires_grad());
+  auto model = MaxUnpool2d{MaxUnpool2dOptions(3).stride(2).padding(1)};
+  auto y = model->forward(x, indices);
+
+  ASSERT_EQ(y.dim(), 4);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor(
+   {{{{ 0,  0,  0,  0,  0},
+      { 0,  6,  0,  8,  9},
+      { 0,  0,  0,  0,  0},
+      { 0, 16,  0, 18, 19},
+      { 0, 21,  0, 23, 24}}},
+    {{{ 0,  0,  0,  0,  0},
+      { 0, 31,  0, 33, 34},
+      { 0,  0,  0,  0,  0},
+      { 0, 41,  0, 43, 44},
+      { 0, 46,  0, 48, 49}}}} , torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 1, 5, 5}));
+}
+
 TEST_F(ModulesTest, Linear) {
   Linear model(5, 2);
   auto x = torch::randn({10, 5}, torch::requires_grad());
@@ -947,6 +980,16 @@ TEST_F(ModulesTest, PrettyPrintMaxUnpool) {
   ASSERT_EQ(
       c10::str(MaxUnpool1d(MaxUnpool1dOptions(5).stride(3).padding(1))),
       "torch::nn::MaxUnpool1d(kernel_size=5, stride=3, padding=1)");
+
+  ASSERT_EQ(
+      c10::str(MaxUnpool2d(5)),
+      "torch::nn::MaxUnpool2d(kernel_size=[5, 5], stride=[5, 5], padding=[0, 0])");
+  ASSERT_EQ(
+      c10::str(MaxUnpool2d(torch::IntArrayRef{5, 6})),
+      "torch::nn::MaxUnpool2d(kernel_size=[5, 6], stride=[5, 6], padding=[0, 0])");
+  ASSERT_EQ(
+      c10::str(MaxUnpool2d(MaxUnpool2dOptions(torch::IntArrayRef{5, 6}).stride({3, 4}).padding({1, 2}))),
+      "torch::nn::MaxUnpool2d(kernel_size=[5, 6], stride=[3, 4], padding=[1, 2])");
 }
 
 TEST_F(ModulesTest, PrettyPrintDropout) {
