@@ -270,8 +270,14 @@ class TestTypePromotion(TestCase):
 
     def test_lt_with_type_promotion(self):
         for dt in torch.testing.get_all_math_dtypes(self.device):
-            actual = torch.tensor([0], dtype=dt, device=self.device) < 0.5
+            x = torch.tensor([0], dtype=dt, device=self.device)
             expected = torch.tensor([True], dtype=dt, device=self.device)
+
+            actual = x < 0.5
+            self.assertTrue(actual, expected)
+            self.assertTrue(actual.dtype == torch.bool)
+
+            actual = x < torch.tensor(0.5)
             self.assertTrue(actual, expected)
             self.assertTrue(actual.dtype == torch.bool)
 
