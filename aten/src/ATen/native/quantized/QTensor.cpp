@@ -156,8 +156,12 @@ Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
 }
 
 Tensor quantized_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
-
   // TODO(vitalyf): add memory format support
+  TORCH_CHECK(
+      optional_memory_format.value_or(MemoryFormat::Contiguous) ==
+          MemoryFormat::Contiguous,
+      "unsupported memory format ",
+      optional_memory_format.value_or(MemoryFormat::Contiguous));
 
   // TODO: add per channel support
   TORCH_INTERNAL_ASSERT(

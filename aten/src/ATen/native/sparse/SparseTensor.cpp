@@ -256,6 +256,11 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, A
 // NB: Deleted newWithSizeNd variants
 
 SparseTensor clone_sparse(const SparseTensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      optional_memory_format.value_or(MemoryFormat::Contiguous) ==
+          MemoryFormat::Contiguous,
+      "unsupported memory format ",
+      optional_memory_format.value_or(MemoryFormat::Contiguous));
   SparseTensor other = new_with_dims_sparse(self.sparse_dim(), self.dense_dim(), self.sizes(), self.options());
   copy_into_sparse(other, self._indices(), self._values(), true);
   return other._coalesced_(self.is_coalesced());

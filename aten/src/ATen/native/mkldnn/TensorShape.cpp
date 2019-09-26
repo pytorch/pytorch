@@ -55,6 +55,11 @@ Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
 }
 
 Tensor mkldnn_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      optional_memory_format.value_or(MemoryFormat::Contiguous) ==
+          MemoryFormat::Contiguous,
+      "unsupported memory format ",
+      optional_memory_format.value_or(MemoryFormat::Contiguous));
   ideep::tensor& src = itensor_from_mkldnn(self);
   ideep::tensor dst;
   ideep::direct_copy::compute<AllocForMKLDNN>(src, dst);

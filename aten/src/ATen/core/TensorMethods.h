@@ -1419,7 +1419,13 @@ inline Tensor Tensor::log() const {
 }
 inline Tensor & Tensor::log_() const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::log_(const_cast<Tensor&>(*this));
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::log_(const_cast<Tensor&>(*this));
+            break;
+        default:
+            AT_ERROR("log_ not implemented for ", at::toString(type_set()));
+    }
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::log_", ""}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &>(
@@ -2821,13 +2827,22 @@ inline Tensor Tensor::clone(c10::optional<MemoryFormat> memory_format) const {
             AT_ERROR("clone not implemented for ", at::toString(type_set()));
     }
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::clone(Tensor self, *, MemoryFormat? memory_format=contiguous_format) -> Tensor");
+    static auto table = globalATenDispatch().getOpTable("aten::clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor");
     return table->getOp<Tensor (const Tensor &, c10::optional<MemoryFormat>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), memory_format);
 #endif
 }
 inline Tensor & Tensor::resize_as_(const Tensor & the_template) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::resize_as_(const_cast<Tensor&>(*this), the_template);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::resize_as_(const_cast<Tensor&>(*this), the_template);
+            break;
+        case Backend::SparseCPU:
+            return SparseCPUType::resize_as_(const_cast<Tensor&>(*this), the_template);
+            break;
+        default:
+            AT_ERROR("resize_as_ not implemented for ", at::toString(type_set()));
+    }
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::resize_as_", ""}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, const Tensor &>(

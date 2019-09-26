@@ -5344,19 +5344,19 @@ class _TestTorchMixin(object):
         self.assertEqual(s1.data_ptr() + 4, s2.data_ptr())
 
     def test_load_unicode_error_msg(self):
-        # This Pickle contains a Python 2 module with Unicode data and the 
+        # This Pickle contains a Python 2 module with Unicode data and the
         # loading should fail if the user explicitly specifies ascii encoding!
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
         if sys.version_info >= (3, 0):
             self.assertRaises(UnicodeDecodeError, lambda: torch.load(path, encoding='ascii'))
         else:
             # Just checks the module loaded
-            self.assertIsNotNone(torch.load(path)) 
+            self.assertIsNotNone(torch.load(path))
 
     def test_load_python2_unicode_module(self):
         # This Pickle contains some Unicode data!
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
-        self.assertIsNotNone(torch.load(path)) 
+        self.assertIsNotNone(torch.load(path))
 
     def test_load_error_msg(self):
         expected_err_msg = (".*You can only torch.load from a file that is seekable. " +
@@ -12692,24 +12692,22 @@ class TestTorchDeviceType(TestCase):
 
     def test_memory_format_clone(self, device):
         nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
-        clone = nhwc.clone()
+        clone = nhwc.clone(memory_format=torch.preserve_format)
         self.assertFalse(clone.is_contiguous())
         self.assertTrue(clone.is_contiguous(memory_format=torch.channels_last))
         self.assertEqual(nhwc, clone)
 
-    def test_memory_format_resize_as(self, device):
         nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
-        flat = torch.randn(10*3*32*32, device=device)
-        flat.resize_as_(nhwc)
-        self.assertTrue(flat.is_contiguous(memory_format=torch.channels_last))
+        clone = nhwc.clone(memory_format=torch.contiguous_format)
+        self.assertTrue(clone.is_contiguous())
+        self.assertFalse(clone.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(nhwc, clone)
 
-    @onlyCUDA
-    def test_memory_format_preserved_during_device_transfer(self, device):
-        nhwc = torch.randn((10, 3, 32, 32), device='cpu').contiguous(memory_format=torch.channels_last)
-        on_cuda = nhwc.to(device)
-        self.assertTrue(on_cuda.is_contiguous(memory_format=torch.channels_last))
-        on_cuda = nhwc.cuda()
-        self.assertTrue(on_cuda.is_contiguous(memory_format=torch.channels_last))
+        nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
+        clone = nhwc.clone()
+        self.assertTrue(clone.is_contiguous())
+        self.assertFalse(clone.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(nhwc, clone)
 
     def test_memory_format_empty_like(self, device):
         x = torch.randn(10, 3, 32, 32, device=device)
@@ -12732,8 +12730,8 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
 
         like = torch.empty_like(nhwc)
-        self.assertFalse(like.is_contiguous())
-        self.assertTrue(like.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(like.is_contiguous())
+        self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
 
         sparse = x.to_sparse()
         with self.assertRaises(RuntimeError):
