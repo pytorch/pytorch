@@ -108,6 +108,20 @@ TEST_F(ModulesTest, MaxPool1d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 }
 
+TEST_F(ModulesTest, MaxPool1dReturnIndices) {
+  MaxPool1d model(MaxPool1dOptions(3).stride(2));
+  auto x = torch::ones({1, 1, 5}, torch::requires_grad());
+  torch::Tensor y, indices;
+  std::tie(y, indices) = model->forward_with_indices(x);
+
+  ASSERT_EQ(y.dim(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1 ,2})));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+
+  ASSERT_TRUE(torch::allclose(indices, torch::tensor({{{0, 2}}}, torch::kLong)));
+  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({1, 1, 2}));
+}
+
 TEST_F(ModulesTest, MaxPool2dEven) {
   MaxPool2d model(MaxPool2dOptions(3).stride(2));
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
@@ -134,6 +148,24 @@ TEST_F(ModulesTest, MaxPool2dUneven) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
 }
 
+TEST_F(ModulesTest, MaxPool2dReturnIndices) {
+  MaxPool2d model(MaxPool2dOptions(3).stride(2));
+  auto x = torch::ones({2, 5, 5}, torch::requires_grad());
+  torch::Tensor y, indices;
+  std::tie(y, indices) = model->forward_with_indices(x);
+
+  ASSERT_EQ(y.dim(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2 ,2})));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
+  ASSERT_TRUE(torch::allclose(
+    indices,
+    torch::tensor({{{ 0,  2},
+                    {10, 12}},
+                   {{ 0,  2},
+                    {10, 12}}}, torch::kLong)));
+  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({2, 2, 2}));
+}
+
 TEST_F(ModulesTest, MaxPool3d) {
   MaxPool3d model(MaxPool3dOptions(3).stride(2));
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
@@ -145,6 +177,29 @@ TEST_F(ModulesTest, MaxPool3d) {
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
   ASSERT_EQ(s.ndimension(), 0);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
+}
+
+TEST_F(ModulesTest, MaxPool3dReturnIndices) {
+  MaxPool3d model(MaxPool3dOptions(3).stride(2));
+  auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
+  torch::Tensor y, indices;
+  std::tie(y, indices) = model->forward_with_indices(x);
+
+  ASSERT_EQ(y.dim(), 4);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
+
+  ASSERT_TRUE(torch::allclose(
+    indices,
+    torch::tensor({{{{ 0,  2},
+                     {10, 12}},
+                    {{50, 52},
+                     {60, 62}}},
+                   {{{ 0,  2},
+                     {10, 12}},
+                    {{50, 52},
+                     {60, 62}}}}, torch::kLong)));
+  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
 }
 
 TEST_F(ModulesTest, AvgPool1d) {
@@ -517,37 +572,49 @@ TEST_F(ModulesTest, PrettyPrintConv) {
 TEST_F(ModulesTest, PrettyPrintMaxPool) {
   ASSERT_EQ(
       c10::str(MaxPool1d(5)),
-      "torch::nn::MaxPool1d(kernel_size=5, stride=5)");
+      "torch::nn::MaxPool1d(kernel_size=5, stride=5, padding=0, dilation=1, ceil_mode=false)");
   ASSERT_EQ(
       c10::str(MaxPool2d(5)),
-      "torch::nn::MaxPool2d(kernel_size=[5, 5], stride=[5, 5])");
+      "torch::nn::MaxPool2d(kernel_size=[5, 5], stride=[5, 5], padding=[0, 0], dilation=[1, 1], ceil_mode=false)");
   ASSERT_EQ(
       c10::str(MaxPool2d(MaxPool2dOptions(5).stride(2))),
-      "torch::nn::MaxPool2d(kernel_size=[5, 5], stride=[2, 2])");
+      "torch::nn::MaxPool2d(kernel_size=[5, 5], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=false)");
+  ASSERT_EQ(
+      c10::str(MaxPool3d(5)),
+      "torch::nn::MaxPool3d(kernel_size=[5, 5, 5], stride=[5, 5, 5], padding=[0, 0, 0], dilation=[1, 1, 1], ceil_mode=false)");
+  ASSERT_EQ(
+      c10::str(MaxPool3d(MaxPool3dOptions(5).stride(2))),
+      "torch::nn::MaxPool3d(kernel_size=[5, 5, 5], stride=[2, 2, 2], padding=[0, 0, 0], dilation=[1, 1, 1], ceil_mode=false)");
 
   const auto options =
       MaxPool2dOptions(torch::IntArrayRef{5, 6}).stride({1, 2});
   ASSERT_EQ(
       c10::str(MaxPool2d(options)),
-      "torch::nn::MaxPool2d(kernel_size=[5, 6], stride=[1, 2])");
+      "torch::nn::MaxPool2d(kernel_size=[5, 6], stride=[1, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=false)");
 }
 
 TEST_F(ModulesTest, PrettyPrintAvgPool) {
   ASSERT_EQ(
       c10::str(AvgPool1d(5)),
-      "torch::nn::AvgPool1d(kernel_size=5, stride=5)");
+      "torch::nn::AvgPool1d(kernel_size=5, stride=5, padding=0)");
   ASSERT_EQ(
       c10::str(AvgPool2d(5)),
-      "torch::nn::AvgPool2d(kernel_size=[5, 5], stride=[5, 5])");
+      "torch::nn::AvgPool2d(kernel_size=[5, 5], stride=[5, 5], padding=[0, 0])");
   ASSERT_EQ(
       c10::str(AvgPool2d(AvgPool2dOptions(5).stride(2))),
-      "torch::nn::AvgPool2d(kernel_size=[5, 5], stride=[2, 2])");
+      "torch::nn::AvgPool2d(kernel_size=[5, 5], stride=[2, 2], padding=[0, 0])");
+  ASSERT_EQ(
+      c10::str(AvgPool3d(5)),
+      "torch::nn::AvgPool3d(kernel_size=[5, 5, 5], stride=[5, 5, 5], padding=[0, 0, 0])");
+  ASSERT_EQ(
+      c10::str(AvgPool3d(AvgPool3dOptions(5).stride(2))),
+      "torch::nn::AvgPool3d(kernel_size=[5, 5, 5], stride=[2, 2, 2], padding=[0, 0, 0])");
 
   const auto options =
       AvgPool2dOptions(torch::IntArrayRef{5, 6}).stride({1, 2});
   ASSERT_EQ(
       c10::str(AvgPool2d(options)),
-      "torch::nn::AvgPool2d(kernel_size=[5, 6], stride=[1, 2])");
+      "torch::nn::AvgPool2d(kernel_size=[5, 6], stride=[1, 2], padding=[0, 0])");
 }
 
 TEST_F(ModulesTest, PrettyPrintDropout) {

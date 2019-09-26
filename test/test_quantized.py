@@ -139,8 +139,6 @@ class TestQuantizedOps(TestCase):
             self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
 
     """Tests the correctness of the scalar addition."""
-    @unittest.skip("temporarily disable until failures are fixed. " +
-                   "See https://github.com/pytorch/pytorch/issues/26279")
     @no_deadline
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=st.floats(-1e6, 1e6, allow_nan=False),
@@ -155,22 +153,22 @@ class TestQuantizedOps(TestCase):
         A = A.astype(np.float32)
         qA = torch.quantize_per_tensor(torch.from_numpy(A), scale, zero_point, dtype)
 
-        C = qA.dequantize() + b
+        C = qA.dequantize() + round(b / scale) * scale
         C_relu = copy.deepcopy(C)
         C_relu[C_relu < 0] = 0
 
-        C_ref = torch.quantize_per_tensor(C, scale, zero_point, dtype)
-        C_relu_ref = torch.quantize_per_tensor(C_relu, scale, zero_point, dtype)
+        C_hat = add_scalar(qA, b)
+        C_ref = torch.quantize_per_tensor(C, C_hat.q_scale(), C_hat.q_zero_point(), dtype)
+        C_relu_hat = add_scalar_relu(qA, b)
+        C_relu_ref = torch.quantize_per_tensor(
+            C_relu, C_relu_hat.q_scale(), C_relu_hat.q_zero_point(), dtype)
 
-        C_hat = add_scalar(qA, b, scale=scale, zero_point=zero_point)
-        C_relu_hat = add_scalar_relu(qA, b, scale=scale, zero_point=zero_point)
-
-        self.assertEqual(C_ref, C_hat,
+        self.assertEqual(C_ref.dequantize(), C_hat.dequantize(),
                          message="Scalar add results don't match:\
-                         {} vs {}".format(C_ref, C_hat))
-        self.assertEqual(C_relu_ref, C_relu_hat,
+                         {} vs {}".format(C_ref.dequantize(), C_hat.dequantize()))
+        self.assertEqual(C_relu_ref.dequantize(), C_relu_hat.dequantize(),
                          message="Scalar add relu results don't match:\
-                         {} vs {}".format(C_relu_ref, C_relu_hat))
+                         {} vs {}".format(C_relu_ref.dequantize(), C_relu_hat.dequantize()))
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
@@ -790,17 +788,18 @@ class TestQuantizedOps(TestCase):
             cat_q = q_cat_op(tensors_q, dim=ch_axis, scale=scale,
                              zero_point=zero_point)
 
+    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams()),
            size=st.sampled_from((1, 3, 5, 10)),
-           mode=st.sampled_from(("nearest", "nearest")),
+           mode=st.sampled_from(("bilinear", "nearest")),
            scale_factor=st.sampled_from((None, 1.5, 2.0)),
            align_corners=st.sampled_from((True, False)),
            nhwc_layout=st.sampled_from((True, False)))
     def test_interpolate(self, X, size, mode, scale_factor, align_corners, nhwc_layout):
         """
-        This test cover upsample_nearest2d
+        This test cover upsample_nearest2d and upsample_bilinear2d
         """
         X, (scale, zero_point, torch_type) = X
         H, W = X.shape[-2:]
@@ -832,7 +831,6 @@ class TestQuantizedOps(TestCase):
             "nn.functional": torch.nn.functional.interpolate,
             "nn.quantized.functional": torch.nn.quantized.functional.interpolate
         }
-
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
         for name, op in ops_under_test.items():
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
