@@ -262,6 +262,9 @@ void Int8Quantize(
     out += 8;
   }
 #endif
+  for (; i < N; ++i) {
+    (*out++) = Uint8Quantize(Y_scale, Y_offset, (*in++));
+  }
 }
 
 template <typename T>
