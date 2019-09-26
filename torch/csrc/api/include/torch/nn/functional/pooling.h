@@ -50,6 +50,16 @@ inline Tensor max_pool1d(const Tensor& input, const MaxPool1dOptions& options) {
       options.ceil_mode());
 }
 
+inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(const Tensor& input, const MaxPool1dOptions& options) {
+  return torch::max_pool1d_with_indices(
+      input,
+      options.kernel_size(),
+      options.stride(),
+      options.padding(),
+      options.dilation(),
+      options.ceil_mode());
+}
+
 inline Tensor max_pool2d(const Tensor& input, const MaxPool2dOptions& options) {
   return torch::max_pool2d(
       input,
@@ -60,8 +70,28 @@ inline Tensor max_pool2d(const Tensor& input, const MaxPool2dOptions& options) {
       options.ceil_mode());
 }
 
+inline std::tuple<Tensor, Tensor> max_pool2d_with_indices(const Tensor& input, const MaxPool2dOptions& options) {
+  return torch::max_pool2d_with_indices(
+      input,
+      options.kernel_size(),
+      options.stride(),
+      options.padding(),
+      options.dilation(),
+      options.ceil_mode());
+}
+
 inline Tensor max_pool3d(const Tensor& input, const MaxPool3dOptions& options) {
   return torch::max_pool3d(
+      input,
+      options.kernel_size(),
+      options.stride(),
+      options.padding(),
+      options.dilation(),
+      options.ceil_mode());
+}
+
+inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(const Tensor& input, const MaxPool3dOptions& options) {
+  return torch::max_pool3d_with_indices(
       input,
       options.kernel_size(),
       options.stride(),
