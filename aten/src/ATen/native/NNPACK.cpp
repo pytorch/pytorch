@@ -80,6 +80,7 @@ pthreadpool_t nnpack_threadpool() {
         throw std::runtime_error("could not initialize NNPack (unknown error)");
       }
     }
+#ifndef C10_MOBILE
     unsigned int threads;
 #ifdef INTRA_OP_PARALLEL
     threads = at::get_num_threads();
@@ -90,18 +91,28 @@ pthreadpool_t nnpack_threadpool() {
     if (nnpack_threadpool_ == nullptr) {
       throw std::runtime_error("could not initialize NNPack's pthreadpool");
     }
+#endif /* C10_MOBILE */
   }
   return nnpack_threadpool_;
 }
 
 bool _nnpack_available() {
-  if (! called_nnpack_threadpool_) {
+  const auto check_validity = []() {
+#ifndef C10_MOBILE
+    return nnpack_threadpool_ != nullptr;
+#else
+    return called_nnpack_threadpool_;
+#endif
+  };
+
+  if (!called_nnpack_threadpool_) {
     try {
-      return nnpack_threadpool() != nullptr;
+      nnpack_threadpool();
     } catch (std::runtime_error e) {
     }
   }
-  return nnpack_threadpool() != nullptr;
+
+  return check_validity();
 }
 
 // Make thread_local for safety in cases where we have multiple threads running
