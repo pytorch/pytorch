@@ -6,7 +6,8 @@
 #include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/core/Tensor.h>
-
+#include <third_party/gemmlowp/gemmlowp/fixedpoint/fixedpoint.h>
+#include <third_party/gemmlowp/gemmlowp/public/gemmlowp.h>
 #include <typeinfo>
 
 #ifdef USE_FBGEMM
@@ -159,6 +160,21 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t z
 }
 #else  // USE_FBGEMM
 
+#if defined(__ANDROID__) && !defined(__NDK_MAJOR__)
+template <class T>
+inline float Round(const float x) {
+  return ::nearbyintf(x);
+}
+inline double Round(const double x) {
+  return ::nearbyint(x);
+}
+#else
+template <class T>
+inline T Round(const T x) {
+  return std::nearbyint(x);
+}
+#endif
+
 template <typename T>
 T quantize_val(double scale, int64_t zero_point, float value) {
   // std::nearbyint results in nearest integer value according to the current
@@ -171,8 +187,7 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   int64_t qvalue;
   constexpr int64_t qmin = std::numeric_limits<typename T::underlying>::min();
   constexpr int64_t qmax = std::numeric_limits<typename T::underlying>::max();
-  checkZeroPoint<typename T::underlying>("quantize_val", zero_point);
-  qvalue = static_cast<int64_t>(std::nearbyint(value / scale + zero_point));
+  qvalue = static_cast<int64_t>(Round(value / scale + zero_point));
   qvalue = std::max<int64_t>(qvalue, qmin);
   qvalue = std::min<int64_t>(qvalue, qmax);
   return static_cast<T>(qvalue);
@@ -180,9 +195,73 @@ T quantize_val(double scale, int64_t zero_point, float value) {
 
 template <typename T, int precision>
 void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, size_t count) {
+  checkZeroPoint<typename T::underlying>("quantize_val", zero_point);
   for (int64_t i = 0; i < count; ++i) {
     dst[i] = quantize_val<T>(scale, zero_point, src[i]);
   }
+}
+
+#ifdef GEMMLOWP_NEON
+#define INT8_NEON_SIMD
+#endif
+
+#if defined(__SSE4_2__) && defined(__clang__)
+#include "NEON_2_SSE.h"
+#define INT8_NEON_SIMD
+#endif
+inline uint8_t Uint8Quantize(const float scale, const int32_t zero_point, const float value) {
+  const int32_t qmin = std::numeric_limits<uint8_t>::min();
+  const int32_t qmax = std::numeric_limits<uint8_t>::max();
+  auto r = zero_point + static_cast<int32_t>(Round(value / scale));
+  r = std::max(r, qmin);
+  r = std::min(r, qmax);
+  return static_cast<uint8_t>(r);
+}
+
+void Int8Quantize(
+    const float* in,
+    uint8_t* out,
+    const int64_t N,
+    const float Y_scale,
+    const int32_t Y_offset) {
+  const float inv_scale = 1.0f / Y_scale;
+  uint32_t i = 0;
+
+#ifdef INT8_NEON_SIMD
+  const float32x4_t vinv_scale = vdupq_n_f32(inv_scale);
+  // magic float and magic int to take care of rounding
+  // int magic_round(float f): interpret_int32(f + 12582912.0f) - 0x4B400000
+  // Some detail:
+  // 12582912.0f is 2**23 + 2**22. The trick is based on the fact that when you
+  // add a small number to a large number, the result rounds to the precision of
+  // the least significant bit of the large number. For IEEE-754
+  // single-precision number mantissa has 23 bits, and adding 2**23 would cause
+  // rounding to the nearest even integer. The we cast to int and subtract the
+  // same number (0x4B400000 is the integer representation of 12582912.0f) to
+  // get only the mantissa. This works if -2**22 < x < 2**22, but preserves the
+  // sign for negative numbers.
+  const int32x4_t voffset = vdupq_n_s32(Y_offset - 0x4B400000);
+  const float32x4_t vmagic_float = vdupq_n_f32(12582912.0f);
+  for (i = 0; i + 8 < N; i += 8) {
+    const float32x4_t vin0123 = vld1q_f32(in);
+    in += 4;
+    const float32x4_t vin4567 = vld1q_f32(in);
+    in += 4;
+    const int32x4_t vraw0123 = vaddq_s32(
+        voffset,
+        vreinterpretq_s32_f32(
+            vaddq_f32(vmagic_float, vmulq_f32(vin0123, vinv_scale))));
+    const int32x4_t vraw4567 = vaddq_s32(
+        voffset,
+        vreinterpretq_s32_f32(
+            vaddq_f32(vmagic_float, vmulq_f32(vin4567, vinv_scale))));
+    const int16x8_t vraw01234567 =
+        vcombine_s16(vqmovn_s32(vraw0123), vqmovn_s32(vraw4567));
+    const uint8x8_t vout01234567 = vqmovun_s16(vraw01234567);
+    vst1_u8(out, vout01234567);
+    out += 8;
+  }
+#endif
 }
 
 template <typename T>
@@ -191,10 +270,23 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
-  const float* rdata = rtensor.data_ptr<float>();
+  const float* const rdata = rtensor.data_ptr<float>();
   auto qdata = qtensor.data_ptr<T>();
-  for (int i = 0; i < rtensor.numel(); ++i) {
-    qdata[i] = quantize_val<T>(scale, zero_point, rdata[i]);
+  // If PYTORCH_QNNPACK is enabled, use caffe2 specialized Int8Quantize implementation
+#if defined(USE_PYTORCH_QNNPACK) && defined(INT8_NEON_SIMD)
+  const bool use_pytorch_qnnpack_arm = at::globalContext().qEngine() == at::QEngine::QNNPACK;
+#else
+  const bool use_pytorch_qnnpack_arm = false;
+#endif
+
+  // Int8Quantize only works with uint8 type.
+  if (use_pytorch_qnnpack_arm && (sizeof(T) == sizeof(uint8_t))) {
+    Int8Quantize(rdata, (uint8_t *)(qdata), rtensor.numel(), scale, zero_point);
+  }
+  else {
+    for (int i = 0; i < rtensor.numel(); ++i) {
+      qdata[i] = quantize_val<T>(scale, zero_point, rdata[i]);
+    }
   }
   return qtensor;
 }
