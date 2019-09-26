@@ -5,7 +5,6 @@ import os
 import re
 import shutil
 import sys
-import tarfile
 import tempfile
 import torch
 import warnings
@@ -433,7 +432,7 @@ def _download_url_to_file(url, dst, hash_prefix=None, progress=True):
 def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=True, check_hash=False):
     r"""Loads the Torch serialized object at the given URL.
 
-    If downloaded file is a zip file or tar file, it will be automatically
+    If downloaded file is a zip file, it will be automatically
     decompressed.
 
     If the object is already present in `model_dir`, it's deserialized and
@@ -486,14 +485,9 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
         download_url_to_file(url, cached_file, hash_prefix, progress=progress)
 
     # Note: extractall() defaults to overwrite file if exists. No need to clean up beforehand.
-    if tarfile.is_tarfile(cached_file):
-        with tarfile.open(cached_file) as tar:
-            members = tar.getmembers()
-            if len(members) != 1 or not members[0].isfile():
-                raise RuntimeError('Only one file(not dir) is allowed in the tarfile')
-            tar.extractall(model_dir)
-            cached_file = os.path.join(model_dir, tar.getnames()[0])
-    elif zipfile.is_zipfile(cached_file):
+    #       We deliberately don't handle tarfile here since our legacy serialization format was in tar.
+    #       E.g. resnet18-5c106cde.pth which is widely used.
+    if zipfile.is_zipfile(cached_file):
         with zipfile.ZipFile(cached_file) as cached_zipfile:
             members = cached_zipfile.infolist()
             if len(members) != 1:

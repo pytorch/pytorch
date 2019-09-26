@@ -40,10 +40,27 @@ void ceil_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void expm1_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "expm1_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return ::expm1(a);
+    });
+  });
+}
+
+
 void floor_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "floor_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return std::floor(a);
+    });
+  });
+}
+
+void log_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "log_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return std::log(a);
     });
   });
 }
@@ -71,6 +88,24 @@ void round_kernel_cuda(TensorIterator& iter) {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       // We do not use std::round because we would like to round midway numbers to the nearest even integer.
       return nearbyint_wrapper(a);
+    });
+  });
+}
+
+// We manually overload trunc because std::trunc does not work with ROCm.
+template <typename scalar_t>
+__host__ __device__ static inline scalar_t trunc_wrapper(scalar_t a) {
+  return static_cast<scalar_t>(::truncf(static_cast<float>(a)));
+}
+
+__host__ __device__ static inline double trunc_wrapper(double a) {
+  return ::trunc(a);
+}
+
+void trunc_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "trunc_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return trunc_wrapper(a);
     });
   });
 }
@@ -142,11 +177,14 @@ void lgamma_kernel_cuda(TensorIterator& iter) {
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
 REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda);
+REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
 REGISTER_DISPATCH(floor_stub, &floor_kernel_cuda);
+REGISTER_DISPATCH(log_stub, &log_kernel_cuda);
 REGISTER_DISPATCH(neg_stub, &neg_kernel_cuda);
 REGISTER_DISPATCH(round_stub, &round_kernel_cuda);
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
 REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda);
+REGISTER_DISPATCH(trunc_stub, &trunc_kernel_cuda);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(digamma_stub, &digamma_kernel_cuda);
 REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel_cuda);

@@ -14,9 +14,7 @@ namespace torch {
 namespace jit {
 namespace script {
 
-TORCH_API void runCleanupPasses(
-    std::shared_ptr<Graph>& to_clean,
-    bool convert_ssa = true);
+TORCH_API void runCleanupPasses(std::shared_ptr<Graph>& to_clean);
 
 TORCH_API bool meaningfulName(const std::string& name);
 TORCH_API void lambdaLiftFork(Node* fork_node);

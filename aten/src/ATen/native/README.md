@@ -99,7 +99,9 @@ signature.
 Functions with no tensor inputs are called *factory functions*, and
 are handled specially by code generation.  If your function is behaving
 differently than another example, check first and see if one is a
-factory while another is not.
+factory while another is not. In some rare cases, factory function might have a
+tensor argument. In this case mark it with 'category_override: factory'
+explicitly.
 
 **Argument names.** Argument names are meaningful; downstream binding code may make use of the specific
 argument name you provide, and a rename of an argument name is considered a BC-breaking
