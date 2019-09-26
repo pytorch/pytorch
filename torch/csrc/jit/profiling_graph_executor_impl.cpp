@@ -1,14 +1,16 @@
-#include <torch/csrc/jit/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
+#include <torch/csrc/jit/passes/canonicalize_ops.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/insert_guards.h>
+#include <torch/csrc/jit/passes/lower_grad_of.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/profiling_graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
@@ -27,6 +29,7 @@ std::shared_ptr<Graph> ProfilingGraphExecutorImpl::prepareGraph(
   arg_spec_creator_.specializeTypes(*g, spec);
   runRequiredPasses(g);
   PropagateRequiresGrad(g);
+  ConstantPropagation(g);
   if (needsGradient(g)) {
     auto diff_nodes = CreateAutodiffSubgraphs(
         g, getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
@@ -67,6 +70,17 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   auto copy = pr_->graph()->copy();
   // insert bailouts
   InsertGuards(copy);
+  // get rid of autograd specific ops
+  // we can probably make guard_elimination.cpp
+  // to handle these ops
+  specializeAutogradZero(*copy);
+  // hoist out GradOf blocks
+  // otherwise we will need to teach
+  // liveness and buildBailOut graphs
+  // about them
+  LowerGradOf(*copy);
+  // constant fold into ConstantChunk
+  CanonicalizeOps(copy);
   EliminateRedundantGuards(copy);
   InsertBailOuts(copy);
   // regular optimizations
