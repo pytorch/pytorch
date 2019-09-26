@@ -189,10 +189,10 @@ if [[ $BUILD_ENVIRONMENT == *caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04* ]]; then
 #     rm "$l"
 #  done
 
-#  curl -L -k -o ./cmake-3.14.6-Linux-x86_64.tar.gz https://github.com/Kitware/CMake/releases/download/v3.14.6/cmake-3.14.6-Linux-x86_64.tar.gz
-#  tar -xzf cmake-3.14.6-Linux-x86_64.tar.gz
-#  rm cmake-3.14.6-Linux-x86_64.tar.gz
-#  export PATH=$(pwd)/cmake-3.14.6-Linux-x86_64/bin/:$PATH
+  curl -L -k -o ./cmake-3.14.6-Linux-x86_64.tar.gz https://github.com/Kitware/CMake/releases/download/v3.14.6/cmake-3.14.6-Linux-x86_64.tar.gz
+  tar -xzf cmake-3.14.6-Linux-x86_64.tar.gz
+  rm cmake-3.14.6-Linux-x86_64.tar.gz
+  export PATH=$(pwd)/cmake-3.14.6-Linux-x86_64/bin/:$PATH
 
   curl -L -k -o TRT6.tar.gz https://github.com/NVIDIA/TensorRT/archive/v6.0.1.tar.gz
   tar -xzf TRT6.tar.gz
