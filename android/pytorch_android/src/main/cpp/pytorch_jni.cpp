@@ -583,7 +583,11 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
   }
 
   PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
-    at::globalContext().setQEngine(at::QEngine::QNNPACK);
+    auto qengines = at::globalContext().supportedQEngines();
+    if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
+        qengines.end()) {
+      at::globalContext().setQEngine(at::QEngine::QNNPACK);
+    }
     module_ = torch::jit::load(std::move(modelPath->toStdString()));
     module_.eval();
   }
