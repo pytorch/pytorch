@@ -156,8 +156,8 @@ struct FunctionSchema {
       : FunctionSchema(
             name.toQualString(),
             std::move(overload_name),
-            std::move(std::move(arguments)),
-            std::move(std::move(returns)),
+            std::move(arguments),
+            std::move(returns),
             is_vararg,
             is_varret) {}
 
