@@ -58,6 +58,7 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['weight'])):
         return super(QConfigDynamic, cls).__new__(cls, weight)
 
 default_dynamic_qconfig = QConfigDynamic(weight=default_weight_observer)
+float16_dynamic_qconfig = QConfigDynamic(weight=NoopObserver.with_args(dtype=torch.float16))
 
 default_qat_qconfig = QConfig(activation=default_fake_quant,
                               weight=default_weight_fake_quant)
