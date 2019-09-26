@@ -170,8 +170,9 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
       scalar_t w = weight.defined() ? weight.data_ptr<scalar_t>()[f * weight.stride(0)] : 1;
       scalar_t b = bias.defined() ? bias.data_ptr<scalar_t>()[f * bias.stride(0)] : 0;
 
-      CPU_tensor_apply2<scalar_t,scalar_t>(out, in, [&](scalar_t& o, const scalar_t& i) {
-        o = ((i - mean) * invstd) * w + b;
+      auto iter = TensorIterator::unary_op(out, in);
+      cpu_serial_kernel(iter, [=](const scalar_t i) -> scalar_t {
+        return ((i - mean) * invstd) * w + b;
       });
     }
   });
