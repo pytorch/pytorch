@@ -6,6 +6,8 @@
 #include <ATen/Config.h>
 
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
 
 #include <vector>
 
@@ -302,10 +304,10 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
             // projection of gradOutput on to output scaled by std
             scalar_t k = (scalar_t) dotp * invstd * invstd / n;
 
-            CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, in, [&](scalar_t& gi, const scalar_t& i) {
-                gi = (i - mean)* k;
-              });
-
+            auto iter = TensorIterator::unary_op(grad_in, in);
+            cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
+              return (i - mean) * k;
+            });
             accscalar_t grad_mean = sum / n;
             CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, grad_out, [&](scalar_t& gi, const scalar_t& go) {
             gi = (go - grad_mean - gi) * invstd * w;
