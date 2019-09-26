@@ -129,14 +129,32 @@ def from_ivalue(arg, value):
 
 
 CALL_NAMESPACE = CodeTemplate("""\
+#ifdef USE_STATIC_DISPATCH
+auto result_ = [&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    return at::${name}(
+        ${args}
+    );
+}();
+#else
 auto result_ = at::${name}(
     ${args}
 );
+#endif
 """)
 CALL_METHOD = CodeTemplate("""\
+#ifdef USE_STATIC_DISPATCH
+auto result_ = [&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    return (${first}).${name}(
+        ${args}
+    );
+}();
+#else
 auto result_ = (${first}).${name}(
     ${args}
 );
+#endif
 """)
 CALL_NAMESPACE_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
@@ -145,7 +163,10 @@ const auto options = TensorOptions()
         .device(${device})
         .pinned_memory(${pin_memory});
 #ifdef USE_STATIC_DISPATCH
-    auto result_ = at::${name}(${args_with_tensor_options});
+    auto result_ = [&]() {
+      at::AutoNonVariableTypeMode non_var_type_mode(true);
+      return at::${name}(${args_with_tensor_options});
+    }();
 #else
     auto result_ = torch::${name}(${args_with_tensor_options});
 #endif
@@ -155,8 +176,15 @@ const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
         .device(${device})
-        .pinned_memory(${pin_memory});;
+        .pinned_memory(${pin_memory});
+#ifdef USE_STATIC_DISPATCH
+auto result_ = [&]() {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  return (${first}).${name}(${args_with_tensor_options});
+}();
+#else
 auto result_ = (${first}).${name}(${args_with_tensor_options});
+#endif
 """)
 
 CONSTRUCTOR = CodeTemplate("""\
