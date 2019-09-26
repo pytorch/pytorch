@@ -136,6 +136,9 @@ static bool _is_basic_python_type(PyTypeObject *tp)
 
 static PyObject* PyTorch_LookupSpecial(PyObject *obj, char *name)
 {
+  if(PyObject_HasAttrString(obj, name) == 0){
+    return NULL;
+  }
   PyTypeObject *tp = Py_TYPE(obj);
   if (_is_basic_python_type(tp)) {
     return NULL;
