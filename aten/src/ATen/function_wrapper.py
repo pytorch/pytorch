@@ -371,39 +371,29 @@ TYPE_RETURN = {
 CHECKED_CAST = {
     'THTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::${ScalarName})'),
+            'DeviceType::${DeviceType}, ScalarType::${ScalarName})'),
     'THByteTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Byte)'),
+            'DeviceType::${DeviceType}, ScalarType::Byte)'),
     'THBoolTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Bool)'),
+            'DeviceType::${DeviceType}, ScalarType::Bool)'),
     'THIndexTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Long)'),
+            'DeviceType::${DeviceType}, ScalarType::Long)'),
     'THIntegerTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Int)'),
-    'THDenseTensor*':
-        CodeTemplate(
-            'checked_tensor_unwrap('
-            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${DenseBackend}, ScalarType::${ScalarName})'),
-    'THDenseIndexTensor*':
-        CodeTemplate(
-            'checked_tensor_unwrap('
-            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${DenseBackend}, ScalarType::Long)'),
+            'DeviceType::${DeviceType}, ScalarType::Int)'),
     'THStorage*':
         CodeTemplate(
             'checked_storage('
