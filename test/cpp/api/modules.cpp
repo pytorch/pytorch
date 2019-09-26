@@ -762,6 +762,13 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
   ASSERT_EQ(
       c10::str(AdaptiveMaxPool1d(options)),
       "torch::nn::AdaptiveMaxPool1d(output_size=3)");
+
+  ASSERT_EQ(
+      c10::str(AdaptiveMaxPool2d(5)),
+      "torch::nn::AdaptiveMaxPool2d(output_size=[5, 5])");
+  ASSERT_EQ(
+      c10::str(AdaptiveMaxPool2d(torch::IntArrayRef{5, 6})),
+      "torch::nn::AdaptiveMaxPool2d(output_size=[5, 6])");
 }
 
 TEST_F(ModulesTest, PrettyPrintDropout) {
