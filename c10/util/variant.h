@@ -9,7 +9,7 @@
 //
 // C10
 // - Move to `c10` namespace.
-// - Renamed namespace `detail` to `detail_`, to not conflict with existing
+// - Rename namespace `detail` to `detail_`, to not conflict with existing
 //   c10 implementations in `detail` namespace.
 
 #ifndef C10_UTIL_VARIANT_H_
