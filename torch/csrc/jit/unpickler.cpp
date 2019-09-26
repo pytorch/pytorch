@@ -460,18 +460,45 @@ PickleOpCode Unpickler::readInstruction() {
           int64_t storage_offset = elements.at(idx++).toInt();
           std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
           std::vector<int64_t> stride = tupleToIntList(elements.at(idx++));
-          double q_scale = 0.;
-          int64_t q_zero_point = 0;
+          at::Tensor result;
           if (quantized) {
-            q_scale = elements.at(idx++).toDouble();
-            q_zero_point = elements.at(idx++).toInt();
+            auto qparams_tuple = elements.at(idx++).toTuple();
+            const auto& qparams = qparams_tuple->elements();
+            auto qscheme = static_cast<at::QScheme>(qparams.at(0).toInt());
+            switch (qscheme) {
+              case at::kPerTensorAffine: {
+                double q_scale = qparams.at(1).toDouble();
+                int64_t q_zero_point = qparams.at(2).toInt();
+                result = at::_empty_affine_quantized(
+                    {0}, storage_tensor.options(), q_scale, q_zero_point);
+              } break;
+              case at::kPerChannelAffine: {
+                const auto& scales_list = qparams.at(1).toDoubleList();
+                std::vector<double> scales(
+                    scales_list.begin(), scales_list.end());
+                const auto& zero_points_list = qparams.at(2).toIntList();
+                std::vector<int64_t> zero_points(
+                    zero_points_list.begin(), zero_points_list.end());
+                int64_t axis = qparams.at(3).toInt();
+                result = _empty_per_channel_affine_quantized(
+                    {0},
+                    at::tensor(scales),
+                    at::tensor(zero_points),
+                    axis,
+                    storage_tensor.options());
+              } break;
+              default:
+                TORCH_CHECK(
+                    false,
+                    "Unsupported tensor quantization type in serialization ",
+                    toString(qscheme));
+                break;
+            }
+          } else {
+            result = at::empty({0}, storage_tensor.options());
           }
           bool requires_grad = elements.at(idx++).toBool();
           // elements[idx++] is empty backwards hooks
-          at::Tensor result = quantized
-              ? at::_empty_affine_quantized(
-                    {}, storage_tensor.options(), q_scale, q_zero_point)
-              : at::empty({0}, storage_tensor.options());
           at::TensorImpl* impl = result.unsafeGetTensorImpl();
           impl->set_storage(storage_tensor.storage());
           impl->set_storage_offset(storage_offset);
@@ -487,6 +514,11 @@ PickleOpCode Unpickler::readInstruction() {
           stack_.back() = IValue();
         });
       } else if (module_name == "torch") {
+        // Try to manually resolve several global enums
+        // NOTE: this does not put a global into the global table,
+        // like the other branches here because no REDUCE or BUILD will
+        // be called on this value. Instead, we just put it on the stack
+        // and return early
         c10::optional<c10::ScalarType> scalar_type;
 #define CHECK_SCALAR(_, name)          \
   if (class_name == #name "Storage") { \
@@ -494,46 +526,32 @@ PickleOpCode Unpickler::readInstruction() {
   }
         AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CHECK_SCALAR)
 #undef CHECK_SCALAR
-        // NOTE: this does not put a global into the global table,
-        // like the other branches here because no REDUCE or BUILD will
-        // be called on this value. Instead, we just put it on the stack
-        // and return early
-        AT_ASSERT(
-            scalar_type.has_value(),
-            "class name not understood: torch.",
-            class_name);
-        stack_.emplace_back(int64_t(*scalar_type));
-        return opcode;
+        if (scalar_type.has_value()) {
+          stack_.emplace_back(int64_t(*scalar_type));
+          return opcode;
+        }
+
+        c10::optional<at::QScheme> qscheme;
+        for (int i = 0; i < at::COMPILE_TIME_NUM_QSCHEMES; ++i) {
+          if (class_name == toString(static_cast<at::QScheme>(i))) {
+            qscheme = static_cast<at::QScheme>(i);
+          }
+        }
+        if (qscheme.has_value()) {
+          stack_.emplace_back(int64_t(*qscheme));
+          return opcode;
+        }
+        TORCH_CHECK(false, "class name not understood: torch.", class_name);
       } else {
         AT_ASSERT(class_resolver_);
         at::StrongTypePtr type =
             class_resolver_(c10::QualifiedName(module_name, class_name));
-        auto cls = type.type_->expect<at::ClassType>();
-        size_t n = cls->numAttributes();
-        if (checkHasValidSetGetState(type.type_)) {
-          globals_.emplace_back([this, type, n] {
-            auto arg = std::move(stack_.back());
-            stack_.pop_back();
-            auto obj = c10::ivalue::Object::create(type, n);
-            // XXX: Do not optimize __setstate__, so that we don't try to
-            // specialize the class before it is initialized.
-            setGraphExecutorOptimize(false);
-            (*type.type_->getMethod("__setstate__"))({obj, arg});
-            setGraphExecutorOptimize(true);
-            postSetStateValidate(obj);
-            stack_.emplace_back(std::move(obj));
-          });
-        } else {
-          globals_.emplace_back([this, type, cls, n] {
-            auto dict = std::move(stack_.back()).toGenericDict();
-            stack_.pop_back();
-            auto obj = c10::ivalue::Object::create(type, n);
-            for (size_t i = 0; i < n; ++i) {
-              obj->setSlot(i, dict.at(cls->getAttributeName(i)));
-            }
-            stack_.emplace_back(std::move(obj));
-          });
-        }
+        globals_.emplace_back([this, type] {
+          auto val = stack_.back();
+          stack_.pop_back();
+          auto obj = obj_loader_(type, val);
+          stack_.emplace_back(std::move(obj));
+        });
       }
       stack_.emplace_back(int64_t(globals_.size() - 1));
     } break;

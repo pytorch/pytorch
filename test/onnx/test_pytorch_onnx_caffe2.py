@@ -39,8 +39,8 @@ from caffe2.python.operator_test.torch_integration_test import (generate_rois_ro
 import onnx
 import caffe2.python.onnx.backend as c2
 
-from test_pytorch_common import BATCH_SIZE, RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from test_pytorch_common import skipIfTravis, skipIfNoLapack, skipIfNoCuda
+from test_pytorch_common import BATCH_SIZE, RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from test_pytorch_common import skipIfUnsupportedOpsetVersion, skipIfUnsupportedMinOpsetVersion
 import verify
 
@@ -335,7 +335,10 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, batch_size=RNN_BATCH_SIZE, input=input, use_gpu=False, atol=1e-7)
 
         # test that the model still runs with a different batch size
-        onnxir, _ = do_export(model, input, keep_initializers_as_inputs=True)
+        # (save the model with a batch_size of 1 with rnn with a variable batch size,
+        # othewise expand will fail) 
+        variable_batch_size_init_input = make_input(1)
+        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -375,7 +378,10 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, batch_size=RNN_BATCH_SIZE, input=input, use_gpu=False)
 
         # test that the model still runs with a different batch size
-        onnxir, _ = do_export(model, input, keep_initializers_as_inputs=True)
+        # (save the model with a batch_size of 1 with rnn with a variable batch size,
+        # othewise expand will fail) 
+        variable_batch_size_init_input = make_input(1)
+        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -413,7 +419,10 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, batch_size=RNN_BATCH_SIZE, input=input, use_gpu=False)
 
         # test that the model still runs with a different batch size
-        onnxir, _ = do_export(model, input, keep_initializers_as_inputs=True)
+        # (save the model with a batch_size of 1 with rnn with a variable batch size,
+        # othewise expand will fail) 
+        variable_batch_size_init_input = make_input(1)
+        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -1965,6 +1974,15 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         self.run_model_test(ArangeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_size(self):
+        class SizeModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.arange(input.size(0)), torch.arange(input.size(-1))
+
+        x = torch.randn(5, 3, 2)
+        self.run_model_test(SizeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
     def test_log2(self):
         class Log2Model(torch.nn.Module):
             def forward(self, input):
@@ -2211,6 +2229,7 @@ def make_test(name, base, layer, bidirectional, initial_state,
     ]))
 
     @skipIfUnsupportedOpsetVersion([10])
+    @skipIfUnsupportedMinOpsetVersion(8)
     def f(self):
         self._dispatch_rnn_test(
             base,

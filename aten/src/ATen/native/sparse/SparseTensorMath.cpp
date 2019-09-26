@@ -153,8 +153,8 @@ SparseTensor pow_sparse_scalar(const SparseTensor& t, Scalar value) {
 SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value);
 
 Tensor div_sparse(const Tensor& self, const Tensor& value) {
-  auto promotedType = at::result_type(self, value);
-  Tensor result = at::empty({0}, self.options().dtype(promotedType));
+  auto commonDtype = at::result_type(self, value);
+  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
   return div_out_sparse_zerodim(result, self, value);
 }
 
@@ -207,8 +207,8 @@ Tensor add_sparse(const Tensor& self, const Tensor& other, Scalar alpha) {
   // TODO: Why?! Can't we just flip the order here...
   TORCH_CHECK(!(self.is_sparse() && !other.is_sparse()),
               "add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
-  auto promotedType = at::result_type(self, other);
-  Tensor result = at::empty({0}, self.options().dtype(promotedType));
+  auto commonDtype = at::result_type(self, other);
+  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
   return at::add_out(result, self, other, alpha);  // redispatch!
 }
 
@@ -242,9 +242,9 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
   TORCH_CHECK(!r.is_cuda(), "add: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!src.is_cuda(), "add: expected 'other' to be a CPU tensor, but got a CUDA tensor");
 
-  auto promotedType = promoteTypes(t.scalar_type(), src.scalar_type());
+  auto commonDtype = promoteTypes(t.scalar_type(), src.scalar_type());
 
-  TORCH_CHECK(canCast(promotedType, r.scalar_type()), "Can't convert result type ", promotedType, " to output ", r.scalar_type());
+  TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type());
 
   TORCH_CHECK(t.sizes().equals(src.sizes()), "add: expected sizes of 'self' and 'other' to match, but ", t.sizes(), " != ", src.sizes());
 
@@ -268,20 +268,20 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
   r.resize_as_(src);
 
 
-  if (t_values.scalar_type() != promotedType) {
-    t_values = t_values.to(promotedType);
+  if (t_values.scalar_type() != commonDtype) {
+    t_values = t_values.to(commonDtype);
   }
 
-  if (s_values.scalar_type() != promotedType) {
-    s_values = s_values.to(promotedType);
+  if (s_values.scalar_type() != commonDtype) {
+    s_values = s_values.to(commonDtype);
   }
 
   if (s_values.is_contiguous() && t_values.is_contiguous()) {
     LongTensor r_indices = at::empty({sparse_dim, max_nnz}, t_indices.options());
     Tensor r_values = new_values_with_size_of(s_values, max_nnz).zero_();
 
-    if (promotedType != r_values.scalar_type()) {
-      r_values = r_values.to(promotedType);
+    if (commonDtype != r_values.scalar_type()) {
+      r_values = r_values.to(commonDtype);
     }
 
     int64_t blockSize = r_values.stride(0);
@@ -294,7 +294,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
     auto src_indices_accessor = src_indices.accessor<int64_t, 2>();
 
     AT_DISPATCH_ALL_TYPES(
-        promotedType, "cadd_sparse", [&] {
+        commonDtype, "cadd_sparse", [&] {
           scalar_t* t_values_ptr = t_values.data_ptr<scalar_t>();
           scalar_t* s_values_ptr = s_values.data_ptr<scalar_t>();
           scalar_t* r_values_ptr = r_values.data_ptr<scalar_t>();
@@ -344,7 +344,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
         }
     );
 
-    if (r.scalar_type() != promotedType) {
+    if (r.scalar_type() != commonDtype) {
       r_values = r_values.to(r.scalar_type());
     }
     get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
@@ -358,7 +358,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
     // If `t` or `src` contains non-contiguous `values`, `THBlas_axpy` doesn't work
     // and we concat the indices and values tensors instead.
     AT_DISPATCH_ALL_TYPES(
-      promotedType, "add_out_sparse_cuda", [&] {
+      commonDtype, "add_out_sparse_cuda", [&] {
           if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
             s_values = s_values.mul(value);
           }
@@ -366,7 +366,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
 
     LongTensor r_indices = at::cat({t_indices, src_indices}, 1);
     Tensor r_values = at::cat({t_values, s_values}, 0);
-    if (r.scalar_type() != promotedType) {
+    if (r.scalar_type() != commonDtype) {
       r_values = r_values.to(r.scalar_type());
     }
     alias_into_sparse(r, r_indices, r_values);
@@ -411,8 +411,8 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
   TORCH_CHECK(dense.sizes().equals(sparse_.sizes()), "add: expected 'self' and 'other' to have same size, but self has size ",
     dense.sizes(), " while other has size ", sparse_.sizes(), " (FYI: dense-sparse addition does not currently support broadcasting)");
 
-  auto promotedType = promoteTypes(dense.scalar_type(), sparse_.scalar_type());
-  TORCH_CHECK(canCast(promotedType, r.scalar_type()), "Can't convert result type ", promotedType, " to output ", r.scalar_type());
+  auto commonDtype = promoteTypes(dense.scalar_type(), sparse_.scalar_type());
+  TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type());
 
   r.resize_as_(dense);
   SparseTensor sparse = sparse_.coalesce();
@@ -438,14 +438,14 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
     }
   } else {
     Tensor promoted_result = r;
-    if (r.scalar_type() != promotedType) {
-      promoted_result = r.to(promotedType);
+    if (r.scalar_type() != commonDtype) {
+      promoted_result = r.to(commonDtype);
     }
     AT_DISPATCH_ALL_TYPES(
-        promotedType, "add_dense_sparse", [&] {
+        commonDtype, "add_dense_sparse", [&] {
           add_dense_sparse_worker_cpu<scalar_t>(promoted_result, value, sparse, indices, values);
         });
-    if (r.scalar_type() != promotedType) {
+    if (r.scalar_type() != commonDtype) {
       r.copy_(promoted_result);
     }
   }
@@ -457,8 +457,8 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
 // --------------------------------------------------------------------
 
 Tensor mul_sparse(const Tensor& self, const Tensor& other) {
-  auto promotedType = at::result_type(self, other);
-  Tensor result = at::empty({0}, self.options().dtype(promotedType));
+  auto commonDtype = at::result_type(self, other);
+  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
   return at::mul_out(result, self, other);  // redispatch!
 }
 
@@ -503,19 +503,19 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   int64_t match, d;
   int64_t r_i = 0, t_i = 0, s_i = 0;
 
-  auto promotedType = promoteTypes(t_.scalar_type(), src_.scalar_type());
-  TORCH_CHECK(canCast(promotedType, r.scalar_type()), "Can't convert result type ", promotedType, " to output ", r.scalar_type());
+  auto commonDtype = promoteTypes(t_.scalar_type(), src_.scalar_type());
+  TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type());
 
-  if (t_values.scalar_type() != promotedType) {
-    t_values = t_values.to(promotedType);
+  if (t_values.scalar_type() != commonDtype) {
+    t_values = t_values.to(commonDtype);
   }
 
-  if (s_values.scalar_type() != promotedType) {
-    s_values = s_values.to(promotedType);
+  if (s_values.scalar_type() != commonDtype) {
+    s_values = s_values.to(commonDtype);
   }
   Tensor r_buffer = r_values;
-  if (r_values.scalar_type() != promotedType) {
-    r_buffer = r_values.to(promotedType);
+  if (r_values.scalar_type() != commonDtype) {
+    r_buffer = r_values.to(commonDtype);
   }
 
   // NB: relies on nnz test above
@@ -557,7 +557,7 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
     }
   } else {
     AT_DISPATCH_ALL_TYPES(
-        promotedType, "mul_out_sparse", [&] {
+        commonDtype, "mul_out_sparse", [&] {
           auto r_accessor = r_buffer.accessor<scalar_t, 1>();
           auto t_accessor = t_values.accessor<scalar_t, 1>();
           auto s_accessor = s_values.accessor<scalar_t, 1>();
@@ -573,7 +573,7 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
     );
   }
 
-  if (promotedType != r_values.scalar_type()) {
+  if (commonDtype != r_values.scalar_type()) {
     r_values.copy_(r_buffer);
   }
   get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values.to(r.scalar_type()));

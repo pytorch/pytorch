@@ -9,6 +9,8 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <ATen/Dimname.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 $extra_cuda_headers
 

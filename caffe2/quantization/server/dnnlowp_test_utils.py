@@ -14,6 +14,8 @@ from hypothesis import assume
 def check_quantized_results_close(outputs, ref=None, symmetric=False, atol_scale=0.53):
     if ref is None:
         ref = outputs[0][0]
+    if ref.size == 0:
+        return
     ref_min = min(np.min(ref), 0)
     ref_max = max(np.max(ref), 0)
     if symmetric:
