@@ -86,7 +86,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]]; then
   EXTRA_TESTS+=("$caffe2_pypath/contrib/nccl")
 fi
 
-ignore_tests=()
+ignore_tests=( --ignore $caffe2_pypath/caffe2/python/control_ops_grad_test.py )
 if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   # Currently these tests are failing on ROCM platform:
 
@@ -116,6 +116,7 @@ fi
 pip install --user pytest-sugar
 "$PYTHON" \
   -m pytest \
+  -x \
   -v \
   --disable-warnings \
   --junit-xml="$pytest_reports_dir/result.xml" \
@@ -123,7 +124,7 @@ pip install --user pytest-sugar
   --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
   --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
   --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
-  ${ignore_tests[@]} \
+  "${ignore_tests[@]}" \
   "$caffe2_pypath/python" \
   "${EXTRA_TESTS[@]}"
 
