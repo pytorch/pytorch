@@ -46,8 +46,8 @@ using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 using c10::optional;
 
 namespace VariableType {
-  std::vector<at::DeprecatedTypeProperties*> allCUDATypes();
-  std::vector<at::DeprecatedTypeProperties*> allCPUTypes();
+  TORCH_API std::vector<at::DeprecatedTypeProperties*> allCUDATypes();
+  TORCH_API std::vector<at::DeprecatedTypeProperties*> allCPUTypes();
 
   // checks that t is actually a Variable
   const Variable & checked_cast_variable(const Tensor & t, const char * name, int pos);

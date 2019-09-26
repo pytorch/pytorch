@@ -23,11 +23,11 @@ std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(at::ArrayRef<at::
 
 namespace VariableType {
 
-std::vector<at::DeprecatedTypeProperties*> allCPUTypes() {
+C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCPUTypes() {
   return allTypesForBackends({ Backend::CPU, Backend::SparseCPU });
 }
 
-std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
+C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
   at::globalContext().lazyInitCUDA();
   return allTypesForBackends({ Backend::CUDA, Backend::SparseCUDA });
 }
