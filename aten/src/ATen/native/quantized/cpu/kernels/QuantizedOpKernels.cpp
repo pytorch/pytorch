@@ -1,9 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/quantized/Quantizer.h>
 #include <ATen/native/SortingUtils.h>
+
 
 namespace at {
 namespace native {
@@ -454,7 +457,8 @@ void qadaptive_avg_pool2d_nhwc_kernel(
             istrideD,
             istrideH,
             istrideW);
-        // remainer
+        // 1) The following loop handles the remaining channels
+        // 2) It also handles the Non-AVX2 path
         for (; c < sizeD; ++c) {
           int32_t acc_int32 = -qx.q_zero_point() * size;
           int64_t tcntr = 0;
@@ -553,7 +557,8 @@ void qavg_pool2d_nhwc_kernel(
             1,
             inputWidth,
             1);
-        // remainer
+        // 1) The following loop handles the remaining channels
+        // 2) It also handles the Non-AVX2 path
         for (; c < nInputPlane; ++c) {
           int32_t acc_int32 = -qx.q_zero_point() * size;
           int64_t tcntr = 0;
@@ -575,6 +580,155 @@ void qavg_pool2d_nhwc_kernel(
       } // ow
     } // oh
   });
+}
+
+template <typename T>
+int64_t do_quantized_bilinear_on_AVX2(
+    const typename T::underlying*& pos1,
+    typename T::underlying*& pos2,
+    int64_t input_height,
+    int64_t input_width,
+    int64_t output_height,
+    int64_t output_width,
+    int64_t channels,
+    int32_t output_zero_point,
+    int32_t input_zero_point,
+    float multiplier,
+    const float h0lambda,
+    const float h1lambda,
+    const float w0lambda,
+    const float w1lambda,
+    const int64_t h1p,
+    const int64_t w1p) {
+  int64_t c = 0;
+#if defined(__AVX2__) && !defined(_MSC_VER)
+  constexpr auto vec_width = Vec256<T>::size() / 4;
+  if (vec_width == 8) {
+    for (; c + vec_width <= channels; c += vec_width) {
+      Vec256<float> pos1_fp_v[4];
+      Vec256<int32_t> pos1_int_v[4];
+      pos1_int_v[0] = vec256::convert_to_int32<typename T::underlying>(pos1);
+      pos1_int_v[1] = vec256::convert_to_int32<typename T::underlying>(
+          pos1 + w1p * channels);
+      pos1_int_v[2] = vec256::convert_to_int32<typename T::underlying>(
+          pos1 + h1p * input_width * channels);
+      pos1_int_v[3] = vec256::convert_to_int32<typename T::underlying>(
+          pos1 + (h1p * input_width + w1p) * channels);
+      for (int i = 0; i < 4; i++) {
+        int32_t pos1_int[vec_width];
+        float pos1_fp[vec_width];
+        pos1_int_v[i].store(pos1_int);
+        vec256::convert(pos1_int, pos1_fp, vec_width);
+        pos1_fp_v[i] = Vec256<float>::loadu(pos1_fp, 8);
+      }
+      Vec256<float> h0lambda_v(h0lambda);
+      Vec256<float> h1lambda_v(h1lambda);
+      Vec256<float> w0lambda_v(w0lambda);
+      Vec256<float> w1lambda_v(w1lambda);
+      Vec256<float> input_zero_point_v(input_zero_point);
+      Vec256<float> result =
+          h0lambda_v * (w0lambda_v * pos1_fp_v[0] + w1lambda_v * pos1_fp_v[1]) +
+          h1lambda_v * (w0lambda_v * pos1_fp_v[2] + w1lambda_v * pos1_fp_v[3]) - input_zero_point_v;
+      float result_fp[vec_width];
+      result.store(result_fp);
+      vec256::QuantizeAvx2<T>(
+          result_fp, pos2, vec_width, multiplier, output_zero_point);
+      pos1 += vec_width;
+      pos2 += vec_width;
+    }
+  }
+#endif
+  return c;
+}
+
+void qupsample_bilinear2d_nhwc_kernel(
+    Tensor& output,
+    const Tensor& input,
+    int64_t input_height,
+    int64_t input_width,
+    int64_t output_height,
+    int64_t output_width,
+    int64_t nbatch,
+    int64_t channels,
+    bool align_corners) {
+  AT_DISPATCH_QINT_TYPES(
+      input.scalar_type(), "upsample_bilinear2d_nhwc", [&]() {
+        auto* idata = static_cast<scalar_t*>(input.data_ptr());
+        auto* odata = static_cast<scalar_t*>(output.data_ptr());
+        float multiplier = input.q_scale() / output.q_scale();
+        float output_scale = output.q_scale() / input.q_scale();
+        const auto rheight = area_pixel_compute_scale<float>(
+            input_height, output_height, align_corners);
+        const auto rwidth = area_pixel_compute_scale<float>(
+            input_width, output_width, align_corners);
+
+        for (int64_t b = 0; b < nbatch; ++b) {
+          auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
+              idata + b * input_height * input_width * channels);
+          auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
+              odata + b * output_height * output_width * channels);
+
+          for (int64_t h2 = 0; h2 < output_height; ++h2) {
+            const auto h1r = area_pixel_compute_source_index<float>(
+                rheight, h2, align_corners, /*cubic=*/false);
+
+            const int64_t h1 = h1r;
+            const int64_t h1p = (h1 < input_height - 1) ? 1 : 0;
+            const float h1lambda = h1r - h1;
+            const float h0lambda = static_cast<float>(1.) - h1lambda;
+
+            for (int64_t w2 = 0; w2 < output_width; ++w2) {
+              const auto w1r = area_pixel_compute_source_index<float>(
+                  rwidth, w2, align_corners, /*cubic=*/false);
+              const int64_t w1 = w1r;
+              const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;
+
+              const float w1lambda = w1r - w1;
+              const float w0lambda = static_cast<float>(1.) - w1lambda;
+
+              int64_t c = 0;
+              // We use float32 to do the computation
+              const typename scalar_t::underlying* pos1 =
+                  i_p + (h1 * input_width + w1) * channels;
+              typename scalar_t::underlying* pos2 =
+                  o_p + (h2 * output_width + w2) * channels;
+              // We have to isolate this function out because the VS does not
+              // expand the macro correctly.
+              c = do_quantized_bilinear_on_AVX2<scalar_t>(
+                  pos1,
+                  pos2,
+                  input_height,
+                  input_width,
+                  output_height,
+                  output_width,
+                  channels,
+                  output.q_zero_point(),
+                  input.q_zero_point(),
+                  multiplier,
+                  h0lambda,
+                  h1lambda,
+                  w0lambda,
+                  w1lambda,
+                  h1p,
+                  w1p);
+              // 1) The following loop handles the remaining channels
+              // 2) It also handles the Non-AVX2 path
+              for (; c < channels; ++c) {
+                float result = h0lambda *
+                        (w0lambda * pos1[0] + w1lambda * pos1[w1p * channels]) +
+                    h1lambda *
+                        (w0lambda * pos1[h1p * input_width * channels] +
+                         w1lambda * pos1[(h1p * input_width + w1p) * channels]);
+                pos2[0] = at::quantize_val<scalar_t>(
+                              output_scale, output.q_zero_point(), result - input.q_zero_point())
+                              .val_;
+                pos1 += 1;
+                pos2 += 1;
+              } // c
+            } // w2
+          } // h2
+        } // b
+      });
 }
 
 void qtopk_kernel(Tensor& values,
@@ -661,6 +815,9 @@ REGISTER_DISPATCH(
     qadaptive_avg_pool2d_nhwc_stub,
     &qadaptive_avg_pool2d_nhwc_kernel);
 REGISTER_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
+REGISTER_DISPATCH(
+    qupsample_bilinear2d_nhwc_stub,
+    &qupsample_bilinear2d_nhwc_kernel);
 REGISTER_DISPATCH(qcat_nhwc_stub, &qcat_nhwc_kernel<false>);
 REGISTER_DISPATCH(qcat_relu_nhwc_stub, &qcat_nhwc_kernel<true>);
 REGISTER_DISPATCH(qtopk_stub, &qtopk_kernel);

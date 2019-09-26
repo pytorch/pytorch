@@ -37,7 +37,6 @@ TH_API void THVector_(log1p)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(log2)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(sigmoid)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(exp)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(expm1)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(erf)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(erfc)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(cos)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
