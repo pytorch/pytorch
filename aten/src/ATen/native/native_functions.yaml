@@ -3747,6 +3747,8 @@
   dispatch:
     CUDA: _thnn_fused_lstm_cell_backward_cuda
 
+- func: _thnn_differentiable_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor input_gates, Tensor hidden_gates, Tensor? input_bias, Tensor? hidden_bias, Tensor cx, Tensor cy) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+
 - func: _thnn_fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor? input_bias=None, Tensor? hidden_bias=None) -> (Tensor, Tensor)
   dispatch:
     CUDA: _thnn_fused_gru_cell_cuda
@@ -3755,6 +3757,8 @@
   use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: _thnn_fused_gru_cell_backward_cuda
+
+- func: _thnn_differentiable_gru_cell_backward(Tensor grad_hy, Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor? input_bias, Tensor? hidden_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
 
 # RNN cells and layers
 - func: lstm.input(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
