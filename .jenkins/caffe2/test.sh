@@ -100,7 +100,6 @@ fi
 ##############################
 if [[ $BUILD_ENVIRONMENT == *caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04* ]]; then
   pip install -q --user torchvision
-  ignore_tests+=( --ignore $caffe2_pypath/python/trt/test_trt.py )
 else
   ignore_tests+=( --ignore $caffe2_pypath/python/trt/test_pt_onnx_trt.py )
 fi
@@ -117,6 +116,7 @@ fi
 pip install --user pytest-sugar
 "$PYTHON" \
   -m pytest \
+  -x \
   -v \
   --disable-warnings \
   --junit-xml="$pytest_reports_dir/result.xml" \
@@ -124,7 +124,7 @@ pip install --user pytest-sugar
   --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
   --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
   --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
-  "${ignore_tests[@]}" \
+  ${ignore_tests[@]} \
   "$caffe2_pypath/python" \
   "${EXTRA_TESTS[@]}"
 
