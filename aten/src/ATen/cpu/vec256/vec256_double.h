@@ -109,6 +109,9 @@ public:
   Vec256<double> erfc() const {
     return Vec256<double>(Sleef_erfcd4_u15(values));
   }
+  Vec256<double> erfinv() const {
+    return map(calc_erfinv);
+  }
   Vec256<double> exp() const {
     return Vec256<double>(Sleef_expd4_u10(values));
   }

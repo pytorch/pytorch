@@ -247,7 +247,7 @@ class TestOperators(TestCase):
 
     def test_batchnorm_onnx_irv4(self):
         x = torch.ones(2, 2, 2, 2, requires_grad=True)
-        self.assertONNX(nn.BatchNorm2d(2), x, keep_initializers_as_inputs=False)
+        self.assertONNX(nn.BatchNorm2d(2), x)
 
     def test_batchnorm_1d(self):
         x = torch.ones(2, 2, requires_grad=True)
@@ -263,7 +263,7 @@ class TestOperators(TestCase):
 
     def test_conv_onnx_irv4(self):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
-        self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x, keep_initializers_as_inputs=False)
+        self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x)
 
     def test_conv_variable_length(self):
         x = torch.ones(5, 3, 6, 6, requires_grad=True)
