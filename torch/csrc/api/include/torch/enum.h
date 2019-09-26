@@ -5,16 +5,14 @@
 #define TORCH_ENUM_DECLARE(name) \
 namespace torch { \
 namespace enumtype { \
-namespace torch { \
   struct k##name {}; \
 } \
-} \
-TORCH_API extern const enumtype::torch::k##name k##name; \
+TORCH_API extern const enumtype::k##name k##name; \
 }
 
 #define TORCH_ENUM_DEFINE(name) \
 namespace torch { \
-const enumtype::torch::k##name k##name; \
+const enumtype::k##name k##name; \
 }
 
 TORCH_ENUM_DECLARE(Linear)

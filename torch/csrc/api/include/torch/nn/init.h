@@ -10,22 +10,22 @@ namespace nn {
 namespace init {
 
 using Nonlinearity = c10::variant<
-  enumtype::torch::kLinear,
-  enumtype::torch::kConv1D,
-  enumtype::torch::kConv2D,
-  enumtype::torch::kConv3D,
-  enumtype::torch::kConvTranspose1D,
-  enumtype::torch::kConvTranspose2D,
-  enumtype::torch::kConvTranspose3D,
-  enumtype::torch::kSigmoid,
-  enumtype::torch::kTanh,
-  enumtype::torch::kReLU,
-  enumtype::torch::kLeakyReLU
+  enumtype::kLinear,
+  enumtype::kConv1D,
+  enumtype::kConv2D,
+  enumtype::kConv3D,
+  enumtype::kConvTranspose1D,
+  enumtype::kConvTranspose2D,
+  enumtype::kConvTranspose3D,
+  enumtype::kSigmoid,
+  enumtype::kTanh,
+  enumtype::kReLU,
+  enumtype::kLeakyReLU
 >;
 
 using FanMode = c10::variant<
-  enumtype::torch::kFanIn,
-  enumtype::torch::kFanOut
+  enumtype::kFanIn,
+  enumtype::kFanOut
 >;
 
 /// Return the recommended gain value for the given nonlinearity function.
