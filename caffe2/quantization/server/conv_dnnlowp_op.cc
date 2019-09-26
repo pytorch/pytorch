@@ -377,8 +377,8 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
     packW = false;
   }
 
-  if ((depthwise_3x3_fast_path && !Wq_depthwise_3x3_packed_) ||
-      (depthwise_3x3x3_fast_path && !Wq_depthwise_3x3x3_packed_) ||
+  if ((depthwise_3x3_fast_path && !Wq_depthwise_packed_) ||
+      (depthwise_3x3x3_fast_path && !Wq_depthwise_packed_) ||
       (gconv_fast_path && !Wq_gconv_packed_) || (packW && !Wq_packed_) ||
       (!packW && W_quantized_.empty())) {
     if (this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER)) {
@@ -423,19 +423,23 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
       if (this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER)) {
         const auto& packed_filter =
             this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER);
-        Wq_depthwise_3x3_packed_ = packed_filter.W_depthwise_3x3;
+        Wq_depthwise_packed_ = packed_filter.W_depthwise;
       } else {
-        Wq_depthwise_3x3_packed_.reset(new fbgemm::Packed3x3ConvMatrix(
-            group_, reinterpret_cast<const int8_t*>(W_quantized_.data())));
+        Wq_depthwise_packed_.reset(new fbgemm::PackedDepthWiseConvMatrix(
+            group_,
+            3 * 3,
+            reinterpret_cast<const int8_t*>(W_quantized_.data())));
       }
     } else if (depthwise_3x3x3_fast_path) {
       if (this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER)) {
         const auto& packed_filter =
             this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER);
-        Wq_depthwise_3x3x3_packed_ = packed_filter.W_depthwise_3x3x3;
+        Wq_depthwise_packed_ = packed_filter.W_depthwise;
       } else {
-        Wq_depthwise_3x3x3_packed_.reset(new fbgemm::Packed3x3x3ConvMatrix(
-            group_, reinterpret_cast<const int8_t*>(W_quantized_.data())));
+        Wq_depthwise_packed_.reset(new fbgemm::PackedDepthWiseConvMatrix(
+            group_,
+            3 * 3 * 3,
+            reinterpret_cast<const int8_t*>(W_quantized_.data())));
       }
     } else if (gconv_fast_path) {
       if (this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER)) {
@@ -1161,7 +1165,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             in_qparams_[INPUT].zero_point,
             reinterpret_cast<const uint8_t*>(Xdata),
             filter_zero_points_.data(),
-            *Wq_depthwise_3x3x3_packed_,
+            *Wq_depthwise_packed_,
             requantization_multipliers_.data(),
             out_qparams_.zero_point,
             Y_uint8_data,
@@ -1186,7 +1190,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             in_qparams_[INPUT].zero_point,
             reinterpret_cast<const uint8_t*>(Xdata),
             FilterQuantizationParams(0).zero_point,
-            *Wq_depthwise_3x3x3_packed_,
+            *Wq_depthwise_packed_,
             requantization_params_[0].real_multiplier,
             out_qparams_.zero_point,
             Y_uint8_data,
@@ -1223,7 +1227,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             in_qparams_[INPUT].zero_point,
             reinterpret_cast<const uint8_t*>(Xdata),
             filter_zero_points_.data(),
-            *Wq_depthwise_3x3_packed_,
+            *Wq_depthwise_packed_,
             requantization_multipliers_.data(),
             out_qparams_.zero_point,
             Y_uint8_data,
@@ -1246,7 +1250,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             in_qparams_[INPUT].zero_point,
             reinterpret_cast<const uint8_t*>(Xdata),
             FilterQuantizationParams(0).zero_point,
-            *Wq_depthwise_3x3_packed_,
+            *Wq_depthwise_packed_,
             requantization_params_[0].real_multiplier,
             out_qparams_.zero_point,
             Y_uint8_data,
@@ -1609,8 +1613,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWC() {
     }
 #endif
 
-    if (Wq_packed_ || Wq_depthwise_3x3_packed_ || Wq_depthwise_3x3x3_packed_ ||
-        Wq_gconv_packed_) {
+    if (Wq_packed_ || Wq_depthwise_packed_ || Wq_gconv_packed_) {
       // In fast path with fbgemm except when
       // rescaling quantized numbers should've been already done.
       PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
