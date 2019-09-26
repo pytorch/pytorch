@@ -2815,10 +2815,4 @@ namespace std {
 
 }  // namespace std
 
-namespace c10 {
-
-using namespace c10;
-
-} // namespace c10
-
 #endif  // C10_UTIL_VARIANT_H_
