@@ -20,13 +20,13 @@ _all__ = [
     # Sub functions called by quantize
     'prepare', 'convert',
     # Sub functions for `prepare` and `swap_module`
-    'propagate_qconfig', 'add_quant_dequant', 'add_observer', 'swap_module',
-    'default_eval_fn',
+    'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
+    'default_eval_fn', 'get_observer_dict',
     # Observers
     'Observer', 'WeightObserver', 'observer', 'default_observer',
     'default_weight_observer',
     # QConfig
-    'QConfig', 'default_qconfig', 'default_dynamic_qconfig',
+    'QConfig', 'default_qconfig', 'default_dynamic_qconfig', 'float16_dynamic_qconfig',
     # QAT utilities
     'default_qat_qconfig', 'prepare_qat', 'quantize_qat',
     # module transformations

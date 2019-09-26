@@ -12,6 +12,25 @@
 namespace torch {
 namespace nn {
 
+/// A placeholder identity operator that is argument-insensitive.
+class TORCH_API IdentityImpl : public Cloneable<IdentityImpl> {
+ public:
+  void reset() override;
+
+  /// Pretty prints the `Identity` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input);
+};
+
+/// A `ModuleHolder` subclass for `IdentityImpl`.
+/// See the documentation for `IdentityImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(Identity);
+
+// ============================================================================
+
 /// Applies a linear transformation with optional bias.
 class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
  public:
