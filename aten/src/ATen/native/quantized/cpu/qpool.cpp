@@ -212,6 +212,24 @@ Tensor q_maxpool_2d(
 }
 } // namespace
 
+namespace {
+void check_maxpool2d_params(
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation) {
+  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
+              "Expected 1d or 2d kernel size, got ", kernel_size.size());
+  TORCH_CHECK(stride.empty() || stride.size() == 2,
+              "Expected no strides or 2d strides, got", stride.size());
+  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
+              "Expected 1d or 2d padding, got ", padding.size());
+  TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
+              "Expected 1d or 2d dilation, got ", dilation.size());
+}
+
+}  // namespace
+
 // at::native functions for the native_functions.yaml
 Tensor quantized_max_pool2d(
     const Tensor& qx,
@@ -220,12 +238,11 @@ Tensor quantized_max_pool2d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  TORCH_CHECK(
-      (kernel_size.size() == 1 || kernel_size.size() == 2) &&
-          (stride.empty() || stride.size() == 2) &&
-          (padding.size() == 1 || padding.size() == 2) &&
-          (dilation.size() == 1 || dilation.size() == 2),
-      "Can I haz proper args for the quantized_max_pool2d?");
+  check_maxpool2d_params(
+      kernel_size,
+      stride,
+      padding,
+      dilation);
   if (stride.empty()) {
     stride = kernel_size;
   }
