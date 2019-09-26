@@ -268,6 +268,22 @@ class TestTypePromotion(TestCase):
                     self.assertTrue(t1.dtype == dt1)
                     self.assertTrue(t2.dtype == dt2)
 
+                    t1 = torch.tensor(val1, dtype=dt1, device=device)
+                    t2 = torch.tensor(val2, dtype=dt2, device=device)
+                    expected = torch.tensor(op["compare_op"](val1, val2), dtype=torch.bool)
+
+                    out_res = op["out_op"](t1, t2, device)
+                    self.assertEqual(out_res, expected)
+                    self.assertTrue(out_res.dtype == torch.bool)
+                    self.assertTrue(t1.dtype == dt1)
+                    self.assertTrue(t2.dtype == dt2)
+
+                    out_res = op["ret_op"](t1, t2)
+                    self.assertEqual(out_res, expected)
+                    self.assertTrue(out_res.dtype == torch.bool)
+                    self.assertTrue(t1.dtype == dt1)
+                    self.assertTrue(t2.dtype == dt2)
+
     def test_lt_with_type_promotion(self):
         for dt in torch.testing.get_all_math_dtypes(self.device):
             x = torch.tensor([0], dtype=dt, device=self.device)

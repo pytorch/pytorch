@@ -141,11 +141,15 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
   return tensor;
 }
 
-static Tensor wrapped_scalar_tensor_and_check_convert(Scalar scalar, Tensor tensor) {
+static void check_convert(Scalar scalar, ScalarType scalarType) {
   // Validate that is possible to convert scalar to tensor dtype without overflow
-  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, tensor.scalar_type(), "check_convert", [&]{
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, scalarType, "check_convert", [&]{
     scalar.to<scalar_t>();
   });
+}
+
+static Tensor wrapped_scalar_tensor_and_check_convert(Scalar scalar, Tensor tensor) {
+  check_convert(scalar, tensor.scalar_type());
   return wrapped_scalar_tensor(scalar);
 }
 
@@ -224,14 +228,17 @@ template <typename Stub>
 Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& other, Stub& stub) {
   TORCH_CHECK(result.scalar_type() == kBool,
               "The output tensor of lt must be a bool, but was ", result.scalar_type());
+  // Validate that is possible to convert zero-dim tensor's dtype to other dtype without overflow
+  if (self.dim() == 0 && self.scalar_type() != other.scalar_type()) {
+    check_convert(self.item(), other.scalar_type());
+  } else if (other.dim() == 0 && self.scalar_type() != other.scalar_type()) {
+    check_convert(other.item(), self.scalar_type());
+  }
   return native::comparison_op_impl_out(result, self, other, stub);
 }
 
 template <typename Stub>
 Tensor comparison_op(const Tensor& self, const Tensor& other, Stub& stub) {
-  TORCH_CHECK((self.dim() != 0 && other.dim() != 0) || self.dtype() == other.dtype(),
-              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-              other.dtype(), " for argument 'other'");
   Tensor result = at::empty({0}, self.options().dtype(kBool));
   return native::comparison_op_out(result, self, other, stub);
 }
