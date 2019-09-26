@@ -396,7 +396,7 @@ void do_avg_pool_on_AVX2(
       acc.store(acc_int);
       vec256::convert(acc_int, acc_fp, vec_width);
       at::quantize_vec<T>(
-          1 / multiplier,
+          1.0f / multiplier,
           output_zero_point,
           acc_fp,
           reinterpret_cast<T*>(o_p + c),
