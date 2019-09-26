@@ -55,7 +55,7 @@
               export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
-            docker push ${COMMIT_DOCKER_IMAGE}
+            time docker push ${COMMIT_DOCKER_IMAGE}
           fi
 
   caffe2_linux_test:

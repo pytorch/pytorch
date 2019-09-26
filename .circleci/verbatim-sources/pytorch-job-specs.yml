@@ -75,7 +75,7 @@ jobs:
               export COMMIT_DOCKER_IMAGE=$output_image
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
-            docker push ${COMMIT_DOCKER_IMAGE}
+            time docker push ${COMMIT_DOCKER_IMAGE}
           fi
 
   pytorch_linux_test:
