@@ -351,7 +351,9 @@ MatchTypeReturn matchTypeVariables(
       type_env[vt->name()] = actual;
       return MatchTypeReturn::Success();
     } else if (auto unified = unifyTypes(it->second, actual)) {
-      type_env[vt->name()] = *unified;
+      // note: unifyTypes allows subtyping in either direction, so actual
+      // may be a supertype of the current binding. we're not responsible
+      // for reporting the error, only for keeping type_env stable
       return MatchTypeReturn::Success();
     }
     std::stringstream ss;
