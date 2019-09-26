@@ -201,13 +201,10 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
         raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
 
     def run_function(start, end, functions):
-        def forward(*inputs):
+        def forward(input):
             for j in range(start, end + 1):
-                if isinstance(inputs, tuple):
-                    inputs = functions[j](*inputs)
-                else:
-                    inputs = functions[j](inputs)
-            return inputs
+                input = functions[j](input)
+            return input
         return forward
 
     if isinstance(functions, torch.nn.Sequential):
