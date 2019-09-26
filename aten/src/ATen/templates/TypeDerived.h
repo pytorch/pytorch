@@ -33,9 +33,9 @@ struct Quantizer;
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 #ifdef USE_STATIC_DISPATCH
-namespacd ${Type} {
+namespace ${Type} {
   ${type_derived_method_declarations}
-};
+}
 #endif
 
 } // namespace at
