@@ -317,7 +317,7 @@ namespace std {
 #include <cstddef>
 
 
-namespace mpark {
+namespace c10 {
 
   struct in_place_t { explicit in_place_t() = default; };
 
@@ -335,7 +335,7 @@ namespace mpark {
   template <typename T> constexpr in_place_type_t<T> in_place_type{};
 #endif
 
-}  // namespace mpark
+}  // namespace c10
 
 #endif  // MPARK_IN_PLACE_HPP
 
@@ -358,7 +358,7 @@ namespace mpark {
 #define MPARK_RETURN(...) \
   noexcept(noexcept(__VA_ARGS__)) -> decltype(__VA_ARGS__) { return __VA_ARGS__; }
 
-namespace mpark {
+namespace c10 {
   namespace lib {
     template <typename T>
     struct identity { using type = T; };
@@ -870,14 +870,14 @@ namespace mpark {
     };
 
   }  // namespace lib
-}  // namespace mpark
+}  // namespace c10
 
 #undef MPARK_RETURN
 
 #endif  // MPARK_LIB_HPP
 
 
-namespace mpark {
+namespace c10 {
 
 #ifdef MPARK_RETURN_TYPE_DEDUCTION
 
@@ -2752,28 +2752,28 @@ namespace mpark {
 #undef DECLTYPE_AUTO
 #undef DECLTYPE_AUTO_RETURN
 
-}  // namespace mpark
+}  // namespace c10
 
 namespace std {
 
   template <typename... Ts>
-  struct hash<mpark::detail::enabled_type<
-      mpark::variant<Ts...>,
-      mpark::lib::enable_if_t<mpark::lib::all<mpark::detail::hash::is_enabled<
-          mpark::lib::remove_const_t<Ts>>()...>::value>>> {
-    using argument_type = mpark::variant<Ts...>;
+  struct hash<c10::detail::enabled_type<
+      c10::variant<Ts...>,
+      c10::lib::enable_if_t<c10::lib::all<c10::detail::hash::is_enabled<
+          c10::lib::remove_const_t<Ts>>()...>::value>>> {
+    using argument_type = c10::variant<Ts...>;
     using result_type = std::size_t;
 
     inline result_type operator()(const argument_type &v) const {
-      using mpark::detail::visitation::variant;
+      using c10::detail::visitation::variant;
       std::size_t result =
           v.valueless_by_exception()
               ? 299792458  // Random value chosen by the universe upon creation
               : variant::visit_alt(
 #ifdef MPARK_GENERIC_LAMBDAS
                     [](const auto &alt) {
-                      using alt_type = mpark::lib::decay_t<decltype(alt)>;
-                      using value_type = mpark::lib::remove_const_t<
+                      using alt_type = c10::lib::decay_t<decltype(alt)>;
+                      using value_type = c10::lib::remove_const_t<
                           typename alt_type::value_type>;
                       return hash<value_type>{}(alt.value);
                     }
@@ -2790,9 +2790,9 @@ namespace std {
     struct hasher {
       template <typename Alt>
       inline std::size_t operator()(const Alt &alt) const {
-        using alt_type = mpark::lib::decay_t<Alt>;
+        using alt_type = c10::lib::decay_t<Alt>;
         using value_type =
-            mpark::lib::remove_const_t<typename alt_type::value_type>;
+            c10::lib::remove_const_t<typename alt_type::value_type>;
         return hash<value_type>{}(alt.value);
       }
     };
@@ -2804,8 +2804,8 @@ namespace std {
   };
 
   template <>
-  struct hash<mpark::monostate> {
-    using argument_type = mpark::monostate;
+  struct hash<c10::monostate> {
+    using argument_type = c10::monostate;
     using result_type = std::size_t;
 
     inline result_type operator()(const argument_type &) const noexcept {
@@ -2817,7 +2817,7 @@ namespace std {
 
 namespace c10 {
 
-using namespace mpark;
+using namespace c10;
 
 } // namespace c10
 
