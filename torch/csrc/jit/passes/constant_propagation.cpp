@@ -37,10 +37,11 @@ std::unordered_set<Symbol> tuple_ops = {
 
 struct ConstantPropagator {
   ConstantPropagator(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)), aliasDb(graph_){};
+      : graph_(std::move(graph)), aliasDb(graph_), changed_(false){};
 
-  void run() {
+  bool  run() {
     ConstantPropagation(graph_->block());
+    return changed_;
   }
 
  private:
@@ -126,6 +127,7 @@ struct ConstantPropagator {
             n->outputs()[i]->debugName(),
             " with ",
             getHeader((*new_output)->node()));
+        changed_ = true;
         if (outputs[i].isNone()) {
           (*new_output)->setType(n->outputs()[i]->type());
         }
@@ -140,6 +142,7 @@ struct ConstantPropagator {
               n->outputs()[i]->debugName(),
               " with ",
               getHeader(new_tup->node()));
+          changed_ = true;
           tuple_val = new_tup;
         }
         tuples[tuple_val] = std::move(outputs[i]);
@@ -174,6 +177,7 @@ struct ConstantPropagator {
           trip_count,
           " and start_cond: ",
           getHeader(start_cond->node()));
+      changed_ = true;
     }
     return !loop_might_run;
   }
@@ -203,6 +207,7 @@ struct ConstantPropagator {
         getHeader(n->input()->node()),
         " where condition = ",
         *input_bool);
+    changed_ = true;
     size_t block_index = *input_bool ? 0 : 1;
     ConstantPropagation(n->blocks().at(block_index));
     inlineIfBody(n->blocks().at(block_index));
@@ -337,14 +342,18 @@ struct ConstantPropagator {
   AliasDb aliasDb;
   // these are tuples which we know the computed IValue for
   std::unordered_map<Value*, IValue> tuples;
+  // Set to true if a constant folding is performed
+  bool changed_;
 };
 } // anonymous namespace
 
 void ConstantPropagation(std::shared_ptr<Graph>& graph) {
   ConstantPropagator cp(graph);
-  cp.run();
-  GRAPH_DUMP("After ConstantPropagation: ", graph);
-  EliminateDeadCode(graph);
+  bool changed = cp.run();
+  if (changed) {
+    GRAPH_DUMP("After ConstantPropagation: ", graph);
+    EliminateDeadCode(graph);
+  }
 }
 } // namespace jit
 } // namespace torch
