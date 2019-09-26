@@ -383,7 +383,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_arange_dyn(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
-                return torch.arange(torch.arange(12), \
+                return torch.arange(12), \
                     torch.arange(start=input.shape[0], end=input.shape[0] + 5, step=0.5)
 
         x = torch.randn(5, 3, 2)
