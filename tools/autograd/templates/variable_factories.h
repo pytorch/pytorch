@@ -108,7 +108,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
       return vec_;
     }
 
-    const std::vector<int64_t>& sizes() const {
+    const std::vector<size_t>& sizes() const {
       return sizes_;
     }
 
@@ -165,7 +165,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
     }
     c10::Scalar scalar_;
     std::vector<ListInitTensor> vec_;
-    std::vector<int64_t> sizes_;
+    std::vector<size_t> sizes_;
     c10::ScalarType scalar_type_;
     ListInitTensorType type_;
   };
