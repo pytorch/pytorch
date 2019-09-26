@@ -268,6 +268,7 @@ class TestTypePromotion(TestCase):
                     self.assertTrue(t1.dtype == dt1)
                     self.assertTrue(t2.dtype == dt2)
 
+                    # test that comparing a zero dim tensor with another zero dim tensor has type promotion behavior
                     t1 = torch.tensor(val1, dtype=dt1, device=device)
                     t2 = torch.tensor(val2, dtype=dt2, device=device)
                     expected = torch.tensor(op["compare_op"](val1, val2), dtype=torch.bool)

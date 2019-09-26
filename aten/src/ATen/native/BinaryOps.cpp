@@ -229,10 +229,12 @@ Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& othe
   TORCH_CHECK(result.scalar_type() == kBool,
               "The output tensor of lt must be a bool, but was ", result.scalar_type());
   // Validate that is possible to convert zero-dim tensor's dtype to other dtype without overflow
-  if (self.dim() != 0 && other.dim() == 0 && self.scalar_type() != other.scalar_type()) {
-    check_convert(other.item(), self.scalar_type());
-  } else if (self.dim() == 0 && other.dim() != 0 && self.scalar_type() != other.scalar_type()) {
-    check_convert(self.item(), other.scalar_type());
+  if (self.scalar_type() != other.scalar_type()) {
+    if (self.dim() != 0 && other.dim() == 0) {
+      check_convert(other.item(), self.scalar_type());
+    } else if (self.dim() == 0 && other.dim() != 0) {
+      check_convert(self.item(), other.scalar_type());
+    }
   }
   return native::comparison_op_impl_out(result, self, other, stub);
 }
