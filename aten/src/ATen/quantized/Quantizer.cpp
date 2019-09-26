@@ -203,7 +203,8 @@ void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, si
   }
 }
 
-inline uint8_t Uint8Quantize(const float scale, const int32_t zero_point, const float value) {
+// TODO combine this with quantize_val once the numerics for ARM are aligned with it
+inline uint8_t quantize_val_arm(const float scale, const int32_t zero_point, const float value) {
   const int32_t qmin = std::numeric_limits<uint8_t>::min();
   const int32_t qmax = std::numeric_limits<uint8_t>::max();
   auto r = zero_point + static_cast<int32_t>(Round(value / scale));
@@ -214,31 +215,31 @@ inline uint8_t Uint8Quantize(const float scale, const int32_t zero_point, const 
 
 // Generic template defaults to naive quantize implementation
 template <typename T>
-void Int8Quantize(
+void quantize_tensor_arm(
     const float* in,
     Tensor qtensor,
     const int64_t N,
-    const float Y_scale,
-    const int32_t Y_offset) {
+    const float scale,
+    const int32_t zero_point) {
   auto out = qtensor.data_ptr<T>();
   for (int i = 0; i < N; ++i) {
-    out[i] = quantize_val<T>(Y_scale, Y_offset, in[i]);
+    out[i] = quantize_val<T>(scale, zero_point, in[i]);
   }
 }
 
 // Specialized implementation from caffe2::Int8Quantize.
 // There may be slight accuracy difference between this and implementation of quantize_val
-// TODO Update Int8Quantize implementation to follow quantize_val,
+// TODO Update quantize_tensor_arm implementation to follow quantize_val,
 // i.e. f = Round(value/scale + zero_point)
-// TODO Make Int8Quantize work for other datatypes too (int8, int32).
+// TODO Make quantize_tensor_arm work for other datatypes too (int8, int32).
 template <>
-void Int8Quantize<c10::quint8>(
+void quantize_tensor_arm<c10::quint8>(
     const float* in,
     Tensor qtensor,
     const int64_t N,
-    const float Y_scale,
-    const int32_t Y_offset) {
-  const float inv_scale = 1.0f / Y_scale;
+    const float scale,
+    const int32_t zero_point) {
+  const float inv_scale = 1.0f / scale;
   uint32_t i = 0;
   auto out = (uint8_t*)qtensor.data_ptr<c10::quint8>();
 #ifdef __ARM_NEON__
@@ -254,7 +255,7 @@ void Int8Quantize<c10::quint8>(
   // same number (0x4B400000 is the integer representation of 12582912.0f) to
   // get only the mantissa. This works if -2**22 < x < 2**22, but preserves the
   // sign for negative numbers.
-  const int32x4_t voffset = vdupq_n_s32(Y_offset - 0x4B400000);
+  const int32x4_t voffset = vdupq_n_s32(zero_point - 0x4B400000);
   const float32x4_t vmagic_float = vdupq_n_f32(12582912.0f);
   for (i = 0; i + 8 < N; i += 8) {
     const float32x4_t vin0123 = vld1q_f32(in);
@@ -277,7 +278,7 @@ void Int8Quantize<c10::quint8>(
   }
 #endif // __ARM_NEON__
   for (; i < N; ++i) {
-    (*out++) = Uint8Quantize(Y_scale, Y_offset, (*in++));
+    (*out++) = quantize_val_arm(scale, zero_point, (*in++));
   }
 }
 
@@ -289,7 +290,6 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
   TORCH_CHECK(rtensor.is_contiguous(), "Float tensor should be contiguous");
   const float* const rdata = rtensor.data_ptr<float>();
-  auto qdata = qtensor.data_ptr<T>();
   // If QEngine is set to QNNPACK, use caffe2 specialized Int8Quantize implementation on ARM
 #if defined(__ARM_NEON__)
   const bool use_pytorch_qnnpack_arm = at::globalContext().qEngine() == at::QEngine::QNNPACK;
@@ -298,9 +298,10 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
 #endif
 
   if (use_pytorch_qnnpack_arm) {
-    Int8Quantize<T>(rdata, qtensor, rtensor.numel(), scale, zero_point);
+    quantize_tensor_arm<T>(rdata, qtensor, rtensor.numel(), scale, zero_point);
   }
   else {
+    auto qdata = qtensor.data_ptr<T>();
     for (int i = 0; i < rtensor.numel(); ++i) {
       qdata[i] = quantize_val<T>(scale, zero_point, rdata[i]);
     }
