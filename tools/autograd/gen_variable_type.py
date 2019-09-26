@@ -144,11 +144,11 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
-static ${return_type} ${api_name}(${type_method_formals}) ;
+${return_type} ${api_name}(${type_method_formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} VariableType::${api_name}(${type_method_formals}) {
+${return_type} ${api_name}(${type_method_formals}) {
   ${type_definition_body}
 }
 """)
@@ -156,14 +156,14 @@ ${return_type} VariableType::${api_name}(${type_method_formals}) {
 LEGACY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_legacyATenKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .impl_unboxedOnlyATenKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .impl_unboxedOnlyC10Kernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 

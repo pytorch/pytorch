@@ -4528,17 +4528,6 @@ a")
         self.checkScript(test_scalar_cast, (torch.tensor(1.0),))
         self.checkScript(test_scalar_cast, (torch.tensor(1),))
 
-        expected_str = r"Use int\(tensor\) or float\(tensor\) to retrieve"
-        with self.assertRaisesRegex(RuntimeError, expected_str):
-            @torch.jit.script
-            def int_fn(a):
-                # type: (int) -> int
-                return a
-
-            @torch.jit.script
-            def test_error_msg(x):
-                return int_fn(x.item())
-
     def test_method_on_number(self):
         def func():
             c = 1
@@ -6272,6 +6261,25 @@ a")
                 run_test(code)
             for func in funcs:
                 code = funcs_template.format(func=func, scalar1=scalar1, scalar2=scalar2)
+                run_test(code)
+
+        # test Scalar overloads
+        for scalar1, scalar2 in scalar_pairs:
+            item1 = 'torch.tensor(' + scalar1 + ').item()'
+            item2 = 'torch.tensor(' + scalar2 + ').item()'
+            for op in ops:
+                code = ops_template.format(op=op, scalar1=item1, scalar2=scalar2)
+                run_test(code)
+                code = ops_template.format(op=op, scalar1=scalar1, scalar2=item2)
+                run_test(code)
+                code = ops_template.format(op=op, scalar1=item1, scalar2=item2)
+                run_test(code)
+            for func in funcs:
+                code = funcs_template.format(func=func, scalar1=item1, scalar2=scalar2)
+                run_test(code)
+                code = funcs_template.format(func=func, scalar1=scalar1, scalar2=item2)
+                run_test(code)
+                code = funcs_template.format(func=func, scalar1=item1, scalar2=item2)
                 run_test(code)
 
     def test_number_abs(self):
@@ -18298,6 +18306,38 @@ class TestList(JitTestCase):
             return li[0] + li[1] + li[2]
 
         self.checkScript(list_cast, ())
+
+    def test_comprehension_iterable(self):
+        def test_func(fn, inputs):
+            self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
+
+        def foo(names, results):
+            # type: (List[int], List[int])
+            return [(k + 5, v - 2) for k, v in zip(names, results)]
+
+        test_func(foo, ([1, 2, 4], [4, 7, 9]))
+        test_func(foo, ([5], [4, 7, 9]))
+
+        def fn(x):
+            # type: (int)
+            return [i for i in range(x)]
+
+        test_func(fn, (9,))
+        test_func(fn, (0,))
+        test_func(fn, (-1,))
+
+        def changes_type():
+            a = [float(i) for i in range(5)]
+            b = [float(i) for i in [1, 2, 3, 4]]
+            c = [(float(i), j) for i, j in enumerate([1, 2, 3, 8])]
+            return a, b, c
+
+        test_func(changes_type, ())
+
+        def test_zero_iter():
+            return [str(i) for i, j in zip("", "")]
+
+        test_func(test_zero_iter, ())
 
     def test_mutable_list_append_2(self):
         def test_append_2():

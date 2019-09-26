@@ -5,6 +5,12 @@
 namespace torch {
 namespace jit {
 
+using ClassResolver =
+    std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
+
+using ObjLoader =
+    std::function<c10::intrusive_ptr<c10::ivalue::Object>(at::StrongTypePtr, IValue)>;
+
 // [unpickler refactor] there is some cruft around PickleOpCode::BUILD,
 // PickleOpCode::NEWOBJ, and the last_opcode_ member below that should be deleted at
 // some point, the Pickler doesn't produce it and it's only around to support
@@ -27,11 +33,13 @@ class Unpickler {
   Unpickler(
       std::function<bool(char*, size_t)> reader,
       ClassResolver class_resolver,
+      ObjLoader obj_loader,
       std::function<at::DataPtr(const std::string&)> read_record,
       c10::optional<at::Device> device)
       : reader_(reader),
         tensor_table_(nullptr),
         class_resolver_(std::move(class_resolver)),
+        obj_loader_(std::move(obj_loader)),
         read_record_(std::move(read_record)),
         device_(std::move(device)) {}
 
@@ -74,6 +82,7 @@ class Unpickler {
 
   // optionally nullptr, needs to be present for creating classes
   ClassResolver class_resolver_;
+  ObjLoader obj_loader_;
   IValue empty_tuple_;
 
   std::function<at::DataPtr(const std::string&)> read_record_;

@@ -89,11 +89,11 @@ case ScalarType::${ScalarName}: {
 # In this case, it will be called for all backends, but can be overwritten on a
 # per backend basis.
 NATIVE_DISPATCH_DECLARATION = CodeTemplate("""\
-static ${return_type} ${api_name}(${type_method_formals});
+${return_type} ${api_name}(${type_method_formals});
 """)
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
-${return_type} TypeDefault::${api_name}(${type_method_formals}) {
+${return_type} ${api_name}(${type_method_formals}) {
 #ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
 #endif
@@ -103,7 +103,7 @@ ${return_type} TypeDefault::${api_name}(${type_method_formals}) {
 """)
 
 NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
-${return_type} ${Type}::${api_name}(${type_method_formals}) {
+${return_type} ${api_name}(${type_method_formals}) {
 #ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
 #endif
@@ -115,25 +115,25 @@ ${return_type} ${Type}::${api_name}(${type_method_formals}) {
 DEFAULT_LEGACY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_legacyATenCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
+  .impl_unboxedOnlyATenCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 BACKEND_LEGACY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_legacyATenKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
+  .impl_unboxedOnlyATenKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
+  .impl_unboxedOnlyC10CatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
+  .impl_unboxedOnlyC10Kernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\

@@ -18,11 +18,17 @@
 #include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
+namespace TypeDefault {
 
 ${type_method_definitions}
 
+}  // namespace TypeDefault
+
 #ifndef USE_STATIC_DISPATCH
+namespace {
 static auto registerer = torch::RegisterOperators()
   ${function_registrations};
-#endif
 }
+#endif
+
+}  // namespace at
