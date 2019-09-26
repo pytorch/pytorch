@@ -18,12 +18,4 @@ Tensor& resize_cuda_(Tensor& self, IntArrayRef size) {
   return self;
 }
 
-Tensor& resize_as_cuda_(Tensor& self, const Tensor& the_template) {
-  Tensor& result = resize_cuda_(self, the_template.sizes());
-#ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names(result, the_template);
-#endif
-  return result;
-}
-
 }}

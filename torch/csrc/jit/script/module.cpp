@@ -86,7 +86,7 @@ void Module::to(at::Device device, bool non_blocking) {
 
 void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
 #ifndef C10_MOBILE
-  ExportModule(*this, out, extra_files);
+  ExportModule(*this, out, extra_files, false);
 #else
   AT_ERROR("Saving module is not supported on mobile.");
 #endif
@@ -95,10 +95,19 @@ void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
 void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
     const {
 #ifndef C10_MOBILE
-  ExportModule(*this, filename, extra_files);
+  ExportModule(*this, filename, extra_files, false);
 #else
   AT_ERROR("Saving module is not supported on mobile.");
 #endif
+}
+
+void Module::_save_for_mobile(std::ostream& out, const ExtraFilesMap& extra_files) const {
+  ExportModule(*this, out, extra_files, true);
+}
+
+void Module::_save_for_mobile(const std::string& filename, const ExtraFilesMap& extra_files)
+    const {
+  ExportModule(*this, filename, extra_files, true);
 }
 
 void module_state_to(

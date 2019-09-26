@@ -38,7 +38,7 @@ _constant_types = (bool, float, int, str, type(None), types.FunctionType, torch.
 
 def make_stub(func):
     rcb = _jit_internal.createResolutionCallbackFromClosure(func)
-    ast = torch.jit.get_jit_def(func, self_name="ScriptModule")
+    ast = torch.jit.get_jit_def(func, self_name="RecursiveScriptModule")
     return ScriptMethodStub(rcb, ast, func)
 
 def _get_valid_constant(attr, v):
@@ -151,9 +151,9 @@ def get_module_meta(original, level=0):
             # TODO clean this up if possible
             continue
 
-        if isinstance(getattr(type(original), name, None), property):
-            # Avoid adding @property methods as attributes
-            continue
+        # if isinstance(getattr(type(original), name, None), property):
+        #     # Avoid adding @property methods as attributes
+        #     continue
 
         item = getattr(original, name)
 
@@ -207,7 +207,7 @@ def get_type(original, level=0):
     # printt("============================")
     # printt("CALLING GET TYPE ON,", type(original).__name__)
     assert isinstance(original, Module)
-    if isinstance(original, torch.jit.ScriptModule) and original._type_frozen:
+    if isinstance(original, torch.jit.RecursiveScriptModule) and original._type_frozen:
         # printt("ALREADY A SCRIPT MOD")
         # printt("============================")
         return original._module_meta, original._c._type()
@@ -248,28 +248,16 @@ def compile_unbound_method(cpp_mod, module_meta, fn):
 #    ScriptModule with a fresh ._c already set
 # 4. From tracing, if we have exports set on the traced module. Then its called
 #    directly to just compile the exports.
-def create_script_module(original_module, stubs):
-    if isinstance(original_module, torch.jit.ScriptModule):
-        # The only time this can be a ScriptModule
-        assert not original_module._type_frozen
-        is_inplace = True
-    else:
-        is_inplace = False
+def create_script_module(original_module, stubs, fresh_type=False):
+    assert isinstance(original_module, torch.nn.Module)
 
     module_meta, module_type = get_type(original_module)
-    # TODO this path happens when we are tracing (and thus pass in an
-    # already-existing cpp_mod). Can we change TracedModule construction to
-    # make this less weird here?
-    if hasattr(original_module, '_c'):
-        cpp_mod = original_module._c
+    if fresh_type:
+        cpp_mod = torch._C.ScriptModule(torch._jit_internal._qualified_name(type(original_module)), torch.jit._python_cu, True)
+        module_type = cpp_mod._type()
     else:
         cpp_mod = torch._C._create_module_with_type(module_type)
-
-    if is_inplace:
-        script_module = original_module
-        script_module.__dict__["_c"] = cpp_mod
-    else:
-        script_module = torch.jit.ScriptModule(_cpp_module=cpp_mod)
+    script_module = torch.jit.RecursiveScriptModule(cpp_mod)
 
     # Add attributes/parameters
     for name, (attr_type, is_param) in module_meta.get_attributes().items():
@@ -282,20 +270,12 @@ def create_script_module(original_module, stubs):
         else:
             cpp_mod._register_attribute(name, attr_type, orig_value)
 
-        if is_inplace:
-            # Delete the python version
-            delattr(original_module, name)
-
     # Add modules, recursively scripting them.
     for name in module_meta.get_module_names():
         orig_value = getattr(original_module, name)
         assert isinstance(orig_value, Module)
         scripted = recursive_script(orig_value)
         cpp_mod._register_module(name, scripted._c)
-
-        if is_inplace:
-            # Delete the python version
-            delattr(original_module, name)
 
         script_module._modules[name] = scripted
 
@@ -317,16 +297,17 @@ def create_script_module(original_module, stubs):
 
     # Compile methods if necessary
     if module_type not in module_meta_store.methods_compiled:
-        # 1. Compile any methods stored on _lazy_defines
-        for src, rcb in script_module._lazy_defines:
-            cpp_mod._define(module_meta, src, rcb)
-
-        # 2. Compile the stubs the provided
         create_methods_from_stubs(cpp_mod, module_meta, stubs)
         module_meta_store.methods_compiled.add(module_type)
 
     # Make the compiled methods available to the Python ScriptModule class.
     for stub in stubs:
+        if stub.original_method is None:
+            # define()'d methods don't have an original_method, so we don't #
+            # need to do any Python stuff--we'll just look it up on the cpp_mod
+            # directly
+            continue
+
         name = stub.original_method.__name__
         if name != stub.def_.name().name:
             # TODO: Why skip this? Because @torch.jit._overload_method will
@@ -381,10 +362,10 @@ def get_overload_name_mapping(overload_info):
 def make_stubs_for_overloads(overload_info):
     overload_stubs = []
     for orig_fn, overloads in overload_info.items():
-        orig_ast = torch.jit.get_jit_def(orig_fn, self_name="ScriptModule")
+        orig_ast = torch.jit.get_jit_def(orig_fn, self_name="RecursiveScriptModule")
         for overload_name, overload_fn in overloads:
             torch.jit._check_no_signature(overload_fn)
-            over_ast = torch.jit.get_jit_def(overload_fn, self_name="ScriptModule")
+            over_ast = torch.jit.get_jit_def(overload_fn, self_name="RecursiveScriptModule")
             new_ast = torch._C._replace_overloaded_method_decl(over_ast.decl(), orig_ast, overload_name)
             _rcb = _jit_internal.createResolutionCallbackFromClosure(orig_fn)
             overload_stubs.append(ScriptMethodStub(_rcb, new_ast, overload_fn))
@@ -398,7 +379,9 @@ def recursive_script(mod, exclude_methods=()):
     starting points for compilation. These methods are turned into stubs and
     handed off to the actual compilation process.
     """
-    if isinstance(mod, torch.jit.ScriptModule) and mod._type_frozen:
+    if isinstance(mod, torch.jit.ScriptModule):
+        return mod
+    if isinstance(mod, torch.jit.RecursiveScriptModule) and mod._type_frozen:
         return mod
 
     if isinstance(mod, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)):
@@ -504,7 +487,7 @@ def wrap_cpp_module(cpp_module):
     """
     Wrap this torch._C.ScriptModule in a Python ScriptModule, recursively for all submodules
     """
-    script_module = torch.jit.ScriptModule(_cpp_module=cpp_module)
+    script_module = torch.jit.RecursiveScriptModule(cpp_module)
     for name, cpp_mod in script_module._c._get_modules():
         setattr(script_module, name, wrap_cpp_module(cpp_mod))
 
@@ -528,7 +511,7 @@ def bind_to_dummy_module(module_meta, unbound_method, cpp_mod):
     from information in `module_meta` we can be sure that there is no dynamic
     shenanigans that would ruin our type sharing.
     """
-    script_module = torch.jit.ScriptModule(cpp_mod)
+    script_module = torch.jit.RecursiveScriptModule(cpp_mod)
     orig_class = module_meta.py_class
 
     # Copy @ignored/@unused methods from the original module to the new one.
@@ -542,5 +525,5 @@ def bind_to_dummy_module(module_meta, unbound_method, cpp_mod):
         setattr(script_module, name, value)
 
     script_module._finalize()
-    method = bind_method(unbound_method, script_module, torch.jit.ScriptModule)
+    method = bind_method(unbound_method, script_module, torch.jit.RecursiveScriptModule)
     return method

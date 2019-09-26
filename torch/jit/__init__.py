@@ -5,6 +5,7 @@ import torch.jit.annotations
 import torch.testing
 import torch.jit._recursive
 
+from torch.jit._recursive import ScriptMethodStub
 from torch._jit_internal import _qualified_name
 from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
@@ -1249,6 +1250,9 @@ def interface(obj):
 
 
 def script_method(fn):
+    if not _enabled:
+        return fn
+
     # NOTE: we need to traverse two frames here because the meta-class frame
     # for ScriptModule will be present, as opposed to invoking @script on a
     # a function or invoking define() on a CompilationUnit.
@@ -1261,13 +1265,9 @@ def script_method(fn):
     #
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
-    rcb = _jit_internal.createResolutionCallback(frames_up=2)
-    # TODO: we stash the rcb because otherwise we won't be able to find types
-    # referenced by the type annotations. see test_nn_lstm
-    fn._torchscript_rcb = rcb
-    fn._torchscript_modifier = torch._jit_internal.FunctionModifiers.EXPORT
-
-    return fn
+    _rcb = _jit_internal.createResolutionCallback(frames_up=2)
+    ast = get_jit_def(fn, self_name="ScriptModule")
+    return ScriptMethodStub(_rcb, ast, fn)
 
 
 
@@ -1416,12 +1416,6 @@ def _get_valid_constant(attr, v):
         """.format(type(v).__name__, attr, constants)))
 
 
-def _create_methods_from_stubs(self, stubs):
-    defs = [m.def_ for m in stubs]
-    rcbs = [m.resolution_callback for m in stubs]
-    defaults = [get_default_args(m.original_method) for m in stubs]
-    self._c._create_methods(self, defs, rcbs, defaults)
-
 # TODO rewrite
 # For each user-defined class that subclasses ScriptModule this meta-class,
 # (1) finds all the methods annotated with @script_method
@@ -1434,13 +1428,21 @@ def _create_methods_from_stubs(self, stubs):
 class ScriptMeta(type):
     def __init__(cls, name, bases, attrs):
         # Aggregate all the ScriptMethods and constants from superclasses
+        cls._methods = {}
         cls._constants_set = set(getattr(cls, '__constants__', ()))
         for base in reversed(bases):
+            for k, v in getattr(base, '_methods', {}).items():
+                cls._methods[k] = v
             base_constants = getattr(base, '_constants_set', set())
             cls._constants_set = cls._constants_set.union(base_constants)
 
-        # TODO figure out how to forward-reference ScriptModule without using strings for names...
-        if cls.__name__ in ('ScriptModule', 'TracedModule', 'TopLevelTracedModule'):
+        # find all the script methods of the current class
+        for k, v in sorted(attrs.items()):
+            if isinstance(v, ScriptMethodStub):
+                delattr(cls, k)
+                cls._methods[v.original_method.__name__] = v
+
+        if getattr(cls, '_disable_script_meta', False):
             # We leave built-in ScriptModule types alone, since this metaclass
             # is only for compiling user classes that inherit from
             # ScriptModule.
@@ -1452,7 +1454,23 @@ class ScriptMeta(type):
         def init_then_script(self, *args, **kwargs):
             original_init(self, *args, **kwargs)
             if type(self) == cls:
-                torch.jit._recursive.recursive_script(self)
+                stubs = [v for k, v in sorted(cls._methods.items())]
+                self.__dict__["_actual_script_module"] = torch.jit._recursive.create_script_module(self, stubs)
+
+                # now delete the Python attributes that shadow the ScriptModule ones
+                # TODO how to make this robust over time? Maybe just blank out __dict__
+                module_meta = self._actual_script_module._module_meta
+                for name in module_meta.get_attributes():
+                    if hasattr(cls, name) and isinstance(getattr(cls, name), property):
+                        # TODO giant hack. Right now we are encoding properties
+                        # as attributes (this is what recursive script does
+                        # today, but it is wrong)
+                        continue
+                    delattr(self, name)
+                for name in module_meta.get_module_names():
+                    delattr(self, name)
+                for name in ("_parameters", "_buffers", "_modules"):
+                    delattr(self, name)
 
         cls.__init__ = init_then_script
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
@@ -1471,8 +1489,43 @@ if _enabled:
         def __get__(self, obj, cls):
             return self.__getattr__('forward')
 
-
     class ScriptModule(with_metaclass(ScriptMeta, Module)):
+        def __init__(self):
+            super(ScriptModule, self).__init__()
+
+        forward = _CachedForward()
+
+        def __getattr__(self, attr):
+            if "_actual_script_module" not in self.__dict__:
+                return super(ScriptModule, self).__getattr__(attr)
+            return getattr(self._actual_script_module, attr)
+
+        def __setattr__(self, attr, value):
+            if "_actual_script_module" not in self.__dict__:
+                return super(ScriptModule, self).__setattr__(attr, value)
+            setattr(self._actual_script_module, attr, value)
+
+        def lazy_define(self, src):
+            """
+            TODO doc, can maybe rename define()
+            """
+            if "_actual_script_module" in self.__dict__:
+                raise RuntimeError("Tried to call 'lazy_define' on a frozen ScriptModule. "
+                                   "Did you mean 'define()'?")
+            # We use frames_up=1 to get to the proper surrounding scope. The stack
+            # will look like:
+            # 0. createResolutionCallback
+            # 1. define()
+            # 2. surrounding scope.
+            #
+            # createResolutionCallback internally adds 1 to get us to our frame, then
+            # we add 1 to get to the proper surrounding scope.
+            rcb = _jit_internal.createResolutionCallback(frames_up=1)
+            ast = torch._C._parse_source_def(src)
+            self._methods[ast.name().name] = ScriptMethodStub(rcb, ast, None)
+
+
+    class RecursiveScriptModule(ScriptModule):
         r"""
         The core data structure in TorchScript is the ``ScriptModule``. It is an
         analogue of torch's ``nn.Module`` and represents an entire model as a tree of
@@ -1486,16 +1539,12 @@ if _enabled:
         ``ScriptModule``\s should not be created manually, instead use
         either :func:`tracing <torch.jit.trace>` or :func:`scripting <torch.jit.script>`.
         """
-        def __init__(self, _cpp_module=None):
+        _disable_script_meta = True
+
+        def __init__(self, cpp_module):
             self.__dict__['_type_frozen'] = False
-
-            if _cpp_module is not None:
-                if not isinstance(_cpp_module, torch._C.ScriptModule):
-                    raise RuntimeError("Do not initialize ScriptModule with any arguments.")
-                self._c = _cpp_module
-
-            self._lazy_defines = []
-            super(ScriptModule, self).__init__()
+            self._c = cpp_module
+            super(RecursiveScriptModule, self).__init__()
 
         # TODO: it's really error-prone to leave ScriptModule in an unfrozen way
         # We should error a lot louder if we try to use (i.e. call forward
@@ -1571,30 +1620,12 @@ if _enabled:
             rcb = _jit_internal.createResolutionCallback(frames_up=1)
             self._c._define(self._module_meta, src, rcb)
 
-        # TODO Doc
-        # Use this to define() within __init__. These will be enqueued to
-        # be compiled during the initialization process.
-        def lazy_define(self, src):
-            if self._type_frozen is not False:
-                raise RuntimeError("Tried to call 'lazy_define' on a frozen ScriptModule. "
-                                   "Did you mean 'define()'?")
-            # We use frames_up=1 to get to the proper surrounding scope. The stack
-            # will look like:
-            # 0. createResolutionCallback
-            # 1. define()
-            # 2. surrounding scope.
-            #
-            # createResolutionCallback internally adds 1 to get us to our frame, then
-            # we add 1 to get to the proper surrounding scope.
-            rcb = _jit_internal.createResolutionCallback(frames_up=1)
-            self._lazy_defines.append((src, rcb))
-
         def __getattr__(self, attr):
             if '_type_frozen' not in self.__dict__:
                 raise RuntimeError("ScriptModule has not been initialized, did you forget to call super's init?")
 
             if not self._type_frozen:
-                return super(ScriptModule, self).__getattr__(attr)
+                return super(RecursiveScriptModule, self).__getattr__(attr)
 
             if '_c' not in self.__dict__:
                 raise RuntimeError("Foo")
@@ -1610,11 +1641,11 @@ if _enabled:
 
             # parameters, buffers, and submodules can be handled by delegating
             # to nn.Module, which will index into our custom OrderedXDicts
-            return super(ScriptModule, self).__getattr__(attr)
+            return super(RecursiveScriptModule, self).__getattr__(attr)
 
         def __setattr__(self, attr, value):
             if not self._type_frozen:
-                return super(ScriptModule, self).__setattr__(attr, value)
+                return super(RecursiveScriptModule, self).__setattr__(attr, value)
 
             if self._c._has_attribute(attr):
                 self._c._set_attribute(attr, value)
@@ -1639,6 +1670,7 @@ if _enabled:
                 "For purely script modules use my_script_module.save(<filename>) instead.")
 
 else:
+    # TODO MAKE SURE THAT DISABLING WORKS
     class ScriptModule(torch.nn.Module):
         def __init__(self):
             super(ScriptModule, self).__init__()
@@ -1674,62 +1706,68 @@ for name, method in _get_methods(torch.nn.Module):
         setattr(ScriptModule, method.__name__, _make_fail(name))
 
 
+def copy_to_tmp_module(orig):
+    assert(isinstance(orig, torch.nn.Module))
+    id_set = set()
+    tmp_module = Module()
+
+    def check_unique(param):
+        if param in id_set:
+            raise ValueError("TracedModules don't support parameter sharing between modules")
+        id_set.add(param)
+
+    tmp_module.training = orig.training
+
+    for name, param in orig._parameters.items():
+        if param is not None:
+            tmp_module._parameters[name] = param
+            check_unique(param)
+    for name, buf in orig._buffers.items():
+        if buf is not None:
+            tmp_module._buffers[name] = buf
+            check_unique(buf)
+
+    if orig._backward_hooks:
+        raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(orig))
+
+    for name, submodule in orig._modules.items():
+        tmp_module._modules[name] = make_module(submodule, TracedModule, _compilation_unit=None)
+
+    # TODO: this way of doing it means we lose name information on the class,
+    # since the qualname is basically "nn.Module"
+    return torch.jit._recursive.create_script_module(tmp_module, (), fresh_type=True)
+
+
 class TracedModule(ScriptModule):
-    __frozen = False
+    _disable_script_meta = True
 
     def __init__(self, orig, id_set=None, _compilation_unit=None):
         # XXX: orig can be a nn.Module or a function!
-        if _compilation_unit is None:
-            _compilation_unit = _python_cu
-        qual_name = torch._jit_internal._qualified_name(orig.__class__)
-
-        cpp_module = torch._C.ScriptModule(qual_name, _compilation_unit, True)
-        super(TracedModule, self).__init__(_cpp_module=cpp_module)
-        if id_set is None:
-            id_set = set()
-
+        super(TracedModule, self).__init__()
         assert(isinstance(orig, torch.nn.Module))
-        self._name = 'TracedModule[' + type(orig).__name__ + ']'
-
-        def check_unique(param):
-            if param in id_set:
-                raise ValueError("TracedModules don't support parameter sharing between modules")
-            id_set.add(param)
-
-        self.training = orig.training
-
-        for name, param in orig._parameters.items():
-            if param is not None:
-                self._parameters[name] = param
-                check_unique(param)
-        for name, buf in orig._buffers.items():
-            if buf is not None:
-                self._buffers[name] = buf
-                check_unique(buf)
-
-        if orig._backward_hooks:
-            raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(self))
-
-        for name, submodule in orig._modules.items():
-            self._modules[name] = make_module(submodule, TracedModule, _compilation_unit)
-
-        torch.jit._recursive.create_script_module(self, ())
-
-        self._freeze()
+        self.__dict__['_name'] = 'TracedModule[' + type(orig).__name__ + ']'
+        self.__dict__['_actual_script_module'] = copy_to_tmp_module(orig)
 
     def forward(self, *args, **kwargs):
         raise RuntimeError('Trace submodules cannot be called.')
 
-    def _freeze(self):
-        self.__dict__['__frozen'] = True
+    def __getattr__(self, attr):
+        if "_actual_script_module" not in self.__dict__:
+            return super(TracedModule, self).__getattr__(attr)
+        return getattr(self._actual_script_module, attr)
+
+    def __setattr__(self, attr, value):
+        if "_actual_script_module" not in self.__dict__:
+            return super(TracedModule, self).__setattr__(attr, value)
+        setattr(self._actual_script_module, attr, value)
 
     def _get_name(self):
         return self._name
 
-    def __setattr__(self, attr, value):
-        if not self.__frozen or hasattr(self, attr):
-            return super(TracedModule, self).__setattr__(attr, value)
-        raise RuntimeError("Cannot set new properties on a traced module.")
+    # def __setattr__(self, attr, value):
+    #     if not self.__frozen or hasattr(self, attr):
+    #         return super(TracedModule, self).__setattr__(attr, value)
+    #     raise RuntimeError("Cannot set new properties on a traced module.")
 
 if _enabled:
     class TopLevelTracedModule(TracedModule):

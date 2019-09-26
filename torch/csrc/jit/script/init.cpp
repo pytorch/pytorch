@@ -81,7 +81,7 @@ struct PythonResolver : public Resolver {
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
       Function& m,
-      const SourceRange& loc) const override {
+      const SourceRange& loc) override {
     AutoGIL ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
@@ -97,7 +97,7 @@ struct PythonResolver : public Resolver {
   }
 
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
-      const override {
+      override {
     if (classType_ && name == classname_) {
       return classType_;
     }
@@ -882,6 +882,10 @@ void initJitScriptBindings(PyObject* module) {
             c10::QualifiedName(qualifiedName), classDef, pythonResolver(rcb));
       });
 
+  m.def("_parse_source_def", [](const std::string& src) {
+    Parser p(std::make_shared<Source>(src));
+    return Def(p.parseFunction(/*is_method=*/true));
+  });
   m.def("parse_type_comment", [](const std::string& comment) {
     Parser p(std::make_shared<Source>(comment));
     return Decl(p.parseTypeComment());

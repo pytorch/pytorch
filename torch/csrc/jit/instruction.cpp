@@ -15,6 +15,17 @@ std::ostream& operator<<(std::ostream& out, OpCode op) {
   return out;
 }
 
+char const * toString(OpCode op) {
+  switch (op) {
+#define OP_STRING(x, _) \
+  case x:               \
+    return #x;
+    FORALL_OPCODES(OP_STRING)
+#undef OP_STRING
+  }
+  return nullptr;
+}
+
 const char* OpInfo(OpCode op) {
   switch (op) {
 #define OP_INFO(x, info) \
@@ -40,5 +51,33 @@ std::ostream& operator<<(std::ostream& out, Instruction inst) {
   }
   return out;
 }
+
+static constexpr char *strOpCode[] = {
+#define STR_OP(x, _) #x,
+    FORALL_OPCODES(STR_OP)
+#undef STR_OP
+};
+
+OpCode parseOpCode(const char *str) {
+  const int n = sizeof(strOpCode) / sizeof(strOpCode[0]);
+  for (int i = 0; i < n; ++i)
+  {
+    if (strcmp(strOpCode[i], str) == 0)
+      return (OpCode) i;
+  }
+  return OP;
+}
+
+bool isOpSupportedInMobile(OpCode op) {
+  static constexpr OpCode supported_ops_in_mobile[] {
+      OP, LOAD, MOVE, STOREN, STORE, DROP, DROPR, LOADC, JF, LOOP, RET, GET_ATTR, SET_ATTR
+  };
+
+  for (auto sop : supported_ops_in_mobile) {
+    if (op == sop) return true;
+  }
+  return false;
+}
+
 }
 }
