@@ -319,7 +319,7 @@ namespace std {
 
 namespace c10 {
 
-  struct in_place_t { explicit in_place_t() = default; };
+  struct variant_in_place_t { explicit variant_in_place_t() = default; };
 
   template <std::size_t I>
   struct in_place_index_t { explicit in_place_index_t() = default; };
@@ -328,7 +328,7 @@ namespace c10 {
   struct in_place_type_t { explicit in_place_type_t() = default; };
 
 #ifdef MPARK_VARIABLE_TEMPLATES
-  constexpr in_place_t in_place{};
+  constexpr variant_in_place_t in_place{};
 
   template <std::size_t I> constexpr in_place_index_t<I> in_place_index{};
 
@@ -1643,7 +1643,7 @@ namespace c10 {
 #pragma warning(disable : 4244)
 #endif
       template <typename... Args>
-      inline explicit constexpr alt(in_place_t, Args &&... args)
+      inline explicit constexpr alt(variant_in_place_t, Args &&... args)
           : value(lib::forward<Args>(args)...) {}
 #ifdef _MSC_VER
 #pragma warning(pop)
@@ -1668,7 +1668,7 @@ namespace c10 {
     template <typename... Args>                                            \
     inline explicit constexpr recursive_union(in_place_index_t<0>,         \
                                               Args &&... args)             \
-        : head_(in_place_t{}, lib::forward<Args>(args)...) {}              \
+        : head_(variant_in_place_t{}, lib::forward<Args>(args)...) {}              \
                                                                            \
     template <std::size_t I, typename... Args>                             \
     inline explicit constexpr recursive_union(in_place_index_t<I>,         \
@@ -1833,7 +1833,7 @@ namespace c10 {
       template <std::size_t I, typename T, typename... Args>
       inline static T &construct_alt(alt<I, T> &a, Args &&... args) {
         auto *result = ::new (static_cast<void *>(lib::addressof(a)))
-            alt<I, T>(in_place_t{}, lib::forward<Args>(args)...);
+            alt<I, T>(variant_in_place_t{}, lib::forward<Args>(args)...);
         return result->value;
       }
 
