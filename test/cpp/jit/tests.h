@@ -63,7 +63,8 @@ namespace jit {
   _(DCE)                               \
   _(CustomFusionNestedBlocks)          \
   _(ClassDerive)                       \
-  _(Inliner)
+  _(Inliner)                           \
+  _(LiteInterpreter)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

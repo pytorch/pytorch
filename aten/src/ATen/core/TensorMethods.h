@@ -1080,13 +1080,7 @@ inline Tensor Tensor::expm1() const {
 }
 inline Tensor & Tensor::expm1_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::expm1_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("expm1_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::expm1_(const_cast<Tensor&>(*this));
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::expm1_", ""}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &>(
@@ -1425,13 +1419,7 @@ inline Tensor Tensor::log() const {
 }
 inline Tensor & Tensor::log_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::log_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("log_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::log_(const_cast<Tensor&>(*this));
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::log_", ""}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &>(

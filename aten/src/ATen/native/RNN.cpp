@@ -1032,6 +1032,93 @@ std::tuple<Tensor, Tensor> lstm_cell(
   return LSTMCell<CellParams>{}(input, std::make_tuple(hx[0], hx[1]), CellParams{w_ih, w_hh, b_ih, b_hh});
 }
 
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+_thnn_differentiable_lstm_cell_backward(
+    const Tensor& grad_hy,
+    const Tensor& grad_cy,
+    const Tensor& input_gates,
+    const Tensor& hidden_gates,
+    const Tensor& input_bias,
+    const Tensor& hidden_bias,
+    const Tensor& cx,
+    const Tensor& cy) {
+  Tensor gates = input_gates + hidden_gates;
+  if (input_bias.defined()) {
+    gates = gates + input_bias;
+  }
+  if (hidden_bias.defined()) {
+    gates = gates + hidden_bias;
+  }
+  auto chunked_gates = gates.chunk(4, 1);
+  Tensor i = chunked_gates[0].sigmoid();
+  Tensor f = chunked_gates[1].sigmoid();
+  Tensor c = chunked_gates[2].tanh();
+  Tensor o = chunked_gates[3].sigmoid();
+
+  Tensor gcx = cy.tanh();
+  Tensor gog;
+  TORCH_INTERNAL_ASSERT((grad_hy.defined() || grad_cy.defined()),"either gradient with respect to hy or cy should be defined");
+  if (grad_hy.defined()) {
+    gog = grad_hy * gcx;
+    gog = at::sigmoid_backward(gog, o);
+    gcx = at::tanh_backward(grad_hy * o, gcx);
+    if (grad_cy.defined()) {
+      gcx = gcx + grad_cy;
+    }
+  } else if (grad_cy.defined()) {
+    gog = at::zeros_like(cx);
+    gcx = grad_cy;
+  }
+  Tensor gig = gcx * c;
+  Tensor gfg = gcx * cx;
+  Tensor gcg = gcx * i;
+  gcx = gcx * f;
+  gig = at::sigmoid_backward(gig, i);
+  gfg = at::sigmoid_backward(gfg, f);
+  gcg = at::tanh_backward(gcg, c);
+  Tensor grad_gates = at::cat({gig, gfg, gcg, gog}, 1);
+  Tensor grad_bias = input_bias.defined() ? grad_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
+  return std::make_tuple(grad_gates, grad_gates, gcx, grad_bias, grad_bias);
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell_backward(
+    const Tensor& grad_hy,
+    const Tensor& input_gates,
+    const Tensor& hidden_gates,
+    const Tensor& hx,
+    const Tensor& input_bias,
+    const Tensor& hidden_bias){
+  Tensor in_g = input_gates;
+  Tensor h_g = hidden_gates;
+  if (input_bias.defined()){
+    in_g = in_g+input_bias;
+  }
+  if (hidden_bias.defined()){
+    h_g = h_g + hidden_bias;
+  }
+  auto chunked_input_gates = in_g.chunk(3, 1);
+  Tensor ir = chunked_input_gates[0];
+  Tensor ii = chunked_input_gates[1];
+  Tensor in = chunked_input_gates[2];
+  auto chunked_hidden_gates = h_g.chunk(3, 1);
+  Tensor hr = chunked_hidden_gates[0];
+  Tensor hi = chunked_hidden_gates[1];
+  Tensor hn = chunked_hidden_gates[2];
+  Tensor rg = (ir + hr).sigmoid();
+  Tensor ig = (ii + hi).sigmoid();
+  Tensor grad_hx = grad_hy * ig;
+  Tensor ng = (in+rg*hn).tanh();
+  Tensor gig = at::sigmoid_backward(grad_hy * (hx - ng), ig);
+  Tensor gin = at::tanh_backward(grad_hy * (1 - ig), ng);
+  Tensor ghn = gin * rg;
+  Tensor grg = at::sigmoid_backward(gin * hn, rg);
+  Tensor grad_input_gates = at::cat({grg,gig,gin}, 1);
+  Tensor grad_hidden_gates = at::cat({grg,gig,ghn}, 1);
+  Tensor grad_input_bias = input_bias.defined() ? grad_input_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
+  Tensor grad_hidden_bias = input_bias.defined() ? grad_hidden_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
+  return std::make_tuple(grad_input_gates, grad_hidden_gates,  grad_hx, grad_input_bias, grad_hidden_bias);
+}
+
 Tensor gru_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
