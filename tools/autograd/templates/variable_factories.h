@@ -76,31 +76,31 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
         sizes_(),
         scalar_type_(),
         type_(ListInitTensorType::InitList) {
-      if (init_list.size() > 0) {
-        scalar_type_ = init_list.begin()->scalar_type_;
-        const ListInitTensor& first_elem = *(init_list.begin());
-        for (const auto& elem : init_list) {
-          TORCH_CHECK(elem.scalar_type_ == first_elem.scalar_type_,
-            "Expected all elements of the tensor to have the same scalar type: ",
-            first_elem.scalar_type_,
-            ", but got element of scalar type: ",
-            elem.scalar_type_);
-          TORCH_CHECK(elem.sizes_ == first_elem.sizes_,
-            "Expected all sub-lists to have sizes: ",
-            first_elem.sizes_,
-            " (e.g. ", first_elem, "), ",
-            "but got sub-list ",
-            elem,
-            " with sizes: ",
-            elem.sizes_);
-        }
-        sizes_.reserve(first_elem.sizes_.size() + 1);
-        sizes_.push_back(init_list.size());
-        sizes_.insert(sizes_.end(), first_elem.sizes_.begin(), first_elem.sizes_.end());
-      } else {
+      if (init_list.size() == 0) {
         scalar_type_ = c10::ScalarType::Undefined;
         sizes_ = {0};
+        return;
       }
+      scalar_type_ = init_list.begin()->scalar_type_;
+      const ListInitTensor& first_elem = *(init_list.begin());
+      for (const auto& elem : init_list) {
+        TORCH_CHECK(elem.scalar_type_ == first_elem.scalar_type_,
+          "Expected all elements of the tensor to have the same scalar type: ",
+          first_elem.scalar_type_,
+          ", but got element of scalar type: ",
+          elem.scalar_type_);
+        TORCH_CHECK(elem.sizes_ == first_elem.sizes_,
+          "Expected all sub-lists to have sizes: ",
+          first_elem.sizes_,
+          " (e.g. ", first_elem, "), ",
+          "but got sub-list ",
+          elem,
+          " with sizes: ",
+          elem.sizes_);
+      }
+      sizes_.reserve(first_elem.sizes_.size() + 1);
+      sizes_.push_back(init_list.size());
+      sizes_.insert(sizes_.end(), first_elem.sizes_.begin(), first_elem.sizes_.end());
     }
 
     const c10::ScalarType& scalar_type() const {
