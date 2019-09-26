@@ -628,11 +628,11 @@ struct TORCH_API Node {
 
   void dump() const;
 
-  std::ostream& print(
-      std::ostream& out,
-      size_t level,
-      std::vector<const Node*>* groups,
-      bool print_source_locations = true) const;
+  std::ostream &print(std::ostream &out, size_t level,
+                      std::vector<const Node *> *groups,
+                      bool print_source_locations = true,
+                      bool print_attributes = true, bool print_scopes = true,
+                      bool print_body = true) const;
 
   virtual ~Node() = default;
 
@@ -734,9 +734,9 @@ struct TORCH_API Node {
     return getAttr<TensorsAttr>(name);
   }
 
- private:
+private:
   void printAttrValue(std::ostream& out, const Symbol& name) const;
-  void printAttributes(std::ostream& out, bool ignore_subgraph) const;
+  void printAttributes(std::ostream &out, bool ignore_subgraph) const;
 
   template <typename T>
   Node* setAttr(Symbol name, typename T::ConstructorType v) {
