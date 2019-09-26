@@ -183,8 +183,7 @@ if [[ $BUILD_ENVIRONMENT == *caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04* ]]; then
   cd build
   cmake ..
   CPLUS_INCLUDE_PATH=/usr/local/cuda/include make -j4
-  sudo cp libnvonnxparser.so.6.0.1 /usr/lib/x86_64-linux-gnu
-  sudo cp libnvonnxparser_static.a /usr/lib/x86_64-linux-gnu
+  sudo make install
   cd ../../
   rm -rf onnx-tensorrt/
 
