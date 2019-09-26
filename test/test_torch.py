@@ -3920,9 +3920,11 @@ class _TestTorchMixin(object):
 
         # Both abs(0.0) and abs(-0.0) should result in 0.0
         for dtype in (torch.float, torch.double):
-            abs_zeros = torch.tensor([0.0, -0.0], dtype=dtype).abs().tolist()
-            for num in abs_zeros:
-                self.assertGreater(math.copysign(1.0, num), 0.0)
+            for abs_zeros in (torch.tensor([0.0, -0.0], dtype=dtype).abs().tolist(),
+                              # test a large tensor so that the vectorized version is tested
+                              torch.abs(-torch.zeros(10000, dtype=dtype)).tolist()):
+                for num in abs_zeros:
+                    self.assertGreater(math.copysign(1.0, num), 0.0)
 
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
