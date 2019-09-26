@@ -196,29 +196,34 @@ if [[ $BUILD_ENVIRONMENT == *caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04* ]]; then
 
   curl -L -k -o TRT6.tar.gz https://github.com/NVIDIA/TensorRT/archive/v6.0.1.tar.gz
   tar -xzf TRT6.tar.gz
-  cd TensorRT-6.0.1
+  cd TensorRT-6.0.1/parsers/onnx/
+  git clone --depth 1 --branch release/6.0 https://github.com/onnx/onnx-tensorrt.git .
+  git submodule update --init --recursive
+  cd third_party/onnx
+  git checkout v1.5.0
+  cd ../../../../
   export TRT_LIB_DIR=/opt/trt6/lib
   export TRT_BIN_DIR=/opt/trt6/bin
   mkdir -p build && cd build
-  cmake .. -DTRT_LIB_DIR=$TRT_LIB_DIR/lib -DTRT_BIN_DIR=TRT_BIN_DIR -DCUDA_VERISON=10.1
+  cmake .. -DTRT_LIB_DIR=$TRT_LIB_DIR/lib -DTRT_BIN_DIR=TRT_BIN_DIR -DCUDA_VERISON=10.1 -DBUILD_PARSERS=ON
   make -j$(nproc)
   sudo make install
   cd ../../
 
   # building OSS release of ONNX parser on top of just installed
-  git clone --depth 1 --branch release/6.0 https://github.com/onnx/onnx-tensorrt.git
-  cd onnx-tensorrt/
-  git submodule update --init --recursive
-  cd third_party/onnx
-  git checkout v1.5.0
-  cd ../../
-  mkdir build
-  cd build
-  cmake ..
-  CPLUS_INCLUDE_PATH=/usr/local/cuda/include make -j$(nproc)
-  sudo make install
-  cd ../../
-  rm -rf onnx-tensorrt/
+#  git clone --depth 1 --branch release/6.0 https://github.com/onnx/onnx-tensorrt.git
+#  cd onnx-tensorrt/
+#  git submodule update --init --recursive
+#  cd third_party/onnx
+#  git checkout v1.5.0
+#  cd ../../
+#  mkdir build
+#  cd build
+#  cmake ..
+#  CPLUS_INCLUDE_PATH=/usr/local/cuda/include make -j$(nproc)
+#  sudo make install
+#  cd ../../
+#  rm -rf onnx-tensorrt/
 
   build_args+=("USE_TENSORRT=ON")
 fi
