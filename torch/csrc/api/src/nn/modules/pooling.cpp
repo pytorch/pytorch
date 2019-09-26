@@ -143,5 +143,27 @@ template class AdaptiveAvgPoolImpl<1, AdaptiveAvgPool1dImpl>;
 template class AdaptiveAvgPoolImpl<2, AdaptiveAvgPool2dImpl>;
 template class AdaptiveAvgPoolImpl<3, AdaptiveAvgPool3dImpl>;
 
+// ============================================================================
+
+template <size_t D, typename Derived>
+MaxUnpoolImpl<D, Derived>::MaxUnpoolImpl(const MaxUnpoolOptions<D>& options_)
+    : options(options_) {}
+
+template <size_t D, typename Derived>
+void MaxUnpoolImpl<D, Derived>::reset() {}
+
+template <size_t D, typename Derived>
+void MaxUnpoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::MaxUnpool" << D << "d"
+         << "(kernel_size=" << options.kernel_size()
+         << ", stride=" << options.stride() << ")";
+}
+
+Tensor MaxUnpool1dImpl::forward(const Tensor& input, const Tensor& indices, IntArrayRef output_size) {
+  return F::max_unpool1d(input, indices, output_size, options);
+}
+
+template class MaxUnpoolImpl<1, MaxUnpool1dImpl>;
+
 } // namespace nn
 } // namespace torch

@@ -312,5 +312,42 @@ class TORCH_API AdaptiveAvgPool3dImpl :
 /// module storage semantics.
 TORCH_MODULE(AdaptiveAvgPool3d);
 
+// ============================================================================
+
+/// Base class for all (dimension-specialized) maxunpool modules.
+template <size_t D, typename Derived>
+class TORCH_API MaxUnpoolImpl : public torch::nn::Cloneable<Derived> {
+ public:
+  MaxUnpoolImpl(ExpandingArray<D> kernel_size)
+      : MaxUnpoolImpl(MaxUnpoolOptions<D>(kernel_size)) {}
+  explicit MaxUnpoolImpl(const MaxUnpoolOptions<D>& options_);
+
+  void reset() override;
+
+  /// Pretty prints the `MaxUnpool{1,2,3}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  MaxUnpoolOptions<D> options;
+};
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MaxUnpool1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies maxunpool over a 1-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.MaxUnpool1d to learn
+/// about the exact behavior of this module.
+class TORCH_API MaxUnpool1dImpl : public MaxUnpoolImpl<1, MaxUnpool1dImpl> {
+ public:
+  using MaxUnpoolImpl<1, MaxUnpool1dImpl>::MaxUnpoolImpl;
+  Tensor forward(const Tensor& input, const Tensor& indices,
+                 IntArrayRef output_size = {});
+};
+
+/// A `ModuleHolder` subclass for `MaxUnpool1dImpl`.
+/// See the documentation for `MaxUnpool1dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(MaxUnpool1d);
+
 } // namespace nn
 } // namespace torch

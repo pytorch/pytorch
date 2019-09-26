@@ -119,6 +119,52 @@ inline Tensor adaptive_avg_pool3d(const Tensor& input,
    return torch::adaptive_avg_pool3d(input, options.output_size());
 }
 
+// ============================================================================
+
+inline std::vector<int64_t> _unpool_output_size(const Tensor& input,
+  const IntArrayRef kernel_size, const IntArrayRef stride,
+  const IntArrayRef padding, const IntArrayRef output_size) {
+  auto input_size = input.sizes();
+  std::vector<int64_t> default_size;
+  for (size_t d = 0; d < kernel_size.size(); d++) {
+    default_size.push_back((input_size[d + 2] - 1) * stride[d] +
+                            kernel_size[d] - 2 * padding[d]);
+  }
+  if (output_size.empty()) {
+    return default_size;
+  } else {
+    std::vector<int64_t> output_size_;
+    if (output_size.size() == kernel_size.size() + 2) {
+      output_size_ = {output_size.begin() + 2, output_size.end()};
+    }
+    if (output_size_.size() != kernel_size.size()) {
+      TORCH_CHECK(false, "output_size should be a sequence containing ",
+                  kernel_size.size(), " or ", kernel_size.size() + 2,
+                  " elements, but it has a length of '",
+                  output_size_.size(), "'");
+    }
+    for (size_t d = 0; d < kernel_size.size(); d++) {
+      const auto min_size = default_size[d] - stride[d];
+      const auto max_size = default_size[d] + stride[d];
+      if (!(min_size <= output_size_[d] && output_size_[d] <= max_size)) {
+        TORCH_CHECK(false, "invalid output_size ", output_size_, " (dim ", d,
+                    " must be between ", min_size, " and ", max_size, ")");
+      }
+    }
+    return output_size_;
+  }
+}
+
+inline Tensor max_unpool1d(const Tensor& input, const Tensor& indices,
+  const IntArrayRef output_size, const MaxUnpool1dOptions& options) {
+  auto output_size_ = _unpool_output_size(input, options.kernel_size(),
+                                          options.stride(), options.padding(),
+                                          output_size);
+  output_size_.push_back(1);
+  return torch::max_unpool2d(input.unsqueeze(3), indices.unsqueeze(3),
+                             output_size_).squeeze(3);
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch
