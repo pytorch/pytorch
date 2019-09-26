@@ -45,19 +45,6 @@ namespace detail {
         sizes_(),                                                                        \
         scalar_type_(at::k##S),                                                          \
         type_(ListInitTensorType::Scalar) {}                                             \
-    ListInitTensor(std::vector<T> values) :                                              \
-        scalar_(), vec_(),                                                               \
-        /* NOTE: We use `static_cast<int64_t>(...)` here because `std::vector<T>.size()`
-           returns a value of `std::vector<T>::size_type` type, and converting it to
-           `int64_t` type is a narrowing conversion. */                                  \
-        sizes_({static_cast<int64_t>(values.size())}),                                   \
-        scalar_type_(at::k##S),                                                          \
-        type_(ListInitTensorType::Vector) {                                              \
-      vec_.reserve(values.size());                                                       \
-      for (const auto& elem : values) {                                                  \
-        vec_.push_back(ListInitTensor(elem));                                            \
-      }                                                                                  \
-    }                                                                                    \
     ListInitTensor(at::ArrayRef<T> values) :                                             \
         scalar_(), vec_(),                                                               \
         /* NOTE: We use `static_cast<int64_t>(...)` here because `at::ArrayRef<T>.size()`
