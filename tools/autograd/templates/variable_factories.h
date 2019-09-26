@@ -61,13 +61,13 @@ namespace detail {
       tensor_ = ([&]() {                                                                 \
         at::AutoNonVariableTypeMode non_var_type_mode(true);                             \
         return at::tensor(                                                               \
-          values,                                                                        \
+          std::move(values),                                                                        \
           at::TensorOptions(at::k##S).device(at::kCPU).is_variable(false));              \
       })();                                                                              \
     }                                                                                    \
     ListInitTensor(const std::vector<T>& values) :                                       \
-        ListInitTensor(at::ArrayRef<T>(values))
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
+        ListInitTensor(at::ArrayRef<T>(values.begin(), values.end())) {}
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)  // yf225 TODO need Bool
 #undef TENSOR
     ListInitTensor(std::initializer_list<ListInitTensor> init_list) :
         scalar_(),
@@ -108,22 +108,25 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
     }
 
     at::Tensor to_tensor(const at::TensorOptions& options) const {
-      if (type_ != ListInitTensorType::Tensor) {
+      if (type_ == ListInitTensorType::Tensor) {
+        TORCH_CHECK(
+          tensor_.defined(),
+          "ListInitTensor has type `ListInitTensorType::Tensor`, but its `tensor_` field is null");
+        return tensor_.to(options);
+      } else {
         // NOTE: Here we explicitly choose to initialize the tensor on CPU first,
         // fill each element of the tensor, and then move the tensor to the desired
         // device. For CUDA device, this approach only involves 1 CUDA kernel launch,
         // and is much faster than initializing the tensor on CUDA first and then
         // filling each element of it (which involves `N` CUDA kernel launches where
         // `N` is the number of the elements in the tensor).
-        tensor_ = ([&]() {
+        at::Tensor tensor = ([&]() {
           at::AutoNonVariableTypeMode non_var_type_mode(true);
           return at::empty(sizes_, at::TensorOptions(options).device(at::kCPU).is_variable(false));
         })();
-        fill_tensor(tensor_);
-      } else {
-        TORCH_CHECK(tensor_, "ListInitTensor has type `ListInitTensorType::Tensor`, but its `tensor_` field is null");
+        fill_tensor(tensor);
+        return tensor.to(options);
       }
-      return tensor_.to(options);
     }
 
     void pretty_print_recursive(std::ostream& stream) const {
@@ -131,13 +134,15 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
         AT_DISPATCH_ALL_TYPES_AND3(at::kBool, at::kHalf, at::kBFloat16, scalar_type_, "ListInitTensor_pretty_print_scalar", [&] {
           stream << scalar_.to<scalar_t>();
         });
-      } else if (type_ == ListInitTensorType::Vector) {
+      } else if (type_ == ListInitTensorType::InitList) {
         stream << "{";
         for (auto it = init_list_.begin(); it != init_list_.end(); it++) {
           it->pretty_print_recursive(stream);
           if (std::next(it) != init_list_.end()) stream << ", ";
         }
         stream << "}";
+      } else if (type_ == ListInitTensorType::Tensor) {
+        stream << tensor_;
       }
     }
 
