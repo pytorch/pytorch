@@ -213,6 +213,7 @@ inline uint8_t quantize_val_arm(const float scale, const int32_t zero_point, con
   return static_cast<uint8_t>(r);
 }
 
+#ifdef __ARM_NEON__
 // Generic template defaults to naive quantize implementation
 template <typename T>
 void quantize_tensor_arm(
@@ -242,7 +243,6 @@ void quantize_tensor_arm<c10::quint8>(
   const float inv_scale = 1.0f / scale;
   uint32_t i = 0;
   auto out = (uint8_t*)qtensor.data_ptr<c10::quint8>();
-#ifdef __ARM_NEON__
   const float32x4_t vinv_scale = vdupq_n_f32(inv_scale);
   // magic float and magic int to take care of rounding
   // int magic_round(float f): interpret_int32(f + 12582912.0f) - 0x4B400000
@@ -276,11 +276,11 @@ void quantize_tensor_arm<c10::quint8>(
     vst1_u8(out, vout01234567);
     out += 8;
   }
-#endif // __ARM_NEON__
   for (; i < N; ++i) {
     (*out++) = quantize_val_arm(scale, zero_point, (*in++));
   }
 }
+#endif // __ARM_NEON__
 
 template <typename T>
 Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
@@ -292,21 +292,17 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
   const float* const rdata = rtensor.data_ptr<float>();
   // If QEngine is set to QNNPACK, use caffe2 specialized Int8Quantize implementation on ARM
 #if defined(__ARM_NEON__)
-  const bool use_pytorch_qnnpack_arm = at::globalContext().qEngine() == at::QEngine::QNNPACK;
-#else
-  const bool use_pytorch_qnnpack_arm = false;
-#endif
-
-  if (use_pytorch_qnnpack_arm) {
+  if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
     quantize_tensor_arm<T>(rdata, qtensor, rtensor.numel(), scale, zero_point);
+    return qtensor;
   }
-  else {
-    auto qdata = qtensor.data_ptr<T>();
-    for (int i = 0; i < rtensor.numel(); ++i) {
-      qdata[i] = quantize_val<T>(scale, zero_point, rdata[i]);
-    }
+#else
+  auto qdata = qtensor.data_ptr<T>();
+  for (int i = 0; i < rtensor.numel(); ++i) {
+    qdata[i] = quantize_val<T>(scale, zero_point, rdata[i]);
   }
   return qtensor;
+#endif
 }
 
 template <typename T>
