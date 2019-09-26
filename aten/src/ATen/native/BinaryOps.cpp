@@ -16,6 +16,7 @@ DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(logical_xor_stub);
 DEFINE_DISPATCH(lt_stub);
+DEFINE_DISPATCH(gt_stub);
 
 static constexpr char alpha_mismatch_err[] =
   "For integral input tensors, argument alpha must not be a floating point number.";
@@ -279,6 +280,13 @@ Tensor& lt_(Tensor& self, const Tensor& other) { return comparison_op_(self, oth
 Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, lt_stub); }
 Tensor lt(const Tensor& self, Scalar other) { return comparison_op(self, other, lt_stub); }
 Tensor& lt_(Tensor& self, Scalar other) { return comparison_op_(self, other, lt_stub); }
+
+Tensor& gt_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, gt_stub); }
+Tensor gt(const Tensor& self, const Tensor& other) { return comparison_op(self, other, gt_stub); }
+Tensor& gt_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, gt_stub); }
+Tensor& gt_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, gt_stub); }
+Tensor gt(const Tensor& self, Scalar other) { return comparison_op(self, other, gt_stub); }
+Tensor& gt_(Tensor& self, Scalar other) { return comparison_op_(self, other, gt_stub); }
 
 }
 }  // namespace at

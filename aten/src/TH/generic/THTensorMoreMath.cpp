@@ -35,8 +35,7 @@
     TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb,                 \
                      *r__data = (*ta_data OP *tb_data) ? 1 : 0;);              \
   }
-  
-TENSOR_IMPLEMENT_LOGICAL(gt,>)
+
 TENSOR_IMPLEMENT_LOGICAL(le,<=)
 TENSOR_IMPLEMENT_LOGICAL(ge,>=)
 TENSOR_IMPLEMENT_LOGICAL(eq,==)
