@@ -192,7 +192,7 @@ def prepare(model, qconfig_dict=None, inplace=False):
             configuration, qconfig applies to all submodules of a given
             module unless qconfig for the submodules are specified (when the
             submodule already has qconfig attribute)
-        inplace: carry out model transformations in-place, the original model is destroyed
+        inplace: carry out model transformations in-place, the original module is mutated
     """
     if not inplace:
         model = copy.deepcopy(model)
@@ -255,7 +255,7 @@ def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING, inplace=Fa
         run_fn: a function for evaluating the prepared model, can be a
             function that simply runs the prepared model or a training loop
         run_args: positional arguments for `run_fn`
-        inplace: carry out model transformations in-place, the original model is destroyed
+        inplace: carry out model transformations in-place, the original module is mutated
         mapping: correspondence between original module types and quantized counterparts
 
     Return:
@@ -265,9 +265,9 @@ def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING, inplace=Fa
     if not inplace:
         model = copy.deepcopy(model)
     model.eval()
-    model = prepare(model, inplace=True)
+    prepare(model, inplace=True)
     run_fn(model, run_args)
-    model = convert(model, mapping, inplace=True)
+    convert(model, mapping, inplace=True)
     return model
 
 def quantize_dynamic(model, qconfig_dict=None, dtype=torch.qint8, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING, inplace=False):
@@ -288,7 +288,7 @@ def quantize_dynamic(model, qconfig_dict=None, dtype=torch.qint8, mapping=DEFAUL
             module unless qconfig for the submodules are specified (when the
             submodule already has qconfig attribute). Entries in the dictionary
             need to be QConfigDynamic instances.
-        inplace: carry out model transformations in-place, the original model is destroyed
+        inplace: carry out model transformations in-place, the original module is mutated
         mapping: maps type of a submodule to a type of corresponding dynamically quantized version
             with which the submodule needs to be replaced
     """
@@ -312,12 +312,12 @@ def quantize_dynamic(model, qconfig_dict=None, dtype=torch.qint8, mapping=DEFAUL
         model = copy.deepcopy(model)
     model.eval()
     propagate_qconfig_(model, qconfig_dict)
-    model = convert(model, mapping, inplace=True)
+    convert(model, mapping, inplace=True)
     return model
 
 def prepare_qat(model, mapping=DEFAULT_QAT_MODULE_MAPPING, inplace=False):
     model = prepare(model, inplace=inplace)
-    model = convert(model, mapping, inplace=True)
+    convert(model, mapping, inplace=True)
     return model
 
 def quantize_qat(model, run_fn, run_args, inplace=False):
@@ -335,9 +335,9 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
     if not inplace:
         model = copy.deepcopy(model)
     model.train()
-    model = prepare_qat(model, inplace=True)
+    prepare_qat(model, inplace=True)
     run_fn(model, run_args)
-    model = convert(model, inplace=True)
+    convert(model, inplace=True)
     return model
 
 def convert(module, mapping=DEFAULT_MODULE_MAPPING, inplace=False):
@@ -347,7 +347,7 @@ def convert(module, mapping=DEFAULT_MODULE_MAPPING, inplace=False):
         module: calibrated module with observers
         mapping: a dictionary that maps from float module type to quantized
            module type, can be overwrritten to allow swapping user defined Modules
-        inplace: carry out model transformations in-place, the original model is destroyed
+        inplace: carry out model transformations in-place, the original module is mutated
     """
     if not inplace:
         module = copy.deepcopy(module)

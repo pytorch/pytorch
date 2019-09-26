@@ -304,7 +304,7 @@ class ModuleAPITest(QuantizationTestCase):
         float_linear(X.float())
         # Sequential allows swapping using "convert".
         quantized_float_linear = torch.nn.Sequential(float_linear)
-        torch.quantization.convert(quantized_float_linear, inplace=True)
+        quantized_float_linear = torch.quantization.convert(quantized_float_linear, inplace=True)
 
         # Smoke test to make sure the module actually runs
         quantized_float_linear(X_q)
@@ -486,7 +486,7 @@ class ModuleAPITest(QuantizationTestCase):
                                      bias=use_bias,
                                      padding_mode='zeros').float()
         float_conv.qconfig = torch.quantization.default_qconfig
-        torch.quantization.prepare(float_conv)
+        torch.quantization.prepare(float_conv, inplace=True)
         float_conv(X.float())
         quantized_float_conv = torch.nn.Sequential(float_conv)
         torch.quantization.convert(quantized_float_conv, inplace=True)
