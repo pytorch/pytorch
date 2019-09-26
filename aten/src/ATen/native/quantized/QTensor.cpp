@@ -155,7 +155,10 @@ Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
   return self;
 }
 
-Tensor quantized_clone(const Tensor& self) {
+Tensor quantized_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
+
+  // TODO(vitalyf): add memory format support
+
   // TODO: add per channel support
   TORCH_INTERNAL_ASSERT(
       self.qscheme() == at::kPerTensorAffine,

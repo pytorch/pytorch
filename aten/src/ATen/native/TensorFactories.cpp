@@ -176,8 +176,8 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
-Tensor empty_like(const Tensor& self) {
-  return native::empty_like(self, self.options());
+Tensor empty_like(const Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::empty_like(self, self.options(), optional_memory_format);
 }
 
 Tensor empty_like(
@@ -197,7 +197,8 @@ Tensor empty_like(
   }
 
   auto memory_format =
-      optional_memory_format.value_or(self.suggest_memory_format());
+      optional_memory_format.value_or(MemoryFormat::Contiguous);
+      // optional_memory_format.value_or(self.suggest_memory_format());
   auto use_memory_format = memory_format;
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_contiguous(MemoryFormat::ChannelsLast)) {
@@ -867,8 +868,14 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ clone ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor clone(const Tensor& src) {
-  auto self = at::empty_like(src, src.options(), src.suggest_memory_format());
+Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto memory_format =
+      optional_memory_format.value_or(MemoryFormat::Contiguous);
+  if (memory_format == MemoryFormat::Preserve) {
+    memory_format = src.suggest_memory_format();
+  }
+
+  auto self = at::empty_like(src, src.options(), memory_format);
   self.copy_(src);
   return self;
 }
