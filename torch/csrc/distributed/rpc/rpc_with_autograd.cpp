@@ -19,14 +19,12 @@ RpcWithAutograd::RpcWithAutograd(
     MessageType messageType,
     const AutogradMetadata& autogradMetadata,
     std::unique_ptr<RpcCommandBase> wrappedRpc)
-    : messageType_(messageType),
-      autogradMetadata_(autogradMetadata),
-      wrappedRpc_(std::move(wrappedRpc)) {
-  TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cannot be null!");
+    : messageType_(messageType), autogradMetadata_(autogradMetadata) {
+  TORCH_INTERNAL_ASSERT(wrappedRpc != nullptr, "wrappedRpc cannot be null!");
   TORCH_INTERNAL_ASSERT(
       messageType_ == MessageType::MESSAGE_WITH_AUTOGRAD_REQ ||
       messageType_ == MessageType::MESSAGE_WITH_AUTOGRAD_RESP);
-  wrappedMessage_ = wrappedRpc_->toMessage();
+  wrappedMessage_ = std::move(*wrappedRpc).toMessage();
   tensors_ = wrappedMessage_.tensors();
   wrappedMessageType_ = wrappedMessage_.type();
 }
@@ -48,8 +46,7 @@ RpcWithAutograd::RpcWithAutograd(
       messageType_ == MessageType::MESSAGE_WITH_AUTOGRAD_RESP);
 }
 
-Message RpcWithAutograd::toMessage() {
-  auto& tensors = wrappedMessage_.tensors();
+Message RpcWithAutograd::toMessage() && {
   auto messageId = wrappedMessage_.id();
   auto messageType = wrappedMessage_.type();
 
@@ -81,7 +78,7 @@ Message RpcWithAutograd::toMessage() {
       1);
 
   return Message(
-      std::move(payload), std::move(tensors), messageType_, messageId);
+      std::move(payload), std::move(tensors_), messageType_, messageId);
 }
 
 std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
@@ -150,8 +147,9 @@ const AutogradMetadata& RpcWithAutograd::autogradMetadata() const {
   return autogradMetadata_;
 }
 
-std::unique_ptr<RpcCommandBase> RpcWithAutograd::moveWrappedRpc() && {
-  return std::move(wrappedRpc_);
+RpcCommandBase& RpcWithAutograd::wrappedRpc() {
+  TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cannot be null!");
+  return *wrappedRpc_;
 }
 
 MessageType RpcWithAutograd::wrappedMessageType() const {

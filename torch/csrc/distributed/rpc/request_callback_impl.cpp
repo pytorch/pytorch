@@ -106,8 +106,8 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
 
       // Process the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
-      auto wrappedRpcResponse = processRpc(
-          *std::move(rpcWithAutograd).moveWrappedRpc(), wrappedMessageType);
+      auto wrappedRpcResponse =
+          processRpc(rpcWithAutograd.wrappedRpc(), wrappedMessageType);
 
       // Wrap the response with autograd, need a new autograd message id for
       // each send/recv pair.
@@ -141,7 +141,7 @@ Message RequestCallbackImpl::processMessage(const Message& request) {
   if (response == nullptr) {
     return Message();
   }
-  auto responseMessage = response->toMessage();
+  auto responseMessage = std::move(*response).toMessage();
   responseMessage.setId(request.id());
   return responseMessage;
 }

@@ -8,7 +8,7 @@ namespace rpc {
 PythonUDFCall::PythonUDFCall(std::vector<char> pickledPayload)
     : pickledPayload_(std::move(pickledPayload)) {}
 
-Message PythonUDFCall::toMessage() {
+Message PythonUDFCall::toMessage() && {
   return Message(
       std::move(pickledPayload_),
       std::vector<torch::Tensor>(),

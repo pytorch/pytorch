@@ -9,8 +9,9 @@ namespace rpc {
 // Base class for all RPC request and responses.
 class RpcCommandBase {
  public:
-  // Need to override this to serialize the RPC.
-  virtual Message toMessage() = 0;
+  // Need to override this to serialize the RPC. This should destructively
+  // create a message for the RPC (Hence the &&).
+  virtual Message toMessage() && = 0;
   virtual ~RpcCommandBase() = 0;
 };
 

@@ -14,7 +14,7 @@ at::IValue& RRefMessageBase::valueRef() {
   return value_;
 }
 
-Message RRefMessageBase::toMessage() {
+Message RRefMessageBase::toMessage() && {
   std::vector<at::IValue> ivalues;
   ivalues.push_back(value_);
   std::vector<torch::Tensor> tensor_table;

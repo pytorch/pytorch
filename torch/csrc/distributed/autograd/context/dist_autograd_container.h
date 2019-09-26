@@ -52,8 +52,7 @@ class TORCH_API DistAutogradContainer {
 
   // Creates a new autograd context with the provided context_id. If a context
   // already exists with the provided context_id, we just return it.
-  // This also sets the context_id provided as the current context for the
-  // current thread.
+  // This does not set the current context for the current thread.
   DistAutogradContext& getOrCreateContext(int64_t context_id);
 
   // Retrieves the maximum possible autograd_context_id/autograd_message_id that

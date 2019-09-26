@@ -9,10 +9,9 @@ namespace rpc {
 // RPC call representing calling a Python UDF over RPC.
 class TORCH_API PythonUDFCall final : public RpcCommandBase {
  public:
-  PythonUDFCall(std::vector<char> pickledPayload);
+  explicit PythonUDFCall(std::vector<char> pickledPayload);
 
-  // Destructively creates a message to avoid copies.
-  Message toMessage() override;
+  Message toMessage() && override;
 
   static std::unique_ptr<PythonUDFCall> fromMessage(const Message& message);
 

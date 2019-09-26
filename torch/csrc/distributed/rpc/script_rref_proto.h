@@ -20,7 +20,7 @@ class TORCH_API RRefMessageBase : public RpcCommandBase {
   const at::IValue& value();
   at::IValue& valueRef();
 
-  Message toMessage() override;
+  Message toMessage() && override;
   static at::IValue fromMessage(const Message& message);
 
  private:

@@ -78,8 +78,7 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
 
       // Handle the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
-      return toPyObjInternal(
-          *std::move(rpcWithAutograd).moveWrappedRpc(), wrappedMessageType);
+      return toPyObjInternal(rpcWithAutograd.wrappedRpc(), wrappedMessageType);
     }
     default: {
       AT_ERROR("Unrecognized response message type ", messageType);
@@ -117,9 +116,9 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
     addSendRpcBackward(
         autogradContext, autogradMetadata, rpcWithAutograd.tensors());
 
-    return agent.send(dst, std::move(rpcWithAutograd.toMessage()));
+    return agent.send(dst, std::move(rpcWithAutograd).toMessage());
   } else {
-    return agent.send(dst, std::move(scriptCall->toMessage()));
+    return agent.send(dst, std::move(*scriptCall).toMessage());
   }
 }
 
