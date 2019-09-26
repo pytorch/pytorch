@@ -51,10 +51,9 @@ class InternalRPCPickler:
         # save _thread_local_tensor_tables.send_tables if it is in nested call
         global _thread_local_tensor_tables
         if hasattr(_thread_local_tensor_tables, "send_tables"):
-            should_restore = True
             old_send_tables = _thread_local_tensor_tables.send_tables
         else:
-            should_restore = False
+            old_send_tables = None
         _thread_local_tensor_tables.send_tables = []
 
         p.dump(obj)
@@ -62,7 +61,7 @@ class InternalRPCPickler:
         # restore _thread_local_tensor_tables.send_tables if return
         # from nested call, otherwise clean up the table
         tensors = _thread_local_tensor_tables.send_tables
-        if should_restore:
+        if old_send_tables is not None:
             _thread_local_tensor_tables.send_tables = old_send_tables
         else:
             del _thread_local_tensor_tables.send_tables
@@ -74,17 +73,16 @@ class InternalRPCPickler:
         # save _thread_local_tensor_tables.recv_tables if it is in nested call
         global _thread_local_tensor_tables
         if hasattr(_thread_local_tensor_tables, "recv_tables"):
-            should_restore = True
             old_recv_tables = _thread_local_tensor_tables.recv_tables
         else:
-            should_restore = False
+            old_recv_tables = None
         _thread_local_tensor_tables.recv_tables = tensor_table
 
         ret = pickle.loads(binary_data)
 
         # restore _thread_local_tensor_tables.recv_tables if return
         # from nested call, otherwise clean up the table
-        if should_restore:
+        if old_recv_tables is not None:
             _thread_local_tensor_tables.recv_tables = old_recv_tables
         else:
             del _thread_local_tensor_tables.recv_tables
