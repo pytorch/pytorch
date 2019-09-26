@@ -52,7 +52,7 @@ set(C10D_SRCS
 set(C10D_LIBS torch)
 
 if(USE_C10D_NCCL)
-  list(APPEND C10D_SRCS ProcessGroupNCCL.cpp)
+  list(APPEND C10D_SRCS ProcessGroupNCCL.cpp NCCLUtils.cpp)
   list(APPEND C10D_LIBS __caffe2_nccl)
 endif()
 

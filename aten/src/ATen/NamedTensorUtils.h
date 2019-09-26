@@ -53,7 +53,7 @@ void propagate_names(TensorImpl* result, std::vector<Dimname>&& names, bool vali
 void propagate_names(TensorImpl* result, optional<std::vector<Dimname>>&& maybe_names, bool validate_names);
 
 // Propagates all names from src to result.
-void propagate_names(Tensor& result, const Tensor& src);
+CAFFE2_API void propagate_names(Tensor& result, const Tensor& src);
 void propagate_names(TensorImpl* result, /*const */TensorImpl* src);
 
 // Propagates all names except for those at the excluded_idxs.

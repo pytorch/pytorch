@@ -112,6 +112,18 @@ ${return_type} ${Type}::${api_name}(${type_method_formals}) {
 }
 """)
 
+DEFAULT_LEGACY_FUNCTION_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .impl_legacyATenCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
+BACKEND_LEGACY_FUNCTION_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .impl_legacyATenKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
@@ -371,39 +383,29 @@ TYPE_RETURN = {
 CHECKED_CAST = {
     'THTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::${ScalarName})'),
+            'DeviceType::${DeviceType}, ScalarType::${ScalarName})'),
     'THByteTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Byte)'),
+            'DeviceType::${DeviceType}, ScalarType::Byte)'),
     'THBoolTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Bool)'),
+            'DeviceType::${DeviceType}, ScalarType::Bool)'),
     'THIndexTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Long)'),
+            'DeviceType::${DeviceType}, ScalarType::Long)'),
     'THIntegerTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Int)'),
-    'THDenseTensor*':
-        CodeTemplate(
-            'checked_tensor_unwrap('
-            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${DenseBackend}, ScalarType::${ScalarName})'),
-    'THDenseIndexTensor*':
-        CodeTemplate(
-            'checked_tensor_unwrap('
-            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${DenseBackend}, ScalarType::Long)'),
+            'DeviceType::${DeviceType}, ScalarType::Int)'),
     'THStorage*':
         CodeTemplate(
             'checked_storage('
@@ -1373,10 +1375,13 @@ def create_generic(top_env, declarations):
             if option['use_c10_dispatcher'] == 'full':
                 top_env['function_registrations'].append(
                     check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
-            else:
-                assert option['use_c10_dispatcher'] in ['unboxed_only', 'no']
+            elif option['use_c10_dispatcher'] == 'unboxed_only':
                 top_env['function_registrations'].append(
                     check_namedtensor_enabled(DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option)))
+            else:
+                assert option['use_c10_dispatcher'] == 'no'
+                top_env['function_registrations'].append(
+                    check_namedtensor_enabled(DEFAULT_LEGACY_FUNCTION_REGISTRATION.substitute(option)))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1843,10 +1848,13 @@ def create_derived(backend_type_env, declarations):
                     if option['use_c10_dispatcher'] == 'full':
                         function_registrations.append(
                             BACKEND_FUNCTION_REGISTRATION.substitute(env))
-                    else:
-                        assert option['use_c10_dispatcher'] in ['unboxed_only', 'no']
+                    elif option['use_c10_dispatcher'] == 'unboxed_only':
                         function_registrations.append(
                             BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env))
+                    else:
+                        assert option['use_c10_dispatcher'] == 'no'
+                        function_registrations.append(
+                            BACKEND_LEGACY_FUNCTION_REGISTRATION.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:

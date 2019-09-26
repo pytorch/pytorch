@@ -208,11 +208,6 @@ double THLog2(const double x)
   return log2(x);
 }
 
-double THExpm1(const double x)
-{
-  return expm1(x);
-}
-
 THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
   const int L = TH_DESC_BUFF_LEN;
   THDescBuff buf;

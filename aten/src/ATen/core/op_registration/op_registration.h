@@ -270,19 +270,12 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      if (legacyATenSchema_.has_value()) {
-        // TODO Remove this once all ops are moved to c10.
-        TORCH_INTERNAL_ASSERT(!schemaOrName_.has_value());
-        at::globalATenDispatch().registerOp<FuncType>(dispatch_key, legacyATenSchema_->c_str(), kernel_func);
-        return std::move(*this);
-      } else {
-        return std::move(*this).kernel(
-          std::move(dispatch_key),
-          KernelFunction::makeFromUnboxedOnlyFunction<FuncType, kernel_func>(),
-          // TODO Do schema inference without relying on WrapKernelFunction
-          detail::FunctionSchemaInferer<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>()()
-        );
-      }
+      return std::move(*this).kernel(
+        std::move(dispatch_key),
+        KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
+        // TODO Do schema inference without relying on WrapKernelFunction
+        detail::FunctionSchemaInferer<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>()()
+      );
     }
 
     // TODO Remove impl_unboxedOnlyCatchAllKernel once all of aten can generate boxed kernels
@@ -292,19 +285,34 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      if (legacyATenSchema_.has_value()) {
-        // TODO Remove this once all ops are moved to c10.
-        TORCH_INTERNAL_ASSERT(!schemaOrName_.has_value());
-        at::globalATenDispatch().registerOp<FuncType>(TensorTypeId::UndefinedTensorId, legacyATenSchema_->c_str(), kernel_func);
-        return std::move(*this);
-      } else {
-        return std::move(*this).kernel(
-          c10::nullopt,
-          KernelFunction::makeFromUnboxedOnlyFunction<FuncType, kernel_func>(),
-          // TODO Do schema inference without relying on WrapKernelFunction
-          detail::FunctionSchemaInferer<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>()()
-        );
-      }
+      return std::move(*this).kernel(
+        c10::nullopt,
+        KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
+        // TODO Do schema inference without relying on WrapKernelFunction
+        detail::FunctionSchemaInferer<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>()()
+      );
+    }
+
+    // TODO Remove impl_legacyATenKernel once all of aten can generate boxed kernels
+    template<class FuncType, FuncType* kernel_func>
+    // enable_if: only enable it if FuncType is actually a function
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_legacyATenKernel(TensorTypeId dispatch_key) && {
+      static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
+
+      at::globalATenDispatch().registerOp<FuncType>(dispatch_key, legacyATenSchema_->c_str(), kernel_func);
+      return std::move(*this);
+    }
+
+    // TODO Remove impl_legacyATenCatchAllKernel once all of aten can generate boxed kernels
+    template<class FuncType, FuncType* kernel_func>
+    // enable_if: only enable it if FuncType is actually a function
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_legacyATenCatchAllKernel() && {
+      static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
+
+      at::globalATenDispatch().registerOp<FuncType>(TensorTypeId::UndefinedTensorId, legacyATenSchema_->c_str(), kernel_func);
+      return std::move(*this);
     }
 
     /**
