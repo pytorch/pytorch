@@ -213,6 +213,7 @@ inline Tensor Tensor::abs() const {
 }
 inline Tensor & Tensor::abs_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::abs_(const_cast<Tensor&>(*this));
@@ -237,6 +238,7 @@ inline Tensor Tensor::acos() const {
 }
 inline Tensor & Tensor::acos_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::acos_(const_cast<Tensor&>(*this));
@@ -252,6 +254,7 @@ inline Tensor & Tensor::acos_() const {
 }
 inline Tensor Tensor::add(const Tensor & other, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::add(const_cast<Tensor&>(*this), other, alpha);
@@ -270,6 +273,7 @@ inline Tensor Tensor::add(const Tensor & other, Scalar alpha) const {
 }
 inline Tensor & Tensor::add_(const Tensor & other, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::add_(const_cast<Tensor&>(*this), other, alpha);
@@ -306,6 +310,7 @@ inline Tensor & Tensor::add_(Scalar other, Scalar alpha) const {
 }
 inline Tensor Tensor::addmv(const Tensor & mat, const Tensor & vec, Scalar beta, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::addmv(const_cast<Tensor&>(*this), mat, vec, beta, alpha);
@@ -321,6 +326,7 @@ inline Tensor Tensor::addmv(const Tensor & mat, const Tensor & vec, Scalar beta,
 }
 inline Tensor & Tensor::addmv_(const Tensor & mat, const Tensor & vec, Scalar beta, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::addmv_(const_cast<Tensor&>(*this), mat, vec, beta, alpha);
@@ -419,6 +425,7 @@ inline Tensor Tensor::argmin(c10::optional<int64_t> dim, bool keepdim) const {
 }
 inline Tensor Tensor::as_strided(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::as_strided(const_cast<Tensor&>(*this), size, stride, storage_offset);
@@ -455,6 +462,7 @@ inline Tensor Tensor::asin() const {
 }
 inline Tensor & Tensor::asin_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::asin_(const_cast<Tensor&>(*this));
@@ -479,6 +487,7 @@ inline Tensor Tensor::atan() const {
 }
 inline Tensor & Tensor::atan_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::atan_(const_cast<Tensor&>(*this));
@@ -494,6 +503,7 @@ inline Tensor & Tensor::atan_() const {
 }
 inline Tensor Tensor::baddbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::baddbmm(const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
@@ -509,6 +519,7 @@ inline Tensor Tensor::baddbmm(const Tensor & batch1, const Tensor & batch2, Scal
 }
 inline Tensor & Tensor::baddbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::baddbmm_(const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
@@ -532,6 +543,7 @@ inline Tensor Tensor::bernoulli(Generator * generator) const {
 }
 inline Tensor & Tensor::bernoulli_(const Tensor & p, Generator * generator) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::bernoulli_(const_cast<Tensor&>(*this), p, generator);
@@ -546,6 +558,7 @@ inline Tensor & Tensor::bernoulli_(const Tensor & p, Generator * generator) cons
 }
 inline Tensor & Tensor::bernoulli_(double p, Generator * generator) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::bernoulli_(const_cast<Tensor&>(*this), p, generator);
@@ -568,6 +581,7 @@ inline Tensor Tensor::bernoulli(double p, Generator * generator) const {
 }
 inline Tensor Tensor::bincount(const Tensor & weights, int64_t minlength) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::bincount(const_cast<Tensor&>(*this), weights, minlength);
@@ -636,6 +650,7 @@ inline Tensor & Tensor::logical_xor_(const Tensor & other) const {
 }
 inline Tensor Tensor::bmm(const Tensor & mat2) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::bmm(const_cast<Tensor&>(*this), mat2);
@@ -687,6 +702,7 @@ inline Tensor Tensor::clamp(c10::optional<Scalar> min, c10::optional<Scalar> max
 }
 inline Tensor & Tensor::clamp_(c10::optional<Scalar> min, c10::optional<Scalar> max) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::clamp_(const_cast<Tensor&>(*this), min, max);
@@ -711,6 +727,7 @@ inline Tensor Tensor::clamp_max(Scalar max) const {
 }
 inline Tensor & Tensor::clamp_max_(Scalar max) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::clamp_max_(const_cast<Tensor&>(*this), max);
@@ -735,6 +752,7 @@ inline Tensor Tensor::clamp_min(Scalar min) const {
 }
 inline Tensor & Tensor::clamp_min_(Scalar min) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::clamp_min_(const_cast<Tensor&>(*this), min);
@@ -776,6 +794,7 @@ inline Tensor Tensor::cos() const {
 }
 inline Tensor & Tensor::cos_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::cos_(const_cast<Tensor&>(*this));
@@ -800,6 +819,7 @@ inline Tensor Tensor::cosh() const {
 }
 inline Tensor & Tensor::cosh_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::cosh_(const_cast<Tensor&>(*this));
@@ -896,6 +916,7 @@ inline Tensor & Tensor::fill_diagonal_(Scalar fill_value, bool wrap) const {
 }
 inline Tensor Tensor::div(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::div(const_cast<Tensor&>(*this), other);
@@ -914,6 +935,7 @@ inline Tensor Tensor::div(const Tensor & other) const {
 }
 inline Tensor & Tensor::div_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::div_(const_cast<Tensor&>(*this), other);
@@ -950,6 +972,7 @@ inline Tensor & Tensor::div_(Scalar other) const {
 }
 inline Tensor Tensor::dot(const Tensor & tensor) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::dot(const_cast<Tensor&>(*this), tensor);
@@ -981,6 +1004,7 @@ inline Tensor Tensor::new_full(IntArrayRef size, Scalar fill_value, const Tensor
 }
 inline Tensor & Tensor::resize_(IntArrayRef size) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::resize_(const_cast<Tensor&>(*this), size);
@@ -1008,6 +1032,7 @@ inline Tensor Tensor::erf() const {
 }
 inline Tensor & Tensor::erf_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::erf_(const_cast<Tensor&>(*this));
@@ -1032,6 +1057,7 @@ inline Tensor Tensor::erfc() const {
 }
 inline Tensor & Tensor::erfc_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::erfc_(const_cast<Tensor&>(*this));
@@ -1056,6 +1082,7 @@ inline Tensor Tensor::exp() const {
 }
 inline Tensor & Tensor::exp_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::exp_(const_cast<Tensor&>(*this));
@@ -1191,6 +1218,7 @@ inline Tensor Tensor::frac() const {
 }
 inline Tensor & Tensor::frac_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::frac_(const_cast<Tensor&>(*this));
@@ -1206,6 +1234,7 @@ inline Tensor & Tensor::frac_() const {
 }
 inline Tensor Tensor::ger(const Tensor & vec2) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::ger(const_cast<Tensor&>(*this), vec2);
@@ -1437,6 +1466,7 @@ inline Tensor Tensor::log10() const {
 }
 inline Tensor & Tensor::log10_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::log10_(const_cast<Tensor&>(*this));
@@ -1461,6 +1491,7 @@ inline Tensor Tensor::log1p() const {
 }
 inline Tensor & Tensor::log1p_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::log1p_(const_cast<Tensor&>(*this));
@@ -1488,6 +1519,7 @@ inline Tensor Tensor::log2() const {
 }
 inline Tensor & Tensor::log2_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::log2_(const_cast<Tensor&>(*this));
@@ -1605,6 +1637,7 @@ inline Tensor Tensor::max_values(DimnameList dim, bool keepdim) const {
 #endif
 inline Tensor Tensor::mean(c10::optional<ScalarType> dtype) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::mean(const_cast<Tensor&>(*this), dtype);
@@ -1622,6 +1655,7 @@ inline Tensor Tensor::mean(c10::optional<ScalarType> dtype) const {
 }
 inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::mean(const_cast<Tensor&>(*this), dim, keepdim, dtype);
@@ -1640,6 +1674,7 @@ inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim, c10::optional<ScalarTy
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor Tensor::mean(DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::mean(const_cast<Tensor&>(*this), dim, keepdim, dtype);
@@ -1712,6 +1747,7 @@ inline Tensor Tensor::min_values(DimnameList dim, bool keepdim) const {
 #endif
 inline Tensor Tensor::mm(const Tensor & mat2) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::mm(const_cast<Tensor&>(*this), mat2);
@@ -1749,6 +1785,7 @@ inline std::tuple<Tensor,Tensor> Tensor::mode(Dimname dim, bool keepdim) const {
 #endif
 inline Tensor Tensor::mul(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::mul(const_cast<Tensor&>(*this), other);
@@ -1767,6 +1804,7 @@ inline Tensor Tensor::mul(const Tensor & other) const {
 }
 inline Tensor & Tensor::mul_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::mul_(const_cast<Tensor&>(*this), other);
@@ -1803,6 +1841,7 @@ inline Tensor & Tensor::mul_(Scalar other) const {
 }
 inline Tensor Tensor::mv(const Tensor & vec) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::mv(const_cast<Tensor&>(*this), vec);
@@ -1836,6 +1875,7 @@ inline Tensor & Tensor::mvlgamma_(int64_t p) const {
 }
 inline Tensor Tensor::narrow_copy(int64_t dim, int64_t start, int64_t length) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::narrow_copy(const_cast<Tensor&>(*this), dim, start, length);
@@ -1917,6 +1957,7 @@ inline Tensor Tensor::reciprocal() const {
 }
 inline Tensor & Tensor::reciprocal_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::reciprocal_(const_cast<Tensor&>(*this));
@@ -2013,6 +2054,7 @@ inline Tensor & Tensor::round_() const {
 }
 inline Tensor Tensor::relu() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::relu(const_cast<Tensor&>(*this));
@@ -2031,6 +2073,7 @@ inline Tensor Tensor::relu() const {
 }
 inline Tensor & Tensor::relu_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::relu_(const_cast<Tensor&>(*this));
@@ -2049,6 +2092,7 @@ inline Tensor & Tensor::relu_() const {
 }
 inline Tensor Tensor::prelu(const Tensor & weight) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::prelu(const_cast<Tensor&>(*this), weight);
@@ -2064,6 +2108,7 @@ inline Tensor Tensor::prelu(const Tensor & weight) const {
 }
 inline std::tuple<Tensor,Tensor> Tensor::prelu_backward(const Tensor & grad_output, const Tensor & weight) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::prelu_backward(grad_output, const_cast<Tensor&>(*this), weight);
@@ -2079,6 +2124,7 @@ inline std::tuple<Tensor,Tensor> Tensor::prelu_backward(const Tensor & grad_outp
 }
 inline Tensor Tensor::hardshrink(Scalar lambd) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::hardshrink(const_cast<Tensor&>(*this), lambd);
@@ -2094,6 +2140,7 @@ inline Tensor Tensor::hardshrink(Scalar lambd) const {
 }
 inline Tensor Tensor::hardshrink_backward(const Tensor & grad_out, Scalar lambd) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::hardshrink_backward(grad_out, const_cast<Tensor&>(*this), lambd);
@@ -2146,6 +2193,7 @@ inline Tensor Tensor::select(int64_t dim, int64_t index) const {
 }
 inline Tensor Tensor::sigmoid() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::sigmoid(const_cast<Tensor&>(*this));
@@ -2161,6 +2209,7 @@ inline Tensor Tensor::sigmoid() const {
 }
 inline Tensor & Tensor::sigmoid_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::sigmoid_(const_cast<Tensor&>(*this));
@@ -2185,6 +2234,7 @@ inline Tensor Tensor::sin() const {
 }
 inline Tensor & Tensor::sin_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::sin_(const_cast<Tensor&>(*this));
@@ -2209,6 +2259,7 @@ inline Tensor Tensor::sinh() const {
 }
 inline Tensor & Tensor::sinh_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::sinh_(const_cast<Tensor&>(*this));
@@ -2460,6 +2511,7 @@ inline Tensor Tensor::sqrt() const {
 }
 inline Tensor & Tensor::sqrt_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::sqrt_(const_cast<Tensor&>(*this));
@@ -2556,6 +2608,7 @@ inline Tensor Tensor::tan() const {
 }
 inline Tensor & Tensor::tan_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::tan_(const_cast<Tensor&>(*this));
@@ -2580,6 +2633,7 @@ inline Tensor Tensor::tanh() const {
 }
 inline Tensor & Tensor::tanh_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::tanh_(const_cast<Tensor&>(*this));
@@ -2623,6 +2677,7 @@ inline Tensor & Tensor::transpose_(int64_t dim0, int64_t dim1) const {
 }
 inline Tensor Tensor::flip(IntArrayRef dims) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::flip(const_cast<Tensor&>(*this), dims);
@@ -2638,6 +2693,7 @@ inline Tensor Tensor::flip(IntArrayRef dims) const {
 }
 inline Tensor Tensor::roll(IntArrayRef shifts, IntArrayRef dims) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::roll(const_cast<Tensor&>(*this), shifts, dims);
@@ -2807,6 +2863,7 @@ inline Tensor Tensor::norm(c10::optional<Scalar> p, DimnameList dim, bool keepdi
 #endif
 inline Tensor Tensor::clone() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::clone(const_cast<Tensor&>(*this));
@@ -2837,6 +2894,7 @@ inline Tensor & Tensor::resize_as_(const Tensor & the_template) const {
 }
 inline Tensor Tensor::pow(Scalar exponent) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::pow(const_cast<Tensor&>(*this), exponent);
@@ -2855,6 +2913,7 @@ inline Tensor Tensor::pow(Scalar exponent) const {
 }
 inline Tensor & Tensor::zero_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::zero_(const_cast<Tensor&>(*this));
@@ -2873,6 +2932,7 @@ inline Tensor & Tensor::zero_() const {
 }
 inline Tensor Tensor::sub(const Tensor & other, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::sub(const_cast<Tensor&>(*this), other, alpha);
@@ -2891,6 +2951,7 @@ inline Tensor Tensor::sub(const Tensor & other, Scalar alpha) const {
 }
 inline Tensor & Tensor::sub_(const Tensor & other, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::sub_(const_cast<Tensor&>(*this), other, alpha);
@@ -2927,6 +2988,7 @@ inline Tensor & Tensor::sub_(Scalar other, Scalar alpha) const {
 }
 inline Tensor Tensor::addmm(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::addmm(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
@@ -2945,6 +3007,7 @@ inline Tensor Tensor::addmm(const Tensor & mat1, const Tensor & mat2, Scalar bet
 }
 inline Tensor & Tensor::addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::addmm_(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
@@ -2963,6 +3026,7 @@ inline Tensor & Tensor::addmm_(const Tensor & mat1, const Tensor & mat2, Scalar 
 }
 inline Tensor & Tensor::sparse_resize_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::sparse_resize_(const_cast<Tensor&>(*this), size, sparse_dim, dense_dim);
@@ -2978,6 +3042,7 @@ inline Tensor & Tensor::sparse_resize_(IntArrayRef size, int64_t sparse_dim, int
 }
 inline Tensor & Tensor::sparse_resize_and_clear_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::sparse_resize_and_clear_(const_cast<Tensor&>(*this), size, sparse_dim, dense_dim);
@@ -2993,6 +3058,7 @@ inline Tensor & Tensor::sparse_resize_and_clear_(IntArrayRef size, int64_t spars
 }
 inline Tensor Tensor::sparse_mask(const Tensor & mask) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::sparse_mask(const_cast<Tensor&>(*this), mask);
@@ -3008,6 +3074,7 @@ inline Tensor Tensor::sparse_mask(const Tensor & mask) const {
 }
 inline Tensor Tensor::to_dense() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::to_dense(const_cast<Tensor&>(*this));
@@ -3023,6 +3090,7 @@ inline Tensor Tensor::to_dense() const {
 }
 inline int64_t Tensor::sparse_dim() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::sparse_dim(const_cast<Tensor&>(*this));
@@ -3038,6 +3106,7 @@ inline int64_t Tensor::sparse_dim() const {
 }
 inline int64_t Tensor::_dimI() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::_dimI(const_cast<Tensor&>(*this));
@@ -3053,6 +3122,7 @@ inline int64_t Tensor::_dimI() const {
 }
 inline int64_t Tensor::dense_dim() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::dense_dim(const_cast<Tensor&>(*this));
@@ -3068,6 +3138,7 @@ inline int64_t Tensor::dense_dim() const {
 }
 inline int64_t Tensor::_dimV() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::_dimV(const_cast<Tensor&>(*this));
@@ -3083,6 +3154,7 @@ inline int64_t Tensor::_dimV() const {
 }
 inline int64_t Tensor::_nnz() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::_nnz(const_cast<Tensor&>(*this));
@@ -3098,6 +3170,7 @@ inline int64_t Tensor::_nnz() const {
 }
 inline Tensor Tensor::coalesce() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::coalesce(const_cast<Tensor&>(*this));
@@ -3113,6 +3186,7 @@ inline Tensor Tensor::coalesce() const {
 }
 inline bool Tensor::is_coalesced() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::is_coalesced(const_cast<Tensor&>(*this));
@@ -3128,6 +3202,7 @@ inline bool Tensor::is_coalesced() const {
 }
 inline Tensor Tensor::_indices() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::_indices(const_cast<Tensor&>(*this));
@@ -3143,6 +3218,7 @@ inline Tensor Tensor::_indices() const {
 }
 inline Tensor Tensor::_values() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::_values(const_cast<Tensor&>(*this));
@@ -3158,6 +3234,7 @@ inline Tensor Tensor::_values() const {
 }
 inline Tensor & Tensor::_coalesced_(bool coalesced) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::_coalesced_(const_cast<Tensor&>(*this), coalesced);
@@ -3173,6 +3250,7 @@ inline Tensor & Tensor::_coalesced_(bool coalesced) const {
 }
 inline Tensor Tensor::indices() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::indices(const_cast<Tensor&>(*this));
@@ -3188,6 +3266,7 @@ inline Tensor Tensor::indices() const {
 }
 inline Tensor Tensor::values() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::SparseCPU:
             return SparseCPUType::values(const_cast<Tensor&>(*this));
@@ -3231,6 +3310,7 @@ inline std::vector<Tensor> Tensor::unbind(Dimname dim) const {
 #endif
 inline Tensor Tensor::to_sparse(int64_t sparse_dim) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::to_sparse(const_cast<Tensor&>(*this), sparse_dim);
@@ -3246,6 +3326,7 @@ inline Tensor Tensor::to_sparse(int64_t sparse_dim) const {
 }
 inline Tensor Tensor::to_sparse() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::to_sparse(const_cast<Tensor&>(*this));
@@ -3261,6 +3342,7 @@ inline Tensor Tensor::to_sparse() const {
 }
 inline Tensor Tensor::to_mkldnn() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::to_mkldnn(const_cast<Tensor&>(*this));
@@ -3276,6 +3358,7 @@ inline Tensor Tensor::to_mkldnn() const {
 }
 inline Tensor Tensor::dequantize() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::QuantizedCPU:
             return QuantizedCPUType::dequantize(const_cast<Tensor&>(*this));
@@ -3291,6 +3374,7 @@ inline Tensor Tensor::dequantize() const {
 }
 inline double Tensor::q_scale() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::QuantizedCPU:
             return QuantizedCPUType::q_scale(const_cast<Tensor&>(*this));
@@ -3306,6 +3390,7 @@ inline double Tensor::q_scale() const {
 }
 inline int64_t Tensor::q_zero_point() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::QuantizedCPU:
             return QuantizedCPUType::q_zero_point(const_cast<Tensor&>(*this));
@@ -3321,6 +3406,7 @@ inline int64_t Tensor::q_zero_point() const {
 }
 inline Tensor Tensor::q_per_channel_scales() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::QuantizedCPU:
             return QuantizedCPUType::q_per_channel_scales(const_cast<Tensor&>(*this));
@@ -3336,6 +3422,7 @@ inline Tensor Tensor::q_per_channel_scales() const {
 }
 inline Tensor Tensor::q_per_channel_zero_points() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::QuantizedCPU:
             return QuantizedCPUType::q_per_channel_zero_points(const_cast<Tensor&>(*this));
@@ -3351,6 +3438,7 @@ inline Tensor Tensor::q_per_channel_zero_points() const {
 }
 inline int64_t Tensor::q_per_channel_axis() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::QuantizedCPU:
             return QuantizedCPUType::q_per_channel_axis(const_cast<Tensor&>(*this));
@@ -3365,6 +3453,7 @@ inline int64_t Tensor::q_per_channel_axis() const {
 }
 inline Tensor Tensor::int_repr() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::QuantizedCPU:
             return QuantizedCPUType::int_repr(const_cast<Tensor&>(*this));
@@ -3380,6 +3469,7 @@ inline Tensor Tensor::int_repr() const {
 }
 inline QScheme Tensor::qscheme() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::QuantizedCPU:
             return QuantizedCPUType::qscheme(const_cast<Tensor&>(*this));
@@ -3436,6 +3526,7 @@ inline Scalar Tensor::item() const {
 }
 inline Tensor & Tensor::set_(Storage source) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::set_(const_cast<Tensor&>(*this), source);
@@ -3450,6 +3541,7 @@ inline Tensor & Tensor::set_(Storage source) const {
 }
 inline Tensor & Tensor::set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::set_(const_cast<Tensor&>(*this), source, storage_offset, size, stride);
@@ -3467,6 +3559,7 @@ inline Tensor & Tensor::set_(Storage source, int64_t storage_offset, IntArrayRef
 }
 inline Tensor & Tensor::set_(const Tensor & source) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::set_(const_cast<Tensor&>(*this), source);
@@ -3482,6 +3575,7 @@ inline Tensor & Tensor::set_(const Tensor & source) const {
 }
 inline Tensor & Tensor::set_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::set_(const_cast<Tensor&>(*this));
@@ -3497,6 +3591,7 @@ inline Tensor & Tensor::set_() const {
 }
 inline Tensor & Tensor::set_quantizer_(ConstQuantizerPtr quantizer) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::QuantizedCPU:
             return QuantizedCPUType::set_quantizer_(const_cast<Tensor&>(*this), quantizer);
@@ -3511,6 +3606,7 @@ inline Tensor & Tensor::set_quantizer_(ConstQuantizerPtr quantizer) const {
 }
 inline bool Tensor::is_set_to(const Tensor & tensor) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::is_set_to(const_cast<Tensor&>(*this), tensor);
@@ -3526,6 +3622,7 @@ inline bool Tensor::is_set_to(const Tensor & tensor) const {
 }
 inline Tensor & Tensor::masked_fill_(const Tensor & mask, Scalar value) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::masked_fill_(const_cast<Tensor&>(*this), mask, value);
@@ -3550,6 +3647,7 @@ inline Tensor Tensor::masked_fill(const Tensor & mask, Scalar value) const {
 }
 inline Tensor & Tensor::masked_fill_(const Tensor & mask, const Tensor & value) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::masked_fill_(const_cast<Tensor&>(*this), mask, value);
@@ -3574,6 +3672,7 @@ inline Tensor Tensor::masked_fill(const Tensor & mask, const Tensor & value) con
 }
 inline Tensor & Tensor::masked_scatter_(const Tensor & mask, const Tensor & source) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::masked_scatter_(const_cast<Tensor&>(*this), mask, source);
@@ -3598,6 +3697,7 @@ inline Tensor Tensor::masked_scatter(const Tensor & mask, const Tensor & source)
 }
 inline Tensor Tensor::view(IntArrayRef size) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::view(const_cast<Tensor&>(*this), size);
@@ -3616,6 +3716,7 @@ inline Tensor Tensor::view(IntArrayRef size) const {
 }
 inline Tensor & Tensor::put_(const Tensor & index, const Tensor & source, bool accumulate) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::put_(const_cast<Tensor&>(*this), index, source, accumulate);
@@ -3631,6 +3732,7 @@ inline Tensor & Tensor::put_(const Tensor & index, const Tensor & source, bool a
 }
 inline Tensor & Tensor::index_add_(int64_t dim, const Tensor & index, const Tensor & source) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::index_add_(const_cast<Tensor&>(*this), dim, index, source);
@@ -3665,6 +3767,7 @@ inline Tensor Tensor::index_add(Dimname dim, const Tensor & index, const Tensor 
 #endif
 inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, Scalar value) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::index_fill_(const_cast<Tensor&>(*this), dim, index, value);
@@ -3689,6 +3792,7 @@ inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, Scalar value
 }
 inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, const Tensor & value) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::index_fill_(const_cast<Tensor&>(*this), dim, index, value);
@@ -3733,6 +3837,7 @@ inline Tensor Tensor::index_fill(Dimname dim, const Tensor & index, const Tensor
 #endif
 inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, const Tensor & src) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::scatter_(const_cast<Tensor&>(*this), dim, index, src);
@@ -3757,6 +3862,7 @@ inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, const Tensor & 
 }
 inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, Scalar value) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::scatter_(const_cast<Tensor&>(*this), dim, index, value);
@@ -3801,6 +3907,7 @@ inline Tensor Tensor::scatter(Dimname dim, const Tensor & index, Scalar value) c
 #endif
 inline Tensor & Tensor::scatter_add_(int64_t dim, const Tensor & index, const Tensor & src) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::scatter_add_(const_cast<Tensor&>(*this), dim, index, src);
@@ -3835,6 +3942,7 @@ inline Tensor Tensor::scatter_add(Dimname dim, const Tensor & index, const Tenso
 #endif
 inline Tensor & Tensor::lt_(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::lt_(const_cast<Tensor&>(*this), other);
@@ -3850,6 +3958,7 @@ inline Tensor & Tensor::lt_(Scalar other) const {
 }
 inline Tensor & Tensor::lt_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::lt_(const_cast<Tensor&>(*this), other);
@@ -3865,6 +3974,7 @@ inline Tensor & Tensor::lt_(const Tensor & other) const {
 }
 inline Tensor & Tensor::gt_(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::gt_(const_cast<Tensor&>(*this), other);
@@ -3880,6 +3990,7 @@ inline Tensor & Tensor::gt_(Scalar other) const {
 }
 inline Tensor & Tensor::gt_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::gt_(const_cast<Tensor&>(*this), other);
@@ -3895,6 +4006,7 @@ inline Tensor & Tensor::gt_(const Tensor & other) const {
 }
 inline Tensor & Tensor::le_(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::le_(const_cast<Tensor&>(*this), other);
@@ -3910,6 +4022,7 @@ inline Tensor & Tensor::le_(Scalar other) const {
 }
 inline Tensor & Tensor::le_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::le_(const_cast<Tensor&>(*this), other);
@@ -3925,6 +4038,7 @@ inline Tensor & Tensor::le_(const Tensor & other) const {
 }
 inline Tensor & Tensor::ge_(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::ge_(const_cast<Tensor&>(*this), other);
@@ -3940,6 +4054,7 @@ inline Tensor & Tensor::ge_(Scalar other) const {
 }
 inline Tensor & Tensor::ge_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::ge_(const_cast<Tensor&>(*this), other);
@@ -3955,6 +4070,7 @@ inline Tensor & Tensor::ge_(const Tensor & other) const {
 }
 inline Tensor & Tensor::eq_(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::eq_(const_cast<Tensor&>(*this), other);
@@ -3970,6 +4086,7 @@ inline Tensor & Tensor::eq_(Scalar other) const {
 }
 inline Tensor & Tensor::eq_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::eq_(const_cast<Tensor&>(*this), other);
@@ -3985,6 +4102,7 @@ inline Tensor & Tensor::eq_(const Tensor & other) const {
 }
 inline Tensor & Tensor::ne_(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::ne_(const_cast<Tensor&>(*this), other);
@@ -4000,6 +4118,7 @@ inline Tensor & Tensor::ne_(Scalar other) const {
 }
 inline Tensor & Tensor::ne_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::ne_(const_cast<Tensor&>(*this), other);
@@ -4015,6 +4134,7 @@ inline Tensor & Tensor::ne_(const Tensor & other) const {
 }
 inline Tensor Tensor::__and__(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__and__(const_cast<Tensor&>(*this), other);
@@ -4030,6 +4150,7 @@ inline Tensor Tensor::__and__(Scalar other) const {
 }
 inline Tensor Tensor::__and__(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__and__(const_cast<Tensor&>(*this), other);
@@ -4045,6 +4166,7 @@ inline Tensor Tensor::__and__(const Tensor & other) const {
 }
 inline Tensor & Tensor::__iand__(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__iand__(const_cast<Tensor&>(*this), other);
@@ -4060,6 +4182,7 @@ inline Tensor & Tensor::__iand__(Scalar other) const {
 }
 inline Tensor & Tensor::__iand__(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__iand__(const_cast<Tensor&>(*this), other);
@@ -4075,6 +4198,7 @@ inline Tensor & Tensor::__iand__(const Tensor & other) const {
 }
 inline Tensor Tensor::__or__(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__or__(const_cast<Tensor&>(*this), other);
@@ -4090,6 +4214,7 @@ inline Tensor Tensor::__or__(Scalar other) const {
 }
 inline Tensor Tensor::__or__(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__or__(const_cast<Tensor&>(*this), other);
@@ -4105,6 +4230,7 @@ inline Tensor Tensor::__or__(const Tensor & other) const {
 }
 inline Tensor & Tensor::__ior__(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__ior__(const_cast<Tensor&>(*this), other);
@@ -4120,6 +4246,7 @@ inline Tensor & Tensor::__ior__(Scalar other) const {
 }
 inline Tensor & Tensor::__ior__(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__ior__(const_cast<Tensor&>(*this), other);
@@ -4135,6 +4262,7 @@ inline Tensor & Tensor::__ior__(const Tensor & other) const {
 }
 inline Tensor Tensor::__xor__(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__xor__(const_cast<Tensor&>(*this), other);
@@ -4150,6 +4278,7 @@ inline Tensor Tensor::__xor__(Scalar other) const {
 }
 inline Tensor Tensor::__xor__(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__xor__(const_cast<Tensor&>(*this), other);
@@ -4165,6 +4294,7 @@ inline Tensor Tensor::__xor__(const Tensor & other) const {
 }
 inline Tensor & Tensor::__ixor__(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__ixor__(const_cast<Tensor&>(*this), other);
@@ -4180,6 +4310,7 @@ inline Tensor & Tensor::__ixor__(Scalar other) const {
 }
 inline Tensor & Tensor::__ixor__(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__ixor__(const_cast<Tensor&>(*this), other);
@@ -4195,6 +4326,7 @@ inline Tensor & Tensor::__ixor__(const Tensor & other) const {
 }
 inline Tensor Tensor::__lshift__(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__lshift__(const_cast<Tensor&>(*this), other);
@@ -4210,6 +4342,7 @@ inline Tensor Tensor::__lshift__(Scalar other) const {
 }
 inline Tensor Tensor::__lshift__(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__lshift__(const_cast<Tensor&>(*this), other);
@@ -4225,6 +4358,7 @@ inline Tensor Tensor::__lshift__(const Tensor & other) const {
 }
 inline Tensor & Tensor::__ilshift__(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__ilshift__(const_cast<Tensor&>(*this), other);
@@ -4240,6 +4374,7 @@ inline Tensor & Tensor::__ilshift__(Scalar other) const {
 }
 inline Tensor & Tensor::__ilshift__(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__ilshift__(const_cast<Tensor&>(*this), other);
@@ -4255,6 +4390,7 @@ inline Tensor & Tensor::__ilshift__(const Tensor & other) const {
 }
 inline Tensor Tensor::__rshift__(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__rshift__(const_cast<Tensor&>(*this), other);
@@ -4270,6 +4406,7 @@ inline Tensor Tensor::__rshift__(Scalar other) const {
 }
 inline Tensor Tensor::__rshift__(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__rshift__(const_cast<Tensor&>(*this), other);
@@ -4285,6 +4422,7 @@ inline Tensor Tensor::__rshift__(const Tensor & other) const {
 }
 inline Tensor & Tensor::__irshift__(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__irshift__(const_cast<Tensor&>(*this), other);
@@ -4300,6 +4438,7 @@ inline Tensor & Tensor::__irshift__(Scalar other) const {
 }
 inline Tensor & Tensor::__irshift__(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::__irshift__(const_cast<Tensor&>(*this), other);
@@ -4315,6 +4454,7 @@ inline Tensor & Tensor::__irshift__(const Tensor & other) const {
 }
 inline Tensor & Tensor::lgamma_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::lgamma_(const_cast<Tensor&>(*this));
@@ -4339,6 +4479,7 @@ inline Tensor & Tensor::atan2_(const Tensor & other) const {
 }
 inline Tensor & Tensor::tril_(int64_t diagonal) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::tril_(const_cast<Tensor&>(*this), diagonal);
@@ -4354,6 +4495,7 @@ inline Tensor & Tensor::tril_(int64_t diagonal) const {
 }
 inline Tensor & Tensor::triu_(int64_t diagonal) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::triu_(const_cast<Tensor&>(*this), diagonal);
@@ -4387,6 +4529,7 @@ inline Tensor & Tensor::polygamma_(int64_t n) const {
 }
 inline Tensor & Tensor::renorm_(Scalar p, int64_t dim, Scalar maxnorm) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::renorm_(const_cast<Tensor&>(*this), p, dim, maxnorm);
@@ -4402,6 +4545,7 @@ inline Tensor & Tensor::renorm_(Scalar p, int64_t dim, Scalar maxnorm) const {
 }
 inline Tensor & Tensor::pow_(Scalar exponent) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::pow_(const_cast<Tensor&>(*this), exponent);
@@ -4417,6 +4561,7 @@ inline Tensor & Tensor::pow_(Scalar exponent) const {
 }
 inline Tensor & Tensor::pow_(const Tensor & exponent) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::pow_(const_cast<Tensor&>(*this), exponent);
@@ -4432,6 +4577,7 @@ inline Tensor & Tensor::pow_(const Tensor & exponent) const {
 }
 inline Tensor & Tensor::lerp_(const Tensor & end, Scalar weight) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::lerp_(const_cast<Tensor&>(*this), end, weight);
@@ -4447,6 +4593,7 @@ inline Tensor & Tensor::lerp_(const Tensor & end, Scalar weight) const {
 }
 inline Tensor & Tensor::lerp_(const Tensor & end, const Tensor & weight) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::lerp_(const_cast<Tensor&>(*this), end, weight);
@@ -4462,6 +4609,7 @@ inline Tensor & Tensor::lerp_(const Tensor & end, const Tensor & weight) const {
 }
 inline Tensor & Tensor::fmod_(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::fmod_(const_cast<Tensor&>(*this), other);
@@ -4477,6 +4625,7 @@ inline Tensor & Tensor::fmod_(Scalar other) const {
 }
 inline Tensor & Tensor::fmod_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::fmod_(const_cast<Tensor&>(*this), other);
@@ -4492,6 +4641,7 @@ inline Tensor & Tensor::fmod_(const Tensor & other) const {
 }
 inline Tensor & Tensor::remainder_(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::remainder_(const_cast<Tensor&>(*this), other);
@@ -4507,6 +4657,7 @@ inline Tensor & Tensor::remainder_(Scalar other) const {
 }
 inline Tensor & Tensor::remainder_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::remainder_(const_cast<Tensor&>(*this), other);
@@ -4522,6 +4673,7 @@ inline Tensor & Tensor::remainder_(const Tensor & other) const {
 }
 inline Tensor & Tensor::addbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::addbmm_(const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
@@ -4537,6 +4689,7 @@ inline Tensor & Tensor::addbmm_(const Tensor & batch1, const Tensor & batch2, Sc
 }
 inline Tensor Tensor::addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::addbmm(const_cast<Tensor&>(*this), batch1, batch2, beta, alpha);
@@ -4561,6 +4714,7 @@ inline Tensor & Tensor::addcdiv_(const Tensor & tensor1, const Tensor & tensor2,
 }
 inline Tensor & Tensor::random_(int64_t from, int64_t to, Generator * generator) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::random_(const_cast<Tensor&>(*this), from, to, generator);
@@ -4575,6 +4729,7 @@ inline Tensor & Tensor::random_(int64_t from, int64_t to, Generator * generator)
 }
 inline Tensor & Tensor::random_(int64_t to, Generator * generator) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::random_(const_cast<Tensor&>(*this), to, generator);
@@ -4589,6 +4744,7 @@ inline Tensor & Tensor::random_(int64_t to, Generator * generator) const {
 }
 inline Tensor & Tensor::random_(Generator * generator) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::random_(const_cast<Tensor&>(*this), generator);
@@ -4603,6 +4759,7 @@ inline Tensor & Tensor::random_(Generator * generator) const {
 }
 inline Tensor & Tensor::uniform_(double from, double to, Generator * generator) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::uniform_(const_cast<Tensor&>(*this), from, to, generator);
@@ -4617,6 +4774,7 @@ inline Tensor & Tensor::uniform_(double from, double to, Generator * generator) 
 }
 inline Tensor & Tensor::normal_(double mean, double std, Generator * generator) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::normal_(const_cast<Tensor&>(*this), mean, std, generator);
@@ -4631,6 +4789,7 @@ inline Tensor & Tensor::normal_(double mean, double std, Generator * generator) 
 }
 inline Tensor & Tensor::cauchy_(double median, double sigma, Generator * generator) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::cauchy_(const_cast<Tensor&>(*this), median, sigma, generator);
@@ -4645,6 +4804,7 @@ inline Tensor & Tensor::cauchy_(double median, double sigma, Generator * generat
 }
 inline Tensor & Tensor::log_normal_(double mean, double std, Generator * generator) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::log_normal_(const_cast<Tensor&>(*this), mean, std, generator);
@@ -4659,6 +4819,7 @@ inline Tensor & Tensor::log_normal_(double mean, double std, Generator * generat
 }
 inline Tensor & Tensor::exponential_(double lambd, Generator * generator) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::exponential_(const_cast<Tensor&>(*this), lambd, generator);
@@ -4673,6 +4834,7 @@ inline Tensor & Tensor::exponential_(double lambd, Generator * generator) const 
 }
 inline Tensor & Tensor::geometric_(double p, Generator * generator) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::geometric_(const_cast<Tensor&>(*this), p, generator);
@@ -4687,6 +4849,7 @@ inline Tensor & Tensor::geometric_(double p, Generator * generator) const {
 }
 inline Tensor Tensor::diag(int64_t diagonal) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::diag(const_cast<Tensor&>(*this), diagonal);
@@ -4729,6 +4892,7 @@ inline Tensor Tensor::tril(int64_t diagonal) const {
 }
 inline Tensor Tensor::trace() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::trace(const_cast<Tensor&>(*this));
@@ -4744,6 +4908,7 @@ inline Tensor Tensor::trace() const {
 }
 inline Tensor Tensor::ne(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::ne(const_cast<Tensor&>(*this), other);
@@ -4762,6 +4927,7 @@ inline Tensor Tensor::ne(Scalar other) const {
 }
 inline Tensor Tensor::ne(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::ne(const_cast<Tensor&>(*this), other);
@@ -4780,6 +4946,7 @@ inline Tensor Tensor::ne(const Tensor & other) const {
 }
 inline Tensor Tensor::eq(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::eq(const_cast<Tensor&>(*this), other);
@@ -4798,6 +4965,7 @@ inline Tensor Tensor::eq(Scalar other) const {
 }
 inline Tensor Tensor::eq(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::eq(const_cast<Tensor&>(*this), other);
@@ -4816,6 +4984,7 @@ inline Tensor Tensor::eq(const Tensor & other) const {
 }
 inline Tensor Tensor::ge(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::ge(const_cast<Tensor&>(*this), other);
@@ -4834,6 +5003,7 @@ inline Tensor Tensor::ge(Scalar other) const {
 }
 inline Tensor Tensor::ge(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::ge(const_cast<Tensor&>(*this), other);
@@ -4852,6 +5022,7 @@ inline Tensor Tensor::ge(const Tensor & other) const {
 }
 inline Tensor Tensor::le(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::le(const_cast<Tensor&>(*this), other);
@@ -4870,6 +5041,7 @@ inline Tensor Tensor::le(Scalar other) const {
 }
 inline Tensor Tensor::le(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::le(const_cast<Tensor&>(*this), other);
@@ -4888,6 +5060,7 @@ inline Tensor Tensor::le(const Tensor & other) const {
 }
 inline Tensor Tensor::gt(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::gt(const_cast<Tensor&>(*this), other);
@@ -4906,6 +5079,7 @@ inline Tensor Tensor::gt(Scalar other) const {
 }
 inline Tensor Tensor::gt(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::gt(const_cast<Tensor&>(*this), other);
@@ -4924,6 +5098,7 @@ inline Tensor Tensor::gt(const Tensor & other) const {
 }
 inline Tensor Tensor::lt(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::lt(const_cast<Tensor&>(*this), other);
@@ -4942,6 +5117,7 @@ inline Tensor Tensor::lt(Scalar other) const {
 }
 inline Tensor Tensor::lt(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::lt(const_cast<Tensor&>(*this), other);
@@ -4960,6 +5136,7 @@ inline Tensor Tensor::lt(const Tensor & other) const {
 }
 inline Tensor Tensor::take(const Tensor & index) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::take(const_cast<Tensor&>(*this), index);
@@ -4975,6 +5152,7 @@ inline Tensor Tensor::take(const Tensor & index) const {
 }
 inline Tensor Tensor::index_select(int64_t dim, const Tensor & index) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::index_select(const_cast<Tensor&>(*this), dim, index);
@@ -5003,6 +5181,7 @@ inline Tensor Tensor::index_select(Dimname dim, const Tensor & index) const {
 #endif
 inline Tensor Tensor::masked_select(const Tensor & mask) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::masked_select(const_cast<Tensor&>(*this), mask);
@@ -5018,6 +5197,7 @@ inline Tensor Tensor::masked_select(const Tensor & mask) const {
 }
 inline Tensor Tensor::nonzero() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::nonzero(const_cast<Tensor&>(*this));
@@ -5042,6 +5222,7 @@ inline std::vector<Tensor> Tensor::nonzero_numpy() const {
 }
 inline Tensor Tensor::gather(int64_t dim, const Tensor & index, bool sparse_grad) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::gather(const_cast<Tensor&>(*this), dim, index, sparse_grad);
@@ -5094,6 +5275,7 @@ inline Tensor Tensor::addcdiv(const Tensor & tensor1, const Tensor & tensor2, Sc
 }
 inline std::tuple<Tensor,Tensor> Tensor::lstsq(const Tensor & A) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::lstsq(const_cast<Tensor&>(*this), A);
@@ -5127,6 +5309,7 @@ inline std::tuple<Tensor,Tensor> Tensor::symeig(bool eigenvectors, bool upper) c
 }
 inline std::tuple<Tensor,Tensor> Tensor::eig(bool eigenvectors) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::eig(const_cast<Tensor&>(*this), eigenvectors);
@@ -5178,6 +5361,7 @@ inline std::tuple<Tensor,Tensor> Tensor::solve(const Tensor & A) const {
 }
 inline Tensor Tensor::cholesky_inverse(bool upper) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::cholesky_inverse(const_cast<Tensor&>(*this), upper);
@@ -5202,6 +5386,7 @@ inline std::tuple<Tensor,Tensor> Tensor::qr(bool some) const {
 }
 inline std::tuple<Tensor,Tensor> Tensor::geqrf() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::geqrf(const_cast<Tensor&>(*this));
@@ -5217,6 +5402,7 @@ inline std::tuple<Tensor,Tensor> Tensor::geqrf() const {
 }
 inline Tensor Tensor::orgqr(const Tensor & input2) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::orgqr(const_cast<Tensor&>(*this), input2);
@@ -5232,6 +5418,7 @@ inline Tensor Tensor::orgqr(const Tensor & input2) const {
 }
 inline Tensor Tensor::ormqr(const Tensor & input2, const Tensor & input3, bool left, bool transpose) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::ormqr(const_cast<Tensor&>(*this), input2, input3, left, transpose);
@@ -5256,6 +5443,7 @@ inline Tensor Tensor::lu_solve(const Tensor & LU_data, const Tensor & LU_pivots)
 }
 inline Tensor Tensor::multinomial(int64_t num_samples, bool replacement, Generator * generator) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::multinomial(const_cast<Tensor&>(*this), num_samples, replacement, generator);
@@ -5270,6 +5458,7 @@ inline Tensor Tensor::multinomial(int64_t num_samples, bool replacement, Generat
 }
 inline Tensor Tensor::lgamma() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::lgamma(const_cast<Tensor&>(*this));
@@ -5303,6 +5492,7 @@ inline Tensor Tensor::polygamma(int64_t n) const {
 }
 inline Tensor Tensor::erfinv() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::erfinv(const_cast<Tensor&>(*this));
@@ -5318,6 +5508,7 @@ inline Tensor Tensor::erfinv() const {
 }
 inline Tensor & Tensor::erfinv_() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::erfinv_(const_cast<Tensor&>(*this));
@@ -5351,6 +5542,7 @@ inline Tensor & Tensor::sign_() const {
 }
 inline Tensor Tensor::dist(const Tensor & other, Scalar p) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::dist(const_cast<Tensor&>(*this), other, p);
@@ -5375,6 +5567,7 @@ inline Tensor Tensor::atan2(const Tensor & other) const {
 }
 inline Tensor Tensor::lerp(const Tensor & end, Scalar weight) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::lerp(const_cast<Tensor&>(*this), end, weight);
@@ -5390,6 +5583,7 @@ inline Tensor Tensor::lerp(const Tensor & end, Scalar weight) const {
 }
 inline Tensor Tensor::lerp(const Tensor & end, const Tensor & weight) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::lerp(const_cast<Tensor&>(*this), end, weight);
@@ -5405,6 +5599,7 @@ inline Tensor Tensor::lerp(const Tensor & end, const Tensor & weight) const {
 }
 inline Tensor Tensor::histc(int64_t bins, Scalar min, Scalar max) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::histc(const_cast<Tensor&>(*this), bins, min, max);
@@ -5420,6 +5615,7 @@ inline Tensor Tensor::histc(int64_t bins, Scalar min, Scalar max) const {
 }
 inline Tensor Tensor::fmod(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::fmod(const_cast<Tensor&>(*this), other);
@@ -5435,6 +5631,7 @@ inline Tensor Tensor::fmod(Scalar other) const {
 }
 inline Tensor Tensor::fmod(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::fmod(const_cast<Tensor&>(*this), other);
@@ -5450,6 +5647,7 @@ inline Tensor Tensor::fmod(const Tensor & other) const {
 }
 inline Tensor Tensor::remainder(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::remainder(const_cast<Tensor&>(*this), other);
@@ -5465,6 +5663,7 @@ inline Tensor Tensor::remainder(Scalar other) const {
 }
 inline Tensor Tensor::remainder(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::remainder(const_cast<Tensor&>(*this), other);
@@ -5480,6 +5679,7 @@ inline Tensor Tensor::remainder(const Tensor & other) const {
 }
 inline Tensor Tensor::min(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::min(const_cast<Tensor&>(*this), other);
@@ -5495,6 +5695,7 @@ inline Tensor Tensor::min(const Tensor & other) const {
 }
 inline Tensor Tensor::min() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::min(const_cast<Tensor&>(*this));
@@ -5513,6 +5714,7 @@ inline Tensor Tensor::min() const {
 }
 inline Tensor Tensor::max(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::max(const_cast<Tensor&>(*this), other);
@@ -5528,6 +5730,7 @@ inline Tensor Tensor::max(const Tensor & other) const {
 }
 inline Tensor Tensor::max() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::max(const_cast<Tensor&>(*this));
@@ -5546,6 +5749,7 @@ inline Tensor Tensor::max() const {
 }
 inline Tensor Tensor::median() const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::median(const_cast<Tensor&>(*this));
@@ -5561,6 +5765,7 @@ inline Tensor Tensor::median() const {
 }
 inline std::tuple<Tensor,Tensor> Tensor::sort(int64_t dim, bool descending) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::sort(const_cast<Tensor&>(*this), dim, descending);
@@ -5608,6 +5813,7 @@ inline Tensor Tensor::argsort(Dimname dim, bool descending) const {
 #endif
 inline std::tuple<Tensor,Tensor> Tensor::topk(int64_t k, int64_t dim, bool largest, bool sorted) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::topk(const_cast<Tensor&>(*this), k, dim, largest, sorted);
@@ -5644,6 +5850,7 @@ inline Tensor Tensor::any() const {
 }
 inline Tensor Tensor::renorm(Scalar p, int64_t dim, Scalar maxnorm) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::renorm(const_cast<Tensor&>(*this), p, dim, maxnorm);
@@ -5659,6 +5866,7 @@ inline Tensor Tensor::renorm(Scalar p, int64_t dim, Scalar maxnorm) const {
 }
 inline Tensor Tensor::unfold(int64_t dimension, int64_t size, int64_t step) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::unfold(const_cast<Tensor&>(*this), dimension, size, step);
@@ -5674,6 +5882,7 @@ inline Tensor Tensor::unfold(int64_t dimension, int64_t size, int64_t step) cons
 }
 inline bool Tensor::equal(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::equal(const_cast<Tensor&>(*this), other);
@@ -5692,6 +5901,7 @@ inline bool Tensor::equal(const Tensor & other) const {
 }
 inline Tensor Tensor::pow(const Tensor & exponent) const {
 #ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
             return CPUType::pow(const_cast<Tensor&>(*this), exponent);
