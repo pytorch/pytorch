@@ -270,9 +270,9 @@ namespace detail {
     explicit constexpr KernelFactory(Args... args)
     : constructor_parameters_(std::move(args)...) {}
 
-    std::shared_ptr<KernelFunctor> operator()() const {
+    std::unique_ptr<OperatorKernel> operator()() const {
       return guts::apply(
-        [] (const Args&... params) {return std::make_shared<KernelFunctor>(params...); },
+        [] (const Args&... params) -> std::unique_ptr<OperatorKernel> {return guts::make_unique_base<OperatorKernel, KernelFunctor>(params...); },
         constructor_parameters_);
     }
 
