@@ -168,8 +168,10 @@ else
   python setup.py install
 fi
 
-echo 'PyTorch Build Statistics'
-sccache --show-stats
+if which sccache > /dev/null; then
+  echo 'PyTorch Build Statistics'
+  sccache --show-stats
+fi
 
 assert_git_not_dirty
 
