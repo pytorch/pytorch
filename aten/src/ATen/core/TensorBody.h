@@ -734,7 +734,7 @@ class CAFFE2_API Tensor {
   #ifdef BUILD_NAMEDTENSOR
   Tensor norm(c10::optional<Scalar> p, DimnameList dim, bool keepdim=false) const;
   #endif
-  Tensor clone() const;
+  Tensor clone(c10::optional<MemoryFormat> memory_format=c10::nullopt) const;
   Tensor & resize_as_(const Tensor & the_template) const;
   Tensor pow(Scalar exponent) const;
   Tensor & zero_() const;
