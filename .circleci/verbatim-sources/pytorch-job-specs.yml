@@ -107,7 +107,7 @@ jobs:
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          gunzip --stdout ~/workspace/built_image.tgz | docker load
+          gunzip --stdout ~/workspace/built_image.tgz | time docker load
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
             export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
