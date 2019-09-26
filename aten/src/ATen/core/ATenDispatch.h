@@ -8,6 +8,7 @@
 #include <ATen/core/OpsAlreadyMovedToC10.h>
 #include <ATen/core/Variadic.h>
 #include <ATen/core/TensorBody.h>
+#include <ATen/NamedTensorUtils.h>
 #include <c10/util/C++17.h>
 #include <memory>
 #include <mutex>
@@ -85,7 +86,7 @@ using not_ok_to_box =
         // but torch::jit::push knows how to handle them
         std::is_same<TensorOptions, T>
       >>
-#ifdef BUILD_NAMED_TENSOR
+#ifdef BUILD_NAMEDTENSOR
     ,
     // some constructors are templated (and therefore pass
     // is_constructible), but do not actually work with all
