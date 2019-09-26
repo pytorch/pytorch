@@ -541,6 +541,17 @@ class TestNamedTensor(TestCase):
         tensor.ndim
         tensor.item()
         tensor.type()
+        tensor.is_shared()
+        tensor.is_signed()
+
+    def test_autograd_smoke(self):
+        x = torch.randn(3, 3, names=('N', 'D'), requires_grad=True)
+
+        y = x.clone()
+        y.retain_grad()
+        y.register_hook(lambda x: x)
+
+        y.sum().backward()
 
         # autograd related attributes
         tensor = torch.empty(1, 1, names=('N', 'D'), requires_grad=True)
@@ -562,6 +573,12 @@ class TestNamedTensor(TestCase):
                 splits = fn(orig_tensor)
                 for split in splits:
                     self.assertEqual(split.names, orig_tensor.names)
+
+    def test_any_all(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.zeros(3, dtype=torch.bool, device=device, names=('C',))
+            self.assertEqual(x.any().names, [])
+            self.assertEqual(x.all().names, [])
 
     def test_binary_ops(self):
         def test_basic(op):
@@ -727,7 +744,11 @@ class TestNamedTensor(TestCase):
         def _test(testcase, names=('N', 'D'), device='cpu'):
             sizes = [2] * len(names)
             tensor = torch.empty(sizes, names=names, device=device)
-            out = testcase.lambd(tensor)
+            try:
+                out = testcase.lambd(tensor)
+            except RuntimeError as err:
+                # Get a better error message by catching the error and asserting.
+                raise RuntimeError('{}: {}'.format(testcase.name, err))
             self.assertEqual(out.names, tensor.names,
                              message=testcase.name)
 
@@ -831,6 +852,14 @@ class TestNamedTensor(TestCase):
             method('short'),
             method('type', dtype=torch.long),
 
+            # cumsum and cumprod
+            fn('cumsum', 0),
+            fn('cumsum', 'D'),
+            out_function('cumsum', 'D'),
+            fn('cumprod', 0),
+            fn('cumprod', 'D'),
+            out_function('cumprod', 'D'),
+
             # views
             method('narrow', 0, 0, 1),
 
@@ -853,6 +882,26 @@ class TestNamedTensor(TestCase):
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             _test(testcase, device=device)
+
+    def test_bitwise_not(self):
+        for device in torch.testing.get_all_device_types():
+            names = ('N', 'D')
+            tensor = torch.zeros(2, 3, names=names, dtype=torch.bool)
+            result = torch.empty(0, dtype=torch.bool)
+
+            self.assertEqual(tensor.bitwise_not().names, names)
+            self.assertEqual(torch.bitwise_not(tensor, out=result).names, names)
+            self.assertEqual(tensor.bitwise_not_().names, names)
+
+    def test_logical_not(self):
+        for device in torch.testing.get_all_device_types():
+            names = ('N', 'D')
+            tensor = torch.zeros(2, 3, names=names, dtype=torch.bool)
+            result = torch.empty(0, dtype=torch.bool)
+
+            self.assertEqual(tensor.logical_not().names, names)
+            self.assertEqual(torch.logical_not(tensor, out=result).names, names)
+            self.assertEqual(tensor.logical_not_().names, names)
 
     def test_bernoulli(self):
         for device in torch.testing.get_all_device_types():

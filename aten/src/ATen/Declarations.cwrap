@@ -2160,24 +2160,6 @@
     - THGenerator* generator
 ]]
 [[
-  name: _th_multinomial
-  cname: multinomial
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THIndexTensor* result
-      output: True
-    - THTensor* self
-    - long num_samples
-    - bool replacement
-    - THGenerator* generator
-]]
-[[
   name: _th_uniform_
   types:
     - floating_point
