@@ -21,7 +21,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#if defined(CAFFE2_USE_MKLDNN) && !defined(USE_CUDA) 
+#if (defined(CAFFE2_USE_MKLDNN)) && (!defined(USE_CUDA))
 #include <caffe2/ideep/ideep_utils.h>
 #endif
 
@@ -108,7 +108,7 @@ class UpsampleNearestGradientOp final : public Operator<Context> {
   int scale_;
 };
 
-#if defined(CAFFE2_USE_MKLDNN) && !defined(USE_CUDA) 
+#if (defined(CAFFE2_USE_MKLDNN)) && (!defined(USE_CUDA))
 USE_IDEEP_DEF_ALIASES();
 
 template <typename T>
@@ -207,7 +207,7 @@ public:
   INPUT_TAGS(INPUT);
   OUTPUT_TAGS(OUTPUT);
 };
-#endif // CAFFE2_USE_MKLDNN
+#endif // 
 } // namespace caffe2
 
 #endif // UPSAMPLE_NEAREST_OP_H_
