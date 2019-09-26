@@ -42,7 +42,7 @@ static void import_libs(
   SourceImporter si(
       cu,
       &tensor_table,
-      [&](const std::string& name) {
+      [&](const std::string& name) -> std::shared_ptr<Source> {
         ASSERT_TRUE(name == "__torch__");
         return src;
       },

@@ -105,7 +105,7 @@ struct SourceImporterImpl : public Resolver,
       const std::vector<at::Tensor>* tensor_table,
       SourceLoader source_loader,
       size_t version)
-      : cu_(cu), source_loader_(source_loader) {
+      : cu_(cu), source_loader_(std::move(source_loader)) {
     env_ = {
         {"torch", std::make_shared<BuiltinModule>("aten", version)},
         {"ops", std::make_shared<OpsValue>(version)},
