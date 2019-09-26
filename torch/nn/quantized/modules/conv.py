@@ -124,13 +124,11 @@ class Conv2d(torch.nn.Module):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
-        else:
-            return ops.quantized.conv2d(input,
-                                        self._packed_params,
-                                        self.stride, self.padding,
-                                        self.dilation, self.groups,
-                                        self.scale, self.zero_point)
-
+        return ops.quantized.conv2d(input,
+                                    self._packed_params,
+                                    self.stride, self.padding,
+                                    self.dilation, self.groups,
+                                    self.scale, self.zero_point)
 
     # ===== Serialization methods =====
     # The special consideration here is that we have to unpack the weights into their

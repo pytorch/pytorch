@@ -6,7 +6,7 @@ from torch._jit_internal import Optional
 import torch.nn as nn
 import torch.nn._intrinsic as nni
 from torch.nn.modules import Module
-
+from torch.nn.quantized.modules.utils import _quantize_weight
 
 class Quantize(Module):
     r"""Quantizes an incoming tensor

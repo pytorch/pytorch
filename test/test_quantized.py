@@ -790,17 +790,18 @@ class TestQuantizedOps(TestCase):
             cat_q = q_cat_op(tensors_q, dim=ch_axis, scale=scale,
                              zero_point=zero_point)
 
+    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams()),
            size=st.sampled_from((1, 3, 5, 10)),
-           mode=st.sampled_from(("nearest", "nearest")),
+           mode=st.sampled_from(("bilinear", "nearest")),
            scale_factor=st.sampled_from((None, 1.5, 2.0)),
            align_corners=st.sampled_from((True, False)),
            nhwc_layout=st.sampled_from((True, False)))
     def test_interpolate(self, X, size, mode, scale_factor, align_corners, nhwc_layout):
         """
-        This test cover upsample_nearest2d
+        This test cover upsample_nearest2d and upsample_bilinear2d
         """
         X, (scale, zero_point, torch_type) = X
         H, W = X.shape[-2:]
@@ -832,7 +833,6 @@ class TestQuantizedOps(TestCase):
             "nn.functional": torch.nn.functional.interpolate,
             "nn.quantized.functional": torch.nn.quantized.functional.interpolate
         }
-
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
         for name, op in ops_under_test.items():
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
