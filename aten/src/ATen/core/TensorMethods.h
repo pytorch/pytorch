@@ -3810,13 +3810,7 @@ inline Tensor Tensor::scatter_add(Dimname dim, const Tensor & index, const Tenso
 #endif
 inline Tensor & Tensor::lt_(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::lt_(const_cast<Tensor&>(*this), other);
-            break;
-        default:
-            AT_ERROR("lt_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::lt_(const_cast<Tensor&>(*this), other);
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::lt_", "Scalar"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, Scalar>(
@@ -3825,13 +3819,7 @@ inline Tensor & Tensor::lt_(Scalar other) const {
 }
 inline Tensor & Tensor::lt_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::lt_(const_cast<Tensor&>(*this), other);
-            break;
-        default:
-            AT_ERROR("lt_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::lt_(const_cast<Tensor&>(*this), other);
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::lt_", "Tensor"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, const Tensor &>(
