@@ -425,8 +425,10 @@ def gen_jit_dispatch(declarations, out, template_path):
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            shards[x].append(OPERATOR.substitute(signature=signature(decl, decl['should_match_schema']),
-                                                 op=emit_decl_variant(decl)))
+            if 'use_c10_dispatcher' not in decl or decl['use_c10_dispatcher'] != 'full':
+                assert 'use_c10_dispatcher' not in decl or decl['use_c10_dispatcher'] in ['unboxed_only', 'no']
+                shards[x].append(OPERATOR.substitute(signature=signature(decl, decl['should_match_schema']),
+                                                     op=emit_decl_variant(decl)))
 
     for i, shard in enumerate(shards):
         env = {
