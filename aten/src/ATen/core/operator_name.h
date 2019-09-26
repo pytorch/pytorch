@@ -8,6 +8,8 @@ namespace c10 {
 struct OperatorName final {
   std::string name;
   std::string overload_name;
+  OperatorName(std::string name, const std::string& overload_name)
+      : name(std::move(name)), overload_name(overload_name) {}
 };
 
 inline bool operator==(const OperatorName& lhs, const OperatorName& rhs) {

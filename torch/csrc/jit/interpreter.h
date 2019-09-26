@@ -11,8 +11,9 @@ class Tensor;
 }
 namespace c10 {
 struct IValue;
-struct Type;
+struct OperatorName;
 } // namespace c10
+
 namespace torch {
 namespace jit {
 
@@ -26,6 +27,7 @@ struct CodeImpl;
 struct InterpreterStateImpl;
 struct Graph;
 struct Node;
+struct Instruction;
 using Stack = std::vector<c10::IValue>;
 using c10::ivalue::Future;
 
@@ -41,6 +43,10 @@ struct TORCH_API Code {
   }
   size_t num_inputs() const;
   size_t num_outputs() const;
+  const std::vector<c10::IValue>& constant_table() const;
+  const std::vector<Instruction>& instructions() const;
+  const std::vector<c10::OperatorName>& opname_table() const;
+  size_t register_size() const;
 
  private:
   std::shared_ptr<CodeImpl> pImpl;

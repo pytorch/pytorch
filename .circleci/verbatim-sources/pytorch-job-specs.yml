@@ -74,7 +74,7 @@ jobs:
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
             docker images --digests
-            docker save "${COMMIT_DOCKER_IMAGE}" | gzip -1 > << parameters.saved_docker_filename >>
+            time docker save "${COMMIT_DOCKER_IMAGE}" | gzip -1 > << parameters.saved_docker_filename >>
           fi
     - persist_to_workspace:
         root: .

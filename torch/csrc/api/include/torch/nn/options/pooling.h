@@ -62,10 +62,6 @@ struct MaxPoolOptions {
   /// a parameter that controls the stride of elements in the window
   TORCH_ARG(ExpandingArray<D>, dilation) = 1;
 
-  /// if true, will return the max indices along with the outputs. Useful
-  /// for `MaxUnpool1d` later
-  TORCH_ARG(bool, return_indices) = false;
-
   /// when True, will use `ceil` instead of `floor` to compute the output shape
   TORCH_ARG(bool, ceil_mode) = false;
 };

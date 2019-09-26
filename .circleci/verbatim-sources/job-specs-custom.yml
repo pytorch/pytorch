@@ -327,7 +327,7 @@
           output_image=$docker_image_libtorch_android_x86_32-gradle
           docker commit "$id_x86_32" ${output_image}
           docker images --digests
-          docker save "${output_image}" | gzip -1 > built_image_x86_32_gradle.tgz
+          time docker save "${output_image}" | gzip -1 > built_image_x86_32_gradle.tgz
     - store_artifacts:
         path: ~/workspace/build_android_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -372,7 +372,7 @@
           output_image=${docker_image_libtorch_android_x86_32_gradle}-publish-snapshot
           docker commit "$id_x86_32" ${output_image}
 #         docker images --digests
-#         docker save "${output_image}" | gzip -1 > built_image_publish_snapshot.tgz
+#         time docker save "${output_image}" | gzip -1 > built_image_publish_snapshot.tgz
 #   - persist_to_workspace:
 #       root: .
 #       paths: built_image_publish_snapshot.tgz
@@ -419,7 +419,7 @@
           output_image=${docker_image_libtorch_android_x86_32}-gradle
           docker commit "$id" ${output_image}
           docker images --digests
-          docker save "${output_image}" | gzip -1 > built_image_x86_32.tgz
+          time docker save "${output_image}" | gzip -1 > built_image_x86_32.tgz
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
