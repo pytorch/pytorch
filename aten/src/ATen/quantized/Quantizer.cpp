@@ -6,12 +6,14 @@
 #include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/core/Tensor.h>
-#include <third_party/gemmlowp/gemmlowp/fixedpoint/fixedpoint.h>
-#include <third_party/gemmlowp/gemmlowp/public/gemmlowp.h>
 #include <typeinfo>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>
+#else
+#ifdef __ARM_NEON__
+#include <arm_neon.h>
+#endif
 #endif
 
 namespace at {
@@ -201,14 +203,6 @@ void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, si
   }
 }
 
-#ifdef GEMMLOWP_NEON
-#define INT8_NEON_SIMD
-#endif
-
-#if defined(__SSE4_2__) && defined(__clang__)
-#include "NEON_2_SSE.h"
-#define INT8_NEON_SIMD
-#endif
 inline uint8_t Uint8Quantize(const float scale, const int32_t zero_point, const float value) {
   const int32_t qmin = std::numeric_limits<uint8_t>::min();
   const int32_t qmax = std::numeric_limits<uint8_t>::max();
@@ -218,16 +212,36 @@ inline uint8_t Uint8Quantize(const float scale, const int32_t zero_point, const 
   return static_cast<uint8_t>(r);
 }
 
+// Generic template defaults to naive quantize implementation
+template <typename T>
 void Int8Quantize(
     const float* in,
-    uint8_t* out,
+    Tensor qtensor,
+    const int64_t N,
+    const float Y_scale,
+    const int32_t Y_offset) {
+  auto out = qtensor.data_ptr<T>();
+  for (int i = 0; i < N; ++i) {
+    out[i] = quantize_val<T>(Y_scale, Y_offset, in[i]);
+  }
+}
+
+// Specialized implementation from caffe2::Int8Quantize.
+// There may be slight accuracy difference between this and implementation of quantize_val
+// TODO Update Int8Quantize implementation to follow quantize_val,
+// i.e. f = Round(value/scale + zero_point)
+// TODO Make Int8Quantize work for other datatypes too (int8, int32).
+template <>
+void Int8Quantize<c10::quint8>(
+    const float* in,
+    Tensor qtensor,
     const int64_t N,
     const float Y_scale,
     const int32_t Y_offset) {
   const float inv_scale = 1.0f / Y_scale;
   uint32_t i = 0;
-
-#ifdef INT8_NEON_SIMD
+  auto out = (uint8_t*)qtensor.data_ptr<c10::quint8>();
+#ifdef __ARM_NEON__
   const float32x4_t vinv_scale = vdupq_n_f32(inv_scale);
   // magic float and magic int to take care of rounding
   // int magic_round(float f): interpret_int32(f + 12582912.0f) - 0x4B400000
@@ -261,7 +275,7 @@ void Int8Quantize(
     vst1_u8(out, vout01234567);
     out += 8;
   }
-#endif
+#endif // __ARM_NEON__
   for (; i < N; ++i) {
     (*out++) = Uint8Quantize(Y_scale, Y_offset, (*in++));
   }
@@ -273,18 +287,18 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
+  TORCH_CHECK(rtensor.is_contiguous(), "Float tensor should be contiguous");
   const float* const rdata = rtensor.data_ptr<float>();
   auto qdata = qtensor.data_ptr<T>();
-  // If PYTORCH_QNNPACK is enabled, use caffe2 specialized Int8Quantize implementation
-#if defined(USE_PYTORCH_QNNPACK) && defined(INT8_NEON_SIMD)
+  // If QEngine is set to QNNPACK, use caffe2 specialized Int8Quantize implementation on ARM
+#if defined(__ARM_NEON__)
   const bool use_pytorch_qnnpack_arm = at::globalContext().qEngine() == at::QEngine::QNNPACK;
 #else
   const bool use_pytorch_qnnpack_arm = false;
 #endif
 
-  // Int8Quantize only works with uint8 type.
-  if (use_pytorch_qnnpack_arm && (sizeof(T) == sizeof(uint8_t))) {
-    Int8Quantize(rdata, (uint8_t *)(qdata), rtensor.numel(), scale, zero_point);
+  if (use_pytorch_qnnpack_arm) {
+    Int8Quantize<T>(rdata, qtensor, rtensor.numel(), scale, zero_point);
   }
   else {
     for (int i = 0; i < rtensor.numel(); ++i) {
