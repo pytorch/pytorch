@@ -104,7 +104,7 @@ struct SourceImporterImpl : public Resolver,
       const std::shared_ptr<CompilationUnit> cu,
       const std::vector<at::Tensor>* tensor_table,
       SourceLoader source_loader)
-      : cu_(cu), source_loader_(source_loader) {
+      : cu_(cu), source_loader_(std::move(source_loader)) {
     env_ = {
         // Constants present in the model. Used to resolve "CONSTANTS.n" to the
         // actual value
