@@ -38,7 +38,15 @@ def _get_valid_min_max(qparams):
     # make sure intermediate results are within the range of long
     min_value = max((long_min - zero_point) * scale, (long_min / scale + zero_point))
     max_value = min((long_max - zero_point) * scale, (long_max / scale + zero_point))
-    return min_value, max_value
+    return np.float32(min_value), np.float32(max_value)
+
+# This wrapper around `st.floats` checks the version of `hypothesis`, and if
+# it is too old, removes the `width` parameter (which was introduced)
+# in 3.67.0
+def _floats_wrapper(*args, **kwargs):
+    if 'width' in kwargs and hypothesis.version.__version_info__ < (3, 67, 0):
+        kwargs.pop('width')
+    return st.floats(*args, **kwargs)
 
 """Hypothesis filter to avoid overflows with quantized tensors.
 
@@ -60,7 +68,6 @@ def assume_not_overflowing(tensor, qparams):
     assume(tensor.min() >= min_value)
     assume(tensor.max() <= max_value)
     return True
-
 
 """Strategy for generating the quantization parameters.
 
@@ -102,7 +109,7 @@ def qparams(draw, dtypes=None, scale_min=None, scale_max=None,
         scale_min = torch.finfo(torch.float).eps
     if scale_max is None:
         scale_max = torch.finfo(torch.float).max
-    scale = draw(st.floats(min_value=scale_min, max_value=scale_max))
+    scale = draw(_floats_wrapper(min_value=scale_min, max_value=scale_max, width=32))
 
     return scale, zero_point, quantized_type
 
@@ -158,15 +165,15 @@ def tensor(draw, shapes=None, elements=None, qparams=None):
         _shape = draw(st.sampled_from(shapes))
     if qparams is None:
         if elements is None:
-            elements = st.floats(-1e6, 1e6, allow_nan=False)
+            elements = _floats_wrapper(-1e6, 1e6, allow_nan=False, width=32)
         X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
         assume(not (np.isnan(X).any() or np.isinf(X).any()))
         return X, None
     qparams = draw(qparams)
     if elements is None:
         min_value, max_value = _get_valid_min_max(qparams)
-        elements = st.floats(min_value, max_value, allow_infinity=False,
-                             allow_nan=False)
+        elements = _floats_wrapper(min_value, max_value, allow_infinity=False,
+                                   allow_nan=False, width=32)
     X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
     # Recompute the scale and zero_points according to the X statistics.
     scale, zp = _calculate_dynamic_qparams(X, qparams[2])

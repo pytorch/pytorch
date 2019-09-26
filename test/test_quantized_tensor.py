@@ -263,25 +263,29 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(q, q2)
 
     def test_qtensor_view(self):
-        scale, zero_point, dtype = 1.0, 2, torch.quint8
-        q = torch._empty_affine_quantized(1, 2, 3, scale=scale, zero_point=zero_point, dtype=dtype)
+        scale, zero_point, dtype = 1.0, 2, torch.uint8
+        q_int = torch.randint(0, 100, [1, 2, 3], dtype=dtype)
+        q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
         q2 = q.view(1, 3, 2)
         self.assertEqual(q.numel(), q2.numel())
         # testing -1
         self.assertEqual(q, q2.view(1, -1, 3))
 
-        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
-        c = a.view(1, 3, 2, 4)  # does not change tensor layout
+        c = a.view(1, 3, 2, 4)  # does not change tensor layout in memory
         self.assertEqual(b.size(), c.size())
         self.assertEqual(b.q_scale(), c.q_scale())
         self.assertEqual(b.q_zero_point(), c.q_zero_point())
-        # TODO: fix flaky test
-        # self.assertNotEqual(b.int_repr(), c.int_repr())
-
+        self.assertNotEqual(b.stride(), c.stride())
+        # size is the same but the underlying data is different
+        self.assertNotEqual(b.int_repr(), c.int_repr())
+        self.assertFalse(torch.equal(b, c))
 
         # a case can't view non-contiguos Tensor
-        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
         err_str = "view size is not compatible with input tensor's size and stride*"
         with self.assertRaisesRegex(RuntimeError, err_str):
@@ -291,28 +295,31 @@ class TestQuantizedTensor(TestCase):
 
 
     def test_qtensor_reshape(self):
-        scale, zero_point, dtype = 1.0, 2, torch.quint8
-        q = torch._empty_affine_quantized([3, 5], scale=scale, zero_point=zero_point, dtype=dtype)
+        scale, zero_point, dtype = 1.0, 2, torch.uint8
+        q_int = torch.randint(0, 100, [3, 5], dtype=dtype)
+        q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
         q2 = q.reshape([15])
         self.assertEqual(q.numel(), q2.numel())
         self.assertEqual(q2.size(), [15])
         # testing -1
         self.assertEqual(q, q2.reshape([3, -1]))
 
-        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
         c = a.reshape(1, 3, 2, 4)  # does not change tensor layout
         self.assertEqual(b.size(), c.size())
         self.assertEqual(b.q_scale(), c.q_scale())
         self.assertEqual(b.q_zero_point(), c.q_zero_point())
-        # TODO: fix flaky test
-        # self.assertNotEqual(b.int_repr(), c.int_repr())
+        self.assertNotEqual(b.stride(), c.stride())
+        self.assertNotEqual(b.int_repr(), c.int_repr())
+        self.assertFalse(torch.equal(b, c))
 
         # we can use reshape for non-contiguous Tensor
-        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
         c = b.reshape(1, 4, 2, 3)
-        self.assertEqual(b, c.reshape(1, 3, 2, 4))
 
     def test_qscheme_pickle(self):
 
