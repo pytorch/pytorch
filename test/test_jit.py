@@ -5963,7 +5963,7 @@ a")
         checkMath("isinf", 1, ret_type="bool")
         checkMath("ldexp", 2, is_float=False, ret_type="float", args_type="(float, int)",
                   vals=[(i, j) for i in float_vals for j in range(-10, 10)])
-        checkMath("pow", 2, is_float=False, ret_type="int")
+        checkMath("pow", 2, is_float=False, ret_type="float")
         checkMath("pow", 2, is_float=True, ret_type="float")
         if not PY2:
             checkMathWrap("floor", ret_type="int")
@@ -10736,7 +10736,7 @@ a")
                 for _ in range():
                     x += 1
                 return x
-        with self.assertRaisesRegex(RuntimeError, r'found float for argument'):
+        with self.assertRaisesRegex(RuntimeError, r'found float'):
             @torch.jit.script
             def range_non_float():
                 for i in range(.5):
