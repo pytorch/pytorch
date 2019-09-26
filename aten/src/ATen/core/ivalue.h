@@ -187,9 +187,6 @@ struct CAFFE2_API IValue final {
     return payload.as_double;
   }
 
-  IValue(ScalarType t):
-  IValue(static_cast<std::underlying_type<ScalarType>::type>(t)) {}
-
   // Future
   IValue(c10::intrusive_ptr<ivalue::Future> v);
   bool isFuture() const { return Tag::Future == tag; }
@@ -366,16 +363,22 @@ struct CAFFE2_API IValue final {
   }
 
   // ScalarType
+  IValue(ScalarType t)
+  : IValue(static_cast<std::underlying_type<ScalarType>::type>(t)) {}
   at::ScalarType toScalarType() const {
     return static_cast<at::ScalarType>(toInt());
   }
 
   // Layout
+  IValue(Layout l)
+  : IValue(static_cast<std::underlying_type<Layout>::type>(l)) {}
   at::Layout toLayout() const {
     return static_cast<at::Layout>(toInt());
   }
 
   // MemoryFormat
+  IValue(MemoryFormat m)
+  : IValue(static_cast<std::underlying_type<MemoryFormat>::type>(m)) {}
   at::MemoryFormat toMemoryFormat() const {
     return static_cast<at::MemoryFormat>(toInt());
   }

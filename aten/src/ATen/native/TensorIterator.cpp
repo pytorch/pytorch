@@ -125,7 +125,12 @@ static void maybe_promote_common_dtype(OperandInfo& op, ScalarType common_dtype)
   {
     op.dtype = common_dtype;
     op.original_tensor = op.tensor;
-    op.tensor = op.tensor.to(common_dtype);
+    if (!op.is_output) {
+      op.tensor = op.tensor.to(common_dtype);
+    } else {
+      op.tensor =
+          at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype));
+    }
     auto original_element_size = op.original_tensor.element_size();
     auto new_element_size = op.tensor.element_size();
 
@@ -446,27 +451,26 @@ int TensorIterator::num_reduce_dims() const {
   return count;
 }
 
-static inline loop2d_t loop_wrapper(int ntensor, const loop_t* loop) {
-  return [=](char** base, const int64_t* strides, int64_t size0, int64_t size1) {
-    auto data = PtrVector(base, base + ntensor);
-    const int64_t* outer_strides = &strides[ntensor];
+#define LOOP_WRAPPER(ntensor, loop) \
+  [=](char** base, const int64_t* strides, int64_t size0, int64_t size1) { \
+    auto data = PtrVector(base, base + ntensor);                          \
+    const int64_t* outer_strides = &strides[ntensor];                     \
+                                                                          \
+    for (int64_t i = 0; i < size1; i++) {                                 \
+      if (i > 0) {                                                        \
+        for (int arg = 0; arg < ntensor; arg++) {                         \
+          data[arg] += outer_strides[arg];                                \
+        }                                                                 \
+      }                                                                   \
+      loop(data.data(), strides, size0);                               \
+    }                                                                     \
+  }
 
-    for (int64_t i = 0; i < size1; i++) {
-      if (i > 0) {
-        for (int arg = 0; arg < ntensor; arg++) {
-          data[arg] += outer_strides[arg];
-        }
-      }
-      (*loop)(data.data(), strides, size0);
-    }
-  };
+void TensorIterator::for_each(loop_t loop) {
+  for_each(LOOP_WRAPPER(ntensors(), loop));
 }
 
-void TensorIterator::for_each(const loop_t& loop) {
-  for_each(loop_wrapper(ntensors(), &loop));
-}
-
-void TensorIterator::for_each(const loop2d_t& loop) {
+void TensorIterator::for_each(loop2d_t loop) {
   int64_t numel = this->numel();
   if (numel == 0) {
     return;
@@ -489,11 +493,11 @@ DimVector TensorIterator::get_strides() const {
   return strides;
 }
 
-void TensorIterator::serial_for_each(const loop_t& loop, Range range) const {
-  serial_for_each(loop_wrapper(ntensors(), &loop), range);
+void TensorIterator::serial_for_each(loop_t loop, Range range) const {
+  serial_for_each(LOOP_WRAPPER(ntensors(), loop), range);
 }
 
-void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
+void TensorIterator::serial_for_each(loop2d_t loop, Range range) const {
   if (range.size() == 0) {
     return;
   }
