@@ -154,15 +154,22 @@ class DynamicModuleAPITest(QuantizationTestCase):
         Z_dq2 = qlinear(X)
         self.assertEqual(Z_dq, Z_dq2)
 
-        # test serialization of module directly
-        b = io.BytesIO()
-        torch.save(qlinear, b)
-        b.seek(0)
-        loaded = torch.load(b)
-        # This check is disabled pending an issue in PyTorch serialization:
+        # The below check is meant to ensure that `torch.save` and `torch.load`
+        # serialization works, however it is currently broken by the following:
         # https://github.com/pytorch/pytorch/issues/24045
+        #
+        # Instead, we currently check that the proper exception is thrown on save.
+        # <start code>
+        # b = io.BytesIO()
+        # torch.save(qlinear, b)
+        # b.seek(0)
+        # loaded = torch.load(b)
         # self.assertEqual(qlinear.weight(), loaded.weight())
-        self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        # self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        # <end code>
+        with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
+            b = io.BytesIO()
+            torch.save(qlinear, b)
 
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X], [Z_ref])), check_save_load=True)
@@ -283,16 +290,23 @@ class ModuleAPITest(QuantizationTestCase):
         Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
-        # test serialization of module directly
-        b = io.BytesIO()
-        torch.save(qlinear, b)
-        b.seek(0)
-        loaded = torch.load(b)
-        # This check is disabled pending an issue in PyTorch serialization:
+        # The below check is meant to ensure that `torch.save` and `torch.load`
+        # serialization works, however it is currently broken by the following:
         # https://github.com/pytorch/pytorch/issues/24045
+        #
+        # Instead, we currently check that the proper exception is thrown on save.
+        # <start code>
+        # b = io.BytesIO()
+        # torch.save(qlinear, b)
+        # b.seek(0)
+        # loaded = torch.load(b)
         # self.assertEqual(qlinear.weight(), loaded.weight())
-        self.assertEqual(qlinear.scale, loaded.scale)
-        self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        # self.assertEqual(qlinear.scale, loaded.scale)
+        # self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        # <end code>
+        with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
+            b = io.BytesIO()
+            torch.save(qlinear, b)
 
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X_q], [Z_ref])), check_save_load=True)
@@ -463,14 +477,24 @@ class ModuleAPITest(QuantizationTestCase):
         loaded_result = loaded_conv_under_test(qX)
         self.assertEqual(loaded_result, result_reference)
 
-        b = io.BytesIO()
-        torch.save(conv_under_test, b)
-        b.seek(0)
-        loaded_conv = torch.load(b)
-
-        self.assertEqual(conv_under_test.bias(), loaded_conv.bias())
-        self.assertEqual(conv_under_test.scale, loaded_conv.scale)
-        self.assertEqual(conv_under_test.zero_point, loaded_conv.zero_point)
+        # The below check is meant to ensure that `torch.save` and `torch.load`
+        # serialization works, however it is currently broken by the following:
+        # https://github.com/pytorch/pytorch/issues/24045
+        #
+        # Instead, we currently check that the proper exception is thrown on save.
+        # <start code>
+        # b = io.BytesIO()
+        # torch.save(conv_under_test, b)
+        # b.seek(0)
+        # loaded_conv = torch.load(b)
+        #
+        # self.assertEqual(conv_under_test.bias(), loaded_conv.bias())
+        # self.assertEqual(conv_under_test.scale, loaded_conv.scale)
+        # self.assertEqual(conv_under_test.zero_point, loaded_conv.zero_point)
+        # <end code>
+        with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
+            b = io.BytesIO()
+            torch.save(conv_under_test, b)
 
         # JIT testing
         self.checkScriptable(conv_under_test, list(zip([qX], [result_reference])), check_save_load=True)
