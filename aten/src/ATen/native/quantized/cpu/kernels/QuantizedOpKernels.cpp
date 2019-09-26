@@ -571,7 +571,7 @@ void qavg_pool2d_nhwc_kernel(
               acc_int32 += val;
             }
           }
-          double acc_fp = acc_int32 * 1.0 - qx.q_zero_point();
+          double acc_fp = acc_int32 * 1.0;
           // clamp
           o_p[c] = at::quantize_val<scalar_t>(
                        1.0f / multiplier, qy.q_zero_point(), acc_fp)
