@@ -144,11 +144,11 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
-static ${return_type} ${api_name}(${type_method_formals}) ;
+${return_type} ${api_name}(${type_method_formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} VariableType::${api_name}(${type_method_formals}) {
+${return_type} ${api_name}(${type_method_formals}) {
   ${type_definition_body}
 }
 """)

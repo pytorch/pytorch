@@ -89,11 +89,11 @@ case ScalarType::${ScalarName}: {
 # In this case, it will be called for all backends, but can be overwritten on a
 # per backend basis.
 NATIVE_DISPATCH_DECLARATION = CodeTemplate("""\
-static ${return_type} ${api_name}(${type_method_formals});
+${return_type} ${api_name}(${type_method_formals});
 """)
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
-${return_type} TypeDefault::${api_name}(${type_method_formals}) {
+${return_type} ${api_name}(${type_method_formals}) {
 #ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
 #endif
@@ -103,7 +103,7 @@ ${return_type} TypeDefault::${api_name}(${type_method_formals}) {
 """)
 
 NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
-${return_type} ${Type}::${api_name}(${type_method_formals}) {
+${return_type} ${api_name}(${type_method_formals}) {
 #ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
 #endif
