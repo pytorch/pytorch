@@ -158,74 +158,54 @@ fi
 if [[ $BUILD_ENVIRONMENT == *caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04* ]]; then
   # removing http:// duplicate in favor of nvidia-ml.list
   # which is https:// version of the same repo
-#  sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list
-#  sudo apt-get -qq update
-#  sudo apt-get install -y --no-install-recommends python3
-#  export ANACONDA_VERSION=3
-#  sudo -E ./docker/caffe2/jenkins/common/install_anaconda.sh
-#  . /opt/conda/etc/profile.d/conda.sh
-#  export PATH=/opt/conda/bin:$PATH
-#  LIB_FOLDER="https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64"
-#  declare -a TRT_DEBS
-#  TRT_DEBS=("libnvinfer6_6.0.1-1+cuda10.1_amd64.deb"
-#    "libnvinfer-dev_6.0.1-1+cuda10.1_amd64.deb"
-#    "libnvinfer-plugin6_6.0.1-1+cuda10.1_amd64.deb"
-#    "libnvinfer-plugin-dev_6.0.1-1+cuda10.1_amd64.deb"
-#    "libnvonnxparsers6_6.0.1-1+cuda10.1_amd64.deb"
-#    "libnvonnxparsers-dev_6.0.1-1+cuda10.1_amd64.deb"
-#    "libnvparsers6_6.0.1-1+cuda10.1_amd64.deb"
-#    "libnvparsers-dev_6.0.1-1+cuda10.1_amd64.deb"
-#    "python3-libnvinfer-dev_6.0.1-1+cuda10.1_amd64.deb"
-#    "python3-libnvinfer_6.0.1-1+cuda10.1_amd64.deb")
-#
-#
-#  for l in "${TRT_DEBS[@]}"
-#  do
-#     curl -L -k -o ./$l $LIB_FOLDER/$l
-#  done
-#  sudo dpkg -i *.deb
-#  for l in "${TRT_DEBS[@]}"
-#  do
-#     rm "$l"
-#  done
+  sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list
+  sudo apt-get -qq update
+  sudo apt-get install -y --no-install-recommends python3
+  export ANACONDA_VERSION=3
+  sudo -E ./docker/caffe2/jenkins/common/install_anaconda.sh
+  . /opt/conda/etc/profile.d/conda.sh
+  export PATH=/opt/conda/bin:$PATH
 
-  curl -L -k -o ./cmake-3.14.6-Linux-x86_64.tar.gz https://github.com/Kitware/CMake/releases/download/v3.14.6/cmake-3.14.6-Linux-x86_64.tar.gz
-  tar -xzf cmake-3.14.6-Linux-x86_64.tar.gz
-  rm cmake-3.14.6-Linux-x86_64.tar.gz
-  export PATH=$(pwd)/cmake-3.14.6-Linux-x86_64/bin/:$PATH
+  LIB_FOLDER="https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64"
+  declare -a TRT_DEBS
+  TRT_DEBS=("libnvinfer6_6.0.1-1+cuda10.1_amd64.deb"
+    "libnvinfer-dev_6.0.1-1+cuda10.1_amd64.deb"
+    "libnvinfer-plugin6_6.0.1-1+cuda10.1_amd64.deb"
+    "libnvinfer-plugin-dev_6.0.1-1+cuda10.1_amd64.deb"
+    "libnvonnxparsers6_6.0.1-1+cuda10.1_amd64.deb"
+    "libnvonnxparsers-dev_6.0.1-1+cuda10.1_amd64.deb"
+    "libnvparsers6_6.0.1-1+cuda10.1_amd64.deb"
+    "libnvparsers-dev_6.0.1-1+cuda10.1_amd64.deb"
+    "python3-libnvinfer-dev_6.0.1-1+cuda10.1_amd64.deb"
+    "python3-libnvinfer_6.0.1-1+cuda10.1_amd64.deb")
 
-  curl -L -k -o TRT6.tar.gz https://github.com/NVIDIA/TensorRT/archive/v6.0.1.tar.gz
-  tar -xzf TRT6.tar.gz
-  cd TensorRT-6.0.1/parsers/onnx/
-  git clone --depth 1 --branch release/6.0 https://github.com/onnx/onnx-tensorrt.git .
+  for l in "${TRT_DEBS[@]}"
+  do
+     curl -L -k -o ./$l $LIB_FOLDER/$l
+  done
+  sudo dpkg -i *.deb
+  for l in "${TRT_DEBS[@]}"
+  do
+     rm "$l"
+  done
+
+  # building OSS release of ONNX parser on top of just installed
+  git clone --depth 1 --branch release/6.0 https://github.com/onnx/onnx-tensorrt.git
+  cd onnx-tensorrt/
   git submodule update --init --recursive
   cd third_party/onnx
   git checkout v1.5.0
-  cd ../../../../
-  export TRT_LIB_DIR=/opt/trt6/lib
-  export TRT_BIN_DIR=/opt/trt6/bin
-  mkdir -p build && cd build
-  cmake .. -DTRT_LIB_DIR=$TRT_LIB_DIR/lib -DTRT_BIN_DIR=TRT_BIN_DIR -DCUDA_VERISON=10.1 -DBUILD_PARSERS=ON
-  make -j$(nproc)
-  sudo make install
   cd ../../
-
-  # building OSS release of ONNX parser on top of just installed
-#  git clone --depth 1 --branch release/6.0 https://github.com/onnx/onnx-tensorrt.git
-#  cd onnx-tensorrt/
-#  git submodule update --init --recursive
-#  cd third_party/onnx
-#  git checkout v1.5.0
-#  cd ../../
-#  mkdir build
-#  cd build
-#  cmake ..
-#  CPLUS_INCLUDE_PATH=/usr/local/cuda/include make -j$(nproc)
-#  sudo make install
-#  cd ../../
-#  rm -rf onnx-tensorrt/
-
+  mkdir build
+  cd build
+  cmake ..
+  CPLUS_INCLUDE_PATH=/usr/local/cuda/include make -j$(nproc)
+  sudo cp libnvonnxparser.so.6.0.1 /usr/lib/x86_64-linux-gnu
+  cd ../../
+  rm -rf onnx-tensorrt/
   build_args+=("USE_TENSORRT=ON")
+else
+  export SKIP_TENSORRT_TEST=1
 fi
 
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then

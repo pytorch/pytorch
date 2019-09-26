@@ -30,6 +30,8 @@ import pycuda.autoinit
 import tensorrt as trt
 TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
 
+no_trt_skip = unittest.skipIf(os.environ.get('SKIP_TENSORRT_TEST', 1), 'No TensorRT support')
+
 def allocate_buffers(engine):
     h_input = cuda.pagelocked_empty(trt.volume(engine.get_binding_shape(0)),
                                     dtype=trt.nptype(trt.float32))
@@ -180,64 +182,87 @@ class Test_PT_ONNX_TRT(unittest.TestCase):
                         err_count = err_count + 1
                 self.assertLessEqual(err_count, 1, "Too many recognition errors")
 
+    @no_trt_skip
     def test_alexnet(self):
         self._test_model("alexnet", (3, 227, 227))
 
+    @no_trt_skip
     def test_resnet18(self):
         self._test_model("resnet18")
+    @no_trt_skip
     def test_resnet34(self):
         self._test_model("resnet34")
+    @no_trt_skip
     def test_resnet50(self):
         self._test_model("resnet50")
+    @no_trt_skip
     def test_resnet101(self):
         self._test_model("resnet101")
     @unittest.skip("Takes 2m")
     def test_resnet152(self):
         self._test_model("resnet152")
 
+    @no_trt_skip
     def test_resnet50_2(self):
         self._test_model("resnet50_2")
     @unittest.skip("Takes 2m")
     def test_resnet101_2(self):
         self._test_model("resnet101_2")
 
+    @no_trt_skip
     def test_squezenet1_0(self):
         self._test_model("squezenet1_0")
+    @no_trt_skip
     def test_squezenet1_1(self):
         self._test_model("squezenet1_1")
 
+    @no_trt_skip
     def test_googlenet(self):
         self._test_model("googlenet")
+    @no_trt_skip
     def test_inception_v3(self):
         self._test_model("inception_v3")
 
+    @no_trt_skip
     def test_mnasnet0_5(self):
         self._test_model("mnasnet0_5", normalization_hint = 1)
+    @no_trt_skip
     def test_mnasnet1_0(self):
         self._test_model("mnasnet1_0", normalization_hint = 1)
 
+    @no_trt_skip
     def test_mobilenet_v2(self):
         self._test_model("mobilenet_v2", normalization_hint = 1)
 
+    @no_trt_skip
     def test_shufflenet_v2_x0_5(self):
         self._test_model("shufflenet_v2_x0_5")
+    @no_trt_skip
     def test_shufflenet_v2_x1_0(self):
         self._test_model("shufflenet_v2_x1_0")
 
+    @no_trt_skip
     def test_vgg11(self):
         self._test_model("vgg11")
+    @no_trt_skip
     def test_vgg11_bn(self):
         self._test_model("vgg11_bn")
+    @no_trt_skip
     def test_vgg13(self):
         self._test_model("vgg13")
+    @no_trt_skip
     def test_vgg13_bn(self):
         self._test_model("vgg13_bn")
+    @no_trt_skip
     def test_vgg16(self):
         self._test_model("vgg16")
+    @no_trt_skip
     def test_vgg16_bn(self):
         self._test_model("vgg16_bn")
+    @no_trt_skip
     def test_vgg19(self):
         self._test_model("vgg19")
+    @no_trt_skip
     def test_vgg19_bn(self):
         self._test_model("vgg19_bn")
 

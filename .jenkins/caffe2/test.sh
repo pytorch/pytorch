@@ -92,7 +92,7 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
 
   # On ROCm, RCCL (distributed) development isn't complete.
   # https://github.com/ROCmSoftwarePlatform/rccl
-  ignore_tests+=( --ignore $caffe2_pypath/python/data_parallel_model_test.py )
+  rocm_ignore_test+=("--ignore $caffe2_pypath/python/data_parallel_model_test.py")
 fi
 
 ##############################
@@ -100,8 +100,6 @@ fi
 ##############################
 if [[ $BUILD_ENVIRONMENT == *caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04* ]]; then
   pip install -q --user torchvision
-else
-  ignore_tests+=( --ignore $caffe2_pypath/python/trt/test_pt_onnx_trt.py )
 fi
 
 # NB: Warnings are disabled because they make it harder to see what
@@ -123,7 +121,7 @@ pip install --user pytest-sugar
   --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
   --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
   --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
-  "${ignore_tests[@]}" \
+  ${rocm_ignore_test[@]} \
   "$caffe2_pypath/python" \
   "${EXTRA_TESTS[@]}"
 
