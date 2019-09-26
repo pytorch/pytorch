@@ -8,7 +8,7 @@
 #include <ATen/core/OpsAlreadyMovedToC10.h>
 #include <ATen/core/Variadic.h>
 #include <ATen/core/TensorBody.h>
-#include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 #include <c10/util/C++17.h>
 #include <memory>
 #include <mutex>
