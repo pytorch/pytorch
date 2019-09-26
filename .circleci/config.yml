@@ -1994,19 +1994,19 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:315"
           resource_class: gpu.medium
       - caffe2_linux_build:
-          name: caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
+          name: caffe2_py3_5_cuda10_1_cudnn7_ubuntu16_04_build
           requires:
             - setup
-          build_environment: "caffe2-py2-cuda9.1-cudnn7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.1-cudnn7-ubuntu16.04:315"
+          build_environment: "caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.5-cuda10.1-cudnn7-ubuntu16.04:315"
       - caffe2_linux_test:
-          name: caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_test
+          name: caffe2_py3_5_cuda10_1_cudnn7_ubuntu16_04_test
           requires:
             - setup
-            - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
-          build_environment: "caffe2-py2-cuda9.1-cudnn7-ubuntu16.04-test"
+            - caffe2_py3_5_cuda10_1_cudnn7_ubuntu16_04_build
+          build_environment: "caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04-test"
           use_cuda_docker_runtime: "1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.1-cudnn7-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.5-cuda10.1-cudnn7-ubuntu16.04:315"
           resource_class: gpu.medium
       - caffe2_linux_build:
           name: caffe2_py2_mkl_ubuntu16_04_build
