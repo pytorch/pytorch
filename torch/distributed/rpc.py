@@ -5,7 +5,7 @@ from . import init_rref_context
 from . import ProcessGroupAgent
 from . import WorkerId
 from .internal_rpc_utils import serialize, PythonUDF
-from .rpc_backend_handler import is_backend_registered, registered_init_rpc
+from .rpc_init_handler_registry import is_backend_registered, rpc_init
 
 import sys
 import torch
@@ -55,7 +55,6 @@ class RpcBackend(Enum):
 # TODO: add a context manager to wrap _init_rpc and join_rpc
 def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
               self_name=None,
-              self_rank=-1,
               init_method=None,
               num_send_recv_threads=4):
     if sys.version_info < (3, 0):
@@ -77,10 +76,11 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
         _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
         init_rref_context(_agent)
     elif is_backend_registered(backend):
-        _agent = registered_init_rpc(backend,
-                                     self_rank=self_rank,
-                                     self_name=self_name,
-                                     init_method=init_method)
+        _agent = rpc_init(
+            backend,
+            self_name=self_name,
+            init_method=init_method,
+        )
         init_rref_context(_agent)
     else:
         raise RuntimeError("Unrecognized RPC backend ", backend)
