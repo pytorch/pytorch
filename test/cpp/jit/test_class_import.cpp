@@ -41,10 +41,13 @@ static void import_libs(
     const std::string& class_name,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& tensor_table) {
-  SourceImporter si(cu, &tensor_table, [&](const std::string& name) {
-    ASSERT_TRUE(name == "__torch__");
-    return src;
-  });
+  SourceImporter si(
+      cu,
+      &tensor_table,
+      [&](const std::string& name) -> std::shared_ptr<Source> {
+        ASSERT_TRUE(name == "__torch__");
+        return src;
+      });
   si.loadNamedType(QualifiedName(class_name));
 }
 
