@@ -94,26 +94,6 @@ Tensor gather_cpu(const Tensor & self, int64_t dim, const Tensor & index, bool s
   return legacy::cpu::_th_gather(self, dim, index);
 }
 
-Tensor & lt_out_cpu(Tensor & result, const Tensor & self, const Tensor & other) {
-  if (result.dtype() == at::ScalarType::Byte) {
-    AT_WARN("torch.lt received 'out' parameter with dtype torch.uint8, this behavior is now deprecated," \
-            "please use 'out' parameter with dtype torch.bool instead.");
-    return legacy::cpu::_th_lt_byte_out(result, self, other);
-  } else {
-    return legacy::cpu::_th_lt_out(result, self, other);
-  }
-}
-
-Tensor & lt_scalar_out_cpu(Tensor & result, const Tensor & self, const Scalar value) {
-  if (result.dtype() == at::ScalarType::Byte) {
-    AT_WARN("torch.lt received 'out' parameter with dtype torch.uint8, this behavior is now deprecated," \
-            "please use 'out' parameter with dtype torch.bool instead.");
-    return legacy::cpu::_th_lt_byte_out(result, self, value);
-  } else {
-    return legacy::cpu::_th_lt_out(result, self, value);
-  }
-}
-
 Tensor & le_out_cpu(Tensor & result, const Tensor & self, const Tensor & other) {
   if (result.dtype() == at::ScalarType::Byte) {
     AT_WARN("torch.le received 'out' parameter with dtype torch.uint8, this behavior is now deprecated," \

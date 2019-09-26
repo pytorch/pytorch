@@ -156,6 +156,8 @@ struct CAFFE2_API TensorIterator {
 
   static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b,
     bool check_mem_overlap = false);
+  static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b,
+    bool check_mem_overlap = false);
   static TensorIterator unary_op(Tensor& out, const Tensor& a,
     bool check_mem_overlap = false);
   static TensorIterator nullary_op(Tensor& out);

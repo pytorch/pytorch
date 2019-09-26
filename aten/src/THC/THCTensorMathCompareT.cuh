@@ -9,13 +9,6 @@
 #include <THC/THCReduce.cuh>
 
 template <typename T, typename TOut>
-struct TensorLTOp {
-  __device__ inline void operator()(TOut* out, T* a, T* b) {
-    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::lt(*a, *b));
-  }
-};
-
-template <typename T, typename TOut>
 struct TensorGTOp {
   __device__ inline void operator()(TOut* out, T* a, T* b) {
     *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::gt(*a, *b));

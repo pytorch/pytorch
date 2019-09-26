@@ -145,7 +145,6 @@ static void maybe_promote_common_dtype(OperandInfo& op, ScalarType common_dtype)
 void TensorIterator::compute_types() {
   bool missing_dtypes = false;
   bool missing_output_dtypes = false;
-  bool has_read_write_op = false;
   ScalarType common_dtype = dtype();
   for (auto& op : operands_) {
     if (!op.tensor.defined() && !op.is_type_defined()) {
@@ -154,14 +153,10 @@ void TensorIterator::compute_types() {
         missing_output_dtypes = true;
       }
     }
-    if (op.is_read_write) {
-      has_read_write_op = true;
-    }
   }
 
   if (compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_INPUTS) {
     TORCH_CHECK(!missing_output_dtypes, "unable to compute and promote common dtype based only on inputs if there are missing dtypes for outputs");
-    TORCH_CHECK(!has_read_write_op, "unable to compute and promote common dtype based only on inputs if input is same as output");
   }
 
   bool compute_common_dtype = (compute_common_dtype_strategy_ != CommonDTypeStrategy::COMPUTE_NONE);
@@ -607,6 +602,19 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
   iter.add_input(a);
   iter.add_input(b);
   iter.allow_cpu_scalars_ = true;
+  iter.build();
+  return iter;
+}
+
+TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
+    const Tensor& b, bool check_mem_overlap) {
+  auto iter = TensorIterator();
+  iter.set_check_mem_overlap(check_mem_overlap);
+  iter.add_output(out);
+  iter.add_input(a);
+  iter.add_input(b);
+  iter.allow_cpu_scalars_ = true;
+  iter.compute_common_dtype_only_for_inputs();
   iter.build();
   return iter;
 }

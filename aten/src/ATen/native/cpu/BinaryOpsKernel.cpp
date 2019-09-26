@@ -112,6 +112,23 @@ void max_kernel(TensorIterator& iter) {
         return a.max(b);
       });
   });
+
+void lt_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "lt_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> bool {
+         return a < b;
+       });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "lt_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> scalar_t {
+         return a < b;
+       });
+    });
+  }
 }
 
 } // anonymous namespace
@@ -124,5 +141,6 @@ REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
 REGISTER_DISPATCH(max_stub, &max_kernel);
+REGISTER_DISPATCH(lt_stub, &lt_kernel);
 
 }} // namespace at::native
