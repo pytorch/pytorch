@@ -3,7 +3,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import sys
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
-from common_distributed import MultiProcessTestCase
 from functools import wraps
 import six
 import unittest
@@ -23,7 +22,7 @@ def dist_init(func):
     @wraps(func)
     def wrapper(self):
         self.worker_id = self.rank
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(backend='gloo', rank=self.rank,
                                 world_size=self.world_size, store=store)
         dist.init_model_parallel('worker%d' % self.rank)
@@ -34,7 +33,7 @@ def dist_init(func):
 
 @unittest.skipIf(not six.PY3, "Pytorch distributed autograd package "
                  "does not support python2")
-class TestDistAutograd(MultiProcessTestCase):
+class TestDistAutograd(object):
 
     @property
     def world_size(self):
@@ -110,7 +109,3 @@ class TestDistAutograd(MultiProcessTestCase):
                     self.assertEqual(tensors[i], next_funcs[i][0].variable)
                 else:
                     self.assertIsNone(next_funcs[i][0])
-
-
-if __name__ == '__main__':
-    unittest.main()
