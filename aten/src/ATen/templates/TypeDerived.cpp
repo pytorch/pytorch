@@ -42,10 +42,17 @@ Tensor * ${Type}::add(Tensor & a, Tensor & b) {
 }
 */
 
+namespace ${Type} {
+namespace {
 ${type_derived_method_definitions}
+}
+}  // namespace ${Type}
 
 #ifndef USE_STATIC_DISPATCH
+namespace {
 static auto registerer = torch::RegisterOperators()
   ${function_registrations};
+}
 #endif
+
 }
