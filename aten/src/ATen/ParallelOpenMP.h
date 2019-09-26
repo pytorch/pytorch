@@ -28,7 +28,9 @@ inline void parallel_for(
   // choose number of tasks based on grain size and number of threads
   int64_t num_threads = omp_in_parallel() ? 1 : omp_get_max_threads();
   const int64_t num_iter = end - begin;
-  num_threads = std::min(num_threads, divup(num_iter, grain_size));
+  if (grain_size > 0) {
+    num_threads = std::min(num_threads, divup(num_iter, grain_size));
+  }
   const int64_t chunk_size = divup(num_iter, num_threads);
 
 #pragma omp parallel num_threads(num_threads)
