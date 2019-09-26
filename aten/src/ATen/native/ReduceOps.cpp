@@ -159,7 +159,16 @@ static TensorIterator make_reduction(
 }
 
 Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  return at::_cumsum(integer_upcast(self, dtype), dim);
+  auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    return at::_cumsum(integer_upcast(self, dtype), dim);
+  }();
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+#endif
+  return result;
 }
 
 Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
@@ -171,11 +180,29 @@ Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optiona
       " and ",
       toString(dtype.value()),
       ".");
-  return at::_cumsum_out(result, self.toType(result.scalar_type()), dim);
+  {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    at::_cumsum_out(result, self.toType(result.scalar_type()), dim);
+  }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+#endif
+  return result;
 }
 
 Tensor cumprod(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  return at::_cumprod(integer_upcast(self, dtype), dim);
+  auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    return at::_cumprod(integer_upcast(self, dtype), dim);
+  }();
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+#endif
+  return result;
 }
 
 Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
@@ -187,7 +214,16 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
       " and ",
       toString(dtype.value()),
       ".");
-  return at::_cumprod_out(result, self.toType(result.scalar_type()), dim);
+  {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    at::_cumprod_out(result, self.toType(result.scalar_type()), dim);
+  }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+#endif
+  return result;
 }
 
 
@@ -741,16 +777,16 @@ Tensor& all_out(Tensor& result, const Tensor &self, Dimname dim, bool keepdim) {
   reportNYIDimnameOverload("all");
 }
 Tensor cumsum(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
-  reportNYIDimnameOverload("cumsum");
+  return at::cumsum(self, dimname_to_position(self, dim), dtype);
 }
 Tensor& cumsum_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
-  reportNYIDimnameOverload("cumsum");
+  return at::cumsum_out(result, self, dimname_to_position(self, dim), dtype);
 }
 Tensor cumprod(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
-  reportNYIDimnameOverload("cumprod");
+  return at::cumprod(self, dimname_to_position(self, dim), dtype);
 }
 Tensor& cumprod_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
-  reportNYIDimnameOverload("cumprod");
+  return at::cumprod_out(result, self, dimname_to_position(self, dim), dtype);
 }
 
 #endif

@@ -303,6 +303,9 @@ set of reviewers.
 
 ### `use_c10_dispatcher`
 
+Note: this functionality is temporary disabled because of code size bloat,
+annotations are ignored.
+
 ```
 use_c10_dispatcher: 'no'
 use_c10_dispatcher: 'unboxed_only'

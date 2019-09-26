@@ -415,6 +415,10 @@ def run(paths):
                 declaration['supports_named_tensor'] = func.get('supports_named_tensor', False)
                 declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', 'no')
                 assert declaration['use_c10_dispatcher'] in ['no', 'unboxed_only', 'full']
+                # TODO: remove this override once code size issues are fixed (see
+                # https://github.com/pytorch/pytorch/pull/26821 for more context)
+                declaration['use_c10_dispatcher'] = 'no'
+
                 declaration['category_override'] = func.get('category_override', '')
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])

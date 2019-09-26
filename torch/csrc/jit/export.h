@@ -46,12 +46,14 @@ TORCH_API std::string pretty_print_onnx(
 TORCH_API void ExportModule(
     const script::Module& module,
     std::ostream& out,
-    const script::ExtraFilesMap& metadata = script::ExtraFilesMap());
+    const script::ExtraFilesMap& metadata = script::ExtraFilesMap(),
+    bool bytecode_format = false);
 
 TORCH_API void ExportModule(
     const script::Module& module,
     const std::string& filename,
-    const script::ExtraFilesMap& metadata = script::ExtraFilesMap());
+    const script::ExtraFilesMap& metadata = script::ExtraFilesMap(),
+    bool bytecode_format = false);
 
 // Surrounding system can install an additional hook to produce extra files
 // with metadata based on environment every time a module is serialized.
