@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/variant.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/enum.h>
 #include <torch/types.h>
@@ -8,10 +9,26 @@ namespace torch {
 namespace nn {
 namespace init {
 
+using Nonlinearity = c10::variant<
+  enumtype::torch::kLinear,
+  enumtype::torch::kConv1D,
+  enumtype::torch::kConv2D,
+  enumtype::torch::kConv3D,
+  enumtype::torch::kConvTranspose1D,
+  enumtype::torch::kConvTranspose2D,
+  enumtype::torch::kConvTranspose3D,
+  enumtype::torch::kSigmoid,
+  enumtype::torch::kTanh,
+  enumtype::torch::kReLU,
+  enumtype::torch::kLeakyReLU
+>;
+
+using FanMode = c10::variant<
+  enumtype::torch::kFanIn,
+  enumtype::torch::kFanOut
+>;
+
 /// Return the recommended gain value for the given nonlinearity function.
-///
-/// NOTE: Please see `torch/enum.h` for the range of acceptable values for
-/// `Nonlinearity` type.
 TORCH_API double calculate_gain(Nonlinearity nonlinearity, double param = 0.01);
 
 /// Fills the given `tensor` with the provided `value` in-place, and returns it.
@@ -62,9 +79,6 @@ TORCH_API Tensor uniform_(Tensor tensor, double low = 0, double high = 1);
 /// performance on ImageNet classification" - He, K. et al. (2015), using a
 /// normal distribution. Also known as He initialization.
 /// No gradient will be recorded for this operation.
-///
-/// NOTE: Please see `torch/enum.h` for the range of acceptable values
-/// for `FanMode` type and `Nonlinearity` type.
 TORCH_API Tensor kaiming_normal_(
     Tensor tensor,
     double a = 0,
@@ -76,9 +90,6 @@ TORCH_API Tensor kaiming_normal_(
 /// performance on ImageNet classification" - He, K. et al. (2015), using a
 /// uniform distribution. Also known as He initialization.
 /// No gradient will be recorded for this operation.
-///
-/// NOTE: Please see `torch/enum.h` for the range of acceptable values
-/// for `FanMode` type and `Nonlinearity` type.
 TORCH_API Tensor kaiming_uniform_(
     Tensor tensor,
     double a = 0,
