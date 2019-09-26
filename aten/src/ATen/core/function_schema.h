@@ -133,22 +133,16 @@ inline bool operator==(const Argument& lhs, const Argument& rhs) {
 bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs);
 
 struct FunctionSchema {
-  template<class String1, class String2, class ArgumentVector1, class ArgumentVector2,
-      typename = guts::enable_if_t<
-          (std::is_same<guts::decay_t<String1>, std::string>::value || std::is_same<guts::decay_t<String1>, const char*>::value) &&
-          (std::is_same<guts::decay_t<String2>, std::string>::value || std::is_same<guts::decay_t<String1>, const char*>::value) &&
-          std::is_same<guts::decay_t<ArgumentVector1>, std::vector<Argument>>::value &&
-          std::is_same<guts::decay_t<ArgumentVector2>, std::vector<Argument>>::value>>
   FunctionSchema(
-      String1&& name,
-      String2&& overload_name,
-      ArgumentVector1&& arguments,
-      ArgumentVector2&& returns,
+      std::string name,
+      std::string overload_name,
+      std::vector<Argument> arguments,
+      std::vector<Argument> returns,
       bool is_vararg = false,
       bool is_varret = false)
-      : name_({std::forward<String1>(name), std::forward<String2>(overload_name)}),
-        arguments_(std::forward<ArgumentVector1>(arguments)),
-        returns_(std::forward<ArgumentVector2>(returns)),
+      : name_({std::move(name), std::move(overload_name)}),
+        arguments_(std::move(arguments)),
+        returns_(std::move(returns)),
         is_vararg_(is_vararg),
         is_varret_(is_varret) {}
 

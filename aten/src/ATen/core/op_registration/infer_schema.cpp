@@ -2,6 +2,11 @@
 #include <sstream>
 
 namespace c10 {
+namespace detail {
+C10_EXPORT FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, std::vector<Argument>&& arguments, std::vector<Argument>&& returns) {
+  return FunctionSchema(std::move(name), std::move(overload_name), std::move(arguments), std::move(returns));
+}
+}
 
 C10_EXPORT c10::optional<std::string> findSchemaDifferences(const FunctionSchema& lhs, const FunctionSchema& rhs) {
   if (lhs.arguments().size() != rhs.arguments().size()) {
