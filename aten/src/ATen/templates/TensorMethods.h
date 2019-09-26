@@ -12,6 +12,7 @@
 #include <ATen/core/Variadic.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/EnableNamedTensor.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
