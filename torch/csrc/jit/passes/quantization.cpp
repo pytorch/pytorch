@@ -951,6 +951,63 @@ void FoldPrepackedWeightIntoModule(
           "_packed_linear_weight_bias",
           wrapper
       );
+
+      // Replace GetAttr on %self with PackedParams module
+      auto w_val = match_vmap.at(vmap.at("w"));
+      auto b_val = match_vmap.at(vmap.at("b"));
+      auto w_quant_val = match_vmap.at(vmap.at("w_quant"));
+
+      // m = self._packed_linear_weight_bias
+      Node* packed_params_module = graph->create(prim::GetAttr);
+      packed_params_module->addInput(graph->inputs()[0]);
+      packed_params_module->s_(attr::name, "_packed_linear_weight_bias");
+      packed_params_module->output()->setDebugName("m");
+      packed_params_module->output()->setType(wrapper.type());
+      packed_params_module->insertAfter(w_quant_val->node());
+
+      // _packed_params = m._packed_params
+      Node* packed_params = graph->create(prim::GetAttr);
+      packed_params->addInput(packed_params_module->output());
+      packed_params->s_(attr::name, "_packed_params");
+      packed_params->output()->setDebugName("_packed_params");
+      packed_params->insertAfter(packed_params_module);
+
+      // weight_bias = m._weight_bias
+      Node* unpack_node = graph->create(prim::CallMethod);
+      unpack_node->s_(attr::name, "_weight_bias");
+      unpack_node->addInput(packed_params_module->output());
+      unpack_node->output()->setDebugName("weight_bias");
+      unpack_node->output()->setType(TupleType::create(std::vector<TypePtr>({TensorType::get(), OptionalType::create(TensorType::get())})));
+      unpack_node->insertAfter(packed_params);
+
+      WithInsertPoint ins(unpack_node);
+      Value* index_zero = graph->insertConstant(IValue(0));
+      Value* index_one = graph->insertConstant(IValue(1));
+      // weight = weight_bias[0]
+      Node* weight_node = graph->create(prim::TupleIndex);
+      weight_node->addInput(unpack_node->output());
+      weight_node->addInput(index_zero);
+      weight_node->insertAfter(unpack_node);
+      w_quant_val->replaceAllUsesWith(weight_node->output());
+
+      // bias = weight_bias[1]
+      Node* bias_node = graph->create(prim::TupleIndex);
+      bias_node->addInput(unpack_node->output());
+      bias_node->addInput(index_one);
+      bias_node->insertAfter(weight_node);
+      b_val->replaceAllUsesWith(bias_node->output());
+
+      // Delete nodes
+      std::vector<Node*> nodes_to_delete;
+      nodes_to_delete.push_back(w_val->node());
+      nodes_to_delete.push_back(b_val->node());
+      nodes_to_delete.push_back(w_quant_val->node());
+      for (auto n : nodes_to_delete) {
+        n->removeAllInputs();
+      }
+      for (auto n : nodes_to_delete) {
+        n->destroy();
+      }
     }
   }
 }

@@ -64,8 +64,9 @@ graph(%a_quant, %w_quant, %r_scale, %r_zero_point, %r_dtype):
         return (%r))";
 
 static std::string linear_with_quant = R"(
-graph(%a_quant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
-        %a_dequant = aten::dequantize(%a_quant)
+graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+        %w = prim::GetAttr[name="weight"](%self)
+        %b = prim::GetAttr[name="bias"](%self)
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
         %w_dequant = aten::dequantize(%w_quant)
         %linear = prim::Constant[name="linear"]()
