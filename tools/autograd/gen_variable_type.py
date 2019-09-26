@@ -170,7 +170,7 @@ UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .kernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .kernel<${return_type} (${formal_types})>(TensorTypeId::VariableTensorId, &VariableType::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
