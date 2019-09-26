@@ -365,7 +365,7 @@ jobs:
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
             docker images --digests
-            docker save "${COMMIT_DOCKER_IMAGE}" | gzip -1 > << parameters.saved_docker_filename >>
+            time docker save "${COMMIT_DOCKER_IMAGE}" | gzip -1 > << parameters.saved_docker_filename >>
           fi
     - persist_to_workspace:
         root: .
@@ -468,7 +468,7 @@ jobs:
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
             docker images --digests
-            docker save "${COMMIT_DOCKER_IMAGE}" | gzip -1 > built_image.tgz
+            time docker save "${COMMIT_DOCKER_IMAGE}" | gzip -1 > built_image.tgz
           else
             # Shut up CircleCI about missing image for BUILD_ONLY jobs
             touch built_image.tgz
@@ -1242,7 +1242,7 @@ jobs:
           output_image=$docker_image_libtorch_android_x86_32-gradle
           docker commit "$id_x86_32" ${output_image}
           docker images --digests
-          docker save "${output_image}" | gzip -1 > built_image_x86_32_gradle.tgz
+          time docker save "${output_image}" | gzip -1 > built_image_x86_32_gradle.tgz
     - store_artifacts:
         path: ~/workspace/build_android_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -1287,7 +1287,7 @@ jobs:
           output_image=${docker_image_libtorch_android_x86_32_gradle}-publish-snapshot
           docker commit "$id_x86_32" ${output_image}
 #         docker images --digests
-#         docker save "${output_image}" | gzip -1 > built_image_publish_snapshot.tgz
+#         time docker save "${output_image}" | gzip -1 > built_image_publish_snapshot.tgz
 #   - persist_to_workspace:
 #       root: .
 #       paths: built_image_publish_snapshot.tgz
@@ -1334,7 +1334,7 @@ jobs:
           output_image=${docker_image_libtorch_android_x86_32}-gradle
           docker commit "$id" ${output_image}
           docker images --digests
-          docker save "${output_image}" | gzip -1 > built_image_x86_32.tgz
+          time docker save "${output_image}" | gzip -1 > built_image_x86_32.tgz
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
