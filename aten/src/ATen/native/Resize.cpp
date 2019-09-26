@@ -18,7 +18,6 @@ Tensor& resize_cpu_(Tensor& self, IntArrayRef size) {
 
 Tensor& resize_as_cpu_(Tensor& self, const Tensor& the_template) {
   Tensor& result = resize_cpu_(self, the_template.sizes());
-  // result.unsafeGetTensorImpl()->empty_tensor_restride(the_template.suggest_memory_format());
 #ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(result, the_template);
 #endif

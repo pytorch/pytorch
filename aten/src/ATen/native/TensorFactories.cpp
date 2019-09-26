@@ -176,8 +176,8 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
-Tensor empty_like(const Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::empty_like(self, self.options(), optional_memory_format);
+Tensor empty_like(const Tensor& self) {
+  return native::empty_like(self, self.options());
 }
 
 Tensor empty_like(
