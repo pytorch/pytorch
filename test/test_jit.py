@@ -4992,18 +4992,11 @@ a")
         a = torch.rand(2, 3)
 
         with enable_profiling_mode():
-            # the first calls are profiled
-            def_in_one_branch(a, False)
-            # check prim::profile are inserted
-            profiled_graph_str = str(def_in_one_branch.graph_for(a, True))
+            # the first call is profiled
+            profiled_graph_str = str(def_in_one_branch.graph_for(a, False))
             FileCheck().check_count("prim::profile", 4).run(profiled_graph_str)
+            # the second call is optimized
             def_in_one_branch(a, False)
-            def_in_one_branch(a, False)
-            # this call is optimized for
-            # the given shape of (2, 3)
-            def_in_one_branch(a, False)
-            # change shape to (3)
-            # so we go down a bailout path
             a = torch.ones(3)
             # check prim::BailOuts are inserted
             bailout_graph_str = str(def_in_one_branch.graph_for(a, True))
