@@ -98,6 +98,12 @@ public:
 
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
+  // TODO callBoxedWithAutogradEnabled() is called from jit for ops from
+  // native_functions.yaml while callBoxed() is called for custom ops.
+  // We should make autograd work for custom ops, remove callBoxed(),
+  // and rename callBoxedWithAutogradEnabled() to callBoxed().
+  void callBoxedWithAutogradEnabled(const OperatorHandle& op, Stack* stack) const;
+
   /**
    * Add a listener that gets called whenever a new op is registered or an existing
    * op is deregistered. Immediately after registering, this listener gets called
@@ -179,6 +185,11 @@ inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, TensorTypeId
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   return op.operatorIterator_->op.callBoxed(stack);
+}
+
+inline void Dispatcher::callBoxedWithAutogradEnabled(const OperatorHandle& op, Stack* stack) const {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  return op.operatorIterator_->op.callBoxedWithAutogradEnabled(stack);
 }
 
 } // namespace c10

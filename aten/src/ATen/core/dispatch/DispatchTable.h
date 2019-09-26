@@ -147,7 +147,22 @@ class DispatchTable final {
        if (!dispatch_strategy_.is_valid_) {
          return c10::nullopt;
        }
-       return dispatch_strategy_.get_dispatch_key(stack, operator_name_);
+       constexpr bool AutogradEnabled = false;
+       return dispatch_strategy_.get_dispatch_key<AutogradEnabled>(stack, operator_name_);
+     });
+   }
+
+   // TODO lookupWithAutogradEnabled(Stack*) is called from jit for ops from
+   // native_functions.yaml while lookup(Stack*) is called for custom ops.
+   // We should make autograd work for custom ops, remove lookup(Stack*),
+   // and rename lookupWithAutogradEnabled(Stack*) to lookup(Stack*).
+   const KernelFunction& lookupWithAutogradEnabled(const Stack* stack) const {
+     return lookup_([=] () -> c10::optional<TensorTypeId> {
+       if (!dispatch_strategy_.is_valid_) {
+         return c10::nullopt;
+       }
+       constexpr bool AutogradEnabled = true;
+       return dispatch_strategy_.get_dispatch_key<AutogradEnabled>(stack, operator_name_);
      });
    }
 
@@ -183,6 +198,7 @@ private:
     // as long as they only have fallback kernels and no dispatched kernels.
     bool is_valid_;
 
+    template<bool enableAutograd>
     TensorTypeId get_dispatch_key(const Stack* stack, const std::string& operator_name) const {
 
       TensorTypeSet ts;
@@ -197,9 +213,13 @@ private:
           }
         }
       }
-      // TODO: Don't use legacy extractor; blocked on c10 understanding
-      // variable
-      return c10::legacyExtractTypeId(ts);
+      if (!enableAutograd) {
+        // TODO: Don't use legacy extractor; blocked on c10 understanding
+        // variable
+        return c10::legacyExtractTypeId(ts);
+      } else {
+        return at::impl::dispatchTypeId(ts);
+      }
     }
   };
 

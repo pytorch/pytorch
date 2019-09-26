@@ -75,6 +75,16 @@ public:
     });
   }
 
+  // TODO callBoxedWithAutogradEnabled() is called from jit for ops from
+  // native_functions.yaml while callBoxed() is called for custom ops.
+  // We should make autograd work for custom ops, remove callBoxed(),
+  // and rename callBoxedWithAutogradEnabled() to callBoxed().
+  void callBoxedWithAutogradEnabled(Stack* stack) const {
+    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) {
+        dispatchTable.lookupWithAutogradEnabled(stack).callBoxed(stack);
+    });
+  }
+
   void prepareForDeregistration();
 
   RegistrationHandleRAII registerKernel(TensorTypeId dispatch_key, KernelFunction kernel);

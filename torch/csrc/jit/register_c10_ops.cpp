@@ -176,8 +176,8 @@ Operator createOperatorFromC10_withTracingAndProfiling(const c10::OperatorHandle
 
 Operator createOperatorFromC10(const c10::OperatorHandle& op) {
   return Operator(op, [op](Stack& stack) {
-      c10::Dispatcher::singleton().callBoxed(op, &stack);
-    };
+      c10::Dispatcher::singleton().callBoxedWithAutogradEnabled(op, &stack);
+  });
 }
 
 class RegistrationListener final : public c10::OpRegistrationListener {
