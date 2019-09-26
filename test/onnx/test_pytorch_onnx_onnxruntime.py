@@ -578,7 +578,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_layer_norm(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
-        self.run_test(model, x, rtol=1e-05, atol=1e-06)
+        self.run_test(model, x)
 
     # enable test for opset 11 when ScatterElements is supported in ORT
     @skipIfUnsupportedMinOpsetVersion(9)

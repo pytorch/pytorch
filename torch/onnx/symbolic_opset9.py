@@ -198,8 +198,6 @@ def _slice(g, input, axes, starts, ends):
         return input
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
-def _constant_of_shape(g, shape, value, dtype):
-    return g.op("ConstantOfShape", shape, value_t=torch.tensor([value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
     def symbolic(g, self, dim=None, keepdim=None):
