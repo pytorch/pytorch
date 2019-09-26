@@ -98,7 +98,7 @@ fi
 ##############################
 # TensorRT integration tests #
 ##############################
-if [[ $BUILD_ENVIRONMENT == *caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04* ]]; then
+if [[ $BUILD_ENVIRONMENT == *caffe2* ]]; then
   pip install -q --user torchvision
 fi
 
