@@ -3,20 +3,10 @@ producer_name: "pytorch"
 producer_version: "1.2"
 graph {
   node {
+    input: "0"
     input: "1"
     output: "2"
-    op_type: "Unsqueeze"
-    attribute {
-      name: "axes"
-      ints: 0
-      type: INTS
-    }
-  }
-  node {
-    input: "0"
-    input: "2"
     output: "3"
-    output: "4"
     op_type: "TopK"
     attribute {
       name: "axis"
@@ -59,7 +49,7 @@ graph {
     }
   }
   output {
-    name: "3"
+    name: "2"
     type {
       tensor_type {
         elem_type: 1
@@ -72,7 +62,7 @@ graph {
     }
   }
   output {
-    name: "4"
+    name: "3"
     type {
       tensor_type {
         elem_type: 7
