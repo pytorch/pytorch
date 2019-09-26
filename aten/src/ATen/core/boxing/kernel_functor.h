@@ -280,11 +280,17 @@ namespace detail {
     std::tuple<Args...> constructor_parameters_;
   };
 
+  template<class FuncType>
+  std::unique_ptr<FunctionSchema> inferFunctionSchema_() {
+    return guts::make_unique<FunctionSchema>(inferFunctionSchema<FuncType>("", ""));
+  }
+
   template<class KernelFunctor>
   class FunctionSchemaInferer final {
   public:
+    using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
     std::unique_ptr<FunctionSchema> operator()() const {
-      return guts::make_unique<FunctionSchema>(inferFunctionSchema<KernelFunctor>("", ""));
+      return inferFunctionSchema_<func_type>();
     }
   };
 }
