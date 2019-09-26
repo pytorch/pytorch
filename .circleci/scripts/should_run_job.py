@@ -18,6 +18,8 @@ default_set = set([
     'pytorch-linux-xenial-py3-clang5-asan',
     # PyTorch DEBUG
     'pytorch-linux-xenial-py3.6-gcc5.4',
+    # LibTorch
+    'pytorch-libtorch-linux-xenial-cuda9-cudnn7-py3',
 
     # Caffe2 CPU
     'caffe2-py2-mkl-ubuntu16.04',
