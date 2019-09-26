@@ -29,6 +29,22 @@ void placeholderCreator(Function&) {
   throw RecursiveMethodCallError();
 }
 
+void Function::run(Stack& stack) {
+  get_executor().run(stack);
+}
+
+void Function::run(Stack&& stack) {
+  run(stack);
+}
+
+IValue Function::operator()(
+    std::vector<IValue> stack,
+    const Kwargs& kwargs) {
+  getSchema().checkAndNormalizeInputs(stack, kwargs);
+  run(stack);
+  return stack.front();
+}
+
 void Function::ensure_defined() {
   try {
     if (function_creator_) {
