@@ -9,6 +9,8 @@
 //
 // C10
 // - Move to `c10` namespace.
+// - Renamed namespace `detail` to `detail_`, to not conflict with existing
+//   c10 implementations in `detail` namespace.
 
 #ifndef C10_UTIL_VARIANT_H_
 #define C10_UTIL_VARIANT_H_
@@ -526,7 +528,7 @@ namespace c10 {
       template <typename... Ts>
       using void_t = typename voider<Ts...>::type;
 
-      namespace detail {
+      namespace detail_ {
         namespace swappable {
 
           using std::swap;
@@ -556,16 +558,16 @@ namespace c10 {
           struct is_nothrow_swappable<false, T> : std::false_type {};
 
         }  // namespace swappable
-      }  // namespace detail
+      }  // namespace detail_
 
-      using detail::swappable::is_swappable;
+      using detail_::swappable::is_swappable;
 
       template <typename T>
       using is_nothrow_swappable =
-          detail::swappable::is_nothrow_swappable<is_swappable<T>::value, T>;
+          detail_::swappable::is_nothrow_swappable<is_swappable<T>::value, T>;
 
       // <functional>
-      namespace detail {
+      namespace detail_ {
 
         template <typename T>
         struct is_reference_wrapper : std::false_type {};
@@ -641,14 +643,14 @@ namespace c10 {
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
-      }  // namespace detail
+      }  // namespace detail_
 
       template <typename F, typename... Args>
       inline constexpr auto invoke(F &&f, Args &&... args)
-        MPARK_RETURN(detail::invoke(lib::forward<F>(f),
+        MPARK_RETURN(detail_::invoke(lib::forward<F>(f),
                                     lib::forward<Args>(args)...))
 
-      namespace detail {
+      namespace detail_ {
 
         template <typename Void, typename, typename...>
         struct invoke_result {};
@@ -661,15 +663,15 @@ namespace c10 {
             : identity<decltype(
                   lib::invoke(std::declval<F>(), std::declval<Args>()...))> {};
 
-      }  // namespace detail
+      }  // namespace detail_
 
       template <typename F, typename... Args>
-      using invoke_result = detail::invoke_result<void, F, Args...>;
+      using invoke_result = detail_::invoke_result<void, F, Args...>;
 
       template <typename F, typename... Args>
       using invoke_result_t = typename invoke_result<F, Args...>::type;
 
-      namespace detail {
+      namespace detail_ {
 
         template <typename Void, typename, typename...>
         struct is_invocable : std::false_type {};
@@ -688,15 +690,15 @@ namespace c10 {
                               Args...>
             : std::is_convertible<invoke_result_t<F, Args...>, R> {};
 
-      }  // namespace detail
+      }  // namespace detail_
 
       template <typename F, typename... Args>
-      using is_invocable = detail::is_invocable<void, F, Args...>;
+      using is_invocable = detail_::is_invocable<void, F, Args...>;
 
       template <typename R, typename F, typename... Args>
-      using is_invocable_r = detail::is_invocable_r<void, R, F, Args...>;
+      using is_invocable_r = detail_::is_invocable_r<void, R, F, Args...>;
 
-      namespace detail {
+      namespace detail_ {
 
         template <bool Invocable, typename F, typename... Args>
         struct is_nothrow_invocable {
@@ -721,15 +723,15 @@ namespace c10 {
         template <typename R, typename F, typename... Args>
         struct is_nothrow_invocable_r<false, R, F, Args...> : std::false_type {};
 
-      }  // namespace detail
+      }  // namespace detail_
 
       template <typename F, typename... Args>
-      using is_nothrow_invocable = detail::
+      using is_nothrow_invocable = detail_::
           is_nothrow_invocable<is_invocable<F, Args...>::value, F, Args...>;
 
       template <typename R, typename F, typename... Args>
       using is_nothrow_invocable_r =
-          detail::is_nothrow_invocable_r<is_invocable_r<R, F, Args...>::value,
+          detail_::is_nothrow_invocable_r<is_invocable_r<R, F, Args...>::value,
                                          R,
                                          F,
                                          Args...>;
@@ -741,7 +743,7 @@ namespace c10 {
         return __builtin_addressof(arg);
       }
 #else
-      namespace detail {
+      namespace detail_ {
 
         namespace has_addressof_impl {
 
@@ -771,11 +773,11 @@ namespace c10 {
           return &arg;
         }
 
-      }  // namespace detail
+      }  // namespace detail_
 
       template <typename T>
       inline constexpr T *addressof(T &arg) noexcept {
-        return detail::addressof(arg, detail::has_addressof<T>{});
+        return detail_::addressof(arg, detail_::has_addressof<T>{});
       }
 #endif
 
@@ -973,7 +975,7 @@ namespace c10 {
 
   constexpr std::size_t variant_npos = static_cast<std::size_t>(-1);
 
-  namespace detail {
+  namespace detail_ {
 
     constexpr std::size_t not_found = static_cast<std::size_t>(-1);
     constexpr std::size_t ambiguous = static_cast<std::size_t>(-2);
@@ -2209,7 +2211,7 @@ namespace c10 {
     template <typename T>
     struct is_in_place_type<in_place_type_t<T>> : std::true_type {};
 
-  }  // detail
+  }  // detail_
 
   template <typename... Ts>
   class variant {
@@ -2240,9 +2242,9 @@ namespace c10 {
         typename Arg,
         typename Decayed = lib::decay_t<Arg>,
         lib::enable_if_t<!std::is_same<Decayed, variant>::value, int> = 0,
-        lib::enable_if_t<!detail::is_in_place_index<Decayed>::value, int> = 0,
-        lib::enable_if_t<!detail::is_in_place_type<Decayed>::value, int> = 0,
-        std::size_t I = detail::best_match<Arg, Ts...>::value,
+        lib::enable_if_t<!detail_::is_in_place_index<Decayed>::value, int> = 0,
+        lib::enable_if_t<!detail_::is_in_place_type<Decayed>::value, int> = 0,
+        std::size_t I = detail_::best_match<Arg, Ts...>::value,
         typename T = lib::type_pack_element_t<I, Ts...>,
         lib::enable_if_t<std::is_constructible<T, Arg>::value, int> = 0>
     inline constexpr variant(Arg &&arg) noexcept(
@@ -2282,7 +2284,7 @@ namespace c10 {
     template <
         typename T,
         typename... Args,
-        std::size_t I = detail::find_index_sfinae<T, Ts...>::value,
+        std::size_t I = detail_::find_index_sfinae<T, Ts...>::value,
         lib::enable_if_t<std::is_constructible<T, Args...>::value, int> = 0>
     inline explicit constexpr variant(
         in_place_type_t<T>,
@@ -2294,7 +2296,7 @@ namespace c10 {
         typename T,
         typename Up,
         typename... Args,
-        std::size_t I = detail::find_index_sfinae<T, Ts...>::value,
+        std::size_t I = detail_::find_index_sfinae<T, Ts...>::value,
         lib::enable_if_t<std::is_constructible<T,
                                                std::initializer_list<Up> &,
                                                Args...>::value,
@@ -2317,7 +2319,7 @@ namespace c10 {
     template <typename Arg,
               lib::enable_if_t<!std::is_same<lib::decay_t<Arg>, variant>::value,
                                int> = 0,
-              std::size_t I = detail::best_match<Arg, Ts...>::value,
+              std::size_t I = detail_::best_match<Arg, Ts...>::value,
               typename T = lib::type_pack_element_t<I, Ts...>,
               lib::enable_if_t<(std::is_assignable<T &, Arg>::value &&
                                 std::is_constructible<T, Arg>::value),
@@ -2354,7 +2356,7 @@ namespace c10 {
     template <
         typename T,
         typename... Args,
-        std::size_t I = detail::find_index_sfinae<T, Ts...>::value,
+        std::size_t I = detail_::find_index_sfinae<T, Ts...>::value,
         lib::enable_if_t<std::is_constructible<T, Args...>::value, int> = 0>
     inline T &emplace(Args &&... args) {
       return impl_.template emplace<I>(lib::forward<Args>(args)...);
@@ -2364,7 +2366,7 @@ namespace c10 {
         typename T,
         typename Up,
         typename... Args,
-        std::size_t I = detail::find_index_sfinae<T, Ts...>::value,
+        std::size_t I = detail_::find_index_sfinae<T, Ts...>::value,
         lib::enable_if_t<std::is_constructible<T,
                                                std::initializer_list<Up> &,
                                                Args...>::value,
@@ -2396,10 +2398,10 @@ namespace c10 {
     }
 
     private:
-    detail::impl<Ts...> impl_;
+    detail_::impl<Ts...> impl_;
 
-    friend struct detail::access::variant;
-    friend struct detail::visitation::variant;
+    friend struct detail_::access::variant;
+    friend struct detail_::visitation::variant;
   };
 
   template <std::size_t I, typename... Ts>
@@ -2409,10 +2411,10 @@ namespace c10 {
 
   template <typename T, typename... Ts>
   inline constexpr bool holds_alternative(const variant<Ts...> &v) noexcept {
-    return holds_alternative<detail::find_index_checked<T, Ts...>::value>(v);
+    return holds_alternative<detail_::find_index_checked<T, Ts...>::value>(v);
   }
 
-  namespace detail {
+  namespace detail_ {
     template <std::size_t I, typename V>
     struct generic_get_impl {
       constexpr generic_get_impl(int) noexcept {}
@@ -2427,53 +2429,53 @@ namespace c10 {
       AUTO_REFREF_RETURN(generic_get_impl<I, V>(
           holds_alternative<I>(v) ? 0 : (throw_bad_variant_access(), 0))(
           lib::forward<V>(v)))
-  }  // namespace detail
+  }  // namespace detail_
 
   template <std::size_t I, typename... Ts>
   inline constexpr variant_alternative_t<I, variant<Ts...>> &get(
       variant<Ts...> &v) {
-    return detail::generic_get<I>(v);
+    return detail_::generic_get<I>(v);
   }
 
   template <std::size_t I, typename... Ts>
   inline constexpr variant_alternative_t<I, variant<Ts...>> &&get(
       variant<Ts...> &&v) {
-    return detail::generic_get<I>(lib::move(v));
+    return detail_::generic_get<I>(lib::move(v));
   }
 
   template <std::size_t I, typename... Ts>
   inline constexpr const variant_alternative_t<I, variant<Ts...>> &get(
       const variant<Ts...> &v) {
-    return detail::generic_get<I>(v);
+    return detail_::generic_get<I>(v);
   }
 
   template <std::size_t I, typename... Ts>
   inline constexpr const variant_alternative_t<I, variant<Ts...>> &&get(
       const variant<Ts...> &&v) {
-    return detail::generic_get<I>(lib::move(v));
+    return detail_::generic_get<I>(lib::move(v));
   }
 
   template <typename T, typename... Ts>
   inline constexpr T &get(variant<Ts...> &v) {
-    return get<detail::find_index_checked<T, Ts...>::value>(v);
+    return get<detail_::find_index_checked<T, Ts...>::value>(v);
   }
 
   template <typename T, typename... Ts>
   inline constexpr T &&get(variant<Ts...> &&v) {
-    return get<detail::find_index_checked<T, Ts...>::value>(lib::move(v));
+    return get<detail_::find_index_checked<T, Ts...>::value>(lib::move(v));
   }
 
   template <typename T, typename... Ts>
   inline constexpr const T &get(const variant<Ts...> &v) {
-    return get<detail::find_index_checked<T, Ts...>::value>(v);
+    return get<detail_::find_index_checked<T, Ts...>::value>(v);
   }
 
   template <typename T, typename... Ts>
   inline constexpr const T &&get(const variant<Ts...> &&v) {
-    return get<detail::find_index_checked<T, Ts...>::value>(lib::move(v));
+    return get<detail_::find_index_checked<T, Ts...>::value>(lib::move(v));
   }
 
-  namespace detail {
+  namespace detail_ {
 
     template <std::size_t I, typename V>
     inline constexpr /* auto * */ AUTO generic_get_if(V *v) noexcept
@@ -2481,34 +2483,34 @@ namespace c10 {
                       ? lib::addressof(access::variant::get_alt<I>(*v).value)
                       : nullptr)
 
-  }  // namespace detail
+  }  // namespace detail_
 
   template <std::size_t I, typename... Ts>
   inline constexpr lib::add_pointer_t<variant_alternative_t<I, variant<Ts...>>>
   get_if(variant<Ts...> *v) noexcept {
-    return detail::generic_get_if<I>(v);
+    return detail_::generic_get_if<I>(v);
   }
 
   template <std::size_t I, typename... Ts>
   inline constexpr lib::add_pointer_t<
       const variant_alternative_t<I, variant<Ts...>>>
   get_if(const variant<Ts...> *v) noexcept {
-    return detail::generic_get_if<I>(v);
+    return detail_::generic_get_if<I>(v);
   }
 
   template <typename T, typename... Ts>
   inline constexpr lib::add_pointer_t<T>
   get_if(variant<Ts...> *v) noexcept {
-    return get_if<detail::find_index_checked<T, Ts...>::value>(v);
+    return get_if<detail_::find_index_checked<T, Ts...>::value>(v);
   }
 
   template <typename T, typename... Ts>
   inline constexpr lib::add_pointer_t<const T>
   get_if(const variant<Ts...> *v) noexcept {
-    return get_if<detail::find_index_checked<T, Ts...>::value>(v);
+    return get_if<detail_::find_index_checked<T, Ts...>::value>(v);
   }
 
-  namespace detail {
+  namespace detail_ {
     template <typename RelOp>
     struct convert_to_bool {
       template <typename Lhs, typename Rhs>
@@ -2521,13 +2523,13 @@ namespace c10 {
             RelOp{}, lib::forward<Lhs>(lhs), lib::forward<Rhs>(rhs));
       }
     };
-  }  // namespace detail
+  }  // namespace detail_
 
   template <typename... Ts>
   inline constexpr bool operator==(const variant<Ts...> &lhs,
                                    const variant<Ts...> &rhs) {
-    using detail::visitation::variant;
-    using equal_to = detail::convert_to_bool<lib::equal_to>;
+    using detail_::visitation::variant;
+    using equal_to = detail_::convert_to_bool<lib::equal_to>;
 #ifdef MPARK_CPP14_CONSTEXPR
     if (lhs.index() != rhs.index()) return false;
     if (lhs.valueless_by_exception()) return true;
@@ -2542,8 +2544,8 @@ namespace c10 {
   template <typename... Ts>
   inline constexpr bool operator!=(const variant<Ts...> &lhs,
                                    const variant<Ts...> &rhs) {
-    using detail::visitation::variant;
-    using not_equal_to = detail::convert_to_bool<lib::not_equal_to>;
+    using detail_::visitation::variant;
+    using not_equal_to = detail_::convert_to_bool<lib::not_equal_to>;
 #ifdef MPARK_CPP14_CONSTEXPR
     if (lhs.index() != rhs.index()) return true;
     if (lhs.valueless_by_exception()) return false;
@@ -2558,8 +2560,8 @@ namespace c10 {
   template <typename... Ts>
   inline constexpr bool operator<(const variant<Ts...> &lhs,
                                   const variant<Ts...> &rhs) {
-    using detail::visitation::variant;
-    using less = detail::convert_to_bool<lib::less>;
+    using detail_::visitation::variant;
+    using less = detail_::convert_to_bool<lib::less>;
 #ifdef MPARK_CPP14_CONSTEXPR
     if (rhs.valueless_by_exception()) return false;
     if (lhs.valueless_by_exception()) return true;
@@ -2577,8 +2579,8 @@ namespace c10 {
   template <typename... Ts>
   inline constexpr bool operator>(const variant<Ts...> &lhs,
                                   const variant<Ts...> &rhs) {
-    using detail::visitation::variant;
-    using greater = detail::convert_to_bool<lib::greater>;
+    using detail_::visitation::variant;
+    using greater = detail_::convert_to_bool<lib::greater>;
 #ifdef MPARK_CPP14_CONSTEXPR
     if (lhs.valueless_by_exception()) return false;
     if (rhs.valueless_by_exception()) return true;
@@ -2596,8 +2598,8 @@ namespace c10 {
   template <typename... Ts>
   inline constexpr bool operator<=(const variant<Ts...> &lhs,
                                    const variant<Ts...> &rhs) {
-    using detail::visitation::variant;
-    using less_equal = detail::convert_to_bool<lib::less_equal>;
+    using detail_::visitation::variant;
+    using less_equal = detail_::convert_to_bool<lib::less_equal>;
 #ifdef MPARK_CPP14_CONSTEXPR
     if (lhs.valueless_by_exception()) return true;
     if (rhs.valueless_by_exception()) return false;
@@ -2616,8 +2618,8 @@ namespace c10 {
   template <typename... Ts>
   inline constexpr bool operator>=(const variant<Ts...> &lhs,
                                    const variant<Ts...> &rhs) {
-    using detail::visitation::variant;
-    using greater_equal = detail::convert_to_bool<lib::greater_equal>;
+    using detail_::visitation::variant;
+    using greater_equal = detail_::convert_to_bool<lib::greater_equal>;
 #ifdef MPARK_CPP14_CONSTEXPR
     if (rhs.valueless_by_exception()) return true;
     if (lhs.valueless_by_exception()) return false;
@@ -2661,7 +2663,7 @@ namespace c10 {
   }
 
 #ifdef MPARK_CPP14_CONSTEXPR
-  namespace detail {
+  namespace detail_ {
 
     inline constexpr bool all(std::initializer_list<bool> bs) {
       for (bool b : bs) {
@@ -2672,18 +2674,18 @@ namespace c10 {
       return true;
     }
 
-  }  // namespace detail
+  }  // namespace detail_
 
   template <typename Visitor, typename... Vs>
   inline constexpr decltype(auto) visit(Visitor &&visitor, Vs &&... vs) {
-    return (detail::all({!vs.valueless_by_exception()...})
+    return (detail_::all({!vs.valueless_by_exception()...})
                 ? (void)0
                 : throw_bad_variant_access()),
-           detail::visitation::variant::visit_value(
+           detail_::visitation::variant::visit_value(
                lib::forward<Visitor>(visitor), lib::forward<Vs>(vs)...);
   }
 #else
-  namespace detail {
+  namespace detail_ {
 
     template <std::size_t N>
     inline constexpr bool all_impl(const lib::array<bool, N> &bs,
@@ -2696,16 +2698,16 @@ namespace c10 {
       return all_impl(bs, 0);
     }
 
-  }  // namespace detail
+  }  // namespace detail_
 
   template <typename Visitor, typename... Vs>
   inline constexpr DECLTYPE_AUTO visit(Visitor &&visitor, Vs &&... vs)
     DECLTYPE_AUTO_RETURN(
-        (detail::all(
+        (detail_::all(
              lib::array<bool, sizeof...(Vs)>{{!vs.valueless_by_exception()...}})
              ? (void)0
              : throw_bad_variant_access()),
-        detail::visitation::variant::visit_value(lib::forward<Visitor>(visitor),
+        detail_::visitation::variant::visit_value(lib::forward<Visitor>(visitor),
                                                  lib::forward<Vs>(vs)...))
 #endif
 
@@ -2716,7 +2718,7 @@ namespace c10 {
     lhs.swap(rhs);
   }
 
-  namespace detail {
+  namespace detail_ {
 
     template <typename T, typename...>
     using enabled_type = T;
@@ -2741,7 +2743,7 @@ namespace c10 {
 
     }  // namespace hash
 
-  }  // namespace detail
+  }  // namespace detail_
 
 #undef AUTO
 #undef AUTO_RETURN
@@ -2757,15 +2759,15 @@ namespace c10 {
 namespace std {
 
   template <typename... Ts>
-  struct hash<c10::detail::enabled_type<
+  struct hash<c10::detail_::enabled_type<
       c10::variant<Ts...>,
-      c10::lib::enable_if_t<c10::lib::all<c10::detail::hash::is_enabled<
+      c10::lib::enable_if_t<c10::lib::all<c10::detail_::hash::is_enabled<
           c10::lib::remove_const_t<Ts>>()...>::value>>> {
     using argument_type = c10::variant<Ts...>;
     using result_type = std::size_t;
 
     inline result_type operator()(const argument_type &v) const {
-      using c10::detail::visitation::variant;
+      using c10::detail_::visitation::variant;
       std::size_t result =
           v.valueless_by_exception()
               ? 299792458  // Random value chosen by the universe upon creation
