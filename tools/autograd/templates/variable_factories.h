@@ -22,7 +22,7 @@ using at::DimnameList;
 namespace torch {
 
 namespace detail {
-  enum class ListInitTensorType { Scalar, Vector };
+  enum class ListInitTensorType { Scalar, Tensor, InitList };
 
   // `ListInitTensor` represents a Tensor initialized by a list type or a scalar type
   // (which is convertible to a list type). Specifically, it supports converting the
@@ -30,55 +30,52 @@ namespace detail {
   // - Scalar value, e.g. `3.14`.
   // - `at::ArrayRef<T>`, e.g. `at::ArrayRef<int>({1, 2, 3})`.
   // - `std::vector<T>`, e.g. `std::vector<int>({1, 2, 3})`.
-  // - Arbitrarily nested braced-init-list (e.g. {{1, 2}, {3, 4}}), taking advantage of the fact that
-  // the constructor will automatically be called recursively until it reaches all innermost
-  // scalar values.
+  // - Arbitrarily nested braced-init-list (e.g. {{1, 2}, {3, 4}}), taking advantage of
+  //   the fact that the constructor will automatically be called recursively until it
+  //   reaches all innermost scalar values.
   //
-  // At any time, a `ListInitTensor` object represents either of the following:
+  // At any time, a `ListInitTensor` object represents one of the following:
   // 1. A scalar with value `scalar()` and type `scalar_type()`.
-  // 2. A Tensor represented in `std::vector<ListInitTensor>` form, with value
-  //    `vec()`, Tensor scalar type `scalar_type()`, and Tensor sizes `sizes()`.
+  // 2. A Tensor stored in `tensor_`.
+  // 3. A Tensor represented in `std::initializer_list<ListInitTensor>` form, with value
+  //    `init_list_`, Tensor scalar type `scalar_type()`, and Tensor sizes `sizes_`.
   struct ListInitTensor {
 #define TENSOR(T, S)                                                                     \
     ListInitTensor(T scalar) :                                                           \
-        scalar_(scalar), vec_(),                                                         \
+        scalar_(scalar),                                                                 \
+        init_list_(),                                                                    \
+        tensor_(),                                                                       \
         sizes_(),                                                                        \
         scalar_type_(at::k##S),                                                          \
         type_(ListInitTensorType::Scalar) {}                                             \
-    ListInitTensor(std::vector<T> values) :                                              \
-        scalar_(), vec_(),                                                               \
-        /* NOTE: We use `static_cast<int64_t>(...)` here because `std::vector<T>.size()`
-           returns a value of `std::vector<T>::size_type` type, and converting it to
-           `int64_t` type is a narrowing conversion. */                                  \
-        sizes_({static_cast<int64_t>(values.size())}),                                   \
-        scalar_type_(at::k##S),                                                          \
-        type_(ListInitTensorType::Vector) {                                              \
-      vec_.reserve(values.size());                                                       \
-      for (const auto& elem : values) {                                                  \
-        vec_.push_back(ListInitTensor(elem));                                            \
-      }                                                                                  \
-    }                                                                                    \
     ListInitTensor(at::ArrayRef<T> values) :                                             \
-        scalar_(), vec_(),                                                               \
+        scalar_(),                                                                       \
+        init_list_(),                                                                    \
+        tensor_(),                                                                       \
         /* NOTE: We use `static_cast<int64_t>(...)` here because `at::ArrayRef<T>.size()`
            returns a value of `size_t` type, and converting it to `int64_t` type is
            a narrowing conversion. */                                                    \
         sizes_({static_cast<int64_t>(values.size())}),                                   \
         scalar_type_(at::k##S),                                                          \
-        type_(ListInitTensorType::Vector) {                                              \
-      vec_.reserve(values.size());                                                       \
-      for (const auto& elem : values) {                                                  \
-        vec_.push_back(ListInitTensor(elem));                                            \
-      }                                                                                  \
-    }
+        type_(ListInitTensorType::Tensor) {                                              \
+      tensor_ = ([&]() {                                                                 \
+        at::AutoNonVariableTypeMode non_var_type_mode(true);                             \
+        return at::tensor(                                                               \
+          values,                                                                        \
+          at::TensorOptions(at::k##S).device(at::kCPU).is_variable(false));              \
+      })();                                                                              \
+    }                                                                                    \
+    ListInitTensor(const std::vector<T>& values) :                                       \
+        ListInitTensor(at::ArrayRef<T>(values))
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
     ListInitTensor(std::initializer_list<ListInitTensor> init_list) :
         scalar_(),
-        vec_(init_list),
+        init_list_(init_list),
+        tensor_(),
         sizes_(),
         scalar_type_(),
-        type_(ListInitTensorType::Vector) {
+        type_(ListInitTensorType::InitList) {
       if (init_list.size() > 0) {
         scalar_type_ = init_list.begin()->scalar_type_;
         const ListInitTensor& first_elem = *(init_list.begin());
@@ -106,39 +103,27 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
       }
     }
 
-    const c10::Scalar& scalar() const {
-      return scalar_;
-    }
-
-    const std::vector<ListInitTensor>& vec() const {
-      return vec_;
-    }
-
-    const std::vector<int64_t>& sizes() const {
-      return sizes_;
-    }
-
     const c10::ScalarType& scalar_type() const {
       return scalar_type_;
     }
 
-    const ListInitTensorType& type() const {
-      return type_;
-    }
-
     at::Tensor to_tensor(const at::TensorOptions& options) const {
-      // NOTE: Here we explicitly choose to initialize the tensor on CPU first,
-      // fill each element of the tensor, and then move the tensor to the desired
-      // device. For CUDA device, this approach only involves 1 CUDA kernel launch,
-      // and is much faster than initializing the tensor on CUDA first and then
-      // filling each element of it (which involves `N` CUDA kernel launches where
-      // `N` is the number of the elements in the tensor).
-      at::Tensor tensor = ([&]() {
-        at::AutoNonVariableTypeMode non_var_type_mode(true);
-        return at::empty(sizes_, at::TensorOptions(options).device(at::kCPU).is_variable(false));
-      })();
-      fill_tensor(tensor);
-      return tensor.to(options.device());
+      if (type_ != ListInitTensorType::Tensor) {
+        // NOTE: Here we explicitly choose to initialize the tensor on CPU first,
+        // fill each element of the tensor, and then move the tensor to the desired
+        // device. For CUDA device, this approach only involves 1 CUDA kernel launch,
+        // and is much faster than initializing the tensor on CUDA first and then
+        // filling each element of it (which involves `N` CUDA kernel launches where
+        // `N` is the number of the elements in the tensor).
+        tensor_ = ([&]() {
+          at::AutoNonVariableTypeMode non_var_type_mode(true);
+          return at::empty(sizes_, at::TensorOptions(options).device(at::kCPU).is_variable(false));
+        })();
+        fill_tensor(tensor_);
+      } else {
+        TORCH_CHECK(tensor_, "ListInitTensor has type `ListInitTensorType::Tensor`, but its `tensor_` field is null");
+      }
+      return tensor_.to(options);
     }
 
     void pretty_print_recursive(std::ostream& stream) const {
@@ -148,9 +133,9 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
         });
       } else if (type_ == ListInitTensorType::Vector) {
         stream << "{";
-        for (auto it = vec_.begin(); it != vec_.end(); it++) {
+        for (auto it = init_list_.begin(); it != init_list_.end(); it++) {
           it->pretty_print_recursive(stream);
-          if (std::next(it) != vec_.end()) stream << ", ";
+          if (std::next(it) != init_list_.end()) stream << ", ";
         }
         stream << "}";
       }
@@ -163,14 +148,15 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
         tensor.fill_(scalar_);
       } else {
         size_t index = 0;
-        for (const auto& elem : vec_) {
+        for (const auto& elem : init_list_) {
           elem.fill_tensor(tensor[index]);
           index++;
         }
       }
     }
     c10::Scalar scalar_;
-    std::vector<ListInitTensor> vec_;
+    std::initializer_list<ListInitTensor> init_list_;
+    at::Tensor tensor_;
     std::vector<int64_t> sizes_;
     c10::ScalarType scalar_type_;
     ListInitTensorType type_;
