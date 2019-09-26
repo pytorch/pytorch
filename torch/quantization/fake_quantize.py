@@ -5,12 +5,48 @@ from .observer import MinMaxObserver, _with_args
 
 class FakeQuantize(Module):
     ''' Simulate the quantize and dequantize operations in training time.
+    The output of this module is given by
+
+    x_out = (clamp(round(x/scale + zero_point), quant_min, quant_max)-zero_point)*scale
+
+
+
+    * :attr:`scale` defines the scale factor used for quantization.
+
+    * :attr:`zero_point` specifies the quantized value to which 0 in floating point maps to
+
+    * :attr:`quant_min` specifies the minimum allowable quantized value.
+
+    * :attr:`quant_max` specifies the maximum allowable quantized value.
+
+    * :attr:`fake_quant_enable` controls the application of fake quantization on tensors, note that
+      statistics can still be updated.
+
+    * :attr:`observer_enable` controls statistics collection on tensors
+
+    * :attr:`dtype` specifies the quantized dtype that is being emulated with fake-quantization,
+     allowable values are torch.qint8 and torch.quint8. The values of quant_min and quant_max should
+     be chosen to be consistent with the dtype
+
+
     Args:
-        `qconfig`: object that encodes configuration info for quantization
-        `observer_module`: Observer module that records stats of weights and
-        activations
-        `calcqparam`: A function that calculates quantization parameters
+        observer (module): Module for observing statistics on input tensors and calculating
+        scale and zero-point.
+        quant_min (int): The minimum allowable quantized value.
+        quant_max (int): The maximum allowable quantized value.
+        observer_kwargs (optional): Arguments for the observer module
+
+    Attributes:
+        observer (Module): User provided module that collects statistics on the input tensor and
+                           provides a method to calculate scale and zero-point.
+
+    """
+    Args:
+        `observer`: Observer module that records stats of input tensor
+        `quant_min`: Tensors are fake-quantized corresponding to the
+        `quant_max`: A function that calculates quantization parameters
         given the stats
+        `observer_kwargs`
     '''
     def __init__(self, observer=MinMaxObserver, quant_min=0, quant_max=255, **observer_kwargs):
         super(FakeQuantize, self).__init__()
@@ -35,18 +71,12 @@ class FakeQuantize(Module):
     def disable_fake_quant(self):
         return self.enable_fake_quant(False)
 
-    def enable_observer(self, enabled=True):
-        self.observer_enabled = enabled
-
-    def disable_observer(self):
-        return self.enable_observer(False)
-
     def calculate_qparams(self):
         return self.observer.calculate_qparams()
 
     def forward(self, X):
         if self.observer_enabled:
-            X = self.observer(X)
+            self.observer(X)
             scale, zero_point = self.calculate_qparams()
             self.scale, self.zero_point = float(scale), int(zero_point)
         if self.fake_quant_enabled:
@@ -62,6 +92,8 @@ class FakeQuantize(Module):
             self.scale, self.zero_point)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
+        # We cannot currently register scalar values as buffers, so need to manually
+        # specify serialization here.
         super(FakeQuantize, self)._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'scale'] = self.scale
         destination[prefix + 'zero_point'] = self.zero_point
