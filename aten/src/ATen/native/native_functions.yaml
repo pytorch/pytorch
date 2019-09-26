@@ -1695,7 +1695,7 @@
   dispatch:
     MkldnnCPU: mkldnn_max_pool2d
 
-- func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1) -> Tensor
+- func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   use_c10_dispatcher: unboxed_only
   requires_tensor: True
   dispatch:
