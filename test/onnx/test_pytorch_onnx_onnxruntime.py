@@ -369,14 +369,28 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input):
                 return torch.arange(input.shape[0]), \
                     torch.arange(12), \
-                    torch.arange(start=input.shape[0], end=input.shape[0] + 5), \
+                    torch.arange(start=input.shape[0], end=input.shape[0] + 5)
+
+        x = torch.randn(5, 3, 2)
+        y = torch.randn(8, 3, 2)
+        self.run_test(ArangeModel(), x, test_with_inputs=[y],
+                      input_names=['input_1'],
+                      output_names=['output_1', 'output_2', 'output_3'],
+                      dynamic_axes={'input_1': [0],
+                                    'output_1': [0]})
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_arange_dyn(self):
+        class ArangeModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.arange(torch.arange(12), \
                     torch.arange(start=input.shape[0], end=input.shape[0] + 5, step=0.5)
 
         x = torch.randn(5, 3, 2)
         y = torch.randn(8, 3, 2)
         self.run_test(ArangeModel(), x, test_with_inputs=[y],
                       input_names=['input_1'],
-                      output_names=['output_1', 'output_2', 'output_3', 'output_4'],
+                      output_names=['output_1', 'output_2'],
                       dynamic_axes={'input_1': [0],
                                     'output_1': [0]})
 
