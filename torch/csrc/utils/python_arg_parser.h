@@ -97,6 +97,8 @@ struct PythonArgParser {
 
   template<int N>
   inline PythonArgs parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
+
+  // meant only for `torch` functions.
   template<int N>
   inline PythonArgs parse2(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
 
@@ -104,6 +106,8 @@ private:
   [[noreturn]]
   void print_error(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
   PythonArgs raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
+
+  // meant only for `torch` functions.
   PythonArgs raw_parse2(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
 
   std::vector<FunctionSignature> signatures_;

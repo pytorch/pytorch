@@ -130,14 +130,6 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   }
 }
 
-bool THPVariable_check_torch_function(PyObject *o, PyObject *attr_name){
-  int has_torch_function = PyObject_HasAttr(o, attr_name);
-  if(has_torch_function == 1){
-    return true;
-  }
-  return false;
-}
-
 static PyObject* get_tensor_torch_function(void)
 {
   PyObject* method = PyObject_GetAttrString((PyObject*)THPVariableClass, "__torch_function__");
@@ -145,6 +137,7 @@ static PyObject* get_tensor_torch_function(void)
   return method;
 }
 
+// checks if `overloaded_args[]` has args with `__torch_function__`
 bool FunctionParameter::check_has_torch_function(PyObject* obj)
 {
   PyObject* method = PyTorch_LookupSpecial(obj, "__torch_function__");
@@ -511,6 +504,8 @@ pyobject_array_insert(PyObject **array, int length, int index, PyObject *item)
     array[index] = item;
 }
 
+// Signature parsing for `torch.Tensor` methods
+
 bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
                               bool raise_exception) {
   int num_overloaded_args = 0;
@@ -612,6 +607,12 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
   }
   return true;
 }
+
+// Signature parsing for `torch` functions.
+// `FunctionSignature::parse2()` is different from `FunctionSignature::parse()` as it
+// collects a list of `overloaded_args` in Python args and tests if they have
+// `__torch_function__` overload available. It has a lot of reused code so that
+// it doesn't mess up with `torch.Tensor` methods.
 
 bool FunctionSignature::parse2(PyObject* args, PyObject* kwargs, PyObject* dst[],
                                PyObject* overloaded_args[], bool raise_exception) {
@@ -781,6 +782,8 @@ PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject
   }
   print_error(args, kwargs, parsed_args);
 }
+
+// Similar to PythonArgParser::raw_parse() but this one is specifically for `torch` functions.
 
 PythonArgs PythonArgParser::raw_parse2(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
   if (signatures_.size() == 1) {
