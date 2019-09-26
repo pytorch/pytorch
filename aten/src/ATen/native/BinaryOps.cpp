@@ -212,49 +212,64 @@ Tensor& logical_xor_(Tensor& self, const Tensor& other) {
   return native::logical_xor_out(self, self, other);
 }
 
-Tensor& lt_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(result.scalar_type() == kBool,
-      "The output tensor of lt must be a bool, but was ", result.scalar_type());
+template <typename Stub>
+static inline Tensor& comparison_op_impl_out(Tensor& result, const Tensor& self, const Tensor& other, Stub& stub) {
   auto iter = TensorIterator::comparison_op(result, self, other,
       /*check_mem_overlap=*/true);
-  lt_stub(iter.device_type(), iter);
+  stub(iter.device_type(), iter);
   return result;
 }
 
-Tensor lt(const Tensor& self, const Tensor& other) {
+template <typename Stub>
+Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& other, Stub& stub) {
+  TORCH_CHECK(result.scalar_type() == kBool,
+              "The output tensor of lt must be a bool, but was ", result.scalar_type());
+  return native::comparison_op_impl_out(result, self, other, stub);
+}
+
+template <typename Stub>
+Tensor comparison_op(const Tensor& self, const Tensor& other, Stub& stub) {
+  TORCH_CHECK((self.dim() != 0 && other.dim() != 0) || self.dtype() == other.dtype(),
+              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
+              other.dtype(), " for argument 'other'");
   Tensor result = at::empty({0}, self.options().dtype(kBool));
-  native::lt_out(result, self, other);
-  return result;
+  return native::comparison_op_out(result, self, other, stub);
 }
 
-Tensor& lt_(Tensor& self, const Tensor& other) {
+// To avoid overflow during type promotion we will check that both dtypes of self and other are same
+template <typename Stub>
+Tensor& comparison_op_(Tensor& self, const Tensor& other, Stub& stub) {
   TORCH_CHECK(self.dtype() == other.dtype(),
-      "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-      other.dtype(), " for argument 'other' in call to lt_")
-  auto iter = TensorIterator::comparison_op(self, self, other,
-      /*check_mem_overlap=*/true);
-  lt_stub(iter.device_type(), iter);
-  return self;
+              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
+              other.dtype(), " for argument 'other'");
+  return native::comparison_op_impl_out(self, self, other, stub);
 }
 
-// `lt` validates that is possible to convert Scalar other to self's dtype without overflow.
+// validates that is possible to convert Scalar other to self's dtype without overflow.
 // This behavior is unique to comparison ops; arithmetic operations don't do this.
 // In the future, we should reconsider this inconsistency and decide if we want to add the same check to arithmetic ops.
-Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) {
-  return native::lt_out(result, self, wrapped_scalar_tensor_and_check_convert(other, self));
+template <typename Stub>
+Tensor& comparison_op_out(Tensor& result, const Tensor& self, Scalar other, Stub& stub) {
+  return native::comparison_op_out(result, self, wrapped_scalar_tensor_and_check_convert(other, self), stub);
 }
 
-Tensor lt(const Tensor& self, Scalar other) {
+template <typename Stub>
+Tensor comparison_op(const Tensor& self, Scalar other, Stub& stub) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
-  return native::lt_out(result, self, other);
+  return native::comparison_op_out(result, self, other, stub);
 }
 
-Tensor& lt_(Tensor& self, Scalar other) {
-  auto iter = TensorIterator::comparison_op(self, self, wrapped_scalar_tensor_and_check_convert(other, self),
-      /*check_mem_overlap=*/true);
-  lt_stub(iter.device_type(), iter);
-  return self;
+template <typename Stub>
+Tensor& comparison_op_(Tensor& self, Scalar other, Stub& stub) {
+  return native::comparison_op_impl_out(self, self, wrapped_scalar_tensor_and_check_convert(other, self), stub);
 }
+
+Tensor& lt_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, lt_stub); }
+Tensor lt(const Tensor& self, const Tensor& other) { return comparison_op(self, other, lt_stub); }
+Tensor& lt_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, lt_stub); }
+Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, lt_stub); }
+Tensor lt(const Tensor& self, Scalar other) { return comparison_op(self, other, lt_stub); }
+Tensor& lt_(Tensor& self, Scalar other) { return comparison_op_(self, other, lt_stub); }
 
 }
 }  // namespace at
