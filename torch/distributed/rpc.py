@@ -5,7 +5,7 @@ from . import init_rref_context
 from . import ProcessGroupAgent
 from . import WorkerId
 from .internal_rpc_utils import serialize, PythonUDF
-from .rpc_init_handler_registry import is_backend_registered, rpc_init
+from .rpc_backend_registry import is_rpc_backend_registered, init_rpc_backend
 
 import sys
 import torch
@@ -76,8 +76,8 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
         # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
         init_rref_context(_agent)
-    elif is_backend_registered(backend):
-        _agent = rpc_init(
+    elif is_rpc_backend_registered(backend):
+        _agent = init_rpc_backend(
             backend,
             self_name=self_name,
             init_method=init_method,
