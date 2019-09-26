@@ -379,6 +379,15 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={'input_1': [0],
                                     'output_1': [0]})
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_size(self):
+        class SizeModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.arange(input.size(0)), torch.arange(input.size(-1))
+
+        x = torch.randn(5, 3, 2)
+        self.run_test(SizeModel(), x)
+
     def _test_index_generic(self, fn):
         class MyModel(torch.nn.Module):
             def __init__(self):

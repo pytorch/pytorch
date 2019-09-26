@@ -153,7 +153,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     ${static_dispatch_method_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${method_actuals});
+    return table->callUnboxed<${return_type}, ${formals_types}>(${method_actuals});
 #endif
 }
 """)
@@ -194,7 +194,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     ${static_dispatch_function_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${native_actuals});
+    return table->callUnboxed<${return_type}, ${formals_types}>(${native_actuals});
 #endif
 }
 """)
@@ -256,7 +256,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${native_actuals});
+    return table->callUnboxed<${return_type}, ${formals_types}>(${native_actuals});
 #endif
 }
 """)
@@ -371,39 +371,29 @@ TYPE_RETURN = {
 CHECKED_CAST = {
     'THTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::${ScalarName})'),
+            'DeviceType::${DeviceType}, ScalarType::${ScalarName})'),
     'THByteTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Byte)'),
+            'DeviceType::${DeviceType}, ScalarType::Byte)'),
     'THBoolTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Bool)'),
+            'DeviceType::${DeviceType}, ScalarType::Bool)'),
     'THIndexTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Long)'),
+            'DeviceType::${DeviceType}, ScalarType::Long)'),
     'THIntegerTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Int)'),
-    'THDenseTensor*':
-        CodeTemplate(
-            'checked_tensor_unwrap('
-            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${DenseBackend}, ScalarType::${ScalarName})'),
-    'THDenseIndexTensor*':
-        CodeTemplate(
-            'checked_tensor_unwrap('
-            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${DenseBackend}, ScalarType::Long)'),
+            'DeviceType::${DeviceType}, ScalarType::Int)'),
     'THStorage*':
         CodeTemplate(
             'checked_storage('
