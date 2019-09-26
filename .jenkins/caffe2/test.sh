@@ -116,7 +116,6 @@ fi
 pip install --user pytest-sugar
 "$PYTHON" \
   -m pytest \
-  -x \
   -v \
   --disable-warnings \
   --junit-xml="$pytest_reports_dir/result.xml" \
