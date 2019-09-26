@@ -21,7 +21,7 @@ namespace torch {
 namespace jit {
 
 using caffe2::serialize::PyTorchStreamReader;
-
+void postSetStateValidate(const IValue& v);
 namespace {
 
 struct ClassResolver : public script::Resolver {

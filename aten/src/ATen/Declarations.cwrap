@@ -1159,20 +1159,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_log
-  cname: log
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_log10
   cname: log10
   types:
@@ -1217,20 +1203,6 @@
 [[
   name: _th_exp
   cname: exp
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_expm1
-  cname: expm1
   types:
     - floating_point
   backends:
@@ -2185,24 +2157,6 @@
     - THTensor* q
     - THIndexTensor* J
     - long num_samples
-    - THGenerator* generator
-]]
-[[
-  name: _th_multinomial
-  cname: multinomial
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THIndexTensor* result
-      output: True
-    - THTensor* self
-    - long num_samples
-    - bool replacement
     - THGenerator* generator
 ]]
 [[
