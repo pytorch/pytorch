@@ -13,6 +13,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
+#include <torch/csrc/DynamicTypes.h>
 
 namespace torch { namespace autograd { namespace utils {
 
@@ -45,6 +46,10 @@ inline PyObject* wrap(void* value) {
 inline PyObject* wrap(THPDtype *dtype) {
   Py_INCREF(dtype);
   return (PyObject*)dtype;
+}
+
+inline PyObject* wrap(at::ScalarType scalarType) {
+  return wrap(getDtype(scalarType));
 }
 
 inline PyObject* wrap(THPLayout *layout) {
