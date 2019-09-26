@@ -4951,9 +4951,6 @@ class _TestTorchMixin(object):
         utf8_bytes = b'\xc5\xbc\xc4\x85\xc4\x85\xc3\xb3\xc5\xbc\xc4\x85\xc5\xbc'
         utf8_str = utf8_bytes.decode('utf-8')
         if PY3:
-            with self.assertRaisesRegex(UnicodeDecodeError, "'ascii' codec can't decode byte"):
-                loaded = torch.load(buf)
-            buf.seek(0)
             loaded_utf8 = torch.load(buf, encoding='utf-8')
             self.assertEqual(loaded_utf8, [utf8_str, torch.zeros(1, dtype=torch.float), 2])
             buf.seek(0)
@@ -5345,6 +5342,21 @@ class _TestTorchMixin(object):
         self.assertEqual(s1[0], 0)
         self.assertEqual(s2[0], 0)
         self.assertEqual(s1.data_ptr() + 4, s2.data_ptr())
+
+    def test_load_unicode_error_msg(self):
+        # This Pickle contains a Python 2 module with Unicode data and the 
+        # loading should fail if the user explicitly specifies ascii encoding!
+        path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
+        if sys.version_info >= (3, 0):
+            self.assertRaises(UnicodeDecodeError, lambda: torch.load(path, encoding='ascii'))
+        else:
+            # Just checks the module loaded
+            self.assertIsNotNone(torch.load(path)) 
+
+    def test_load_python2_unicode_module(self):
+        # This Pickle contains some Unicode data!
+        path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
+        self.assertIsNotNone(torch.load(path)) 
 
     def test_load_error_msg(self):
         expected_err_msg = (".*You can only torch.load from a file that is seekable. " +
@@ -11818,13 +11830,13 @@ class TestTorchDeviceType(TestCase):
             ("exp", doubles, True, True, 'cpu'),
             ("exp", doubles, False, True, 'cuda'),
             ("expm1", doubles, True, True, 'cpu'),
-            ("expm1", doubles, False, True, 'cuda'),
+            ("expm1", doubles, True, True, 'cuda'),
             ("floor", doubles, True, True, 'cpu'),
             ("floor", doubles, True, True, 'cuda'),
             ("frac", doubles, True, True, 'cpu'),
             ("frac", doubles, False, True, 'cuda'),
             ("log", positives, True, True, 'cpu'),
-            ("log", positives, False, True, 'cuda'),
+            ("log", positives, True, True, 'cuda'),
             ("log10", positives, True, True, 'cpu'),
             ("log10", positives, False, True, 'cuda'),
             ("log1p", positives, True, True, 'cpu'),
