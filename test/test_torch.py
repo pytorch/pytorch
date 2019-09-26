@@ -35,7 +35,9 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
 from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
-    dtypes, dtypesIfCUDA
+    dtypes, dtypesIfCUDA, deviceCountAtLeast
+import torch.backends.quantized
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1346,51 +1348,6 @@ class _TestTorchMixin(object):
         res6 = torch.baddbmm(.1, res2, .5, b1, b2)
         self.assertEqual(res6, res2 * .1 + res * .5)
 
-    def test_pow(self):
-        # [res] torch.pow([res,] x)
-
-        # pow has dedicated implementation for different exponents
-        for exponent in [-2, -1, -0.5, 0.5, 1, 2, 3, 4]:
-            # base - tensor, exponent - number
-            # contiguous
-            m1 = torch.rand(100, 100) + 0.5
-            res1 = torch.pow(m1[4], exponent)
-            res2 = res1.clone().zero_()
-            for i in range(res2.size(0)):
-                res2[i] = math.pow(m1[4][i], exponent)
-            self.assertEqual(res1, res2)
-
-            # non-contiguous
-            m1 = torch.rand(100, 100) + 0.5
-            res1 = torch.pow(m1[:, 4], exponent)
-            res2 = res1.clone().zero_()
-            for i in range(res2.size(0)):
-                res2[i] = math.pow(m1[i, 4], exponent)
-            self.assertEqual(res1, res2)
-
-        # base - number, exponent - tensor
-        # contiguous
-        m1 = torch.randn(100, 100)
-        res1 = torch.pow(3, m1[4])
-        res2 = res1.clone().zero_()
-        for i in range(res2.size(0)):
-            res2[i] = math.pow(3, m1[4, i])
-        self.assertEqual(res1, res2)
-
-        # non-contiguous
-        m1 = torch.randn(100, 100)
-        res1 = torch.pow(3, m1[:, 4])
-        res2 = res1.clone().zero_()
-        for i in range(res2.size(0)):
-            res2[i] = math.pow(3, m1[i][4])
-        self.assertEqual(res1, res2)
-
-        # resize behavior for exp == 1
-        m1 = torch.randn(2, 2)
-        out = torch.randn([0])
-        torch.pow(m1, 1, out=out)
-        self.assertEqual(out, m1)
-
     def _test_cop(self, torchfn, mathfn):
         def reference_implementation(res2):
             for i, j in iter_indices(sm1):
@@ -2114,13 +2071,12 @@ class _TestTorchMixin(object):
         test_inference(torch.float32)
 
     def test_qengnie(self):
-        qengines = torch._C._supported_qengines()
-        # [TODO] Enable after the interface change
-        # original_qe = torch._C._get_qengine()
-        # for qe in qengines:
-        #     torch._C._set_qengine(qe)
-        #     assert torch._C._get_qengine() == qe, 'qengine not set successfully'
-        # torch._C._set_qengine(original_qe)
+        qengines = torch.backends.quantized.get_supported_qengines()
+        original_qe = torch.backends.quantized.engine
+        for qe in qengines:
+            torch.backends.quantized.engine = qe
+            assert torch.backends.quantized.engine == qe, 'qengine not set successfully'
+        torch.backends.quantized.engine = original_qe
 
     def test_new_tensor(self):
         expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
@@ -4995,9 +4951,6 @@ class _TestTorchMixin(object):
         utf8_bytes = b'\xc5\xbc\xc4\x85\xc4\x85\xc3\xb3\xc5\xbc\xc4\x85\xc5\xbc'
         utf8_str = utf8_bytes.decode('utf-8')
         if PY3:
-            with self.assertRaisesRegex(UnicodeDecodeError, "'ascii' codec can't decode byte"):
-                loaded = torch.load(buf)
-            buf.seek(0)
             loaded_utf8 = torch.load(buf, encoding='utf-8')
             self.assertEqual(loaded_utf8, [utf8_str, torch.zeros(1, dtype=torch.float), 2])
             buf.seek(0)
@@ -5389,6 +5342,21 @@ class _TestTorchMixin(object):
         self.assertEqual(s1[0], 0)
         self.assertEqual(s2[0], 0)
         self.assertEqual(s1.data_ptr() + 4, s2.data_ptr())
+
+    def test_load_unicode_error_msg(self):
+        # This Pickle contains a Python 2 module with Unicode data and the 
+        # loading should fail if the user explicitly specifies ascii encoding!
+        path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
+        if sys.version_info >= (3, 0):
+            self.assertRaises(UnicodeDecodeError, lambda: torch.load(path, encoding='ascii'))
+        else:
+            # Just checks the module loaded
+            self.assertIsNotNone(torch.load(path)) 
+
+    def test_load_python2_unicode_module(self):
+        # This Pickle contains some Unicode data!
+        path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
+        self.assertIsNotNone(torch.load(path)) 
 
     def test_load_error_msg(self):
         expected_err_msg = (".*You can only torch.load from a file that is seekable. " +
@@ -7021,6 +6989,66 @@ class TestTorchDeviceType(TestCase):
         result = torch.diagonal(x, 17)
         expected = torch.diag(x, 17)
         self.assertEqual(result, expected)
+
+    def test_pow(self, device):
+        # [res] torch.pow([res,] x)
+
+        # pow has dedicated implementation for different exponents
+        for dtype in torch.testing.get_all_math_dtypes(device):
+
+            # This test won't work on torch.half because math.pow will generate a much more accurate result. We skip it
+            # for now.
+            if dtype == torch.half:
+                continue
+
+            m1 = torch.empty(0, dtype=dtype, device=device)
+            if m1.is_floating_point():
+                m1 = torch.rand(100, 100, dtype=dtype, device=device) + 0.5
+            else:
+                # math.pow will overflow and throw exceptions for large integers
+                range_high = 4 if dtype in (torch.int8, torch.uint8) else 10
+                m1 = torch.randint(1, range_high, (100, 100), dtype=dtype, device=device)
+
+            for num in [-2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4, 3.3]:
+                if isinstance(num, int) and num < 0 and not m1.is_floating_point():
+                    with self.assertRaisesRegex(RuntimeError,
+                                                r'Integers to negative integer powers are not allowed\.'):
+                        torch.pow(m1[4], num)
+                else:
+                    # base - tensor, exponent - number
+                    # contiguous
+                    res1 = torch.pow(m1[4], num)
+                    res2 = res1.clone().zero_()
+                    for i in range(res2.size(0)):
+                        res2[i] = math.pow(m1[4][i], num)
+                    self.assertEqual(res1, res2)
+
+                    # non-contiguous
+                    res1 = torch.pow(m1[:, 4], num)
+                    res2 = res1.clone().zero_()
+                    for i in range(res2.size(0)):
+                        res2[i] = math.pow(m1[i, 4], num)
+                    self.assertEqual(res1, res2)
+
+            # base - number, exponent - tensor
+            # contiguous
+            res1 = torch.pow(3, m1[4])
+            res2 = res1.clone().zero_()
+            for i in range(res2.size(0)):
+                res2[i] = math.pow(3, m1[4, i])
+            self.assertEqual(res1, res2)
+
+            # non-contiguous
+            res1 = torch.pow(3, m1[:, 4])
+            res2 = res1.clone().zero_()
+            for i in range(res2.size(0)):
+                res2[i] = math.pow(3, m1[i][4])
+            self.assertEqual(res1, res2)
+
+            # resize behavior for exp == 1
+            out = torch.zeros(1, dtype=dtype, device=device)
+            torch.pow(m1, 1, out=out)
+            self.assertEqual(out, m1)
 
     def test_neg(self, device):
         int_types = [torch.int, torch.short, torch.int8, torch.uint8]
@@ -9656,7 +9684,7 @@ class TestTorchDeviceType(TestCase):
 
         def _test_underdetermined(a, b, expectedNorm):
             # underdetermined systems are not supported on the GPU
-            if 'cuda' in device:
+            if not torch.device(device).type == 'cpu':
                 return
 
             m = a.size()[0]
@@ -9811,7 +9839,7 @@ class TestTorchDeviceType(TestCase):
         if device == 'cpu':
             rng_device = None
         else:
-            rng_device = [0]
+            rng_device = [device]
 
         # Test core functionality. On CUDA, for small n, randperm is offloaded to CPU instead. For large n, randperm is
         # executed on GPU.
@@ -10849,7 +10877,7 @@ class TestTorchDeviceType(TestCase):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
             x_clone = x.clone()
-            if (device == 'cuda' and dt == torch.bfloat16):
+            if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: copy(x))
                 continue
             y = copy(x)
@@ -10875,7 +10903,7 @@ class TestTorchDeviceType(TestCase):
     def test_view_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
-            if (device == 'cuda' and dt == torch.bfloat16):
+            if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: x.view(6))
                 continue
             self.assertEqual(x.view(6).shape, [6])
@@ -10883,7 +10911,7 @@ class TestTorchDeviceType(TestCase):
     def test_fill_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor((1, 1), dtype=dt, device=device)
-            if (device == 'cuda' and dt == torch.bfloat16):
+            if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: x.fill_(1))
                 continue
             x.fill_(1)
@@ -10895,7 +10923,7 @@ class TestTorchDeviceType(TestCase):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor((1, 1), dtype=dt, device=device)
             y = x.clone()
-            if (device == 'cuda' and dt == torch.bfloat16):
+            if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                 # `x - y` is used inside of the assertEqual
                 self.assertRaises(RuntimeError, lambda: x - y)
                 continue
@@ -10904,7 +10932,7 @@ class TestTorchDeviceType(TestCase):
     def test_cat_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
             x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
-            if (device == 'cuda' and dt == torch.bfloat16):
+            if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                 self.assertRaises(RuntimeError, lambda: torch.cat((x, x), 0))
                 continue
 
@@ -10921,7 +10949,7 @@ class TestTorchDeviceType(TestCase):
         for shape in shapes:
             for dt in torch.testing.get_all_dtypes():
 
-                if (device == 'cuda' and dt == torch.bfloat16):
+                if (torch.device(device).type == 'cuda' and dt == torch.bfloat16):
                     self.assertRaises(RuntimeError, lambda: torch.zeros(shape, device=device, dtype=dt).shape)
                     self.assertRaises(RuntimeError, lambda: torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                     self.assertRaises(RuntimeError, lambda: torch.full(shape, 3, device=device, dtype=dt).shape)
@@ -11078,7 +11106,7 @@ class TestTorchDeviceType(TestCase):
                 # in this test
                 continue
 
-            if device == 'cuda' and dt == torch.bfloat16:
+            if torch.device(device).type == 'cuda' and dt == torch.bfloat16:
                 self.assertRaises(RuntimeError, lambda: x > b)
                 self.assertRaises(RuntimeError, lambda: x < b)
                 self.assertRaises(RuntimeError, lambda: x == b)
@@ -11278,12 +11306,12 @@ class TestTorchDeviceType(TestCase):
                     src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
                     mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
 
-                    if dt == torch.bfloat16 and device == 'cuda':
+                    if dt == torch.bfloat16 and torch.device(device).type == 'cuda':
                         # remove once bfloat16 implemented on CUDA
                         self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                         continue
 
-                    if dt == torch.half and device == 'cpu':
+                    if dt == torch.half and torch.device(device).type == 'cpu':
                         self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                         continue
 
@@ -11802,13 +11830,13 @@ class TestTorchDeviceType(TestCase):
             ("exp", doubles, True, True, 'cpu'),
             ("exp", doubles, False, True, 'cuda'),
             ("expm1", doubles, True, True, 'cpu'),
-            ("expm1", doubles, False, True, 'cuda'),
+            ("expm1", doubles, True, True, 'cuda'),
             ("floor", doubles, True, True, 'cpu'),
             ("floor", doubles, True, True, 'cuda'),
             ("frac", doubles, True, True, 'cpu'),
             ("frac", doubles, False, True, 'cuda'),
             ("log", positives, True, True, 'cpu'),
-            ("log", positives, False, True, 'cuda'),
+            ("log", positives, True, True, 'cuda'),
             ("log10", positives, True, True, 'cpu'),
             ("log10", positives, False, True, 'cuda'),
             ("log1p", positives, True, True, 'cpu'),
@@ -11836,7 +11864,7 @@ class TestTorchDeviceType(TestCase):
             ("tanh", doubles, True, True, 'cpu'),
             ("tanh", doubles, False, True, 'cuda'),
             ("trunc", doubles, True, True, 'cpu'),
-            ("trunc", doubles, False, True, 'cuda')
+            ("trunc", doubles, True, True, 'cuda')
         ]
 
         for (fn, inputs, has_input_output_mem_overlap_check,
@@ -12349,29 +12377,29 @@ class TestTorchDeviceType(TestCase):
         run_test(device, torch.long)
         run_test(device, torch.uint8)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    @deviceCountAtLeast(2)
     @onlyCUDA
-    def test_reverse_binary_ops_multiple_device(self, device):
-        self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to("cuda:1"))    # __radd__
-        self.assertEqual(2 - torch.tensor(3), 2 - torch.tensor(3).to("cuda:1"))    # __rsub__
-        self.assertEqual(2 * torch.tensor(3), 2 * torch.tensor(3).to("cuda:1"))    # __rmul__
-        self.assertEqual(2 / torch.tensor(3), 2 / torch.tensor(3).to("cuda:1"))    # __rtruediv__
-        self.assertEqual(2 // torch.tensor(3), 2 // torch.tensor(3).to("cuda:1"))  # __rfloordiv__
+    def test_reverse_binary_ops_multiple_device(self, devices):
+        self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to(devices[1]))    # __radd__
+        self.assertEqual(2 - torch.tensor(3), 2 - torch.tensor(3).to(devices[1]))    # __rsub__
+        self.assertEqual(2 * torch.tensor(3), 2 * torch.tensor(3).to(devices[1]))    # __rmul__
+        self.assertEqual(2 / torch.tensor(3), 2 / torch.tensor(3).to(devices[1]))    # __rtruediv__
+        self.assertEqual(2 // torch.tensor(3), 2 // torch.tensor(3).to(devices[1]))  # __rfloordiv__
 
         self.assertEqual(
-            torch.tensor(2).to("cuda:1") + torch.tensor(3).to("cuda:0"),
+            torch.tensor(2).to(devices[1]) + torch.tensor(3).to(devices[0]),
             torch.tensor(2) + torch.tensor(3))
         self.assertEqual(
-            torch.tensor(2).to("cuda:1") - torch.tensor(3).to("cuda:0"),
+            torch.tensor(2).to(devices[1]) - torch.tensor(3).to(devices[0]),
             torch.tensor(2) - torch.tensor(3))
         self.assertEqual(
-            torch.tensor(2).to("cuda:1") * torch.tensor(3).to("cuda:0"),
+            torch.tensor(2).to(devices[1]) * torch.tensor(3).to(devices[0]),
             torch.tensor(2) * torch.tensor(3))
         self.assertEqual(
-            torch.tensor(2).to("cuda:1") / torch.tensor(3).to("cuda:0"),
+            torch.tensor(2).to(devices[1]) / torch.tensor(3).to(devices[0]),
             torch.tensor(2) / torch.tensor(3))
         self.assertEqual(
-            torch.tensor(2).to("cuda:1") // torch.tensor(3).to("cuda:0"),
+            torch.tensor(2).to(devices[1]) // torch.tensor(3).to(devices[0]),
             torch.tensor(2) // torch.tensor(3))
 
     @onlyCUDA
@@ -12409,20 +12437,20 @@ class TestTorchDeviceType(TestCase):
             RuntimeError, "multinomial arguments must have the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    @deviceCountAtLeast(2)
     @onlyCUDA
-    def test_multinomial_gpu_device_constrain(self, device):
-        x = torch.empty(0, device="cuda:0")
-        y = torch.empty(0, device="cuda:1")
+    def test_multinomial_gpu_device_constrain(self, devices):
+        x = torch.empty(0, device=devices[0])
+        y = torch.empty(0, device=devices[1])
         self.assertRaisesRegex(
             RuntimeError, "multinomial arguments must have the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    @deviceCountAtLeast(2)
     @onlyCUDA
-    def test_zeros_like_multiple_device(self, device):
-        expected = torch.zeros(100, 100, device=device)
-        x = torch.randn(100, 100, device='cuda:1', dtype=torch.float32)
+    def test_zeros_like_multiple_device(self, devices):
+        expected = torch.zeros(100, 100, device=devices[0])
+        x = torch.randn(100, 100, device=devices[1], dtype=torch.float32)
         output = torch.zeros_like(x)
         self.assertEqual(output, expected)
 
@@ -12433,24 +12461,22 @@ class TestTorchDeviceType(TestCase):
         res1 = torch.ones_like(expected)
         self.assertEqual(res1, expected)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    @deviceCountAtLeast(2)
     @onlyCUDA
-    def test_ones_like_multiple_device(self, device):
-        expected = torch.ones(100, 100, device=device)
-        x = torch.randn(100, 100, device='cuda:1', dtype=torch.float32)
+    def test_ones_like_multiple_device(self, devices):
+        expected = torch.ones(100, 100, device=devices[0])
+        x = torch.randn(100, 100, device=devices[1], dtype=torch.float32)
         output = torch.ones_like(x)
         self.assertEqual(output, expected)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
+    @deviceCountAtLeast(2)
     @onlyCUDA
-    def test_device_guard(self, device):
+    def test_device_guard(self, devices):
         # verify that all operators with `device_guard: False` behave properly with multiple devices.
         # TODO: if we had operator introspection we could figure out this set of operators automatically...
-        current_device = torch.cuda.current_device()
-        device = torch.device('cuda:1') if current_device == 0 else torch.device('cuda:0')
-        x = torch.randn((1, 2, 3), device=device)
-        y = torch.zeros((1, 3, 2), device=device)
-        scalar = torch.tensor(5, device=device)
+        x = torch.randn((1, 2, 3), device=devices[1])
+        y = torch.zeros((1, 3, 2), device=devices[1])
+        scalar = torch.tensor(5, device=devices[1])
 
         # property ops
         torch.cudnn_is_acceptable(x)
@@ -12482,7 +12508,7 @@ class TestTorchDeviceType(TestCase):
 
         # in-place ops
         def inplace():
-            return torch.randn((1, 2, 3), device=device)
+            return torch.randn((1, 2, 3), device=devices[1])
         inplace().as_strided_(y.size(), y.stride())
         inplace().resize_(y.size())
         inplace().squeeze_()
@@ -12537,10 +12563,10 @@ class TestTorchDeviceType(TestCase):
         torch.set_default_tensor_type(torch.cuda.DoubleTensor)
         torch.set_default_dtype(torch.float32)
         self.assertIs(torch.float32, torch.tensor(0.).dtype)
-        self.assertEqual(torch.device('cuda:0'), torch.tensor(0.).device)
+        self.assertEqual(torch.device(device), torch.tensor(0.).device)
         torch.set_default_dtype(torch.float64)
         self.assertIs(torch.float64, torch.tensor(0.).dtype)
-        self.assertEqual(torch.device('cuda:0'), torch.tensor(0.).device)
+        self.assertEqual(torch.device(device), torch.tensor(0.).device)
         torch.set_default_tensor_type(saved_type)
 
     @onlyCUDA
@@ -12612,12 +12638,12 @@ class TestTorchDeviceType(TestCase):
                 torch.lu_solve(b, A, torch.rand(A.shape[:-1], device=b_device).int())
 
     # Note - reports a leak of 512 bytes on CUDA device 1
-    @unittest.skipIf(torch.cuda.device_count() < 2, 'less than 2 GPUs detected')
+    @deviceCountAtLeast(2)
     @skipCUDAMemoryLeakCheckIf(True)
     @onlyCUDA
-    def test_tensor_set_errors_multigpu(self, device):
-        f_cuda0 = torch.randn((2, 3), dtype=torch.float32, device='cuda:0')
-        f_cuda1 = torch.randn((2, 3), dtype=torch.float32, device='cuda:1')
+    def test_tensor_set_errors_multigpu(self, devices):
+        f_cuda0 = torch.randn((2, 3), dtype=torch.float32, device=devices[0])
+        f_cuda1 = torch.randn((2, 3), dtype=torch.float32, device=devices[1])
 
         self.assertRaises(RuntimeError, lambda: f_cuda0.set_(f_cuda1.storage()))
         self.assertRaises(RuntimeError,
@@ -12638,13 +12664,13 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(xc.float(), xc2.float())
 
     @onlyCUDA
-    def test_serialization(self, device):
+    @deviceCountAtLeast(1)  # Note: Tests works with one but prefers more devices
+    def test_serialization(self, devices):
         def _test_serialization(filecontext_lambda):
-            device_count = torch.cuda.device_count()
             t0 = torch.cuda.FloatTensor(5).fill_(1)
-            torch.cuda.set_device(device_count - 1)
-            tn = torch.cuda.FloatTensor(3).fill_(2)
-            torch.cuda.set_device(0)
+            with torch.cuda.device(devices[-1]):
+                tn = torch.cuda.FloatTensor(3).fill_(2)
+            torch.cuda.set_device(devices[0])
             b = (t0, tn)
             with filecontext_lambda() as f:
                 torch.save(b, f)
@@ -12652,8 +12678,8 @@ class TestTorchDeviceType(TestCase):
                 c = torch.load(f)
                 self.assertEqual(b, c, 0)
                 u0, un = c
-                self.assertEqual(u0.get_device(), 0)
-                self.assertEqual(un.get_device(), device_count - 1)
+                self.assertEqual(str(u0.device), devices[0])
+                self.assertEqual(str(un.device), devices[-1])
 
         _test_serialization(tempfile.NamedTemporaryFile)
         _test_serialization(BytesIOContext)
@@ -12884,10 +12910,9 @@ class TestTorchDeviceType(TestCase):
         x = torch.tensor([], device=device)
         self.assertEqual(x.dtype, x.storage().dtype)
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, 'less than 2 GPUs detected')
+    @deviceCountAtLeast(2)
     @onlyCUDA
-    def test_storage_multigpu(self, device):
-        devices = ['cuda:0', 'cuda:1']
+    def test_storage_multigpu(self, devices):
         for device in devices:
             x = torch.tensor([], device=device)
             self.assertEqual(x.dtype, x.storage().dtype)

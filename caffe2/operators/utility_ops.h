@@ -365,7 +365,9 @@ class WeightedSumOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    const int input_size = this->InputSize();
+    // the code is written this way because of 10.1 + gcc 7.3.1 compiler bug
+    // as discussed at https://devtalk.nvidia.com/default/topic/1048037/linux/cuda-10-1-nvidia-you-re-now-quot-fixing-quot-gcc-bugs-that-gcc-doesn-t-even-have/
+    const int input_size = (*this).InputSize();
     CAFFE_ENFORCE_EQ(input_size % 2, 0);
     const auto& X0 = Input(0);
     const auto& weight0 = Input(1);
@@ -752,7 +754,7 @@ class ScatterOp : public Operator<CPUContext> {
   virtual ~ScatterOp() noexcept override {}
 
   bool RunOnDevice() override {
-    
+
     TORCH_CHECK(Context::GetDeviceType() == kCPU, "ScatterOp currently only supports CPU.")
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
@@ -769,7 +771,7 @@ class ScatterOp : public Operator<CPUContext> {
 
     // ONNX allows negative axis to index from the back, valid range: [-r, r].
     axis_ = data.canonical_axis_index(axis_);
-    
+
     CAFFE_ENFORCE_GE(data.dim(), axis_ + 1, "DATA should be at least [axis+1]-D");
     CAFFE_ENFORCE_GE(axis_, 0, "Axis should be non-negative");
     CAFFE_ENFORCE_LT(axis_, data.dim(), "Axis out of range");
@@ -796,7 +798,7 @@ class ScatterOp : public Operator<CPUContext> {
     const int64_t src_indexing_axis_dim = updates.size(axis_);
     const int64_t src_batch_bytesize = updates.size_from_dim(axis_) * item_bytesize;
     const int64_t dst_batch_size = data.size_from_dim(axis_) * item_bytesize;
-    
+
     const int64_t N = indices.size(axis_);
 
     check_indexarray_range<IndexType>(idxs, N, src_indexing_axis_dim);
