@@ -446,7 +446,10 @@ struct CodeImpl {
     graph_ = preprocess_.graph;
     n_outputs = graph_->outputs().size();
     n_inputs = graph_->inputs().size();
-    // std::cout << *graph_ << "\n";
+    const static auto *ppg = std::getenv("PYTORCH_PRINT_INT");
+    if (ppg) {
+      std::cout << *graph_ << "\n";
+    }
     emitCodeForBlock(graph_->block());
     insertInstruction(RET);
     // we deferred the emission of bailout blocks so they appear at the end
@@ -868,8 +871,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-        // std::cout << "RUNNING ";
-        // frames.back().function->dump(std::cout, af.pc);
+
+        const static auto *ppg = std::getenv("PYTORCH_PRINT_INT");
+        if (ppg) {
+          std::cout << "RUNNING ";
+          frames.back().function->dump(std::cout, af.pc);
+        }
+
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:

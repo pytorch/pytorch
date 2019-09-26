@@ -735,7 +735,10 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
 
-  FuseGraph(graph);
+  const static auto* cdfg = std::getenv("PYTORCH_DISABLE_FUSE_GRAPH");
+  if (!cdfg) {
+    FuseGraph(graph);  
+  }
 }
 
 void runOptimization(std::shared_ptr<Graph>& graph) {

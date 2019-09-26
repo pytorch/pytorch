@@ -44,10 +44,16 @@ void specializeAutogradZero(Graph &g) {
   for (Value* input : g.inputs()) {
     const auto& tp = input->type();
     if (auto tt = tp->cast<TensorType>()) {
-      if (tt->undefined() && *tt->undefined()) {
-        state[input] = State::Zero;
-      } else {
-        state[input] = State::Nonzero;
+      if (tt->undefined()) 
+      {
+        if(*tt->undefined()) {
+          state[input] = State::Zero;
+        } else {
+          state[input] = State::Nonzero;
+        }
+      }
+      else {
+        state[input] = State::Unknown;
       }
     } else if (
         tp->isSubtypeOf(TensorType::get()) ||
@@ -57,6 +63,14 @@ void specializeAutogradZero(Graph &g) {
       state[input] = State::Unknown;
     }
   }
+
+
+  const static auto *ppg = std::getenv("PYTORCH_PRINT_GRAPH");
+  if (ppg) {
+    std::cout << "specializeAutogradZero =\n";
+    g.dump();
+  }
+  
   replaceUndefinedWithNone(g.block());
   for (auto it = g.nodes().begin(); it != g.nodes().end(); ++it) {
     auto n = *it;
@@ -88,7 +102,8 @@ void specializeAutogradZero(Graph &g) {
             // where we do not know if a value is Nonzero since at the top level
             // a gradient graph is composed of Linear nodes and AutogradAdds
             // and LinearNodes only appear in these graphs
-            AT_ASSERT(state[input] != State::Unknown);
+
+            //AT_ASSERT(state[input] != State::Unknown);
           }
           // hoist the nodes in the GradOf body to be before the linear block
           for (auto it = body->nodes().begin(); it != body->nodes().end();) {

@@ -70,7 +70,10 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   // get rid of autograd specific ops
   // we can probably make guard_elimination.cpp
   // to handle these ops
-  specializeAutogradZero(*copy);
+
+  //if (getProfilingMode()) {
+    specializeAutogradZero(*copy);
+  //}
   // hoist out GradOf blocks
   // otherwise we will need to teach
   // liveness and buildBailOut graphs
@@ -83,8 +86,16 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   // TODO: this runs specializeAutogradZero ??
   GRAPH_DUMP("After InsertBailOuts: ", copy);
   runRequiredPasses(copy);
+  // if (!getProfilingMode()) {
+  //   // PropagateInputShapes is likely a no-op since we don't specialize
+
+  //   PropagateInputShapes(copy);
+  //   PropagateRequiresGrad(copy);
+  // }
   ConstantPropagation(copy);
   runOptimization(copy);
+
+  // TODO: insert grad propagation
   if (needsGradient(copy)) {
     auto diff_nodes = CreateAutodiffSubgraphs(
         copy,

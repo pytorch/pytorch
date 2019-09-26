@@ -891,7 +891,12 @@ void initJitScriptBindings(PyObject* module) {
             return f.run(str);
           })
       .def(
-          "run", [](testing::FileCheck& f, const Graph& g) { return f.run(g); })
+          "run", [](testing::FileCheck& f, const Graph& g) 
+          { 
+            std::cout << ".def run\n";
+            g.dump();
+            return f.run(g); 
+          })
       .def(
           "run",
           [](testing::FileCheck& f,

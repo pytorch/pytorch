@@ -87,6 +87,38 @@ RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
 
+func_call = torch._C.Function.__call__
+meth_call = torch._C.ScriptMethod.__call__
+
+def prof_func_call(*args, **kwargs):
+    if 'profile' in kwargs:
+        with enable_profiling_mode(True):
+            print("prof_func_call")
+            del kwargs['profile']
+            #profile
+            print ("args = ", args)
+            func_call(*args, **kwargs)  
+            #optimize
+            print ("args2 = ", args)
+            return func_call(*args, **kwargs)
+
+    return func_call(*args, **kwargs)
+
+def prof_meth_call(*args, **kwargs):
+    if 'profile' in kwargs:
+        with enable_profiling_mode(True):
+            print("prof_method_call")
+            del kwargs['profile']
+            #profile
+            meth_call(*args, **kwargs)  
+            #optimize
+            return meth_call(*args, **kwargs)
+
+    return meth_call(*args, **kwargs)
+
+torch._C.Function.__call__ = prof_func_call
+torch._C.ScriptMethod.__call__ = prof_meth_call
+
 
 def LSTMCellF(input, hx, cx, *params):
     return LSTMCell(input, (hx, cx), *params)
@@ -2962,6 +2994,54 @@ graph(%Ra, %Rb):
         self.assertEqual(model_loaded(), model())
 
 class TestScript(JitTestCase):
+
+
+    # def test_override(self):
+
+    #     func_call = torch._C.Function.__call__
+    #     meth_call = torch._C.ScriptMethod.__call__
+
+    #     def prof_func_call(*args, **kwargs):
+    #         if 'profile' in kwargs:
+    #             with enable_profiling_mode(profiling):
+    #                 print("prof_method_call")
+    #                 del kwargs['profile']
+    #                 #profile
+    #                 func_call(*args, **kwargs)  
+    #                 #optimize
+
+    #         return func_call(*args, **kwargs)
+
+    #     def prof_meth_call(*args, **kwargs):
+    #         if 'profile' in kwargs:
+    #             with enable_profiling_mode(profiling):
+    #                 print("prof_method_call")
+    #                 del kwargs['profile']
+    #                 #profile
+    #                 meth_call(*args, **kwargs)  
+    #                 #optimize
+
+    #         return meth_call(*args, **kwargs)
+
+    #     torch._C.Function.__call__ = prof_func_call
+    #     torch._C.ScriptMethod.__call__ = prof_meth_call
+
+            
+        # @torch.jit.script
+        # def foo(x: int):
+        #     print("run")
+        #     return x + 1
+
+
+        # class Foo(torch.nn.Module):
+        #     def forward(self, x: int):
+        #         print("run2")
+        #         return x + 1
+
+        # fs = torch.jit.script(Foo())
+        # fs(1, profile=True)
+        # print(type(foo))
+        # print(type(fs.forward))
 
     # def test_merge(self):
     #     def f(x, y):
@@ -5978,17 +6058,18 @@ a")
         ''')
         ops = ['tensor', 'as_tensor']
         inputs = ['[1]', '[False]', '[2.5]', '0.5', '1', 'False', '[[1]]']
-        expected_shape = ["Long(*)", ("Bool(*)"), "Double(*)", "Double()", "Long()", "Bool()", "Long(*, *)"]
+        expected_shape = ["Long(1)", "Bool(1)", "Double(1)", "Double()", "Long()", "Bool()", "Long(1, 1)"]
 
         for op in ops:
             for inp, expect in zip(inputs, expected_shape):
                 code = tensor_template.format(tensor_op=op, input=inp)
                 scope = {}
                 exec(code, globals(), scope)
-                self.checkScript(code, ())
-                cu = torch.jit.CompilationUnit(code)
-                torch._C._jit_pass_complete_shape_analysis(cu.func.graph, (), False)
-                FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(cu.func.graph)
+                fn = self.checkScript(code, ())
+                #cu = torch.jit.CompilationUnit(code)
+                #torch._C._jit_pass_complete_shape_analysis(cu.func.graph, (), False)
+                #FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(cu.func.graph)
+                FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(fn.graph_for())
 
         @torch.jit.script
         def test_dtype(inp_dtype):
@@ -5996,17 +6077,17 @@ a")
             a = torch.tensor(1.0, dtype=torch.float, requires_grad=True)
             return a, torch.tensor(1.0, dtype=inp_dtype)  # noqa T484
 
-        g = test_dtype.graph_for(5)
-        # first should have type set second should not
-        FileCheck().check("Float() = aten::tensor").check("Tensor = aten::tensor").run(g)
+        g = test_dtype.graph_for(5, profile = True)
+        # both should have completed shapes
+        FileCheck().check("Tensor = aten::tensor").check("Float() = prim::BailOut").check("Tensor = aten::tensor").check("Half() = prim::BailOut").run(g)
 
         @torch.jit.script
         def test_as_tensor_tensor_input(input):
             a = torch.as_tensor(input, dtype=input.dtype)
             return a, torch.as_tensor(input, dtype=torch.float)
 
-        g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4))
-        FileCheck().check("Tensor = aten::as_tensor").check("Float(*, *) = aten::as_tensor").run(g)
+        g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4), profile = True)
+        FileCheck().check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").run(g)
 
 
     def test_tensor_requires_grad(self):
@@ -9787,22 +9868,21 @@ a")
             a = torch.rand([3, 4])
             return a + 1.0 - a
 
-        self.checkScript(test_rand, ())
-        fn = torch.jit.script(test_rand)
+        fn = self.checkScript(test_rand, ())
         out = fn()
         self.assertEqual(out.dtype, torch.double)
-        g = fn.graph_for()
+        FileCheck().check("Double(3, 4)").check_not("Float(3, 4)").run(fn.graph_for())
         # Testing shape analysis correctly setting type
-        FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(g)
-
+        
         @torch.jit.script
         def randint():
             return torch.randint(0, 5, [1, 2])
-        out = randint()
+        
+        out = randint(profile=True)
         self.assertEqual(out.dtype, torch.double)
         # although the type should be int here, testing that the runtime dtype
         # and shape analysis dtype is the same.
-        FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(randint.graph_for())
+        FileCheck().check("Double(1, 2)").check_not("Float(1, 2)").run(randint.graph_for())
 
     def test_erase_number_types(self):
         def func(a):
@@ -15734,19 +15814,21 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
     # anyways
 
 
-    # with enable_profiling_mode(True):
-    #     # profile
-    #     recording_inputs_profiling, recording_tensors_profiling = clone_inputs(True)
-    #     self.runAndSaveRNG(func, recording_inputs_profiling, kwargs)
-    #     # print("profiling")
-    #     # print(str(func.last_graph))
-    #     # optimzie
-    #     recording_inputs_optimized, recording_tensors_optimized = clone_inputs(True)
-    #     self.runAndSaveRNG(func, recording_inputs_optimized, kwargs)
-    #     print("optimize")
-    #     print(str(func.last_graph))
-        
+    print ("enable profiling")
+    with enable_profiling_mode(True):
+        # profile
+        recording_inputs_profiling, recording_tensors_profiling = clone_inputs(True)
+        self.runAndSaveRNG(func, recording_inputs_profiling, kwargs)
+        # print("profiling")
+        # print(str(func.last_graph))
+        #optimzie
+        recording_inputs_optimized, recording_tensors_optimized = clone_inputs(True)
+        self.runAndSaveRNG(func, recording_inputs_optimized, kwargs)
+        # print("optimize")
+        # print(str(func.last_graph))
 
+
+    print ("no grad")
     # test no gradients case
     outputs = self.runAndSaveRNG(reference_func, nograd_inputs, kwargs)
     outputs_test = self.runAndSaveRNG(func, nograd_inputs, kwargs)
@@ -15759,6 +15841,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
         # skip grad tests
         return
 
+    print ("grad")
     # test single grad case
     outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
     grads = torch.autograd.grad(allSum(outputs), recording_tensors,
@@ -15770,6 +15853,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
     self.assertEqual(outputs, outputs_test)
     self.assertEqual(grads, grads_test)
 
+    print ("grad grad")
     # test the grad grad case
     if self._testMethodName in nn_functional_single_grad:
         return

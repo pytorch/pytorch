@@ -522,6 +522,12 @@ struct CAFFE2_API TensorType : public Type {
     return r;
   }
 
+  TensorTypePtr withPossiblyUndefined() {
+    auto r = clone();
+    r->undefined_ = c10::optional<bool>{};
+    return r;
+  }
+
   c10::optional<bool> undefined() const { return undefined_; }
 
   static TensorTypePtr get();
