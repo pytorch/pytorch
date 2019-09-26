@@ -387,6 +387,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/symbolic_script.cpp
     ${TORCH_SRC_DIR}/csrc/jit/profiling_record.cpp
     ${TORCH_SRC_DIR}/csrc/jit/profiling_graph_executor_impl.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/update_graph_executor_opt.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/bailout_graph.cpp
@@ -459,6 +460,17 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
     )
+
+  if (NOT INTERN_BUILD_MOBILE)
+    set (MOBILE_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_ops.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
+        )
+    list (APPEND TORCH_SRCS ${MOBILE_SRCS})
+  endif()
 
   if (NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND TORCH_SRCS

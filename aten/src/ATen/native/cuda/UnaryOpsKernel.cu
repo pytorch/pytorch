@@ -57,6 +57,14 @@ void floor_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void log_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "log_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return std::log(a);
+    });
+  });
+}
+
 void neg_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "neg_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
@@ -171,6 +179,7 @@ REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
 REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda);
 REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
 REGISTER_DISPATCH(floor_stub, &floor_kernel_cuda);
+REGISTER_DISPATCH(log_stub, &log_kernel_cuda);
 REGISTER_DISPATCH(neg_stub, &neg_kernel_cuda);
 REGISTER_DISPATCH(round_stub, &round_kernel_cuda);
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
