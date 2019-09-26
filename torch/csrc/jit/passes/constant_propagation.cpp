@@ -343,8 +343,8 @@ struct ConstantPropagator {
 void ConstantPropagation(std::shared_ptr<Graph>& graph) {
   ConstantPropagator cp(graph);
   cp.run();
-  GRAPH_DUMP("After ConstantPropagation: ", graph);
   EliminateDeadCode(graph);
+  GRAPH_DUMP("After ConstantPropagation: ", graph);
 }
 } // namespace jit
 } // namespace torch
