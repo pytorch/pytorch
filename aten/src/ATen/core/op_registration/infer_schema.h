@@ -86,10 +86,7 @@ FunctionSchema createFunctionSchemaFromTraits(std::string&& name, std::string&& 
  using ReturnType = typename FunctionTraits::return_type;
  using ParameterTypes = typename FunctionTraits::parameter_types;
 
- auto arguments = createArguments<ParameterTypes>::call();
- auto returns = createReturns<ReturnType>::call();
-
- return {std::move(name), std::move(overload_name), std::move(arguments), std::move(returns)};
+ return {std::move(name), std::move(overload_name), createArguments<ParameterTypes>::call(), createReturns<ReturnType>::call()};
 }
 }
 
