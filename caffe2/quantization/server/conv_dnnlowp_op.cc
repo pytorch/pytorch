@@ -255,11 +255,13 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
             this->template Input<int8::Int8TensorCPU>(BIAS).scale;
         bias_qparams.zero_point =
             this->template Input<int8::Int8TensorCPU>(BIAS).zero_point;
-        CAFFE_ENFORCE_LE(
-            std::abs(
-                bias_qparams.scale -
-                in_qparams_[INPUT].scale * FilterQuantizationParams(0).scale),
-            1e-4);
+        if (InputTensorCPU_(INPUT).dim32(0) > 0) {
+          CAFFE_ENFORCE_LE(
+              std::abs(
+                  bias_qparams.scale -
+                  in_qparams_[INPUT].scale * FilterQuantizationParams(0).scale),
+              1e-4);
+        }
         CAFFE_ENFORCE_EQ(bias_qparams.zero_point, 0);
         b_quantized_data_ = bias.template data<int32_t>();
       } else {
