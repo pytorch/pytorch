@@ -226,7 +226,6 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  std::stringstream err;
   std::vector<NamedValue> new_inputs = inputs.vec();
   new_inputs.insert(new_inputs.begin(), module_);
 
@@ -245,7 +244,7 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
           c10::nullopt,
           new_inputs,
           attributes,
-          &err,
+          &failure_messages,
           allow_conversions);
       if (match) {
         return MethodValue(module_, method_name)
