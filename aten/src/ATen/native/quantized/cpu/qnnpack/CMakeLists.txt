@@ -276,8 +276,10 @@ IF(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
   SET_PROPERTY(SOURCE ${PYTORCH_QNNPACK_OPERATOR_SRCS} APPEND_STRING PROPERTY COMPILE_FLAGS " -O2 ")
 ENDIF()
 TARGET_INCLUDE_DIRECTORIES(pytorch_qnnpack PUBLIC include)
-TARGET_INCLUDE_DIRECTORIES(pytorch_qnnpack PRIVATE src)
+TARGET_INCLUDE_DIRECTORIES(pytorch_qnnpack PUBLIC src)
 SET_TARGET_PROPERTIES(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/pytorch_qnnpack.h)
+SET_TARGET_PROPERTIES(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/conv_utils.h)
+SET_TARGET_PROPERTIES(pytorch_qnnpack PROPERTIES PUBLIC_HEADER include/qnnpack_func.h)
 
 # ---[ Configure clog
 IF(NOT TARGET clog)
@@ -289,7 +291,7 @@ IF(NOT TARGET clog)
   # We build static version of clog but a dynamic library may indirectly depend on it
   SET_PROPERTY(TARGET clog PROPERTY POSITION_INDEPENDENT_CODE ON)
 ENDIF()
-TARGET_LINK_LIBRARIES(pytorch_qnnpack PRIVATE clog)
+TARGET_LINK_LIBRARIES(pytorch_qnnpack PUBLIC clog)
 
 # ---[ Configure cpuinfo
 IF(NOT TARGET cpuinfo)

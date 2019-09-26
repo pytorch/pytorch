@@ -205,11 +205,10 @@
   self: cholesky_backward(grad, upper, result)
 
 - name: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
-  self: not_implemented("cholesky_solve")
-  input2: not_implemented("cholesky_solve")
+  self, input2: cholesky_solve_backward(grad, self, input2, result, upper)
 
 - name: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
-  self: not_implemented("cholesky_inverse")
+  self: cholesky_inverse_backward(grad, self, upper, result)
 
 - name: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
   self: not_implemented("fbgemm_linear_int8_weight_fp32_activation only supported for inference")
@@ -386,7 +385,7 @@
 - name: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   self: not_implemented("histc")
 
-- name: index(Tensor self, Tensor?[] indices) -> Tensor
+- name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(zeros_like(self), indices, grad)
   indices: TensorList()
 
@@ -622,7 +621,7 @@
   pdist: not_implemented("_pdist_backward")
 
 - name: cdist(Tensor x1, Tensor x2, float p=2) -> Tensor
-  x1: _cdist_backward(grad, x1, x2, p, result)
+  x1: _cdist_backward(grad.contiguous(), x1, x2, p, result)
   x2: _cdist_backward(grad.transpose(-1, -2).contiguous(), x2, x1, p, result.transpose(-1, -2).contiguous())
 
 - name: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
@@ -849,7 +848,7 @@
 - name: trace(Tensor self) -> Tensor
   self: trace_backward(grad, self.sizes())
 
-- name: transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
+- name: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   self: grad.transpose(dim0, dim1)
 
 - name: transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
@@ -1504,7 +1503,7 @@
 - name: _fft_with_size(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, bool normalized, bool onesided, int[] output_sizes) -> Tensor
   self: fft_backward(self, grad, signal_ndim, complex_input, complex_output, inverse, checked_signal_sizes, normalized, onesided, output_sizes)
 
-- name: unbind(Tensor(a) self, int dim=0) -> Tensor(a)[]
+- name: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]
   self: unbind_backward(grads, dim)
 
 - name: stack(Tensor[] tensors, int dim=0) -> Tensor
@@ -1516,10 +1515,10 @@
 # _thnn_fused_lstm_cell outputs: (hy, cy, workspace)
 - name: _thnn_fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor? input_bias=None, Tensor? hidden_bias=None) -> (Tensor, Tensor, Tensor)
   output_differentiability: [True, True, False]
-  input_gates, hidden_gates, cx, input_bias, hidden_bias: _thnn_fused_lstm_cell_backward(grads[0], grads[1], cx, result1, result2, input_bias.defined())
+  input_gates, hidden_gates, cx, input_bias, hidden_bias: "GradMode::is_enabled() ? _thnn_differentiable_lstm_cell_backward(grads[0], grads[1], input_gates, hidden_gates, input_bias, hidden_bias, cx, result1) : _thnn_fused_lstm_cell_backward(grads[0], grads[1], cx, result1, result2, input_bias.defined())"
 
 - name: _thnn_fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor? input_bias=None, Tensor? hidden_bias=None) -> (Tensor, Tensor)
-  input_gates, hidden_gates, hx, input_bias, hidden_bias: _thnn_fused_gru_cell_backward(grad, result1, input_bias.defined())
+  input_gates, hidden_gates, hx, input_bias, hidden_bias: "GradMode::is_enabled() ? _thnn_differentiable_gru_cell_backward(grad, input_gates, hidden_gates, hx, input_bias, hidden_bias) : _thnn_fused_gru_cell_backward(grad, result1, input_bias.defined())"
 
 # PackedSequence helpers
 - name: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)

@@ -86,40 +86,30 @@ def add(g, self, other, alpha=None):
     # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
     if alpha and sym_help._scalar(sym_help._maybe_get_scalar(alpha)) != 1:
         return _unimplemented("add", "alpha != 1")
-    # See Note [Pointwise by scalar]
-    other = sym_help._maybe_get_scalar(other)
-    return g.op("Add", self, sym_help._if_scalar_type_as(g, other, self))
+    return g.op("Add", self, other)
 
 
 def sub(g, self, other, alpha=None):
     # default alpha arg is to allow no-alpha sub (aten sub st overload no alpha)
     if alpha and sym_help._scalar(sym_help._maybe_get_scalar(alpha)) != 1:
         return _unimplemented("sub", "alpha != 1")
-    # See Note [Pointwise by scalar]. Note that self or other may be scalars.
-    other = sym_help._maybe_get_scalar(other)
-    return g.op("Sub", self, sym_help._if_scalar_type_as(g, other, self))
+    return g.op("Sub", self, other)
 
 
 def rsub(g, self, other, alpha=None):
-    other = sym_help._maybe_get_scalar(other)
-    other = sym_help._if_scalar_type_as(g, other, self)
     return sub(g, other, self, alpha=alpha)
 
 
 def mul(g, self, other):
-    # See Note [Pointwise by scalar]
-    other = sym_help._maybe_get_scalar(other)
-    return g.op("Mul", self, sym_help._if_scalar_type_as(g, other, self))
+    return g.op("Mul", self, other)
 
 
 def div(g, self, other):
-    # See Note [Pointwise by scalar]
-    other = sym_help._maybe_get_scalar(other)
-    return g.op("Div", self, sym_help._if_scalar_type_as(g, other, self))
+    return g.op("Div", self, other)
 
 
 def reciprocal(g, self):
-    return g.op("Div", sym_help._if_scalar_type_as(g, torch.ones(1), self), self)
+    return g.op("Div", torch.ones(1), self)
 
 
 @parse_args('v', 'i')
@@ -137,8 +127,7 @@ def stack(g, tensor_list, dim):
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
-    ty = sym_help._try_get_scalar_type(self, other).lower()
-    C = g.constant(0, [1], ty)
+    C = g.op("Constant", value_t=torch.tensor([1]))
     return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
 
 
@@ -324,6 +313,11 @@ def embedding_bag(g,
 
 
 def size(g, self, dim):
+    if sym_help._maybe_get_const(dim, 'i') < 0:
+        rank = self.type().dim()
+        if rank:
+            dim = sym_help._maybe_get_const(dim, 'i') + rank
+            dim = g.op("Constant", value_t=torch.tensor(dim))
     full_shape = g.op("Shape", self)
     return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
 
@@ -723,24 +717,11 @@ replication_pad3d = replication_pad
 
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, align_corners=None):
+        sym_help._interpolate_warning(interpolate_mode)
         align_corners = sym_help._maybe_get_scalar(align_corners)
         if align_corners:
             return _unimplemented(name, "align_corners == True")
-
-        output_size = sym_help._maybe_get_const(output_size, 'is')
-        if sym_help._is_value(output_size):
-            offset = 2
-            offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
-            dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
-            divisor = sym_help._slice_helper(g, g.op("Shape", input), axes=[0], ends=[dim], starts=[offset])
-            divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
-            scale_dims = g.op("Div", dividend, divisor)
-            scales = g.op("Concat", offsets, scale_dims, axis_i=0)
-        else:
-            scales_constant = [1. if i < 2 else
-                               float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
-                               for i in range(0, dim)]
-            scales = g.op("Constant", value_t=torch.tensor(scales_constant))
+        scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
         return g.op("Upsample", input, scales, mode_s=interpolate_mode)
     return symbolic_fn
 
@@ -748,6 +729,9 @@ def _interpolate(name, dim, interpolate_mode):
 upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
 upsample_nearest2d = _interpolate('upsample_nearest2d', 4, "nearest")
 upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
+upsample_linear1d = _interpolate('upsample_linear1d', 3, "linear")
+upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
+upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
 
 def wrap_logical_op_with_cast_to(to_type):
@@ -788,8 +772,7 @@ def gt(g, input, other):
 
 
 def gt_impl(g, input, other):
-    other = sym_help._maybe_get_scalar(other)
-    return g.op("Greater", input, sym_help._if_scalar_type_as(g, other, input))
+    return g.op("Greater", input, other)
 
 
 def lt(g, input, other):
@@ -797,20 +780,17 @@ def lt(g, input, other):
 
 
 def lt_impl(g, input, other):
-    other = sym_help._maybe_get_scalar(other)
-    return g.op("Less", input, sym_help._if_scalar_type_as(g, other, input))
+    return g.op("Less", input, other)
 
 
 @wrap_logical_op_with_negation
 def ge(g, input, other):
-    other = sym_help._maybe_get_scalar(other)
-    return lt_impl(g, input, sym_help._if_scalar_type_as(g, other, input))
+    return lt_impl(g, input, other)
 
 
 @wrap_logical_op_with_negation
 def le(g, input, other):
-    other = sym_help._maybe_get_scalar(other)
-    return gt_impl(g, input, sym_help._if_scalar_type_as(g, other, input))
+    return gt_impl(g, input, other)
 
 
 @wrap_logical_op_with_cast_to_and_from('Bool')
@@ -1037,8 +1017,7 @@ def log1p(g, self):
 
 
 def pow(g, self, exponent):
-    exponent = sym_help._maybe_get_scalar(exponent)
-    return g.op("Pow", self, sym_help._if_scalar_type_as(g, exponent, self))
+    return g.op("Pow", self, exponent)
 
 
 def clamp(g, self, min, max):
@@ -1348,6 +1327,13 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
                  num_layers, dropout, train, bidirectional, batch_first=None, batch_sizes=None):
+
+    warnings.warn("Exporting a model to ONNX with a batch_size other than 1, " +
+                  "with a variable lenght with " + variant + " can cause an error " +
+                  "when running the ONNX model with a different batch size. " +
+                  "Make sure to save the model with a batch size of 1, " +
+                  "or define the initial states (h0/c0) as inputs of the model. ")
+
     onnxActivations = ['Relu', 'Tanh', 'Sigmoid', 'Affine', 'LeakyRelu', 'ThresholdedRelu',
                        'ScaledTanh', 'HardSigmoid', 'Elu', 'Softsign', 'Softplus']
     variantToOnnxActivationMap = dict(zip([act_fun.lower() for act_fun in onnxActivations], onnxActivations))
@@ -1678,10 +1664,10 @@ def scatter_add(g, self, dim, index, src):
         return _unimplemented("scatter_add", "input size not accessible")
     dtype = self.type().scalarType()
     dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-    dims = self.type().sizes()
-    to_add = torch.zeros(dims)
-    to_add = g.op("Constant", value_t=to_add)
-    to_add = scatter(g, to_add, dim, index, src)
+    dtype = sym_help.scalar_type_to_pytorch_type[dtype]
+    sizes = self.type().sizes()
+    to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=dtype))
+    to_add = sym_help._scatter_helper(g, to_add, dim, index, src)
     return add(g, self, to_add)
 
 
@@ -1696,8 +1682,10 @@ def prim_shape(g, self):
 
 @parse_args('v', 'i', 'v', 'v')
 def gather(g, self, dim, index, sparse_grad=False):
-    # NOTE: Update this workaround if ONNX has native Gather support.
-    #       The current Gather in ONNX is not the same as torch.gather.
+    if sym_help._maybe_get_const(sparse_grad, 'i'):
+        return _unimplemented("gather", "sparse_grad == True")
+    # NOTE: This workaround is needed since GatherElement is only supported
+    #       since opset 11, and Gather in ONNX is not the same as torch.gather.
     dtype = self.type().scalarType()
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
     depth = size(g, self, g.op("Constant", value_t=torch.LongTensor([dim])))
@@ -1903,9 +1891,9 @@ def index(g, self, index):
 
 @parse_args('v', 'is', 'i')
 def frobenius_norm(g, self, dim=None, keepdim=False):
-    sqrt = g.op('Mul', self, self)
-    sumsqrt = g.op('ReduceSum', sqrt, axes_i=dim, keepdims_i=keepdim)
-    return g.op('Sqrt', sumsqrt)
+    sqr = g.op('Mul', self, self)
+    sumsqr = g.op('ReduceSum', sqr, axes_i=dim, keepdims_i=keepdim)
+    return g.op('Sqrt', sumsqr)
 
 
 @parse_args('v', 'i', 'b', 'v')
@@ -1919,3 +1907,10 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
     return g.op("Multinomial", log_input,
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
+
+
+def gelu(g, self):
+    _sqrt2 = 1.4142135623730951
+    erf = g.op('Erf', div(g, self, torch.tensor(_sqrt2)))
+    erf_plusone = add(g, erf, g.op('Constant', value_t=torch.tensor(1, dtype=torch.float)))
+    return mul(g, mul(g, self, erf_plusone), g.op('Constant', value_t=torch.tensor(0.5, dtype=torch.float)))

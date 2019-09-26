@@ -5,6 +5,7 @@
 
 namespace torch {
 namespace nn {
+namespace utils {
 
 float clip_grad_norm_(
     std::vector<Tensor>& parameters,
@@ -50,5 +51,6 @@ float clip_grad_norm_(Tensor& parameters, float max_norm, float norm_type) {
   return clip_grad_norm_(params, max_norm, norm_type);
 }
 
+} // namespace utils
 } // namespace nn
 } // namespace torch

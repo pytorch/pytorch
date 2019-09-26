@@ -37,7 +37,7 @@ TEST_F(ParallelTest, DifferentiableScatter_MultiCUDA) {
                   .allclose(input));
 
   torch::Tensor sum = output[0].to({torch::kCUDA, 1}) + output[1];
-  sum.backward();
+  sum.backward(torch::ones_like(sum));
 
   ASSERT_TRUE(input.grad().defined());
   ASSERT_TRUE(input.grad().device().is_cpu());
@@ -61,7 +61,7 @@ TEST_F(ParallelTest, DifferentiableGather_MultiCUDA) {
   ASSERT_TRUE(chunks[0].to({torch::kCUDA, 0}).allclose(a));
   ASSERT_TRUE(chunks[1].allclose(b));
 
-  output.backward();
+  output.backward(torch::ones_like(output));
 
   ASSERT_TRUE(a.grad().defined());
   ASSERT_EQ(a.grad().device(), torch::Device(torch::kCUDA, 0));

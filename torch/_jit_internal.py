@@ -9,6 +9,7 @@ import weakref
 import warnings
 import torch._C
 from torch._six import builtins
+from torch._utils_internal import get_source_lines_and_file
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
@@ -477,11 +478,11 @@ def _get_overloaded_methods(method, mod_class):
     if overloads is None:
         return None
 
-    method_line_no = inspect.getsourcelines(method)[1]
-    mod_class_fileno = inspect.getsourcelines(mod_class)[1]
-    mod_end_fileno = mod_class_fileno + len(inspect.getsourcelines(mod_class)[0])
+    method_line_no = get_source_lines_and_file(method)[1]
+    mod_class_fileno = get_source_lines_and_file(mod_class)[1]
+    mod_end_fileno = mod_class_fileno + len(get_source_lines_and_file(mod_class)[0])
     if not (method_line_no >= mod_class_fileno and method_line_no <= mod_end_fileno):
-        raise Exception("Overloads are not useable when a module is redaclared within the same file: " + str(method))
+        raise Exception("Overloads are not useable when a module is redeclared within the same file: " + str(method))
     return overloads
 
 try:
@@ -506,13 +507,20 @@ try:
 
     def is_optional(ann):
         # Optional[T] is just shorthand for Union[T, None], so check for both
+        def safe_is_subclass(the_type, super_type):
+            # Don't throw if `the_type` isn't a class type (e.g. if it is
+            # another type annotation instance)
+            if not inspect.isclass(the_type):
+                return False
+            return issubclass(the_type, super_type)
+
         union_optional = False
         if ann.__module__ == 'typing' and \
            (getattr(ann, '__origin__', None) is typing.Union):
             args = getattr(ann, '__args__', ())
             if len(args) == 2:
-                union_optional = (issubclass(args[1], type(None)) and not issubclass(args[0], type(None))) \
-                    or (issubclass(args[0], type(None)) and not issubclass(args[1], type(None)))
+                union_optional = (safe_is_subclass(args[1], type(None)) and not safe_is_subclass(args[0], type(None))) \
+                    or (safe_is_subclass(args[0], type(None)) and not safe_is_subclass(args[1], type(None)))
 
         optional = ann.__module__ == 'typing' and \
             (getattr(ann, '__origin__', None) is typing.Optional)

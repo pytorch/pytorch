@@ -35,6 +35,9 @@ default_set = set([
     'manywheel 2.7mu cpu devtoolset7',
     'libtorch 2.7m cpu devtoolset7',
     'libtorch 2.7m cpu gcc5.4_cxx11-abi',
+    'libtorch-ios-10.2.1-nightly-x86_64-build',
+    'libtorch-ios-10.2.1-nightly-arm64-build',
+    'libtorch-ios-10.2.1-nightly-binary-build-upload',
 
     # Caffe2 Android
     'caffe2-py2-android-ubuntu16.04',
@@ -51,9 +54,16 @@ default_set = set([
     'pytorch-ios-10.2.1-x86_64_build',
     'pytorch-ios-10.2.1-arm64_build',
 
+    # Pytorch backward compatibility check
+    'pytorch-linux-backward-compatibility-check-test',
 
     # XLA
     'pytorch-xla-linux-xenial-py3.6-clang7',
+
+    # Named tensor
+    "pytorch-namedtensor-linux-xenial-py3.6-gcc5.4",
+    "pytorch-namedtensor-linux-xenial-py3-clang5-asan",
+    "pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2",
 
     # Other checks
     'pytorch-short-perf-test-gpu',

@@ -71,7 +71,7 @@ TEST_F(ClipGradTest, ClipGrad) {
     }
     auto norm_before = compute_norm(norm_type);
     auto layer_params = linear_layer->parameters();
-    auto norm = clip_grad_norm_(layer_params, max_norm, norm_type);
+    auto norm = utils::clip_grad_norm_(layer_params, max_norm, norm_type);
     auto norm_after = compute_norm(norm_type);
     ASSERT_FLOAT_EQ(norm, norm_before);
     ASSERT_FLOAT_EQ(norm_after, max_norm);
@@ -90,7 +90,7 @@ TEST_F(ClipGradTest, ClipGrad) {
     }
     auto norm_before = compute_norm(norm_type);
     auto layer_params = linear_layer->parameters();
-    auto norm = clip_grad_norm_(layer_params, max_norm, norm_type);
+    auto norm = utils::clip_grad_norm_(layer_params, max_norm, norm_type);
     auto norm_after = compute_norm(norm_type);
     ASSERT_FLOAT_EQ(norm, norm_before);
     ASSERT_FLOAT_EQ(norm_before, norm_after);
@@ -103,8 +103,8 @@ TEST_F(ClipGradTest, ClipGrad) {
   p1.grad() = g.clone();
   p2.grad() = g.clone();
   for (const auto norm_type : norm_types) {
-    clip_grad_norm_(p1, max_norm, norm_type);
-    clip_grad_norm_(p2, max_norm, norm_type);
+    utils::clip_grad_norm_(p1, max_norm, norm_type);
+    utils::clip_grad_norm_(p2, max_norm, norm_type);
     ASSERT_TRUE(p1.grad().equal(p2.grad()));
   }
 }

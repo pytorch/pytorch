@@ -19,6 +19,28 @@ jobs:
           docker pull ${DOCKER_IMAGE} >/dev/null
           export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
+          # TODO We may want to move the rebase logic to a separate step after checkout
+          # Rebase to master only if in xenial_py3_6_gcc5_4 case
+          if [[ "${CIRCLE_BRANCH}" != "master" && "${BUILD_ENVIRONMENT}" == *"gcc5"* ]]; then
+            echo "Merge master branch into $CIRCLE_BRANCH before build in environment $BUILD_ENVIRONMENT"
+            set -x
+            git config --global user.email "circleci.ossci@gmail.com"
+            git config --global user.name "CircleCI"
+            git config remote.origin.url https://github.com/pytorch/pytorch.git
+            git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
+            git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=50 --quiet
+            export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
+            echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
+            export GIT_COMMIT=${CIRCLE_SHA1}
+            echo "GIT_COMMIT: " ${GIT_COMMIT}
+            git checkout -f ${GIT_COMMIT}
+            git reset --hard ${GIT_COMMIT}
+            git merge --no-edit --no-ff ${GIT_MERGE_TARGET}
+            set +x
+          else
+            echo "Do NOT merge master branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
+          fi
+
           git submodule sync && git submodule update -q --init --recursive
 
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace

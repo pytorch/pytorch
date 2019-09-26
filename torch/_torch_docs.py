@@ -595,10 +595,14 @@ add_docstr(torch.atan2,
            r"""
 atan2(input, other, out=None) -> Tensor
 
-Returns a new tensor with the arctangent of the elements of :attr:`input`
-and :attr:`other`.
+Element-wise arctangent of :math:`\text{{input}}_{{i}} / \text{{other}}_{{i}}`
+with consideration of the quadrant. Returns a new tensor with the signed angles
+in radians between vector :math:`(\text{{other}}_{{i}}, \text{{input}}_{{i}})`
+and vector :math:`(1, 0)`. (Note that :math:`\text{{other}}_{{i}}`, the second
+parameter, is the x-coordinate, while :math:`\text{{input}}_{{i}}`, the first
+parameter, is the y-coordinate.)
 
-The shapes of :attr:`input` and :attr:`other` must be
+The shapes of ``input`` and ``other`` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
@@ -4428,6 +4432,27 @@ Example::
     >>> b = torch.tensor([[0, 1], [2, 3]])
     >>> torch.reshape(b, (-1,))
     tensor([ 0,  1,  2,  3])
+""")
+
+
+add_docstr(torch.result_type,
+           r"""
+result_type(tensor1, tensor2) -> dtype
+
+Returns the :class:`torch.dtype` that would result from performing an arithmetic
+operation on the provided input tensors. See type promotion :ref:`documentation <type-promotion-doc>`
+for more information on the type promotion logic.
+
+Args:
+    tensor1 (Tensor or Number): an input tensor or number
+    tensor2 (Tensor or Number): an input tensor or number
+
+Example::
+
+    >>> torch.result_type(torch.tensor([1, 2], dtype=torch.int), 1.0)
+    torch.float32
+    >>> torch.result_type(torch.tensor([1, 2], dtype=torch.uint8), torch.tensor(1))
+    torch.uint8
 """)
 
 

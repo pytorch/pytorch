@@ -135,10 +135,15 @@ class ProcessGroupGloo : public ProcessGroup {
   static std::shared_ptr<::gloo::transport::Device> createDeviceForInterface(
       const std::string& interface);
 
-  // Create new device instance for hostname or address.
-  // If specified argument is empty, it defaults to this machine's hostname.
+  // Create new device instance for specific hostname or address.
   static std::shared_ptr<::gloo::transport::Device> createDeviceForHostname(
       const std::string& hostname);
+
+  // Create new device instance.
+  // It tries to resolve this machine's hostname and bind to that address.
+  // If that fails (i.e. the hostname doesn't resolve to an address), it
+  // falls back to binding to the loopback address.
+  static std::shared_ptr<::gloo::transport::Device> createDefaultDevice();
 
   explicit ProcessGroupGloo(
       const std::shared_ptr<Store>& store,

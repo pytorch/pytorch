@@ -1,4 +1,5 @@
 import unittest
+import math
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
@@ -6,10 +7,10 @@ import torch.nn._intrinsic as nni
 import torch.nn._intrinsic.quantized as nniq
 import torch.nn._intrinsic.qat as nniqat
 from torch.quantization import \
-    QConfig_dynamic, default_weight_observer, dump_tensor,\
+    QConfigDynamic, default_weight_observer, get_observer_dict,\
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
-    default_dynamic_qconfig, MinMaxObserver, TensorObserver, QuantWrapper
+    default_dynamic_qconfig, HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver, RecordingObserver, QuantWrapper
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
@@ -25,6 +26,7 @@ from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedMod
 
 from hypothesis import given
 from hypothesis import strategies as st
+from hypothesis_utils import no_deadline
 import io
 import copy
 
@@ -39,14 +41,14 @@ class PostTrainingQuantTest(QuantizationTestCase):
         to nnq.Linear which is the quantized version of the module
         """
         model = SingleLayerLinearModel()
-        prepare(model)
+        model = prepare(model)
         # Check if observers and quant/dequant nodes are inserted
         self.checkNoPrepModules(model)
         self.checkHasPrepModules(model.fc1)
         self.checkObservers(model)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.checkNoPrepModules(model)
@@ -57,9 +59,17 @@ class PostTrainingQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-        # test one line API
-        model = quantize(SingleLayerLinearModel(), test_only_eval_fn,
-                         self.calib_data)
+        # test one line API - out of place version
+        base = SingleLayerLinearModel()
+        keys_before = set(list(base.state_dict().keys()))
+        model = quantize(base, test_only_eval_fn, self.calib_data)
+        checkQuantized(model)
+        keys_after = set(list(base.state_dict().keys()))
+        self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
+
+        # in-place version
+        model = SingleLayerLinearModel()
+        quantize(model, test_only_eval_fn, self.calib_data, inplace=True)
         checkQuantized(model)
 
     def test_two_layers(self):
@@ -67,7 +77,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         `fc2`, and `fc1`is not quantized
         """
         model = AnnotatedTwoLayerLinearModel()
-        prepare(model)
+        model = prepare(model)
 
         self.checkNoPrepModules(model)
         self.checkObservers(model)
@@ -75,7 +85,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         self.checkHasPrepModules(model.fc2)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.checkNoPrepModules(model)
@@ -111,10 +121,10 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkNoPrepModules(model.sub2.fc2)
             self.checkHasPrepModules(model.fc3)
 
-        prepare(model)
+        model = prepare(model)
         checkPrepModules(model, True)
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             checkPrepModules(model)
@@ -135,7 +145,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
 
     def test_nested2(self):
         model = AnnotatedSubNestedModel()
-        prepare(model)
+        model = prepare(model)
 
         def checkPrepModules(model, before_calib=False):
             if before_calib:
@@ -152,7 +162,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkPrepModules(model, True)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             checkPrepModules(model)
@@ -176,7 +186,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         parent qconfig
         """
         model = AnnotatedCustomConfigNestedModel()
-        prepare(model)
+        model = prepare(model)
 
         def checkPrepModules(model, before_calib=False):
             if before_calib:
@@ -193,7 +203,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkPrepModules(model, True)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             checkPrepModules(model)
@@ -215,11 +225,11 @@ class PostTrainingQuantTest(QuantizationTestCase):
         """
 
         model = SkipQuantModel()
-        prepare(model)
+        model = prepare(model)
         self.checkObservers(model)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.checkLinear(model.fc)
@@ -243,11 +253,11 @@ class PostTrainingQuantTest(QuantizationTestCase):
         model = QuantStubModel()
         # propagate the qconfig of parents to children, model is changed
         # inplace
-        prepare(model)
+        model = prepare(model)
         self.checkObservers(model)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.fc), nnq.Linear)
@@ -269,10 +279,10 @@ class PostTrainingQuantTest(QuantizationTestCase):
         model.qconfig = default_qconfig
         fuse_list = [['module.conv1', 'module.bn1', 'module.relu1']]
         fuse_modules(model, fuse_list)
-        prepare(model)
+        model = prepare(model)
         self.checkObservers(model)
         test_only_eval_fn(model, self.img_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.module.conv1), nn._intrinsic.quantized.ConvReLU2d)
@@ -306,9 +316,17 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-        # test one line API
-        model = quantize_dynamic(SingleLayerLinearDynamicModel().eval(),
-                                 qconfig_dict)
+        # test one line API - out of place version
+        base = SingleLayerLinearDynamicModel()
+        keys_before = set(list(base.state_dict().keys()))
+        model = quantize_dynamic(base, qconfig_dict)
+        checkQuantized(model)
+        keys_after = set(list(base.state_dict().keys()))
+        self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
+
+        # in-place version
+        model = SingleLayerLinearDynamicModel()
+        quantize_dynamic(model, qconfig_dict, inplace=True)
         checkQuantized(model)
 
     def test_two_layers(self):
@@ -396,7 +414,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             'dtype': torch.quint8,
             'qscheme': torch.per_tensor_affine
         }
-        custom_dynamic_qconfig = QConfig_dynamic(weight=default_weight_observer())
+        custom_dynamic_qconfig = QConfigDynamic(weight=default_weight_observer)
         qconfig_dynamic_dict = {
             'fc3': default_dynamic_qconfig,
             'sub2': default_dynamic_qconfig,
@@ -483,18 +501,14 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         ref = copy.deepcopy(cell)
 
-        qconfig_dynamic_dict = {
-            torch.nn.LSTM: default_dynamic_qconfig,
-        }
-        default_dynamic_module_mapping = {
-            torch.nn.LSTM: torch.nn.quantized.dynamic.LSTM,
-        }
-        model_int8 = quantize_dynamic(
-            model, qconfig_dynamic_dict, default_dynamic_module_mapping
-        )
+        model_int8 = quantize_dynamic(model=model, dtype=torch.qint8)
+        model_fp16 = quantize_dynamic(model=model, dtype=torch.float16)
         cell_int8 = model_int8.lstm
+        cell_fp16 = model_fp16.lstm
 
         assert type(cell_int8) == torch.nn.quantized.dynamic.LSTM, \
+            'torch.nn.LSTM should be converted to torch.nn.quantized.dynamic.LSTM after quantize_dynamic'
+        assert type(cell_fp16) == torch.nn.quantized.dynamic.LSTM, \
             'torch.nn.LSTM should be converted to torch.nn.quantized.dynamic.LSTM after quantize_dynamic'
 
         niter = 10
@@ -547,6 +561,13 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         for loaded_val, ref_val in zip(out_loaded, ref_out):
             torch.testing.assert_allclose(loaded_val, ref_val)
 
+        # Compare fp16 quantized to unquantized
+        output_fp16, final_hiddens_fp16 = cell_fp16(x, hiddens)
+
+        torch.testing.assert_allclose(output_fp16, ref_out)
+        self.assertEqual(output_fp16, ref_out)
+        for out, ref in zip(final_hiddens_fp16, ref_hid):
+            torch.testing.assert_allclose(out, ref)
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
@@ -556,10 +577,10 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
         model = ManualLinearQATModel()
-        prepare_qat(model)
+        model = prepare_qat(model)
         self.checkObservers(model)
         test_only_train_fn(model, self.train_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.fc1), nnq.Linear)
@@ -580,7 +601,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         """
         model = ManualLinearQATModel()
 
-        prepare_qat(model)
+        model = prepare_qat(model)
         self.checkObservers(model)
 
         model.eval()
@@ -589,11 +610,11 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_conv_linear(self):
         model = ManualConvLinearQATModel()
 
-        prepare_qat(model)
+        model = prepare_qat(model)
         self.checkObservers(model)
 
         test_only_train_fn(model, self.img_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.conv), nnq.Conv2d)
@@ -616,8 +637,8 @@ class ScriptabilityTest(QuantizationTestCase):
         self.qmodel_under_test = self.qmodel_under_test.from_float(
             self.model_under_test)
         self.x = torch.rand(10)
-        self.qx = torch.quantize_linear(self.x.to(torch.float), scale=1.0,
-                                        zero_point=0, dtype=torch.qint32)
+        self.qx = torch.quantize_per_tensor(self.x.to(torch.float), scale=1.0,
+                                            zero_point=0, dtype=torch.qint32)
 
     def test_scriptability_serialization(self):
         # test serialization of quantized functional modules
@@ -631,7 +652,7 @@ class ScriptabilityTest(QuantizationTestCase):
                         'zero point not in state dict for functional modules')
 
         x = torch.rand(10, 1, dtype=torch.float)
-        xq = torch.quantize_linear(x, 1.0, 0, torch.qint8)
+        xq = torch.quantize_per_tensor(x, 1.0, 0, torch.qint8)
         self.checkScriptable(self.qmodel_under_test, [(xq, xq)], check_save_load=True)
         self.checkScriptable(self.model_under_test, [(xq.dequantize(), xq.dequantize())], check_save_load=True)
 
@@ -659,7 +680,7 @@ class FusionTest(QuantizationTestCase):
                          "Non-fused submodule Conv")
         self.assertEqual(type(model.sub2.relu), torch.nn.ReLU,
                          "Non-fused submodule ReLU")
-        prepare_qat(model)
+        model = prepare_qat(model)
         self.checkObservers(model)
 
         def checkQAT(model):
@@ -673,7 +694,7 @@ class FusionTest(QuantizationTestCase):
 
         checkQAT(model)
         test_only_train_fn(model, self.img_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.conv1), nniq.ConvReLU2d)
@@ -718,10 +739,10 @@ class FusionTest(QuantizationTestCase):
         self.assertEqual(type(model.sub2.relu), torch.nn.ReLU,
                          "Non-fused submodule ReLU")
 
-        prepare(model)
+        model = prepare(model)
         self.checkObservers(model)
         test_only_eval_fn(model, self.img_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.conv1), nniq.ConvReLU2d)
@@ -775,8 +796,67 @@ class ObserverTest(QuantizationTestCase):
         self.assertEqual(qparams[1].item(), ref_zero_point)
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
 
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
+           ch_axis=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
+    def test_per_channel_minmax_observer(self, qdtype, qscheme, ch_axis, reduce_range):
+        # reduce_range cannot be true for symmetric quantization with uint8
+        if qdtype == torch.quint8 and qscheme == torch.per_channel_symmetric:
+            reduce_range = False
+        myobs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
+        x = torch.tensor(
+            [
+                [[[1.0, 2.0], [2.0, 2.5]], [[3.0, 4.0], [4.5, 6.0]]],
+                [[[-4.0, -3.0], [5.0, 5.0]], [[6.0, 3.0], [7.0, 8.0]]],
+            ]
+        )
+        result = myobs(x)
+        self.assertEqual(result, x)
+        qparams = myobs.calculate_qparams()
+        ref_min_vals = [[1.0, -4.0], [-4.0, 3.0], [-4.0, 2.0], [-4.0, -3.0]]
+        ref_max_vals = [[6.0, 8.0], [5.0, 8.0], [6.0, 8.0], [7.0, 8.0]]
+        per_channel_symmetric_ref_scales = [
+            [0.04705882, 0.06274509],
+            [0.03921569, 0.0627451],
+            [0.04705882, 0.0627451],
+            [0.05490196, 0.0627451],
+        ]
+        per_channel_affine_ref_scales = [
+            [0.02352941, 0.04705882],
+            [0.03529412, 0.03137255],
+            [0.03921569, 0.03137255],
+            [0.04313726, 0.04313726],
+        ]
+        per_channel_affine_qint8_zp = [
+            [-128, -43],
+            [-15, -128],
+            [-26, -128],
+            [-35, -58],
+        ]
+        per_channel_affine_quint8_zp = [[0, 85], [113, 0], [102, 0], [93, 70]]
+
+        self.assertEqual(myobs.min_vals, ref_min_vals[ch_axis])
+        self.assertEqual(myobs.max_vals, ref_max_vals[ch_axis])
+        if qscheme == torch.per_channel_symmetric:
+            ref_scales = per_channel_symmetric_ref_scales[ch_axis]
+            ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
+        else:
+            ref_scales = per_channel_affine_ref_scales[ch_axis]
+            ref_zero_points = (
+                per_channel_affine_qint8_zp[ch_axis]
+                if qdtype is torch.qint8
+                else per_channel_affine_quint8_zp[ch_axis]
+            )
+
+        if reduce_range:
+            ref_scales = [s * 255 / 127 for s in ref_scales]
+            ref_zero_points = [math.floor(z / 2) for z in ref_zero_points]
+
+        self.assertTrue(torch.allclose(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype)))
+        self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
+
     def test_observer_scriptable(self):
-        obs = torch.quantization.default_observer()()
+        obs = torch.quantization.default_observer()
         scripted = torch.jit.script(obs)
 
         x = torch.rand(3, 4)
@@ -796,25 +876,26 @@ class ObserverTest(QuantizationTestCase):
                  ' well with UBSAN at the moment, so we skip the test if'
                  ' we are in a UBSAN environment.')
 class QuantizationDebugTest(QuantizationTestCase):
-    def test_tensor_observer(self):
+    def test_record_observer(self):
         model = SingleLayerLinearModel()
         model.qconfig = default_debug_qconfig
-        prepare(model)
+        model = prepare(model)
         # run the evaluation and dump all tensors
         test_only_eval_fn(model, self.calib_data)
         test_only_eval_fn(model, self.calib_data)
-        tensor_dict = {}
-        dump_tensor(model, tensor_dict)
+        observer_dict = {}
+        get_observer_dict(model, observer_dict)
 
-        # we can torch,save() and torch_load() in bento for further analysis
-        self.assertTrue('fc1.module.activation' in tensor_dict.keys(),
-                        'activation is not recorded in the dict')
-        self.assertEqual(len(tensor_dict['fc1.module.activation']), 2 * len(self.calib_data))
+        self.assertTrue('fc1.module.observer' in observer_dict.keys(),
+                        'observer is not recorded in the dict')
+        self.assertEqual(len(observer_dict['fc1.module.observer'].get_tensor_value()), 2 * len(self.calib_data))
+        self.assertEqual(observer_dict['fc1.module.observer'].get_tensor_value()[0], model(self.calib_data[0][0]))
+
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
-    def test_tensor_observer_scriptable(self, qdtype, qscheme):
-        obs = TensorObserver(dtype=qdtype, qscheme=qscheme)
+    def test_observer_observer_scriptable(self, qdtype, qscheme):
+        obs = RecordingObserver(dtype=qdtype, qscheme=qscheme)
         scripted = torch.jit.script(obs)
 
         x = torch.rand(3, 4)
@@ -826,6 +907,40 @@ class QuantizationDebugTest(QuantizationTestCase):
         buf.seek(0)
         loaded = torch.jit.load(buf)
         self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
+
+    @no_deadline
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
+           reduce_range=st.booleans())
+    def test_histogram_observer(self, qdtype, qscheme, reduce_range):
+        myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        x = torch.tensor([2.0, 3.0, 4.0, 5.0])
+        y = torch.tensor([5.0, 6.0, 7.0, 8.0])
+        myobs(x)
+        myobs(y)
+        self.assertEqual(myobs.min_val, 2.0)
+        self.assertEqual(myobs.max_val, 8.0)
+        self.assertEqual(myobs.histogram, [2., 3., 3.])
+
+        qparams = myobs.calculate_qparams()
+
+        if reduce_range:
+            if qscheme == torch.per_tensor_symmetric:
+                ref_scale = 0.0470588 * 255 / 127
+                ref_zero_point = 0 if qdtype is torch.qint8 else 128
+            else:
+                ref_scale = 0.0235294 * 255 / 127
+                ref_zero_point = -64 if qdtype is torch.qint8 else 0
+        else:
+            if qscheme == torch.per_tensor_symmetric:
+                ref_scale = 0.0470588
+                ref_zero_point = 0 if qdtype is torch.qint8 else 128
+            else:
+                ref_scale = 0.0235294
+                ref_zero_point = -128 if qdtype is torch.qint8 else 0
+
+        self.assertEqual(qparams[1].item(), ref_zero_point)
+        self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
 
 if __name__ == '__main__':
     run_tests()

@@ -28,8 +28,8 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
-#include <ATen/core/Tensor.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
+#include <ATen/core/Tensor.h>
 #include <ATen/core/ivalue.h>
 #endif
 
@@ -530,6 +530,10 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         }
       }
     }
+  }
+
+  virtual std::string debug_info_string() const {
+    return "";
   }
 
   inline const OperatorDef& debug_def() const {

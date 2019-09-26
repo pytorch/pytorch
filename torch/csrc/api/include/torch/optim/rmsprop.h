@@ -36,9 +36,9 @@ class TORCH_API RMSprop : public Optimizer {
   template <typename ParameterContainer>
   explicit RMSprop(
       ParameterContainer&& parameters,
-      const RMSpropOptions& options)
+      const RMSpropOptions& options_)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options(options) {}
+        options(options_) {}
 
   void step() override;
 
