@@ -899,6 +899,22 @@ inferSqueezeGeometry(const Tensor &tensor) {
   return std::make_tuple(sizes, strides);
 }
 
+#ifdef BUILD_NAMEDTENSOR
+optional<std::vector<Dimname>> inferSqueezeNames(const Tensor& tensor) {
+  if (!tensor.has_names()) {
+    return nullopt;
+  }
+  std::vector<Dimname> outnames;
+  auto tensor_names = tensor.names();
+  for (int64_t d = 0; d < tensor.dim(); d++) {
+    if (tensor.sizes()[d] != 1) {
+      outnames.push_back(tensor_names[d]);
+    }
+  }
+  return outnames;
+}
+#endif
+
 std::tuple<std::vector<int64_t>, std::vector<int64_t> >
 inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
   std::vector<int64_t> sizes;
@@ -926,7 +942,12 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  return self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = inferSqueezeNames(self);
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
 
 Tensor squeeze(const Tensor& self, int64_t dim) {
@@ -937,7 +958,11 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
     return self.as_strided(self.sizes(), self.strides());
   }
   auto g = inferSqueezeGeometry(self, dim);
-  return self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_except(result, self, {dim});
+#endif
+  return result;
 }
 
 Tensor & squeeze_(Tensor& self) {
