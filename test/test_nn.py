@@ -3854,7 +3854,6 @@ class TestNN(NNTestCase):
             for i, replica in enumerate(replicas):
                 self.assertEqual(replica.bn.running_mean.get_device(), i, 'buffer on wrong device')
                 self.assertEqual(replica.bn.running_var.get_device(), i, 'buffer on wrong device')
-                self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_buffers_requiring_grad(self):
@@ -4402,6 +4401,9 @@ class TestNN(NNTestCase):
                 param = getattr(param, component)
                 if isinstance(param, Parameter):
                     param = param.data
+            # bn.num_batches_tracked is stored as integer
+            if isinstance(param, int):
+                continue
             self.assertEqual(v.data_ptr(), param.data_ptr())
 
         l = nn.Linear(5, 5)
@@ -4503,15 +4505,16 @@ class TestNN(NNTestCase):
         # earlier versions or no versions, it should provide default value of 0.
         bn = nn.BatchNorm2d(3)
         state_dict = bn.state_dict()
+
+        self.assertEqual(state_dict['num_batches_tracked'].dtype, torch.long)
+        self.assertEqual(state_dict['num_batches_tracked'].item(), 0)
         del state_dict['num_batches_tracked']
         state_dict._metadata['']['version'] = 1  # version 1
         bn.load_state_dict(state_dict)
-        self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
-        self.assertEqual(bn.num_batches_tracked.item(), 0)
+        self.assertEqual(bn.num_batches_tracked, 0)
         del state_dict._metadata['']['version']  # no version
         bn.load_state_dict(state_dict)
-        self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
-        self.assertEqual(bn.num_batches_tracked.item(), 0)
+        self.assertEqual(bn.num_batches_tracked, 0)
 
     @unittest.skipIf(not PY3, 'Python 2.7 generates cyclic trash')
     def test_load_state_dict_ref_cycle(self):
@@ -7087,7 +7090,7 @@ class TestNN(NNTestCase):
         # training pass
         old_running_mean = module.running_mean.clone()
         old_running_var = module.running_var.clone()
-        old_num_batches_tracked = module.num_batches_tracked.clone()
+        old_num_batches_tracked = module.num_batches_tracked
         module(data)
         self.assertNotEqual(old_running_mean, module.running_mean)
         self.assertNotEqual(old_running_var, module.running_var)
@@ -7097,7 +7100,7 @@ class TestNN(NNTestCase):
         module.eval()
         old_running_mean = module.running_mean.clone()
         old_running_var = module.running_var.clone()
-        old_num_batches_tracked = module.num_batches_tracked.clone()
+        old_num_batches_tracked = module.num_batches_tracked
         module(data)
         self.assertEqual(old_running_mean, module.running_mean)
         self.assertEqual(old_running_var, module.running_var)

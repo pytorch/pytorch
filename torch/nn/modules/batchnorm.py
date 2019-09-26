@@ -33,34 +33,24 @@ class _BatchNorm(Module):
         if self.track_running_stats:
             self.register_buffer('running_mean', torch.zeros(num_features))
             self.register_buffer('running_var', torch.ones(num_features))
-            self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
+            self.num_batches_tracked = 0
         else:
             self.register_parameter('running_mean', None)
             self.register_parameter('running_var', None)
-            self.register_parameter('num_batches_tracked', None)
-        self.num_batches_tracked_scalar = -1
+            self.num_batches_tracked = None
         self.reset_parameters()
 
     def reset_running_stats(self):
         if self.track_running_stats:
             self.running_mean.zero_()
             self.running_var.fill_(1)
-            self.num_batches_tracked.zero_()
-            self.num_batches_tracked_scalar = 0
+            self.num_batches_tracked = 0
 
     def reset_parameters(self):
         self.reset_running_stats()
-        if self.track_running_stats:
-            self.num_batches_tracked_scalar = int(self.num_batches_tracked)
         if self.affine:
             init.ones_(self.weight)
             init.zeros_(self.bias)
-
-    @property
-    def num_batches_tracked(self):
-        if self.track_running_stats and self.num_batches_tracked_scalar != -1:
-            super(_BatchNorm, self).__getattr__('num_batches_tracked').fill_(self.num_batches_tracked_scalar)
-        return super(_BatchNorm, self).__getattr__('num_batches_tracked')
 
     def _check_input_dim(self, input):
         raise NotImplementedError
@@ -68,7 +58,7 @@ class _BatchNorm(Module):
     def forward(self, input):
         self._check_input_dim(input)
 
-        # exponential_average_factor is set to self.momentum
+        # exponential_average_factor is set to self.momentum 
         # (when it is available) only so that if gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
@@ -79,9 +69,9 @@ class _BatchNorm(Module):
         if self.training and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
             if self.num_batches_tracked is not None:
-                self.num_batches_tracked_scalar = self.num_batches_tracked_scalar + 1
+                self.num_batches_tracked = self.num_batches_tracked + 1
                 if self.momentum is None:  # use cumulative moving average
-                    exponential_average_factor = 1.0 / float(self.num_batches_tracked_scalar)
+                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
                 else:  # use exponential moving average
                     exponential_average_factor = self.momentum
 
@@ -94,33 +84,46 @@ class _BatchNorm(Module):
         return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
                'track_running_stats={track_running_stats}'.format(**self.__dict__)
 
-    def state_dict(self, destination=None, prefix='', keep_vars=False):
-        if self.num_batches_tracked is not None:
-            self.num_batches_tracked.fill_(self.num_batches_tracked_scalar)
-        return super(_BatchNorm, self).state_dict(destination, prefix, keep_vars)
-
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        if self.num_batches_tracked is not None:
-            self.num_batches_tracked.fill_(self.num_batches_tracked_scalar)
+        if self.num_batches_tracked is None:
+            destination[prefix + 'num_batches_tracked'] = self.num_batches_tracked
+        else:
+            destination[prefix + 'num_batches_tracked'] = torch.tensor(
+                self.num_batches_tracked, device=self.running_mean.device, dtype=torch.long)
         super(_BatchNorm, self)._save_to_state_dict(
             destination, prefix, keep_vars)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         version = local_metadata.get('version', None)
+        _num_batches_tracked = None
 
-        if (version is None or version < 2) and self.track_running_stats:
+        if self.track_running_stats:
             # at version 2: added num_batches_tracked buffer
             #               this should have a default value of 0
             num_batches_tracked_key = prefix + 'num_batches_tracked'
             if num_batches_tracked_key not in state_dict:
-                state_dict[num_batches_tracked_key] = torch.tensor(0, dtype=torch.long)
+                if version is not None and version >= 2:
+                    missing_keys.append(num_batches_tracked_key)
+                self.num_batches_tracked = 0
+            else:
+                _num_batches_tracked = state_dict[num_batches_tracked_key]
+                self.num_batches_tracked = int(state_dict[num_batches_tracked_key])
+                # We need to remove num_batches_tracked from state_dict to avoid
+                # hitting unexpected unexpected_keys later.
+                # Because `num_batches_tracked` is not stored as buffer or
+                # parameter any more
+                state_dict.pop(num_batches_tracked_key)
+        else:
+            self.num_batches_tracked = None
 
         super(_BatchNorm, self)._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
-        if self.num_batches_tracked is not None:
-            self.num_batches_tracked_scalar = int(self.num_batches_tracked)
+
+        # restore state_dict
+        if _num_batches_tracked is not None:
+            state_dict[num_batches_tracked_key] = _num_batches_tracked
 
 
 class BatchNorm1d(_BatchNorm):
@@ -451,7 +454,7 @@ class SyncBatchNorm(_BatchNorm):
 
         self._check_input_dim(input)
 
-        # exponential_average_factor is set to self.momentum
+        # exponential_average_factor is set to self.momentum 
         # (when it is available) only so that if gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
@@ -460,9 +463,9 @@ class SyncBatchNorm(_BatchNorm):
             exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
-            self.num_batches_tracked_scalar = self.num_batches_tracked_scalar + 1
+            self.num_batches_tracked = self.num_batches_tracked + 1
             if self.momentum is None:  # use cumulative moving average
-                exponential_average_factor = 1.0 / float(self.num_batches_tracked_scalar)
+                exponential_average_factor = 1.0 / self.num_batches_tracked.item()
             else:  # use exponential moving average
                 exponential_average_factor = self.momentum
 
