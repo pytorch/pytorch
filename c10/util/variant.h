@@ -11,6 +11,8 @@
 // - Move to `c10` namespace.
 // - Rename namespace `detail` to `detail_`, to not conflict with existing
 //   c10 implementations in `detail` namespace.
+// - `struct in_place_t` is renamed to `struct variant_in_place_t`, to not
+//   conflict with `struct in_place_t` in c10/util/Optional.h.
 
 #ifndef C10_UTIL_VARIANT_H_
 #define C10_UTIL_VARIANT_H_
