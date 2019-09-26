@@ -84,12 +84,15 @@ using not_ok_to_box =
         // TensorOptions are not directly constructible into IValue,
         // but torch::jit::push knows how to handle them
         std::is_same<TensorOptions, T>
-      >>,
+      >>
+#ifdef BUILD_NAMED_TENSOR
+    ,
     // some constructors are templated (and therefore pass
     // is_constructible), but do not actually work with all
     // template arguments, so we must blacklist them explicitly
     // TODO: The correct fix is to sfinae based on is_constructible of T
     std::is_same<optional<ArrayRef<Dimname>>, T>
+#endif
   >;
 
 template <class Result, class... Args>
@@ -155,7 +158,7 @@ class CAFFE2_API ATenDispatch {
     return &iter->second;
   }
 
-  const FallbackBoxedFunction* getFallbackBoxedOp(TensorTypeId tid) const {
+  FallbackBoxedFunction* getFallbackBoxedOp(TensorTypeId tid) const {
     return boxed_fallback_table_[static_cast<size_t>(tid)];
   }
 
@@ -167,13 +170,15 @@ class CAFFE2_API ATenDispatch {
 
 CAFFE2_API ATenDispatch& globalATenDispatch();
 
-template<
-  class Result, class... Args,
+template<class Result, class... Args>
+Result callBoxedFallback(const char* schema, FallbackBoxedFunction* boxed_fallback_fn, Args&&... args,
+  // NB: enable_if must occur in function parameter, because MSVC
+  // doesn't like it when it's a template argument next to
+  // a parameter pack
   typename c10::guts::enable_if_t<
     !supports_boxed_fallback<Result, Args...>::value,
     std::nullptr_t
-  > = nullptr>
-Result callBoxedFallback(const char* schema, const FallbackBoxedFunction* boxed_fallback_fn, Args&&... args) {
+  > = nullptr) {
   // This is dead because we test the SFINAE condition before calling
   // boxed_fallback_fn.  A more functional way of writing this with
   // optional<Result> return value works poorly when void is involved.
@@ -181,12 +186,12 @@ Result callBoxedFallback(const char* schema, const FallbackBoxedFunction* boxed_
 }
 
 template<
-  class Result, class... Args,
+  class Result, class... Args>
+Result callBoxedFallback(const char* schema, FallbackBoxedFunction* boxed_fallback_fn, Args&&... args,
   typename c10::guts::enable_if_t<
     supports_boxed_fallback<Result, Args...>::value,
     std::nullptr_t
-  > = nullptr>
-Result callBoxedFallback(const char* schema, const FallbackBoxedFunction* boxed_fallback_fn, Args&&... args) {
+  > = nullptr) {
   torch::jit::Stack stack;
   torch::jit::push(stack, std::forward<Args>(args)...);
   boxed_fallback_fn(schema, &stack);
