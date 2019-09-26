@@ -284,7 +284,7 @@ Tensor _convolution_depthwise3x3_winograd(
 
   at::parallel_for(0, args.batch * groups, 0, [&](int64_t start, int64_t end) {
     for (int64_t k = start; k < end; ++k) {
-      int64_t g = k % groups;
+      const int64_t g = k % groups;
       convolution_depthwise3x3_winograd_impl(
           args,
           input.data_ptr<float>() + k * input_hxw,
