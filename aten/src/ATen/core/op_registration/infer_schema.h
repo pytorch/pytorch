@@ -94,7 +94,7 @@ FunctionSchema createFunctionSchemaFromTraits(std::string name, std::string over
 }
 
 template<class FuncType>
-FunctionSchema inferFunctionSchema(std::string name, std::string overload_name) {
+FunctionSchema inferFunctionSchema(std::string&& name, std::string&& overload_name) {
   return detail::createFunctionSchemaFromTraits<guts::infer_function_traits_t<FuncType>>(std::move(name), std::move(overload_name));
 }
 

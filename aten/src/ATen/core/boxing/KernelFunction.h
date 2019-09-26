@@ -315,6 +315,17 @@ public:
     );
   }
 
+  template<class FuncType>
+  static KernelFunction makeFromUnboxedOnlyRuntimeFunction(FuncType* func) {
+    static_assert(guts::is_function_type<FuncType>::value, "Tried to call KernelFunction::makeFromUnboxedRuntimeFunction with a non-function type.");
+    static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedRuntimeFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
+    TORCH_INTERNAL_ASSERT(func != nullptr, "Kernel function cannot be nullptr");
+
+    return makeFromUnboxedOnlyFunctor(
+      std::make_shared<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>(func)
+    );
+  }
+
   /**
    * Create a KernelFunction from an unboxed lambda.
    *
