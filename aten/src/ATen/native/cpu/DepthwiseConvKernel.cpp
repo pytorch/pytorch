@@ -1,5 +1,6 @@
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/ATen.h>
+#include <ATen/Parallel.h>
 
 #ifdef __ARM_NEON__
 #include <arm_neon.h>
@@ -281,21 +282,17 @@ Tensor _convolution_depthwise3x3_winograd(
                       bias_potentially_undefined :
                       at::zeros({kernel_sizes[0]}, input.options());
 
-  const auto f = [&](const int64_t n, const int64_t g) {
-    convolution_depthwise3x3_winograd_impl(
-        args,
-        input.data_ptr<float>() + g * input_hxw + n * groups * input_hxw,
-        kernel.data_ptr<float>() + g * 3 * 3,
-        bias.data_ptr< float >() + g,
-        output.data_ptr<float>() + g * output_hxw + n * groups * output_hxw);
-  };
-
-  // TODO: Candidate for parallelization. Experiment with aten::parallel_for, etc.
-  for (int64_t n = 0; n < args.batch; ++n) {
-    for (int64_t g = 0; g < groups; ++g) {
-      f(n, g);
+  at::parallel_for(0, args.batch * groups, 0, [&](int64_t start, int64_t end) {
+    for (int64_t k = start; k < end; ++k) {
+      int64_t g = k % groups;
+      convolution_depthwise3x3_winograd_impl(
+          args,
+          input.data_ptr<float>() + k * input_hxw,
+          kernel.data_ptr<float>() + g * 3 * 3,
+          bias.data_ptr<float>() + g,
+          output.data_ptr<float>() + k * output_hxw);
     }
-  }
+  });
 
   return output;
 }
