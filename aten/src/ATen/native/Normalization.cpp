@@ -315,9 +315,11 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
             // Q(X) = X - running_mean  ; i.e. input centered to zero mean
             // Y = Q(X) / running_std    ; i.e. BN output before weight and bias
             // dL/dX = w / running_std
-            CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, grad_out, [&](scalar_t& gi, const scalar_t& go) {
-                gi = go * invstd * w;
-              });
+            auto iter = TensorIterator::unary_op(grad_in, grad_out);
+            cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
+              return i * invstd * w;
+
+            });
           }
         }
         if (grad_input_mask[1]) {
