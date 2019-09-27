@@ -1618,7 +1618,6 @@
   dispatch:
     CPU: log_softmax_cpu
     CUDA: log_softmax_cuda
-  supports_named_tensor: True
 
 - func: _log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2511,7 +2510,6 @@
     CPU: softmax_cpu
     CUDA: softmax_cuda
     MkldnnCPU: mkldnn_softmax
-  supports_named_tensor: True
 
 - func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2533,15 +2531,18 @@
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: unboxed_only
+  supports_named_tensor: True
   variants: function, method
   device_guard: False
 
 - func: squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)
   use_c10_dispatcher: unboxed_only
+  supports_named_tensor: True
   variants: function, method
   device_guard: False
 
 - func: squeeze.dimname(Tensor(a) self, Dimname dim) -> Tensor(a)
+  supports_named_tensor: True
   variants: function, method
   device_guard: False
 
@@ -3950,12 +3951,14 @@
 - func: index_fill_.Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
+  supports_named_tensor: True
   dispatch:
     CPU: legacy::cpu::_th_index_fill_
     CUDA: legacy::cuda::_th_index_fill_
 
 - func: index_fill.Scalar(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   use_c10_dispatcher: full
+  supports_named_tensor: True
   variants: function, method
 
 - func: index_fill_.Tensor(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
@@ -3964,16 +3967,28 @@
   dispatch:
     CPU: legacy::cpu::_th_index_fill_
     CUDA: legacy::cuda::_th_index_fill_
+  supports_named_tensor: True
 
 - func: index_fill.Tensor(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
+  supports_named_tensor: True
+
+- func: index_fill_.dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)
+  variants: method
+  supports_named_tensor: True
+
+- func: index_fill_.dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Tensor value) -> Tensor(a!)
+  variants: method
+  supports_named_tensor: True
 
 - func: index_fill.dimname_Scalar(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
+  supports_named_tensor: True
 
 - func: index_fill.dimname_Tensor(Tensor self, Dimname dim, Tensor index, Tensor value) -> Tensor
   variants: function, method
+  supports_named_tensor: True
 
 - func: scatter_.src(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
@@ -5173,6 +5188,7 @@
   dispatch:
     CPU: median_cpu
     CUDA: median_cuda
+  supports_named_tensor: True
 
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
