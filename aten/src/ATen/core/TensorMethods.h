@@ -9,7 +9,6 @@
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/core/Variadic.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/EnableNamedTensor.h>
 
@@ -21,30 +20,6 @@
 #endif
 
 namespace at {
-
-namespace detail {
-
-struct MultiDispatchTensorTypeSet : IterArgs<MultiDispatchTensorTypeSet> {
-  TensorTypeSet ts;
-  void operator()(const at::Tensor& x) {
-    ts = ts | x.type_set();
-  }
-  void operator()(TensorOptions x) {
-    ts = ts | x.type_set();
-  }
-  void operator()(at::ArrayRef<at::Tensor> xs) {
-    for (const auto& x : xs) {
-      ts = ts | x.type_set();
-    }
-  }
-};
-
-template <typename... Args>
-TensorTypeSet multi_dispatch_tensor_type_set(Args&&... args) {
-  return MultiDispatchTensorTypeSet().apply(std::forward<Args>(args)...).ts;
-}
-
-}
 
 struct Quantizer;
 // This is temporary typedef to enable Quantizer in aten native function API
@@ -87,7 +62,7 @@ inline void Tensor::backward(const Tensor & gradient, bool keep_graph, bool crea
      TypeDefault::backward(const_cast<Tensor&>(*this), gradient, keep_graph, create_graph);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> void");
-    return table->getOp<void (const Tensor &, const Tensor &, bool, bool)>(at::detail::multi_dispatch_tensor_type_set(*this, gradient))(const_cast<Tensor&>(*this), gradient, keep_graph, create_graph);
+    return table->callUnboxed<void, const Tensor &, const Tensor &, bool, bool>(const_cast<Tensor&>(*this), gradient, keep_graph, create_graph);
 #endif
 }
 inline void Tensor::set_data(const Tensor & new_data) const {
@@ -95,7 +70,7 @@ inline void Tensor::set_data(const Tensor & new_data) const {
      TypeDefault::set_data(const_cast<Tensor&>(*this), new_data);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::set_data(Tensor(a!) self, Tensor new_data) -> void");
-    return table->getOp<void (const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, new_data))(const_cast<Tensor&>(*this), new_data);
+    return table->callUnboxed<void, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), new_data);
 #endif
 }
 inline Tensor Tensor::data() const {
@@ -112,7 +87,7 @@ inline bool Tensor::is_leaf() const {
     return TypeDefault::is_leaf(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::is_leaf(Tensor self) -> bool");
-    return table->getOp<bool (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
+    return table->callUnboxed<bool, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline int64_t Tensor::output_nr() const {
@@ -120,7 +95,7 @@ inline int64_t Tensor::output_nr() const {
     return TypeDefault::output_nr(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::output_nr(Tensor self) -> int");
-    return table->getOp<int64_t (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
+    return table->callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline int64_t Tensor::_version() const {
@@ -128,7 +103,7 @@ inline int64_t Tensor::_version() const {
     return TypeDefault::_version(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::_version(Tensor self) -> int");
-    return table->getOp<int64_t (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
+    return table->callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -137,7 +112,7 @@ inline Tensor & Tensor::rename_(c10::optional<DimnameList> names) const {
     return TypeDefault::rename_(const_cast<Tensor&>(*this), names);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, c10::optional<DimnameList>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), names);
+    return table->callUnboxed<Tensor &, Tensor &, c10::optional<DimnameList>>(const_cast<Tensor&>(*this), names);
 #endif
 }
 #endif
@@ -147,7 +122,7 @@ inline Tensor Tensor::rename(c10::optional<DimnameList> names) const {
     return TypeDefault::rename(const_cast<Tensor&>(*this), names);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::rename(Tensor(a) self, Dimname[]? names) -> Tensor(a)");
-    return table->getOp<Tensor (const Tensor &, c10::optional<DimnameList>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), names);
+    return table->callUnboxed<Tensor, const Tensor &, c10::optional<DimnameList>>(const_cast<Tensor&>(*this), names);
 #endif
 }
 #endif
@@ -157,7 +132,7 @@ inline Tensor Tensor::align_to(DimnameList names) const {
     return TypeDefault::align_to(const_cast<Tensor&>(*this), names);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::align_to(Tensor(a) self, DimnameList names) -> Tensor(a)");
-    return table->getOp<Tensor (const Tensor &, DimnameList)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), names);
+    return table->callUnboxed<Tensor, const Tensor &, DimnameList>(const_cast<Tensor&>(*this), names);
 #endif
 }
 #endif
@@ -178,7 +153,7 @@ inline Tensor Tensor::refine_names(DimnameList names) const {
     return TypeDefault::refine_names(const_cast<Tensor&>(*this), names);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::refine_names(Tensor(a) self, DimnameList names) -> Tensor(a)");
-    return table->getOp<Tensor (const Tensor &, DimnameList)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), names);
+    return table->callUnboxed<Tensor, const Tensor &, DimnameList>(const_cast<Tensor&>(*this), names);
 #endif
 }
 #endif
@@ -188,7 +163,7 @@ inline Tensor Tensor::unflatten(Dimname dim, IntArrayRef sizes, DimnameList name
     return TypeDefault::unflatten(const_cast<Tensor&>(*this), dim, sizes, names);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::unflatten(Tensor self, Dimname dim, int[] sizes, DimnameList names) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, IntArrayRef, DimnameList)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, sizes, names);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, IntArrayRef, DimnameList>(const_cast<Tensor&>(*this), dim, sizes, names);
 #endif
 }
 #endif
@@ -198,7 +173,7 @@ inline Tensor Tensor::unflatten(int64_t dim, IntArrayRef sizes, DimnameList name
     return TypeDefault::unflatten(const_cast<Tensor&>(*this), dim, sizes, names);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::unflatten(Tensor self, int dim, int[] sizes, DimnameList names) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, IntArrayRef, DimnameList)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, sizes, names);
+    return table->callUnboxed<Tensor, const Tensor &, int64_t, IntArrayRef, DimnameList>(const_cast<Tensor&>(*this), dim, sizes, names);
 #endif
 }
 #endif
@@ -367,7 +342,7 @@ inline Tensor Tensor::all(Dimname dim, bool keepdim) const {
     return TypeDefault::all(const_cast<Tensor&>(*this), dim, keepdim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::all.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, bool>(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
 #endif
@@ -395,7 +370,7 @@ inline Tensor Tensor::any(Dimname dim, bool keepdim) const {
     return TypeDefault::any(const_cast<Tensor&>(*this), dim, keepdim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::any.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, bool>(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
 #endif
@@ -527,7 +502,7 @@ inline Tensor Tensor::bernoulli(Generator * generator) const {
     return TypeDefault::bernoulli(const_cast<Tensor&>(*this), generator);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::bernoulli(Tensor self, *, Generator? generator=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Generator *)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), generator);
+    return table->callUnboxed<Tensor, const Tensor &, Generator *>(const_cast<Tensor&>(*this), generator);
 #endif
 }
 inline Tensor & Tensor::bernoulli_(const Tensor & p, Generator * generator) const {
@@ -541,7 +516,7 @@ inline Tensor & Tensor::bernoulli_(const Tensor & p, Generator * generator) cons
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, const Tensor &, Generator *)>(at::detail::multi_dispatch_tensor_type_set(*this, p))(const_cast<Tensor&>(*this), p, generator);
+    return table->callUnboxed<Tensor &, Tensor &, const Tensor &, Generator *>(const_cast<Tensor&>(*this), p, generator);
 #endif
 }
 inline Tensor & Tensor::bernoulli_(double p, Generator * generator) const {
@@ -555,7 +530,7 @@ inline Tensor & Tensor::bernoulli_(double p, Generator * generator) const {
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, double, Generator *)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), p, generator);
+    return table->callUnboxed<Tensor &, Tensor &, double, Generator *>(const_cast<Tensor&>(*this), p, generator);
 #endif
 }
 inline Tensor Tensor::bernoulli(double p, Generator * generator) const {
@@ -563,7 +538,7 @@ inline Tensor Tensor::bernoulli(double p, Generator * generator) const {
     return TypeDefault::bernoulli(const_cast<Tensor&>(*this), p, generator);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::bernoulli.p(Tensor self, float p, *, Generator? generator=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, double, Generator *)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), p, generator);
+    return table->callUnboxed<Tensor, const Tensor &, double, Generator *>(const_cast<Tensor&>(*this), p, generator);
 #endif
 }
 inline Tensor Tensor::bincount(const Tensor & weights, int64_t minlength) const {
@@ -577,7 +552,7 @@ inline Tensor Tensor::bincount(const Tensor & weights, int64_t minlength) const 
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::bincount(Tensor self, Tensor? weights=None, int minlength=0) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, const Tensor &, int64_t)>(at::detail::multi_dispatch_tensor_type_set(*this, weights))(const_cast<Tensor&>(*this), weights, minlength);
+    return table->callUnboxed<Tensor, const Tensor &, const Tensor &, int64_t>(const_cast<Tensor&>(*this), weights, minlength);
 #endif
 }
 inline Tensor Tensor::bitwise_not() const {
@@ -753,7 +728,7 @@ inline Tensor Tensor::contiguous(MemoryFormat memory_format) const {
     return TypeDefault::contiguous(const_cast<Tensor&>(*this), memory_format);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::contiguous(Tensor self, *, MemoryFormat memory_format=contiguous_format) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, MemoryFormat)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), memory_format);
+    return table->callUnboxed<Tensor, const Tensor &, MemoryFormat>(const_cast<Tensor&>(*this), memory_format);
 #endif
 }
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) const {
@@ -818,7 +793,7 @@ inline Tensor Tensor::cumsum(int64_t dim, c10::optional<ScalarType> dtype) const
     return TypeDefault::cumsum(const_cast<Tensor&>(*this), dim, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, int64_t, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -827,7 +802,7 @@ inline Tensor Tensor::cumsum(Dimname dim, c10::optional<ScalarType> dtype) const
     return TypeDefault::cumsum(const_cast<Tensor&>(*this), dim, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
 #endif
@@ -836,7 +811,7 @@ inline Tensor Tensor::cumprod(int64_t dim, c10::optional<ScalarType> dtype) cons
     return TypeDefault::cumprod(const_cast<Tensor&>(*this), dim, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, int64_t, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -845,7 +820,7 @@ inline Tensor Tensor::cumprod(Dimname dim, c10::optional<ScalarType> dtype) cons
     return TypeDefault::cumprod(const_cast<Tensor&>(*this), dim, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
 #endif
@@ -968,7 +943,7 @@ inline Tensor Tensor::new_empty(IntArrayRef size, const TensorOptions & options)
     return TypeDefault::new_empty(const_cast<Tensor&>(*this), size, options);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, IntArrayRef, const TensorOptions &)>(at::detail::multi_dispatch_tensor_type_set(*this, options))(const_cast<Tensor&>(*this), size, options);
+    return table->callUnboxed<Tensor, const Tensor &, IntArrayRef, const TensorOptions &>(const_cast<Tensor&>(*this), size, options);
 #endif
 }
 inline Tensor Tensor::new_full(IntArrayRef size, Scalar fill_value, const TensorOptions & options) const {
@@ -976,7 +951,7 @@ inline Tensor Tensor::new_full(IntArrayRef size, Scalar fill_value, const Tensor
     return TypeDefault::new_full(const_cast<Tensor&>(*this), size, fill_value, options);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, IntArrayRef, Scalar, const TensorOptions &)>(at::detail::multi_dispatch_tensor_type_set(*this, options))(const_cast<Tensor&>(*this), size, fill_value, options);
+    return table->callUnboxed<Tensor, const Tensor &, IntArrayRef, Scalar, const TensorOptions &>(const_cast<Tensor&>(*this), size, fill_value, options);
 #endif
 }
 inline Tensor & Tensor::resize_(IntArrayRef size) const {
@@ -1120,7 +1095,7 @@ inline Tensor Tensor::flatten(int64_t start_dim, int64_t end_dim, Dimname out_di
     return TypeDefault::flatten(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::flatten.named_out_dim(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, int64_t, Dimname)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
+    return table->callUnboxed<Tensor, const Tensor &, int64_t, int64_t, Dimname>(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
 #endif
 }
 #endif
@@ -1130,7 +1105,7 @@ inline Tensor Tensor::flatten(Dimname start_dim, Dimname end_dim, Dimname out_di
     return TypeDefault::flatten(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::flatten.using_names(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, Dimname, Dimname)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, Dimname, Dimname>(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
 #endif
 }
 #endif
@@ -1140,7 +1115,7 @@ inline Tensor Tensor::flatten(DimnameList dims, Dimname out_dim) const {
     return TypeDefault::flatten(const_cast<Tensor&>(*this), dims, out_dim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::flatten.DimnameList(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, DimnameList, Dimname)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dims, out_dim);
+    return table->callUnboxed<Tensor, const Tensor &, DimnameList, Dimname>(const_cast<Tensor&>(*this), dims, out_dim);
 #endif
 }
 #endif
@@ -1260,7 +1235,7 @@ inline Tensor Tensor::index(TensorList indices) const {
     return TypeDefault::index(const_cast<Tensor&>(*this), indices);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, TensorList)>(at::detail::multi_dispatch_tensor_type_set(*this, indices))(const_cast<Tensor&>(*this), indices);
+    return table->callUnboxed<Tensor, const Tensor &, TensorList>(const_cast<Tensor&>(*this), indices);
 #endif
 }
 inline Tensor & Tensor::index_copy_(int64_t dim, const Tensor & index, const Tensor & source) const {
@@ -1287,7 +1262,7 @@ inline Tensor & Tensor::index_copy_(Dimname dim, const Tensor & index, const Ten
     return TypeDefault::index_copy_(const_cast<Tensor&>(*this), dim, index, source);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::index_copy_.dimname(Tensor(a!) self, Dimname dim, Tensor index, Tensor source) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, source))(const_cast<Tensor&>(*this), dim, index, source);
+    return table->callUnboxed<Tensor &, Tensor &, Dimname, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, source);
 #endif
 }
 #endif
@@ -1297,7 +1272,7 @@ inline Tensor Tensor::index_copy(Dimname dim, const Tensor & index, const Tensor
     return TypeDefault::index_copy(const_cast<Tensor&>(*this), dim, index, source);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::index_copy.dimname(Tensor self, Dimname dim, Tensor index, Tensor source) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, source))(const_cast<Tensor&>(*this), dim, index, source);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, source);
 #endif
 }
 #endif
@@ -1306,7 +1281,7 @@ inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values, bo
     return TypeDefault::index_put_(const_cast<Tensor&>(*this), indices, values, accumulate);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, TensorList, const Tensor &, bool)>(at::detail::multi_dispatch_tensor_type_set(*this, indices, values))(const_cast<Tensor&>(*this), indices, values, accumulate);
+    return table->callUnboxed<Tensor &, Tensor &, TensorList, const Tensor &, bool>(const_cast<Tensor&>(*this), indices, values, accumulate);
 #endif
 }
 inline Tensor Tensor::index_put(TensorList indices, const Tensor & values, bool accumulate) const {
@@ -1314,7 +1289,7 @@ inline Tensor Tensor::index_put(TensorList indices, const Tensor & values, bool 
     return TypeDefault::index_put(const_cast<Tensor&>(*this), indices, values, accumulate);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, TensorList, const Tensor &, bool)>(at::detail::multi_dispatch_tensor_type_set(*this, indices, values))(const_cast<Tensor&>(*this), indices, values, accumulate);
+    return table->callUnboxed<Tensor, const Tensor &, TensorList, const Tensor &, bool>(const_cast<Tensor&>(*this), indices, values, accumulate);
 #endif
 }
 inline Tensor Tensor::inverse() const {
@@ -1404,7 +1379,7 @@ inline std::tuple<Tensor,Tensor> Tensor::kthvalue(int64_t k, Dimname dim, bool k
     return TypeDefault::kthvalue(const_cast<Tensor&>(*this), k, dim, keepdim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::kthvalue.dimname(Tensor self, int k, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)");
-    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, int64_t, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), k, dim, keepdim);
+    return table->callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, Dimname, bool>(const_cast<Tensor&>(*this), k, dim, keepdim);
 #endif
 }
 #endif
@@ -1515,7 +1490,7 @@ inline Tensor Tensor::log_softmax(int64_t dim, c10::optional<ScalarType> dtype) 
     return TypeDefault::log_softmax(const_cast<Tensor&>(*this), dim, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::log_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, int64_t, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -1524,7 +1499,7 @@ inline Tensor Tensor::log_softmax(Dimname dim, c10::optional<ScalarType> dtype) 
     return TypeDefault::log_softmax(const_cast<Tensor&>(*this), dim, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::log_softmax(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
 #endif
@@ -1543,7 +1518,7 @@ inline Tensor Tensor::logsumexp(DimnameList dim, bool keepdim) const {
     return TypeDefault::logsumexp(const_cast<Tensor&>(*this), dim, keepdim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::logsumexp.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, DimnameList, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
+    return table->callUnboxed<Tensor, const Tensor &, DimnameList, bool>(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
 #endif
@@ -1589,7 +1564,7 @@ inline std::tuple<Tensor,Tensor> Tensor::max(Dimname dim, bool keepdim) const {
     return TypeDefault::max(const_cast<Tensor&>(*this), dim, keepdim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::max.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)");
-    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
+    return table->callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, Dimname, bool>(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
 #endif
@@ -1599,7 +1574,7 @@ inline Tensor Tensor::max_values(DimnameList dim, bool keepdim) const {
     return TypeDefault::max_values(const_cast<Tensor&>(*this), dim, keepdim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::max_values.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, DimnameList, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
+    return table->callUnboxed<Tensor, const Tensor &, DimnameList, bool>(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
 #endif
@@ -1617,7 +1592,7 @@ inline Tensor Tensor::mean(c10::optional<ScalarType> dtype) const {
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dtype);
+    return table->callUnboxed<Tensor, const Tensor &, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dtype);
 #endif
 }
 inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) const {
@@ -1634,7 +1609,7 @@ inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim, c10::optional<ScalarTy
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -1649,7 +1624,7 @@ inline Tensor Tensor::mean(DimnameList dim, bool keepdim, c10::optional<ScalarTy
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, DimnameList, bool, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 #endif
 }
 #endif
@@ -1668,7 +1643,7 @@ inline std::tuple<Tensor,Tensor> Tensor::median(Dimname dim, bool keepdim) const
     return TypeDefault::median(const_cast<Tensor&>(*this), dim, keepdim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::median.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)");
-    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
+    return table->callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, Dimname, bool>(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
 #endif
@@ -1696,7 +1671,7 @@ inline std::tuple<Tensor,Tensor> Tensor::min(Dimname dim, bool keepdim) const {
     return TypeDefault::min(const_cast<Tensor&>(*this), dim, keepdim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::min.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)");
-    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
+    return table->callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, Dimname, bool>(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
 #endif
@@ -1706,7 +1681,7 @@ inline Tensor Tensor::min_values(DimnameList dim, bool keepdim) const {
     return TypeDefault::min_values(const_cast<Tensor&>(*this), dim, keepdim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::min_values.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, DimnameList, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
+    return table->callUnboxed<Tensor, const Tensor &, DimnameList, bool>(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
 #endif
@@ -1743,7 +1718,7 @@ inline std::tuple<Tensor,Tensor> Tensor::mode(Dimname dim, bool keepdim) const {
     return TypeDefault::mode(const_cast<Tensor&>(*this), dim, keepdim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::mode.dimname(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)");
-    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim);
+    return table->callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, Dimname, bool>(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
 #endif
@@ -2131,7 +2106,7 @@ inline Tensor Tensor::select(Dimname dim, int64_t index) const {
     return TypeDefault::select(const_cast<Tensor&>(*this), dim, index);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::select.Dimname(Tensor(a) self, Dimname dim, int index) -> Tensor(a)");
-    return table->getOp<Tensor (const Tensor &, Dimname, int64_t)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, index);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, int64_t>(const_cast<Tensor&>(*this), dim, index);
 #endif
 }
 #endif
@@ -2255,7 +2230,7 @@ inline int64_t Tensor::size(Dimname dim) const {
     return TypeDefault::size(const_cast<Tensor&>(*this), dim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::size.Dimname(Tensor self, Dimname dim) -> int");
-    return table->getOp<int64_t (const Tensor &, Dimname)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim);
+    return table->callUnboxed<int64_t, const Tensor &, Dimname>(const_cast<Tensor&>(*this), dim);
 #endif
 }
 #endif
@@ -2291,7 +2266,7 @@ inline Tensor Tensor::softmax(int64_t dim, c10::optional<ScalarType> dtype) cons
     return TypeDefault::softmax(const_cast<Tensor&>(*this), dim, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, int64_t, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -2300,7 +2275,7 @@ inline Tensor Tensor::softmax(Dimname dim, c10::optional<ScalarType> dtype) cons
     return TypeDefault::softmax(const_cast<Tensor&>(*this), dim, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::softmax(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
 #endif
@@ -2346,7 +2321,7 @@ inline Tensor Tensor::squeeze(Dimname dim) const {
     return TypeDefault::squeeze(const_cast<Tensor&>(*this), dim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::squeeze.dimname(Tensor(a) self, Dimname dim) -> Tensor(a)");
-    return table->getOp<Tensor (const Tensor &, Dimname)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname>(const_cast<Tensor&>(*this), dim);
 #endif
 }
 #endif
@@ -2374,7 +2349,7 @@ inline Tensor & Tensor::squeeze_(Dimname dim) const {
     return TypeDefault::squeeze_(const_cast<Tensor&>(*this), dim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::squeeze_.dimname(Tensor(a!) self, Dimname dim) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, Dimname)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim);
+    return table->callUnboxed<Tensor &, Tensor &, Dimname>(const_cast<Tensor&>(*this), dim);
 #endif
 }
 #endif
@@ -2392,7 +2367,7 @@ inline Tensor Tensor::stft(int64_t n_fft, c10::optional<int64_t> hop_length, c10
     return TypeDefault::stft(const_cast<Tensor&>(*this), n_fft, hop_length, win_length, window, normalized, onesided);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool onesided=True) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const Tensor &, bool, bool)>(at::detail::multi_dispatch_tensor_type_set(*this, window))(const_cast<Tensor&>(*this), n_fft, hop_length, win_length, window, normalized, onesided);
+    return table->callUnboxed<Tensor, const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const Tensor &, bool, bool>(const_cast<Tensor&>(*this), n_fft, hop_length, win_length, window, normalized, onesided);
 #endif
 }
 inline int64_t Tensor::stride(int64_t dim) const {
@@ -2410,7 +2385,7 @@ inline int64_t Tensor::stride(Dimname dim) const {
     return TypeDefault::stride(const_cast<Tensor&>(*this), dim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::stride.Dimname(Tensor self, Dimname dim) -> int");
-    return table->getOp<int64_t (const Tensor &, Dimname)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim);
+    return table->callUnboxed<int64_t, const Tensor &, Dimname>(const_cast<Tensor&>(*this), dim);
 #endif
 }
 #endif
@@ -2419,7 +2394,7 @@ inline Tensor Tensor::sum(c10::optional<ScalarType> dtype) const {
     return TypeDefault::sum(const_cast<Tensor&>(*this), dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dtype);
+    return table->callUnboxed<Tensor, const Tensor &, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dtype);
 #endif
 }
 inline Tensor Tensor::sum(IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) const {
@@ -2427,7 +2402,7 @@ inline Tensor Tensor::sum(IntArrayRef dim, bool keepdim, c10::optional<ScalarTyp
     return TypeDefault::sum(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -2436,7 +2411,7 @@ inline Tensor Tensor::sum(DimnameList dim, bool keepdim, c10::optional<ScalarTyp
     return TypeDefault::sum(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::sum.dim_DimnameList(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, DimnameList, bool, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 #endif
 }
 #endif
@@ -2497,7 +2472,7 @@ inline Tensor Tensor::std(DimnameList dim, bool unbiased, bool keepdim) const {
     return TypeDefault::std(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::std.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, DimnameList, bool, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
+    return table->callUnboxed<Tensor, const Tensor &, DimnameList, bool, bool>(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
 #endif
 }
 #endif
@@ -2506,7 +2481,7 @@ inline Tensor Tensor::prod(c10::optional<ScalarType> dtype) const {
     return TypeDefault::prod(const_cast<Tensor&>(*this), dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::prod(Tensor self, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dtype);
+    return table->callUnboxed<Tensor, const Tensor &, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dtype);
 #endif
 }
 inline Tensor Tensor::prod(int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) const {
@@ -2514,7 +2489,7 @@ inline Tensor Tensor::prod(int64_t dim, bool keepdim, c10::optional<ScalarType> 
     return TypeDefault::prod(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::prod.dim_int(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, bool, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, int64_t, bool, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
@@ -2523,7 +2498,7 @@ inline Tensor Tensor::prod(Dimname dim, bool keepdim, c10::optional<ScalarType> 
     return TypeDefault::prod(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::prod.dim_Dimname(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, bool, c10::optional<ScalarType>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, keepdim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, bool, c10::optional<ScalarType>>(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 #endif
 }
 #endif
@@ -2608,7 +2583,7 @@ inline Tensor Tensor::transpose(Dimname dim0, Dimname dim1) const {
     return TypeDefault::transpose(const_cast<Tensor&>(*this), dim0, dim1);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)");
-    return table->getOp<Tensor (const Tensor &, Dimname, Dimname)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim0, dim1);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, Dimname>(const_cast<Tensor&>(*this), dim0, dim1);
 #endif
 }
 #endif
@@ -2729,7 +2704,7 @@ inline Tensor Tensor::var(DimnameList dim, bool unbiased, bool keepdim) const {
     return TypeDefault::var(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::var.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, DimnameList, bool, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
+    return table->callUnboxed<Tensor, const Tensor &, DimnameList, bool, bool>(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
 #endif
 }
 #endif
@@ -2756,7 +2731,7 @@ inline Tensor Tensor::norm(c10::optional<Scalar> p, ScalarType dtype) const {
     return TypeDefault::norm(const_cast<Tensor&>(*this), p, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, c10::optional<Scalar>, ScalarType)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), p, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, c10::optional<Scalar>, ScalarType>(const_cast<Tensor&>(*this), p, dtype);
 #endif
 }
 inline Tensor Tensor::norm(Scalar p) const {
@@ -2773,7 +2748,7 @@ inline Tensor Tensor::norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdi
     return TypeDefault::norm(const_cast<Tensor&>(*this), p, dim, keepdim, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), p, dim, keepdim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType>(const_cast<Tensor&>(*this), p, dim, keepdim, dtype);
 #endif
 }
 inline Tensor Tensor::norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdim) const {
@@ -2791,7 +2766,7 @@ inline Tensor Tensor::norm(c10::optional<Scalar> p, DimnameList dim, bool keepdi
     return TypeDefault::norm(const_cast<Tensor&>(*this), p, dim, keepdim, dtype);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::norm.names_ScalarOpt_dim_dtype(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), p, dim, keepdim, dtype);
+    return table->callUnboxed<Tensor, const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType>(const_cast<Tensor&>(*this), p, dim, keepdim, dtype);
 #endif
 }
 #endif
@@ -2801,7 +2776,7 @@ inline Tensor Tensor::norm(c10::optional<Scalar> p, DimnameList dim, bool keepdi
     return TypeDefault::norm(const_cast<Tensor&>(*this), p, dim, keepdim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::norm.names_ScalarOpt_dim(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), p, dim, keepdim);
+    return table->callUnboxed<Tensor, const Tensor &, c10::optional<Scalar>, DimnameList, bool>(const_cast<Tensor&>(*this), p, dim, keepdim);
 #endif
 }
 #endif
@@ -3225,7 +3200,7 @@ inline std::vector<Tensor> Tensor::unbind(Dimname dim) const {
     return TypeDefault::unbind(const_cast<Tensor&>(*this), dim);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::unbind.Dimname(Tensor(a) self, Dimname dim) -> Tensor(a)[]");
-    return table->getOp<std::vector<Tensor> (const Tensor &, Dimname)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim);
+    return table->callUnboxed<std::vector<Tensor>, const Tensor &, Dimname>(const_cast<Tensor&>(*this), dim);
 #endif
 }
 #endif
@@ -3360,7 +3335,7 @@ inline int64_t Tensor::q_per_channel_axis() const {
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::q_per_channel_axis(Tensor self) -> int");
-    return table->getOp<int64_t (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
+    return table->callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::int_repr() const {
@@ -3389,7 +3364,7 @@ inline QScheme Tensor::qscheme() const {
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::qscheme(Tensor self) -> QScheme");
-    return table->getOp<QScheme (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
+    return table->callUnboxed<QScheme, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
@@ -3397,7 +3372,7 @@ inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool 
     return TypeDefault::to(const_cast<Tensor&>(*this), options, non_blocking, copy);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::to.dtype_layout(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, bool non_blocking=False, bool copy=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, const TensorOptions &, bool, bool)>(at::detail::multi_dispatch_tensor_type_set(*this, options))(const_cast<Tensor&>(*this), options, non_blocking, copy);
+    return table->callUnboxed<Tensor, const Tensor &, const TensorOptions &, bool, bool>(const_cast<Tensor&>(*this), options, non_blocking, copy);
 #endif
 }
 inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking, bool copy) const {
@@ -3405,7 +3380,7 @@ inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking, boo
     return TypeDefault::to(const_cast<Tensor&>(*this), device, dtype, non_blocking, copy);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Device, ScalarType, bool, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), device, dtype, non_blocking, copy);
+    return table->callUnboxed<Tensor, const Tensor &, Device, ScalarType, bool, bool>(const_cast<Tensor&>(*this), device, dtype, non_blocking, copy);
 #endif
 }
 inline Tensor Tensor::to(ScalarType dtype, bool non_blocking, bool copy) const {
@@ -3413,7 +3388,7 @@ inline Tensor Tensor::to(ScalarType dtype, bool non_blocking, bool copy) const {
     return TypeDefault::to(const_cast<Tensor&>(*this), dtype, non_blocking, copy);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, ScalarType, bool, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dtype, non_blocking, copy);
+    return table->callUnboxed<Tensor, const Tensor &, ScalarType, bool, bool>(const_cast<Tensor&>(*this), dtype, non_blocking, copy);
 #endif
 }
 inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) const {
@@ -3445,7 +3420,7 @@ inline Tensor & Tensor::set_(Storage source) const {
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::set_.source_Storage(Tensor(a!) self, Storage source) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, Storage)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), source);
+    return table->callUnboxed<Tensor &, Tensor &, Storage>(const_cast<Tensor&>(*this), source);
 #endif
 }
 inline Tensor & Tensor::set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) const {
@@ -3462,7 +3437,7 @@ inline Tensor & Tensor::set_(Storage source, int64_t storage_offset, IntArrayRef
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, Storage, int64_t, IntArrayRef, IntArrayRef)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), source, storage_offset, size, stride);
+    return table->callUnboxed<Tensor &, Tensor &, Storage, int64_t, IntArrayRef, IntArrayRef>(const_cast<Tensor&>(*this), source, storage_offset, size, stride);
 #endif
 }
 inline Tensor & Tensor::set_(const Tensor & source) const {
@@ -3506,7 +3481,7 @@ inline Tensor & Tensor::set_quantizer_(ConstQuantizerPtr quantizer) const {
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::set_quantizer_(Tensor(a!) self, ConstQuantizerPtr quantizer) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, ConstQuantizerPtr)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), quantizer);
+    return table->callUnboxed<Tensor &, Tensor &, ConstQuantizerPtr>(const_cast<Tensor&>(*this), quantizer);
 #endif
 }
 inline bool Tensor::is_set_to(const Tensor & tensor) const {
@@ -3659,7 +3634,7 @@ inline Tensor Tensor::index_add(Dimname dim, const Tensor & index, const Tensor 
     return TypeDefault::index_add(const_cast<Tensor&>(*this), dim, index, source);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::index_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor source) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, source))(const_cast<Tensor&>(*this), dim, index, source);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, source);
 #endif
 }
 #endif
@@ -3717,7 +3692,7 @@ inline Tensor Tensor::index_fill(Dimname dim, const Tensor & index, Scalar value
     return TypeDefault::index_fill(const_cast<Tensor&>(*this), dim, index, value);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::index_fill.dimname_Scalar(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, Scalar)>(at::detail::multi_dispatch_tensor_type_set(*this, index))(const_cast<Tensor&>(*this), dim, index, value);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, const Tensor &, Scalar>(const_cast<Tensor&>(*this), dim, index, value);
 #endif
 }
 #endif
@@ -3727,7 +3702,7 @@ inline Tensor Tensor::index_fill(Dimname dim, const Tensor & index, const Tensor
     return TypeDefault::index_fill(const_cast<Tensor&>(*this), dim, index, value);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::index_fill.dimname_Tensor(Tensor self, Dimname dim, Tensor index, Tensor value) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, value))(const_cast<Tensor&>(*this), dim, index, value);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, value);
 #endif
 }
 #endif
@@ -3785,7 +3760,7 @@ inline Tensor Tensor::scatter(Dimname dim, const Tensor & index, const Tensor & 
     return TypeDefault::scatter(const_cast<Tensor&>(*this), dim, index, src);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::scatter.dimname_src(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, src))(const_cast<Tensor&>(*this), dim, index, src);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, src);
 #endif
 }
 #endif
@@ -3795,7 +3770,7 @@ inline Tensor Tensor::scatter(Dimname dim, const Tensor & index, Scalar value) c
     return TypeDefault::scatter(const_cast<Tensor&>(*this), dim, index, value);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::scatter.dimname_value(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, Scalar)>(at::detail::multi_dispatch_tensor_type_set(*this, index))(const_cast<Tensor&>(*this), dim, index, value);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, const Tensor &, Scalar>(const_cast<Tensor&>(*this), dim, index, value);
 #endif
 }
 #endif
@@ -3829,7 +3804,7 @@ inline Tensor Tensor::scatter_add(Dimname dim, const Tensor & index, const Tenso
     return TypeDefault::scatter_add(const_cast<Tensor&>(*this), dim, index, src);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index, src))(const_cast<Tensor&>(*this), dim, index, src);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, src);
 #endif
 }
 #endif
@@ -4570,7 +4545,7 @@ inline Tensor & Tensor::random_(int64_t from, int64_t to, Generator * generator)
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::random_.from(Tensor(a!) self, int from, int to, *, Generator? generator=None) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, int64_t, int64_t, Generator *)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), from, to, generator);
+    return table->callUnboxed<Tensor &, Tensor &, int64_t, int64_t, Generator *>(const_cast<Tensor&>(*this), from, to, generator);
 #endif
 }
 inline Tensor & Tensor::random_(int64_t to, Generator * generator) const {
@@ -4584,7 +4559,7 @@ inline Tensor & Tensor::random_(int64_t to, Generator * generator) const {
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, int64_t, Generator *)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), to, generator);
+    return table->callUnboxed<Tensor &, Tensor &, int64_t, Generator *>(const_cast<Tensor&>(*this), to, generator);
 #endif
 }
 inline Tensor & Tensor::random_(Generator * generator) const {
@@ -4598,7 +4573,7 @@ inline Tensor & Tensor::random_(Generator * generator) const {
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, Generator *)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), generator);
+    return table->callUnboxed<Tensor &, Tensor &, Generator *>(const_cast<Tensor&>(*this), generator);
 #endif
 }
 inline Tensor & Tensor::uniform_(double from, double to, Generator * generator) const {
@@ -4612,7 +4587,7 @@ inline Tensor & Tensor::uniform_(double from, double to, Generator * generator) 
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, double, double, Generator *)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), from, to, generator);
+    return table->callUnboxed<Tensor &, Tensor &, double, double, Generator *>(const_cast<Tensor&>(*this), from, to, generator);
 #endif
 }
 inline Tensor & Tensor::normal_(double mean, double std, Generator * generator) const {
@@ -4626,7 +4601,7 @@ inline Tensor & Tensor::normal_(double mean, double std, Generator * generator) 
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, double, double, Generator *)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), mean, std, generator);
+    return table->callUnboxed<Tensor &, Tensor &, double, double, Generator *>(const_cast<Tensor&>(*this), mean, std, generator);
 #endif
 }
 inline Tensor & Tensor::cauchy_(double median, double sigma, Generator * generator) const {
@@ -4640,7 +4615,7 @@ inline Tensor & Tensor::cauchy_(double median, double sigma, Generator * generat
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, double, double, Generator *)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), median, sigma, generator);
+    return table->callUnboxed<Tensor &, Tensor &, double, double, Generator *>(const_cast<Tensor&>(*this), median, sigma, generator);
 #endif
 }
 inline Tensor & Tensor::log_normal_(double mean, double std, Generator * generator) const {
@@ -4654,7 +4629,7 @@ inline Tensor & Tensor::log_normal_(double mean, double std, Generator * generat
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, double, double, Generator *)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), mean, std, generator);
+    return table->callUnboxed<Tensor &, Tensor &, double, double, Generator *>(const_cast<Tensor&>(*this), mean, std, generator);
 #endif
 }
 inline Tensor & Tensor::exponential_(double lambd, Generator * generator) const {
@@ -4668,7 +4643,7 @@ inline Tensor & Tensor::exponential_(double lambd, Generator * generator) const 
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, double, Generator *)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), lambd, generator);
+    return table->callUnboxed<Tensor &, Tensor &, double, Generator *>(const_cast<Tensor&>(*this), lambd, generator);
 #endif
 }
 inline Tensor & Tensor::geometric_(double p, Generator * generator) const {
@@ -4682,7 +4657,7 @@ inline Tensor & Tensor::geometric_(double p, Generator * generator) const {
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &, double, Generator *)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), p, generator);
+    return table->callUnboxed<Tensor &, Tensor &, double, Generator *>(const_cast<Tensor&>(*this), p, generator);
 #endif
 }
 inline Tensor Tensor::diag(int64_t diagonal) const {
@@ -4997,7 +4972,7 @@ inline Tensor Tensor::index_select(Dimname dim, const Tensor & index) const {
     return TypeDefault::index_select(const_cast<Tensor&>(*this), dim, index);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::index_select.dimname(Tensor self, Dimname dim, Tensor index) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, index))(const_cast<Tensor&>(*this), dim, index);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, const Tensor &>(const_cast<Tensor&>(*this), dim, index);
 #endif
 }
 #endif
@@ -5061,7 +5036,7 @@ inline Tensor Tensor::gather(Dimname dim, const Tensor & index, bool sparse_grad
     return TypeDefault::gather(const_cast<Tensor&>(*this), dim, index, sparse_grad);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::gather.dimname(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, const Tensor &, bool)>(at::detail::multi_dispatch_tensor_type_set(*this, index))(const_cast<Tensor&>(*this), dim, index, sparse_grad);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, const Tensor &, bool>(const_cast<Tensor&>(*this), dim, index, sparse_grad);
 #endif
 }
 #endif
@@ -5265,7 +5240,7 @@ inline Tensor Tensor::multinomial(int64_t num_samples, bool replacement, Generat
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, bool, Generator *)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), num_samples, replacement, generator);
+    return table->callUnboxed<Tensor, const Tensor &, int64_t, bool, Generator *>(const_cast<Tensor&>(*this), num_samples, replacement, generator);
 #endif
 }
 inline Tensor Tensor::lgamma() const {
@@ -5583,7 +5558,7 @@ inline std::tuple<Tensor,Tensor> Tensor::sort(Dimname dim, bool descending) cons
     return TypeDefault::sort(const_cast<Tensor&>(*this), dim, descending);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::sort.dimname(Tensor self, Dimname dim, bool descending=False) -> (Tensor values, Tensor indices)");
-    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, descending);
+    return table->callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, Dimname, bool>(const_cast<Tensor&>(*this), dim, descending);
 #endif
 }
 #endif
@@ -5602,7 +5577,7 @@ inline Tensor Tensor::argsort(Dimname dim, bool descending) const {
     return TypeDefault::argsort(const_cast<Tensor&>(*this), dim, descending);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::argsort.dimname(Tensor self, Dimname dim, bool descending=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, bool)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), dim, descending);
+    return table->callUnboxed<Tensor, const Tensor &, Dimname, bool>(const_cast<Tensor&>(*this), dim, descending);
 #endif
 }
 #endif
