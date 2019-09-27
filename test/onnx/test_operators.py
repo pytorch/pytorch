@@ -764,6 +764,10 @@ class TestOperators(TestCase):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 2.5000], requires_grad=True)
         self.assertONNX(lambda x: torch.round(x), x, opset_version=11)
 
+    def test_det(self):
+        x = torch.randn(2, 3, 5, 5, requires_grad=True)
+        self.assertONNX(lambda x: torch.det(x), x, opset_version=11)
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

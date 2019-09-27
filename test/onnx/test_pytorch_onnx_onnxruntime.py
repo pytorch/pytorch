@@ -1102,6 +1102,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 3.5000], requires_grad=True)
         self.run_test(Round(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_det(self):
+        class Det(torch.nn.Module):
+            def forward(self, x):
+                return torch.det(x)
+
+        x = torch.randn(2, 3, 5, 5, requires_grad=True)
+        self.run_test(Det(), x)
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)

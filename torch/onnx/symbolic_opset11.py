@@ -117,3 +117,7 @@ def unique_dim(g, self, dim, sorted, return_inverse, return_counts):
 
 def round(g, self):
     return g.op("Round", self)
+
+
+def det(g, self):
+    return g.op("Det", self)
