@@ -64,7 +64,11 @@ class ProcessGroupAgent : public RpcAgent {
   void enqueueRecv(RecvWork work);
   // receiving messages
   void listenLoop();
-
+  // globally checks if there is no pending messages. This method reads send and
+  // recv counters, and then use an allgather to collect all counters from all
+  // peers, i.e., all workers will have the same view of the counters. Then, a
+  // worker will only return true if all send counters match all receive
+  // coutners.
   bool checkNoPendingMessage();
 
   int64_t nextId() {

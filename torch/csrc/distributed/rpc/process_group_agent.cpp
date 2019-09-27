@@ -174,20 +174,15 @@ bool ProcessGroupAgent::checkNoPendingMessage() {
     // copy sent message cnt to worldSize - 2*worldSize elements
     std::lock_guard<std::mutex> guard(sendCntMutex_);
     std::copy(
-        msgSendCnts_.begin(),
-        msgSendCnts_.end(),
-        cnts.begin() + worldSize
-    );
+        msgSendCnts_.begin(), msgSendCnts_.end(), cnts.begin() + worldSize);
   }
 
   // allgather both send and recv messages in one shot
-  std::vector<torch::Tensor> inputCnt =
-      {torch::tensor(cnts, {torch::kInt64})};
+  std::vector<torch::Tensor> inputCnt = {torch::tensor(cnts, {torch::kInt64})};
   std::vector<std::vector<torch::Tensor>> outputCnts(1);
 
   for (int i = 0; i < worldSize; ++i) {
-    outputCnts[0].emplace_back(
-        torch::empty({2 * worldSize}, {torch::kInt64}));
+    outputCnts[0].emplace_back(torch::empty({2 * worldSize}, {torch::kInt64}));
   }
 
   pg_->allgather(outputCnts, inputCnt)->wait();
@@ -346,7 +341,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
           ++msgRecvCnts_[work.from_.id_];
         }
 
-        if (!message.isRequest() && !message.isResponse()){
+        if (!message.isRequest() && !message.isResponse()) {
           // TODO: pass the error back to the caller instead of crashing here.
           AT_ERROR("unrecognized message type ", message.type());
         }
