@@ -11163,10 +11163,6 @@ class TestTorchDeviceType(TestCase):
                 byteRes = torch.empty_like(x, device=device).byte()
                 boolRes = torch.empty_like(x, device=device).bool()
 
-                torch.le(x, b, out=byteRes)
-                torch.le(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
-
                 torch.ge(x, b, out=byteRes)
                 torch.ge(x, b, out=boolRes)
                 self.assertEqual(byteRes.bool(), boolRes)
@@ -11183,7 +11179,7 @@ class TestTorchDeviceType(TestCase):
                 torch.ne(x, b, out=boolRes)
                 self.assertEqual(byteRes.bool(), boolRes)
 
-                self.assertEquals(len(warningsCount), 5)
+                self.assertEquals(len(warningsCount), 4)
 
         # Bool Tensor
         x = torch.tensor([True, False, True, False], device=device)
