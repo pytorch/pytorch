@@ -610,6 +610,26 @@
   name: _th_min
   cpu_bool: True
   cuda_bool: True
+  variants:
+    - function
+  options:
+    - cname: minall
+      return: real
+      arguments:
+        - THTensor* self
+    - cname: cmin
+      return: argument 0
+      arguments:
+      - arg: THTensor* result
+        output: True
+      - arg: THTensor* self
+        broadcast: other fallback
+      - THTensor* other
+]]
+[[
+  name: _th_min
+  cpu_bool: True
+  cuda_bool: True
   variants: function
   options:
     - cname: min
