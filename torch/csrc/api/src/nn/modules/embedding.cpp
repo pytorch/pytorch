@@ -12,7 +12,7 @@
 namespace torch {
 namespace nn {
 
-    EmbeddingImpl::EmbeddingImpl(const EmbeddingOptions& options) : options(options) {
+    EmbeddingImpl::EmbeddingImpl(const EmbeddingOptions& options_) : options(options_) {
       reset();
     }
 
