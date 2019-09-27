@@ -12,7 +12,7 @@
 namespace torch {
 namespace nn {
 
-    EmbeddingImpl::EmbeddingImpl(const EmbeddingOptions& options_) : options(options_) {
+    EmbeddingImpl::EmbeddingImpl(const EmbeddingOptions& options_) : options(options_) { // NOLINT(modernize-pass-by-value)
       reset();
     }
 
@@ -95,7 +95,7 @@ namespace nn {
       return embedding;
     }
 
-    EmbeddingBagImpl::EmbeddingBagImpl(const EmbeddingBagOptions& options) : options(options) {
+    EmbeddingBagImpl::EmbeddingBagImpl(const EmbeddingBagOptions& options_) : options(options_) { // NOLINT(modernize-pass-by-value)
       reset();
     }
 
