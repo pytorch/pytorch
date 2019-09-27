@@ -41,6 +41,7 @@ class FakeQuantize(Module):
                            provides a method to calculate scale and zero-point.
 
     """
+
     Args:
         `observer`: Observer module that records stats of input tensor
         `quant_min`: Tensors are fake-quantized corresponding to the
