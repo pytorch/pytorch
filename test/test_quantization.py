@@ -30,25 +30,23 @@ from hypothesis_utils import no_deadline
 import io
 import copy
 
-@unittest.skipIf(
-    not torch.fbgemm_is_cpu_supported(),
-    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-    " with instruction set support avx2 or newer.",
-)
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class PostTrainingQuantTest(QuantizationTestCase):
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
         to nnq.Linear which is the quantized version of the module
         """
         model = SingleLayerLinearModel()
-        prepare(model)
+        model = prepare(model)
         # Check if observers and quant/dequant nodes are inserted
         self.checkNoPrepModules(model)
         self.checkHasPrepModules(model.fc1)
         self.checkObservers(model)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.checkNoPrepModules(model)
@@ -59,9 +57,17 @@ class PostTrainingQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-        # test one line API
-        model = quantize(SingleLayerLinearModel(), test_only_eval_fn,
-                         self.calib_data)
+        # test one line API - out of place version
+        base = SingleLayerLinearModel()
+        keys_before = set(list(base.state_dict().keys()))
+        model = quantize(base, test_only_eval_fn, self.calib_data)
+        checkQuantized(model)
+        keys_after = set(list(base.state_dict().keys()))
+        self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
+
+        # in-place version
+        model = SingleLayerLinearModel()
+        quantize(model, test_only_eval_fn, self.calib_data, inplace=True)
         checkQuantized(model)
 
     def test_two_layers(self):
@@ -69,7 +75,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         `fc2`, and `fc1`is not quantized
         """
         model = AnnotatedTwoLayerLinearModel()
-        prepare(model)
+        model = prepare(model)
 
         self.checkNoPrepModules(model)
         self.checkObservers(model)
@@ -77,7 +83,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         self.checkHasPrepModules(model.fc2)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.checkNoPrepModules(model)
@@ -113,10 +119,10 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkNoPrepModules(model.sub2.fc2)
             self.checkHasPrepModules(model.fc3)
 
-        prepare(model)
+        model = prepare(model)
         checkPrepModules(model, True)
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             checkPrepModules(model)
@@ -137,7 +143,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
 
     def test_nested2(self):
         model = AnnotatedSubNestedModel()
-        prepare(model)
+        model = prepare(model)
 
         def checkPrepModules(model, before_calib=False):
             if before_calib:
@@ -154,7 +160,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkPrepModules(model, True)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             checkPrepModules(model)
@@ -178,7 +184,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         parent qconfig
         """
         model = AnnotatedCustomConfigNestedModel()
-        prepare(model)
+        model = prepare(model)
 
         def checkPrepModules(model, before_calib=False):
             if before_calib:
@@ -195,7 +201,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkPrepModules(model, True)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             checkPrepModules(model)
@@ -217,11 +223,11 @@ class PostTrainingQuantTest(QuantizationTestCase):
         """
 
         model = SkipQuantModel()
-        prepare(model)
+        model = prepare(model)
         self.checkObservers(model)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.checkLinear(model.fc)
@@ -245,11 +251,11 @@ class PostTrainingQuantTest(QuantizationTestCase):
         model = QuantStubModel()
         # propagate the qconfig of parents to children, model is changed
         # inplace
-        prepare(model)
+        model = prepare(model)
         self.checkObservers(model)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.fc), nnq.Linear)
@@ -271,10 +277,10 @@ class PostTrainingQuantTest(QuantizationTestCase):
         model.qconfig = default_qconfig
         fuse_list = [['module.conv1', 'module.bn1', 'module.relu1']]
         fuse_modules(model, fuse_list)
-        prepare(model)
+        model = prepare(model)
         self.checkObservers(model)
         test_only_eval_fn(model, self.img_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.module.conv1), nn._intrinsic.quantized.ConvReLU2d)
@@ -284,11 +290,9 @@ class PostTrainingQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-@unittest.skipIf(
-    not torch.fbgemm_is_cpu_supported(),
-    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-    " with instruction set support avx2 or newer.",
-)
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class PostTrainingDynamicQuantTest(QuantizationTestCase):
     def test_single_layer(self):
         r"""Dynamic Quantize SingleLayerLinearDynamicModel which has one Linear module,
@@ -308,9 +312,17 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-        # test one line API
-        model = quantize_dynamic(SingleLayerLinearDynamicModel().eval(),
-                                 qconfig_dict)
+        # test one line API - out of place version
+        base = SingleLayerLinearDynamicModel()
+        keys_before = set(list(base.state_dict().keys()))
+        model = quantize_dynamic(base, qconfig_dict)
+        checkQuantized(model)
+        keys_after = set(list(base.state_dict().keys()))
+        self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
+
+        # in-place version
+        model = SingleLayerLinearDynamicModel()
+        quantize_dynamic(model, qconfig_dict, inplace=True)
         checkQuantized(model)
 
     def test_two_layers(self):
@@ -553,18 +565,16 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         for out, ref in zip(final_hiddens_fp16, ref_hid):
             torch.testing.assert_allclose(out, ref)
 
-@unittest.skipIf(
-    not torch.fbgemm_is_cpu_supported(),
-    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-    " with instruction set support avx2 or newer.",
-)
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
         model = ManualLinearQATModel()
-        prepare_qat(model)
+        model = prepare_qat(model)
         self.checkObservers(model)
         test_only_train_fn(model, self.train_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.fc1), nnq.Linear)
@@ -585,7 +595,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         """
         model = ManualLinearQATModel()
 
-        prepare_qat(model)
+        model = prepare_qat(model)
         self.checkObservers(model)
 
         model.eval()
@@ -594,11 +604,11 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_conv_linear(self):
         model = ManualConvLinearQATModel()
 
-        prepare_qat(model)
+        model = prepare_qat(model)
         self.checkObservers(model)
 
         test_only_train_fn(model, self.img_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.conv), nnq.Conv2d)
@@ -640,10 +650,9 @@ class ScriptabilityTest(QuantizationTestCase):
         self.checkScriptable(self.qmodel_under_test, [(xq, xq)], check_save_load=True)
         self.checkScriptable(self.model_under_test, [(xq.dequantize(), xq.dequantize())], check_save_load=True)
 
-@unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
-                 'Quantization requires FBGEMM. FBGEMM does not play'
-                 ' well with UBSAN at the moment, so we skip the test if'
-                 ' we are in a UBSAN environment.')
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class FusionTest(QuantizationTestCase):
     def test_fuse_module_train(self):
         model = ModelForFusion(default_qat_qconfig).train()
@@ -664,7 +673,7 @@ class FusionTest(QuantizationTestCase):
                          "Non-fused submodule Conv")
         self.assertEqual(type(model.sub2.relu), torch.nn.ReLU,
                          "Non-fused submodule ReLU")
-        prepare_qat(model)
+        model = prepare_qat(model)
         self.checkObservers(model)
 
         def checkQAT(model):
@@ -678,7 +687,7 @@ class FusionTest(QuantizationTestCase):
 
         checkQAT(model)
         test_only_train_fn(model, self.img_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.conv1), nniq.ConvReLU2d)
@@ -723,10 +732,10 @@ class FusionTest(QuantizationTestCase):
         self.assertEqual(type(model.sub2.relu), torch.nn.ReLU,
                          "Non-fused submodule ReLU")
 
-        prepare(model)
+        model = prepare(model)
         self.checkObservers(model)
         test_only_eval_fn(model, self.img_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.conv1), nniq.ConvReLU2d)
@@ -739,7 +748,7 @@ class FusionTest(QuantizationTestCase):
             test_only_eval_fn(model, self.img_data)
         checkQuantized(model)
 
-        model = ModelForFusion(default_qat_qconfig).eval()
+        model = ModelForFusion(default_qconfig).eval()
         fuse_modules(model, [['conv1', 'bn1', 'relu1'],
                              ['sub1.conv', 'sub1.bn']])
         model = quantize(model, test_only_eval_fn, self.img_data)
@@ -779,6 +788,21 @@ class ObserverTest(QuantizationTestCase):
                 ref_zero_point = -128 if qdtype is torch.qint8 else 0
         self.assertEqual(qparams[1].item(), ref_zero_point)
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
+
+        # Test for serializability
+        state_dict = myobs.state_dict()
+        b = io.BytesIO()
+        torch.save(state_dict, b)
+        b.seek(0)
+        loaded_dict = torch.load(b)
+        for key in state_dict:
+            self.assertEqual(state_dict[key], loaded_dict[key])
+        loaded_obs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        loaded_obs.load_state_dict(loaded_dict)
+        loaded_qparams = loaded_obs.calculate_qparams()
+        self.assertEqual(myobs.min_val, loaded_obs.min_val)
+        self.assertEqual(myobs.max_val, loaded_obs.max_val)
+        self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
@@ -839,6 +863,21 @@ class ObserverTest(QuantizationTestCase):
         self.assertTrue(torch.allclose(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype)))
         self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
 
+        # Test for serializability
+        state_dict = myobs.state_dict()
+        b = io.BytesIO()
+        torch.save(state_dict, b)
+        b.seek(0)
+        loaded_dict = torch.load(b)
+        for key in state_dict:
+            self.assertEqual(state_dict[key], loaded_dict[key])
+        loaded_obs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
+        loaded_obs.load_state_dict(loaded_dict)
+        loaded_qparams = loaded_obs.calculate_qparams()
+        self.assertEqual(myobs.min_vals, loaded_obs.min_vals)
+        self.assertEqual(myobs.max_vals, loaded_obs.max_vals)
+        self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
+
     def test_observer_scriptable(self):
         obs = torch.quantization.default_observer()
         scripted = torch.jit.script(obs)
@@ -855,15 +894,14 @@ class ObserverTest(QuantizationTestCase):
         loaded = torch.jit.load(buf)
         self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
 
-@unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
-                 'Quantization requires FBGEMM. FBGEMM does not play'
-                 ' well with UBSAN at the moment, so we skip the test if'
-                 ' we are in a UBSAN environment.')
-class QuantizationDebugTest(QuantizationTestCase):
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
+class RecordHistogramObserverTest(QuantizationTestCase):
     def test_record_observer(self):
         model = SingleLayerLinearModel()
         model.qconfig = default_debug_qconfig
-        prepare(model)
+        model = prepare(model)
         # run the evaluation and dump all tensors
         test_only_eval_fn(model, self.calib_data)
         test_only_eval_fn(model, self.calib_data)
@@ -875,10 +913,10 @@ class QuantizationDebugTest(QuantizationTestCase):
         self.assertEqual(len(observer_dict['fc1.module.observer'].get_tensor_value()), 2 * len(self.calib_data))
         self.assertEqual(observer_dict['fc1.module.observer'].get_tensor_value()[0], model(self.calib_data[0][0]))
 
-
+    @no_deadline
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
-    def test_observer_observer_scriptable(self, qdtype, qscheme):
+    def test_observer_scriptable(self, qdtype, qscheme):
         obs = RecordingObserver(dtype=qdtype, qscheme=qscheme)
         scripted = torch.jit.script(obs)
 
@@ -925,6 +963,23 @@ class QuantizationDebugTest(QuantizationTestCase):
 
         self.assertEqual(qparams[1].item(), ref_zero_point)
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
+        # Test for serializability
+        state_dict = myobs.state_dict()
+        b = io.BytesIO()
+        torch.save(state_dict, b)
+        b.seek(0)
+        loaded_dict = torch.load(b)
+        for key in state_dict:
+            self.assertEqual(state_dict[key], loaded_dict[key])
+        loaded_obs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        loaded_obs.load_state_dict(loaded_dict)
+        loaded_qparams = loaded_obs.calculate_qparams()
+        self.assertEqual(myobs.min_val, loaded_obs.min_val)
+        self.assertEqual(myobs.max_val, loaded_obs.max_val)
+        self.assertEqual(myobs.histogram, loaded_obs.histogram)
+        self.assertEqual(myobs.bins, loaded_obs.bins)
+        self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
+
 
 if __name__ == '__main__':
     run_tests()

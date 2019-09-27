@@ -3665,6 +3665,17 @@ def foo(x):
         with self.assertRaisesRegex(Exception, "backward hooks assigned"):
             torch.jit.trace(n, (torch.tensor(1.0),))
 
+    def test_python_op_builtins(self):
+        @torch.jit.unused
+        def fn(x):
+            # type: (List[int]) -> int
+            return sum(x)
+
+        @torch.jit.script
+        def script_fn(x):
+            # type: (List[int]) -> int
+            return fn(x)
+
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
@@ -4078,6 +4089,42 @@ def foo(xyz):
                 offset, source_range = debug_file[i]
                 offset2, source_range2 = debug_file[i + 1]
                 self.assertNotEqual(source_range, source_range2)
+
+    def test_circular_dependency(self):
+        """
+        https://github.com/pytorch/pytorch/issues/25871
+        """
+        class A(torch.jit.ScriptModule):
+            def __init__(self):
+                super(A, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x
+
+        class B(torch.jit.ScriptModule):
+            def __init__(self):
+                super(B, self).__init__()
+                self.foo = torch.nn.ModuleList([A()])
+
+            @torch.jit.script_method
+            def forward(self, x):
+                for f in self.foo:
+                    x = f(x)
+                return x
+
+        class C(torch.jit.ScriptModule):
+            def __init__(self):
+                super(C, self).__init__()
+                self.foo = torch.nn.Sequential(B())
+
+            @torch.jit.script_method
+            def forward(self, x):
+                for f in self.foo:
+                    x = f(x)
+                return x
+        self.getExportImportCopy(C())
+
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
@@ -4516,17 +4563,6 @@ a")
         FileCheck().check("(int, float) = prim::TupleConstruct").run(graph)
         self.checkScript(test_scalar_cast, (torch.tensor(1.0),))
         self.checkScript(test_scalar_cast, (torch.tensor(1),))
-
-        expected_str = r"Use int\(tensor\) or float\(tensor\) to retrieve"
-        with self.assertRaisesRegex(RuntimeError, expected_str):
-            @torch.jit.script
-            def int_fn(a):
-                # type: (int) -> int
-                return a
-
-            @torch.jit.script
-            def test_error_msg(x):
-                return int_fn(x.item())
 
     def test_method_on_number(self):
         def func():
@@ -6263,6 +6299,25 @@ a")
                 code = funcs_template.format(func=func, scalar1=scalar1, scalar2=scalar2)
                 run_test(code)
 
+        # test Scalar overloads
+        for scalar1, scalar2 in scalar_pairs:
+            item1 = 'torch.tensor(' + scalar1 + ').item()'
+            item2 = 'torch.tensor(' + scalar2 + ').item()'
+            for op in ops:
+                code = ops_template.format(op=op, scalar1=item1, scalar2=scalar2)
+                run_test(code)
+                code = ops_template.format(op=op, scalar1=scalar1, scalar2=item2)
+                run_test(code)
+                code = ops_template.format(op=op, scalar1=item1, scalar2=item2)
+                run_test(code)
+            for func in funcs:
+                code = funcs_template.format(func=func, scalar1=item1, scalar2=scalar2)
+                run_test(code)
+                code = funcs_template.format(func=func, scalar1=scalar1, scalar2=item2)
+                run_test(code)
+                code = funcs_template.format(func=func, scalar1=item1, scalar2=item2)
+                run_test(code)
+
     def test_number_abs(self):
         def func1(x):
             # type: (float) -> float
@@ -7155,9 +7210,9 @@ a")
         a = A()
         self.assertEqual(a.with_docstring.__doc__, 'test str')
 
-    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
-                     'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
-                     ' with instruction set support avx2 or newer.')
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
     def test_rnn_cell_quantized(self):
         d_in, d_hid = 2, 2
 
@@ -7249,9 +7304,9 @@ a")
             for out, ref_out in zip(outs, ref_outs):
                 torch.testing.assert_allclose(out, ref_out)
 
-    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
-                     'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
-                     ' with instruction set support avx2 or newer.')
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
     def test_rnn_quantized(self):
         d_in, d_hid = 2, 2
 
@@ -12323,7 +12378,7 @@ a")
 
             traced = torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
 
-    if torch.fbgemm_is_cpu_supported():
+    if 'fbgemm' in torch.backends.quantized.supported_engines:
         def test_quantization_modules(self):
             K1, N1 = 2, 2
 
@@ -15134,7 +15189,7 @@ a")
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "keyword-arg expansion is not supported"):
             torch.jit.script(fn)
 
-    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(), "requires FBGEMM")
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines, "requires FBGEMM")
     def test_erase_class_tensor_shapes(self):
         class Linear(torch.nn.Module):
             def __init__(self, in_features, out_features):
@@ -16009,7 +16064,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
     def test_snli(self):
         self._test_snli(self, device='cpu')
 
-    if torch.fbgemm_is_cpu_supported():
+    if 'fbgemm' in torch.backends.quantized.supported_engines:
         def test_snli_quantized(self):
             self._test_snli(self, device='cpu', quantized=True)
 
@@ -16151,7 +16206,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
     def test_vae(self):
         self._test_vae(self, device='cpu')
 
-    if torch.fbgemm_is_cpu_supported():
+    if 'fbgemm' in torch.backends.quantized.supported_engines:
         def test_vae_quantized(self):
             self._test_vae(self, device='cpu', quantized=True)
 
@@ -16279,6 +16334,7 @@ EXCLUDE_SCRIPT = {
     'test_norm_fro',
     'test_norm_fro_default',
     'test_norm_nuc',
+    'test_norm_nuc_batched',
 
     # aten op has additional cudnn argument
     'test_nn_unfold',
@@ -16942,7 +16998,7 @@ nn_functional_tests = [
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
     ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),
-        '', (True, 'aten::_batch_norm_impl_index')),
+        '', (False, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],), '',
      (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
@@ -18287,6 +18343,38 @@ class TestList(JitTestCase):
             return li[0] + li[1] + li[2]
 
         self.checkScript(list_cast, ())
+
+    def test_comprehension_iterable(self):
+        def test_func(fn, inputs):
+            self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
+
+        def foo(names, results):
+            # type: (List[int], List[int])
+            return [(k + 5, v - 2) for k, v in zip(names, results)]
+
+        test_func(foo, ([1, 2, 4], [4, 7, 9]))
+        test_func(foo, ([5], [4, 7, 9]))
+
+        def fn(x):
+            # type: (int)
+            return [i for i in range(x)]
+
+        test_func(fn, (9,))
+        test_func(fn, (0,))
+        test_func(fn, (-1,))
+
+        def changes_type():
+            a = [float(i) for i in range(5)]
+            b = [float(i) for i in [1, 2, 3, 4]]
+            c = [(float(i), j) for i, j in enumerate([1, 2, 3, 8])]
+            return a, b, c
+
+        test_func(changes_type, ())
+
+        def test_zero_iter():
+            return [str(i) for i, j in zip("", "")]
+
+        test_func(test_zero_iter, ())
 
     def test_mutable_list_append_2(self):
         def test_append_2():
