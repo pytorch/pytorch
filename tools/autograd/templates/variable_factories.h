@@ -197,6 +197,11 @@ inline at::Tensor tensor(detail::InitListTensor init_list_tensor) {
 /// NOTE: We add `torch::tensor(std::initializer_list<detail::InitListTensor>)` function overload,
 /// so that `torch::tensor({{1, 2}})` can take this overload instead of `torch::tensor(at::ArrayRef<T>)`.
 inline at::Tensor tensor(std::initializer_list<detail::InitListTensor> init_list) {
+  TORCH_CHECK(
+    init_list.begin()->type() != detail::InitListTensorType::Scalar,
+    "1D tensor construction such as `torch::tensor({1, 2, 3})` should never take the ",
+    "torch::tensor(std::initializer_list<detail::InitListTensor>) function overload. ",
+    "Please fix the code to avoid this regression.")
   return torch::tensor(detail::InitListTensor(init_list), at::dtype(init_list.begin()->scalar_type()));
 }
 
