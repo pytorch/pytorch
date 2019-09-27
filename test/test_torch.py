@@ -11175,15 +11175,11 @@ class TestTorchDeviceType(TestCase):
                 torch.gt(x, b, out=boolRes)
                 self.assertEqual(byteRes.bool(), boolRes)
 
-                torch.eq(x, b, out=byteRes)
-                torch.eq(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
-
                 torch.ne(x, b, out=byteRes)
                 torch.ne(x, b, out=boolRes)
                 self.assertEqual(byteRes.bool(), boolRes)
 
-                self.assertEquals(len(warningsCount), 5)
+                self.assertEquals(len(warningsCount), 4)
 
         # Bool Tensor
         x = torch.tensor([True, False, True, False], device=device)
