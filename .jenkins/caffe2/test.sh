@@ -20,7 +20,7 @@ else
   python_installation="$(dirname $(dirname $(cd /usr && $PYTHON -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
   caffe2_pypath="$python_installation/caffe2"
   cpp_test_dir="$python_installation/torch/test"
-  ld_library_path="$python_installation/torch/lib"
+  ld_library_path="$python_installation/torch/lib:$python_installation/caffe2/python"
 fi
 
 ################################################################################
@@ -110,6 +110,9 @@ pip install --user pytest-sugar
 # TensorRT integration tests #
 ##############################
 if [[ $BUILD_ENVIRONMENT == *caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04* ]]; then
+  export LD_LIBRARY_PATH="$ld_library_path":$LD_LIBRARY_PATH
+  export PYTHONPATH="$caffe2_pypath/python":$PYTHONPATH
+  export PATH="/var/lib/jenkins/.local/bin:$PATH"
   pip install -q --user torchvision
   "$PYTHON" \
   -m pytest \

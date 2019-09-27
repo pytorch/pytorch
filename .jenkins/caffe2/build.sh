@@ -161,10 +161,10 @@ if [[ $BUILD_ENVIRONMENT == *caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04* ]]; then
   sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list
   sudo apt-get -qq update
   sudo apt-get install -y --no-install-recommends python3
-  export ANACONDA_VERSION=3
-  sudo -E ./docker/caffe2/jenkins/common/install_anaconda.sh
-  . /opt/conda/etc/profile.d/conda.sh
-  export PATH=/opt/conda/bin:$PATH
+#  export ANACONDA_VERSION=3
+#  sudo -E ./docker/caffe2/jenkins/common/install_anaconda.sh
+#  . /opt/conda/etc/profile.d/conda.sh
+#  export PATH=/opt/conda/bin:$PATH
 
   LIB_FOLDER="https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64"
   declare -a TRT_DEBS
