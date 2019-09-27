@@ -1176,6 +1176,10 @@ graph(%x : Tensor,
                    .check("return") \
                    .run(str(m._c._get_module('conv')._get_method('conv2d_forward').graph))
 
+    @_tmp_donotuse_dont_inline_everything
+    def test_insert_pack_unpack(self):
+        pass
+
     def test_quant_fusion(self):
         input_strs = [
             # aten::conv2d --> quantized::conv2d
@@ -1199,92 +1203,62 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         return (%r_dequant)""",
             # addmm -> quantized::linear
             """
-graph(%self, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %packed_params = prim::GetAttr[name="_packed_params"](%self)
-        # CHECK-NOT: prim::Constant
-        %zero : int = prim::Constant[value=0]()
-        # CHECK-NOT: prim::Constant
-        %one : int = prim::Constant[value=1]()
-        # CHECK-NOT: prim::CallMethod[name="_weight_bias"]
-        %weight_bias : (Tensor, Tensor?) = prim::CallMethod[name="_weight_bias"](%packed_params)
-        # CHECK-NOT: prim::TupleIndex
-        %w_quant : Tensor = prim::TupleIndex(%weight_bias, %zero)
-        # CHECK-NOT: prim::TupleIndex
-        %b : Tensor = prim::TupleIndex(%weight_bias, %one)
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        # CHECK-NOT: quantized::linear_unpack
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         # CHECK-NOT: aten::dequantize
         %w_dequant = aten::dequantize(%w_quant)
         # CHECK-NOT: aten::t
         %w_dequant_t = aten::t(%w_dequant)
-        # CHECK-NOT: quantized::linear_prepack
-        # CHECK: prim::GetAttr[name="_packed_params"]
         # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
         %r = aten::addmm(%b, %a_dequant, %w_dequant_t, %4, %4)
         # CHECK-NOT: aten::quantize_per_tensor
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # matmul(with bias) -> quantized::linear
             """
-graph(%self, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %packed_params_module = prim::GetAttr[name="_packed_linear_weight_bias"](%self)
-        # CHECK-NOT: prim::Constant
-        %zero : int = prim::Constant[value=0]()
-        # CHECK-NOT: prim::Constant
-        %one : int = prim::Constant[value=1]()
-        # CHECK-NOT: prim::CallMethod[name="_weight_bias"]
-        %weight_bias : (Tensor, Tensor?) = prim::CallMethod[name="_weight_bias"](%packed_params_module)
-        # CHECK-NOT: prim::TupleIndex
-        %w_quant : Tensor = prim::TupleIndex(%weight_bias, %zero)
-        # CHECK-NOT: prim::TupleIndex
-        %b : Tensor = prim::TupleIndex(%weight_bias, %one)
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        # CHECK-NOT: quantized::linear_unpack
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         # CHECK-NOT: aten::dequantize
         %w_dequant = aten::dequantize(%w_quant)
         # CHECK-NOT: aten::t
         %w_dequant_t = aten::t(%w_dequant)
-        # CHECK-NOT: quantized::linear_prepack
-        # CHECK: prim::GetAttr[name="_packed_params"]
         # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
         %output = aten::matmul(%a_dequant, %w_dequant_t)
         %r = aten::add_(%output, %b, %4)
         # CHECK-NOT: aten::quantize_per_tensor
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # matmul(without bias) -> quantized::linear
             """
-graph(%self, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %packed_params_module = prim::GetAttr[name="_packed_linear_weight_bias"](%self)
-        # CHECK-NOT: prim::Constant
-        %zero : int = prim::Constant[value=0]()
-        # CHECK-NOT: prim::CallMethod[name="_weight_bias"]
-        %weight_bias : (Tensor, Tensor?) = prim::CallMethod[name="_weight_bias"](%packed_params_module)
-        # CHECK-NOT: prim::TupleIndex
-        %w_quant : Tensor = prim::TupleIndex(%weight_bias, %zero)
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         # CHECK-NOT: aten::dequantize
         %w_dequant = aten::dequantize(%w_quant)
         # CHECK-NOT: aten::t
         %w_dequant_t = aten::t(%w_dequant)
-        # CHECK-NOT: quantized::linear_prepack
-        # CHECK: prim::GetAttr[name="_packed_params"]
         # CHECK: quantized::linear
         # CHECK-NOT: aten::matmul
         %r = aten::matmul(%a_dequant, %w_dequant_t)
         # CHECK-NOT: aten::quantize_per_tensor
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)"""
         ]
@@ -1494,7 +1468,9 @@ graph(%input, %weight):
             def forward(self, x):
                 xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
                 wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
-                r = torch.nn.functional.linear(xq.dequantize(), wq.dequantize(), self.bias)
+                packed = torch.ops.quantized.linear_prepack(wq, self.bias)
+                w_unpacked, b_unpacked = torch.ops.quantized.linear_unpack(packed)
+                r = torch.nn.functional.linear(xq.dequantize(), w_unpacked.dequantize(), b_unpacked)
                 rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
                 return rq
 
