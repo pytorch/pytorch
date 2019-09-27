@@ -221,6 +221,18 @@ THC_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
                   THCTensor *total_weight,
                   int64_t ignore_index);
 
+THC_API void THNN_(SpatialConvolutionMM_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCTensor *weight,
+                  THCTensor *bias,              // [OPTIONAL]
+                  THCTensor *columns,
+                  THCTensor *ones,
+                  int kW, int kH,
+                  int dW, int dH,
+                  int padW, int padH);
+
 THC_API void THNN_(SpatialConvolutionMM_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
