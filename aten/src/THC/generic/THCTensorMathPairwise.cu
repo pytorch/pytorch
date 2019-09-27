@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathPairwise.cu"
 #else
 
+#include <THC/THCTensorMathCompareT.cuh>
+
 int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
