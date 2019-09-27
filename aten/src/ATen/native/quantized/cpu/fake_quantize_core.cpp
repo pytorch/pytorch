@@ -3,22 +3,21 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 
-/* FakeQuantize Op for PerChannelAffine quantization scheme */
+/* Core operations for fake-quantization shared between per tensor
+ and per-channel fake quant */
 namespace at {
 namespace native {
 
-/* Per channel fake-quantizes the 'inputs' tensor.
+/* Fake quantize a tensor, common block for per-channel & per-tensor fake quant
 Args:
-  X: Forward input tensor.
-  dY: Backward input tensor (_backward op only).
-  scale: scale of per channel affine quantization
-  zero_point: zero_point of per channel affine quantization
-  axis: int specifying the axis to be quantized
+  output: output tensor.
+  input : input tensor.
+  sc:  scale to quantize the input tensor to
+  zero_point: zero_point
   quant_min: minimum quantized value
   quant_max: maximum quantized value
 Returns:
   Fake quantized tensor (double dtype).
-
 */
 void fake_quantize_slice(Tensor& output,
                         const Tensor& input,

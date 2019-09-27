@@ -9,24 +9,18 @@ namespace at {
 namespace native {
 
 
-/* Fake-quantizes the 'inputs' tensor.
-Args:
-  X: Forward input tensor.
-  scale: scale of per tensor affine quantization
-  zero_point: zero_point of per tensor affine quantization
-  quant_min: minimum quantized value
-  quant_max: maximum quantized value
-  quant_delay: Count of global steps for which to delay the quantization.
-               See note below.
-  iter: The current quantization iteration used for `quant_delay`.
-Returns:
-  Quantized tensor (double dtype).
+  /* Per channel fake-quantizes the 'inputs' tensor.
+  Args:
+    self: Forward input tensor.
+    scale: scale of per channel affine quantization
+    zero_point: zero_point of per channel affine quantization
+    axis: int specifying the axis to be quantized
+    quant_min: minimum quantized value
+    quant_max: maximum quantized value
+  Returns:
+    Fake quantized tensor (double dtype).
 
-Notes:
-  - quant_delay might be set to non-zero to help weights stabilize in the
-    beginning of the training.
-  - quantization range [quant_min, quant_max]
-*/
+  */
 Tensor fake_quantize_per_channel_affine_cuda(
     const Tensor& self,
     const Tensor& scale,
@@ -71,25 +65,20 @@ Tensor fake_quantize_per_channel_affine_cuda(
   return Y;
 }
 
-/* Backward path to fake-quantize the 'inputs' tensor.
+/* Backward path for per-channel fake-quantization of the 'inputs' tensor.
 
 Args:
-  X: Forward input tensor.
   dY: Backward input tensor.
+  X: Forward input tensor.
   scale: scale of per tensor affine quantization
   zero_point: zero_point of per tensor affine quantization
-  quant_min: minimum quantized value
-  quant_max: maximum quantized value
-  quant_delay: Count of global steps for which to delay the quantization.
-               See note in forward.
-  iter: The current quantization iteration used for `quant_delay`.
-Returns:
-  Quantized tensor (double dtype).
+  axis: int ,the axis over which quantization parameters vary
+  quant_min: int, minimum quantized value
+  quant_max: int, maximum quantized value
 
-Notes:
-  - quant_delay might be set to non-zero to help weights stabilize in the
-    beginning of the training.
-  - quantization range [quant_min, quant_max]
+Returns:
+  Gradient for per channel fake quant (double dtype).
+
 */
 Tensor fake_quantize_per_channel_affine_backward_cuda(
     const Tensor& dY,

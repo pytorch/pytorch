@@ -10,21 +10,13 @@ namespace native {
 
 /* Fake-quantizes the 'inputs' tensor.
 Args:
-  X: Forward input tensor.
+  self: Forward input tensor.
   scale: scale of per tensor affine quantization
   zero_point: zero_point of per tensor affine quantization
   quant_min: minimum quantized value
   quant_max: maximum quantized value
-  quant_delay: Count of global steps for which to delay the quantization.
-               See note below.
-  iter: The current quantization iteration used for `quant_delay`.
 Returns:
   Quantized tensor (double dtype).
-
-Notes:
-  - quant_delay might be set to non-zero to help weights stabilize in the
-    beginning of the training.
-  - quantization range [quant_min, quant_max]
 */
 Tensor fake_quantize_per_tensor_affine_cuda(
     const Tensor& self,
@@ -49,22 +41,14 @@ Tensor fake_quantize_per_tensor_affine_cuda(
 /* Backward path to fake-quantize the 'inputs' tensor.
 
 Args:
-  X: Forward input tensor.
   dY: Backward input tensor.
+  X: Forward input tensor.
   scale: scale of per tensor affine quantization
   zero_point: zero_point of per tensor affine quantization
   quant_min: minimum quantized value
   quant_max: maximum quantized value
-  quant_delay: Count of global steps for which to delay the quantization.
-               See note in forward.
-  iter: The current quantization iteration used for `quant_delay`.
 Returns:
   Quantized tensor (double dtype).
-
-Notes:
-  - quant_delay might be set to non-zero to help weights stabilize in the
-    beginning of the training.
-  - quantization range [quant_min, quant_max]
 */
 Tensor fake_quantize_per_tensor_affine_backward_cuda(
     const Tensor& dY,
