@@ -125,7 +125,7 @@ std::ostream& operator<<(std::ostream& out, JitLoggingLevels level) {
       out << "DEBUG";
       break;
     default:
-      TORCH_INTERNAL_ASSERT("Invalid level");
+      TORCH_INTERNAL_ASSERT(false, "Invalid level");
   }
 
   return out;
