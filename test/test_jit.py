@@ -44,7 +44,7 @@ from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
 from textwrap import dedent
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Union
 import copy
 import inspect
 import math
@@ -919,8 +919,6 @@ graph(%x : Tensor,
         def get_forward_graph(m):
             return m._get_method("forward").graph
         torch._C._jit_pass_constant_propagation(get_forward_graph(m._c))
-        # TODO: change to use module level constant prop
-        torch._C._jit_pass_constant_propagation(m._c._get_module('conv')._get_method('conv2d_forward').graph)
         qconfig_dict = {
             '':
             QConfig(
@@ -1171,12 +1169,10 @@ graph(%x : Tensor,
                    .check("return") \
                    .run(str(get_forward(m).graph))
         FileCheck().check("aten::quantize_per_tensor") \
-                   .check_next("aten::int_repr") \
-                   .check_next("aten::_dequantize_linear") \
+                   .check_next("aten::dequantize") \
                    .check("aten::conv2d") \
                    .check("aten::quantize_per_tensor") \
-                   .check_next("aten::int_repr") \
-                   .check_next("aten::_dequantize_linear") \
+                   .check_next("aten::dequantize") \
                    .check("return") \
                    .run(str(m._c._get_module('conv')._get_method('conv2d_forward').graph))
 
@@ -1187,40 +1183,29 @@ graph(%x : Tensor,
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
 %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::int_repr
-        %a_intrepr = aten::int_repr(%a_quant)
-        # CHECK-NOT: aten::_dequantize_linear
-        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        # CHECK-NOT: aten::dequantize
+        %a_dequant = aten::dequantize(%a_quant)
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        %w_intrepr = aten::int_repr(%w_quant)
-        # CHECK-NOT: aten::_dequantize_linear
-        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::dequantize
+        %w_dequant = aten::dequantize(%w_quant)
         # CHECK: quantized::conv_prepack
         # CHECK: quantized::conv2d
         # CHECK-NOT: aten::conv2d
         %r = aten::conv2d(%a_dequant, %w_dequant, %b, %c, %d, %e, %f)
         # CHECK-NOT: aten::quantize_per_tensor
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::int_repr
-        %r_intrepr = aten::int_repr(%r_quant)
-        # CHECK: aten::_dequantize_linear
-        %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        # CHECK: aten::dequantize
+        %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # addmm -> quantized::linear
             """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%r_scale, %r_zero_point, %r_dtype, %4):
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::int_repr
-        %a_intrepr = aten::int_repr(%a_quant)
-        # CHECK-NOT: aten::_dequantize_linear
-        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        # CHECK-NOT: aten::dequantize
+        %a_dequant = aten::dequantize(%a_quant)
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        %w_intrepr = aten::int_repr(%w_quant)
-        # CHECK-NOT: aten::_dequantize_linear
-        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::dequantize
+        %w_dequant = aten::dequantize(%w_quant)
         # CHECK: aten::t
         # CHECK: quantized::linear_prepack
         # CHECK: quantized::linear
@@ -1228,27 +1213,18 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
         # CHECK-NOT: aten::quantize_per_tensor
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::int_repr
-        %r_intrepr = aten::int_repr(%r_quant)
-        # CHECK: aten::_dequantize_linear
-        %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        # CHECK: aten::dequantize
+        %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # matmul(with bias) -> quantized::linear
             """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%r_scale, %r_zero_point, %r_dtype, %4):
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::int_repr
-        %a_intrepr = aten::int_repr(%a_quant)
-        # CHECK-NOT: aten::_dequantize_linear
-        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        # CHECK-NOT: aten::dequantize
+        %a_dequant = aten::dequantize(%a_quant)
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        %w_intrepr = aten::int_repr(%w_quant)
-        # CHECK-NOT: aten::_dequantize_linear
-        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        # CHECK-NOT: aten::_dequantize_linear
+        # CHECK-NOT: aten::dequantize
+        %w_dequant = aten::dequantize(%w_quant)
         # CHECK: aten::t
         # CHECK: quantized::linear_prepack
         # CHECK: quantized::linear
@@ -1257,25 +1233,18 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %r = aten::add_(%output, %b, %4)
         # CHECK-NOT: aten::quantize_per_tensor
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::int_repr
-        %r_intrepr = aten::int_repr(%r_quant)
-        # CHECK: aten::_dequantize_linear
-        %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        # CHECK: aten::dequantize
+        %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # matmul(without bias) -> quantized::linear
             """
-graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%r_scale, %r_zero_point, %r_dtype):
+graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::int_repr
-        %a_intrepr = aten::int_repr(%a_quant)
-        # CHECK-NOT: aten::_dequantize_linear
-        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        # CHECK-NOT: aten::dequantize
+        %a_dequant = aten::dequantize(%a_quant)
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::int_repr
-        %w_intrepr = aten::int_repr(%w_quant)
-        # CHECK-NOT: aten::_dequantize_linear
-        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::dequantize
+        %w_dequant = aten::dequantize(%w_quant)
         # CHECK: aten::t
         # CHECK: prim::Constant()
         # CHECK: quantized::linear_prepack
@@ -1284,10 +1253,8 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
         %r = aten::matmul(%a_dequant, %w_dequant)
         # CHECK-NOT: aten::quantize_per_tensor
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::int_repr
-        %r_intrepr = aten::int_repr(%r_quant)
-        # CHECK: aten::_dequantize_linear
-        %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        # CHECK: aten::dequantize
+        %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)"""
         ]
         for input_str in input_strs:
@@ -3357,23 +3324,28 @@ graph(%Ra, %Rb):
 
     def test_serialize_qtensor(self):
         class SimpleQTensor(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self, per_channel):
                 super(SimpleQTensor, self).__init__()
                 x = torch.rand(5, 5).float()
-                x_q = torch.quantize_per_tensor(x, 0.2, 10, torch.quint8)
-
+                if not per_channel:
+                    x_q = torch.quantize_per_tensor(x, 0.2, 10, torch.quint8)
+                else:
+                    s = torch.rand(5, dtype=torch.float64) + 0.1
+                    zp = torch.randint(5, 15, (5,))
+                    x_q = torch.quantize_per_channel(x, s, zp, 1, torch.quint8)
                 self.register_buffer('x', x_q)
 
             @torch.jit.script_method
             def forward(self):
                 return self.x
 
-        model = SimpleQTensor()
-        buffer = io.BytesIO()
-        torch.jit.save(model, buffer)
-        buffer.seek(0)
-        model_loaded = torch.jit.load(buffer)
-        self.assertEqual(model_loaded(), model())
+        for per_channel in [False, True]:
+            model = SimpleQTensor(per_channel)
+            buffer = io.BytesIO()
+            torch.jit.save(model, buffer)
+            buffer.seek(0)
+            model_loaded = torch.jit.load(buffer)
+            self.assertEqual(model_loaded(), model())
 
 
 class TestFrontend(JitTestCase):
@@ -3441,6 +3413,21 @@ def foo(x):
             return fn()
 
         FileCheck().check("NamedTuple").run(fn2.graph)
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+
+            @torch.jit.unused
+            def fn(self):
+                # type: () -> MyTuple
+                return MyTuple(1)
+
+            def forward(self, x):
+                return self.fn()
+
+        mod = torch.jit.script(MyMod())
+        FileCheck().check_dag("NamedTuple").check_dag("Exception").run(mod.forward.graph)
 
     def test_inherit_method(self):
         class A(torch.jit.ScriptModule):
@@ -3537,6 +3524,10 @@ def foo(x):
                 def invalid_prefix_annotation3(a):
                     #     type: (Int) -> Int
                     return a + 2
+
+    def test_is_optional(self):
+        ann = Union[List[int], List[float]]
+        torch._jit_internal.is_optional(ann)
 
     def test_interpreter_fuzz(self):
         # This test generates random tree-like programs to fuzz test
@@ -3673,6 +3664,17 @@ def foo(x):
         n.register_backward_hook(backward_hook)
         with self.assertRaisesRegex(Exception, "backward hooks assigned"):
             torch.jit.trace(n, (torch.tensor(1.0),))
+
+    def test_python_op_builtins(self):
+        @torch.jit.unused
+        def fn(x):
+            # type: (List[int]) -> int
+            return sum(x)
+
+        @torch.jit.script
+        def script_fn(x):
+            # type: (List[int]) -> int
+            return fn(x)
 
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
@@ -4087,6 +4089,42 @@ def foo(xyz):
                 offset, source_range = debug_file[i]
                 offset2, source_range2 = debug_file[i + 1]
                 self.assertNotEqual(source_range, source_range2)
+
+    def test_circular_dependency(self):
+        """
+        https://github.com/pytorch/pytorch/issues/25871
+        """
+        class A(torch.jit.ScriptModule):
+            def __init__(self):
+                super(A, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x
+
+        class B(torch.jit.ScriptModule):
+            def __init__(self):
+                super(B, self).__init__()
+                self.foo = torch.nn.ModuleList([A()])
+
+            @torch.jit.script_method
+            def forward(self, x):
+                for f in self.foo:
+                    x = f(x)
+                return x
+
+        class C(torch.jit.ScriptModule):
+            def __init__(self):
+                super(C, self).__init__()
+                self.foo = torch.nn.Sequential(B())
+
+            @torch.jit.script_method
+            def forward(self, x):
+                for f in self.foo:
+                    x = f(x)
+                return x
+        self.getExportImportCopy(C())
+
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
@@ -4525,17 +4563,6 @@ a")
         FileCheck().check("(int, float) = prim::TupleConstruct").run(graph)
         self.checkScript(test_scalar_cast, (torch.tensor(1.0),))
         self.checkScript(test_scalar_cast, (torch.tensor(1),))
-
-        expected_str = r"Use int\(tensor\) or float\(tensor\) to retrieve"
-        with self.assertRaisesRegex(RuntimeError, expected_str):
-            @torch.jit.script
-            def int_fn(a):
-                # type: (int) -> int
-                return a
-
-            @torch.jit.script
-            def test_error_msg(x):
-                return int_fn(x.item())
 
     def test_method_on_number(self):
         def func():
@@ -5484,6 +5511,35 @@ a")
 
         self.assertTrue(str(test_lhs_none_rhs_never.graph).count(': int = prim::Constant') == 1)
 
+        @torch.jit.script
+        def test_bool_arith_and(lhs):
+            if lhs is None and lhs is not None:
+                return 1
+            else:
+                return 2
+        self.assertEqual(test_bool_arith_and(torch.zeros(3)), 2)
+        self.assertTrue(str(test_bool_arith_and.graph).count('if') == 0)
+
+        @torch.jit.script
+        def test_bool_arith_or(lhs):
+            if lhs is None or lhs is not None:
+                return 1
+            else:
+                return 2
+        self.assertEqual(test_bool_arith_or(torch.zeros(3)), 1)
+        self.assertTrue(str(test_bool_arith_or.graph).count('if') == 0)
+
+
+        @torch.jit.script
+        def test_bool_arith_not(lhs):
+            if not (lhs is None):
+                return 1
+            else:
+                return 2
+        self.assertEqual(test_bool_arith_not(torch.zeros(3)), 1)
+        self.assertTrue(str(test_bool_arith_not.graph).count('if') == 0)
+
+
     def test_conditional_casting(self):
         def test_bool_cast_tensor(x):
             if x:
@@ -6241,6 +6297,25 @@ a")
                 run_test(code)
             for func in funcs:
                 code = funcs_template.format(func=func, scalar1=scalar1, scalar2=scalar2)
+                run_test(code)
+
+        # test Scalar overloads
+        for scalar1, scalar2 in scalar_pairs:
+            item1 = 'torch.tensor(' + scalar1 + ').item()'
+            item2 = 'torch.tensor(' + scalar2 + ').item()'
+            for op in ops:
+                code = ops_template.format(op=op, scalar1=item1, scalar2=scalar2)
+                run_test(code)
+                code = ops_template.format(op=op, scalar1=scalar1, scalar2=item2)
+                run_test(code)
+                code = ops_template.format(op=op, scalar1=item1, scalar2=item2)
+                run_test(code)
+            for func in funcs:
+                code = funcs_template.format(func=func, scalar1=item1, scalar2=scalar2)
+                run_test(code)
+                code = funcs_template.format(func=func, scalar1=scalar1, scalar2=item2)
+                run_test(code)
+                code = funcs_template.format(func=func, scalar1=item1, scalar2=item2)
                 run_test(code)
 
     def test_number_abs(self):
@@ -10545,8 +10620,7 @@ a")
         self.checkScript(fn, (torch.randn(3, 2, dtype=torch.float), torch.ones(3, 2, dtype=torch.float)))
 
     def test_reassign_module_lhs(self):
-        with self.assertRaisesRegex(RuntimeError, 'Cannot re-assign \'self\' because it has type value and self is'
-                                    ' not a first-class value.  Only reassignments to first-class values are allowed'):
+        with self.assertRaisesRegex(RuntimeError, 'Cannot re-assign \'self\''):
             class ReassignSelfLHS(torch.jit.ScriptModule):
                 @torch.jit.script_method
                 def forward(self, x):
@@ -10557,8 +10631,7 @@ a")
             ReassignSelfLHS()
 
     def test_reassign_module_rhs(self):
-        with self.assertRaisesRegex(RuntimeError, 'Cannot re-assign \'x\' to a value of type module because x is not a'
-                                    ' first-class value.  Only reassignments to first-class values are allowed'):
+        with self.assertRaisesRegex(RuntimeError, 'Cannot re-assign \'x\' to a value of type module'):
             class ReassignSelfRHS(torch.jit.ScriptModule):
                 @torch.jit.script_method
                 def forward(self, x):
@@ -14922,6 +14995,34 @@ a")
                     self.assertEqual(loaded_y.view(4), loaded_y_view)
                     self.assertEqual(loaded_y_2.view(4), loaded_y_view)
 
+    def _test_pickle_checkpoint_qtensor(self, device):
+        with TemporaryFileName() as fname:
+            class M(torch.jit.ScriptModule):
+                __constants__ = ['fname']
+
+                def __init__(self):
+                    super(M, self).__init__()
+                    self.fname = fname
+
+                @torch.jit.script_method
+                def forward(self, x, y):
+                    torch.save((x, y), self.fname)
+                    return y
+
+            q = torch.quantize_per_tensor(
+                torch.rand(2, 3, dtype=torch.float), scale=0.1, zero_point=10, dtype=torch.quint8).to(device)
+            qc = torch.quantize_per_channel(
+                torch.rand(2, 3, dtype=torch.float),
+                scales=torch.tensor([0.1, 0.5, 0.01]),
+                zero_points=torch.tensor([10, 0, 20]),
+                axis=1, dtype=torch.quint8).to(device)
+            m = M()
+            m(q, qc)
+            with open(fname, "rb") as handle:
+                loaded_q, loaded_qc = torch.load(fname)
+                self.assertEqual(loaded_q, q)
+                self.assertEqual(loaded_qc, qc)
+
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_pickle_checkpoint_cuda(self):
         self._test_pickle_checkpoint('cuda')
@@ -14930,6 +15031,7 @@ a")
     def test_pickle_checkpoint(self):
         self._test_pickle_checkpoint('cpu')
         self._test_pickle_checkpoint_views('cpu')
+        self._test_pickle_checkpoint_qtensor('cpu')
 
     def test_pickle_checkpoint_tup(self):
         @torch.jit.script
@@ -16232,6 +16334,7 @@ EXCLUDE_SCRIPT = {
     'test_norm_fro',
     'test_norm_fro_default',
     'test_norm_nuc',
+    'test_norm_nuc_batched',
 
     # aten op has additional cudnn argument
     'test_nn_unfold',
@@ -16895,7 +16998,7 @@ nn_functional_tests = [
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
     ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),
-        '', (True, 'aten::_batch_norm_impl_index')),
+        '', (False, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],), '',
      (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
@@ -18240,6 +18343,38 @@ class TestList(JitTestCase):
             return li[0] + li[1] + li[2]
 
         self.checkScript(list_cast, ())
+
+    def test_comprehension_iterable(self):
+        def test_func(fn, inputs):
+            self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
+
+        def foo(names, results):
+            # type: (List[int], List[int])
+            return [(k + 5, v - 2) for k, v in zip(names, results)]
+
+        test_func(foo, ([1, 2, 4], [4, 7, 9]))
+        test_func(foo, ([5], [4, 7, 9]))
+
+        def fn(x):
+            # type: (int)
+            return [i for i in range(x)]
+
+        test_func(fn, (9,))
+        test_func(fn, (0,))
+        test_func(fn, (-1,))
+
+        def changes_type():
+            a = [float(i) for i in range(5)]
+            b = [float(i) for i in [1, 2, 3, 4]]
+            c = [(float(i), j) for i, j in enumerate([1, 2, 3, 8])]
+            return a, b, c
+
+        test_func(changes_type, ())
+
+        def test_zero_iter():
+            return [str(i) for i, j in zip("", "")]
+
+        test_func(test_zero_iter, ())
 
     def test_mutable_list_append_2(self):
         def test_append_2():

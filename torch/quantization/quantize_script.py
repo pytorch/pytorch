@@ -18,12 +18,15 @@ def convert_script(model, inplace=False):
     torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', True)
     return model
 
+# TODO: non-scriptable QConfig will be supported later
 def script_qconfig(qconfig):
     return QConfig(
         activation=torch.jit.script(qconfig.activation())._c,
         weight=torch.jit.script(qconfig.weight())._c)
 
-def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
+def _quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
+    if not isinstance(model, torch.jit.ScriptModule):
+        raise ValueError('input must be a script module, got: ' + str(type(model)))
     if not model._c._has_method('forward'):
         raise ValueError('input script module does not have forward method')
     if not inplace:
