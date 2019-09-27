@@ -105,9 +105,23 @@ class FakeQuantize(Module):
         super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                         missing_keys, unexpected_keys, error_msgs)
 
-default_fake_quant = FakeQuantize
+default_fake_quant = FakeQuantize.with_args(observer=MinMaxObserver, quant_min=0, quant_max=255,
+                                            dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=True)
+default_weight_fake_quant = FakeQuantize.with_args(observer=MinMaxObserver, quant_min=-128, quant_max=127,
+                                                   dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
 
-default_weight_fake_quant = FakeQuantize.with_args(dtype=torch.qint8,
-                                                   qscheme=torch.per_tensor_symmetric,
-                                                   quant_min=-128,
-                                                   quant_max=127)
+def disable_fake_quant(mod):
+    if type(mod) == FakeQuantize:
+        mod.disable_fake_quant()
+
+def enable_fake_quant(mod):
+    if type(mod) == FakeQuantize:
+        mod.enable_fake_quant()
+
+def disable_observer(mod):
+    if type(mod) == FakeQuantize:
+        mod.disable_observer()
+
+def enable_observer(mod):
+    if type(mod) == FakeQuantize:
+        mod.disable_observer()
