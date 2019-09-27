@@ -157,7 +157,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   if(torch::jit::tracer::isTracing()) {
     const jit::tracer::TracingState& state = *jit::tracer::getTracingState();
     auto& graph = state.graph;
-    if (state.force_outplace) {
+    if (state.force_outplace && self.storage().use_count() <= 1) {
       // if you have no views of self, then an in place copy is equivalent to
       // making sure we expand src to the same size as self
       jit::Node* node = graph->create(jit::aten::expand_as, /*num_outputs=*/1);
@@ -170,6 +170,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
       output = graph->insert(
           jit::aten::copy_,
           {jit::tracer::getValueTrace(self), jit::tracer::getValueTrace(src)});
+      jit::tracer::recordSourceLocation(output->node());
     }
   }
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
