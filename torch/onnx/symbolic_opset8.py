@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_opset9 as sym_opset9
@@ -39,7 +41,8 @@ import warnings
 
 black_listed_operators = [
     "nonzero", "where", "scatter", "scatter_add", "erf", "sign", "isnan", "gather",
-    "arange", "masked_fill"
+    "arange", "masked_fill",
+    "index_fill", "index_copy"
 ]
 
 for black_listed_op in black_listed_operators:

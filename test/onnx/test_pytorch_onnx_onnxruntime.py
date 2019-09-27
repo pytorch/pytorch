@@ -379,6 +379,15 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={'input_1': [0],
                                     'output_1': [0]})
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_size(self):
+        class SizeModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.arange(input.size(0)), torch.arange(input.size(-1))
+
+        x = torch.randn(5, 3, 2)
+        self.run_test(SizeModel(), x)
+
     def _test_index_generic(self, fn):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -497,6 +506,29 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 3, requires_grad=True)
         self.run_test(NarrowModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfUnsupportedOpsetVersion([11])
+    def test_index_fill(self):
+        class IndexFillModel(torch.nn.Module):
+            def forward(self, input):
+                index = torch.tensor([2, 0])
+                return input.index_fill(2, index, -1)
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(IndexFillModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfUnsupportedOpsetVersion([11])
+    def test_index_copy(self):
+        class IndexCopyModel(torch.nn.Module):
+            def forward(self, input):
+                index = torch.tensor([2, 0])
+                source = torch.ones(3, 2, 5)
+                return input.index_copy(1, index, source)
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(IndexCopyModel(), x)
+
     # TODO: enable for opset 10 when ONNXRuntime version will be updated
     def test_index_select_constant_scaler_index(self):
         class IndexSelectScalerIndexModel(torch.nn.Module):
@@ -560,6 +592,22 @@ class TestONNXRuntime(unittest.TestCase):
         indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
         values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
         self.run_test(ScatterModel(), input=(input, indices, values))
+
+        input = torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        indices = torch.tensor([[1, 0], [0, 2], [0, 1]], dtype=torch.int64)
+        values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
+        self.run_test(ScatterModel(), (input, indices, values))
+
+        input = torch.zeros(3, 4, 5, 6)
+        indices = torch.tensor([[1, 0], [0, 2], [0, 1]], dtype=torch.int64)
+        indices = indices.view(3, 2, 1, 1).expand(3, 2, 5, 6)
+        values = torch.arange(3 * 2 * 5 * 6, dtype=torch.float32).view(3, 2, 5, 6)
+        self.run_test(ScatterModel(), (input, indices, values))
+
+        input = torch.zeros(3, 4, 2)
+        indices = torch.tensor([[[1, 0], [0, 2]], [[1, 1], [0, 1]], [[2, 1], [2, 2]]])
+        values = torch.arange(3 * 2 * 2, dtype=torch.float32).view(3, 2, 2)
+        self.run_test(ScatterModel(), (input, indices, values))
 
     # enable test for opset 11 when ScatterElements is supported in ORT
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -1301,6 +1349,7 @@ def setup_rnn_tests():
 
 
 setup_rnn_tests()
+
 
 # opset 7 tests
 TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),

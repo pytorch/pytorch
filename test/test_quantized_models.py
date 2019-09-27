@@ -15,9 +15,9 @@ class ModelNumerics(QuantizationTestCase):
         qModel.eval()
         qModel.qconfig = torch.quantization.default_qconfig
         torch.quantization.fuse_modules(qModel.module, [['conv1', 'bn1', 'relu1']])
-        torch.quantization.prepare(qModel)
+        torch.quantization.prepare(qModel, inplace=True)
         qModel(calib_data)
-        torch.quantization.convert(qModel)
+        torch.quantization.convert(qModel, inplace=True)
         out_q = qModel(eval_data)
         SQNRdB = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_q))
         # Quantized model output should be close to floating point model output numerically

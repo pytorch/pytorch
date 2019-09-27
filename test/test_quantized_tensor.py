@@ -265,14 +265,14 @@ class TestQuantizedTensor(TestCase):
     def test_qtensor_view(self):
         scale, zero_point, dtype = 1.0, 2, torch.uint8
         q_int = torch.randint(0, 100, [1, 2, 3], dtype=dtype)
-        q = torch._per_tensor_affine_qtensor(q_int, scale=scale, zero_point=zero_point)
+        q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
         q2 = q.view(1, 3, 2)
         self.assertEqual(q.numel(), q2.numel())
         # testing -1
         self.assertEqual(q, q2.view(1, -1, 3))
 
         a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype)
-        a = torch._per_tensor_affine_qtensor(a_int, scale=scale, zero_point=zero_point)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
         c = a.view(1, 3, 2, 4)  # does not change tensor layout in memory
         self.assertEqual(b.size(), c.size())
@@ -285,7 +285,7 @@ class TestQuantizedTensor(TestCase):
 
         # a case can't view non-contiguos Tensor
         a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype)
-        a = torch._per_tensor_affine_qtensor(a_int, scale=scale, zero_point=zero_point)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
         err_str = "view size is not compatible with input tensor's size and stride*"
         with self.assertRaisesRegex(RuntimeError, err_str):
@@ -297,7 +297,7 @@ class TestQuantizedTensor(TestCase):
     def test_qtensor_reshape(self):
         scale, zero_point, dtype = 1.0, 2, torch.uint8
         q_int = torch.randint(0, 100, [3, 5], dtype=dtype)
-        q = torch._per_tensor_affine_qtensor(q_int, scale=scale, zero_point=zero_point)
+        q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
         q2 = q.reshape([15])
         self.assertEqual(q.numel(), q2.numel())
         self.assertEqual(q2.size(), [15])
@@ -305,7 +305,7 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(q, q2.reshape([3, -1]))
 
         a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype)
-        a = torch._per_tensor_affine_qtensor(a_int, scale=scale, zero_point=zero_point)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
         c = a.reshape(1, 3, 2, 4)  # does not change tensor layout
         self.assertEqual(b.size(), c.size())
@@ -317,7 +317,7 @@ class TestQuantizedTensor(TestCase):
 
         # we can use reshape for non-contiguous Tensor
         a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype)
-        a = torch._per_tensor_affine_qtensor(a_int, scale=scale, zero_point=zero_point)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
         c = b.reshape(1, 4, 2, 3)
 
