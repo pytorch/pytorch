@@ -1176,6 +1176,10 @@ graph(%x : Tensor,
                    .check("return") \
                    .run(str(m._c._get_module('conv')._get_method('conv2d_forward').graph))
 
+    @_tmp_donotuse_dont_inline_everything
+    def test_insert_pack_unpack(self):
+        pass
+
     def test_quant_fusion(self):
         input_strs = [
             # aten::conv2d --> quantized::conv2d

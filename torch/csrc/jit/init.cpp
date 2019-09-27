@@ -109,7 +109,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
-      .def("_jit_pass_onnx_peephole",
+      .def(
+          "_jit_pass_onnx_peephole",
           [](std::shared_ptr<Graph>& graph,
              int opset_version,
              bool fixed_batch_size) {
@@ -181,8 +182,11 @@ void initJITBindings(PyObject* module) {
           py::arg("method_name"),
           py::arg("inplace") = false)
       .def(
+          "_jit_pass_insert_pack_unpack",
+          [](script::Module& module) { return InsertPackUnpack(module); })
+      .def(
           "_jit_pass_quant_fusion",
-          [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
+          [](std::shared_ptr<Graph> g) { return QuantFusion(g); })
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def("_jit_pass_fold_quantize",
