@@ -97,10 +97,11 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
       cpu_kernel(
           iter,
           [&](scalar_t a) -> scalar_t {
+            a = scalar_t(underlying_t(q_max + q_min - a.val_));
             if (ReLUFused) {
-              a = scalar_t(std::max(a.val_, underlying_t(self_zero_point)));
+              a = scalar_t(std::max(a.val_, underlying_t(zero_point_prime)));
             }
-            return scalar_t(underlying_t(q_max + q_min - a.val_));
+            return a;
           });
       out.set_quantizer_(make_per_tensor_affine_quantizer(
           scale_prime, zero_point_prime, self.scalar_type()));

@@ -328,10 +328,17 @@ class TestQuantizedOps(TestCase):
                          message="mulReLU.out failed")
 
         # Scalar addition
-        mul = torch.ops.quantized.mul_scalar
         for b in B:
             C_ref = qA.dequantize().numpy() * b.item()
-            qC_hat = mul(qA, b.item())
+            qC_hat = torch.ops.quantized.mul_scalar(qA, b.item())
+
+            self.assertEqual(C_ref, qC_hat.dequantize())
+
+        # Scalar addition + relu
+        for b in B:
+            C_ref = qA.dequantize().numpy() * b.item()
+            C_ref[C_ref < 0] = 0
+            qC_hat = torch.ops.quantized.mul_scalar_relu(qA, b.item())
 
             self.assertEqual(C_ref, qC_hat.dequantize())
 
