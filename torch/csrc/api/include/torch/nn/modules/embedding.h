@@ -45,6 +45,7 @@ struct TORCH_API EmbeddingBagOptions {
   /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
   TORCH_ARG(float, norm_type) = 2.;
   /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``False``.
+  /// Note: this option is not supported when ``mode="max"``.
   TORCH_ARG(bool, scale_grad_by_freq) = false;
   /// ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag. ``"sum"`` computes the weighted sum, taking `per_sample_weights`
   /// into consideration. ``"mean"`` computes the average of the values in the bag, ``"max"`` computes the max value over each bag.
@@ -75,7 +76,7 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
   /// Changes to `EmbeddingOptions` *after construction* have no effect.
   EmbeddingOptions options;
 
-  /// The embedding table
+  /// The embedding table.
   Tensor weight;
 };
 
@@ -101,7 +102,7 @@ class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl>
 
     /// The `Options` used to configure this `EmbeddingBag` module.
     EmbeddingBagOptions options;
-    /// The embedding table
+    /// The embedding table.
     Tensor weight;
 };
 
