@@ -96,7 +96,7 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
   p2.grad() = g.clone();
   for (const auto norm_type : norm_types) {
     utils::clip_grad_norm_(p1, max_norm, norm_type);
-    utils::clip_grad_norm_({p2}, max_norm, norm_type);
+    utils::clip_grad_norm_(p2, max_norm, norm_type);
     ASSERT_TRUE(torch::allclose(p1.grad(), p2.grad()));
   }
 }
