@@ -25,17 +25,11 @@ inline void parallel_for(
 #ifdef _OPENMP
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
   std::exception_ptr eptr;
-  // choose number of tasks based on grain size and number of threads
-  int64_t num_threads = omp_in_parallel() ? 1 : omp_get_max_threads();
-  const int64_t num_iter = end - begin;
-  if (grain_size > 0) {
-    num_threads = std::min(num_threads, divup(num_iter, grain_size));
-  }
-  const int64_t chunk_size = divup(num_iter, num_threads);
-
-#pragma omp parallel num_threads(num_threads)
+#pragma omp parallel if (!omp_in_parallel() && ((end - begin) >= grain_size))
   {
+    int64_t num_threads = omp_get_num_threads();
     int64_t tid = omp_get_thread_num();
+    int64_t chunk_size = divup((end - begin), num_threads);
     int64_t begin_tid = begin + tid * chunk_size;
     if (begin_tid < end) {
       try {

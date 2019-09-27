@@ -171,8 +171,10 @@ fi
 # TODO: I'm not sure why, but somehow we lose verbose commands
 set -x
 
-echo 'PyTorch Build Statistics'
-sccache --show-stats
+if which sccache > /dev/null; then
+  echo 'PyTorch Build Statistics'
+  sccache --show-stats
+fi
 
 assert_git_not_dirty
 
