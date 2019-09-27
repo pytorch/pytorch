@@ -16,13 +16,6 @@ struct TensorGTOp {
 };
 
 template <typename T, typename TOut>
-struct TensorLEOp {
-  __device__ inline void operator()(TOut* out, T* a, T* b) {
-    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::le(*a, *b));
-  }
-};
-
-template <typename T, typename TOut>
 struct TensorGEOp {
   __device__ inline void operator()(TOut* out, T* a, T* b) {
     *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::ge(*a, *b));

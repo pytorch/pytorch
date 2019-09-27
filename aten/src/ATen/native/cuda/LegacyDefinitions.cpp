@@ -90,26 +90,6 @@ Tensor gather_cuda(const Tensor & self, int64_t dim, const Tensor & index, bool 
   return legacy::cuda::_th_gather(self, dim, index);
 }
 
-Tensor & le_out_cuda(Tensor & result, const Tensor & self, const Tensor & other) {
-  if (result.dtype() == at::ScalarType::Byte) {
-    AT_WARN("torch.le received 'out' parameter with dtype torch.uint8, this behavior is now deprecated," \
-            "please use 'out' parameter with dtype torch.bool instead.");
-    return legacy::cuda::_th_le_byte_out(result, self, other);
-  } else {
-    return legacy::cuda::_th_le_out(result, self, other);
-  }
-}
-
-Tensor & le_scalar_out_cuda(Tensor & result, const Tensor & self, const Scalar value) {
-  if (result.dtype() == at::ScalarType::Byte) {
-    AT_WARN("torch.le received 'out' parameter with dtype torch.uint8, this behavior is now deprecated," \
-            "please use 'out' parameter with dtype torch.bool instead.");
-    return legacy::cuda::_th_le_byte_out(result, self, value);
-  } else {
-    return legacy::cuda::_th_le_out(result, self, value);
-  }
-}
-
 Tensor & gt_out_cuda(Tensor & result, const Tensor & self, const Tensor & other) {
   if (result.dtype() == at::ScalarType::Byte) {
     AT_WARN("torch.gt received 'out' parameter with dtype torch.uint8, this behavior is now deprecated," \

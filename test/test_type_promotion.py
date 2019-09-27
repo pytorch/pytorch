@@ -245,6 +245,12 @@ class TestTypePromotion(TestCase):
                 ret_op=lambda x, y: torch.lt(x, y),
                 compare_op=lambda x, y: x < y,
             ),
+            dict(
+                name="le",
+                out_op=lambda x, y, d: torch.le(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                ret_op=lambda x, y: torch.le(x, y),
+                compare_op=lambda x, y: x <= y,
+            ),
         ]
         device = self.device
         for op in comparison_ops:
