@@ -1177,8 +1177,21 @@ graph(%x : Tensor,
                    .run(str(m._c._get_module('conv')._get_method('conv2d_forward').graph))
 
     @_tmp_donotuse_dont_inline_everything
-    def test_insert_pack_unpack(self):
-        pass
+    def test_insert_prepack_unpack(self):
+        input_str = """
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype):
+        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK: quantized::linear_prepack
+        # CHECK: quantized::linear_unpack
+        %w_dequant = aten::dequantize(%w_quant)
+        %linear = prim::Constant[name="linear"]()
+        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
+        return (%r)"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_insert_prepack_unpack(graph)
+        FileCheck().run(input_str, graph)
 
     def test_quant_fusion(self):
         input_strs = [

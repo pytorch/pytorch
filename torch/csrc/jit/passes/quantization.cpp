@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/quantization.h>
-#include <torch/csrc/jit/passes/quantization_patterns.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/quantization_patterns.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 #include <torch/csrc/jit/ir.h>
@@ -111,7 +111,8 @@ Value* insertScalarType(Node* ins_node, at::ScalarType t) {
 
 class InsertObserversHelper {
  public:
-  InsertObserversHelper(const ModuleQConfigMap& map) : module_qconfig_map_(map) {}
+  InsertObserversHelper(const ModuleQConfigMap& map)
+      : module_qconfig_map_(map) {}
   void insertObservers(script::Module& module, const std::string& method_name);
 
  private:
@@ -122,15 +123,16 @@ class InsertObserversHelper {
       const QConfig& qconfig);
 
   void findIntermediateValuesInPattern(
-    Graph& graph,
-    const std::string& pattern);
+      Graph& graph,
+      const std::string& pattern);
 
   void addIntermediateValuesToSkipObserver(
       const script::Module& module,
       const std::string& method_name);
 
-  // Values that are the output of GetAttr[name="weight"] and GetAttr[name="bias"]
-  // will be propagated from parent method call to the child graph
+  // Values that are the output of GetAttr[name="weight"] and
+  // GetAttr[name="bias"] will be propagated from parent method call to the
+  // child graph
   void propagateValues(Node* n, std::shared_ptr<Graph>& graph);
 
   const ModuleQConfigMap& module_qconfig_map_;
@@ -343,7 +345,8 @@ void InsertObserversHelper::insertObservers(
                 "or child instance in insert_observers_pass right now");
             callee_module = module;
           }
-          auto method_graph = callee_module.get_method(module_method_name).graph();
+          auto method_graph =
+              callee_module.get_method(module_method_name).graph();
           propagateValues(v->node(), method_graph);
           // Recursively insert observer for the forward function of child
           // module
@@ -835,7 +838,7 @@ graph(%self, %scale, %zero_point, %dtype):
     auto float_weight = module.get_parameter("weight").variable_data();
     auto scale = toIValue(match_vmap.at(vmap.at("scale"))).value().toDouble();
     auto zero_point =
-      toIValue(match_vmap.at(vmap.at("zero_point"))).value().toInt();
+        toIValue(match_vmap.at(vmap.at("zero_point"))).value().toInt();
     auto dtype =
         toIValue(match_vmap.at(vmap.at("dtype"))).value().toScalarType();
     module.register_buffer(
@@ -852,37 +855,36 @@ graph(%self, %scale, %zero_point, %dtype):
   rewriter.runOnGraph(graph, filter);
 }
 
-void InsertPackUnpack(std::shared_ptr<Graph> graph) {
+void InsertPrepackUnpack(std::shared_ptr<Graph>& graph) {
   std::string linear_with_quant = R"(
-graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
         %w_dequant = aten::dequantize(%w_quant)
         %linear = prim::Constant[name="linear"]()
         %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
-        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_quant))";
+        return (%r))";
 
   std::string linear_with_quant_prepack = R"(
-graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
         %packed_params = quantized::linear_prepack(%w, %b)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %linear = prim::Constant[name="linear"]()
         %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b_unpacked)
-        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_quant))";
+        return (%r))";
 
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
   rewriter.runOnGraph(graph);
 }
 
-void InsertPackUnpack(script::Module& module) {
+void InsertPrepackUnpack(script::Module& module) {
   for (auto& method : module.get_methods()) {
-    InsertPackUnpack(method.graph());
+    auto graph = method.graph();
+    InsertPrepackUnpack(graph);
     for (auto m : module.get_modules()) {
-      InsertPackUnpack(m);
+      InsertPrepackUnpack(m);
     }
   }
 }
@@ -902,20 +904,21 @@ graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype):
         return (%packed_params))";
 
   auto patterns = {linear_with_quant};
-  for (const auto& pattern: patterns) {
+  for (const auto& pattern : patterns) {
     Graph pattern_graph;
     std::unordered_map<std::string, Value*> vmap;
     script::parseIR(pattern, &pattern_graph, vmap);
     const auto& matches = findPatternMatches(pattern_graph, *graph);
-    TORCH_CHECK(
+    TORCH_INTERNAL_ASSERT(
         matches.size() <= 1, "We only support at most one match right now");
     for (const auto& match : matches) {
       const auto& match_vmap = match.values_map;
-      auto w_scale = toIValue(match_vmap.at(vmap.at("w_scale"))).value().toDouble();
-    auto w_zero_point =
-      toIValue(match_vmap.at(vmap.at("w_zero_point"))).value().toInt();
-    auto w_dtype =
-        toIValue(match_vmap.at(vmap.at("w_dtype"))).value().toScalarType();
+      auto w_scale =
+          toIValue(match_vmap.at(vmap.at("w_scale"))).value().toDouble();
+      auto w_zero_point =
+          toIValue(match_vmap.at(vmap.at("w_zero_point"))).value().toInt();
+      auto w_dtype =
+          toIValue(match_vmap.at(vmap.at("w_dtype"))).value().toScalarType();
       auto w = module.get_parameter("weight").variable_data();
       auto w_quant = at::quantize_per_tensor(w, w_scale, w_zero_point, w_dtype);
       auto b = module.get_parameter("bias").variable_data();
@@ -923,10 +926,7 @@ graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype):
       auto set_weight_bias = wrapper.get_method("set_weight_bias");
       set_weight_bias(std::vector<IValue>{IValue(w_quant), IValue(b)});
       // TODO: we need to make sure this name is unique
-      module.register_module(
-          "_packed_linear_weight_bias",
-          wrapper
-      );
+      module.register_module("_packed_linear_weight_bias", wrapper);
 
       // Replace GetAttr on %self with PackedParams module
       auto w_val = match_vmap.at(vmap.at("w"));
@@ -946,7 +946,10 @@ graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype):
       packed_params_val->replaceAllUsesWith(packed_params_from_attr);
 
       // Delete nodes
-      std::vector<Node*> nodes_to_delete = {w_val->node(), b_val->node(), w_quant_val->node(), packed_params_val->node()};
+      std::vector<Node*> nodes_to_delete = {w_val->node(),
+                                            b_val->node(),
+                                            w_quant_val->node(),
+                                            packed_params_val->node()};
       for (auto n : nodes_to_delete) {
         n->removeAllInputs();
       }
@@ -967,6 +970,5 @@ void FoldPrepackedWeightIntoModule(
     }
   }
 }
-
 } // namespace jit
 } // namespace torch
