@@ -40,11 +40,11 @@ void div_kernel_cuda(TensorIterator& iter) {
       });
     });
   } else {
-    auto assert_state = at::cuda::getCurrentCUDAStream().assert_state();
+    C10_KERNEL_ASSERT_ENABLE;
     AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "div_cuda", [&]() {
       gpu_kernel_with_scalars(iter, [=]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         if (b == 0) {
-            graceful_devision_by_zero(assert_state, "ZeroDivisionError: integer division by zero");
+            C10_KERNEL_ERROR_DIVISION_BY_ZERO("ZeroDivisionError: integer division by zero");
             return 0;   // what to return in this case?
         }
         return a / b;

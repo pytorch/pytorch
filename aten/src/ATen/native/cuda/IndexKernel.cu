@@ -50,9 +50,8 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   char* in_ptr = (char*)iter.data_ptr(1);
 
   auto offset_calc = index_make_offset_calculator<3>(iter);
-  auto stream = at::cuda::getCurrentCUDAStream();
-  auto assert_state = stream.assert_state();
 
+  C10_KERNEL_ASSERT_ENABLE;
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int idx) {
     auto offsets = offset_calc.get(idx);
     char* out_data = out_ptr + offsets[0];
@@ -64,7 +63,7 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
       int64_t index = *(int64_t*)(index_ptrs[i] + offsets[2]);
 
       if (index < -sizes[i] || index >= sizes[i]) {
-        graceful_index_error(assert_state, index, i, sizes[i], "index out of bounds");
+        C10_KERNEL_ERROR_INDEX_ERROR(index, i, sizes[i], "index out of bounds");
         return;
       }
 

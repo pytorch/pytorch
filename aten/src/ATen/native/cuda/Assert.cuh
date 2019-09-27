@@ -8,6 +8,8 @@ namespace assert {
 
 using namespace c10::cuda;
 
+__device__ CUDAAssert* global_assert_state = nullptr;
+
 static inline C10_HOST_DEVICE char* device_strcpy(
     char* dst,
     const char* src,
@@ -51,22 +53,20 @@ static inline C10_HOST_DEVICE bool assert_failed(
 }
 
 static inline C10_DEVICE bool graceful_assert_(
-    CUDAAssert* assert_state,
     bool condition,
     const char* message,
     uint32_t line,
     const char* file) {
   if (!condition) {
     assert_failed(
-        assert_state, CUDAAssertKind::ASSERTION_FAILED, message, line, file);
+        global_assert_state, CUDAAssertKind::ASSERTION_FAILED, message, line, file);
   }
 
-  return !assert_state->error; // return false if we are in error state, signals
+  return !global_assert_state->error; // return false if we are in error state, signals
                                // kernel to quit
 }
 
 static inline C10_DEVICE void graceful_index_error_(
-    CUDAAssert* assert_state,
     int64_t index,
     int64_t axis,
     int64_t size,
@@ -74,46 +74,55 @@ static inline C10_DEVICE void graceful_index_error_(
     uint32_t line,
     const char* file) {
   if (assert_failed(
-          assert_state,
+          global_assert_state,
           CUDAAssertKind::INDEX_OUT_OF_BOUNDS,
           message,
           line,
           file)) {
     // capture index details
-    CUDAAssertDetailIndexError& details = assert_state->details.index_error;
+    CUDAAssertDetailIndexError& details =
+        global_assert_state->details.index_error;
     details.index = index;
     details.axis = axis;
     details.size = size;
   }
 }
 
-static inline C10_HOST_DEVICE void graceful_devision_by_zero_(
-    CUDAAssert* assert_state,
+static inline C10_HOST_DEVICE void graceful_division_by_zero_(
     const char* message,
     uint32_t line,
     const char* file) {
+#ifdef __CUDA_ARCH__
   assert_failed(
-      assert_state, CUDAAssertKind::ZERO_DIVISION, message, line, file);
+      global_assert_state, CUDAAssertKind::ZERO_DIVISION, message, line, file);
+#endif
 }
 
 } // namespace assert
 } // namespace native
 } // namespace at
 
-#define graceful_assert(assert_state, exp, msg) \
+inline C10_HOST void enableCudaAssert(c10::cuda::CUDAAssert* state) {
+  // only set pointer value
+  cudaMemcpyToSymbol(
+      at::native::assert::global_assert_state, &state, sizeof(state));
+}
+
+#define C10_KERNEL_ASSERT_ENABLE                    \
+  do {                                              \
+    auto stream = at::cuda::getCurrentCUDAStream(); \
+    auto assert_state = stream.assert_state();      \
+    enableCudaAssert(assert_state);                 \
+  } while (0);
+
+#define C10_KERNEL_ASSERT(exp, msg) \
   at::native::assert::graceful_assert_(         \
-      assert_state, exp, msg, static_cast<uint32_t>(__LINE__), __FILE__)
+      exp, msg, static_cast<uint32_t>(__LINE__), __FILE__)
 
-#define graceful_index_error(assert_state, index, axis, size, msg) \
-  at::native::assert::graceful_index_error_(                       \
-      assert_state,                                                \
-      index,                                                       \
-      axis,                                                        \
-      size,                                                        \
-      msg,                                                         \
-      static_cast<uint32_t>(__LINE__),                             \
-      __FILE__)
+#define C10_KERNEL_ERROR_INDEX_ERROR(index, axis, size, msg) \
+  at::native::assert::graceful_index_error_(         \
+      index, axis, size, msg, static_cast<uint32_t>(__LINE__), __FILE__)
 
-#define graceful_devision_by_zero(assert_state, msg) \
-  at::native::assert::graceful_devision_by_zero_(    \
-      assert_state, msg, static_cast<uint32_t>(__LINE__), __FILE__)
+#define C10_KERNEL_ERROR_DIVISION_BY_ZERO(msg) \
+  at::native::assert::graceful_division_by_zero_(    \
+      msg, static_cast<uint32_t>(__LINE__), __FILE__)
