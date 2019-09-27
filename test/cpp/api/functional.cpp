@@ -137,7 +137,7 @@ TEST_F(FunctionalTest, AdaptiveAvgPool3d) {
 TEST_F(FunctionalTest, MaxUnpool1d) {
   auto x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
-  auto y = F::max_unpool1d(x, indices, {}, MaxUnpool1dOptions(3));
+  auto y = F::max_unpool1d(x, indices, MaxUnpool1dOptions(3));
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
@@ -145,7 +145,7 @@ TEST_F(FunctionalTest, MaxUnpool1d) {
 
   x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
-  y = F::max_unpool1d(x, indices, {1, 1, 9}, MaxUnpool1dOptions(3));
+  y = F::max_unpool1d(x, indices, MaxUnpool1dOptions(3), c10::IntArrayRef({1, 1, 9}));
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
@@ -153,7 +153,7 @@ TEST_F(FunctionalTest, MaxUnpool1d) {
 
   x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
-  y = F::max_unpool1d(x, indices, {}, MaxUnpool1dOptions(3).stride(2).padding(1));
+  y = F::max_unpool1d(x, indices, MaxUnpool1dOptions(3).stride(2).padding(1));
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::tensor({{{0, 2, 0, 4, 5}}}, torch::kFloat)));

@@ -352,7 +352,7 @@ class TORCH_API MaxUnpool1dImpl : public MaxUnpoolImpl<1, MaxUnpool1dImpl> {
  public:
   using MaxUnpoolImpl<1, MaxUnpool1dImpl>::MaxUnpoolImpl;
   Tensor forward(const Tensor& input, const Tensor& indices,
-                 IntArrayRef output_size = {});
+                 const c10::optional<IntArrayRef>& output_size = c10::nullopt);
 };
 
 /// A `ModuleHolder` subclass for `MaxUnpool1dImpl`.

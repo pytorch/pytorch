@@ -178,8 +178,9 @@ void MaxUnpoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
          << ", padding=" << options.padding() << ")";
 }
 
-Tensor MaxUnpool1dImpl::forward(const Tensor& input, const Tensor& indices, IntArrayRef output_size) {
-  return F::max_unpool1d(input, indices, output_size, options);
+Tensor MaxUnpool1dImpl::forward(const Tensor& input, const Tensor& indices,
+    const c10::optional<IntArrayRef>& output_size) {
+  return F::max_unpool1d(input, indices, options, output_size);
 }
 
 template class MaxUnpoolImpl<1, MaxUnpool1dImpl>;
