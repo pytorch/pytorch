@@ -89,15 +89,16 @@ class SparseAdam(Optimizer):
                 exp_avg_sq_update_values = grad_values.pow(2).sub_(old_exp_avg_sq_values).mul_(1 - beta2)
                 exp_avg_sq.add_(make_sparse(exp_avg_sq_update_values))
 
+                bias_correction1 = 1 - beta1 ** state['step']
+                bias_correction2 = 1 - beta2 ** state['step']
+
                 # Dense addition again is intended, avoiding another sparse_mask
                 numer = exp_avg_update_values.add_(old_exp_avg_values)
                 exp_avg_sq_update_values.add_(old_exp_avg_sq_values)
-                denom = exp_avg_sq_update_values.sqrt_().add_(group['eps'])
+                denom = (exp_avg_sq_update_values.sqrt_() / math.sqrt(bias_correction2)).add_(group['eps'])
                 del exp_avg_update_values, exp_avg_sq_update_values
 
-                bias_correction1 = 1 - beta1 ** state['step']
-                bias_correction2 = 1 - beta2 ** state['step']
-                step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
+                step_size = group['lr'] / bias_correction1
 
                 p.data.add_(make_sparse(-step_size * numer.div_(denom)))
 
