@@ -24,6 +24,7 @@ def _fake_quantize_per_tensor_affine_grad_reference(dY, X, scale, zero_point, qu
     res[mask] = dY.cpu()[mask]
     return res
 
+# Helper function used to simulate per-channel fake-quant against any axis
 def _permute_to_axis_zero(X, axis):
     x_dim = X.dim()
     new_axis_list = list(range(x_dim))
