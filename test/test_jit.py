@@ -19694,7 +19694,7 @@ class TestClassType(JitTestCase):
 
             def __pow__(self, other):
                 # type: (int) -> int
-                return self.x ** other
+                return int(self.x ** other)
 
             def __truediv__(self, other):
                 # type: (int) -> float
