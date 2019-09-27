@@ -30,6 +30,13 @@ struct TensorGEOp {
 };
 
 template <typename T, typename TOut>
+struct TensorEQOp {
+  __device__ inline void operator()(TOut* out, T* a, T* b) {
+    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::eq(*a, *b));
+  }
+};
+
+template <typename T, typename TOut>
 struct TensorNEOp {
   __device__ inline void operator()(TOut* out, T* a, T* b) {
     *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::ne(*a, *b));
