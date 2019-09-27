@@ -8,6 +8,10 @@ namespace torch {
 namespace nn {
 namespace utils {
 
+// Clips gradient norm of a vector of Tensors.
+// See
+// https://pytorch.org/docs/stable/nn.html?highlight=clip_grad_norm#torch.nn.utils.clip_grad_norm_
+// for more details about this module.
 inline float clip_grad_norm_(
     std::vector<Tensor>& parameters,
     float max_norm,
