@@ -755,7 +755,7 @@ class FusionTest(QuantizationTestCase):
             test_only_eval_fn(model, self.img_data)
         checkQuantized(model)
 
-        model = ModelForFusion(default_qat_qconfig).eval()
+        model = ModelForFusion(default_qconfig).eval()
         fuse_modules(model, [['conv1', 'bn1', 'relu1'],
                              ['sub1.conv', 'sub1.bn']])
         model = quantize(model, test_only_eval_fn, self.img_data)
@@ -795,6 +795,21 @@ class ObserverTest(QuantizationTestCase):
                 ref_zero_point = -128 if qdtype is torch.qint8 else 0
         self.assertEqual(qparams[1].item(), ref_zero_point)
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
+
+        # Test for serializability
+        state_dict = myobs.state_dict()
+        b = io.BytesIO()
+        torch.save(state_dict, b)
+        b.seek(0)
+        loaded_dict = torch.load(b)
+        for key in state_dict:
+            self.assertEqual(state_dict[key], loaded_dict[key])
+        loaded_obs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        loaded_obs.load_state_dict(loaded_dict)
+        loaded_qparams = loaded_obs.calculate_qparams()
+        self.assertEqual(myobs.min_val, loaded_obs.min_val)
+        self.assertEqual(myobs.max_val, loaded_obs.max_val)
+        self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
@@ -855,6 +870,21 @@ class ObserverTest(QuantizationTestCase):
         self.assertTrue(torch.allclose(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype)))
         self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
 
+        # Test for serializability
+        state_dict = myobs.state_dict()
+        b = io.BytesIO()
+        torch.save(state_dict, b)
+        b.seek(0)
+        loaded_dict = torch.load(b)
+        for key in state_dict:
+            self.assertEqual(state_dict[key], loaded_dict[key])
+        loaded_obs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
+        loaded_obs.load_state_dict(loaded_dict)
+        loaded_qparams = loaded_obs.calculate_qparams()
+        self.assertEqual(myobs.min_vals, loaded_obs.min_vals)
+        self.assertEqual(myobs.max_vals, loaded_obs.max_vals)
+        self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
+
     def test_observer_scriptable(self):
         obs = torch.quantization.default_observer()
         scripted = torch.jit.script(obs)
@@ -875,7 +905,7 @@ class ObserverTest(QuantizationTestCase):
                  'Quantization requires FBGEMM. FBGEMM does not play'
                  ' well with UBSAN at the moment, so we skip the test if'
                  ' we are in a UBSAN environment.')
-class QuantizationDebugTest(QuantizationTestCase):
+class RecordHistogramObserverTest(QuantizationTestCase):
     def test_record_observer(self):
         model = SingleLayerLinearModel()
         model.qconfig = default_debug_qconfig
@@ -891,10 +921,10 @@ class QuantizationDebugTest(QuantizationTestCase):
         self.assertEqual(len(observer_dict['fc1.module.observer'].get_tensor_value()), 2 * len(self.calib_data))
         self.assertEqual(observer_dict['fc1.module.observer'].get_tensor_value()[0], model(self.calib_data[0][0]))
 
-
+    @no_deadline
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
-    def test_observer_observer_scriptable(self, qdtype, qscheme):
+    def test_observer_scriptable(self, qdtype, qscheme):
         obs = RecordingObserver(dtype=qdtype, qscheme=qscheme)
         scripted = torch.jit.script(obs)
 
@@ -941,6 +971,23 @@ class QuantizationDebugTest(QuantizationTestCase):
 
         self.assertEqual(qparams[1].item(), ref_zero_point)
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
+        # Test for serializability
+        state_dict = myobs.state_dict()
+        b = io.BytesIO()
+        torch.save(state_dict, b)
+        b.seek(0)
+        loaded_dict = torch.load(b)
+        for key in state_dict:
+            self.assertEqual(state_dict[key], loaded_dict[key])
+        loaded_obs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        loaded_obs.load_state_dict(loaded_dict)
+        loaded_qparams = loaded_obs.calculate_qparams()
+        self.assertEqual(myobs.min_val, loaded_obs.min_val)
+        self.assertEqual(myobs.max_val, loaded_obs.max_val)
+        self.assertEqual(myobs.histogram, loaded_obs.histogram)
+        self.assertEqual(myobs.bins, loaded_obs.bins)
+        self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
+
 
 if __name__ == '__main__':
     run_tests()
