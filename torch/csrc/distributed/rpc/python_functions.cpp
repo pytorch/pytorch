@@ -55,8 +55,8 @@ py::object toPyObj(const Message& message) {
       stack.push_back(ret.value());
       {
         AutoGIL ag;
-        // createPyObjectForStack does not acquire GIL but creates a new
-        // py::object
+        // The createPyObjectForStack does not acquire GIL, but creating a new
+        // py::object requires GIL.
         return torch::jit::createPyObjectForStack(std::move(stack));
       }
     }
