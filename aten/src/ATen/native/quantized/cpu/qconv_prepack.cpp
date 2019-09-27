@@ -257,10 +257,10 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
           weight, bias, stride, padding, dilation, groups);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::conv_prepack ",
         toString(ctx.qEngine()));
-    return at::Tensor();
   }
 };
 
