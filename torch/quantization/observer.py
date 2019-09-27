@@ -173,7 +173,7 @@ class MinMaxObserver(_ObserverBase):
     r"""Default Observer Module
     A default implementation of the observer module, only works for
     `per_tensor_affine` quantization scheme.  The module will record the
-    running average of max and min value of the observed Tensor and
+     running average of max and min value of the observed Tensor and
     calculate_qparams will calculate scale and zero_point
     """
 
@@ -189,7 +189,7 @@ class MinMaxObserver(_ObserverBase):
         #  aten/src/ATen/native/quantized/cpu/qconv.cpp
         #  This is not the optimal choice for non x86 backends as
         #  lose a bit of precision for activations.
-        #
+
         super(MinMaxObserver, self).__init__(**kwargs)
         self.min_val = None
         self.max_val = None
@@ -224,6 +224,19 @@ class MinMaxObserver(_ObserverBase):
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_val, self.max_val)
 
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(MinMaxObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'min_val'] = self.min_val
+        destination[prefix + 'max_val'] = self.max_val
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+
+        self.min_val = state_dict.pop(prefix + 'min_val')
+        self.max_val = state_dict.pop(prefix + 'max_val')
+        super(MinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                          missing_keys, unexpected_keys, error_msgs)
+
 
 class PerChannelMinMaxObserver(_ObserverBase):
     r"""Per Channel Observer Module
@@ -235,8 +248,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
     def __init__(self, ch_axis=0, **kwargs):
         super(PerChannelMinMaxObserver, self).__init__(**kwargs)
         self.ch_axis = ch_axis
-        self.min_vals = None
-        self.max_vals = None
+        self.register_buffer('min_vals', None)
+        self.register_buffer('max_vals', None)
         if (
             self.qscheme == torch.per_channel_symmetric
             and self.reduce_range
@@ -273,7 +286,14 @@ class PerChannelMinMaxObserver(_ObserverBase):
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
 
-
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        # We have to handle min_vals and max_vals manually even though they are registered as buffers
+        # as they are initialized to None
+        self.min_vals = state_dict.pop(prefix + 'min_vals')
+        self.max_vals = state_dict.pop(prefix + 'max_vals')
+        super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                                    missing_keys, unexpected_keys, error_msgs)
 
 class HistogramObserver(_ObserverBase):
     r"""
@@ -284,14 +304,13 @@ class HistogramObserver(_ObserverBase):
     __annotations__ = {
         "min_val": Optional[torch.Tensor],
         "max_val": Optional[torch.Tensor],
-        "histogram": Optional[torch.Tensor],
     }
 
     def __init__(self, bins=2048, **kwargs):
         # bins: The number of bins used for histogram calculation.
         super(HistogramObserver, self).__init__(**kwargs)
         self.bins = bins
-        self.histogram = None
+        self.register_buffer('histogram', torch.zeros(self.bins))
         self.min_val = None
         self.max_val = None
 
@@ -477,8 +496,7 @@ class HistogramObserver(_ObserverBase):
         with torch.no_grad():
             min_val = self.min_val
             max_val = self.max_val
-            histogram = self.histogram
-            if min_val is None or max_val is None or histogram is None:
+            if min_val is None or max_val is None:
                 min_val = torch.min(x)
                 max_val = torch.max(x)
                 self.min_val = min_val
@@ -529,6 +547,17 @@ class HistogramObserver(_ObserverBase):
 
         return self._calculate_qparams(new_min.item(), new_max.item())
 
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(HistogramObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'min_val'] = self.min_val
+        destination[prefix + 'max_val'] = self.max_val
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        self.min_val = state_dict.pop(prefix + 'min_val')
+        self.max_val = state_dict.pop(prefix + 'max_val')
+        super(HistogramObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                             missing_keys, unexpected_keys, error_msgs)
 
 class RecordingObserver(_ObserverBase):
     r"""
