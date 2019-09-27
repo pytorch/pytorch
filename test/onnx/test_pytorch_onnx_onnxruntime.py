@@ -38,7 +38,7 @@ def ort_test_with_input(ort_sess, input, output, rtol, atol):
 
     # compare onnxruntime and PyTorch results
     assert len(outputs) == len(ort_outs), "number of outputs differ"
-
+    
     # compare onnxruntime and PyTorch results
     [np.testing.assert_allclose(out, ort_out, rtol=rtol, atol=atol) for out, ort_out in zip(outputs, ort_outs)]
 
@@ -364,7 +364,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(DynamicSliceExportMod(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    def test_arange(self):
+    def test_arange_dynamic(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
                 return torch.arange(input.shape[0]), \
@@ -380,19 +380,14 @@ class TestONNXRuntime(unittest.TestCase):
                                     'output_1': [0]})
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    def test_arange_dyn(self):
+    def test_arange(self):
         class ArangeModel(torch.nn.Module):
-            def forward(self, input):
-                return torch.arange(12), \
-                    torch.arange(start=input.shape[0], end=input.shape[0] + 5, step=0.5)
+            def forward(self, start, end):
+                return torch.arange(start, end, 1.5, dtype=torch.int)
 
-        x = torch.randn(5, 3, 2)
-        y = torch.randn(8, 3, 2)
-        self.run_test(ArangeModel(), x, test_with_inputs=[y],
-                      input_names=['input_1'],
-                      output_names=['output_1', 'output_2'],
-                      dynamic_axes={'input_1': [0],
-                                    'output_1': [0]})
+        x = torch.tensor(0)
+        y = torch.tensor(6.2, dtype=torch.float)
+        self.run_test(ArangeModel(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_size(self):
