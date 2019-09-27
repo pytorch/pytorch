@@ -729,6 +729,26 @@ class TestOperators(TestCase):
         inputs = (scores, bbox_deltas, im_info, anchors)
         self.assertONNX(model, inputs)
 
+    def test_dict(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x_in):
+                x_out = {}
+                x_out["test_key_out"] = torch.add(x_in[list(x_in.keys())[0]], list(x_in.keys())[0])
+                return x_out
+
+        x = {torch.tensor(1.): torch.randn(1, 2, 3)}
+        self.assertONNX(MyModel(), (x,))
+
+    def test_dict_str(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x_in):
+                x_out = {}
+                x_out["test_key_out"] = torch.add(x_in["test_key_in"], 2.)
+                return x_out
+
+        x = {"test_key_in": torch.randn(1, 2, 3)}
+        self.assertONNX(MyModel(), (x,))
+
     def test_dyn_arange(self):
         class TestModel(torch.nn.Module):
             def forward(self, input):
