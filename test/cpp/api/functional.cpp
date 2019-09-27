@@ -79,3 +79,12 @@ TEST_F(FunctionalTest, PairwiseDistance) {
   auto expected = torch::tensor({6, 6}, torch::kFloat);
   ASSERT_TRUE(output.allclose(expected));
 }
+
+TEST_F(FunctionalTest, AdaptiveMaxPool1d) {
+  auto x = torch::ones({1, 1, 5});
+  auto y = F::adaptive_max_pool1d(x, AdaptiveMaxPool1dOptions(3));
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1, 3})));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 3}));
+}
