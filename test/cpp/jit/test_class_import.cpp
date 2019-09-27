@@ -43,7 +43,6 @@ static void import_libs(
       cu,
       &tensor_table,
       [&](const std::string& name) -> std::shared_ptr<Source> {
-        ASSERT_TRUE(name == "__torch__");
         return src;
       },
       /*version=*/2);

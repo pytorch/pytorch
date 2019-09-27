@@ -91,10 +91,12 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
         if (*lhs->ty(name) != *rhs->ty(name)) {
           return false;
         }
+        break;
       case AttributeKind::tys:
         if (!typeListEqual(lhs->tys(name), rhs->tys(name))) {
           return false;
         }
+        break;
       case AttributeKind::g:
       case AttributeKind::gs:
         return false;
