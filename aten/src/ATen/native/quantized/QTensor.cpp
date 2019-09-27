@@ -156,18 +156,23 @@ Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
 }
 
 Tensor quantized_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  // TODO(vitalyf): add memory format support
-  TORCH_CHECK(
-      !optional_memory_format.has_value(),
-      "unsupported memory format option ",
-      optional_memory_format.value());
-
   // TODO: add per channel support
   TORCH_INTERNAL_ASSERT(
       self.qscheme() == at::kPerTensorAffine,
       "clone for quantized Tensor only works for PerTensorAffine scheme right now");
+
+  auto memory_format =
+      optional_memory_format.value_or(MemoryFormat::Contiguous);
+  if (memory_format == MemoryFormat::Preserve) {
+    memory_format = self.suggest_memory_format();
+  }
+
   Tensor dst = at::_empty_affine_quantized(
-      self.sizes(), self.options(), self.q_scale(), self.q_zero_point());
+      self.sizes(),
+      self.options(),
+      self.q_scale(),
+      self.q_zero_point(),
+      memory_format);
 
   at::native::copy_(dst, self, false);
 

@@ -3100,7 +3100,6 @@
   variants: function
 
 - func: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
-  # use_c10_dispatcher: full
   variants: function, method
   dispatch:
     CPU: clone
