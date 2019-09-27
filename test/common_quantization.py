@@ -15,7 +15,7 @@ import torch.nn.quantized.dynamic as nnqd
 from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, QConfig, default_observer, default_weight_observer, \
-    default_qat_qconfig, propagate_qconfig, convert, DEFAULT_DYNAMIC_MODULE_MAPPING
+    default_qat_qconfig, propagate_qconfig_, convert, DEFAULT_DYNAMIC_MODULE_MAPPING
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -53,10 +53,10 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
     return train_loss, correct, total
 
 def convert_dynamic(module):
-    convert(module, DEFAULT_DYNAMIC_MODULE_MAPPING)
+    convert(module, DEFAULT_DYNAMIC_MODULE_MAPPING, inplace=True)
 
 def prepare_dynamic(model, qconfig_dict=None):
-    propagate_qconfig(model, qconfig_dict)
+    propagate_qconfig_(model, qconfig_dict)
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):

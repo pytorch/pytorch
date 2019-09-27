@@ -3,7 +3,9 @@
 namespace torch {
 namespace jit {
 
-static std::string conv2d = R"(
+std::unordered_map<std::string, std::string> quant_fusion_pattern_and_replacements() {
+
+  static std::string conv2d = R"(
 graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %a_dequant = aten::dequantize(%a_quant)
         %w_dequant = aten::dequantize(%w_quant)
@@ -11,7 +13,7 @@ graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %stride, %paddi
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))";
 
-static std::string quantized_conv2d = R"(
+  static std::string quantized_conv2d = R"(
 graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         %r_quant = quantized::conv2d(%a_quant, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
@@ -23,7 +25,7 @@ graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %stride, %paddi
         %r_perm = aten::permute(%r_quant, %out_param)
         return (%r_perm))";
 
-static std::string addmm = R"(
+  static std::string addmm = R"(
 graph(%packed_params_module, %a_quant, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_dequant = aten::dequantize(%a_quant)
         %zero : int = prim::Constant[value=0]()
@@ -37,7 +39,7 @@ graph(%packed_params_module, %a_quant, %r_scale, %r_zero_point, %r_dtype, %4):
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))";
 
-static std::string matmul_with_bias = R"(
+  static std::string matmul_with_bias = R"(
 graph(%packed_params_module, %a_quant, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_dequant = aten::dequantize(%a_quant)
         %zero : int = prim::Constant[value=0]()
@@ -52,13 +54,13 @@ graph(%packed_params_module, %a_quant, %r_scale, %r_zero_point, %r_dtype, %4):
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))";
 
-static std::string quantized_linear = R"(
+  static std::string quantized_linear = R"(
 graph(%packed_params_module, %a_quant, %r_scale, %r_zero_point, %r_dtype, %4):
         %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
         %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r))";
 
-static std::string matmul_no_bias = R"(
+  static std::string matmul_no_bias = R"(
 graph(%packed_params_module, %a_quant, %r_scale, %r_zero_point, %r_dtype):
         %a_dequant = aten::dequantize(%a_quant)
         %zero : int = prim::Constant[value=0]()
@@ -71,13 +73,13 @@ graph(%packed_params_module, %a_quant, %r_scale, %r_zero_point, %r_dtype):
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))";
 
-static std::string quantized_linear_no_bias = R"(
+  static std::string quantized_linear_no_bias = R"(
 graph(%packed_params_module, %a_quant, %r_scale, %r_zero_point, %r_dtype):
         %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
         %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r))";
 
-static std::string linear_with_quant = R"(
+  static std::string linear_with_quant = R"(
 graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %w = prim::GetAttr[name="weight"](%self)
         %b = prim::GetAttr[name="bias"](%self)
@@ -87,5 +89,14 @@ graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_po
         %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))";
+
+  return {
+    {conv2d, quantized_conv2d},
+    {addmm, quantized_linear},
+    {matmul_with_bias, quantized_linear},
+    {matmul_no_bias, quantized_linear_no_bias}
+  };
+
+}
 
 }} // torch::jit
