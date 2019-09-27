@@ -92,7 +92,7 @@ void lt_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void lt_kernel_cuda(TensorIterator& iter) {
+void le_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.input_dtype(), "le_cpu", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
