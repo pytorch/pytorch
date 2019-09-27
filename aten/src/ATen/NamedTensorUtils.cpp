@@ -225,6 +225,20 @@ void propagate_names(TensorImpl* result, TensorImpl* src) {
   propagate_names(result, impl::get_opt_names(src));
 }
 
+optional<std::vector<Dimname>> compute_squeeze_outnames(const Tensor& tensor) {
+  if (!tensor.has_names()) {
+    return nullopt;
+  }
+  std::vector<Dimname> outnames;
+  auto tensor_names = tensor.names();
+  for (int64_t d = 0; d < tensor.dim(); d++) {
+    if (tensor.sizes()[d] != 1) {
+      outnames.push_back(tensor_names[d]);
+    }
+  }
+  return outnames;
+}
+
 // tensor_dotted_dim and other_dotted_dim are the dimensions of the two
 // tensors that we contract together. Usually other_dotted_dim is 0
 // and tensor_dotted_dim is the last dim of tensor, but there are some special
