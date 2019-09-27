@@ -111,7 +111,7 @@ Value* insertScalarType(Node* ins_node, at::ScalarType t) {
 
 class InsertObserversHelper {
  public:
-  InsertObserversHelper(const ModuleQConfigMap& map)
+  explict InsertObserversHelper(const ModuleQConfigMap& map)
       : module_qconfig_map_(map) {}
   void insertObservers(script::Module& module, const std::string& method_name);
 
