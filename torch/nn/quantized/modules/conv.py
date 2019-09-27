@@ -134,7 +134,6 @@ class Conv2d(torch.nn.Module):
     # regular QTensor form for serialization. Packed weights should not live
     # outside the process in which they were created, rather they should be derived
     # from the QTensor weight.
-
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(Conv2d, self)._save_to_state_dict(destination, prefix, keep_vars)
         (w, b) = self._weight_bias()
