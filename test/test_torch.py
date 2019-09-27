@@ -6212,12 +6212,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     def test_inplace_comparison_ops_require_inputs_have_same_dtype(self):
         with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
-            torch.tensor([1], dtype=torch.int).lt_(torch.tensor([2], dtype=torch.long))
-            torch.tensor([1], dtype=torch.int).le_(torch.tensor([2], dtype=torch.long))
-            torch.tensor([1], dtype=torch.int).gt_(torch.tensor([2], dtype=torch.long))
-            torch.tensor([1], dtype=torch.int).ge_(torch.tensor([2], dtype=torch.long))
-            torch.tensor([1], dtype=torch.int).eq_(torch.tensor([2], dtype=torch.long))
-            torch.tensor([1], dtype=torch.int).ne_(torch.tensor([2], dtype=torch.long))
+            for op in ['lt_', 'le_', 'gt_', 'ge_', 'eq_', 'ne_']:
+                x = torch.tensor([1], dtype=torch.int)
+                y = torch.tensor([2], dtype=torch.long)
+                in_place_method = getattr(x, op)
+                in_place_method(y)
 
     def test_comparison_ops_check_for_scalar_overflow(self):
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
