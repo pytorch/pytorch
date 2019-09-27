@@ -24,29 +24,29 @@ class FakeQuantize(Module):
         self.qscheme = qscheme
         self.quant_min = quant_min
         self.quant_max = quant_max
-        self.enabled = True
+        self.fake_quant_enabled = True
+        self.observer_enabled = True
         self.observer = default_observer(dtype=dtype, qscheme=qscheme)
         self.scale = None
         self.zero_point = None
 
-    def enable(self, enabled=True):
-        self.enabled = enabled
+    def enable_fake_quant(self, enabled=True):
+        self.fake_quant_enabled = enabled
         return self
 
-    def disable(self):
-        return self.enable(False)
+    def disable_fake_quant(self):
+        return self.enable_fake_quant(False)
 
     def calculate_qparams(self):
         return self.observer.calculate_qparams()
 
     def forward(self, X):
-        if self.enabled:
+        if self.observer_enabled:
             self.observer(X)
             scale, zero_point = self.calculate_qparams()
             self.scale, self.zero_point = float(scale), int(zero_point)
-            X = torch.fake_quantize_per_tensor_affine(
-                X, self.scale, self.zero_point, self.quant_min,
-                self.quant_max)
+        if self.fake_quant_enabled:
+            X = torch.fake_quantize_per_tensor_affine(X, self.scale, self.zero_point, self.quant_min, self.quant_max)
         return X
 
     with_args = classmethod(_with_args)
