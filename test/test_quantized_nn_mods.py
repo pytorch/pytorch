@@ -34,11 +34,9 @@ class FunctionalAPITest(QuantizationTestCase):
         self.assertEqual(qY, qY_hat)
 
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         use_bias=st.booleans(),
     )
@@ -89,11 +87,9 @@ class FunctionalAPITest(QuantizationTestCase):
 
 class DynamicModuleAPITest(QuantizationTestCase):
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -209,11 +205,9 @@ class ModuleAPITest(QuantizationTestCase):
 
 
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -341,11 +335,9 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(rqr, rqr2)
 
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         use_bias=st.booleans(),
         use_fused=st.booleans(),
