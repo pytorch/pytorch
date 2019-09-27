@@ -624,8 +624,6 @@ Tensor max_values(const Tensor& self, DimnameList dims, bool keepdim) {
 #endif
 
 Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
-  TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-      "argmax only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   TORCH_CHECK(self.numel() > 0, "cannot perform reduction function argmax on a "
       "tensor with no elements because the operation does not have an identity");
   Tensor in;
@@ -634,6 +632,10 @@ Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
   } else {
     in = self.reshape({-1});
     keepdim = false;
+  }
+  if (self.type().backend() != Backend::CPU && self.type().backend() != Backend::CUDA) {
+    Tensor ignored = at::empty({0}, self.options());
+    return std::get<1>(at::max_out(ignored, result, in, dim.value_or(0), keepdim));
   }
   auto itr = make_reduction("argmax", result, in, dim.value_or(0), keepdim,
       self.scalar_type(), at::kLong);
@@ -647,8 +649,6 @@ Tensor argmax(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
 }
 
 Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
-  TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-      "argmin only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   TORCH_CHECK(self.numel() > 0, "cannot perform reduction function argmin on a "
       "tensor with no elements because the operation does not have an identity");
   Tensor in;
@@ -657,6 +657,10 @@ Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
   } else {
     in = self.reshape({-1});
     keepdim = false;
+  }
+  if (self.type().backend() != Backend::CPU && self.type().backend() != Backend::CUDA) {
+    Tensor ignored = at::empty({0}, self.options());
+    return std::get<1>(at::min_out(ignored, result, in, dim.value_or(0), keepdim));
   }
   auto itr = make_reduction("argmin", result, in, dim.value_or(0), keepdim,
       self.scalar_type(), at::kLong);
