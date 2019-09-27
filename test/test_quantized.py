@@ -394,21 +394,23 @@ class TestQuantizedOps(TestCase):
            kernel=st.sampled_from((3, 5, 7)),
            stride=st.sampled_from((None, 1, 2)),
            dilation=st.integers(1, 2),
-           padding=st.integers(0, 2))
-    def test_max_pool2d(self, X, kernel, stride, dilation, padding):
+           padding=st.integers(0, 2),
+           ceil_mode=st.booleans())
+    def test_max_pool2d(self, X, kernel, stride, dilation, padding, ceil_mode):
         X, (scale, zero_point, torch_type) = X
         # Check constraints
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
         iH, iW = X.shape[-2:]
-        oH = pool_output_shape(iH, kernel, padding, stride, dilation)
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation, ceil_mode)
         assume(oH > 0)
-        oW = pool_output_shape(iW, kernel, padding, stride, dilation)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation, ceil_mode)
         assume(oW > 0)
 
         a = torch.from_numpy(X)
         a_pool = torch.nn.functional.max_pool2d(a, kernel_size=kernel,
                                                 stride=stride,
-                                                padding=padding, dilation=dilation)
+                                                padding=padding, dilation=dilation,
+                                                ceil_mode=ceil_mode)
         a_ref = torch.quantize_per_tensor(a_pool, scale=scale,
                                           zero_point=zero_point, dtype=torch_type)
         a_ref = a_ref.dequantize()
@@ -423,14 +425,14 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
-                       dilation=dilation)
+                       dilation=dilation, ceil_mode=ceil_mode)
             self.assertEqual(a_ref, a_hat.dequantize(),
                              message="{} results are off".format(name))
         # Test the ops.quantized separately, because None is not treated.
         a_hat = torch.ops.quantized.max_pool2d(
             qa, kernel_size=_pair(kernel),
             stride=_pair(kernel if stride is None else stride),
-            padding=_pair(padding), dilation=_pair(dilation))
+            padding=_pair(padding), dilation=_pair(dilation), ceil_mode=ceil_mode)
         self.assertEqual(a_ref, a_hat.dequantize(),
                          message="ops.quantized.max_pool2d results are off")
 
@@ -441,8 +443,9 @@ class TestQuantizedOps(TestCase):
            kernel=st.sampled_from((3, 5, 7)),
            stride=st.sampled_from((None, 1, 2)),
            dilation=st.integers(1, 2),
-           padding=st.integers(0, 2))
-    def test_max_pool2d_nhwc(self, X, kernel, stride, dilation, padding):
+           padding=st.integers(0, 2),
+           ceil_mode=st.booleans())
+    def test_max_pool2d_nhwc(self, X, kernel, stride, dilation, padding, ceil_mode):
         X, (scale, zero_point, torch_type) = X
         # Ensure we hit the vectorized paths
         # 176 = 128 + 32 + 16
@@ -454,16 +457,17 @@ class TestQuantizedOps(TestCase):
         # Check constraints
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
         iH, iW = X.shape[-2:]
-        oH = pool_output_shape(iH, kernel, padding, stride, dilation)
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation, ceil_mode)
         assume(oH > 0)
-        oW = pool_output_shape(iW, kernel, padding, stride, dilation)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation, ceil_mode)
         assume(oW > 0)
 
         X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
         a = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
         a_pool = torch.nn.functional.max_pool2d(a, kernel_size=kernel,
                                                 stride=stride,
-                                                padding=padding, dilation=dilation)
+                                                padding=padding, dilation=dilation,
+                                                ceil_mode=ceil_mode)
         a_ref = torch.quantize_per_tensor(a_pool, scale=scale,
                                           zero_point=zero_point, dtype=torch_type)
         a_ref = a_ref.dequantize()
@@ -479,7 +483,7 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
-                       dilation=dilation)
+                       dilation=dilation, ceil_mode=ceil_mode)
             self.assertTrue(a_hat.stride() != sorted(a_hat.stride()))
             self.assertEqual(a_ref, a_hat.dequantize(),
                              message="{} results are off".format(name))
@@ -487,7 +491,7 @@ class TestQuantizedOps(TestCase):
         a_hat = torch.ops.quantized.max_pool2d(
             qa, kernel_size=_pair(kernel),
             stride=_pair(kernel if stride is None else stride),
-            padding=_pair(padding), dilation=_pair(dilation))
+            padding=_pair(padding), dilation=_pair(dilation), ceil_mode=ceil_mode)
         self.assertEqual(a_ref, a_hat.dequantize(),
                          message="ops.quantized.max_pool2d results are off")
 
@@ -593,10 +597,9 @@ class TestQuantizedOps(TestCase):
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams(dtypes=torch.quint8)),
-           permute=st.sampled_from(([0, 1, 2, 3], [0, 2, 3, 1], [0, 3, 1, 2])),
            output_size_h=st.integers(1, 10),
            output_size_w=st.integers(1, 10))
-    def test_adaptive_avg_pool2d(self, X, permute, output_size_h, output_size_w):
+    def test_adaptive_avg_pool2d(self, X, output_size_h, output_size_w):
         X, (scale, zero_point, torch_type) = X
 
         H, W = X.shape[-2:]
@@ -608,7 +611,7 @@ class TestQuantizedOps(TestCase):
             output_size = (output_size_h, output_size_w)
         X = torch.from_numpy(X)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type).permute(permute)
+                                       dtype=torch_type)
 
         # Run reference on int_repr + round to avoid double rounding error.
         X_ref = torch.nn.functional.adaptive_avg_pool2d(
