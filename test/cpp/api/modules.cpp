@@ -564,7 +564,7 @@ TEST_F(ModulesTest, MaxUnpool1d) {
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
   x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   model = MaxUnpool1d{MaxUnpool1dOptions(3).stride(2).padding(1)};
-  y = model->forward(x, indices, {1, 1, 5});
+  y = model->forward(x, indices, c10::IntArrayRef({1, 1, 5}));
 
   ASSERT_EQ(y.dim(), 3);
   ASSERT_TRUE(torch::allclose(y,

@@ -152,20 +152,20 @@ inline Tensor adaptive_avg_pool3d(const Tensor& input,
 // ============================================================================
 
 inline std::vector<int64_t> _unpool_output_size(const Tensor& input,
-  const IntArrayRef kernel_size, const IntArrayRef stride,
-  const IntArrayRef padding, const IntArrayRef output_size) {
+  const IntArrayRef& kernel_size, const IntArrayRef& stride,
+  const IntArrayRef& padding, const c10::optional<IntArrayRef>& output_size) {
   auto input_size = input.sizes();
   std::vector<int64_t> default_size;
   for (size_t d = 0; d < kernel_size.size(); d++) {
     default_size.push_back((input_size[d + 2] - 1) * stride[d] +
                             kernel_size[d] - 2 * padding[d]);
   }
-  if (output_size.empty()) {
+  if (!output_size) {
     return default_size;
   } else {
     std::vector<int64_t> output_size_;
-    if (output_size.size() == kernel_size.size() + 2) {
-      output_size_ = {output_size.begin() + 2, output_size.end()};
+    if (output_size->size() == kernel_size.size() + 2) {
+      output_size_ = {output_size->begin() + 2, output_size->end()};
     }
     if (output_size_.size() != kernel_size.size()) {
       TORCH_CHECK(false, "output_size should be a sequence containing ",
@@ -186,7 +186,8 @@ inline std::vector<int64_t> _unpool_output_size(const Tensor& input,
 }
 
 inline Tensor max_unpool1d(const Tensor& input, const Tensor& indices,
-  const IntArrayRef output_size, const MaxUnpool1dOptions& options) {
+    const MaxUnpool1dOptions& options,
+    const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
   auto output_size_ = _unpool_output_size(input, options.kernel_size(),
                                           options.stride(), options.padding(),
                                           output_size);
@@ -196,7 +197,8 @@ inline Tensor max_unpool1d(const Tensor& input, const Tensor& indices,
 }
 
 inline Tensor max_unpool2d(const Tensor& input, const Tensor& indices,
-  const IntArrayRef output_size, const MaxUnpool2dOptions& options) {
+  const MaxUnpool2dOptions& options,
+  const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
   auto output_size_ = _unpool_output_size(input, options.kernel_size(),
                                           options.stride(), options.padding(),
                                           output_size);
