@@ -852,6 +852,41 @@ graph(%self, %scale, %zero_point, %dtype):
   rewriter.runOnGraph(graph, filter);
 }
 
+void InsertPackUnpack(std::shared_ptr<Graph> graph) {
+  std::string linear_with_quant = R"(
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %w_dequant = aten::dequantize(%w_quant)
+        %linear = prim::Constant[name="linear"]()
+        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant))";
+
+  std::string linear_with_quant_prepack = R"(
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %packed_params = quantized::linear_prepack(%w, %b)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %linear = prim::Constant[name="linear"]()
+        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b_unpacked)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant))";
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
+  rewriter.runOnGraph(graph);
+}
+
+void InsertPackUnpack(script::Module& module) {
+  for (auto& method : module.get_methods()) {
+    InsertPackUnpack(method.graph());
+    for (auto m : module.get_modules()) {
+      InsertPackUnpack(m);
+    }
+  }
+}
+
 void FoldPrepackedWeightIntoModule(
     script::Module& module,
     const std::string& method_name,
@@ -890,6 +925,14 @@ void FoldPrepackedWeightIntoModule(
     }
   }
 
+  std::string linear_with_quant = R"(
+graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype):
+        %w = prim::GetAttr[name="weight"](%self)
+        %b = prim::GetAttr[name="bias"](%self)
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %packed_params = quantized::linear_prepack(%w_quant, %b)
+        return (%packed_params))";
+
   auto patterns = {linear_with_quant};
   for (const auto& pattern: patterns) {
     Graph pattern_graph;
@@ -921,52 +964,21 @@ void FoldPrepackedWeightIntoModule(
       auto w_val = match_vmap.at(vmap.at("w"));
       auto b_val = match_vmap.at(vmap.at("b"));
       auto w_quant_val = match_vmap.at(vmap.at("w_quant"));
+      auto packed_params_val = match_vmap.at(vmap.at("packed_params"));
 
-      // m = self._packed_linear_weight_bias
-      Node* packed_params_module = graph->create(prim::GetAttr);
-      packed_params_module->addInput(graph->inputs()[0]);
-      packed_params_module->s_(attr::name, "_packed_linear_weight_bias");
-      packed_params_module->output()->setDebugName("m");
-      packed_params_module->output()->setType(wrapper.type());
-      packed_params_module->insertAfter(w_quant_val->node());
+      WithInsertPoint ins(packed_params_val->node());
+      // wrapper_module = self._packed_linear_weight_bias
+      Value* packed_params_module =
+          graph->insertGetAttr(graph->inputs()[0], "_packed_linear_weight_bias")
+              ->setType(wrapper.type());
 
-      // _packed_params = m._packed_params
-      Node* packed_params = graph->create(prim::GetAttr);
-      packed_params->addInput(packed_params_module->output());
-      packed_params->s_(attr::name, "_packed_params");
-      packed_params->output()->setDebugName("_packed_params");
-      packed_params->insertAfter(packed_params_module);
-
-      // weight_bias = m._weight_bias
-      Node* unpack_node = graph->create(prim::CallMethod);
-      unpack_node->s_(attr::name, "_weight_bias");
-      unpack_node->addInput(packed_params_module->output());
-      unpack_node->output()->setDebugName("weight_bias");
-      unpack_node->output()->setType(TupleType::create(std::vector<TypePtr>({TensorType::get(), OptionalType::create(TensorType::get())})));
-      unpack_node->insertAfter(packed_params);
-
-      WithInsertPoint ins(unpack_node);
-      Value* index_zero = graph->insertConstant(IValue(0));
-      Value* index_one = graph->insertConstant(IValue(1));
-      // weight = weight_bias[0]
-      Node* weight_node = graph->create(prim::TupleIndex);
-      weight_node->addInput(unpack_node->output());
-      weight_node->addInput(index_zero);
-      weight_node->insertAfter(unpack_node);
-      w_quant_val->replaceAllUsesWith(weight_node->output());
-
-      // bias = weight_bias[1]
-      Node* bias_node = graph->create(prim::TupleIndex);
-      bias_node->addInput(unpack_node->output());
-      bias_node->addInput(index_one);
-      bias_node->insertAfter(weight_node);
-      b_val->replaceAllUsesWith(bias_node->output());
+      // packed_params = wrapper_module._packed_params
+      Value* packed_params_from_attr =
+          graph->insertGetAttr(packed_params_module, "_packed_params");
+      packed_params_val->replaceAllUsesWith(packed_params_from_attr);
 
       // Delete nodes
-      std::vector<Node*> nodes_to_delete;
-      nodes_to_delete.push_back(w_val->node());
-      nodes_to_delete.push_back(b_val->node());
-      nodes_to_delete.push_back(w_quant_val->node());
+      std::vector<Node*> nodes_to_delete = {w_val->node(), b_val->node(), w_quant_val->node(), packed_params_val->node()};
       for (auto n : nodes_to_delete) {
         n->removeAllInputs();
       }

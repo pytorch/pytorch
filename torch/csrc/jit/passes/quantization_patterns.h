@@ -5,7 +5,7 @@ namespace jit {
 
 std::unordered_map<std::string, std::string> quant_fusion_pattern_and_replacements() {
 
-  static std::string conv2d = R"(
+  std::string conv2d = R"(
 graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %a_dequant = aten::dequantize(%a_quant)
         %w_dequant = aten::dequantize(%w_quant)
@@ -13,7 +13,7 @@ graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %stride, %paddi
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))";
 
-  static std::string quantized_conv2d = R"(
+  std::string quantized_conv2d = R"(
 graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         %r_quant = quantized::conv2d(%a_quant, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
@@ -25,7 +25,7 @@ graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %stride, %paddi
         %r_perm = aten::permute(%r_quant, %out_param)
         return (%r_perm))";
 
-  static std::string addmm = R"(
+  std::string addmm = R"(
 graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_dequant = aten::dequantize(%a_quant)
         %w_dequant = aten::dequantize(%w_quant)
@@ -33,7 +33,7 @@ graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %4):
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))";
 
-  static std::string matmul_with_bias = R"(
+  std::string matmul_with_bias = R"(
 graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_dequant = aten::dequantize(%a_quant)
         %w_dequant = aten::dequantize(%w_quant)
@@ -42,14 +42,14 @@ graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %4):
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))";
 
-  static std::string quantized_linear_with_bias = R"(
+  std::string quantized_linear_with_bias = R"(
 graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %4):
         %w_quant_t = aten::t(%w_quant)
         %packed_params = quantized::linear_prepack(%w_quant_t, %b)
         %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r))";
 
-  static std::string matmul_no_bias = R"(
+  std::string matmul_no_bias = R"(
 graph(%a_quant, %w_quant, %r_scale, %r_zero_point, %r_dtype):
         %a_dequant = aten::dequantize(%a_quant)
         %w_dequant = aten::dequantize(%w_quant)
@@ -57,24 +57,13 @@ graph(%a_quant, %w_quant, %r_scale, %r_zero_point, %r_dtype):
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))";
 
-  static std::string quantized_linear_no_bias = R"(
+  std::string quantized_linear_no_bias = R"(
 graph(%a_quant, %w_quant, %r_scale, %r_zero_point, %r_dtype):
         %w_quant_t = aten::t(%w_quant)
         %bias: Tensor? = prim::Constant()
         %packed_params = quantized::linear_prepack(%w_quant_t, %bias)
         %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r))";
-
-  static std::string linear_with_quant = R"(
-graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
-        %w = prim::GetAttr[name="weight"](%self)
-        %b = prim::GetAttr[name="bias"](%self)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        %w_dequant = aten::dequantize(%w_quant)
-        %linear = prim::Constant[name="linear"]()
-        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
-        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_quant))";
 
   return {
     {conv2d, quantized_conv2d},

@@ -118,6 +118,15 @@ TORCH_API void FoldConvBatchNorm2d(const script::Module& module);
  */
 TORCH_API void FoldQuantizeCallIntoBuffer(script::Module& module, const std::string& method_name);
 
+/** \brief Insert pack and unpack function in all graphs
+ *   of module
+ */
+TORCH_API void InsertPackUnpack(script::Module& module);
+
+/** \brief Insert pack and unpack function in graph
+ */
+TORCH_API void InsertPackUnpack(std::shared_ptr<Graph>& graph);
+
 /** \brief Fold prepack function call into module
  *
  *  For the graph of the specified method, if we find a `prepack_linear` call on a
