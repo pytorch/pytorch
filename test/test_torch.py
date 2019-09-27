@@ -2070,8 +2070,8 @@ class _TestTorchMixin(object):
         test_inference(torch.float64)
         test_inference(torch.float32)
 
-    def test_qengnie(self):
-        qengines = torch.backends.quantized.get_supported_qengines()
+    def test_qengine(self):
+        qengines = torch.backends.quantized.supported_engines
         original_qe = torch.backends.quantized.engine
         for qe in qengines:
             torch.backends.quantized.engine = qe
@@ -5356,19 +5356,19 @@ class _TestTorchMixin(object):
         self.assertEqual(s1.data_ptr() + 4, s2.data_ptr())
 
     def test_load_unicode_error_msg(self):
-        # This Pickle contains a Python 2 module with Unicode data and the 
+        # This Pickle contains a Python 2 module with Unicode data and the
         # loading should fail if the user explicitly specifies ascii encoding!
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
         if sys.version_info >= (3, 0):
             self.assertRaises(UnicodeDecodeError, lambda: torch.load(path, encoding='ascii'))
         else:
             # Just checks the module loaded
-            self.assertIsNotNone(torch.load(path)) 
+            self.assertIsNotNone(torch.load(path))
 
     def test_load_python2_unicode_module(self):
         # This Pickle contains some Unicode data!
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
-        self.assertIsNotNone(torch.load(path)) 
+        self.assertIsNotNone(torch.load(path))
 
     def test_load_error_msg(self):
         expected_err_msg = (".*You can only torch.load from a file that is seekable. " +
@@ -6205,6 +6205,23 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         for idx in iter_indices(x):
             self.assertEqual(x[idx] >= y[idx], ge[idx] == 1)
 
+    def test_comparison_ops_must_take_bool_output(self):
+        with self.assertRaisesRegex(RuntimeError, 'The output tensor of lt must be a bool'):
+            torch.lt(torch.tensor([True]), torch.tensor([False]), out=torch.empty(1, dtype=torch.uint8))
+
+    def test_inplace_comparison_ops_require_inputs_have_same_dtype(self):
+        with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
+            torch.tensor([1], dtype=torch.int).lt_(torch.tensor([2], dtype=torch.long))
+
+    def test_comparison_ops_check_for_scalar_overflow(self):
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            torch.tensor([1 << 5], dtype=torch.uint8) < (1 << 20)
+
+    def test_comparison_ops_check_for_zerodim_tensor_overflow(self):
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            torch.tensor([1 << 5], dtype=torch.uint8) < torch.tensor(1 << 20, dtype=torch.int32)
+            torch.tensor(1 << 40, dtype=torch.int64) < torch.tensor([1 << 30], dtype=torch.int32)
+
     def test_bitwise_ops(self):
         x = torch.randn(5, 5).gt(0)
         y = torch.randn(5, 5).gt(0)
@@ -6739,11 +6756,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             e2[i + 4][i] = v
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
-
-    def test_function_unwrap_message(self):
-        self.assertRaisesRegex(RuntimeError, ' call to _th_lt',
-                               lambda: torch.ones(1, dtype=torch.float) < torch.ones(1, dtype=torch.double))
-
 
 # Functions to test negative dimension wrapping
 METHOD = 1
@@ -11145,10 +11157,6 @@ class TestTorchDeviceType(TestCase):
                 byteRes = torch.empty_like(x, device=device).byte()
                 boolRes = torch.empty_like(x, device=device).bool()
 
-                torch.lt(x, b, out=byteRes)
-                torch.lt(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
-
                 torch.le(x, b, out=byteRes)
                 torch.le(x, b, out=boolRes)
                 self.assertEqual(byteRes.bool(), boolRes)
@@ -11169,7 +11177,7 @@ class TestTorchDeviceType(TestCase):
                 torch.ne(x, b, out=boolRes)
                 self.assertEqual(byteRes.bool(), boolRes)
 
-                self.assertEquals(len(warningsCount), 6)
+                self.assertEquals(len(warningsCount), 5)
 
         # Bool Tensor
         x = torch.tensor([True, False, True, False], device=device)
