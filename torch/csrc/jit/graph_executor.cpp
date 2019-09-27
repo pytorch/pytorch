@@ -1,7 +1,5 @@
 #include <torch/csrc/jit/graph_executor.h>
 
-#include <aten/src/ATen/Context.h>
-
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
