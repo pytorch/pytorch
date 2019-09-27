@@ -48,7 +48,11 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
         sizes_(),
         scalar_type_(),
         type_(InitListTensorType::InitList) {
-      TORCH_CHECK(init_list.size() > 0, "Empty init-list is not supported");
+      TORCH_CHECK(
+        init_list.size() > 0,
+        "Empty init-list is not yet supported. We can create tensors with zero-size dimensions in the following way:\n",
+        "1-D: `torch::randn({0})`\n",
+        "N-D: `torch::randn({2, 3, 0})`");
       scalar_type_ = init_list.begin()->scalar_type_;
       const InitListTensor& first_elem = *(init_list.begin());
       for (const auto& elem : init_list) {
@@ -143,8 +147,8 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
     InitListTensorType type_;
   };
 
-  inline std::ostream& operator<<(std::ostream& stream, const InitListTensor& list_init_tensor) {
-    list_init_tensor.pretty_print_recursive(stream);
+  inline std::ostream& operator<<(std::ostream& stream, const InitListTensor& init_list_tensor) {
+    init_list_tensor.pretty_print_recursive(stream);
     return stream;
   }
 } // namespace detail
@@ -179,19 +183,36 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 
 /// NOTE: `torch::tensor({})` doesn't work at the moment because we would need to solve the
 /// ambiguous overload problem (see https://github.com/pytorch/pytorch/pull/26210#discussion_r325336686).
-/// If the user wants to create an empty tensor, they can use `torch::randn({0})` for now.
+/// We can create tensors with zero-size dimensions in the following way instead:
+/// - 1-D tensor: `torch::randn({0})`
+/// - N-D tensor: `torch::randn({2, 3, 0})`
 ///
 /// NOTE: Currently `torch::tensor(...)` doesn't support mixed data types
 /// (i.e. `torch::tensor({{bool, 2.0}})` doesn't work). We might be able to
 /// support it in the future by iterating over all sub-lists to find
 /// the largest data type that can represent all of the elements, or by using
 /// variadic templates.
-inline at::Tensor tensor(detail::InitListTensor list_init_tensor, const at::TensorOptions& options) {
-  return autograd::make_variable(list_init_tensor.to_tensor(options), options.requires_grad());
+inline at::Tensor tensor(detail::InitListTensor init_list_tensor, const at::TensorOptions& options) {
+  return autograd::make_variable(init_list_tensor.to_tensor(options), options.requires_grad());
 }
 
-inline at::Tensor tensor(detail::InitListTensor list_init_tensor) {
-  return torch::tensor(list_init_tensor, at::dtype(list_init_tensor.scalar_type()));
+inline at::Tensor tensor(detail::InitListTensor init_list_tensor) {
+  return torch::tensor(init_list_tensor, at::dtype(init_list_tensor.scalar_type()));
+}
+
+/// NOTE: We add `torch::tensor(std::initializer_list<detail::InitListTensor>)` function overload (and its options variant),
+/// so that `torch::tensor({{1, 2}})` can take this overload instead of `torch::tensor(at::ArrayRef<T>)`.
+inline at::Tensor tensor(std::initializer_list<detail::InitListTensor> init_list, const at::TensorOptions& options) {
+  TORCH_INTERNAL_ASSERT(
+    init_list.begin()->type() != detail::InitListTensorType::Scalar,
+    "1D tensor construction such as `torch::tensor({1, 2, 3})` should never take the ",
+    "torch::tensor(std::initializer_list<detail::InitListTensor>) function overload. ",
+    "Please fix the code to avoid this regression.")
+  return torch::tensor(detail::InitListTensor(init_list), options);
+}
+
+inline at::Tensor tensor(std::initializer_list<detail::InitListTensor> init_list) {
+  return torch::tensor(init_list, at::dtype(init_list.begin()->scalar_type()));
 }
 
 /// A generic deleter function.
