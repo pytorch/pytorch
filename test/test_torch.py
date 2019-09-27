@@ -6208,19 +6208,26 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     def test_comparison_ops_must_take_bool_output(self):
         with self.assertRaisesRegex(RuntimeError, 'The output tensor of lt must be a bool'):
             torch.lt(torch.tensor([True]), torch.tensor([False]), out=torch.empty(1, dtype=torch.uint8))
+            torch.gt(torch.tensor([True]), torch.tensor([False]), out=torch.empty(1, dtype=torch.uint8))
 
     def test_inplace_comparison_ops_require_inputs_have_same_dtype(self):
         with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
             torch.tensor([1], dtype=torch.int).lt_(torch.tensor([2], dtype=torch.long))
+            torch.tensor([1], dtype=torch.int).gt_(torch.tensor([2], dtype=torch.long))
 
     def test_comparison_ops_check_for_scalar_overflow(self):
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             torch.tensor([1 << 5], dtype=torch.uint8) < (1 << 20)
+            (1 << 20) < torch.tensor([1 << 5], dtype=torch.uint8)
+            torch.tensor([1 << 5], dtype=torch.uint8) > (1 << 20)
+            (1 << 20) > torch.tensor([1 << 5], dtype=torch.uint8)
 
     def test_comparison_ops_check_for_zerodim_tensor_overflow(self):
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             torch.tensor([1 << 5], dtype=torch.uint8) < torch.tensor(1 << 20, dtype=torch.int32)
             torch.tensor(1 << 40, dtype=torch.int64) < torch.tensor([1 << 30], dtype=torch.int32)
+            torch.tensor([1 << 5], dtype=torch.uint8) > torch.tensor(1 << 20, dtype=torch.int32)
+            torch.tensor(1 << 40, dtype=torch.int64) > torch.tensor([1 << 30], dtype=torch.int32)
 
     def test_bitwise_ops(self):
         x = torch.randn(5, 5).gt(0)
