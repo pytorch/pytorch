@@ -89,15 +89,19 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
       out.set_quantizer_(make_per_tensor_affine_quantizer(
           scale_prime, zero_point_prime, self.scalar_type()));
     } else /* other_val < 0.0 */ {
-      scale_prime = other_val * self_scale;
-      zero_point_prime = q_max - (self_zero_point - q_min) - 1;
+      scale_prime = std::abs(other_val) * self_scale;
+      zero_point_prime = q_max - (self_zero_point - q_min);
 
-      if (ReLUFused) {
-        qrelu_stub(self.device().type(), self, out);
-      } else {
-        out.copy_(self);
-      }
-
+      // xq' = q_max + q_min - x_q
+      auto iter = TensorIterator::unary_op(out, self);
+      cpu_kernel(
+          iter,
+          [&](scalar_t a) -> scalar_t {
+            if (ReLUFused) {
+              a = scalar_t(std::max(a.val_, underlying_t(self_zero_point)));
+            }
+            return scalar_t(underlying_t(q_max + q_min - a.val_));
+          });
       out.set_quantizer_(make_per_tensor_affine_quantizer(
           scale_prime, zero_point_prime, self.scalar_type()));
     }
