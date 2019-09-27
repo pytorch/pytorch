@@ -11172,10 +11172,6 @@ class TestTorchDeviceType(TestCase):
                 torch.ge(x, b, out=boolRes)
                 self.assertEqual(byteRes.bool(), boolRes)
 
-                torch.gt(x, b, out=byteRes)
-                torch.gt(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
-
                 torch.eq(x, b, out=byteRes)
                 torch.eq(x, b, out=boolRes)
                 self.assertEqual(byteRes.bool(), boolRes)
