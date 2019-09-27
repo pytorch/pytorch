@@ -5,7 +5,7 @@
 namespace testns {
 
 namespace enumtype {
-  // NOTE: We need to provide the default constructors for the structs,
+  // NOTE: We need to provide the default constructor for each struct,
   // otherwise Clang 3.8 would complain:
   // ```
   // error: default initialization of an object of const type 'const enumtype::Enum1'
