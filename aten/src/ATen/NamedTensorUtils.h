@@ -103,6 +103,8 @@ optional<std::vector<Dimname>> compute_bmm_outnames(
     const Tensor& self,
     const Tensor& other);
 
+optional<std::vector<Dimname>> compute_squeeze_outnames(const Tensor& tensor);
+
 } // namespace namedinference
 
 } // namespace at

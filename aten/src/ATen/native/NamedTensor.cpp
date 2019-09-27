@@ -248,16 +248,16 @@ Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor&
   reportNYIDimnameOverload("index_add");
 }
 Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
-  reportNYIDimnameOverload("index_fill");
+  return at::index_fill(self, dimname_to_position(self, dim), index, source);
 }
 Tensor& index_fill_(Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
-  reportNYIDimnameOverload("index_fill");
+  return self.index_fill_(dimname_to_position(self, dim), index, source);
 }
 Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-  reportNYIDimnameOverload("index_fill");
+  return at::index_fill(self, dimname_to_position(self, dim), index, source);
 }
 Tensor& index_fill_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-  reportNYIDimnameOverload("index_fill");
+  return self.index_fill_(dimname_to_position(self, dim), index, source);
 }
 Tensor index_copy(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("index_copy");
@@ -299,7 +299,7 @@ Tensor& squeeze_(Tensor& self, Dimname dim) {
   reportNYIDimnameOverload("squeeze");
 }
 Tensor squeeze(const Tensor& self, Dimname dim) {
-  reportNYIDimnameOverload("squeeze");
+  return at::squeeze(self, dimname_to_position(self, dim));
 }
 
 #endif
