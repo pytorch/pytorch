@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import sys
 import unittest
+import unittest.mock
 
 import torch
 import torch.distributed as dist
@@ -15,9 +16,15 @@ from torch.distributed.rpc import RpcBackend
 from common_distributed import MultiProcessTestCase
 from common_utils import load_tests, run_tests
 from os import getenv
+import torch.distributed.rpc_backend_registry as rpc_backend_registry
 
 BACKEND = getenv('RPC_BACKEND', RpcBackend.PROCESS_GROUP)
 RPC_INIT_URL = getenv('RPC_INIT_URL', '')
+
+
+def stub_init_rpc_backend_handler(self_rank, self_name, init_method):
+    pass
+
 
 # it is used to test python user defined function over rpc
 def my_function(a, b, c):
@@ -128,6 +135,18 @@ class RpcTest(MultiProcessTestCase):
             RuntimeError, "does not support making RPC calls to self"
         ):
             dist.rpc(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
+
+    @unittest.mock.patch("torch.distributed.rpc.init_rref_context")
+    def test_register_and_call_init_rpc_backend_handler(self, init_rref_context_mock):
+        BACKEND = "stub_backend"
+        rpc_backend_registry.register_rpc_backend(
+            BACKEND, stub_init_rpc_backend_handler
+        )
+        dist.init_model_parallel(
+            self_name='worker1',
+            backend=BACKEND,
+            self_rank=1
+        )
 
     @unittest.skipIf(
         BACKEND != RpcBackend.PROCESS_GROUP,
