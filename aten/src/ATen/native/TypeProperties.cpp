@@ -117,4 +117,8 @@ bool can_cast(const at::ScalarType from, const at::ScalarType to) {
   return at::canCast(from, to);
 }
 
+ScalarType promote_types(ScalarType type1, ScalarType type2) {
+  return promoteTypes(type1, type2);
+}
+
 }} // namespace at::native
