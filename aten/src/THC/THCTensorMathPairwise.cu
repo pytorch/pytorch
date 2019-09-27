@@ -4,6 +4,7 @@
 #include <THC/THCTensorCopy.h>
 #include <THC/THCApply.cuh>
 #include <THC/THCNumerics.cuh>
+#include <THC/THCTensorMathCompareT.cuh>
 #include <THC/THCTensor.hpp>
 
 template <typename T>
