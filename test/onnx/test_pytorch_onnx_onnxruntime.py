@@ -148,6 +148,26 @@ class TestONNXRuntime(unittest.TestCase):
     def test_index_2d_neg_slice(self):
         self._test_index_generic(lambda input: input[0:-1, :])
 
+    def test_dict(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x_in):
+                x_out = {}
+                x_out["test_key_out"] = torch.add(x_in[list(x_in.keys())[0]], list(x_in.keys())[0])
+                return x_out
+
+        x = {torch.tensor(1.): torch.randn(1, 2, 3)}
+        self.run_test(MyModel(), (x,))
+
+    def test_dict_str(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x_in):
+                x_out = {}
+                x_out["test_key_out"] = torch.add(x_in["test_key_in"], 2.)
+                return x_out
+
+        x = {"test_key_in": torch.randn(1, 2, 3)}
+        self.run_test(MyModel(), (x,))
+
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
             def forward(self, x):
@@ -1113,6 +1133,28 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         model = CumSum()
         self.run_test(model, x)
+
+    def test_baddbmm(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input, batch1, batch2):
+                return torch.baddbmm(input, batch1, batch2, alpha=torch.tensor(5), beta=3.5)
+        x = torch.randn(10, 3, 5)
+        batch1 = torch.randn(10, 3, 4)
+        batch2 = torch.randn(10, 4, 5)
+        model = MyModule()
+        self.run_test(model, (x, batch1, batch2))
+
+    def test_baddbmm_dynamic(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input, batch1, batch2, alpha, beta):
+                return torch.baddbmm(input, batch1, batch2, alpha=alpha, beta=beta)
+        x = torch.randn(10, 3, 5)
+        batch1 = torch.randn(10, 3, 4)
+        batch2 = torch.randn(10, 4, 5)
+        alpha = torch.tensor(5)
+        beta = torch.tensor(3.5)
+        model = MyModule()
+        self.run_test(model, (x, batch1, batch2, alpha, beta))
 
     def test_log(self):
         class Log(torch.nn.Module):
