@@ -893,38 +893,6 @@ void FoldPrepackedWeightIntoModule(
     const script::Module& wrapper_module) {
   auto method = module.get_method(method_name);
   auto graph = method.graph();
-  // Recursively fold prepack in all methods in the call hierarchy
-  std::stack<Block*> blocks_to_visit;
-  blocks_to_visit.push(graph->block());
-  while (!blocks_to_visit.empty()) {
-    Block* b = blocks_to_visit.top();
-    blocks_to_visit.pop();
-    for (Node* n : b->nodes()) {
-      if (n->kind() == prim::CallMethod) {
-        auto module_instance = n->inputs()[0];
-        auto module_method_name = n->s(attr::name);
-        script::Module callee_module = module;
-        if (module_instance->node()->kind() == prim::GetAttr) {
-          auto child_module_name = module_instance->node()->s(attr::name);
-          auto child_module = module.find_module(child_module_name);
-          TORCH_INTERNAL_ASSERT(
-              child_module,
-              "Child module " + child_module_name + " does not exist");
-          callee_module = child_module.value();
-        } else {
-          TORCH_INTERNAL_ASSERT(
-              module_instance == graph->inputs()[0],
-              "We only support call method either on %self"
-              "or child instance in insert_observers_pass right now");
-        }
-        FoldPrepackedWeightIntoModule(callee_module, method_name, wrapper_module);
-      }
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
-      }
-    }
-  }
-
   std::string linear_with_quant = R"(
 graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype):
         %w = prim::GetAttr[name="weight"](%self)
@@ -985,6 +953,17 @@ graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype):
       for (auto n : nodes_to_delete) {
         n->destroy();
       }
+    }
+  }
+}
+
+void FoldPrepackedWeightIntoModule(
+    script::Module& module,
+    const script::Module& wrapper_module) {
+  for (auto& method : module.get_methods()) {
+    FoldPrepackedWeightIntoModule(module, method.name(), wrapper_module);
+    for (auto m : module.get_modules()) {
+      FoldPrepackedWeightIntoModule(m, wrapper_module);
     }
   }
 }

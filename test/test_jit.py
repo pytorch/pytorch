@@ -1477,7 +1477,7 @@ graph(%input, %weight):
         m = torch.jit.script(M())
         data = torch.randn((5, 5), dtype=torch.float)
         ref_res = m._c._get_method('forward')(data)
-        torch._C._jit_pass_fold_prepack(m._c, 'forward', torch.jit.script(PackedParams())._c)
+        torch._C._jit_pass_fold_prepack(m._c, torch.jit.script(PackedParams())._c)
         res = m._c._get_method('forward')(data)
         # check attribute and graph
         self.assertTrue(m._c._has_module('_packed_linear_weight_bias'))
