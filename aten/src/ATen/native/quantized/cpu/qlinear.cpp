@@ -133,7 +133,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
         output_scale,
         output_zero_point);
 
-    auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
+    auto buffer = at::empty_like(output, output.options().dtype(at::kInt));
 
     if (pack_ptr.q_scheme == kPerTensorAffine) {
       // Process the per tensor quantization.
