@@ -1618,7 +1618,6 @@
   dispatch:
     CPU: log_softmax_cpu
     CUDA: log_softmax_cuda
-  supports_named_tensor: True
 
 - func: _log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2511,7 +2510,6 @@
     CPU: softmax_cpu
     CUDA: softmax_cuda
     MkldnnCPU: mkldnn_softmax
-  supports_named_tensor: True
 
 - func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   use_c10_dispatcher: full
