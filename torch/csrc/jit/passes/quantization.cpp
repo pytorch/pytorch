@@ -17,59 +17,28 @@ namespace torch {
 namespace jit {
 namespace {
 
-void findValuesInPattern(
-    Graph& graph,
-    const std::string& pattern,
-    std::unordered_set<Value*>& values_to_skip) {
-  Graph pattern_graph;
-  std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern, &pattern_graph, vmap);
-
-  auto matches = findPatternMatches(pattern_graph, graph);
-  for (const auto& match : matches) {
-    auto output_value = vmap.at("output");
-    TORCH_INTERNAL_ASSERT(
-        match.values_map.find(output_value) != match.values_map.end(),
-        "Didn't find Value output in match result.");
-    values_to_skip.emplace(match.values_map.at(output_value));
-  }
-}
-
-// TODO: move into ObserveHelper
-void addIntermediateValuesToSkipObserver(
+void fillQConfigMap(
     const script::Module& module,
-    const std::string& method_name,
-    std::unordered_set<Value*>& values_to_skip) {
-  script::Method method = module.get_method(method_name);
-  auto graph = method.graph();
+    const QConfigDict& qconfig_dict,
+    ModuleQConfigMap& map,
+    const std::string& key = "",
+    const c10::optional<QConfig>& parent_qconfig = c10::nullopt) {
+  c10::optional<QConfig> qconfig;
+  if (qconfig_dict.find(key) != qconfig_dict.end()) {
+    qconfig = qconfig_dict.at(key);
+  } else {
+    qconfig = parent_qconfig;
+  }
+  map[module.module_object()] = qconfig;
 
-  // Note that the name of the value we want to skip inserting observer for
-  // is hard coded as "output"
-  std::string conv_functional_relu = R"(
-graph(%self, %input, %inplace):
-    %relu = prim::Constant[name="relu"]()
-    %conv = match::module[name="Conv2d"](%self)
-    %output = prim::CallMethod[name="forward"](%conv, %input)
-    %r = prim::CallFunction(%relu, %output, %inplace)
-    return (%r))";
-  std::string conv_relu_module = R"(
-graph(%self, %input):
-    %conv = match::module[name="Conv2d"](%self)
-    %output = prim::CallMethod[name="forward"](%conv, %input)
-    %relu = match::module[name="ReLU"](%self)
-    %r = prim::CallMethod[name="forward"](%relu, %output)
-    return (%r))";
-  std::string matmul_add = R"(
-graph(%input, %weight, %bias, %4):
-     %weight_t = aten::t(%weight)
-     %output = aten::matmul(%input, %weight_t)
-     %res = aten::add_(%output, %bias, %4)
-     return (%res))";
-  std::vector<std::string> patterns = {
-      conv_functional_relu, conv_relu_module, matmul_add};
-
-  for (const auto& pattern : patterns) {
-    findValuesInPattern(*graph, pattern, values_to_skip);
+  for (script::Slot s : module.get_module_slots()) {
+    std::string child_key;
+    if (key == "") {
+      child_key = s.name();
+    } else {
+      child_key = key + "." + s.name();
+    }
+    fillQConfigMap(s.to_module(), qconfig_dict, map, child_key, qconfig);
   }
 }
 
@@ -129,15 +98,6 @@ bool valueNeedsToBeQuantized(Value* v) {
   return false;
 }
 
-Node* traverseToQuantNode(Node* dq) {
-  TORCH_INTERNAL_ASSERT(dq != nullptr);
-  TORCH_INTERNAL_ASSERT(dq->inputs().size() != 0);
-  Node* intrepr = dq->inputs()[0]->node();
-  TORCH_INTERNAL_ASSERT(intrepr != nullptr);
-  TORCH_INTERNAL_ASSERT(intrepr->inputs().size() != 0);
-  return intrepr->inputs()[0]->node();
-}
-
 Value* insertScalarType(Node* ins_node, at::ScalarType t) {
   TORCH_INTERNAL_ASSERT(t != at::ScalarType::Undefined);
   WithInsertPoint ins(ins_node);
@@ -146,31 +106,6 @@ Value* insertScalarType(Node* ins_node, at::ScalarType t) {
   Value* scalartype_v =
       ins_node->owningGraph()->insertConstant(IValue(static_cast<int>(t)));
   return scalartype_v;
-}
-
-// Create Quant Node
-Node* createQuantNode(Value* v, Graph* g) {
-  Node* quant = g->create(at::Symbol::fromQualString("aten::quantize_per_tensor"));
-  TORCH_INTERNAL_ASSERT(quant != nullptr, "Failed to create quant node");
-  quant->output()->setDebugName(v->debugName() + ".quant");
-  return quant;
-}
-
-// Create Dequant node
-Node* createDeQuantNode(Value* v, Graph* g) {
-  Node* dequant =
-      g->create(at::Symbol::fromQualString("aten::dequantize"));
-  TORCH_INTERNAL_ASSERT(dequant != nullptr, "Failed to create dequant node");
-  dequant->output()->setDebugName(v->debugName() + ".dequant");
-  return dequant;
-}
-
-// Create IntTensor Node
-Node* createIntReprNode(Value* v, Graph* g) {
-  Node* intrepr = g->create(at::Symbol::fromQualString("aten::int_repr"));
-  TORCH_INTERNAL_ASSERT(intrepr != nullptr, "Failed to create inttensor node");
-  intrepr->output()->setDebugName(v->debugName() + ".intrepr");
-  return intrepr;
 }
 
 class InsertObserversHelper {
@@ -184,6 +119,15 @@ class InsertObserversHelper {
       Graph* g,
       script::Module& module,
       const QConfig& qconfig);
+
+  void findIntermediateValuesInPattern(
+    Graph& graph,
+    const std::string& pattern);
+
+  void addIntermediateValuesToSkipObserver(
+      const script::Module& module,
+      const std::string& method_name);
+
   // Values that are the output of GetAttr[name="weight"] and GetAttr[name="bias"]
   // will be propagated from parent method call to the child graph
   void propagateValues(Node* n, std::shared_ptr<Graph>& graph);
@@ -243,35 +187,63 @@ Node* InsertObserversHelper::insertObserverFor(
   return call;
 }
 
-void fillQConfigMap(
-    const script::Module& module,
-    const QConfigDict& qconfig_dict,
-    ModuleQConfigMap& map,
-    const std::string& key = "",
-    const c10::optional<QConfig>& parent_qconfig = c10::nullopt) {
-  c10::optional<QConfig> qconfig;
-  if (qconfig_dict.find(key) != qconfig_dict.end()) {
-    qconfig = qconfig_dict.at(key);
-  } else {
-    qconfig = parent_qconfig;
-  }
-  map[module.module_object()] = qconfig;
+void InsertObserversHelper::findIntermediateValuesInPattern(
+    Graph& graph,
+    const std::string& pattern) {
+  Graph pattern_graph;
+  std::unordered_map<std::string, Value*> vmap;
+  script::parseIR(pattern, &pattern_graph, vmap);
 
-  for (script::Slot s : module.get_module_slots()) {
-    std::string child_key;
-    if (key == "") {
-      child_key = s.name();
-    } else {
-      child_key = key + "." + s.name();
-    }
-    fillQConfigMap(s.to_module(), qconfig_dict, map, child_key, qconfig);
+  auto matches = findPatternMatches(pattern_graph, graph);
+  for (const auto& match : matches) {
+    auto output_value = vmap.at("intermediate_val");
+    TORCH_INTERNAL_ASSERT(
+        match.values_map.find(output_value) != match.values_map.end(),
+        "Didn't find Value output in match result.");
+    values_to_skip_.emplace(match.values_map.at(output_value));
+  }
+}
+
+void InsertObserversHelper::addIntermediateValuesToSkipObserver(
+    const script::Module& module,
+    const std::string& method_name) {
+  script::Method method = module.get_method(method_name);
+  auto graph = method.graph();
+
+  // Note that the name of the value we want to skip inserting observer for
+  // is hard coded as "intermediate_val"
+  std::string conv_functional_relu = R"(
+graph(%self, %input, %inplace):
+    %relu = prim::Constant[name="relu"]()
+    %conv = match::module[name="Conv2d"](%self)
+    %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
+    %r = prim::CallFunction(%relu, %intermediate_val, %inplace)
+    return (%r))";
+  std::string conv_relu_module = R"(
+graph(%self, %input):
+    %conv = match::module[name="Conv2d"](%self)
+    %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
+    %relu = match::module[name="ReLU"](%self)
+    %r = prim::CallMethod[name="forward"](%relu, %intermediate_val)
+    return (%r))";
+  std::string matmul_add = R"(
+graph(%input, %weight, %bias, %4):
+     %weight_t = aten::t(%weight)
+     %intermediate_val = aten::matmul(%input, %weight_t)
+     %res = aten::add_(%intermediate_val, %bias, %4)
+     return (%res))";
+  std::vector<std::string> patterns = {
+      conv_functional_relu, conv_relu_module, matmul_add};
+
+  for (const auto& pattern : patterns) {
+    findIntermediateValuesInPattern(*graph, pattern);
   }
 }
 
 void InsertObserversHelper::propagateValues(
     Node* n,
     std::shared_ptr<Graph>& graph) {
-  for (auto i = 1; i < n->inputs().size(); ++i) {
+  for (size_t i = 1; i < n->inputs().size(); ++i) {
     if (weight_values_.count(n->inputs()[i])) {
       weight_values_.emplace(graph->inputs()[i]);
     }
@@ -292,7 +264,7 @@ void InsertObserversHelper::insertObservers(
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   ConstantPropagation(graph);
-  addIntermediateValuesToSkipObserver(module, method_name, values_to_skip_);
+  addIntermediateValuesToSkipObserver(module, method_name);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -400,14 +372,19 @@ Node* insertQuantDeQuantCall(
     const IValue& scalar_type,
     bool insert_after = true) {
   Graph* g = v->node()->owningGraph();
-  Node* quant = createQuantNode(v, g);
-  Node* dequant = createDeQuantNode(v, g);
+
+  Node* quant = g->create(at::Symbol::aten("quantize_per_tensor"));
+  quant->output()->setDebugName(v->debugName() + ".quant");
+
+  Node* dequant = g->create(at::Symbol::aten("dequantize"));
+  dequant->output()->setDebugName(v->debugName() + ".dequant");
+
   Node* insert_point = insert_after ? v->node() : *g->nodes().begin();
   WithCurrentScope scope_guard(
       *insert_point->owningGraph(), insert_point->scope());
   WithInsertPoint ins(insert_point);
 
-  // Add quant-intrepr-dequant nodes and replace for all uses of Value
+  // Add quant-dequant nodes and replace for all uses of Value
   // Create qparam constant nodes
   TORCH_INTERNAL_ASSERT(qparams.isTuple(), "qparams must be tuple");
   auto tp = qparams.toTuple();
@@ -530,8 +507,9 @@ void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
   Node* dequant;
   dequant = insertQuantDeQuantCall(v, qparams, scalar_type, insert_after);
   v->replaceAllUsesWith(dequant->output());
-  Node* q = traverseToQuantNode(dequant);
-  TORCH_INTERNAL_ASSERT(q);
+  Node* q = dequant->input(0)->node();
+  // replaceAllUsesWith rewrote all uses of V, but we want to keep one: the one
+  // used in quant node. Restore it here:
   q->replaceInputWith(dequant->output(), v);
 }
 
