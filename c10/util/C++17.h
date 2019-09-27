@@ -92,6 +92,12 @@ make_unique(Args&&...) = delete;
 
 #endif
 
+template <typename Base, typename Child, typename... Args>
+typename std::enable_if<!std::is_array<Base>::value && !std::is_array<Base>::value && std::is_base_of<Base, Child>::value, std::unique_ptr<Base>>::type
+make_unique_base(Args&&... args) {
+  return std::unique_ptr<Base>(new Child(c10::guts::forward<Args>(args)...));
+}
+
 
 
 #ifdef __cpp_lib_integer_sequence
@@ -225,6 +231,7 @@ constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
 }
 
 #endif
+
 
 
 
