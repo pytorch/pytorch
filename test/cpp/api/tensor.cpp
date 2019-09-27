@@ -225,9 +225,6 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
   ASSERT_TRUE(almost_equal(tensor[0], 1.5));
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
-
-  // yf225 TODO DEBUG
-  std::cout << torch::tensor({1, 1.1}) << std::endl;
 }
 
 TEST(TensorTest, MultidimTensorCtor) {
