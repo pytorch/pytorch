@@ -226,7 +226,6 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  std::stringstream err;
   std::vector<NamedValue> new_inputs = inputs.vec();
   new_inputs.insert(new_inputs.begin(), module_);
 
@@ -245,7 +244,7 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
           c10::nullopt,
           new_inputs,
           attributes,
-          &err,
+          &failure_messages,
           allow_conversions);
       if (match) {
         return MethodValue(module_, method_name)
@@ -360,9 +359,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         m.graph()->insertGetAttr(self_, field),
         *v,
         py_module_.attr(field.c_str()));
-  }
-
-  if (auto kind = module_.kind_of(field)) {
+  } else if (auto kind = module_.kind_of(field)) {
     // methods, parameters, attributes, and buffers are all first class
     return SimpleValue(self_).attr(loc, m, field);
   }
@@ -446,24 +443,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
                     .attr("create_method_from_fn")(py_module_, attr);
     if (!stub.is_none()) {
       return SimpleValue(self_).attr(loc, m, field);
-    }
-  }
-
-  if (py_module_.attr("_constants_set").contains(field.c_str())) {
-    // Values of the attributes listed in the _constants_set will be put
-    // directly into IR. In order to allow us to access these values by their
-    // name after IR is generated, we register them as attributes.
-    if (py::isinstance<py::bool_>(attr)) {
-      module_.register_attribute(field, BoolType::get(), py::cast<bool>(attr));
-    } else if (py::isinstance<py::int_>(attr)) {
-      module_.register_attribute(
-          field, IntType::get(), py::cast<int64_t>(attr));
-    } else if (py::isinstance<py::float_>(attr)) {
-      module_.register_attribute(
-          field, FloatType::get(), py::cast<double>(attr));
-    } else if (py::isinstance<py::str>(attr)) {
-      module_.register_attribute(
-          field, StringType::get(), py::cast<std::string>(attr));
     }
   }
 

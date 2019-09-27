@@ -10,6 +10,9 @@ enum class ReduceOp : std::uint8_t {
   PRODUCT,
   MIN,
   MAX,
+  BAND, // Bitwise AND
+  BOR, // Bitwise OR
+  BXOR, // Bitwise XOR
   UNUSED,
 };
 
