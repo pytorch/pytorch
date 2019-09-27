@@ -150,9 +150,7 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
       tensor_ind_count++;
     }
   }
-  printf("tensor ind count %zu\n", tensor_ind_count);
   size_t total_ind_count = tensor_ind_count + dim_index_map.size();
-  printf("total ind count %zu\n", total_ind_count);
 
   bool is_after_tensor_ind = false;
   size_t tensor_ind_offset = 0;
