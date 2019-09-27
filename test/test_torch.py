@@ -3920,9 +3920,11 @@ class _TestTorchMixin(object):
 
         # Both abs(0.0) and abs(-0.0) should result in 0.0
         for dtype in (torch.float, torch.double):
-            abs_zeros = torch.tensor([0.0, -0.0], dtype=dtype).abs().tolist()
-            for num in abs_zeros:
-                self.assertGreater(math.copysign(1.0, num), 0.0)
+            for abs_zeros in (torch.tensor([0.0, -0.0], dtype=dtype).abs().tolist(),
+                              # test a large tensor so that the vectorized version is tested
+                              torch.abs(-torch.zeros(10000, dtype=dtype)).tolist()):
+                for num in abs_zeros:
+                    self.assertGreater(math.copysign(1.0, num), 0.0)
 
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
@@ -4707,6 +4709,16 @@ class _TestTorchMixin(object):
         self._test_bernoulli(self, torch.uint8, torch.float64, 'cpu')
         # test that it works with bool tensors
         self._test_bernoulli(self, torch.bool, torch.float32, 'cpu')
+
+    def test_bernoulli_edge_cases(self):
+        # Need to draw a lot of samples to cover every random floating point number.
+        a = torch.zeros(10000, 10000, dtype=torch.float32)  # probability of drawing "1" is 0
+        num_ones = (torch.bernoulli(a) == 1).sum()
+        self.assertEqual(num_ones, 0)
+
+        b = torch.ones(10000, 10000, dtype=torch.float32)  # probability of drawing "1" is 1
+        num_zeros = (torch.bernoulli(b) == 0).sum()
+        self.assertEqual(num_zeros, 0)
 
     def test_generator_cpu(self):
         # test default generators are equal
@@ -6193,6 +6205,23 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         for idx in iter_indices(x):
             self.assertEqual(x[idx] >= y[idx], ge[idx] == 1)
 
+    def test_comparison_ops_must_take_bool_output(self):
+        with self.assertRaisesRegex(RuntimeError, 'The output tensor of lt must be a bool'):
+            torch.lt(torch.tensor([True]), torch.tensor([False]), out=torch.empty(1, dtype=torch.uint8))
+
+    def test_inplace_comparison_ops_require_inputs_have_same_dtype(self):
+        with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
+            torch.tensor([1], dtype=torch.int).lt_(torch.tensor([2], dtype=torch.long))
+
+    def test_comparison_ops_check_for_scalar_overflow(self):
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            torch.tensor([1 << 5], dtype=torch.uint8) < (1 << 20)
+
+    def test_comparison_ops_check_for_zerodim_tensor_overflow(self):
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            torch.tensor([1 << 5], dtype=torch.uint8) < torch.tensor(1 << 20, dtype=torch.int32)
+            torch.tensor(1 << 40, dtype=torch.int64) < torch.tensor([1 << 30], dtype=torch.int32)
+
     def test_bitwise_ops(self):
         x = torch.randn(5, 5).gt(0)
         y = torch.randn(5, 5).gt(0)
@@ -6727,11 +6756,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             e2[i + 4][i] = v
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
-
-    def test_function_unwrap_message(self):
-        self.assertRaisesRegex(RuntimeError, ' call to _th_lt',
-                               lambda: torch.ones(1, dtype=torch.float) < torch.ones(1, dtype=torch.double))
-
 
 # Functions to test negative dimension wrapping
 METHOD = 1
@@ -11133,10 +11157,6 @@ class TestTorchDeviceType(TestCase):
                 byteRes = torch.empty_like(x, device=device).byte()
                 boolRes = torch.empty_like(x, device=device).bool()
 
-                torch.lt(x, b, out=byteRes)
-                torch.lt(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
-
                 torch.le(x, b, out=byteRes)
                 torch.le(x, b, out=boolRes)
                 self.assertEqual(byteRes.bool(), boolRes)
@@ -11157,7 +11177,7 @@ class TestTorchDeviceType(TestCase):
                 torch.ne(x, b, out=boolRes)
                 self.assertEqual(byteRes.bool(), boolRes)
 
-                self.assertEquals(len(warningsCount), 6)
+                self.assertEquals(len(warningsCount), 5)
 
         # Bool Tensor
         x = torch.tensor([True, False, True, False], device=device)

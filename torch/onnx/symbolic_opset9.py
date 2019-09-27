@@ -198,6 +198,7 @@ def _slice(g, input, axes, starts, ends):
         return input
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
+
 def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
     def symbolic(g, self, dim=None, keepdim=None):
         if dim is None:
@@ -980,6 +981,47 @@ def index_put(g, self, indices_list_value, values, accumulate):
     indices_list = sym_help._unpack_list(indices_list_value)
     args = [self] + indices_list + [values, accumulate]
     return g.op("ATen", *args, operator_s='index_put')
+
+
+def index_fill(g, self, dim, index, value):
+    dim_value = sym_help._parse_arg(dim, 'i')
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", self, index, value, dim_i=dim_value, operator_s="index_fill")
+    # 1. reshape index => [1, ..., 1, dim, 1, ..., 1]
+    # 2. expand index => [..., dim, ...], same shape as self except for dim.
+    # 3. expand value as well.
+    # 4. apply onnx::scatter.
+
+    if self.type().dim() is None:
+        return _unimplemented("index_fill", "input rank not accesible")
+    self_dim = self.type().dim()
+    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
+    expanded_index_shape = g.op("Scatter", g.op("Shape", self),
+                                g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index), axis_i=0)
+    expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
+
+    value = sym_help._maybe_get_scalar(value)
+    value = sym_help._if_scalar_type_as(g, value, self)
+    expanded_value = expand(g, value, expanded_index_shape, None)
+
+    return scatter(g, self, dim, expanded_index, expanded_value)
+
+
+def index_copy(g, self, dim, index, source):
+    dim_value = sym_help._parse_arg(dim, 'i')
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", self, index, source, dim_i=dim_value, operator_s="index_copy")
+    # Similar to index_fill, apply reshape + expand to index.
+
+    if self.type().dim() is None:
+        return _unimplemented("index_copy", "input rank not accesible")
+    self_dim = self.type().dim()
+    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
+    expanded_index_shape = g.op("Scatter", g.op("Shape", self),
+                                g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index), axis_i=0)
+    expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
+
+    return scatter(g, self, dim, expanded_index, source)
 
 
 def type_as(g, self, other):
