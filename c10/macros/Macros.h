@@ -255,9 +255,11 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // TODO This occurred in CUDA 9 (9.0 to 9.2). Test if this is fixed in CUDA 10.
 #if defined(__CUDA_ARCH__)
 #define C10_HOST_CONSTEXPR __host__
+#define C10_HOST_CONSTEXPR_VAR
 #define C10_CPP14_HOST_CONSTEXPR __host__
 #else
 #define C10_HOST_CONSTEXPR constexpr
+#define C10_HOST_CONSTEXPR_VAR constexpr
 #define C10_CPP14_HOST_CONSTEXPR AT_CPP14_CONSTEXPR
 #endif
 

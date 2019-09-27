@@ -10,6 +10,22 @@
 namespace torch {
 namespace jit {
 
+static std::unordered_set<Value *> collectLoopCounts(Node *n) {
+
+  std::unordered_set<Value *> loopCounts;
+  Block *it = n->owningBlock();
+  while (it->owningNode()) {
+    auto outerNode = it->owningNode();
+    if (outerNode->kind() == prim::Loop) {
+      LoopView lv(outerNode);
+      loopCounts.insert(lv.currentTripCount());
+    }
+    it = outerNode->owningBlock();
+  }
+
+  return std::move(loopCounts);
+}
+
 struct BailOutGraphBuilderForNode {
   explicit BailOutGraphBuilderForNode(
       std::shared_ptr<Graph> graph,
@@ -46,6 +62,11 @@ struct BailOutGraphBuilderForNode {
     } else {
       return this->old_to_new_[v];
     }
+  }
+
+  Value *getInputForValue(Value *v) {
+    TORCH_INTERNAL_ASSERT(this->old_to_new_.count(v));
+    return this->old_to_new_[v];
   }
 
   // buildBailOutBlockFrom builds a bailout graph from
@@ -96,7 +117,7 @@ struct BailOutGraphBuilderForNode {
   void buildBailOutLoop(Node* outer_node) {
     LoopView lv(outer_node);
     auto old_max_count = getOrAddInputForValue(lv.maxTripCount());
-    auto cur_iter = addNewInputForValue(lv.currentTripCount());
+    auto cur_iter = getInputForValue(lv.currentTripCount());
     auto block_outputs = lv.bodyBlock()->outputs();
     auto carried_deps = lv.carriedInputsWithCond();
     mapValues(block_outputs, carried_deps);
@@ -105,6 +126,9 @@ struct BailOutGraphBuilderForNode {
     WithInsertPoint guard(*block->nodes().end());
     auto updated_max_trip_count =
         copy_graph_->insert(aten::sub, {old_max_count, cur_iter});
+    auto one = copy_graph_->insertConstant({1});
+    updated_max_trip_count =
+        copy_graph_->insert(aten::sub, {updated_max_trip_count, one});
     mapExistingInputForValue(outer_node->inputs()[0], updated_max_trip_count);
     buildBailOutBlockFrom(outer_node);
   }
@@ -118,6 +142,10 @@ struct BailOutGraphBuilderForNode {
   }
 
   std::shared_ptr<Graph> buildBailOutGraphFrom(Node* n) {
+
+    for (auto bi : n->inputs()) {
+      getOrAddInputForValue(bi);
+    }
     buildBailOutBlockFrom(n);
     // add graph outputs
     for (auto ov : graph_->outputs()) {
@@ -208,15 +236,28 @@ struct BailOutInserter {
         const auto& live_inputs = liveness_sets_[*it];
 
         // guarded inputs come first
-        // currently, there's always one  guaded input
+        // currently, there's always one guaded input
         bailout_node->addInput(it->input());
+
+        // we need to collect loop counts to
+        // record the number of iterations already run
+        // however, liveness doesn't capture loop counts
+        // if they aren't used explicitly in a loop
+        // so we collect them manually here
+        auto loopCounts = collectLoopCounts(*it);
+        for (auto lc : loopCounts) {
+          bailout_node->addInput(lc);
+        }
 
         for (auto li : live_inputs) {
           // Guarded inputs have already been added
-          // Also, BailOutGraphBuilder materializes constants into a bailout
+          // BailOutGraphBuilder materializes constants into a bailout
           // graph rather than captures them as arguments,
           // so there's no need to add them to inputs
-          if (li->node()->kind() == prim::Constant || li == it->input()) {
+          // Also, skip loop counts as they are added in advance right after
+          // the guarded input
+          if (li->node()->kind() == prim::Constant || li == it->input() ||
+              loopCounts.count(li) != 0) {
             continue;
           }
 
