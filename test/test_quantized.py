@@ -1857,6 +1857,14 @@ class TestQNNPackOps(TestCase):
             np.testing.assert_equal(qC, qC_qnnp.int_repr(),
                                     "Quantized addition failed.")
 
+            Crelu = C.copy()
+            Crelu[C < 0] = 0
+            qCrelu = torch.quantize_per_tensor(torch.from_numpy(Crelu), scale_C,
+                                               zero_point_C, dtype=torch.quint8)
+            qCrelu_hat = torch.ops.quantized.add_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
+            np.testing.assert_equal(qCrelu.int_repr().numpy(), qCrelu_hat.int_repr(),
+                                    "Quantized addition with ReLU failed.")
+
             A = torch.ones((0, 2), dtype=torch.float32)
             qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,
                                            dtype=torch.quint8)
