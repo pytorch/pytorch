@@ -5,7 +5,15 @@
 #define TORCH_ENUM_DECLARE(name) \
 namespace torch { \
 namespace enumtype { \
-  struct k##name {}; \
+  /*
+    NOTE: We need to provide the default constructor for each struct,
+    otherwise Clang 3.8 would complain:
+    ```
+    error: default initialization of an object of const type 'const enumtype::Enum1'
+    without a user-provided default constructor
+    ```
+  */ \
+  struct k##name { k##name() = default; }; \
 } \
 TORCH_API extern const enumtype::k##name k##name; \
 }
