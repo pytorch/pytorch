@@ -3,7 +3,12 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from .QConfig import QConfig
 
+def _assert_is_script_module(model):
+    if not isinstance(model, torch.jit.ScriptModule):
+        raise ValueError('input must be a script module, got: ' + str(type(model)))
+
 def prepare_script(model, qconfig_dict, inplace=False):
+    _assert_is_script_module(model)
     if not inplace:
         model = model.copy()
     torch._C._jit_pass_insert_observers(model._c,
@@ -13,6 +18,7 @@ def prepare_script(model, qconfig_dict, inplace=False):
     return model
 
 def convert_script(model, inplace=False):
+    _assert_is_script_module(model)
     if not inplace:
         model = model.copy()
     torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', True)
@@ -25,8 +31,7 @@ def script_qconfig(qconfig):
         weight=torch.jit.script(qconfig.weight())._c)
 
 def _quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
-    if not isinstance(model, torch.jit.ScriptModule):
-        raise ValueError('input must be a script module, got: ' + str(type(model)))
+    _assert_is_script_module(model)
     if not model._c._has_method('forward'):
         raise ValueError('input script module does not have forward method')
     if not inplace:
