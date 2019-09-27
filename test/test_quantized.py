@@ -967,11 +967,9 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qX.equal(qX2), equal_ref(qX, qX2))
 
 
-@unittest.skipIf(
-    not torch.fbgemm_is_cpu_supported(),
-    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-    " with instruction set support avx2 or newer.",
-)
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
     @no_deadline
@@ -1086,11 +1084,9 @@ class TestDynamicQuantizedLinear(TestCase):
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          message="torch.ops.quantized.linear_dynamic (fbgemm) results are off")
 
-@unittest.skipIf(
-    not torch.fbgemm_is_cpu_supported(),
-    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-    " with instruction set support avx2 or newer.",
-)
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class TestQuantizedLinear(unittest.TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
     @no_deadline
@@ -1264,11 +1260,9 @@ class TestQuantizedLinear(unittest.TestCase):
                 W_q.q_zero_point(), W_q_origin.q_zero_point())
 
 
-@unittest.skipIf(
-    not torch.fbgemm_is_cpu_supported(),
-    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-    " with instruction set support avx2 or newer.",
-)
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class TestQuantizedConv(unittest.TestCase):
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),

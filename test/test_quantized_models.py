@@ -1,8 +1,12 @@
 import torch
 import torch.jit
+import unittest
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, ModelMultipleOps
 
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                     "Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class ModelNumerics(QuantizationTestCase):
     def test_float_quant_compare(self):
         torch.manual_seed(42)

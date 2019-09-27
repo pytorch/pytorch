@@ -185,11 +185,12 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
  public:
   Tensor operator()(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
     check_inputs(qa, qb);
-    #ifdef USE_PYTORCH_QNNPACK
-    if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+#ifdef USE_PYTORCH_QNNPACK
+    if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
+        qa.scalar_type() == kQUInt8 && qb.scalar_type() == kQUInt8) {
       return qnnpack_add(qa, qb, scale, zero_point);
     }
-    #endif
+#endif
     auto qc = at::_empty_affine_quantized(
         qa.sizes(),
         at::device(kCPU).dtype(qa.scalar_type()),

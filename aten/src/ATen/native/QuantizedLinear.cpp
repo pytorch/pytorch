@@ -252,10 +252,6 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
       quantized, col_offsets, q_params.scale, q_params.zero_point);
 }
 
-bool fbgemm_is_cpu_supported() {
-  return fbgemm::fbgemmSupportedCPU();
-}
-
 Tensor fbgemm_pack_quantized_matrix(const Tensor& weight) {
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
