@@ -2369,6 +2369,27 @@ class _TestTorchMixin(object):
         self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
         self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
 
+    @staticmethod
+    def _test_multinomial_unnormalized(self, dtype, device):
+        n_rounds = 20
+        n_elements = 32
+        h = n_elements // 2   # half of the elements
+        expected_indices_sum = n_elements * (n_elements - 1) / 2    # sum(range(0, n_elements))
+        for i in range(n_rounds):
+            # generate unnormalized probabilities with significant exponent span
+            w = torch.rand(n_elements, dtype=dtype, device=device) + 0.01   # ensure [0.01 - 1.01] range
+            w[:h] = w[:h] * 1e15        # lower half becomes large
+            w[h:] = w[h:] * 1e-15       # upper half becomes small
+            r = torch.multinomial(w, n_elements, replacement=False)
+            self.assertEqual(r.sum(), expected_indices_sum, 0, "sampled invalid or non-unique indicies")
+
+    def test_multinomial_unnormalized(self):
+        self._test_multinomial_unnormalized(self, torch.float, device='cpu')
+        self._test_multinomial_unnormalized(self, torch.double, device='cpu')
+        if torch.cuda.is_available():
+            self._test_multinomial_unnormalized(self, torch.float, device='cuda')
+            self._test_multinomial_unnormalized(self, torch.double, device='cuda')
+
     @suppress_warnings
     def test_range(self):
         res1 = torch.range(0, 1)
