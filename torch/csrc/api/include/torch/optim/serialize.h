@@ -16,6 +16,18 @@ namespace optim {
 // inside a template where the archive type is a template type and can thus be
 // passed such that the appropriate overload is selected.
 
+/// Utility function to save a value of `int64_t` type.
+void serialize(
+    serialize::OutputArchive& archive,
+    const std::string& key,
+    const int64_t& value);
+
+/// Utility function to load a value of `int64_t` type.
+void serialize(
+    serialize::InputArchive& archive,
+    const std::string& key,
+    int64_t& value);
+
 /// Utility function to save a vector of step buffers.
 void serialize(
     serialize::OutputArchive& archive,
