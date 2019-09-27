@@ -1093,9 +1093,9 @@ class TestDynamicQuantizedLinear(TestCase):
        use_multi_dim_input=st.booleans(),
        use_channelwise=st.booleans())
 def test_qlinear_op(self, batch_size, input_channels, output_channels, use_bias,
-                 use_relu, use_multi_dim_input, use_channelwise, qengine):
+                    use_relu, use_multi_dim_input, use_channelwise, qengine):
     qlinear_prepack = torch.ops.quantized.linear_prepack
-    if qengine is 'qnnpack':
+    if qengine == 'qnnpack':
         use_channelwise = False
         use_multi_dim_input = False
     if use_relu:
@@ -1204,7 +1204,7 @@ def test_qlinear_op(self, batch_size, input_channels, output_channels, use_bias,
        use_channelwise=st.booleans())
 def test_qlinear_unpack_op(self, W, use_channelwise, qengine):
     W, (W_scale, W_zp, torch_type) = W
-    if qengine is 'qnnpack':
+    if qengine == 'qnnpack':
         use_channelwise = False
     if use_channelwise:
         output_channels = W.shape[0]
@@ -1309,7 +1309,7 @@ def test_qconv_op(
         qengine
 ):
     qconv = torch.ops.quantized.conv2d
-    if qengine is 'qnnpack':
+    if qengine == 'qnnpack':
         use_channelwise = False
     if use_relu:
         qconv = torch.ops.quantized.conv2d_relu
@@ -1430,7 +1430,7 @@ def test_qconv_op(
        channelwise=st.booleans())
 def test_qconv_unpack_op(self, X, strideH, strideW, padH, padW, channelwise, qengine):
     (inputs, filters, bias, groups) = X
-    if qengine is 'qnnpack':
+    if qengine == 'qnnpack':
         channelwise = False
     inputs, (inputs_scale, inputs_zero_point, inputs_qtype) = inputs
     filters, (filters_scale, filters_zero_point, filters_qtype) = filters
@@ -1553,9 +1553,10 @@ class TestQNNPackOps(TestCase):
 
             Crelu = C.copy()
             Crelu[C < 0] = 0
-            qCrelu = _quantize(Crelu, scale_C, zero_point_C)
+            qCrelu = torch.quantize_per_tensor(torch.from_numpy(Crelu), scale_C,
+                                               zero_point_C, dtype=torch.quint8)
             qCrelu_hat = torch.ops.quantized.add_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
-            np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+            np.testing.assert_equal(qCrelu.int_repr().numpy(), qCrelu_hat.int_repr(),
                                     "Quantized addition with ReLU failed.")
 
             A = torch.ones((0, 2), dtype=torch.float32)
