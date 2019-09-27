@@ -248,25 +248,25 @@ TEST(TensorTest, MultidimTensorCtor_CUDA) {
   }
 }
 
-TEST(TensorTest, PrettyPrintListInitTensor) {
+TEST(TensorTest, PrettyPrintInitListTensor) {
   {
     ASSERT_EQ(
-      c10::str(torch::detail::ListInitTensor(1.1)),
+      c10::str(torch::detail::InitListTensor(1.1)),
       "1.1");
   }
   {
     ASSERT_EQ(
-      c10::str(torch::detail::ListInitTensor({1.1, 2.2})),
+      c10::str(torch::detail::InitListTensor({1.1, 2.2})),
       "{1.1, 2.2}");
   }
   {
     ASSERT_EQ(
-      c10::str(torch::detail::ListInitTensor({{1, 2}, {3, 4}})),
+      c10::str(torch::detail::InitListTensor({{1, 2}, {3, 4}})),
       "{{1, 2}, {3, 4}}");
   }
   {
     ASSERT_EQ(
-      c10::str(torch::detail::ListInitTensor({{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}})),
+      c10::str(torch::detail::InitListTensor({{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}})),
       "{{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}}");
   }
 }
@@ -390,10 +390,10 @@ TEST(TensorTest, DataPtr) {
 }
 
 TEST(TensorTest, Data) {
-  const auto tensor = torch::empty({3, 3});
+  const auto tensor = torch::rand({3, 3});
   ASSERT_TRUE(torch::equal(tensor, tensor.data()));
 
-  const auto tensor2 = at::empty({3, 3});
+  const auto tensor2 = at::rand({3, 3});
   ASSERT_THROW(tensor2.data(), c10::Error);
 }
 
@@ -457,4 +457,50 @@ TEST(TensorTest, Version) {
   ASSERT_THROWS_WITH(x._version(), message);
   x.add_(1);
   ASSERT_THROWS_WITH(x._version(), message);
+}
+
+TEST(TensorTest, Detach) {
+  auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  auto y = x * x;
+  const auto y_detached = y.detach();
+  ASSERT_FALSE(y.is_leaf());
+  ASSERT_TRUE(y_detached.is_leaf());
+  ASSERT_FALSE(y_detached.requires_grad());
+
+  x = at::tensor({5}, at::TensorOptions().requires_grad(false));
+  y = x * x;
+  const auto message = "detach is not implemented for Tensor";
+  ASSERT_THROWS_WITH(x.detach(), message);
+  ASSERT_THROWS_WITH(y.detach(), message);
+}
+
+TEST(TensorTest, DetachInplace) {
+  auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
+  auto y = x * x;
+  auto y_detached = y.detach_();
+  ASSERT_TRUE(y.is_leaf());
+  ASSERT_FALSE(y.requires_grad());
+  ASSERT_TRUE(y_detached.is_leaf());
+  ASSERT_FALSE(y_detached.requires_grad());
+
+  x = at::tensor({5}, at::TensorOptions().requires_grad(false));
+  y = x * x;
+  const auto message = "detach_ is not implemented for Tensor";
+  ASSERT_THROWS_WITH(x.detach_(), message);
+  ASSERT_THROWS_WITH(y.detach_(), message);
+}
+
+TEST(TensorTest, SetData) {
+  auto x = torch::randn({5});
+  auto y = torch::randn({5});
+  ASSERT_FALSE(torch::equal(x, y));
+  ASSERT_NE(x.data_ptr<float>(), y.data_ptr<float>());
+
+  x.set_data(y);
+  ASSERT_TRUE(torch::equal(x, y));
+  ASSERT_EQ(x.data_ptr<float>(), y.data_ptr<float>());
+
+  x = at::tensor({5});
+  y = at::tensor({5});
+  ASSERT_THROWS_WITH(x.set_data(y), "set_data is not implemented for Tensor");
 }

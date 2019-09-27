@@ -218,6 +218,96 @@ class TestTypePromotion(TestCase):
         # this seems like odd behavior but ints also create float tensors, numpy doesn't have this function.
         self.assertEqual(torch.scalar_tensor(False, device=self.device), torch.tensor(0., device=self.device))
 
+    def test_result_type(self):
+        self.assertEqual(torch.result_type(torch.tensor(1, dtype=torch.int), 1), torch.int)
+        self.assertEqual(torch.result_type(1, torch.tensor(1, dtype=torch.int)), torch.int)
+        self.assertEqual(torch.result_type(1, 1.), torch.get_default_dtype())
+        self.assertEqual(torch.result_type(torch.tensor(1), 1.), torch.get_default_dtype())
+        self.assertEqual(torch.result_type(torch.tensor(1, dtype=torch.long), torch.tensor([1, 1], dtype=torch.int)), torch.int)
+        self.assertEqual(torch.result_type(torch.tensor([1., 1.], dtype=torch.float), 1.), torch.float)
+        self.assertEqual(torch.result_type(torch.tensor(1., dtype=torch.float), torch.tensor(1, dtype=torch.double)), torch.double)
+
+    def test_comparison_ops_with_type_promotion(self):
+        value_for_type = {
+            torch.uint8: (1 << 5),
+            torch.int8: (1 << 5),
+            torch.int16: (1 << 10),
+            torch.int32: (1 << 20),
+            torch.int64: (1 << 35),
+            torch.float16: (1 << 10),
+            torch.float32: (1 << 20),
+            torch.float64: (1 << 35)
+        }
+        comparison_ops = [
+            dict(
+                name="lt",
+                out_op=lambda x, y, d: torch.lt(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                ret_op=lambda x, y: torch.lt(x, y),
+                compare_op=lambda x, y: x < y,
+            ),
+        ]
+        device = self.device
+        for op in comparison_ops:
+            for dt1 in torch.testing.get_all_math_dtypes(device):
+                for dt2 in torch.testing.get_all_math_dtypes(device):
+                    val1 = value_for_type[dt1]
+                    val2 = value_for_type[dt2]
+                    t1 = torch.tensor([val1], dtype=dt1, device=device)
+                    t2 = torch.tensor([val2], dtype=dt2, device=device)
+                    expected = torch.tensor([op["compare_op"](val1, val2)], dtype=torch.bool)
+
+                    out_res = op["out_op"](t1, t2, device)
+                    self.assertEqual(out_res, expected)
+                    self.assertTrue(out_res.dtype == torch.bool)
+                    self.assertTrue(t1.dtype == dt1)
+                    self.assertTrue(t2.dtype == dt2)
+
+                    out_res = op["ret_op"](t1, t2)
+                    self.assertEqual(out_res, expected)
+                    self.assertTrue(out_res.dtype == torch.bool)
+                    self.assertTrue(t1.dtype == dt1)
+                    self.assertTrue(t2.dtype == dt2)
+
+                    # test that comparing a zero dim tensor with another zero dim tensor has type promotion behavior
+                    t1 = torch.tensor(val1, dtype=dt1, device=device)
+                    t2 = torch.tensor(val2, dtype=dt2, device=device)
+                    expected = torch.tensor(op["compare_op"](val1, val2), dtype=torch.bool)
+
+                    out_res = op["out_op"](t1, t2, device)
+                    self.assertEqual(out_res, expected)
+                    self.assertTrue(out_res.dtype == torch.bool)
+                    self.assertTrue(t1.dtype == dt1)
+                    self.assertTrue(t2.dtype == dt2)
+
+                    out_res = op["ret_op"](t1, t2)
+                    self.assertEqual(out_res, expected)
+                    self.assertTrue(out_res.dtype == torch.bool)
+                    self.assertTrue(t1.dtype == dt1)
+                    self.assertTrue(t2.dtype == dt2)
+
+    def test_lt_with_type_promotion(self):
+        for dt in torch.testing.get_all_math_dtypes(self.device):
+            x = torch.tensor([0], dtype=dt, device=self.device)
+            expected = torch.tensor([True], dtype=torch.bool, device=self.device)
+
+            actual = x < 0.5
+            self.assertTrue(actual, expected)
+            self.assertTrue(actual.dtype == torch.bool)
+
+            actual = x < torch.tensor(0.5)
+            self.assertTrue(actual, expected)
+            self.assertTrue(actual.dtype == torch.bool)
+
+            x = torch.tensor(0, dtype=dt, device=self.device)
+            expected = torch.tensor(True, dtype=torch.bool, device=self.device)
+            actual = x < 0.5
+            self.assertTrue(actual, expected)
+            self.assertTrue(actual.dtype == torch.bool)
+
+            actual = x < torch.tensor(0.5)
+            self.assertTrue(actual, expected)
+            self.assertTrue(actual.dtype == torch.bool)
+
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):
     def setUp(self):
