@@ -156,14 +156,6 @@ static void cosh_kernel(TensorIterator& iter) {
   });
 }
 
-static void erfinv_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "erfinv_cpu", [&]() {
-    cpu_kernel(
-        iter,
-        [=](scalar_t a) -> scalar_t { return calc_erfinv(a); });
-  });
-}
-
 static void digamma_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "digamma", [&]() {
     cpu_kernel(
@@ -337,7 +329,6 @@ REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sign_stub, &sign_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
-REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel);
 REGISTER_DISPATCH(digamma_stub, &digamma_kernel);
 REGISTER_DISPATCH(trigamma_stub, &trigamma_kernel);
 REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
@@ -355,6 +346,7 @@ IMPLEMENT_FLOAT_KERNEL(FLOATING, cos)
 // IMPLEMENT_FLOAT_KERNEL(FLOATING, cosh)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erf)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erfc)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, erfinv)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, exp)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, expm1)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, floor)

@@ -52,7 +52,7 @@ class Linear(nnq.Linear):
         """
         assert type(mod) == NNLinear, 'nn.quantized.dynamic.Linear.from_float only works for nn.Linear'
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-        if mod.qconfig is not None and mod.qconfig.weight() is not None:
+        if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer = mod.qconfig.weight()
         else:
             # We have the circular import issues if we import the qconfig in the beginning of this file:

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ATen/Parallel.h>
+
 namespace at {
 namespace native {
 
