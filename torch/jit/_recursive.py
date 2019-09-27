@@ -120,6 +120,13 @@ def get_module_meta(original, level=0):
             # also in the parameters/buffers. This happens in BatchNorm as a
             # hack to support optional parameters.
             continue
+        if not hasattr(original, name):
+            # TODO: We should really error in this case, but there are a couple
+            # extant examples of this so leave it for a future PR.
+            warnings.warn("'{}' was found in ScriptModule constants, "
+                          "but was not actually set in __init__. "
+                          "Consider removing it.".format(name))
+            continue
         value = getattr(original, name)
         module_meta.add_constant(name, _get_valid_constant(name, value))
         added_names.add(name)
@@ -380,8 +387,6 @@ def recursive_script(mod, exclude_methods=()):
     handed off to the actual compilation process.
     """
     if isinstance(mod, torch.jit.ScriptModule):
-        return mod
-    if isinstance(mod, torch.jit.RecursiveScriptModule) and mod._type_frozen:
         return mod
 
     if isinstance(mod, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)):

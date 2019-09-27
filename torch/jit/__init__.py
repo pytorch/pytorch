@@ -1526,6 +1526,10 @@ if _enabled:
 
 
     class RecursiveScriptModule(ScriptModule):
+        # TODO: RecursiveScriptModule inherits from ScriptModule for the sole
+        # reason that it retains the existing isinstance(ScriptModule)
+        # behavior. Is this a good enough reason to leave it like this? It
+        # makes the inheritance relationship super confusing.
         r"""
         The core data structure in TorchScript is the ``ScriptModule``. It is an
         analogue of torch's ``nn.Module`` and represents an entire model as a tree of
@@ -1669,41 +1673,55 @@ if _enabled:
                 "Mixed serialization of script and non-script modules is not supported. " +
                 "For purely script modules use my_script_module.save(<filename>) instead.")
 
+    # Need to copy all RecursiveScriptModule methods to ScriptModule.
+    #
+    # This is because `super(MyScriptModule, self).foo()` does not use
+    # `__getattr__` to look up `foo`. So we need to make each method available on
+    # the ScriptModule manually.
+    for name, item in RecursiveScriptModule.__dict__.items():
+        if not callable(item) and not isinstance(item, property):
+            continue
+        if name.startswith('__'):
+            continue
+        # We can copy over the implementation wholesale because besides the
+        # `super()` thing above, ScriptModule behaves exactly like
+        # RecursiveScriptModule
+        setattr(ScriptModule, name, item)
+
+    def _get_methods(cls):
+        import inspect
+        # In Python 3 unbound methods are functions, but in Python 2 they are methods
+        return inspect.getmembers(cls, predicate=lambda x: inspect.isfunction(x) or inspect.ismethod(x))
+
+
+    _compiled_methods_whitelist = {
+        'forward', 'register_buffer', 'register_parameter', 'add_module',
+        '_apply', 'apply', 'cuda', 'cpu', 'to', 'type', 'float', 'double', 'half',
+        'state_dict', '_save_to_state_dict', 'load_state_dict',
+        '_load_from_state_dict', '_named_members', 'parameters', 'named_parameters',
+        'buffers', 'named_buffers', 'children', 'named_children', 'modules',
+        'named_modules', 'zero_grad', 'share_memory', '_get_name', 'extra_repr',
+        '_slow_forward', '_tracing_name', 'eval', 'train',
+    }
+
+
+    def _make_fail(name):
+        def fail(self, *args, **kwargs):
+            raise RuntimeError(name + " is not supported on ScriptModules")
+        return fail
+
+    for name, method in _get_methods(torch.nn.Module):
+        if name.startswith('__'):
+            continue
+        if name not in RecursiveScriptModule.__dict__ and name not in _compiled_methods_whitelist:
+            setattr(RecursiveScriptModule, method.__name__, _make_fail(name))
+
 else:
     # TODO MAKE SURE THAT DISABLING WORKS
     class ScriptModule(torch.nn.Module):
         def __init__(self):
             super(ScriptModule, self).__init__()
 
-
-def _get_methods(cls):
-    import inspect
-    # In Python 3 unbound methods are functions, but in Python 2 they are methods
-    return inspect.getmembers(cls, predicate=lambda x: inspect.isfunction(x) or inspect.ismethod(x))
-
-
-_compiled_methods_whitelist = {
-    'forward', 'register_buffer', 'register_parameter', 'add_module',
-    '_apply', 'apply', 'cuda', 'cpu', 'to', 'type', 'float', 'double', 'half',
-    'state_dict', '_save_to_state_dict', 'load_state_dict',
-    '_load_from_state_dict', '_named_members', 'parameters', 'named_parameters',
-    'buffers', 'named_buffers', 'children', 'named_children', 'modules',
-    'named_modules', 'zero_grad', 'share_memory', '_get_name', 'extra_repr',
-    '_slow_forward', '_tracing_name', 'eval', 'train',
-}
-
-
-def _make_fail(name):
-    def fail(self, *args, **kwargs):
-        raise RuntimeError(name + " is not supported on ScriptModules")
-    return fail
-
-
-for name, method in _get_methods(torch.nn.Module):
-    if name.startswith('__'):
-        continue
-    if name not in ScriptModule.__dict__ and name not in _compiled_methods_whitelist:
-        setattr(ScriptModule, method.__name__, _make_fail(name))
 
 
 def copy_to_tmp_module(orig):
