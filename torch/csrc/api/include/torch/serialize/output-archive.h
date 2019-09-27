@@ -40,6 +40,9 @@ class TORCH_API OutputArchive final {
     return cu_;
   }
 
+  /// Writes an `IValue` to the `OutputArchive`.
+  void write(const std::string& key, const c10::IValue& ivalue);
+
   /// Writes a `(key, tensor)` pair to the `OutputArchive`, and marks it as
   /// being or not being a buffer (non-differentiable tensor).
   void write(

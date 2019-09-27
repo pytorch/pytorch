@@ -39,6 +39,7 @@ class TORCH_API SGD : public Optimizer {
 
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
+  int64_t iteration() const;
 
   SGDOptions options;
 
@@ -48,7 +49,7 @@ class TORCH_API SGD : public Optimizer {
   SGD() : options(0) {}
 
   /// Counts how often `step()` is called, for dampening.
-  size_t iteration_{0};
+  int64_t iteration_{0};
 };
 } // namespace optim
 } // namespace torch

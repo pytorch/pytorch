@@ -18,6 +18,18 @@ namespace serialize {
 
 InputArchive::InputArchive() {}
 
+void InputArchive::read(const std::string& key, c10::IValue& ivalue) {
+  if (auto named_attr = module_.find_attribute(key)) {
+    ivalue = named_attr->value();
+  } else {
+    TORCH_CHECK(
+      false,
+      "No such serialized IValue '",
+      key,
+      "'");
+  }
+}
+
 bool InputArchive::try_read(
     const std::string& key,
     Tensor& tensor,
