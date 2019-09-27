@@ -281,12 +281,12 @@ Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) { return compar
 Tensor lt(const Tensor& self, Scalar other) { return comparison_op(self, other, lt_stub); }
 Tensor& lt_(Tensor& self, Scalar other) { return comparison_op_(self, other, lt_stub); }
 
-Tensor& le_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, gt_stub); }
-Tensor le(const Tensor& self, const Tensor& other) { return comparison_op(self, other, gt_stub); }
-Tensor& le_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, gt_stub); }
-Tensor& le_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, gt_stub); }
-Tensor le(const Tensor& self, Scalar other) { return comparison_op(self, other, gt_stub); }
-Tensor& le_(Tensor& self, Scalar other) { return comparison_op_(self, other, gt_stub); }
+Tensor& le_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, le_stub); }
+Tensor le(const Tensor& self, const Tensor& other) { return comparison_op(self, other, le_stub); }
+Tensor& le_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, le_stub); }
+Tensor& le_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, le_stub); }
+Tensor le(const Tensor& self, Scalar other) { return comparison_op(self, other, le_stub); }
+Tensor& le_(Tensor& self, Scalar other) { return comparison_op_(self, other, le_stub); }
 
 }
 }  // namespace at

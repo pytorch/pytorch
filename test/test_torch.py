@@ -6218,7 +6218,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     def test_comparison_ops_check_for_scalar_overflow(self):
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             torch.tensor([1 << 5], dtype=torch.uint8) < (1 << 20)
-            (1 << 20) < torch.tensor([1 << 5], dtype=torch.uint8)
             torch.tensor([1 << 5], dtype=torch.uint8) <= (1 << 20)
             (1 << 20) <= torch.tensor([1 << 5], dtype=torch.uint8)
 
