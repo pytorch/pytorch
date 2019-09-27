@@ -124,7 +124,7 @@ static void assert_names_equal(DimnameList a, DimnameList b) {
   TORCH_CHECK(a == b,
       "Name mismatch: specified out tensor with names ", a,
       " are not the same as the computed output names ", b,
-      ". Please rename the out tensor's dims with `Tensor.rename`."
+      ". Please rename the out tensor's dims with `Tensor.rename`.");
 }
 
 void propagate_names(TensorImpl* result, optional<DimnameList> names) {
