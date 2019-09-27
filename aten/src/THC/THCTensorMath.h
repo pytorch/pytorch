@@ -40,12 +40,6 @@
 #include <THC/generic/THCTensorMathCompare.h>
 #include <THC/THCGenerateBoolType.h>
 
-#include <THC/generic/THCTensorMathCompareT.h>
-#include <THC/THCGenerateAllTypes.h>
-
-#include <THC/generic/THCTensorMathCompareT.h>
-#include <THC/THCGenerateBoolType.h>
-
 #include <THC/generic/THCTensorMathScan.h>
 #include <THC/THCGenerateAllTypes.h>
 
