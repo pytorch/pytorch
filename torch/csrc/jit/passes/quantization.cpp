@@ -620,7 +620,6 @@ script::Module InsertQuantDeQuant(
   return module;
 }
 
-// PyBind APIs
 void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
