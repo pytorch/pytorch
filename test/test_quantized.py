@@ -327,15 +327,20 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                          message="mulReLU.out failed")
 
-        # Scalar addition
-        mul = torch.ops.quantized.mul_scalar
+        # Scalar multiplication
         for b in B:
             C_ref = qA.dequantize().numpy() * b.item()
-            qC = _quantize(C_ref, scale, zero_point)
-            dqC = _dequantize(qC, scale, zero_point)
-            qC_hat = mul(qA, b.item(), scale, zero_point)
-            dqC_hat = qC_hat.dequantize()
-            self.assertEqual(dqC, dqC_hat)
+            qC_hat = torch.ops.quantized.mul_scalar(qA, b.item())
+
+            self.assertEqual(C_ref, qC_hat.dequantize())
+
+        # Scalar multiplication + relu
+        for b in B:
+            C_ref = qA.dequantize().numpy() * b.item()
+            C_ref[C_ref < 0] = 0
+            qC_hat = torch.ops.quantized.mul_scalar_relu(qA, b.item())
+
+            self.assertEqual(C_ref, qC_hat.dequantize())
 
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_relu_different_qparams(self):
