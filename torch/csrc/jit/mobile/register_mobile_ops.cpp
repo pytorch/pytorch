@@ -1,11 +1,22 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/ATen.h>
 #include <ATen/core/stack.h>
+#include <torch/csrc/autograd/variable.h>
 
 using Stack = std::vector<c10::IValue>;
 using torch::jit::peek;
 using torch::jit::drop;
 using torch::jit::pack;
+
+namespace {
+
+at::Tensor wrap_tensor(at::Tensor&& tensor) {
+  if (tensor.is_variable()) {
+    return std::move(tensor);
+  } else {
+    return torch::autograd::make_variable(std::move(tensor));
+  }
+}
 
 void zeros_func(c10::OperatorKernel* kernel, Stack* stack) {
   const auto options = c10::TensorOptions()
@@ -93,18 +104,48 @@ void lstm_data_func(c10::OperatorKernel* kernel, Stack* stack) {
 }
 
 void scatter__src_func(c10::OperatorKernel* kernel, Stack* stack) {
-  auto self = (std::move(peek(*stack, 0, 4))).toTensor();
+  auto self = wrap_tensor((std::move(peek(*stack, 0, 4))).toTensor());
   auto result_ = (self).scatter_(
       (std::move(peek(*stack, 1, 4))).toInt(),
       (std::move(peek(*stack, 2, 4))).toTensor(),
+      wrap_tensor((std::move(peek(*stack, 3, 4))).toTensor())
+      );
+  pack(*stack, std::move(result_));
+}
+
+void _pdist_backward_func(c10::OperatorKernel* kernel, Stack* stack) {
+  auto result_ = at::_pdist_backward(
+      (std::move(peek(*stack, 0, 4))).toTensor(),
+      (std::move(peek(*stack, 1, 4))).toTensor(),
+      (std::move(peek(*stack, 2, 4))).toDouble(),
       (std::move(peek(*stack, 3, 4))).toTensor()
       );
-//auto result_ = torch::autograd::scatter_(const_cast<Tensor&>(*this), dim, index, src);  drop(*stack, 4);
+  drop(*stack, 4);
+  pack(*stack, std::move(result_));
+}
+
+void select_int_func(c10::OperatorKernel* kernel, Stack* stack) {
+  auto result_ = at::select(
+      (std::move(peek(*stack, 0, 3))).toTensor(),
+      (std::move(peek(*stack, 1, 3))).toInt(),
+      (std::move(peek(*stack, 2, 3))).toInt()
+      );
+  drop(*stack, 3);
+  pack(*stack, std::move(result_));
+}
+
+void tanh__func(c10::OperatorKernel* kernel, Stack* stack) {
+  auto self = (std::move(peek(*stack, 0, 1))).toTensor();
+  auto result_ = at::tanh_(
+      self
+      );
+  drop(*stack, 1);
   pack(*stack, std::move(result_));
 }
 
 at::Tensor optional_to_tensor(c10::optional<at::Tensor> v) {
   return v.has_value() ? *v : at::Tensor();
+}
 }
 
 static auto registry0 = torch::RegisterOperators().op(
@@ -275,10 +316,16 @@ torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
 })
 ).op(
   "_aten::index_select",
-  torch::RegisterOperators::options().kernel<decltype(at::index_select), &at::index_select>(c10::TensorTypeId::CPUTensorId)
+torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+[](at::Tensor a, int64_t dim, at::Tensor b) ->at::Tensor {
+return at::index_select(wrap_tensor(std::move(a)), dim, b);
+})
 ).op(
   "_aten::_pack_padded_sequence",
   torch::RegisterOperators::options().kernel<decltype(at::_pack_padded_sequence), &at::_pack_padded_sequence>(c10::TensorTypeId::CPUTensorId)
+).op(
+"_aten::_shape_as_tensor",
+torch::RegisterOperators::options().kernel<decltype(at::_shape_as_tensor), &at::_shape_as_tensor>(c10::TensorTypeId::CPUTensorId)
 ).op(
   "_aten::lstm.data(Tensor data, Tensor batch_sizes, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor, Tensor)",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
@@ -330,5 +377,82 @@ torch::RegisterOperators::options().catchAllKernel(
 "_aten::arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
 torch::RegisterOperators::options().catchAllKernel(
   arange_start_step_func)
+).op(
+"_aten::select.int(Tensor(a) self, int dim, int index) -> Tensor(a)",
+torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  select_int_func).aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
+).op(
+"_aten::_pad_packed_sequence(Tensor data, Tensor batch_sizes, bool batch_first, Scalar padding_value, int total_length) -> (Tensor, Tensor)",
+torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  _pdist_backward_func)
+).op(
+"_aten::cat",
+torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](at::Tensor a, int64_t dim) ->at::Tensor {
+   return at::cat(a, dim);
+ })
+).op(
+"_aten::_reshape_from_tensor",
+torch::RegisterOperators::options().kernel<decltype(at::_reshape_from_tensor), &at::_reshape_from_tensor>(c10::TensorTypeId::CPUTensorId)
+).op(
+"_aten::matmul(Tensor self, Tensor other) -> Tensor",
+torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+[](c10::OperatorKernel* kernel, Stack* stack) {
+  auto result_ = at::matmul(
+      (std::move(peek(*stack, 0, 2))).toTensor(),
+      (std::move(peek(*stack, 1, 2))).toTensor()
+      );
+  drop(*stack, 2);
+  pack(*stack, std::move(result_));
+})
+).op(
+"_aten::tanh_(Tensor(a!) self) -> Tensor(a!)",
+torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+tanh__func).aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
+).op(
+"_aten::tanh",
+torch::RegisterOperators::options().kernel<decltype(at::tanh), &at::tanh>(c10::TensorTypeId::CPUTensorId)
+).op(
+"_aten::softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
+torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+   auto result_ = at::softmax(
+       (std::move(peek(*stack, 0, 3))).toTensor(),
+       (std::move(peek(*stack, 1, 3))).toInt(),
+      (std::move(peek(*stack, 2, 3))).toOptional<c10::ScalarType>()
+       );
+   drop(*stack, 3);
+   pack(*stack, std::move(result_));
+})
+).op(
+"_aten::slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)",
+torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+  auto result_ = at::slice(
+  (std::move(peek(*stack, 0, 5))).toTensor(),
+  (std::move(peek(*stack, 1, 5))).toInt(),
+  (std::move(peek(*stack, 2, 5))).toInt(),
+  (std::move(peek(*stack, 3, 5))).toInt(),
+  (std::move(peek(*stack, 4, 5))).toInt()
+  );
+  drop(*stack, 5);
+  pack(*stack, std::move(result_));
+  }).aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
+).op(
+"_aten::unsqueeze",
+torch::RegisterOperators::options().kernel<decltype(at::unsqueeze), &at::unsqueeze>(c10::TensorTypeId::CPUTensorId)
+).op(
+"_aten::bmm",
+torch::RegisterOperators::options().kernel<decltype(at::bmm), &at::bmm>(c10::TensorTypeId::CPUTensorId) ).op(
+"_aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)",
+torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+  auto result_ = at::squeeze(
+  (std::move(peek(*stack, 0, 2))).toTensor(),
+  (std::move(peek(*stack, 1, 2))).toInt()
+  );
+  drop(*stack, 2);
+  pack(*stack, std::move(result_));
+}).aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
 );
 

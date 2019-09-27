@@ -30,16 +30,24 @@ InterpreterState::InterpreterState(std::shared_ptr<Code> code) : code_(code) {
 bool InterpreterState::run(Stack& stack) {
   size_t pc = 0;
   while (true) {
-    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
+    Instruction inst = code_->instructions_[pc];
+    std::cout << "RUNNING " << pc << " " << inst;
+    if (inst.op == OP) {
+      std::cout << " # " << code_->op_names_[inst.X].name << "."
+                << code_->op_names_[inst.X].overload_name;
+    }
     std::cout << std::endl;
     for (auto val : stack) {
       if (val.isTensor()) {
         std::cout << val.toTensor().sizes() << std::endl;
-      } else {
+      } else if (val.isTensorList()) {
+        auto list = val.toTensorList();
+        std::cout << "Tensor list with size " << list.size() << std::endl;
+      }
+      else {
         std::cout << val << std::endl;
       }
     }
-    Instruction inst = code_->instructions_[pc];
     TORCH_CHECK(isOpSupportedInMobile(inst.op), toString(inst.op),
                 " is not supported in mobile module.");
     switch (inst.op) {

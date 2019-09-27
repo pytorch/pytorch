@@ -28,8 +28,8 @@ void printSlots(const c10::intrusive_ptr<c10::ivalue::Object>& obj) {
 }
 
 void testLiteInterpreter() {
-  torch::autograd::AutoGradMode guard(false);
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+//  torch::autograd::AutoGradMode guard(false);
+//  at::AutoNonVariableTypeMode non_var_type_mode(true);
   std::vector<torch::jit::IValue> inputs;
 
 //  auto m = load("/Users/myuan/data/fbnet/fbnet.pt");
@@ -39,7 +39,7 @@ void testLiteInterpreter() {
 //  inputs.push_back(torch::ones({1, 1, 30, 30}));
 
   // pytext
-  auto m = load("/Users/myuan/data/pytext/pytext_pickle.pt");
+  auto m = load("/Users/myuan/data/pytext/model_traced.pt");
   auto options = torch::TensorOptions().dtype(torch::kI64)
                      .requires_grad(false).device(torch::kCPU);
   int length = 5;

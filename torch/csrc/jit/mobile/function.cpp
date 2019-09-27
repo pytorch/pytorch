@@ -19,7 +19,7 @@ void Function::append_operator(const std::string& name,
   // and here. TODO: remove it when we have separate build for lite interpreter.
   opname.name = "_" + opname.name;
   auto op = c10::Dispatcher::singleton().findSchema(opname);
-  assert(op.has_value());
+  TORCH_CHECK(op.has_value(), opname.name, ".", opname.overload_name, " cannot be found.");
   code_->operators_.emplace_back(op);
 }
 
