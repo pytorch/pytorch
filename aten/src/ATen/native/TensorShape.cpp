@@ -926,7 +926,12 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  return self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_squeeze_outnames(self);
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
 
 Tensor squeeze(const Tensor& self, int64_t dim) {
@@ -937,7 +942,11 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
     return self.as_strided(self.sizes(), self.strides());
   }
   auto g = inferSqueezeGeometry(self, dim);
-  return self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_except(result, self, {dim});
+#endif
+  return result;
 }
 
 Tensor & squeeze_(Tensor& self) {

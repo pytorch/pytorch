@@ -1244,6 +1244,12 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::index_add", "dimname"},
     #endif
     #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_fill_", "dimname_Scalar"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_fill_", "dimname_Scalar"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
         {"aten::index_fill", "dimname_Scalar"},
     #endif
     #ifdef BUILD_NAMEDTENSOR

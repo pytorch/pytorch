@@ -221,6 +221,30 @@ class TestNamedTensor(TestCase):
             [torch.randn(3, requires_grad=True, names=names)],
             names)
 
+    def test_index_fill(self):
+        for device in torch.testing.get_all_device_types():
+            expected_names = ('N', 'C')
+            x = torch.randn(3, 5, device=device, names=expected_names)
+
+            output = x.index_fill_('C', torch.tensor([0, 1], device=device), 5)
+            self.assertEqual(output.names, expected_names)
+
+            output = x.index_fill_('C', torch.tensor([0, 1], device=device), torch.tensor(4.))
+            self.assertEqual(output.names, expected_names)
+
+            output = x.index_fill('C', torch.tensor([0, 1], device=device), 5)
+            self.assertEqual(output.names, expected_names)
+
+            output = x.index_fill('C', torch.tensor([0, 1], device=device), torch.tensor(4.))
+            self.assertEqual(output.names, expected_names)
+
+    def test_squeeze(self):
+        x = create('N:3,C:1,H:1,W:1')
+        output = x.squeeze('C')
+        self.assertEqual(output.names, ['N', 'H', 'W'])
+
+        output = x.squeeze()
+        self.assertEqual(output.names, ['N'])
 
     def test_repr(self):
         named_tensor = torch.zeros(2, 3).rename_('N', 'C')
@@ -1064,7 +1088,7 @@ class TestNamedTensor(TestCase):
             Case(torch.logsumexp, False, True, True, True, None),
             Case(torch.mode, False, False, True, True, values_and_indices),
             Case(kthvalue_wrapper, False, False, True, True, values_and_indices),
-            Case(torch.median, False, False, True, True, values_and_indices),
+            Case(torch.median, True, False, True, True, values_and_indices),
         ]
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
@@ -1790,7 +1814,7 @@ class TestNamedTensor(TestCase):
     def test_nyi_dimname_overload_msg(self):
         x = torch.randn(3, 3)
         with self.assertRaisesRegex(RuntimeError, "squeeze: You passed a dimname"):
-            x.squeeze("N")
+            x.squeeze_("N")
 
     def test_dot(self):
         for device in torch.testing.get_all_device_types():

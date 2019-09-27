@@ -805,6 +805,12 @@ class CAFFE2_API Tensor {
   Tensor & index_fill_(int64_t dim, const Tensor & index, const Tensor & value) const;
   Tensor index_fill(int64_t dim, const Tensor & index, const Tensor & value) const;
   #ifdef BUILD_NAMEDTENSOR
+  Tensor & index_fill_(Dimname dim, const Tensor & index, Scalar value) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & index_fill_(Dimname dim, const Tensor & index, const Tensor & value) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
   Tensor index_fill(Dimname dim, const Tensor & index, Scalar value) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
