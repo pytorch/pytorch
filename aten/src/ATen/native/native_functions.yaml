@@ -4044,16 +4044,10 @@
 - func: ge_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_ge_
-    CUDA: legacy::cuda::_th_ge_
 
 - func: ge_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_ge_
-    CUDA: legacy::cuda::_th_ge_
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
@@ -4524,30 +4518,30 @@
 
 - func: ge.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: ge_scalar_out_cpu
-    CUDA: ge_scalar_out_cuda
+    CPU: ge_out
+    CUDA: ge_out
     QuantizedCPU: ge_out_quantized_cpu
 
 - func: ge.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_ge
-    CUDA: legacy::cuda::_th_ge
+    CPU: ge
+    CUDA: ge
     QuantizedCPU: ge_quantized_cpu
 
 - func: ge.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: ge_out_cpu
-    CUDA: ge_out_cuda
+    CPU: ge_out
+    CUDA: ge_out
     QuantizedCPU: ge_out_quantized_cpu
 
 - func: ge.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_ge
-    CUDA: legacy::cuda::_th_ge
+    CPU: ge
+    CUDA: ge
     QuantizedCPU: ge_quantized_cpu
 
 - func: le.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)

@@ -130,26 +130,6 @@ Tensor & gt_scalar_out_cuda(Tensor & result, const Tensor & self, const Scalar v
   }
 }
 
-Tensor & ge_out_cuda(Tensor & result, const Tensor & self, const Tensor & other) {
-  if (result.dtype() == at::ScalarType::Byte) {
-    AT_WARN("torch.ge received 'out' parameter with dtype torch.uint8, this behavior is now deprecated," \
-            "please use 'out' parameter with dtype torch.bool instead.");
-    return legacy::cuda::_th_ge_byte_out(result, self, other);
-  } else {
-    return legacy::cuda::_th_ge_out(result, self, other);
-  }
-}
-
-Tensor & ge_scalar_out_cuda(Tensor & result, const Tensor & self, const Scalar value) {
-  if (result.dtype() == at::ScalarType::Byte) {
-    AT_WARN("torch.ge received 'out' parameter with dtype torch.uint8, this behavior is now deprecated," \
-            "please use 'out' parameter with dtype torch.bool instead.");
-    return legacy::cuda::_th_ge_byte_out(result, self, value);
-  } else {
-    return legacy::cuda::_th_ge_out(result, self, value);
-  }
-}
-
 Tensor & eq_out_cuda(Tensor & result, const Tensor & self, const Tensor & other) {
   if (result.dtype() == at::ScalarType::Byte) {
     AT_WARN("torch.eq received 'out' parameter with dtype torch.uint8, this behavior is now deprecated," \
