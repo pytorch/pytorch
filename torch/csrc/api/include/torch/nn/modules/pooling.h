@@ -106,6 +106,10 @@ class TORCH_API MaxPool1dImpl : public MaxPoolImpl<1, MaxPool1dImpl> {
  public:
   using MaxPoolImpl<1, MaxPool1dImpl>::MaxPoolImpl;
   Tensor forward(const Tensor& input);
+
+  /// Returns the outputs and the indices of the max values.
+  /// Useful for `torch::nn::MaxUnpool1d` later.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `MaxPool1dImpl`.
@@ -123,6 +127,10 @@ class TORCH_API MaxPool2dImpl : public MaxPoolImpl<2, MaxPool2dImpl> {
  public:
   using MaxPoolImpl<2, MaxPool2dImpl>::MaxPoolImpl;
   Tensor forward(const Tensor& input);
+
+  /// Returns the outputs and the indices of the max values.
+  /// Useful for `torch::nn::MaxUnpool2d` later.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `MaxPool2dImpl`.
@@ -140,6 +148,10 @@ class TORCH_API MaxPool3dImpl : public MaxPoolImpl<3, MaxPool3dImpl> {
  public:
   using MaxPoolImpl<3, MaxPool3dImpl>::MaxPoolImpl;
   Tensor forward(const Tensor& input);
+
+  /// Returns the outputs and the indices of the max values.
+  /// Useful for `torch::nn::MaxUnpool3d` later.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `MaxPool3dImpl`.
@@ -147,6 +159,48 @@ class TORCH_API MaxPool3dImpl : public MaxPoolImpl<3, MaxPool3dImpl> {
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(MaxPool3d);
+
+// ============================================================================
+
+/// Base class for all (dimension-specialized) adaptive maxpool modules.
+template <size_t D, typename Derived>
+class TORCH_API AdaptiveMaxPoolImpl : public torch::nn::Cloneable<Derived> {
+ public:
+  AdaptiveMaxPoolImpl(ExpandingArray<D> output_size)
+      : AdaptiveMaxPoolImpl(AdaptiveMaxPoolOptions<D>(output_size)) {}
+  explicit AdaptiveMaxPoolImpl(const AdaptiveMaxPoolOptions<D>& options_);
+
+  void reset() override;
+
+  /// Pretty prints the `AdaptiveMaxPool{1,2,3}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  AdaptiveMaxPoolOptions<D> options;
+};
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveMaxPool1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies adaptive maxpool over a 1-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.AdaptiveMaxPool1d
+/// to learn about the exact behavior of this module.
+class TORCH_API AdaptiveMaxPool1dImpl :
+  public AdaptiveMaxPoolImpl<1, AdaptiveMaxPool1dImpl> {
+ public:
+  using AdaptiveMaxPoolImpl<1, AdaptiveMaxPool1dImpl>::AdaptiveMaxPoolImpl;
+
+  Tensor forward(const Tensor& input);
+
+  /// Returns the indices along with the outputs.
+  /// Useful to pass to nn.MaxUnpool1d.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
+};
+
+/// A `ModuleHolder` subclass for `AdaptiveMaxPool1dImpl`.
+/// See the documentation for `AdaptiveMaxPool1dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(AdaptiveMaxPool1d);
 
 } // namespace nn
 } // namespace torch
