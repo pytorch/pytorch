@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/quantization.h>
-#include <torch/csrc/jit/passes/quantization_patterns.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/quantization_patterns.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 #include <torch/csrc/jit/ir.h>
@@ -111,7 +111,8 @@ Value* insertScalarType(Node* ins_node, at::ScalarType t) {
 
 class InsertObserversHelper {
  public:
-  InsertObserversHelper(const ModuleQConfigMap& map) : module_qconfig_map_(map) {}
+  InsertObserversHelper(const ModuleQConfigMap& map)
+      : module_qconfig_map_(map) {}
   void insertObservers(script::Module& module, const std::string& method_name);
 
  private:
@@ -122,15 +123,16 @@ class InsertObserversHelper {
       const QConfig& qconfig);
 
   void findIntermediateValuesInPattern(
-    Graph& graph,
-    const std::string& pattern);
+      Graph& graph,
+      const std::string& pattern);
 
   void addIntermediateValuesToSkipObserver(
       const script::Module& module,
       const std::string& method_name);
 
-  // Values that are the output of GetAttr[name="weight"] and GetAttr[name="bias"]
-  // will be propagated from parent method call to the child graph
+  // Values that are the output of GetAttr[name="weight"] and
+  // GetAttr[name="bias"] will be propagated from parent method call to the
+  // child graph
   void propagateValues(Node* n, std::shared_ptr<Graph>& graph);
 
   const ModuleQConfigMap& module_qconfig_map_;
@@ -343,7 +345,8 @@ void InsertObserversHelper::insertObservers(
                 "or child instance in insert_observers_pass right now");
             callee_module = module;
           }
-          auto method_graph = callee_module.get_method(module_method_name).graph();
+          auto method_graph =
+              callee_module.get_method(module_method_name).graph();
           propagateValues(v->node(), method_graph);
           // Recursively insert observer for the forward function of child
           // module
@@ -835,7 +838,7 @@ graph(%self, %scale, %zero_point, %dtype):
     auto float_weight = module.get_parameter("weight").variable_data();
     auto scale = toIValue(match_vmap.at(vmap.at("scale"))).value().toDouble();
     auto zero_point =
-      toIValue(match_vmap.at(vmap.at("zero_point"))).value().toInt();
+        toIValue(match_vmap.at(vmap.at("zero_point"))).value().toInt();
     auto dtype =
         toIValue(match_vmap.at(vmap.at("dtype"))).value().toScalarType();
     module.register_buffer(
