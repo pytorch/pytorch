@@ -430,8 +430,6 @@ C10_EXPORT void GemmStridedBatched<float, CPUContext>(
     B_array[i] = B + i * B_stride;
     C_array[i] = C + i * C_stride;
   }
-  LOG(INFO) << "M " << M << " N " << N << " K " << K << " lda " << lda
-            << " ldb " << ldb << " ldc " << ldc << " batch_size " << batch_size;
   cblas_sgemm_batch(
       CblasRowMajor,
       &trans_A,
