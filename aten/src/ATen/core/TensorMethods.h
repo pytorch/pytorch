@@ -501,8 +501,9 @@ inline Tensor Tensor::bernoulli(Generator * generator) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::bernoulli(const_cast<Tensor&>(*this), generator);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::bernoulli(Tensor self, *, Generator? generator=None) -> Tensor");
-    return table->callUnboxed<Tensor, const Tensor &, Generator *>(const_cast<Tensor&>(*this), generator);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bernoulli", ""}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor, const Tensor &, Generator *>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), generator);
 #endif
 }
 inline Tensor & Tensor::bernoulli_(const Tensor & p, Generator * generator) const {
@@ -515,8 +516,9 @@ inline Tensor & Tensor::bernoulli_(const Tensor & p, Generator * generator) cons
             AT_ERROR("bernoulli_ not implemented for ", at::toString(type_set()));
     }
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)");
-    return table->callUnboxed<Tensor &, Tensor &, const Tensor &, Generator *>(const_cast<Tensor&>(*this), p, generator);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bernoulli_", "Tensor"}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, const Tensor &, Generator *>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this, p)), const_cast<Tensor&>(*this), p, generator);
 #endif
 }
 inline Tensor & Tensor::bernoulli_(double p, Generator * generator) const {
@@ -529,16 +531,18 @@ inline Tensor & Tensor::bernoulli_(double p, Generator * generator) const {
             AT_ERROR("bernoulli_ not implemented for ", at::toString(type_set()));
     }
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)");
-    return table->callUnboxed<Tensor &, Tensor &, double, Generator *>(const_cast<Tensor&>(*this), p, generator);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bernoulli_", "float"}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, double, Generator *>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), p, generator);
 #endif
 }
 inline Tensor Tensor::bernoulli(double p, Generator * generator) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::bernoulli(const_cast<Tensor&>(*this), p, generator);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::bernoulli.p(Tensor self, float p, *, Generator? generator=None) -> Tensor");
-    return table->callUnboxed<Tensor, const Tensor &, double, Generator *>(const_cast<Tensor&>(*this), p, generator);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bernoulli", "p"}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor, const Tensor &, double, Generator *>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), p, generator);
 #endif
 }
 inline Tensor Tensor::bincount(const Tensor & weights, int64_t minlength) const {
@@ -4532,8 +4536,9 @@ inline Tensor & Tensor::random_(int64_t from, int64_t to, Generator * generator)
             AT_ERROR("random_ not implemented for ", at::toString(type_set()));
     }
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::random_.from(Tensor(a!) self, int from, int to, *, Generator? generator=None) -> Tensor(a!)");
-    return table->callUnboxed<Tensor &, Tensor &, int64_t, int64_t, Generator *>(const_cast<Tensor&>(*this), from, to, generator);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::random_", "from"}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, int64_t, int64_t, Generator *>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), from, to, generator);
 #endif
 }
 inline Tensor & Tensor::random_(int64_t to, Generator * generator) const {
@@ -4546,8 +4551,9 @@ inline Tensor & Tensor::random_(int64_t to, Generator * generator) const {
             AT_ERROR("random_ not implemented for ", at::toString(type_set()));
     }
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)");
-    return table->callUnboxed<Tensor &, Tensor &, int64_t, Generator *>(const_cast<Tensor&>(*this), to, generator);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::random_", "to"}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, int64_t, Generator *>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), to, generator);
 #endif
 }
 inline Tensor & Tensor::random_(Generator * generator) const {
@@ -4560,8 +4566,9 @@ inline Tensor & Tensor::random_(Generator * generator) const {
             AT_ERROR("random_ not implemented for ", at::toString(type_set()));
     }
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)");
-    return table->callUnboxed<Tensor &, Tensor &, Generator *>(const_cast<Tensor&>(*this), generator);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::random_", ""}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, Generator *>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), generator);
 #endif
 }
 inline Tensor & Tensor::uniform_(double from, double to, Generator * generator) const {
@@ -4574,8 +4581,9 @@ inline Tensor & Tensor::uniform_(double from, double to, Generator * generator) 
             AT_ERROR("uniform_ not implemented for ", at::toString(type_set()));
     }
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)");
-    return table->callUnboxed<Tensor &, Tensor &, double, double, Generator *>(const_cast<Tensor&>(*this), from, to, generator);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::uniform_", ""}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, double, double, Generator *>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), from, to, generator);
 #endif
 }
 inline Tensor & Tensor::normal_(double mean, double std, Generator * generator) const {
@@ -4588,8 +4596,9 @@ inline Tensor & Tensor::normal_(double mean, double std, Generator * generator) 
             AT_ERROR("normal_ not implemented for ", at::toString(type_set()));
     }
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)");
-    return table->callUnboxed<Tensor &, Tensor &, double, double, Generator *>(const_cast<Tensor&>(*this), mean, std, generator);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::normal_", ""}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, double, double, Generator *>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), mean, std, generator);
 #endif
 }
 inline Tensor & Tensor::cauchy_(double median, double sigma, Generator * generator) const {
@@ -4602,8 +4611,9 @@ inline Tensor & Tensor::cauchy_(double median, double sigma, Generator * generat
             AT_ERROR("cauchy_ not implemented for ", at::toString(type_set()));
     }
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)");
-    return table->callUnboxed<Tensor &, Tensor &, double, double, Generator *>(const_cast<Tensor&>(*this), median, sigma, generator);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::cauchy_", ""}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, double, double, Generator *>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), median, sigma, generator);
 #endif
 }
 inline Tensor & Tensor::log_normal_(double mean, double std, Generator * generator) const {
@@ -4616,8 +4626,9 @@ inline Tensor & Tensor::log_normal_(double mean, double std, Generator * generat
             AT_ERROR("log_normal_ not implemented for ", at::toString(type_set()));
     }
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)");
-    return table->callUnboxed<Tensor &, Tensor &, double, double, Generator *>(const_cast<Tensor&>(*this), mean, std, generator);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::log_normal_", ""}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, double, double, Generator *>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), mean, std, generator);
 #endif
 }
 inline Tensor & Tensor::exponential_(double lambd, Generator * generator) const {
@@ -4630,8 +4641,9 @@ inline Tensor & Tensor::exponential_(double lambd, Generator * generator) const 
             AT_ERROR("exponential_ not implemented for ", at::toString(type_set()));
     }
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)");
-    return table->callUnboxed<Tensor &, Tensor &, double, Generator *>(const_cast<Tensor&>(*this), lambd, generator);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::exponential_", ""}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, double, Generator *>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), lambd, generator);
 #endif
 }
 inline Tensor & Tensor::geometric_(double p, Generator * generator) const {
@@ -4644,8 +4656,9 @@ inline Tensor & Tensor::geometric_(double p, Generator * generator) const {
             AT_ERROR("geometric_ not implemented for ", at::toString(type_set()));
     }
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)");
-    return table->callUnboxed<Tensor &, Tensor &, double, Generator *>(const_cast<Tensor&>(*this), p, generator);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::geometric_", ""}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, double, Generator *>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), p, generator);
 #endif
 }
 inline Tensor Tensor::diag(int64_t diagonal) const {
@@ -5227,8 +5240,9 @@ inline Tensor Tensor::multinomial(int64_t num_samples, bool replacement, Generat
             AT_ERROR("multinomial not implemented for ", at::toString(type_set()));
     }
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor");
-    return table->callUnboxed<Tensor, const Tensor &, int64_t, bool, Generator *>(const_cast<Tensor&>(*this), num_samples, replacement, generator);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::multinomial", ""}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<Tensor, const Tensor &, int64_t, bool, Generator *>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), num_samples, replacement, generator);
 #endif
 }
 inline Tensor Tensor::lgamma() const {

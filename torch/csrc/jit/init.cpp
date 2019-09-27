@@ -182,17 +182,21 @@ void initJITBindings(PyObject* module) {
           py::arg("method_name"),
           py::arg("inplace") = false)
       .def(
-          "_jit_pass_insert_pack_unpack",
-          [](script::Module& module) { return InsertPackUnpack(module); })
+          "_jit_pass_insert_prepack_unpack",
+          [](std::shared_ptr<Graph>& g) { return InsertPrepackUnpack(g); })
+      .def(
+          "_jit_pass_insert_prepack_unpack",
+          [](script::Module& module) { return InsertPrepackUnpack(module); })
       .def(
           "_jit_pass_quant_fusion",
-          [](std::shared_ptr<Graph> g) { return QuantFusion(g); })
+          [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
       .def("_jit_pass_fuse_linear", &FuseLinear)
-      .def("_jit_pass_fold_quantize",
-           [](script::Module& module, const std::string& method_name) {
-             FoldQuantizeCallIntoBuffer(module, method_name);
-           })
+      .def(
+          "_jit_pass_fold_quantize",
+          [](script::Module& module, const std::string& method_name) {
+            FoldQuantizeCallIntoBuffer(module, method_name);
+          })
       .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
       .def(
           "_jit_pass_quantlint",
