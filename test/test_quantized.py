@@ -967,11 +967,9 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qX.equal(qX2), equal_ref(qX, qX2))
 
 
-@unittest.skipIf(
-    not torch.fbgemm_is_cpu_supported(),
-    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-    " with instruction set support avx2 or newer.",
-)
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
 class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
     @no_deadline
@@ -1245,22 +1243,20 @@ def test_qlinear_unpack_op(self, W, use_channelwise, qengine):
 class TestQuantizedLinear(unittest.TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
     def test_qlinear(self):
-        print(torch.backends.quantized.get_supported_qengines())
-        if 'qnnpack' in torch.backends.quantized.get_supported_qengines():
+        if 'qnnpack' in torch.backends.quantized.supported_engines:
             if not IS_WINDOWS and not IS_PPC and not TEST_WITH_UBSAN:
                 with enable_mobile_quantized_engine():
                     test_qlinear_op(self, qengine='qnnpack')
-        if torch.fbgemm_is_cpu_supported():
+        if 'fbgemm' in torch.backends.quantized.supported_engines:
             test_qlinear_op(self, qengine='fbgemm')
 
     """Tests the correctness of the quantized::linear_unpack op."""
     def test_qlinear_unpack(self):
-        print(torch.backends.quantized.get_supported_qengines())
-        if 'qnnpack' in torch.backends.quantized.get_supported_qengines():
+        if 'qnnpack' in torch.backends.quantized.supported_engines:
             if not IS_WINDOWS and not IS_PPC and not TEST_WITH_UBSAN:
                 with enable_mobile_quantized_engine():
                     test_qlinear_unpack_op(self, qengine='qnnpack')
-        if torch.fbgemm_is_cpu_supported():
+        if 'fbgemm' in torch.backends.quantized.supported_engines:
             test_qlinear_unpack_op(self, qengine='fbgemm')
 
 
@@ -1477,20 +1473,20 @@ def test_qconv_unpack_op(self, X, strideH, strideW, padH, padW, channelwise, qen
 class TestQuantizedConv(unittest.TestCase):
     """Tests the correctness of quantized convolution op."""
     def test_qconv(self):
-        if 'qnnpack' in torch.backends.quantized.get_supported_qengines():
+        if 'qnnpack' in torch.backends.quantized.supported_engines:
             if not IS_WINDOWS and not IS_PPC and not TEST_WITH_UBSAN:
                 with enable_mobile_quantized_engine():
                     test_qconv_op(self, qengine='qnnpack')
-        if torch.fbgemm_is_cpu_supported():
+        if 'fbgemm' in torch.backends.quantized.supported_engines:
             test_qconv_op(self, qengine='fbgemm')
 
     """Tests the correctness of the quantized::qconv_unpack op."""
     def test_qconv_unpack(self):
-        if 'qnnpack' in torch.backends.quantized.get_supported_qengines():
+        if 'qnnpack' in torch.backends.quantized.supported_engines:
             if not IS_WINDOWS and not IS_PPC and not TEST_WITH_UBSAN:
                 with enable_mobile_quantized_engine():
                     test_qconv_unpack_op(self, qengine='qnnpack')
-        if torch.fbgemm_is_cpu_supported():
+        if 'fbgemm' in torch.backends.quantized.supported_engines:
             test_qconv_unpack_op(self, qengine='fbgemm')
 
 @unittest.skipIf(not TEST_WITH_QNNPACK, "This Pytorch Build has not been built with QNNPACK")
@@ -1612,7 +1608,7 @@ class TestQNNPackOps(TestCase):
 
             a_pool_nhwc = a_pool.permute([0, 2, 3, 1])
 
-            qa_pool = q_max_pool(qa, k, s, p, d)
+            qa_pool = q_max_pool(qa, k, s, p, d, ceil_mode=False)
 
             qa_pool_int = qa_pool.dequantize()
             np.testing.assert_equal(a_pool.numpy(), qa_pool_int.numpy())
@@ -1620,7 +1616,7 @@ class TestQNNPackOps(TestCase):
             A = torch.ones((0, 2, 4, 4), dtype=torch.float32)
             qa = torch.quantize_per_tensor(A, scale=scale, zero_point=zero_point,
                                            dtype=torch_type)
-            qc = q_max_pool(qa, k, s, p, d)
+            qc = q_max_pool(qa, k, s, p, d, ceil_mode=False)
             oH = pool_output_shape(4, kernel, padding, stride, dilation)
             oW = pool_output_shape(4, kernel, padding, stride, dilation)
             np.testing.assert_equal(qc.size(), (0, 2, oH, oW),
