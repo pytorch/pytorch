@@ -509,6 +509,7 @@ def destroy_process_group(group=group.WORLD):
     global _pg_group_ranks
     global _default_pg
     global _default_pg_init_method
+    global _group_count
 
     if group == GroupMember.NON_GROUP_MEMBER:
         return
@@ -527,6 +528,16 @@ def destroy_process_group(group=group.WORLD):
         _pg_map.clear()
         _pg_names.clear()
         _pg_group_ranks.clear()
+
+        # when process group doesn't have an explicit name (only WORLD (default)
+        # process group can have an explicit name), we use global _group_counter
+        # to generate the name. We need to reset the counter on destruction to
+        # allow consistent value to be generated when we re-create process
+        # groups after some trainers recover from failure
+        #
+        # We only reset this when WORLD is being destroyed because if this
+        # process group is in good state, we aren't dealing with failures.
+        _group_count = 0
     else:
         del _pg_map[pg]
         del _pg_names[pg]
