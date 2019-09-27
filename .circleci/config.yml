@@ -783,7 +783,9 @@ jobs:
         name: Build
         no_output_timeout: "1h"
         command: |
-          set -eux -o pipefail
+          # Do not set -u here; there is some problem with CircleCI
+          # variable expansion with PROMPT_COMMAND
+          set -ex -o pipefail
           script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_build.sh"
           cat "$script"
           source "$script"
@@ -792,7 +794,9 @@ jobs:
         name: Test
         no_output_timeout: "1h"
         command: |
-          set -eux -o pipefail
+          # Do not set -u here; there is some problem with CircleCI
+          # variable expansion with PROMPT_COMMAND
+          set -ex -o pipefail
           script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_test.sh"
           cat "$script"
           source "$script"
@@ -864,6 +868,7 @@ jobs:
           script="/Users/distiller/project/.circleci/scripts/binary_ios_upload.sh"
           cat "$script"
           source "$script"
+
   setup:
     docker:
       - image: circleci/python:3.7.3
@@ -3337,7 +3342,7 @@ workflows:
           requires: 
             - setup
       - binary_ios_build:
-          name: pytorch_ios_10_2_1_nigthly_arm64_build
+          name: pytorch_ios_10_2_1_nightly_arm64_build
           build_environment: "libtorch-ios-10.2.1-nightly-arm64-build"
           ios_arch: "arm64"
           ios_platform: "OS"
@@ -3349,7 +3354,7 @@ workflows:
           requires:
             - setup
             - pytorch_ios_10_2_1_nightly_x86_64_build
-            - pytorch_ios_10_2_1_nigthly_arm64_build
+            - pytorch_ios_10_2_1_nightly_arm64_build
       - pytorch_linux_build:
           name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32"
