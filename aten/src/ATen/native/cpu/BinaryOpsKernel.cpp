@@ -149,6 +149,6 @@ REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
 REGISTER_DISPATCH(lt_stub, &lt_kernel);
-REGISTER_DISPATCH(lt_stub, &gt_kernel);
+REGISTER_DISPATCH(gt_stub, &gt_kernel);
 
 }} // namespace at::native
