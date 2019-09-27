@@ -4,8 +4,6 @@ from torch._six import inf
 from itertools import product
 import warnings
 
-from ._overrides import torch_function_dispatch
-
 __all__ = [
     'align_tensors',  # BUILD_NAMEDTENSOR only
     'broadcast_tensors',
@@ -26,13 +24,6 @@ __all__ = [
     'unique_consecutive',
 ]
 
-
-def _broadcast_tensors_dispatcher(*tensors):
-    for tensor in tensors:
-        yield tensor
-
-
-@torch_function_dispatch(_broadcast_tensors_dispatcher)
 def broadcast_tensors(*tensors):
     r"""broadcast_tensors(*tensors) -> List of Tensors
 
@@ -391,13 +382,6 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
 
 del torch.unique_dim
 
-
-def _unique_dispatcher(input, sorted=None, return_inverse=None,
-                       return_counts=None, dim=None):
-    return (input,)
-
-
-@torch_function_dispatch(_unique_dispatcher)
 def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
     r"""Returns the unique elements of the input tensor.
 
@@ -534,12 +518,6 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
         return output, counts
     return output
 
-
-def _tensordot_dispatcher(a, b, dims=None):
-    return (a, b)
-
-
-@torch_function_dispatch(_tensordot_dispatcher)
 def tensordot(a, b, dims=2):
     r"""Returns a contraction of a and b over multiple dimensions.
 
@@ -754,12 +732,6 @@ def chain_matmul(*matrices):
     """
     return torch._C._VariableFunctions.chain_matmul(matrices)
 
-
-def _lu_dispatcher(A, pivot=None, get_infos=None, out=None):
-    return (A,)
-
-
-@torch_function_dispatch(_lu_dispatcher)
 def lu(A, pivot=True, get_infos=False, out=None):
     r"""Computes the LU factorization of a square matrix or batches of square matrices
     :attr:`A`. Returns a tuple containing the LU factorization and pivots of :attr:`A`.
