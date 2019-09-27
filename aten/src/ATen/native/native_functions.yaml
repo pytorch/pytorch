@@ -1695,7 +1695,7 @@
   dispatch:
     MkldnnCPU: mkldnn_max_pool2d
 
-- func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1) -> Tensor
+- func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   use_c10_dispatcher: unboxed_only
   requires_tensor: True
   dispatch:
@@ -4008,16 +4008,10 @@
 - func: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_lt_
-    CUDA: legacy::cuda::_th_lt_
 
 - func: lt_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_lt_
-    CUDA: legacy::cuda::_th_lt_
 
 - func: gt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
@@ -4614,30 +4608,30 @@
 
 - func: lt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: lt_scalar_out_cpu
-    CUDA: lt_scalar_out_cuda
+    CPU: lt_out
+    CUDA: lt_out
     QuantizedCPU: lt_out_quantized_cpu
 
 - func: lt.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_lt
-    CUDA: legacy::cuda::_th_lt
+    CPU: lt
+    CUDA: lt
     QuantizedCPU: lt_quantized_cpu
 
 - func: lt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: lt_out_cpu
-    CUDA: lt_out_cuda
+    CPU: lt_out
+    CUDA: lt_out
     QuantizedCPU: lt_out_quantized_cpu
 
 - func: lt.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_lt
-    CUDA: legacy::cuda::_th_lt
+    CPU: lt
+    CUDA: lt
     QuantizedCPU: lt_quantized_cpu
 
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
