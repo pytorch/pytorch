@@ -3732,6 +3732,8 @@
   variants: function
 
 - func: result_type.Scalar_Scalar(Scalar scalar1, Scalar scalar2) -> ScalarType
+
+- func: can_cast(ScalarType from, ScalarType to) -> bool
   variants: function
 
 # NB: Does NOT check precondition that numel == 1
