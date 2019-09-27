@@ -32,6 +32,23 @@ def no_result():
 def nested_rpc(dst):
     return dist.rpc(dst, torch.add, args=(torch.ones(2, 2), 1))
 
+def multi_layer_nested_async_rpc(dst, world_size, ttl):
+    # this method returns immediately without blocking the callee, but will
+    # generate additional requests.
+    if ttl > 0:
+        current_dst = 'worker{}'.format(dst)
+        next_dst = (dst + 1) % world_size
+        dist.rpc(
+            current_dst,
+            multi_layer_nested_async_rpc,
+            args=(
+                next_dst,
+                world_size,
+                ttl - 1
+            ),
+            async_call=True
+        )
+        return 0
 
 def light_rpc():
     return 0
@@ -451,6 +468,18 @@ class RpcTest(MultiProcessTestCase):
 
         for i in range(m):
             self.assertEqual(rrefs[i].to_here(), expected[i])
+
+    @_wrap_with_rpc
+    def test_multi_layer_nested_async_rpc(self):
+        # This test will exit right away, but there will be a chain of async
+        # RPCs. The termination algorithm should detect those messages properly.
+        # Otherwise, some peer could exit early, leaving others to timeout
+        # errors or connection closed errors.
+        ttl = 20
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+
+        multi_layer_nested_async_rpc(dst_rank, self.world_size, ttl)
 
 
 if __name__ == '__main__':

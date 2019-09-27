@@ -65,6 +65,8 @@ class ProcessGroupAgent : public RpcAgent {
   // receiving messages
   void listenLoop();
 
+  bool checkNoPendingMessage();
+
   int64_t nextId() {
     return nextId_++;
   }
@@ -73,6 +75,15 @@ class ProcessGroupAgent : public RpcAgent {
   // worker name -> rank
   std::unordered_map<std::string, int> nameMap_;
   std::vector<WorkerId> workerIds_;
+  // record the number of messages sent to and received from each peer. The recv
+  // counter is only marked after the message is processed. Join uses allgather
+  // to collect all counts from all peers, uses these counters to detect global
+  // termination and only exit when all sent messages are processed.
+  std::vector<int64_t> msgSendCnts_;
+  std::vector<int64_t> msgRecvCnts_;
+  std::mutex sendCntMutex_;
+  std::mutex recvCntMutex_;
+
   std::atomic<int64_t> nextId_;
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
