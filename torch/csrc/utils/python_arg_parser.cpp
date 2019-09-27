@@ -504,117 +504,7 @@ pyobject_array_insert(PyObject **array, int length, int index, PyObject *item)
     array[index] = item;
 }
 
-// Signature parsing for `torch.Tensor` methods
-
 bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
-                              bool raise_exception) {
-  int num_overloaded_args = 0;
-  int arg_index = 0;
-  int j;
-  int new_class = 1;
-  auto nargs = PyTuple_GET_SIZE(args);
-  ssize_t remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
-  ssize_t arg_pos = 0;
-  bool allow_varargs_intlist = false;
-
-  // if there is a single positional IntArrayRef argument, i.e. expand(..), view(...),
-  // allow a var-args style IntArrayRef, so expand(5,3) behaves as expand((5,3))
-  if (max_pos_args == 1 && params[0].type_ == ParameterType::INT_LIST) {
-    allow_varargs_intlist = true;
-  }
-
-  if (nargs > max_pos_args && !allow_varargs_intlist) {
-    if (raise_exception) {
-      // foo() takes takes 2 positional arguments but 3 were given
-      extra_args(*this, nargs);
-    }
-    return false;
-  }
-
-  int i = 0;
-  for (auto& param : params) {
-    PyObject* obj = nullptr;
-    bool is_kwd = false;
-    if (arg_pos < nargs) {
-      // extra positional args given after single positional IntArrayRef arg
-      if (param.keyword_only) {
-        if (raise_exception) {
-          extra_args(*this, nargs);
-        }
-        return false;
-      }
-      obj = PyTuple_GET_ITEM(args, arg_pos);
-    } else if (kwargs) {
-      obj = PyDict_GetItem(kwargs, param.python_name);
-      for (PyObject *numpy_name: param.numpy_python_names) {
-        if (obj) {
-          break;
-        }
-        obj = PyDict_GetItem(kwargs, numpy_name);
-      }
-      is_kwd = true;
-    }
-
-    if ((!obj && param.optional) || (obj == Py_None && param.allow_none)) {
-      dst[i++] = nullptr;
-    } else if (!obj) {
-      if (raise_exception) {
-        // foo() missing 1 required positional argument: "b"
-        missing_args(*this, i);
-      }
-      return false;
-    } else if (param.check(obj)) {
-      dst[i++] = obj;
-    // XXX: the Variable check is necessary because sizes become tensors when
-    // tracer is enabled. This behavior easily leads to ambiguities, and we
-    // should avoid having complex signatures that make use of it...
-    } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
-               THPUtils_checkIndex(obj)) {
-      // take all positional arguments as this parameter
-      // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
-      dst[i++] = args;
-      arg_pos = nargs;
-      continue;
-    } else if (raise_exception) {
-      if (is_kwd) {
-        // foo(): argument 'other' must be str, not int
-        throw TypeError("%s(): argument '%s' must be %s, not %s",
-            name.c_str(), param.name.c_str(), param.type_name().c_str(),
-            Py_TYPE(obj)->tp_name);
-      } else {
-        // foo(): argument 'other' (position 2) must be str, not int
-        throw TypeError("%s(): argument '%s' (position %d) must be %s, not %s",
-            name.c_str(), param.name.c_str(), arg_pos + 1,
-            param.type_name().c_str(), Py_TYPE(obj)->tp_name);
-      }
-    } else {
-      return false;
-    }
-
-    if (!is_kwd) {
-      arg_pos++;
-    } else if (obj) {
-      remaining_kwargs--;
-    }
-  }
-
-  if (remaining_kwargs > 0) {
-    if (raise_exception) {
-      // foo() got an unexpected keyword argument "b"
-      extra_kwargs(*this, kwargs, nargs);
-    }
-    return false;
-  }
-  return true;
-}
-
-// Signature parsing for `torch` functions.
-// `FunctionSignature::parse2()` is different from `FunctionSignature::parse()` as it
-// collects a list of `overloaded_args` in Python args and tests if they have
-// `__torch_function__` overload available. It has a lot of reused code so that
-// it doesn't mess up with `torch.Tensor` methods.
-
-bool FunctionSignature::parse2(PyObject* args, PyObject* kwargs, PyObject* dst[],
                                PyObject* overloaded_args[], bool raise_exception) {
   int num_overloaded_args = 0;
   int arg_index = 0;
@@ -768,35 +658,14 @@ PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
     PyObject* overloaded_args[32] = {0};
-    signature.parse(args, kwargs, parsed_args, true);
+    signature.parse(args, kwargs, parsed_args, overloaded_args, true);
     return PythonArgs(0, traceable, signature, parsed_args, overloaded_args);
   }
 
   int i = 0;
   for (auto& signature : signatures_) {
     PyObject* overloaded_args[32] = {0};
-    if (signature.parse(args, kwargs, parsed_args, false)) {
-      return PythonArgs(i, traceable, signature, parsed_args, overloaded_args);
-    }
-    i++;
-  }
-  print_error(args, kwargs, parsed_args);
-}
-
-// Similar to PythonArgParser::raw_parse() but this one is specifically for `torch` functions.
-
-PythonArgs PythonArgParser::raw_parse2(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
-  if (signatures_.size() == 1) {
-    auto& signature = signatures_[0];
-    PyObject* overloaded_args[32] = {0};
-    signature.parse2(args, kwargs, parsed_args, overloaded_args, true);
-    return PythonArgs(0, traceable, signature, parsed_args, overloaded_args);
-  }
-
-  int i = 0;
-  for (auto& signature : signatures_) {
-    PyObject* overloaded_args[32] = {0};
-    if (signature.parse2(args, kwargs, parsed_args, overloaded_args, false)) {
+    if (signature.parse(args, kwargs, parsed_args, overloaded_args, false)) {
       return PythonArgs(i, traceable, signature, parsed_args, overloaded_args);
     }
     i++;
@@ -818,7 +687,7 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
   if (plausible_idxs.size() == 1) {
     auto& signature = signatures_[plausible_idxs[0]];
     PyObject* overloaded_args[32] = {0};
-    signature.parse(args, kwargs, parsed_args, true);
+    signature.parse(args, kwargs, parsed_args, overloaded_args, true);
   }
 
   std::vector<std::string> options;

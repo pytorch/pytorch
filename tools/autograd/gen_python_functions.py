@@ -76,7 +76,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   }, /*traceable=*/${traceable});
   ${unpack_self}
   ParsedArgs<${max_args}> parsed_args;
-  auto r = parser.parse2(args, kwargs, parsed_args);
+  auto r = parser.parse(args, kwargs, parsed_args);
 
   if(r.has_torch_function()){
     PyObject* torch_function = PyObject_FastGetAttrString(r.get_overloaded_arg(0), "__torch_function__");
