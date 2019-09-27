@@ -7210,9 +7210,9 @@ a")
         a = A()
         self.assertEqual(a.with_docstring.__doc__, 'test str')
 
-    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
-                     'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
-                     ' with instruction set support avx2 or newer.')
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
     def test_rnn_cell_quantized(self):
         d_in, d_hid = 2, 2
 
@@ -7304,9 +7304,9 @@ a")
             for out, ref_out in zip(outs, ref_outs):
                 torch.testing.assert_allclose(out, ref_out)
 
-    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
-                     'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
-                     ' with instruction set support avx2 or newer.')
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
     def test_rnn_quantized(self):
         d_in, d_hid = 2, 2
 
@@ -12378,7 +12378,7 @@ a")
 
             traced = torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
 
-    if torch.fbgemm_is_cpu_supported():
+    if 'fbgemm' in torch.backends.quantized.supported_engines:
         def test_quantization_modules(self):
             K1, N1 = 2, 2
 
@@ -15189,7 +15189,7 @@ a")
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "keyword-arg expansion is not supported"):
             torch.jit.script(fn)
 
-    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(), "requires FBGEMM")
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines, "requires FBGEMM")
     def test_erase_class_tensor_shapes(self):
         class Linear(torch.nn.Module):
             def __init__(self, in_features, out_features):
@@ -16064,7 +16064,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
     def test_snli(self):
         self._test_snli(self, device='cpu')
 
-    if torch.fbgemm_is_cpu_supported():
+    if 'fbgemm' in torch.backends.quantized.supported_engines:
         def test_snli_quantized(self):
             self._test_snli(self, device='cpu', quantized=True)
 
@@ -16206,7 +16206,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
     def test_vae(self):
         self._test_vae(self, device='cpu')
 
-    if torch.fbgemm_is_cpu_supported():
+    if 'fbgemm' in torch.backends.quantized.supported_engines:
         def test_vae_quantized(self):
             self._test_vae(self, device='cpu', quantized=True)
 
