@@ -576,6 +576,18 @@ struct to_ir {
           << "methods must have a self argument";
     }
     method.setSchema(emitDef(def, self, graph->block()));
+
+    // NB ORDERING: SSA conversion has to occur before
+    // lifting of closures and forks, this way closures are converted
+    // to SSA while part of their original graph, and closures are ready to
+    // be inlined into forked closures
+    ConvertToSSA(graph);
+    // convert loops with an iter and body condition specified to
+    // python-recognize while loops. we do this so they can be exported,
+    // and run the pass early to avoid jitter. Like conversion to SSA,
+    // it only needs to run once.
+    CanonicalizeModifiedLoops(graph);
+
     runCleanupPasses(graph);
   }
 
@@ -2948,7 +2960,7 @@ struct to_ir {
         tensor_indices[dims[i]] = expr;
       } else {
         TORCH_INTERNAL_ASSERT(
-            "Trying to process index type that we don't support.");
+            false, "Trying to process index type that we don't support.");
       }
     }
     // at::index takes in a List[Optional[Tensor]] where some dims can be None.
@@ -3138,14 +3150,14 @@ struct to_ir {
 
 struct FunctionResolver : public Resolver {
   explicit FunctionResolver(
-      const Resolver* otherResolver,
+      Resolver* otherResolver,
       const std::unordered_map<std::string, Function*>& functionTable)
       : otherResolver_(otherResolver), functionTable_(functionTable) {}
 
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
       Function& m,
-      const SourceRange& loc) const override {
+      const SourceRange& loc) override {
     auto it = functionTable_.find(name);
     if (it != functionTable_.end()) {
       return std::make_shared<FunctionValue>(it->second);
@@ -3154,12 +3166,12 @@ struct FunctionResolver : public Resolver {
   }
 
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
-      const override {
+      override {
     return otherResolver_->resolveType(name, loc);
   }
 
  private:
-  const Resolver* otherResolver_;
+  Resolver* otherResolver_;
   const std::unordered_map<std::string, Function*>& functionTable_;
 };
 
@@ -3291,21 +3303,7 @@ std::vector<Function*> CompilationUnit::define(
   return define(prefix, definitions, resolvers, self);
 }
 
-void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
-  // the graph including closures is converted to ssa in the first pass,
-  // so subsequent cleanups do not need reconvert it
-  if (convert_ssa) {
-    ConvertToSSA(to_clean);
-    // convert loops with an iter and body condition specified to
-    // python-recognize while loops. we do this so they can be exported,
-    // and run the pass early to avoid jitter. Like conversion to SSA,
-    // it only needs to run once.
-    CanonicalizeModifiedLoops(to_clean);
-  }
-  // NB ORDERING: SSA conversion has to occur before
-  // lifting of closures and forks, this way closures are converted
-  // to SSA while part of their original graph, and closures are ready to
-  // be inlined into forked closures
+void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   liftClosures(to_clean);
   inlineForkedClosures(to_clean);
   if (script::getInlineEverythingMode()) {

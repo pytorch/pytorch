@@ -4090,6 +4090,42 @@ def foo(xyz):
                 offset2, source_range2 = debug_file[i + 1]
                 self.assertNotEqual(source_range, source_range2)
 
+    def test_circular_dependency(self):
+        """
+        https://github.com/pytorch/pytorch/issues/25871
+        """
+        class A(torch.jit.ScriptModule):
+            def __init__(self):
+                super(A, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x
+
+        class B(torch.jit.ScriptModule):
+            def __init__(self):
+                super(B, self).__init__()
+                self.foo = torch.nn.ModuleList([A()])
+
+            @torch.jit.script_method
+            def forward(self, x):
+                for f in self.foo:
+                    x = f(x)
+                return x
+
+        class C(torch.jit.ScriptModule):
+            def __init__(self):
+                super(C, self).__init__()
+                self.foo = torch.nn.Sequential(B())
+
+            @torch.jit.script_method
+            def forward(self, x):
+                for f in self.foo:
+                    x = f(x)
+                return x
+        self.getExportImportCopy(C())
+
+
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 
@@ -7174,9 +7210,9 @@ a")
         a = A()
         self.assertEqual(a.with_docstring.__doc__, 'test str')
 
-    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
-                     'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
-                     ' with instruction set support avx2 or newer.')
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
     def test_rnn_cell_quantized(self):
         d_in, d_hid = 2, 2
 
@@ -7268,9 +7304,9 @@ a")
             for out, ref_out in zip(outs, ref_outs):
                 torch.testing.assert_allclose(out, ref_out)
 
-    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
-                     'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
-                     ' with instruction set support avx2 or newer.')
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
     def test_rnn_quantized(self):
         d_in, d_hid = 2, 2
 
@@ -12342,7 +12378,7 @@ a")
 
             traced = torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
 
-    if torch.fbgemm_is_cpu_supported():
+    if 'fbgemm' in torch.backends.quantized.supported_engines:
         def test_quantization_modules(self):
             K1, N1 = 2, 2
 
@@ -15153,7 +15189,7 @@ a")
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "keyword-arg expansion is not supported"):
             torch.jit.script(fn)
 
-    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(), "requires FBGEMM")
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines, "requires FBGEMM")
     def test_erase_class_tensor_shapes(self):
         class Linear(torch.nn.Module):
             def __init__(self, in_features, out_features):
@@ -16028,7 +16064,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
     def test_snli(self):
         self._test_snli(self, device='cpu')
 
-    if torch.fbgemm_is_cpu_supported():
+    if 'fbgemm' in torch.backends.quantized.supported_engines:
         def test_snli_quantized(self):
             self._test_snli(self, device='cpu', quantized=True)
 
@@ -16170,7 +16206,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
     def test_vae(self):
         self._test_vae(self, device='cpu')
 
-    if torch.fbgemm_is_cpu_supported():
+    if 'fbgemm' in torch.backends.quantized.supported_engines:
         def test_vae_quantized(self):
             self._test_vae(self, device='cpu', quantized=True)
 
@@ -16298,6 +16334,7 @@ EXCLUDE_SCRIPT = {
     'test_norm_fro',
     'test_norm_fro_default',
     'test_norm_nuc',
+    'test_norm_nuc_batched',
 
     # aten op has additional cudnn argument
     'test_nn_unfold',
