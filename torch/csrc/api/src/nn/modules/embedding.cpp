@@ -12,7 +12,7 @@
 namespace torch {
 namespace nn {
 
-    EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options) : options(options) {
+    EmbeddingImpl::EmbeddingImpl(const EmbeddingOptions& options) : options(options) {
       reset();
     }
 
@@ -84,7 +84,7 @@ namespace nn {
       return torch::embedding(weight, input.contiguous(), *options.padding_idx(), options.scale_grad_by_freq(), options.sparse());
     }
 
-    Embedding Embedding::from_pretrained(torch::Tensor embeddings, c10::optional<EmbeddingOptions> options, bool freeze) {
+    Embedding Embedding::from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingOptions> options, bool freeze) {
       TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
       if(options != c10::nullopt){
         TORCH_CHECK((*options).num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", (*options).num_embeddings());
@@ -98,7 +98,7 @@ namespace nn {
       return embedding;
     }
 
-    EmbeddingBagImpl::EmbeddingBagImpl(EmbeddingBagOptions options) : options(options) {
+    EmbeddingBagImpl::EmbeddingBagImpl(const EmbeddingBagOptions& options) : options(options) {
       reset();
     }
 
@@ -200,7 +200,7 @@ namespace nn {
       stream << ")";
     }
 
-    EmbeddingBag EmbeddingBag::from_pretrained(torch::Tensor embeddings, c10::optional<EmbeddingBagOptions> options, bool freeze) {
+    EmbeddingBag EmbeddingBag::from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingBagOptions> options, bool freeze) {
       TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
       if(options != c10::nullopt){
         TORCH_CHECK((*options).num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", (*options).num_embeddings());
