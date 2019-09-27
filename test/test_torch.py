@@ -6638,25 +6638,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         alias.fill_(7)
         self.assertEqual(x, alias)
 
-    def test_memory_format_clone(self, device):
-        nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
-        clone = nhwc.clone(memory_format=torch.preserve_format)
-        self.assertFalse(clone.is_contiguous())
-        self.assertTrue(clone.is_contiguous(memory_format=torch.channels_last))
-        self.assertEqual(nhwc, clone)
-
-        nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
-        clone = nhwc.clone(memory_format=torch.contiguous_format)
-        self.assertTrue(clone.is_contiguous())
-        self.assertFalse(clone.is_contiguous(memory_format=torch.channels_last))
-        self.assertEqual(nhwc, clone)
-
-        nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
-        clone = nhwc.clone()
-        self.assertTrue(clone.is_contiguous())
-        self.assertFalse(clone.is_contiguous(memory_format=torch.channels_last))
-        self.assertEqual(nhwc, clone)
-
     def test_memory_format_empty(self):
         with self.assertRaises(RuntimeError):
             x = torch.empty((3, 3), memory_format=torch.channels_last)
@@ -12736,6 +12717,36 @@ class TestTorchDeviceType(TestCase):
         sparse = x.to_sparse()
         with self.assertRaises(RuntimeError):
             z = torch.empty_like(sparse, memory_format=torch.preserve_format)
+
+    def test_memory_format_clone(self, device):
+        nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
+        # nhwc is not memory dense, but looks like channels last
+        nhwc = nhwc[:,:,::2,::2]
+        clone = nhwc.clone(memory_format=torch.preserve_format)
+        self.assertFalse(clone.is_contiguous())
+        self.assertTrue(clone.is_contiguous(memory_format=torch.channels_last))
+        self.assertFalse(nhwc.is_contiguous())
+        self.assertFalse(nhwc.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(nhwc, clone)
+
+        nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
+        clone = nhwc.clone(memory_format=torch.contiguous_format)
+        self.assertTrue(clone.is_contiguous())
+        self.assertFalse(clone.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(nhwc, clone)
+
+        nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
+        clone = nhwc.clone()
+        self.assertTrue(clone.is_contiguous())
+        self.assertFalse(clone.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(nhwc, clone)
+
+        x = torch.randn((3, 4, 5, 6, 7, 8, 9), device=device)
+        for _ in range(10):
+            permutation = list(range(len(x.shape)))
+            random.shuffle(permutation)
+            x = x.permute(permutation)
+            self.assertEqual(x.stride(), x.clone(memory_format=torch.preserve_format).stride())
 
     def test_unique(self, device):
         x = torch.tensor([1, 2, 3, 2, 8, 5, 2, 3], device=device)
