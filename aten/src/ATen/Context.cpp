@@ -115,12 +115,22 @@ void Context::setQEngine(at::QEngine e) {
 
 const std::vector<at::QEngine>& Context::supportedQEngines() const {
   static auto supported_qengines = []() {
-    std::vector<at::QEngine> engines = {at::kNoQEngine};
+    std::vector<at::QEngine> engines = {};
     // Engines are listed in priority order: later one wins
-    // By default we prefer FBGEMM to QNNPACK if we're running on server side
+    // By default we prefer FBGEMM if we're running on server side
+    // QNNPACK on server side has some issue, so we disable it by default.
+#ifdef C10_MOBILE
+    engines.push_back(at::kNoQEngine);
 #ifdef USE_PYTORCH_QNNPACK
     engines.push_back(at::kQNNPACK);
 #endif
+#else  // C10_MOBILE
+#ifdef USE_PYTORCH_QNNPACK
+    engines.push_back(at::kQNNPACK);
+#endif
+    engines.push_back(at::kNoQEngine);
+#endif // C10_MOBILE
+
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
       engines.push_back(at::kFBGEMM);
