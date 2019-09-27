@@ -3888,13 +3888,7 @@ inline Tensor & Tensor::le_(const Tensor & other) const {
 }
 inline Tensor & Tensor::ge_(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::ge_(const_cast<Tensor&>(*this), other);
-            break;
-        default:
-            AT_ERROR("ge_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::ge_(const_cast<Tensor&>(*this), other);
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::ge_", "Scalar"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, Scalar>(
@@ -3903,13 +3897,7 @@ inline Tensor & Tensor::ge_(Scalar other) const {
 }
 inline Tensor & Tensor::ge_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::ge_(const_cast<Tensor&>(*this), other);
-            break;
-        default:
-            AT_ERROR("ge_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::ge_(const_cast<Tensor&>(*this), other);
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::ge_", "Tensor"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, const Tensor &>(
