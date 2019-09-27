@@ -4,36 +4,25 @@
 
 #include <test/cpp/api/support.h>
 
-#include <torch/nn/utils/clip_grad.h>
-
 using namespace torch::nn;
 using namespace torch::test;
 
-struct ClipGradTest : torch::test::SeedingFixture {};
+struct NNUtilsTest : torch::test::SeedingFixture {};
 
-class TestLinearModel : public torch::nn::Module {
- public:
-  TestLinearModel() : l1(register_module("l1", Linear(10, 10))) {}
-  Linear l1;
-};
-
-TEST_F(ClipGradTest, ClipGrad) {
-  TestLinearModel m;
-  auto linear_layer = m.l1;
+TEST_F(NNUtilsTest, ClipGradNorm) {
+  auto linear_layer = Linear(10, 10);
   float max_norm = 2;
   auto compute_norm = [linear_layer](float norm_type) -> float {
-    float inf = std::numeric_limits<float>::infinity();
     float total_norm = 0.0;
-    if (norm_type != inf) {
+    if (norm_type != std::numeric_limits<float>::infinity()) {
       for (const auto& p : linear_layer->parameters()) {
-        auto param_norm = torch::norm(p.grad(), norm_type);
-        total_norm += torch::pow(param_norm, norm_type).item().toFloat();
+        total_norm +=
+            p.grad().data().abs().pow(norm_type).sum().item().toFloat();
       }
-      total_norm = std::pow(total_norm, 1.0 / norm_type);
-      return total_norm;
+      return std::pow(total_norm, 1.0 / norm_type);
     } else {
       for (const auto& p : linear_layer->parameters()) {
-        auto param_max = p.grad().abs().max().item().toFloat();
+        auto param_max = p.grad().data().abs().max().item().toFloat();
         if (param_max > total_norm) {
           total_norm = param_max;
         }
@@ -42,14 +31,14 @@ TEST_F(ClipGradTest, ClipGrad) {
     }
   };
   auto compare_scaling =
-      [linear_layer](std::vector<torch::Tensor>& grads) -> torch::Tensor {
-    std::vector<torch::Tensor> scaled;
+      [linear_layer](const std::vector<torch::Tensor>& grads) -> torch::Tensor {
+    std::vector<torch::Tensor> p_scale;
     for (int i = 0; i < grads.size(); i++) {
       auto param = linear_layer->parameters()[i];
       auto grad = grads[i];
-      scaled.push_back(torch::div(param.grad(), grad).view(-1));
+      p_scale.push_back(param.grad().data().div(grad).view(-1));
     }
-    auto scale = torch::cat(scaled);
+    auto scale = torch::cat(p_scale);
     return scale; // need to assert std is 0.
   };
 
@@ -67,7 +56,7 @@ TEST_F(ClipGradTest, ClipGrad) {
   for (auto norm_type : norm_types) {
     for (int i = 0; i < grads.size(); i++) {
       linear_layer->parameters()[i].grad() =
-          grads[i].clone().view_as(linear_layer->parameters()[i]);
+          grads[i].clone().view_as(linear_layer->parameters()[i].data());
     }
     auto norm_before = compute_norm(norm_type);
     auto layer_params = linear_layer->parameters();
@@ -75,18 +64,18 @@ TEST_F(ClipGradTest, ClipGrad) {
     auto norm_after = compute_norm(norm_type);
     ASSERT_FLOAT_EQ(norm, norm_before);
     ASSERT_FLOAT_EQ(norm_after, max_norm);
-    EXPECT_PRED_FORMAT2(::testing::FloatLE, norm_after, max_norm);
+    ASSERT_LE(norm_after, max_norm);
     auto scaled = compare_scaling(grads);
     ASSERT_NEAR(0, scaled.std().item().toFloat(), 1e-7);
   }
   // Small gradients should be lefted unchanged
   grads = {
       torch::rand({10, 10}).div(10000),
-      torch::ones(10).div(1000),
+      torch::ones(10).div(500),
   };
   for (auto norm_type : norm_types) {
     for (int i = 0; i < grads.size(); i++) {
-      linear_layer->parameters()[i].grad().copy_(grads[i]);
+      linear_layer->parameters()[i].grad().data().copy_(grads[i]);
     }
     auto norm_before = compute_norm(norm_type);
     auto layer_params = linear_layer->parameters();
@@ -94,7 +83,10 @@ TEST_F(ClipGradTest, ClipGrad) {
     auto norm_after = compute_norm(norm_type);
     ASSERT_FLOAT_EQ(norm, norm_before);
     ASSERT_FLOAT_EQ(norm_before, norm_after);
-    EXPECT_PRED_FORMAT2(::testing::FloatLE, norm_after, max_norm);
+    ASSERT_LE(norm_after, max_norm);
+    auto scaled = compare_scaling(grads);
+    ASSERT_NEAR(0, scaled.std().item().toFloat(), 1e-7);
+    ASSERT_EQ(scaled[0].item().toFloat(), 1);
   }
   // should accept a single tensor as input
   auto p1 = torch::randn({10, 10});
@@ -104,7 +96,7 @@ TEST_F(ClipGradTest, ClipGrad) {
   p2.grad() = g.clone();
   for (const auto norm_type : norm_types) {
     utils::clip_grad_norm_(p1, max_norm, norm_type);
-    utils::clip_grad_norm_(p2, max_norm, norm_type);
-    ASSERT_TRUE(p1.grad().equal(p2.grad()));
+    utils::clip_grad_norm_({p2}, max_norm, norm_type);
+    ASSERT_TRUE(torch::allclose(p1.grad(), p2.grad()));
   }
 }

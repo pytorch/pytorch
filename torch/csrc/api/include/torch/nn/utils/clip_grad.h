@@ -21,27 +21,25 @@ inline float clip_grad_norm_(
     }
   }
   float total_norm = 0.0;
-  float inf = std::numeric_limits<float>::infinity();
-  if (norm_type == inf) {
+  if (norm_type == std::numeric_limits<float>::infinity()) {
     for (const auto& param : params_with_grad) {
-      auto param_max = param.grad().abs().max().item().toFloat();
+      auto param_max = param.grad().data().abs().max().item().toFloat();
       if (param_max > total_norm) {
         total_norm = param_max;
       }
     }
   } else {
     for (const auto& param : params_with_grad) {
-      auto param_norm = torch::norm(param.grad(), norm_type);
-      total_norm += torch::pow(param_norm, norm_type).item().toFloat();
+      auto param_norm = param.grad().data().norm(norm_type);
+      total_norm += std::pow(param_norm.item().toFloat(), norm_type);
     }
     total_norm = std::pow(total_norm, 1.0 / norm_type);
   }
 
-  const auto EPS = 1e-6;
-  auto clip_coef = max_norm / (total_norm + EPS);
+  auto clip_coef = max_norm / (total_norm + 1e-6);
   if (clip_coef < 1) {
     for (auto& param : params_with_grad) {
-      param.grad().mul_(clip_coef);
+      param.grad().data().mul_(clip_coef);
     }
   }
   return total_norm;

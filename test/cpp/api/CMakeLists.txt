@@ -3,7 +3,6 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${TORCH_API_TEST_DIR}/autograd.cpp
   ${TORCH_API_TEST_DIR}/any.cpp
-  ${TORCH_API_TEST_DIR}/clip_grad.cpp
   ${TORCH_API_TEST_DIR}/dataloader.cpp
   ${TORCH_API_TEST_DIR}/expanding-array.cpp
   ${TORCH_API_TEST_DIR}/functional.cpp
@@ -15,6 +14,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/module.cpp
   ${TORCH_API_TEST_DIR}/modulelist.cpp
   ${TORCH_API_TEST_DIR}/modules.cpp
+  ${TORCH_API_TEST_DIR}/nn_utils.cpp
   ${TORCH_API_TEST_DIR}/optim.cpp
   ${TORCH_API_TEST_DIR}/ordered_dict.cpp
   ${TORCH_API_TEST_DIR}/rnn.cpp
