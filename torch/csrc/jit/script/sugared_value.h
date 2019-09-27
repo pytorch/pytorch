@@ -20,8 +20,6 @@ namespace script {
 // that separates their behavior from the AST -> IR converter itself.
 // This allows us to keep dependencies on python minimal.
 
-enum NoneStatus { ALWAYS, MAYBE, NEVER };
-
 struct TORCH_API SugaredValue
     : public std::enable_shared_from_this<SugaredValue> {
   // what is this node? for error reporting (e.g. Module, python function)
@@ -49,9 +47,6 @@ struct TORCH_API SugaredValue
       Value* newValue) {
     throw ErrorReport(loc) << "attribute assignment is not defined on "
                            << kind();
-  }
-  virtual NoneStatus isNone() {
-    return NEVER;
   }
 
   // use it as a vector of values, e.g. a tuple of values as return value from
@@ -113,18 +108,12 @@ struct TORCH_API SugaredValue
 struct TORCH_API SimpleValue : public SugaredValue {
   SimpleValue(Value* value) : value_(value) {}
   std::string kind() const override {
-    return "value";
+    std::stringstream ss;
+    ss << "value of type '" << value_->type()->python_str() << "'";
+    return ss.str();
   }
   Value* asValue(const SourceRange& range, Function& m) override {
     return value_;
-  }
-  NoneStatus isNone() override {
-    if (value_->mustBeNone())
-      return ALWAYS;
-    else if (value_->type()->cast<OptionalType>())
-      return MAYBE;
-    else
-      return NEVER;
   }
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,

@@ -138,6 +138,7 @@ class JitTestCase(TestCase):
                 buffer_copy = buffer.getvalue()
 
                 code_files, debug_files = extract_files(buffer)
+
             except RuntimeError as e:
                 if not self._isHookExceptionOk(e):
                     raise
