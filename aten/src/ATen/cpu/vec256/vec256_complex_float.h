@@ -316,7 +316,10 @@ Vec256<std::complex<float>> inline maximum(const Vec256<std::complex<float>>& a,
   auto abs_a = a.abs_2_();
   auto abs_b = b.abs_2_();
   auto mask = _mm256_cmp_ps(abs_a, abs_b, _CMP_LT_OQ);
-  return _mm256_blendv_ps(a, b, mask);
+  auto max = _mm256_blendv_ps(a, b, mask);
+  // Exploit the fact that all-ones is a NaN.
+  auto isnan = _mm256_cmp_ps(abs_a, abs_b, _CMP_UNORD_Q);
+  return _mm256_or_ps(max, isnan);
 }
 
 template <>
@@ -324,7 +327,10 @@ Vec256<std::complex<float>> inline minimum(const Vec256<std::complex<float>>& a,
   auto abs_a = a.abs_2_();
   auto abs_b = b.abs_2_();
   auto mask = _mm256_cmp_ps(abs_a, abs_b, _CMP_GT_OQ);
-  return _mm256_blendv_ps(a, b, mask);
+  auto min = _mm256_blendv_ps(a, b, mask);
+  // Exploit the fact that all-ones is a NaN.
+  auto isnan = _mm256_cmp_ps(abs_a, abs_b, _CMP_UNORD_Q);
+  return _mm256_or_ps(min, isnan);
 }
 
 template <>

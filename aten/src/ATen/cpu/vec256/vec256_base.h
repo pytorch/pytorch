@@ -358,8 +358,10 @@ template <class T> Vec256<T> inline operator||(
 // either input is a NaN.
 template <class T> Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
+  using value_t = typename at::native::ztype<T>::value_t;
+  value_t (*zabs_)(T) = at::native::zabs;
   for (int i = 0; i != Vec256<T>::size(); i++) {
-    c[i] = (a[i] > b[i]) ? a[i] : b[i];
+    c[i] = (zabs_(a[i]) > zabs_(b[i])) ? a[i] : b[i];
     if (_isnan(a[i])) {
       // If either input is NaN, propagate a NaN.
       // NOTE: The case where b[i] was NaN is handled correctly by the naive
@@ -383,8 +385,10 @@ inline T maximum(const T& a, const T& b) {
 // either input is a NaN.
 template <class T> Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
+  using value_t = typename at::native::ztype<T>::value_t;
+  value_t (*zabs_)(T) = at::native::zabs;
   for (int i = 0; i != Vec256<T>::size(); i++) {
-    c[i] = (a[i] < b[i]) ? a[i] : b[i];
+    c[i] = (zabs_(a[i]) < zabs_(b[i])) ? a[i] : b[i];
     if (_isnan(a[i])) {
       // If either input is NaN, propagate a NaN.
       // NOTE: The case where b[i] was NaN is handled correctly by the naive
