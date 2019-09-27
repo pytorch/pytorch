@@ -18,7 +18,7 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
   TORCH_CHECK(cuda::check_device({r, t, mask}),
       "sparse_mask: arguments are located on different devices; self is on device ", t.get_device(),
       ", mask is on device ", mask.get_device(), ", out is on device ", r.get_device());
-  resize_as_sparse_(r, mask);
+  r.resize_as_(mask);
   if (mask._nnz() == 0) {
     return r.zero_();
   }
