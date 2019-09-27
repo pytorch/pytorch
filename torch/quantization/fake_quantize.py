@@ -81,15 +81,13 @@ class FakeQuantize(Module):
                 self.observer(X)
                 self.scale, self.zero_point = self.calculate_qparams()
         if self.fake_quant_enabled:
-        #    TODO: Check if axis is zero
-                if self.qscheme == torch.per_channel_symmetric or self.qscheme == torch.per_channel_affine:
-                    X = torch.fake_quantize_per_channel_affine(
-                    X, self.scale, self.zero_point, self.ch_axis, self.quant_min,
-                    self.quant_max)
-                else:
-                    X = torch.fake_quantize_per_tensor_affine(
-                    X, float(self.scale), int(self.zero_point), self.quant_min,
-                    self.quant_max)
+            if self.qscheme == torch.per_channel_symmetric or self.qscheme == torch.per_channel_affine:
+                X = torch.fake_quantize_per_channel_affine(X, self.scale, self.zero_point,
+                                                           self.ch_axis, self.quant_min, self.quant_max)
+            else:
+                X = torch.fake_quantize_per_tensor_affine(X, float(self.scale),
+                                                          int(self.zero_point), self.quant_min,
+                                                          self.quant_max)
         return X
 
     with_args = classmethod(_with_args)
@@ -121,11 +119,16 @@ default_weight_fake_quant = FakeQuantize.with_args(observer=MinMaxObserver, quan
                                                    dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
 
 default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
-                                                   quant_min=-128, quant_max=127,
-                                                   dtype=torch.qint8, qscheme=torch.per_channel_symmetric, reduce_range =False, ch_axis=0)
-l2_fake_quant = FakeQuantize.with_args(observer=HistogramObserver,
-                                                   quant_min=-128,
-                                                   quant_max=127, reduce_range = True)
+                                                               quant_min=-128,
+                                                               quant_max=127,
+                                                               dtype=torch.qint8,
+                                                               qscheme=torch.per_channel_symmetric,
+                                                               reduce_range=False,
+                                                               ch_axis=0)
+default_histogram_fake_quant = FakeQuantize.with_args(observer=HistogramObserver,
+                                                      quant_min=-128,
+                                                      quant_max=127,
+                                                      reduce_range=True)
 
 def disable_fake_quant(mod):
     if type(mod) == FakeQuantize:

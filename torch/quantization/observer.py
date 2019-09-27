@@ -100,24 +100,26 @@ class _ObserverBase(Observer):
                 "must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point "
             )
-            return torch.tensor([1.0], dtype = torch.double), torch.tensor([0], dtype = torch.long)
+            return torch.tensor([1.0]), torch.tensor([0])
 
         for i in range(len(min_vals)):
             assert (
                 min_vals[i] <= max_vals[i]
             ), "min {} should be less than max {}".format(min_vals[i], max_vals[i])
 
-        scales = torch.ones(min_vals.size(), dtype=torch.double)
-        zero_points = torch.ones(min_vals.size(), dtype=torch.long)
+        scales = torch.ones(min_vals.size())
+        zero_points = torch.ones(min_vals.size())
         for i in range(len(scales)):
             qparam = self._calculate_qparams(
                 min_vals[i], max_vals[i]
             )
-            scales[i] = qparam[0]
+            scales[i] = float(qparam[0])
             zero_points[i] = int(qparam[1])
-        # Needed to ensure that floating point numerics match for fake-quantization numerics
-        # test_fake_quant.py: test_numerical_consistency_per_channel
-        scales = scales.to(torch.float).to(torch.double)
+        # Convert scale to float precision
+        # Needed to ensure that fake quantization module and operator level numerics match
+        # for test:
+        # caffe2/test:fake_quant - test_fq_module (test_fake_quant.TestFakeQuantizePerChannel)
+        scales = scales.to(torch.float)
         return scales, zero_points
 
     def _calculate_qparams(self, min_val, max_val):
