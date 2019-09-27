@@ -1,6 +1,6 @@
-#include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 #include <c10/util/Exception.h>
 
 #include <array>
@@ -36,7 +36,7 @@ struct LeakyStreamInternals {
   DeviceIndex device_index = -1;
   int32_t stream_id = -1;
   cudaStream_t stream = nullptr;
-  CUDAAssert* assert_state = nullptr;
+  std::atomic<CUDAAssert*> assert_state{nullptr};
 };
 
 // Global stream state and constants
@@ -311,32 +311,47 @@ void check_assert_state(const LeakyStreamInternals* ptr) {
     return;
   }
 
-  if (ptr->assert_state->error != 0) {
+  auto assert_state =
+      ptr->assert_state.load(std::memory_order::memory_order_relaxed);
+
+  if (assert_state->error != 0) {
     CUDAGuard device_guard(ptr->device_index);
 
     // wait for kernel to complete
     C10_CUDA_CHECK(cudaDeviceSynchronize());
-    CUDAAssert assert_state(*ptr->assert_state);    // create local isolation copy
+    std::atomic_thread_fence(std::memory_order_acquire);
+
+    CUDAAssert assert_state(*ptr->assert_state); // create local isolation copy
 
     // reset assert state
     std::memset(ptr->assert_state, 0, sizeof(CUDAAssert));
 
-    switch (assert_state.type) {
+    switch (assert_state.kind) {
       case CUDAAssertKind::ASSERTION_FAILED:
         // assertion failed
-        throw ::c10::Error({"unknown", assert_state.file, assert_state.line}, assert_state.message);
+        throw ::c10::Error(
+            {"unknown", assert_state.file, assert_state.line},
+            assert_state.message);
 
       case CUDAAssertKind::INDEX_OUT_OF_BOUNDS: {
         // index out of bounds
-        auto index_error = reinterpret_cast<CUDAAssertDetailIndexKernel*>(assert_state.details);
-        throw ::c10::IndexError({"unknown", assert_state.file, assert_state.line},
-          ::c10::str("index ", index_error->index, " is out of bounds for dimension ", index_error->axis, " with size ", index_error->size));
-        break;
+        const auto& index_error = assert_state.details.index_error;
+        auto message = ::c10::str(
+            "index ",
+            index_error.index,
+            " is out of bounds for dimension ",
+            index_error.axis,
+            " with size ",
+            index_error.size);
+        throw ::c10::IndexError(
+            {"unknown", assert_state.file, assert_state.line}, message);
       }
 
       case CUDAAssertKind::ZERO_DIVISION:
         // zero division error
-        throw ::c10::Error({"unknown", assert_state.file, assert_state.line}, assert_state.message);
+        throw ::c10::Error(
+            {"unknown", assert_state.file, assert_state.line},
+            assert_state.message);
 
       default:
         AT_ASSERTM(0, "Unsupported assertion type");
@@ -367,18 +382,28 @@ CUDAAssert* CUDAStream::assert_state() const {
   auto ptr = CUDAStream_internals(*this);
   AT_ASSERT(ptr);
 
-  // lazy create assert state (TODO: support concurrent calls)
-  if (ptr->assert_state == nullptr) {
+  // lazy create assert state
+  CUDAAssert* assert_state = ptr->assert_state.load();
+  if (assert_state == nullptr) {
     // switch to device to associate host memory with it
     CUDAGuard device_guard(device_index());
 
-    // allocate assert memory
+    // allocate assert memory for this stream object
+    CUDAAssert* new_instance = nullptr;
     C10_CUDA_CHECK(cudaHostAlloc(
-      (void **)&ptr->assert_state, sizeof(ptr->assert_state),
-      cudaHostAllocMapped/* | cudaHostAllocPortable*/));
+        (void**)&new_instance, sizeof(CUDAAssert), cudaHostAllocMapped));
+
+    if (ptr->assert_state.compare_exchange_strong(assert_state, new_instance)) {
+      assert_state = new_instance;
+    } else {
+      // we lost the race: deallocate & load effective value
+      C10_CUDA_CHECK(cudaFreeHost(new_instance));
+      assert_state = ptr->assert_state.load();
+      AT_ASSERT(assert_state);
+    }
   }
 
-  return ptr->assert_state;
+  return assert_state;
 }
 
 // Returns a stream from the requested pool
