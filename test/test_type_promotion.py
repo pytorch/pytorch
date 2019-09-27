@@ -227,6 +227,10 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.result_type(torch.tensor([1., 1.], dtype=torch.float), 1.), torch.float)
         self.assertEqual(torch.result_type(torch.tensor(1., dtype=torch.float), torch.tensor(1, dtype=torch.double)), torch.double)
 
+    def test_can_cast(self):
+        self.assertTrue(torch.can_cast(torch.double, torch.float))
+        self.assertFalse(torch.can_cast(torch.float, torch.int))
+
     def test_comparison_ops_with_type_promotion(self):
         value_for_type = {
             torch.uint8: (1 << 5),
