@@ -493,26 +493,32 @@
 
 - func: bitwise_not(Tensor self) -> Tensor
   use_c10_dispatcher: full
+  supports_named_tensor: True
   variants: function, method
 
 - func: bitwise_not_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
+  supports_named_tensor: True
   variants: method
 
 - func: bitwise_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
   dispatch:
     CPU: bitwise_not_out
     CUDA: bitwise_not_out
 
 - func: logical_not(Tensor self) -> Tensor
   use_c10_dispatcher: unboxed_only
+  supports_named_tensor: True
   variants: function, method
 
 - func: logical_not_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
+  supports_named_tensor: True
   variants: method
 
 - func: logical_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
   dispatch:
     CPU: logical_not_out
     CUDA: logical_not_out
@@ -828,25 +834,32 @@
     CUDA: cudnn_grid_sampler_backward
 
 - func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+  supports_named_tensor: True
   variants: function, method
 
 - func: cumsum.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
 
 - func: cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  supports_named_tensor: True
   variants: function, method
 
 - func: cumsum.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
 
 - func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+  supports_named_tensor: True
   variants: function, method
 
 - func: cumprod.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
 
 - func: cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  supports_named_tensor: True
   variants: function, method
 
 - func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-
+  supports_named_tensor: True
 
 - func: ctc_loss.IntList(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
   use_c10_dispatcher: unboxed_only
@@ -1507,15 +1520,12 @@
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _log__cpu
-    CUDA: _log__cuda
 
 - func: log.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _log_out_cpu
-    CUDA: _log_out_cuda
+    CPU: log_out
+    CUDA: log_out
 
 - func: log10(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -1685,7 +1695,7 @@
   dispatch:
     MkldnnCPU: mkldnn_max_pool2d
 
-- func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1) -> Tensor
+- func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   use_c10_dispatcher: unboxed_only
   requires_tensor: True
   dispatch:
@@ -3105,11 +3115,6 @@
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: resize_as_cpu_
-    CUDA: resize_as_cuda_
-    SparseCPU: resize_as_sparse_
-    SparseCUDA: resize_as_sparse_
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
@@ -3737,6 +3742,8 @@
   dispatch:
     CUDA: _thnn_fused_lstm_cell_backward_cuda
 
+- func: _thnn_differentiable_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor input_gates, Tensor hidden_gates, Tensor? input_bias, Tensor? hidden_bias, Tensor cx, Tensor cy) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+
 - func: _thnn_fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor? input_bias=None, Tensor? hidden_bias=None) -> (Tensor, Tensor)
   dispatch:
     CUDA: _thnn_fused_gru_cell_cuda
@@ -3745,6 +3752,8 @@
   use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: _thnn_fused_gru_cell_backward_cuda
+
+- func: _thnn_differentiable_gru_cell_backward(Tensor grad_hy, Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor? input_bias, Tensor? hidden_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
 
 # RNN cells and layers
 - func: lstm.input(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
@@ -3999,16 +4008,10 @@
 - func: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_lt_
-    CUDA: legacy::cuda::_th_lt_
 
 - func: lt_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_lt_
-    CUDA: legacy::cuda::_th_lt_
 
 - func: gt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
@@ -4605,30 +4608,30 @@
 
 - func: lt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: lt_scalar_out_cpu
-    CUDA: lt_scalar_out_cuda
+    CPU: lt_out
+    CUDA: lt_out
     QuantizedCPU: lt_out_quantized_cpu
 
 - func: lt.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_lt
-    CUDA: legacy::cuda::_th_lt
+    CPU: lt
+    CUDA: lt
     QuantizedCPU: lt_quantized_cpu
 
 - func: lt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: lt_out_cpu
-    CUDA: lt_out_cuda
+    CPU: lt_out
+    CUDA: lt_out
     QuantizedCPU: lt_out_quantized_cpu
 
 - func: lt.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_lt
-    CUDA: legacy::cuda::_th_lt
+    CPU: lt
+    CUDA: lt
     QuantizedCPU: lt_quantized_cpu
 
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
@@ -5188,10 +5191,12 @@
 
 - func: all(Tensor self) -> Tensor
   use_c10_dispatcher: full
+  supports_named_tensor: True
   variants: method, function
 
 - func: any(Tensor self) -> Tensor
   use_c10_dispatcher: full
+  supports_named_tensor: True
   variants: method, function
 
 - func: renorm.out(Tensor self, Scalar p, int dim, Scalar maxnorm, *, Tensor(a!) out) -> Tensor(a!)
@@ -6378,6 +6383,7 @@
   dispatch:
     CPU: upsample_bilinear2d_cpu
     CUDA: upsample_bilinear2d_cuda
+    QuantizedCPU: quantized_upsample_bilinear2d_cpu
 
 - func: upsample_bilinear2d_backward.grad_input(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
