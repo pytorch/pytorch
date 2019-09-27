@@ -174,7 +174,9 @@
         name: Build
         no_output_timeout: "1h"
         command: |
-          set -eux -o pipefail
+          # Do not set -u here; there is some problem with CircleCI
+          # variable expansion with PROMPT_COMMAND
+          set -ex -o pipefail
           script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_build.sh"
           cat "$script"
           source "$script"
@@ -183,7 +185,9 @@
         name: Test
         no_output_timeout: "1h"
         command: |
-          set -eux -o pipefail
+          # Do not set -u here; there is some problem with CircleCI
+          # variable expansion with PROMPT_COMMAND
+          set -ex -o pipefail
           script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_test.sh"
           cat "$script"
           source "$script"
