@@ -109,7 +109,12 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
-      .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
+      .def("_jit_pass_onnx_peephole",
+          [](std::shared_ptr<Graph>& graph,
+             int opset_version,
+             bool fixed_batch_size) {
+            return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
+          })
       .def(
           "_jit_pass_onnx_cast_all_constant_to_floating",
           CastAllConstantToFloating)
@@ -154,17 +159,27 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_insert_observers",
           [](script::Module& module,
              const std::string& method_name,
-             const py::dict& qconfig_dict) {
+             const py::dict& qconfig_dict,
+             bool inplace) {
             auto dict = py::cast<std::unordered_map<
                 std::string,
                 std::tuple<script::Module, script::Module>>>(qconfig_dict);
-            return InsertObservers(module, method_name, dict);
-          })
+            return InsertObservers(module, method_name, dict, inplace);
+          },
+          py::arg("module"),
+          py::arg("method_name"),
+          py::arg("qconfig_dict"),
+          py::arg("inplace") = false)
       .def(
           "_jit_pass_insert_quant_dequant",
-          [](script::Module& module, const std::string& method_name) {
-            return InsertQuantDeQuant(module, method_name);
-          })
+          [](script::Module& module,
+             const std::string& method_name,
+             bool inplace) {
+            return InsertQuantDeQuant(module, method_name, inplace);
+          },
+          py::arg("module"),
+          py::arg("method_name"),
+          py::arg("inplace") = false)
       .def(
           "_jit_pass_quant_fusion",
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })

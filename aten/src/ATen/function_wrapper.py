@@ -89,11 +89,11 @@ case ScalarType::${ScalarName}: {
 # In this case, it will be called for all backends, but can be overwritten on a
 # per backend basis.
 NATIVE_DISPATCH_DECLARATION = CodeTemplate("""\
-static ${return_type} ${api_name}(${type_method_formals});
+${return_type} ${api_name}(${type_method_formals});
 """)
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
-${return_type} TypeDefault::${api_name}(${type_method_formals}) {
+${return_type} ${api_name}(${type_method_formals}) {
 #ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
 #endif
@@ -103,7 +103,7 @@ ${return_type} TypeDefault::${api_name}(${type_method_formals}) {
 """)
 
 NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
-${return_type} ${Type}::${api_name}(${type_method_formals}) {
+${return_type} ${api_name}(${type_method_formals}) {
 #ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
 #endif
@@ -112,28 +112,40 @@ ${return_type} ${Type}::${api_name}(${type_method_formals}) {
 }
 """)
 
+DEFAULT_LEGACY_FUNCTION_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .impl_unboxedOnlyATenCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
+BACKEND_LEGACY_FUNCTION_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .impl_unboxedOnlyATenKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
+  .impl_unboxedOnlyC10CatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
+  .impl_unboxedOnlyC10Kernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .catchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
+  .catchAllKernel<${return_type} (${formals_types})>(&TypeDefault::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .kernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
+  .kernel<${return_type} (${formals_types})>(TensorTypeId::${Backend}TensorId, &${Type}::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
@@ -153,7 +165,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     ${static_dispatch_method_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${method_actuals});
+    return table->callUnboxed<${return_type}, ${formals_types}>(${method_actuals});
 #endif
 }
 """)
@@ -175,7 +187,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op, impl::dispatchTypeId(type_set())${method_actuals_with_comma_prefix});
+        op, impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -194,7 +206,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     ${static_dispatch_function_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${native_actuals});
+    return table->callUnboxed<${return_type}, ${formals_types}>(${native_actuals});
 #endif
 }
 """)
@@ -256,7 +268,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${native_actuals});
+    return table->callUnboxed<${return_type}, ${formals_types}>(${native_actuals});
 #endif
 }
 """)
@@ -371,39 +383,29 @@ TYPE_RETURN = {
 CHECKED_CAST = {
     'THTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::${ScalarName})'),
+            'DeviceType::${DeviceType}, ScalarType::${ScalarName})'),
     'THByteTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Byte)'),
+            'DeviceType::${DeviceType}, ScalarType::Byte)'),
     'THBoolTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Bool)'),
+            'DeviceType::${DeviceType}, ScalarType::Bool)'),
     'THIndexTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Long)'),
+            'DeviceType::${DeviceType}, ScalarType::Long)'),
     'THIntegerTensor*':
         CodeTemplate(
-            'checked_tensor_unwrap('
+            'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${Backend}, ScalarType::Int)'),
-    'THDenseTensor*':
-        CodeTemplate(
-            'checked_tensor_unwrap('
-            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${DenseBackend}, ScalarType::${ScalarName})'),
-    'THDenseIndexTensor*':
-        CodeTemplate(
-            'checked_tensor_unwrap('
-            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'Backend::${DenseBackend}, ScalarType::Long)'),
+            'DeviceType::${DeviceType}, ScalarType::Int)'),
     'THStorage*':
         CodeTemplate(
             'checked_storage('
@@ -598,6 +600,8 @@ FunctionOption = TypedDict('FunctionOption', {
     # cimpls is really a List[FunctionOption]
     'cimpls': List[Any],
     'cname': str,
+    # explicitly specify whether the function is a factory function or other special category
+    'category_override': str,
     'condition': str,
     'device_guard': bool,
     'device_guard_declaration': str,
@@ -663,6 +667,7 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('operator_name', str),
     ('overload_name', str),
     ('use_c10_dispatcher', str),
+    ('category_override', str),
     ('matches_jit_signature', bool),
     ('schema_string', str),
     ('method_prefix_derived', str),
@@ -713,7 +718,7 @@ def named_guard(option, tensors, tensorlists):
 if ({named_conditions}) {{
     AT_ERROR(
         "{op} is not yet supported with named tensors. Please drop names via "
-        "`tensor = tensor.renamed(None)`, call the op with an unnamed tensor, "
+        "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
         "and set names on the result of the operation.");
 }}""".format(named_conditions=' || '.join(named_conditions), op=option['name']))
 
@@ -739,7 +744,8 @@ def is_mutable_formal_argument(argument, option):
 
 
 def check_methods_do_not_start_with_underscore(name, is_method):
-    if name in {'_values', '_indices', '_nnz', '_dimI', '_dimV', '_coalesced_'}:
+    if name in {'_values', '_indices', '_nnz', '_dimI', '_dimV', '_coalesced_',
+                '_version'}:
         return
     if is_method and name.startswith('_') and not name.startswith('__') and not name.startswith('_th_'):
         message = "Function '{}' starts with a single underscore and is ".format(name)
@@ -1224,6 +1230,7 @@ def create_generic(top_env, declarations):
             elif option['use_c10_dispatcher'] == 'unboxed_only':
                 method_definition = C10_UNBOXEDONLY_TENSOR_METHOD_DEFINITION
             else:
+                assert option['use_c10_dispatcher'] == 'full'
                 method_definition = C10_TENSOR_METHOD_DEFINITION
             return FunctionCode(
                 declaration=TENSOR_METHOD_DECLARATION.substitute(
@@ -1259,13 +1266,14 @@ def create_generic(top_env, declarations):
                 fn_definition = FACTORY_DEFINITION.substitute(
                     option, static_dispatch_function_body=static_dispatch_function_body)
             else:
-                if (option['use_c10_dispatcher'] == 'no'):
+                if option['use_c10_dispatcher'] == 'no':
                     fn_definition = FUNCTION_DEFINITION.substitute(
                         option, static_dispatch_function_body=static_dispatch_function_body)
                 elif option['use_c10_dispatcher'] == 'unboxed_only':
                     fn_definition = C10_UNBOXEDONLY_FUNCTION_DEFINITION.substitute(
                         option, static_dispatch_function_body=static_dispatch_function_body)
                 else:
+                    assert option['use_c10_dispatcher'] == 'full'
                     fn_definition = C10_FUNCTION_DEFINITION.substitute(
                         option, static_dispatch_function_body=static_dispatch_function_body)
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
@@ -1331,10 +1339,14 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
-        if BUILD_NAMEDTENSOR or not is_named_tensor_only:
+        # RegistrationDeclarations.h is used downstream in XLA, where XLA uses
+        # it as the "source of truth" for pytorch ops and generates code based
+        # on it. We don't pass named tensor only functions there because XLA
+        # doesn't support them.
+        if not is_named_tensor_only:
             top_env['registration_declarations'].append(
                 REGISTRATION_DECLARATION.substitute(option))
-        if (option['use_c10_dispatcher'] != 'no'):
+        if option['use_c10_dispatcher'] != 'no':
             top_env['c10_ops_already_moved_from_aten_to_c10'].append(
                 check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
             )
@@ -1360,12 +1372,16 @@ def create_generic(top_env, declarations):
                 check_namedtensor_enabled(NATIVE_DISPATCH_DECLARATION.substitute(option)))
             top_env['type_method_definitions'].append(
                 check_namedtensor_enabled(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option)))
-            if (option['use_c10_dispatcher'] == 'full'):
+            if option['use_c10_dispatcher'] == 'full':
                 top_env['function_registrations'].append(
                     check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
-            else:
+            elif option['use_c10_dispatcher'] == 'unboxed_only':
                 top_env['function_registrations'].append(
                     check_namedtensor_enabled(DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option)))
+            else:
+                assert option['use_c10_dispatcher'] == 'no'
+                top_env['function_registrations'].append(
+                    check_namedtensor_enabled(DEFAULT_LEGACY_FUNCTION_REGISTRATION.substitute(option)))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1408,6 +1424,7 @@ def create_generic(top_env, declarations):
             operator_name=option['operator_name'],
             overload_name=option['overload_name'],
             use_c10_dispatcher=option['use_c10_dispatcher'],
+            category_override=option['category_override'],
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],
             method_prefix_derived=option['method_prefix_derived'],
@@ -1828,12 +1845,16 @@ def create_derived(backend_type_env, declarations):
                     option['native_type_method_dispatch'] = native_dispatch
                     type_object_definitions.append(
                         NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
-                    if (option['use_c10_dispatcher'] == 'full'):
+                    if option['use_c10_dispatcher'] == 'full':
                         function_registrations.append(
                             BACKEND_FUNCTION_REGISTRATION.substitute(env))
-                    else:
+                    elif option['use_c10_dispatcher'] == 'unboxed_only':
                         function_registrations.append(
                             BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env))
+                    else:
+                        assert option['use_c10_dispatcher'] == 'no'
+                        function_registrations.append(
+                            BACKEND_LEGACY_FUNCTION_REGISTRATION.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:
