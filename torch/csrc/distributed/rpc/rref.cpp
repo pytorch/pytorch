@@ -46,6 +46,7 @@ RRefForkData RRefForkData::fromPyTuple(const py::tuple& t) {
       t.size() == RFD_TUPLE_SIZE,
       "Pickled RRefForkData must contain 6 numbers.");
   worker_id_t ownerId = t[OWNER_IDX].cast<worker_id_t>();
+  // const reference will extend the lifetime of the temporary variable
   const RRefId& rrefId = RRefId(
       t[RREFID_ON_IDX].cast<worker_id_t>(),
       t[RREFID_ID_IDX].cast<local_id_t>());
