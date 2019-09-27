@@ -95,15 +95,6 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   ignore_tests+=(" --ignore $caffe2_pypath/python/data_parallel_model_test.py ")
 fi
 
-##############################
-# TensorRT integration tests #
-##############################
-if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
-  pip install -q --user torchvision
-else
-  ignore_tests+=(" --ignore $caffe2_pypath/python/trt/test_pt_onnx_trt.py ")
-fi
-
 # NB: Warnings are disabled because they make it harder to see what
 # the actual erroring test is
 echo "Running Python tests.."
@@ -114,7 +105,23 @@ if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
 fi
 
 pip install --user pytest-sugar
-"$PYTHON" \
+
+##############################
+# TensorRT integration tests #
+##############################
+if [[ $BUILD_ENVIRONMENT == *caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04* ]]; then
+  pip install -q --user torchvision
+  "$PYTHON" \
+  -m pytest \
+  -v \
+  --disable-warnings \
+  --junit-xml="$pytest_reports_dir/result.xml" \
+  --ignore "$caffe2_pypath/python/test/executor_test.py" \
+  --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
+  --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
+  --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py"
+else
+  "$PYTHON" \
   -m pytest \
   -v \
   --disable-warnings \
@@ -123,9 +130,11 @@ pip install --user pytest-sugar
   --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
   --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
   --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
+  --ignore "$caffe2_pypath/python/trt/test_pt_onnx_trt.py" \
   ${ignore_tests[@]} \
   "$caffe2_pypath/python" \
   "${EXTRA_TESTS[@]}"
+fi
 
 #####################
 # torchvision tests #
