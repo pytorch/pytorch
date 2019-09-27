@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/core/TensorTypeId.h>
-#include <c10/util/llvmMathExtras.h>
 #include <c10/util/Exception.h>
+#include <c10/util/llvmMathExtras.h>
 #include <ostream>
 
 namespace c10 {
@@ -32,24 +32,22 @@ namespace c10 {
 //
 // An undefined tensor is one with an empty tensor type set.
 class TensorTypeSet final {
-public:
+ public:
   enum Full { FULL };
   enum Raw { RAW };
 
   // NB: default constructor representation as zero is MANDATORY as
   // use of TensorTypeSet in TLS requires this.
-  TensorTypeSet()
-    : repr_(0) {}
-  TensorTypeSet(Full)
-    : repr_(-1) {}
+  TensorTypeSet() : repr_(0) {}
+  TensorTypeSet(Full) : repr_(-1) {}
   // Public version of TensorTypeSet(uint64_t) API; external users
   // must be explicit when they do this!
-  TensorTypeSet(Raw, uint64_t x)
-    : repr_(x) {}
+  TensorTypeSet(Raw, uint64_t x) : repr_(x) {}
   explicit TensorTypeSet(TensorTypeId t)
-    : repr_(t == TensorTypeId::UndefinedTensorId
-              ? 0
-              : 1ULL << (static_cast<uint8_t>(t) - 1)) {}
+      : repr_(
+            t == TensorTypeId::UndefinedTensorId
+                ? 0
+                : 1ULL << (static_cast<uint8_t>(t) - 1)) {}
   // Test if a TensorTypeId is in the set
   bool has(TensorTypeId t) const {
     TORCH_INTERNAL_ASSERT(t != TensorTypeId::UndefinedTensorId);
@@ -86,7 +84,9 @@ public:
   bool empty() const {
     return repr_ == 0;
   }
-  uint64_t raw_repr() { return repr_; }
+  uint64_t raw_repr() {
+    return repr_;
+  }
   // Return the type id in this set with the highest priority (i.e.,
   // is the largest in the TensorTypeId enum).  Intuitively, this
   // type id is the one that should handle dispatch (assuming there
@@ -98,7 +98,8 @@ public:
     // didn't do it for now.
     return static_cast<TensorTypeId>(64 - llvm::countLeadingZeros(repr_));
   }
-private:
+
+ private:
   TensorTypeSet(uint64_t repr) : repr_(repr) {}
   uint64_t repr_ = 0;
 };
@@ -125,4 +126,4 @@ static inline TensorTypeId legacyExtractTypeId(TensorTypeSet s) {
   return s.remove(TensorTypeId::VariableTensorId).highestPriorityTypeId();
 }
 
-}
+} // namespace c10

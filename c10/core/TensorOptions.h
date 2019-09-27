@@ -1,15 +1,15 @@
 #pragma once
 
-#include <c10/core/DefaultDtype.h>
 #include <c10/core/Backend.h>
+#include <c10/core/DefaultDtype.h>
+#include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/Device.h>
 #include <c10/core/TensorTypeSet.h>
 
-#include <c10/util/Optional.h>
-#include <c10/util/C++17.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/C++17.h>
+#include <c10/util/Optional.h>
 
 #include <cstddef>
 #include <iosfwd>
@@ -40,7 +40,8 @@ namespace c10 {
 ///     at::dtype(at::kInt)
 ///
 /// Additionally, anywhere a TensorOptions is expected, you can directly
-/// pass at::kCUDA / at::kInt, and it will implicitly convert to a TensorOptions.
+/// pass at::kCUDA / at::kInt, and it will implicitly convert to a
+/// TensorOptions.
 ///
 /// Here are some recommended ways to create a 2x2 tensor of zeros
 /// with certain properties.  These all *implicitly* make use of
@@ -83,7 +84,8 @@ namespace c10 {
 ///    }
 ///
 ///    template <typename... Args,
-///             typename = std::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
+///             typename = std::enable_if_t<std::is_constructible<Device,
+///             Args&&...>::value>>
 ///    /* implicit */  TensorOptions(Args&&... args)
 ///     : TensorOptions(Device(std::forward<Args>(args)...)) {}
 ///
@@ -96,19 +98,17 @@ namespace c10 {
 /// To get around this, we templatize the `Device` constructor. Since overload
 /// resolution is done before template resolution, our problem is solved.
 
-
 struct C10_API TensorOptions {
   TensorOptions()
-    : requires_grad_(false)
-    , is_variable_(false)
-    , pinned_memory_(false)
-    , has_device_(false)
-    , has_dtype_(false)
-    , has_layout_(false)
-    , has_requires_grad_(false)
-    , has_is_variable_(false)
-    , has_pinned_memory_(false)
-    {}
+      : requires_grad_(false),
+        is_variable_(false),
+        pinned_memory_(false),
+        has_device_(false),
+        has_dtype_(false),
+        has_layout_(false),
+        has_requires_grad_(false),
+        has_is_variable_(false),
+        has_pinned_memory_(false) {}
 
   /// Constructs a `TensorOptions` object with the given layout.
   /* implicit */ TensorOptions(Layout layout) : TensorOptions() {
@@ -117,8 +117,10 @@ struct C10_API TensorOptions {
 
   /// Constructs a `TensorOptions` object with the given device.
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
-  template<typename T,
-           typename = c10::guts::enable_if_t<std::is_same<c10::guts::decay_t<T>, Device>::value>>
+  template <
+      typename T,
+      typename = c10::guts::enable_if_t<
+          std::is_same<c10::guts::decay_t<T>, Device>::value>>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
     this->set_device(std::forward<T>(device));
   }
@@ -131,10 +133,12 @@ struct C10_API TensorOptions {
   /// NB: Ideally we only allow implicit constructors here. But there is no easy
   ///     way to detect them. So we have this one that allows explicit
   ///     constructors too.
-  template <typename... Args,
-            typename = c10::guts::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
-   /* implicit */ TensorOptions(Args&&... args)
-    : TensorOptions(Device(std::forward<Args>(args)...)) {}
+  template <
+      typename... Args,
+      typename = c10::guts::enable_if_t<
+          std::is_constructible<Device, Args&&...>::value>>
+  /* implicit */ TensorOptions(Args&&... args)
+      : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
   /// Constructs a `TensorOptions` object with the given dtype.
   /* implicit */ TensorOptions(caffe2::TypeMeta dtype) : TensorOptions() {
@@ -148,9 +152,7 @@ struct C10_API TensorOptions {
 
   /// True if all elements of the `TensorOptions` match that of the other.
   bool operator==(const TensorOptions& other) const noexcept {
-    return
-        has_dtype_ == other.has_dtype_ &&
-        has_layout_ == other.has_layout_ &&
+    return has_dtype_ == other.has_dtype_ && has_layout_ == other.has_layout_ &&
         has_device_ == other.has_device_ &&
         has_requires_grad_ == other.has_requires_grad_ &&
         has_is_variable_ == other.has_is_variable_ &&
@@ -169,7 +171,8 @@ struct C10_API TensorOptions {
 
   /// Return a copy of `TensorOptions` with `device` set to the given one, or
   /// cleared if `device` is `nullopt`.
-  C10_NODISCARD TensorOptions device(c10::optional<Device> device) const noexcept {
+  C10_NODISCARD TensorOptions device(c10::optional<Device> device) const
+      noexcept {
     TensorOptions r = *this;
     r.set_device(device);
     return r;
@@ -178,9 +181,10 @@ struct C10_API TensorOptions {
   /// Return a copy of `TensorOptions` with `device` set to the given one.
   /// (This overload ensures that variadic template c10::optional constructor
   /// for Device work correctly.)
-  template<typename ... Args>
+  template <typename... Args>
   C10_NODISCARD TensorOptions device(Args&&... args) const noexcept {
-    return device(c10::optional<Device>(c10::in_place, std::forward<Args>(args)...));
+    return device(
+        c10::optional<Device>(c10::in_place, std::forward<Args>(args)...));
   }
 
   /// Return a copy of `TensorOptions`, but with device set to CUDA, and the
@@ -188,19 +192,22 @@ struct C10_API TensorOptions {
   ///
   /// TODO: This function encourages bad behavior (assuming CUDA is
   /// the only device that matters).  Get rid of it / rename it.
-  C10_NODISCARD TensorOptions device_index(int16_t device_index) const noexcept {
+  C10_NODISCARD TensorOptions device_index(int16_t device_index) const
+      noexcept {
     return device(Device::Type::CUDA, device_index);
   }
 
   /// Return a copy of `TensorOptions` with `dtype` set to the given one.
-  C10_NODISCARD TensorOptions dtype(c10::optional<caffe2::TypeMeta> dtype) const noexcept {
+  C10_NODISCARD TensorOptions dtype(c10::optional<caffe2::TypeMeta> dtype) const
+      noexcept {
     TensorOptions r = *this;
     r.set_dtype(dtype);
     return r;
   }
 
   // legacy function to support ScalarType
-  C10_NODISCARD TensorOptions dtype(c10::optional<ScalarType> dtype) const noexcept {
+  C10_NODISCARD TensorOptions dtype(c10::optional<ScalarType> dtype) const
+      noexcept {
     TensorOptions r = *this;
     r.set_dtype(dtype);
     return r;
@@ -215,29 +222,32 @@ struct C10_API TensorOptions {
   }
 
   /// Sets the layout of the `TensorOptions`.
-  C10_NODISCARD TensorOptions layout(c10::optional<Layout> layout) const noexcept {
+  C10_NODISCARD TensorOptions layout(c10::optional<Layout> layout) const
+      noexcept {
     TensorOptions r = *this;
     r.set_layout(layout);
     return r;
   }
 
   /// Sets the `requires_grad` property of the `TensorOptions`.
-  C10_NODISCARD TensorOptions requires_grad(c10::optional<bool> requires_grad) const noexcept {
+  C10_NODISCARD TensorOptions
+  requires_grad(c10::optional<bool> requires_grad) const noexcept {
     TensorOptions r = *this;
     r.set_requires_grad(requires_grad);
     return r;
   }
 
   /// Sets the `is_variable` property on the `TensorOptions`.
-  C10_NODISCARD TensorOptions is_variable(c10::optional<bool> is_variable) const noexcept {
+  C10_NODISCARD TensorOptions is_variable(c10::optional<bool> is_variable) const
+      noexcept {
     TensorOptions r = *this;
     r.set_is_variable(is_variable);
     return r;
   }
 
-
   /// Sets the `pinned_memory` property on the `TensorOptions`.
-  C10_NODISCARD TensorOptions pinned_memory(c10::optional<bool> pinned_memory) const noexcept {
+  C10_NODISCARD TensorOptions
+  pinned_memory(c10::optional<bool> pinned_memory) const noexcept {
     TensorOptions r = *this;
     r.set_pinned_memory(pinned_memory);
     return r;
@@ -323,7 +333,6 @@ struct C10_API TensorOptions {
     return has_is_variable_;
   }
 
-
   /// Returns the `pinned_memory` property of the `TensorOptions`.
   bool pinned_memory() const noexcept {
     return has_pinned_memory_ ? pinned_memory_ : false;
@@ -334,18 +343,17 @@ struct C10_API TensorOptions {
     return has_pinned_memory_;
   }
 
-
   /// Returns the `is_variable` property of the `TensorOptions`, or
   /// `c10::nullopt` if `is_variable` is not specified.
   c10::optional<bool> is_variable_opt() const noexcept {
     return has_is_variable_ ? c10::make_optional(is_variable_) : c10::nullopt;
   }
 
-
   /// Returns the `pinned_memory` property of the `TensorOptions`, or
   /// `c10::nullopt` if `pinned_memory` is not specified.
   c10::optional<bool> pinned_memory_opt() const noexcept {
-    return has_pinned_memory_ ? c10::make_optional(pinned_memory_) : c10::nullopt;
+    return has_pinned_memory_ ? c10::make_optional(pinned_memory_)
+                              : c10::nullopt;
   }
 
   // Resolves the ATen backend specified by the current construction axes.
@@ -366,20 +374,27 @@ struct C10_API TensorOptions {
   ///
   TensorOptions merge_in(TensorOptions options) const noexcept {
     TensorOptions r = options;
-    if (!r.has_device()) r.set_device(device());
-    if (!r.has_dtype()) r.set_dtype(dtype());
-    if (!r.has_layout()) r.set_layout(layout());
+    if (!r.has_device())
+      r.set_device(device());
+    if (!r.has_dtype())
+      r.set_dtype(dtype());
+    if (!r.has_layout())
+      r.set_layout(layout());
     // NB: requires grad is right biased; not a logical AND/OR!
-    if (!r.has_requires_grad()) r.set_requires_grad(requires_grad());
-    if (!r.has_is_variable()) r.set_is_variable(is_variable());
-    if (!r.has_pinned_memory()) r.set_pinned_memory(pinned_memory());
+    if (!r.has_requires_grad())
+      r.set_requires_grad(requires_grad());
+    if (!r.has_is_variable())
+      r.set_is_variable(is_variable());
+    if (!r.has_pinned_memory())
+      r.set_pinned_memory(pinned_memory());
     return r;
   }
 
   // Resolves the tensor type set specified by the current construction axes.
   TensorTypeSet type_set() const noexcept {
     auto r = TensorTypeSet(computeTensorTypeId());
-    if (is_variable()) r = r.add(TensorTypeId::VariableTensorId);
+    if (is_variable())
+      r = r.add(TensorTypeId::VariableTensorId);
     return r;
   }
 
@@ -415,7 +430,8 @@ struct C10_API TensorOptions {
           case DeviceType::XLA:
             return TensorTypeId::XLATensorId;
           default:
-            AT_ERROR("Unsupported device type for dense layout: ", device().type());
+            AT_ERROR(
+                "Unsupported device type for dense layout: ", device().type());
         }
       case Layout::Sparse:
         switch (device().type()) {
@@ -426,14 +442,16 @@ struct C10_API TensorOptions {
           case DeviceType::HIP:
             return TensorTypeId::SparseHIPTensorId;
           default:
-            AT_ERROR("Unsupported device type for sparse layout: ", device().type());
+            AT_ERROR(
+                "Unsupported device type for sparse layout: ", device().type());
         }
       case Layout::Mkldnn:
         switch (device().type()) {
           case DeviceType::CPU:
             return TensorTypeId::MkldnnCPUTensorId;
           default:
-            AT_ERROR("Unsupported device type for mkldnn layout: ", device().type());
+            AT_ERROR(
+                "Unsupported device type for mkldnn layout: ", device().type());
         }
       default:
         AT_ERROR("Unsupported layout: ", layout());
@@ -441,7 +459,6 @@ struct C10_API TensorOptions {
   }
 
  private:
-
   // These methods are currently private because I'm not sure if it's wise
   // to actually publish them.  They are methods because I need them in
   // the constructor and the functional API implementation.
@@ -537,24 +554,24 @@ struct C10_API TensorOptions {
   // Bitmask required here to get this to fit inside 32 bits (or even 64 bits,
   // for that matter)
 
-  bool requires_grad_     : 1;
-  bool is_variable_       : 1;
-  bool pinned_memory_     : 1;
+  bool requires_grad_ : 1;
+  bool is_variable_ : 1;
+  bool pinned_memory_ : 1;
 
-
-  bool has_device_        : 1;
-  bool has_dtype_         : 1;
-  bool has_layout_        : 1;
+  bool has_device_ : 1;
+  bool has_dtype_ : 1;
+  bool has_layout_ : 1;
   bool has_requires_grad_ : 1;
-  bool has_is_variable_   : 1;
+  bool has_is_variable_ : 1;
   bool has_pinned_memory_ : 1;
 };
 
 // We should aspire to fit in one machine-size word; but a size greater than two
 // words is too much.  (We are doing terribly on 32-bit archs, where we require
 // three machine size words to store tensor options.  Eek!)
-static_assert( sizeof(TensorOptions) <= sizeof(int64_t) * 2,
-               "TensorOptions must fit in 128-bits" );
+static_assert(
+    sizeof(TensorOptions) <= sizeof(int64_t) * 2,
+    "TensorOptions must fit in 128-bits");
 
 /// Convenience function that returns a `TensorOptions` object with the `dtype`
 /// set to the given one.

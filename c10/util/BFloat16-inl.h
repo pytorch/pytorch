@@ -18,19 +18,23 @@ inline C10_HOST_DEVICE BFloat16::operator float() const {
 
 /// Arithmetic
 
-inline C10_HOST_DEVICE BFloat16 operator+(const BFloat16& a, const BFloat16& b) {
+inline C10_HOST_DEVICE BFloat16
+operator+(const BFloat16& a, const BFloat16& b) {
   return static_cast<float>(a) + static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE BFloat16 operator-(const BFloat16& a, const BFloat16& b) {
+inline C10_HOST_DEVICE BFloat16
+operator-(const BFloat16& a, const BFloat16& b) {
   return static_cast<float>(a) - static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE BFloat16 operator*(const BFloat16& a, const BFloat16& b) {
+inline C10_HOST_DEVICE BFloat16
+operator*(const BFloat16& a, const BFloat16& b) {
   return static_cast<float>(a) * static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE BFloat16 operator/(const BFloat16& a, const BFloat16& b) {
+inline C10_HOST_DEVICE BFloat16
+operator/(const BFloat16& a, const BFloat16& b) {
   return static_cast<float>(a) / static_cast<float>(b);
 }
 
@@ -204,7 +208,7 @@ namespace std {
 
 template <>
 class numeric_limits<c10::BFloat16> {
-public:
+ public:
   static constexpr bool is_signed = true;
   static constexpr bool is_specialized = true;
   static constexpr bool is_integer = false;
@@ -261,7 +265,11 @@ public:
 };
 
 /// Used by vec256<c10::BFloat16>::map
-inline c10::BFloat16 exp(c10::BFloat16 a) { return std::exp(float(a)); }
-inline c10::BFloat16 log(c10::BFloat16 a) { return std::log(float(a)); }
+inline c10::BFloat16 exp(c10::BFloat16 a) {
+  return std::exp(float(a));
+}
+inline c10::BFloat16 log(c10::BFloat16 a) {
+  return std::log(float(a));
+}
 
 } // namespace std

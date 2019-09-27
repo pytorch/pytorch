@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/core/Backend.h>
-#include <c10/util/Exception.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 
 #include <iostream>
 
@@ -17,11 +17,12 @@
 //    should be in channels_last format
 //
 //  Contiguous:
-//    Regardless of input tensors format, the output should be contiguous Tensor.
+//    Regardless of input tensors format, the output should be contiguous
+//    Tensor.
 //
 //  ChannelsLast:
-//    Regardless of input tensors format, the output should be in channels_last format.
-
+//    Regardless of input tensors format, the output should be in channels_last
+//    format.
 
 namespace c10 {
 enum class MemoryFormat : int8_t { Contiguous, Preserve, ChannelsLast };

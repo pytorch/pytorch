@@ -4,8 +4,8 @@
 #include <memory>
 
 #include <c10/core/Device.h>
-#include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/Exception.h>
+#include <c10/util/UniqueVoidPtr.h>
 
 namespace c10 {
 
@@ -93,7 +93,9 @@ class C10_API DataPtr {
    * be; be sure to read the source code of the Allocator
    * in question to confirm this.
    */
-  C10_NODISCARD bool compare_exchange_deleter(DeleterFnPtr expected_deleter, DeleterFnPtr new_deleter) {
+  C10_NODISCARD bool compare_exchange_deleter(
+      DeleterFnPtr expected_deleter,
+      DeleterFnPtr new_deleter) {
     return ptr_.compare_exchange_deleter(expected_deleter, new_deleter);
   }
   Device device() const {
@@ -209,8 +211,8 @@ struct AllocatorRegisterer {
   }
 };
 
-#define REGISTER_ALLOCATOR(t, f)                    \
-  namespace {                                       \
+#define REGISTER_ALLOCATOR(t, f)                  \
+  namespace {                                     \
   static AllocatorRegisterer<t> g_allocator_d(f); \
   }
 

@@ -130,7 +130,7 @@ class either final {
     return std::move(right());
   }
 
-  template<class Result, class LeftMapFunc, class RightMapFunc>
+  template <class Result, class LeftMapFunc, class RightMapFunc>
   Result map(LeftMapFunc&& leftMapFunc, RightMapFunc&& rightMapFunc) const {
     if (Side::left == _side) {
       return std::forward<LeftMapFunc>(leftMapFunc)(_left);

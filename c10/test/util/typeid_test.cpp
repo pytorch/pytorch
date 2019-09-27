@@ -1,5 +1,5 @@
-#include "c10/util/typeid.h"
 #include <gtest/gtest.h>
+#include "c10/util/typeid.h"
 
 using std::string;
 
@@ -8,7 +8,7 @@ namespace {
 
 class TypeMetaTestFoo {};
 class TypeMetaTestBar {};
-}
+} // namespace
 
 CAFFE_KNOWN_TYPE(TypeMetaTestFoo);
 CAFFE_KNOWN_TYPE(TypeMetaTestBar);
@@ -35,11 +35,10 @@ TEST(TypeMetaTest, Names) {
 #ifdef __GXX_RTTI
   TypeMeta string_meta = TypeMeta::Make<string>();
   // For string, we should have a demangled name.
-  EXPECT_TRUE(
-      string(string_meta.name()) != typeid(string).name());
+  EXPECT_TRUE(string(string_meta.name()) != typeid(string).name());
   EXPECT_TRUE(
       string(string_meta.name()) == c10::demangle(typeid(string).name()));
-#endif  // __GXX_RTTI
+#endif // __GXX_RTTI
 }
 
 TEST(TypeMetaTest, TypeMeta) {
@@ -80,7 +79,6 @@ TEST(TypeMetaTest, TypeMeta) {
 #endif
 }
 
-
 class ClassAllowAssignment {
  public:
   ClassAllowAssignment() : x(42) {}
@@ -96,7 +94,7 @@ class ClassNoAssignment {
   ClassNoAssignment& operator=(const ClassNoAssignment& src) = delete;
   int x;
 };
-}
+} // namespace
 
 CAFFE_KNOWN_TYPE(ClassAllowAssignment);
 CAFFE_KNOWN_TYPE(ClassNoAssignment);
@@ -136,5 +134,5 @@ TEST(TypeMetaTest, Float16IsNotUint16) {
   EXPECT_NE(TypeMeta::Id<uint16_t>(), TypeMeta::Id<at::Half>());
 }
 
-}  // namespace
-}  // namespace caffe2
+} // namespace
+} // namespace caffe2

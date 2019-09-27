@@ -53,8 +53,8 @@ enum class TensorTypeId : uint8_t {
 };
 
 static_assert(
-  static_cast<uint8_t>(TensorTypeId::NumTensorIds) < 64,
-  "TensorTypeId is used as index into 64-bit bitmask; you must have less than 64 entries");
+    static_cast<uint8_t>(TensorTypeId::NumTensorIds) < 64,
+    "TensorTypeId is used as index into 64-bit bitmask; you must have less than 64 entries");
 
 C10_API const char* toString(TensorTypeId);
 C10_API std::ostream& operator<<(std::ostream&, TensorTypeId);
@@ -77,4 +77,4 @@ struct hash<c10::TensorTypeId> {
     return static_cast<size_t>(x);
   }
 };
-}
+} // namespace std

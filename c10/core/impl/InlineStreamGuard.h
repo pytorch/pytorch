@@ -15,27 +15,34 @@ namespace impl {
  */
 template <typename T>
 class InlineStreamGuard : private InlineDeviceGuard<T> {
-public:
+ public:
   /// No default constructor, see Note [Omitted default constructor from RAII]
   explicit InlineStreamGuard() = delete;
 
   /// Set the current device to the device associated with the passed stream,
   /// and set the current stream on that device to the passed stream.
   explicit InlineStreamGuard(Stream stream)
-    : InlineDeviceGuard<T>(stream.device())
-    , original_stream_of_original_device_(this->impl_.getStream(original_device()))
-    , original_stream_of_current_device_(this->impl_.exchangeStream(stream))
-    , current_stream_(stream)
-    {}
+      : InlineDeviceGuard<T>(stream.device()),
+        original_stream_of_original_device_(
+            this->impl_.getStream(original_device())),
+        original_stream_of_current_device_(this->impl_.exchangeStream(stream)),
+        current_stream_(stream) {}
 
   /// This constructor exists purely for testing
-  template <typename U=T, typename=typename std::enable_if<std::is_same<U, VirtualGuardImpl>::value>::type>
-  explicit InlineStreamGuard(Stream stream, const DeviceGuardImplInterface* impl)
-    : InlineDeviceGuard<T>(stream.device(), impl ? impl : getDeviceGuardImpl(stream.device_type()))
-    , original_stream_of_original_device_(this->impl_.getStream(original_device()))
-    , original_stream_of_current_device_(this->impl_.exchangeStream(stream))
-    , current_stream_(stream)
-    {}
+  template <
+      typename U = T,
+      typename = typename std::enable_if<
+          std::is_same<U, VirtualGuardImpl>::value>::type>
+  explicit InlineStreamGuard(
+      Stream stream,
+      const DeviceGuardImplInterface* impl)
+      : InlineDeviceGuard<T>(
+            stream.device(),
+            impl ? impl : getDeviceGuardImpl(stream.device_type())),
+        original_stream_of_original_device_(
+            this->impl_.getStream(original_device())),
+        original_stream_of_current_device_(this->impl_.exchangeStream(stream)),
+        current_stream_(stream) {}
 
   /// Copy is disallowed
   InlineStreamGuard(const InlineStreamGuard<T>&) = delete;
@@ -109,8 +116,9 @@ public:
     return InlineDeviceGuard<T>::original_device();
   }
 
-private:
-  Stream original_stream_of_original_device_; // what the user probably cares about
+ private:
+  Stream
+      original_stream_of_original_device_; // what the user probably cares about
   Stream original_stream_of_current_device_; // what we need to restore
   Stream current_stream_;
 };
@@ -122,17 +130,16 @@ private:
  */
 template <typename T>
 class InlineOptionalStreamGuard {
-public:
+ public:
   /// Creates an uninitialized stream guard.
   explicit InlineOptionalStreamGuard()
-    : guard_() // See Note [Explicit initialization of optional fields]
-    {}
+      : guard_() // See Note [Explicit initialization of optional fields]
+  {}
 
   /// Set the current device to the device associated with the passed stream,
   /// and set the current stream on that device to the passed stream,
   /// if the passed stream is not nullopt.
-  explicit InlineOptionalStreamGuard(optional<Stream> stream_opt)
-    : guard_() {
+  explicit InlineOptionalStreamGuard(optional<Stream> stream_opt) : guard_() {
     if (stream_opt.has_value()) {
       guard_.emplace(stream_opt.value());
     }
@@ -141,13 +148,14 @@ public:
   /// All constructors of StreamGuard are valid for OptionalStreamGuard
   template <typename... Args>
   explicit InlineOptionalStreamGuard(Args&&... args)
-    : guard_(in_place, std::forward<Args>(args)...) {}
+      : guard_(in_place, std::forward<Args>(args)...) {}
 
   // See Note [Move construction for RAII guards is tricky]
   InlineOptionalStreamGuard(InlineOptionalStreamGuard<T>&& other) = delete;
 
   // See Note [Move assignment for RAII guards is tricky]
-  InlineOptionalStreamGuard& operator=(InlineOptionalStreamGuard&& other) = delete;
+  InlineOptionalStreamGuard& operator=(InlineOptionalStreamGuard&& other) =
+      delete;
 
   /// Resets the currently set stream to the original stream and
   /// the currently set device to the original device.  Then,
@@ -165,23 +173,27 @@ public:
   /// Returns the stream that was set at the time the guard was most recently
   /// initialized, or nullopt if the guard is uninitialized.
   optional<Stream> original_stream() const {
-    return guard_.has_value() ? make_optional(guard_->original_stream()) : nullopt;
+    return guard_.has_value() ? make_optional(guard_->original_stream())
+                              : nullopt;
   }
 
   /// Returns the most recent stream that was set using this stream guard,
-  /// either from construction, or via reset_stream, if the guard is initialized,
-  /// or nullopt if the guard is uninitialized.
+  /// either from construction, or via reset_stream, if the guard is
+  /// initialized, or nullopt if the guard is uninitialized.
   optional<Stream> current_stream() const {
-    return guard_.has_value() ? make_optional(guard_->current_stream()) : nullopt;
+    return guard_.has_value() ? make_optional(guard_->current_stream())
+                              : nullopt;
   }
 
-  /// Restore the original device and stream, resetting this guard to uninitialized state.
+  /// Restore the original device and stream, resetting this guard to
+  /// uninitialized state.
   void reset() {
     guard_.reset();
   }
 
-private:
+ private:
   optional<InlineStreamGuard<T>> guard_;
 };
 
-}} // namespace c10::impl
+} // namespace impl
+} // namespace c10

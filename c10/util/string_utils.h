@@ -67,8 +67,8 @@ inline long long stoll(const std::string& str) {
 #define CAFFE2_TESTONLY_WE_ARE_USING_CUSTOM_STRING_FUNCTIONS 0
 using std::stod;
 using std::stoi;
-using std::stoull;
 using std::stoll;
+using std::stoull;
 using std::to_string;
 #endif // defined(__ANDROID__) || defined(CAFFE2_FORCE_STD_STRING_FALLBACK_TEST)
 

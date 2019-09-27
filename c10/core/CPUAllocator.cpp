@@ -43,8 +43,9 @@ void* alloc_cpu(size_t nbytes) {
   // We might have clowny upstream code that tries to alloc a negative number
   // of bytes. Let's catch it early.
   CAFFE_ENFORCE(
-    ((ptrdiff_t)nbytes) >= 0,
-    "alloc_cpu() seems to have been called with negative number: ", nbytes);
+      ((ptrdiff_t)nbytes) >= 0,
+      "alloc_cpu() seems to have been called with negative number: ",
+      nbytes);
 
   void* data;
 #ifdef __ANDROID__
@@ -76,7 +77,7 @@ void* alloc_cpu(size_t nbytes) {
   CHECK(
       !FLAGS_caffe2_cpu_allocator_do_zero_fill ||
       !FLAGS_caffe2_cpu_allocator_do_junk_fill)
-    << "Cannot request both zero-fill and junk-fill at the same time";
+      << "Cannot request both zero-fill and junk-fill at the same time";
   if (FLAGS_caffe2_cpu_allocator_do_zero_fill) {
     memset(data, 0, nbytes);
   } else if (FLAGS_caffe2_cpu_allocator_do_junk_fill) {
@@ -140,7 +141,6 @@ struct C10_API DefaultCPUAllocator final : at::Allocator {
     static MemoryAllocationReporter reporter_;
     return reporter_;
   }
-
 };
 
 void NoDelete(void*) {}

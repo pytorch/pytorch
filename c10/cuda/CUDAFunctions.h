@@ -9,9 +9,9 @@
 
 #include <cuda_runtime_api.h>
 
-#include <c10/macros/Macros.h>
 #include <c10/core/Device.h>
 #include <c10/cuda/CUDAException.h>
+#include <c10/macros/Macros.h>
 
 namespace c10 {
 namespace cuda {
@@ -45,4 +45,5 @@ inline void set_device(DeviceIndex device) {
   C10_CUDA_CHECK(cudaSetDevice(static_cast<int>(device)));
 }
 
-}} // namespace c10::cuda
+} // namespace cuda
+} // namespace c10

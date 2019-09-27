@@ -1,7 +1,7 @@
 #include <algorithm>
 
-#include <gtest/gtest.h>
 #include <c10/util/Logging.h>
+#include <gtest/gtest.h>
 
 namespace c10_test {
 

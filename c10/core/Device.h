@@ -90,16 +90,18 @@ struct C10_API Device final {
   DeviceType type_;
   DeviceIndex index_ = -1;
   void validate() {
-    TORCH_CHECK(index_ == -1 || index_ >= 0,
-        "Device index must be -1 or non-negative, got ", index_);
-    TORCH_CHECK(!is_cpu() || index_ <= 0,
-        "CPU device index must be -1 or zero, got ", index_);
+    TORCH_CHECK(
+        index_ == -1 || index_ >= 0,
+        "Device index must be -1 or non-negative, got ",
+        index_);
+    TORCH_CHECK(
+        !is_cpu() || index_ <= 0,
+        "CPU device index must be -1 or zero, got ",
+        index_);
   }
 };
 
-C10_API std::ostream& operator<<(
-    std::ostream& stream,
-    const Device& device);
+C10_API std::ostream& operator<<(std::ostream& stream, const Device& device);
 
 } // namespace c10
 
@@ -119,10 +121,11 @@ struct hash<c10::Device> {
     // half of the resulting integer.
     //
     // Technically, by C/C++ integer promotion rules, we only need one of the
-    // uint32_t casts to the result type, but we put in both for explicitness's sake.
-    uint32_t bits =
-        static_cast<uint32_t>(static_cast<uint16_t>(d.type())) << 16
-      | static_cast<uint32_t>(static_cast<uint16_t>(d.index()));
+    // uint32_t casts to the result type, but we put in both for explicitness's
+    // sake.
+    uint32_t bits = static_cast<uint32_t>(static_cast<uint16_t>(d.type()))
+            << 16 |
+        static_cast<uint32_t>(static_cast<uint16_t>(d.index()));
     return std::hash<uint32_t>{}(bits);
   }
 };

@@ -6,7 +6,8 @@ using namespace c10;
 
 TEST(TensorTypeSet, Empty) {
   TensorTypeSet empty_set;
-  for (uint8_t i = 1; i < static_cast<uint8_t>(TensorTypeId::NumTensorIds); i++) {
+  for (uint8_t i = 1; i < static_cast<uint8_t>(TensorTypeId::NumTensorIds);
+       i++) {
     auto tid = static_cast<TensorTypeId>(i);
     ASSERT_FALSE(empty_set.has(tid));
   }
@@ -17,7 +18,8 @@ TEST(TensorTypeSet, Empty) {
 }
 
 TEST(TensorTypeSet, Singleton) {
-  for (uint8_t i = 1; i < static_cast<uint8_t>(TensorTypeId::NumTensorIds); i++) {
+  for (uint8_t i = 1; i < static_cast<uint8_t>(TensorTypeId::NumTensorIds);
+       i++) {
     auto tid = static_cast<TensorTypeId>(i);
     TensorTypeSet sing(tid);
     ASSERT_EQ(sing, sing);
@@ -32,8 +34,11 @@ TEST(TensorTypeSet, Singleton) {
 }
 
 TEST(TensorTypeSet, Doubleton) {
-  for (uint8_t i = 1; i < static_cast<uint8_t>(TensorTypeId::NumTensorIds); i++) {
-    for (uint8_t j = i + 1; j < static_cast<uint8_t>(TensorTypeId::NumTensorIds); j++) {
+  for (uint8_t i = 1; i < static_cast<uint8_t>(TensorTypeId::NumTensorIds);
+       i++) {
+    for (uint8_t j = i + 1;
+         j < static_cast<uint8_t>(TensorTypeId::NumTensorIds);
+         j++) {
       ASSERT_LT(i, j);
       auto tid1 = static_cast<TensorTypeId>(i);
       auto tid2 = static_cast<TensorTypeId>(j);
@@ -41,14 +46,15 @@ TEST(TensorTypeSet, Doubleton) {
       ASSERT_EQ(doub, TensorTypeSet(tid1) | TensorTypeSet(tid2));
       ASSERT_TRUE(doub.has(tid1));
       ASSERT_TRUE(doub.has(tid2));
-      ASSERT_EQ(doub.highestPriorityTypeId(), tid2);  // relies on i < j
+      ASSERT_EQ(doub.highestPriorityTypeId(), tid2); // relies on i < j
     }
   }
 }
 
 TEST(TensorTypeSet, Full) {
   TensorTypeSet full(TensorTypeSet::FULL);
-  for (uint8_t i = 1; i < static_cast<uint8_t>(TensorTypeId::NumTensorIds); i++) {
+  for (uint8_t i = 1; i < static_cast<uint8_t>(TensorTypeId::NumTensorIds);
+       i++) {
     auto tid = static_cast<TensorTypeId>(i);
     ASSERT_TRUE(full.has(tid));
   }

@@ -19,4 +19,5 @@ C10_API bool tls_variable_is_enabled();
 C10_API void tls_variable_set_enabled(bool enabled);
 C10_API TensorTypeSet tls_excluded_tensor_type_set();
 
-}} // namespace c10::impl
+} // namespace impl
+} // namespace c10

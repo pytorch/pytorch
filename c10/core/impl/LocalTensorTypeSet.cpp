@@ -21,7 +21,7 @@ uint64_t raw_excluded = 0;
 
 #endif
 
-}
+} // namespace
 
 TensorTypeSet tls_excluded_tensor_type_set() {
   return TensorTypeSet(TensorTypeSet::RAW, raw_excluded);
@@ -33,10 +33,15 @@ bool tls_variable_is_enabled() {
 
 void tls_variable_set_enabled(bool enabled) {
   if (enabled) {
-    raw_excluded = tls_excluded_tensor_type_set().remove(TensorTypeId::VariableTensorId).raw_repr();
+    raw_excluded = tls_excluded_tensor_type_set()
+                       .remove(TensorTypeId::VariableTensorId)
+                       .raw_repr();
   } else {
-    raw_excluded = tls_excluded_tensor_type_set().add(TensorTypeId::VariableTensorId).raw_repr();
+    raw_excluded = tls_excluded_tensor_type_set()
+                       .add(TensorTypeId::VariableTensorId)
+                       .raw_repr();
   }
 }
 
-}} // namespace c10::impl
+} // namespace impl
+} // namespace c10

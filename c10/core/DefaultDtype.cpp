@@ -1,5 +1,5 @@
-#include <c10/util/typeid.h>
 #include <c10/core/DefaultDtype.h>
+#include <c10/util/typeid.h>
 
 namespace c10 {
 static auto default_dtype = caffe2::TypeMeta::Make<float>();

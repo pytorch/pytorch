@@ -110,13 +110,11 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
 
 class C10_API TaskThreadPool : public c10::ThreadPool {
  public:
-  explicit TaskThreadPool(
-      std::size_t pool_size,
-      int numa_node_id = -1)
-      : ThreadPool(pool_size, numa_node_id, [numa_node_id](){
-        setThreadName("CaffeTaskThread");
-        NUMABind(numa_node_id);
-      }) {}
+  explicit TaskThreadPool(std::size_t pool_size, int numa_node_id = -1)
+      : ThreadPool(pool_size, numa_node_id, [numa_node_id]() {
+          setThreadName("CaffeTaskThread");
+          NUMABind(numa_node_id);
+        }) {}
 };
 
 C10_DECLARE_SHARED_REGISTRY(

@@ -9,9 +9,7 @@
 
 namespace c10 {
 
-std::ostream& operator<<(
-    std::ostream& stream,
-    const TensorOptions& options) {
+std::ostream& operator<<(std::ostream& stream, const TensorOptions& options) {
   return stream << "TensorOptions(dtype=" << options.dtype()
                 << ", device=" << options.device()
                 << ", layout=" << options.layout()

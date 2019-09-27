@@ -7,7 +7,8 @@ namespace c10 {
 struct C10_API Storage {
  public:
   Storage() {}
-  Storage(c10::intrusive_ptr<StorageImpl> ptr) : storage_impl_(std::move(ptr)) {}
+  Storage(c10::intrusive_ptr<StorageImpl> ptr)
+      : storage_impl_(std::move(ptr)) {}
 
   // Allocates memory buffer using given allocator and creates a storage with it
   Storage(
@@ -43,11 +44,11 @@ struct C10_API Storage {
   static Storage create_legacy(at::Device device, caffe2::TypeMeta data_type) {
     auto allocator = GetAllocator(device.type());
     return Storage(c10::make_intrusive<StorageImpl>(
-            data_type,
-            0,
-            allocator->allocate(0), // materialize a non-default Device.
-            allocator,
-            true));
+        data_type,
+        0,
+        allocator->allocate(0), // materialize a non-default Device.
+        allocator,
+        true));
   }
 
   template <typename T>
@@ -56,10 +57,14 @@ struct C10_API Storage {
   }
 
   template <typename T>
-  T* data() const { return storage_impl_->data<T>(); }
+  T* data() const {
+    return storage_impl_->data<T>();
+  }
 
   template <typename T>
-  T* unsafe_data() const { return storage_impl_->unsafe_data<T>(); }
+  T* unsafe_data() const {
+    return storage_impl_->unsafe_data<T>();
+  }
 
   size_t elementSize() const {
     return storage_impl_->itemsize();

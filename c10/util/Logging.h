@@ -270,7 +270,7 @@ BINARY_COMP_HELPER(LessEquals, <=)
  *   // Logs caller info with an arbitrary text event, if there is a usage.
  *   C10_LOG_API_USAGE_ONCE("my_api");
  */
-#define C10_LOG_API_USAGE_ONCE(...)             \
+#define C10_LOG_API_USAGE_ONCE(...)                        \
   C10_UNUSED static bool C10_ANONYMOUS_VARIABLE(logFlag) = \
       ::c10::detail::LogAPIUsageFakeReturn(__VA_ARGS__);
 
@@ -281,7 +281,7 @@ C10_API void LogAPIUsage(const std::string& context);
 namespace detail {
 // Return value is needed to do the static variable initialization trick
 C10_API bool LogAPIUsageFakeReturn(const std::string& context);
-}
+} // namespace detail
 
 } // namespace c10
 

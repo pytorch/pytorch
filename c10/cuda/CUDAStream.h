@@ -5,53 +5,53 @@
 
 #include <cuda_runtime_api.h>
 
+#include <c10/core/DeviceGuard.h>
+#include <c10/core/Stream.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAMacros.h>
-#include <c10/core/DeviceGuard.h>
 #include <c10/util/Exception.h>
-#include <c10/core/Stream.h>
 
 /*
-* Stream pool note.
-*
-* A CUDAStream is an abstraction of an actual cuStream on the GPU. CUDAStreams
-* are backed by cuStreams, but they use several pools to minimize the costs
-* associated with creating, retaining, and destroying cuStreams.
-*
-* There are three pools per device, and a device's pools are lazily created.
-*
-* The first pool contains only the default stream. When the default stream
-* is requested it's returned.
-*
-* The second pool is the "low priority" or "default priority" streams. In
-* HIP builds there is no distinction between streams in this pool and streams
-* in the third pool (below). There are 32 of these streams per device, and
-* when a stream is requested one of these streams is returned round-robin.
-* That is, the first stream requested is at index 0, the second at index 1...
-* to index 31, then index 0 again.
-*
-* This means that if 33 low priority streams are requested, the first and
-* last streams requested are actually the same stream (under the covers)
-* and kernels enqueued on them cannot run concurrently.
-*
-* The third pool is the "high priority" streams. The third pool acts like
-* the second pool except the streams are created with a higher priority.
-*
-* These pools suggest that stream users should prefer many short-lived streams,
-* as the cost of acquiring and releasing streams is effectively zero. If
-* many longer-lived streams are required in performance critical scenarios
-* then the functionality here may need to be extended to allow, for example,
-* "reserving" a subset of the pool so that other streams do not accidentally
-* overlap the performance critical streams.
-*
-* Note: although the notion of "current stream for device" is thread local
-* (every OS thread has a separate current stream, as one might expect),
-* the stream pool is global across all threads; stream 0 is always stream 0
-* no matter which thread you use it on.  Multiple threads can synchronize
-* on the same stream.  Although the CUDA documentation is not very clear
-* on the matter, streams are thread safe; e.g., it is safe to enqueue
-* a kernel on the same stream from two different threads.
-*/
+ * Stream pool note.
+ *
+ * A CUDAStream is an abstraction of an actual cuStream on the GPU. CUDAStreams
+ * are backed by cuStreams, but they use several pools to minimize the costs
+ * associated with creating, retaining, and destroying cuStreams.
+ *
+ * There are three pools per device, and a device's pools are lazily created.
+ *
+ * The first pool contains only the default stream. When the default stream
+ * is requested it's returned.
+ *
+ * The second pool is the "low priority" or "default priority" streams. In
+ * HIP builds there is no distinction between streams in this pool and streams
+ * in the third pool (below). There are 32 of these streams per device, and
+ * when a stream is requested one of these streams is returned round-robin.
+ * That is, the first stream requested is at index 0, the second at index 1...
+ * to index 31, then index 0 again.
+ *
+ * This means that if 33 low priority streams are requested, the first and
+ * last streams requested are actually the same stream (under the covers)
+ * and kernels enqueued on them cannot run concurrently.
+ *
+ * The third pool is the "high priority" streams. The third pool acts like
+ * the second pool except the streams are created with a higher priority.
+ *
+ * These pools suggest that stream users should prefer many short-lived streams,
+ * as the cost of acquiring and releasing streams is effectively zero. If
+ * many longer-lived streams are required in performance critical scenarios
+ * then the functionality here may need to be extended to allow, for example,
+ * "reserving" a subset of the pool so that other streams do not accidentally
+ * overlap the performance critical streams.
+ *
+ * Note: although the notion of "current stream for device" is thread local
+ * (every OS thread has a separate current stream, as one might expect),
+ * the stream pool is global across all threads; stream 0 is always stream 0
+ * no matter which thread you use it on.  Multiple threads can synchronize
+ * on the same stream.  Although the CUDA documentation is not very clear
+ * on the matter, streams are thread safe; e.g., it is safe to enqueue
+ * a kernel on the same stream from two different threads.
+ */
 
 namespace c10 {
 namespace cuda {
@@ -61,8 +61,7 @@ namespace cuda {
 // functionality (conversion to cudaStream_t), and a guarantee that
 // the wrapped c10::Stream really is a CUDA stream.
 class C10_CUDA_API CUDAStream {
-public:
-
+ public:
   enum Unchecked { UNCHECKED };
 
   /// Construct a CUDAStream from a Stream.  This construction is checked,
@@ -85,21 +84,31 @@ public:
   }
 
   /// Implicit conversion to cudaStream_t.
-  operator cudaStream_t() const { return stream(); }
+  operator cudaStream_t() const {
+    return stream();
+  }
 
   /// Implicit conversion to Stream (a.k.a., forget that the stream is a
   /// CUDA stream).
-  operator Stream() const { return unwrap(); }
+  operator Stream() const {
+    return unwrap();
+  }
 
   /// Get the CUDA device index that this stream is associated with.
-  DeviceIndex device_index() const { return stream_.device_index(); }
+  DeviceIndex device_index() const {
+    return stream_.device_index();
+  }
 
   /// Get the full Device that this stream is associated with.  The Device
   /// is guaranteed to be a CUDA device.
-  Device device() const { return Device(DeviceType::CUDA, device_index()); }
+  Device device() const {
+    return Device(DeviceType::CUDA, device_index());
+  }
 
   /// Return the stream ID corresponding to this particular stream.
-  StreamId id() const { return stream_.id(); }
+  StreamId id() const {
+    return stream_.id();
+  }
 
   bool query() const {
     DeviceGuard guard{stream_.device()};
@@ -120,21 +129,23 @@ public:
   }
 
   int priority() const {
-    #ifndef __HIP_PLATFORM_HCC__
-      DeviceGuard guard{stream_.device()};
-      int priority = 0;
-      C10_CUDA_CHECK(cudaStreamGetPriority(stream(), &priority));
-      return priority;
-    #else
-      AT_ERROR("cuStreamGetPriority with HIP is not supported");
-    #endif
+#ifndef __HIP_PLATFORM_HCC__
+    DeviceGuard guard{stream_.device()};
+    int priority = 0;
+    C10_CUDA_CHECK(cudaStreamGetPriority(stream(), &priority));
+    return priority;
+#else
+    AT_ERROR("cuStreamGetPriority with HIP is not supported");
+#endif
   }
 
   /// Explicit conversion to cudaStream_t.
   cudaStream_t stream() const;
 
   /// Explicit conversion to Stream.
-  Stream unwrap() const { return stream_; }
+  Stream unwrap() const {
+    return stream_;
+  }
 
   /// Reversibly pack a CUDAStream into a uint64_t representation.  This may
   /// be helpful when storing a CUDAStream in a C struct, where you cannot
@@ -154,20 +165,20 @@ public:
   }
 
   static std::tuple<int, int> priority_range() {
-    #ifndef __HIP_PLATFORM_HCC__
-      int least_priority, greatest_priority;
-      C10_CUDA_CHECK(
+#ifndef __HIP_PLATFORM_HCC__
+    int least_priority, greatest_priority;
+    C10_CUDA_CHECK(
         cudaDeviceGetStreamPriorityRange(&least_priority, &greatest_priority));
-      return std::make_tuple(least_priority, greatest_priority);
-    #else
-      AT_ERROR("cuDeviceGetStreamPriorityRange with HIP is not supported");
-    #endif
+    return std::make_tuple(least_priority, greatest_priority);
+#else
+    AT_ERROR("cuDeviceGetStreamPriorityRange with HIP is not supported");
+#endif
   }
 
   // Deleted for now; use CUDAEvent::block instead
   // void synchronize_with(const CUDAEvent& event) const;
 
-private:
+ private:
   Stream stream_;
 };
 
@@ -216,13 +227,13 @@ CAFFE2_API void setCurrentCUDAStream(CUDAStream stream);
 C10_API std::ostream& operator<<(std::ostream& stream, const CUDAStream& s);
 
 } // namespace cuda
-} // namespace at
+} // namespace c10
 
 namespace std {
-  template <>
-  struct hash<c10::cuda::CUDAStream> {
-    size_t operator()(c10::cuda::CUDAStream s) const noexcept {
-      return std::hash<c10::Stream>{}(s.unwrap());
-    }
-  };
+template <>
+struct hash<c10::cuda::CUDAStream> {
+  size_t operator()(c10::cuda::CUDAStream s) const noexcept {
+    return std::hash<c10::Stream>{}(s.unwrap());
+  }
+};
 } // namespace std

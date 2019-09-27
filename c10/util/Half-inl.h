@@ -1,8 +1,8 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <cstring>
 #include <limits>
-#include <c10/macros/Macros.h>
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
@@ -47,7 +47,7 @@ inline C10_HOST_DEVICE Half::operator __half() const {
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 350)
 inline __device__ Half __ldg(const Half* ptr) {
-    return __ldg(reinterpret_cast<const __half*>(ptr));
+  return __ldg(reinterpret_cast<const __half*>(ptr));
 }
 #endif
 
@@ -70,7 +70,8 @@ inline C10_HOST_DEVICE Half operator/(const Half& a, const Half& b) {
 }
 
 inline C10_HOST_DEVICE Half operator-(const Half& a) {
-#if (defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 530) || defined(__HIP_DEVICE_COMPILE__)
+#if (defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 530) || \
+    defined(__HIP_DEVICE_COMPILE__)
   return __hneg(a);
 #else
   return -static_cast<float>(a);

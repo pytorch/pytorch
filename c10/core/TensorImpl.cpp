@@ -18,7 +18,7 @@ C10_DEFINE_int64(
 
 namespace c10 {
 
-const char * const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
+const char* const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
     "is not allowed on a Tensor created from .data or .detach().\n"
     "If your intent is to change the metadata of a Tensor (such as sizes / strides / storage / storage_offset)\n"
     "without autograd tracking the change, remove the .data / .detach() call and wrap the change in a `with torch.no_grad():` block.\n"
@@ -45,13 +45,23 @@ const at::Tensor& TensorImpl::grad() const {
 }
 
 TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set)
-    : TensorImpl(std::move(storage), type_set, storage.dtype(), storage.device()) {}
+    : TensorImpl(
+          std::move(storage),
+          type_set,
+          storage.dtype(),
+          storage.device()) {}
 
-TensorImpl::TensorImpl(TensorTypeSet type_set, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
+TensorImpl::TensorImpl(
+    TensorTypeSet type_set,
+    const caffe2::TypeMeta& data_type,
+    c10::optional<c10::Device> device_opt)
     : TensorImpl({}, type_set, data_type, std::move(device_opt)) {}
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set, const caffe2::TypeMeta& data_type,
-                       c10::optional<c10::Device> device_opt)
+TensorImpl::TensorImpl(
+    Storage&& storage,
+    TensorTypeSet type_set,
+    const caffe2::TypeMeta& data_type,
+    c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
       sizes_{0},
       storage_offset_(0),
@@ -60,13 +70,14 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set, const caffe2::
       device_opt_(device_opt),
       type_set_(type_set.remove(TensorTypeId::VariableTensorId)) {
   if (!type_set.empty()) {
-    AT_ASSERT(data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
-              device_opt_.has_value());
+    AT_ASSERT(
+        data_type.id() == caffe2::TypeIdentifier::uninitialized() ||
+        device_opt_.has_value());
     // UndefinedTensorImpl is a singleton, so we skip logging it
     C10_LOG_API_USAGE_ONCE("tensor.create");
   }
-  // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
-  // Storages with default devices.
+  // we would also like to check that non-cpu devices have an index, but some
+  // Caffe2 operators create Storages with default devices.
   strides_.push_back(1);
 }
 
@@ -152,7 +163,8 @@ int64_t TensorImpl::stride(int64_t d) const {
 }
 
 TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
-  bool set_zero_dim = condition_when_zero_dim && this->sizes().size() == 1 && this->size(0) == 1;
+  bool set_zero_dim = condition_when_zero_dim && this->sizes().size() == 1 &&
+      this->size(0) == 1;
   if (set_zero_dim) {
     resize_dim(0);
   }
@@ -168,7 +180,7 @@ bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
   AT_ASSERT(compute_contiguous() == is_contiguous_);
 #endif
   if (memory_format == at::MemoryFormat::ChannelsLast) {
-      return is_channels_last_contiguous_;
+    return is_channels_last_contiguous_;
   }
   return is_contiguous_;
 }

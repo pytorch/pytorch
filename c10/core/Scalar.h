@@ -24,8 +24,8 @@ class C10_API Scalar {
  public:
   Scalar() : Scalar(int64_t(0)) {}
 
-#define DEFINE_IMPLICIT_CTOR(type, name)      \
-  Scalar(type vv) : Scalar(vv, true) { }
+#define DEFINE_IMPLICIT_CTOR(type, name) \
+  Scalar(type vv) : Scalar(vv, true) {}
 
   AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, DEFINE_IMPLICIT_CTOR)
 
@@ -61,7 +61,8 @@ class C10_API Scalar {
     } else if (Tag::HAS_z == tag) {                       \
       return checked_convert<type, std::complex<double>>( \
           {v.z[0], v.z[1]}, #type);                       \
-    } if (Tag::HAS_b == tag) {                            \
+    }                                                     \
+    if (Tag::HAS_b == tag) {                              \
       return checked_convert<type, bool>(v.i, #type);     \
     } else {                                              \
       return checked_convert<type, int64_t>(v.i, #type);  \
@@ -80,7 +81,8 @@ class C10_API Scalar {
     return Tag::HAS_d == tag;
   }
 
-  C10_DEPRECATED_MESSAGE("isIntegral is deprecated. Please use the overload with 'includeBool' parameter instead.")
+  C10_DEPRECATED_MESSAGE(
+      "isIntegral is deprecated. Please use the overload with 'includeBool' parameter instead.")
   bool isIntegral() const {
     return Tag::HAS_i == tag;
   }
@@ -98,19 +100,22 @@ class C10_API Scalar {
   Scalar operator-() const;
 
  private:
-    template<typename T,
-             typename std::enable_if<std::numeric_limits<T>::is_integer && ! std::is_same<T, bool>::value, bool>::type* =
-                 nullptr>
-    Scalar(T vv, bool) : tag(Tag::HAS_i) {
-      v.i = convert<decltype(v.i), T>(vv);
-    }
+  template <
+      typename T,
+      typename std::enable_if<
+          std::numeric_limits<T>::is_integer && !std::is_same<T, bool>::value,
+          bool>::type* = nullptr>
+  Scalar(T vv, bool) : tag(Tag::HAS_i) {
+    v.i = convert<decltype(v.i), T>(vv);
+  }
 
-    template<typename T,
-             typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::type* =
-                 nullptr>
-    Scalar(T vv, bool) : tag(Tag::HAS_d) {
-      v.d = convert<decltype(v.d), T>(vv);
-    }
+  template <
+      typename T,
+      typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::
+          type* = nullptr>
+  Scalar(T vv, bool) : tag(Tag::HAS_d) {
+    v.d = convert<decltype(v.d), T>(vv);
+  }
 
   // We can't set v in the initializer list using the
   // syntax v{ .member = ... } because it doesn't work on MSVC
@@ -133,10 +138,10 @@ inline T Scalar::to() const {
   throw std::runtime_error("to() cast to unexpected type.");
 }
 
-#define DEFINE_TO(T, name)    \
-  template <>                 \
-  inline T Scalar::to<T>() const {  \
-    return to##name();        \
+#define DEFINE_TO(T, name)         \
+  template <>                      \
+  inline T Scalar::to<T>() const { \
+    return to##name();             \
   }
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO)
 #undef DEFINE_TO

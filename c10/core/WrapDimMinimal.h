@@ -4,10 +4,14 @@
 
 namespace c10 {
 
-static inline int64_t maybe_wrap_dim(int64_t dim, int64_t dim_post_expr, bool wrap_scalar=true) {
+static inline int64_t maybe_wrap_dim(
+    int64_t dim,
+    int64_t dim_post_expr,
+    bool wrap_scalar = true) {
   if (dim_post_expr <= 0) {
     if (!wrap_scalar) {
-      AT_INDEX_ERROR("dimension specified as ", dim, " but tensor has no dimensions");
+      AT_INDEX_ERROR(
+          "dimension specified as ", dim, " but tensor has no dimensions");
     }
     dim_post_expr = 1; // this will make range [-1, 0]
   }
@@ -16,11 +20,17 @@ static inline int64_t maybe_wrap_dim(int64_t dim, int64_t dim_post_expr, bool wr
   int64_t max = dim_post_expr - 1;
   if (dim < min || dim > max) {
     AT_INDEX_ERROR(
-      "Dimension out of range (expected to be in range of [",
-      min, ", ", max, "], but got ", dim, ")");
+        "Dimension out of range (expected to be in range of [",
+        min,
+        ", ",
+        max,
+        "], but got ",
+        dim,
+        ")");
   }
-  if (dim < 0) dim += dim_post_expr;
+  if (dim < 0)
+    dim += dim_post_expr;
   return dim;
 }
 
-}
+} // namespace c10

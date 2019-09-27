@@ -34,7 +34,8 @@ DeviceType parse_type(const std::string& device_string) {
     return device->second;
   }
   AT_ERROR(
-      "Expected one of cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu device type at start of device string: ", device_string);
+      "Expected one of cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu device type at start of device string: ",
+      device_string);
 }
 } // namespace
 
@@ -75,12 +76,15 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
     std::string device_index = device_string.substr(index + 1);
     try {
       index_ = c10::stoi(device_index);
-    } catch (const std::exception &) {
-      AT_ERROR("Could not parse device index '", device_index,
-               "' in device string '", device_string, "'");
+    } catch (const std::exception&) {
+      AT_ERROR(
+          "Could not parse device index '",
+          device_index,
+          "' in device string '",
+          device_string,
+          "'");
     }
-    TORCH_CHECK(index_ >= 0,
-             "Device index must be non-negative, got ", index_);
+    TORCH_CHECK(index_ >= 0, "Device index must be non-negative, got ", index_);
   }
   validate();
 }

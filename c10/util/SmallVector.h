@@ -20,8 +20,8 @@
 
 #pragma once
 
-#include <c10/util/AlignOf.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/AlignOf.h>
 
 #include <algorithm>
 #include <cassert>
@@ -391,8 +391,8 @@ class SmallVectorImpl
  protected:
   // Default ctor - Initialize to empty.
   explicit SmallVectorImpl(unsigned N)
-      : SmallVectorTemplateBase<T, C10_IS_TRIVIALLY_COPYABLE(T)>(N * sizeof(T)) {
-  }
+      : SmallVectorTemplateBase<T, C10_IS_TRIVIALLY_COPYABLE(T)>(
+            N * sizeof(T)) {}
 
  public:
   SmallVectorImpl(const SmallVectorImpl&) = delete;
@@ -1020,10 +1020,10 @@ inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
 }
 
 template <typename T, unsigned N>
-std::ostream& operator<<(std::ostream & out, const SmallVector<T, N>& list) {
+std::ostream& operator<<(std::ostream& out, const SmallVector<T, N>& list) {
   int i = 0;
   out << "[";
-  for(auto e : list) {
+  for (auto e : list) {
     if (i++ > 0)
       out << ", ";
     out << e;
