@@ -151,23 +151,40 @@ static void or_kernel_impl(TensorIterator& iter) {
 }
 
 static void min_values_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "min_values_cpu", [&iter] {
-    binary_kernel_reduce_vec(
-      iter,
-      [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
-      [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return minimum(a, b); });
-  });
+  if (isComplexType(iter.dtype())){
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "min_values_cpu", [&iter] {
+      binary_kernel_reduce_vec(
+        iter,
+        [](scalar_t a, scalar_t b) -> scalar_t { return std::abs(a) < std::abs(b) ? a : b; },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return minimum(a, b); });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES(iter.dtype(), "min_values_cpu", [&iter] {
+      binary_kernel_reduce_vec(
+        iter,
+        [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return minimum(a, b); });
+    });
+  }
 }
 
 static void max_values_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "max_values_cpu", [&iter] {
-    binary_kernel_reduce_vec(
-      iter,
-      [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
-      [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return maximum(a, b); });
-  });
+  if (isComplexType(iter.dtype())){
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "min_values_cpu", [&iter] {
+      binary_kernel_reduce_vec(
+        iter,
+        [](scalar_t a, scalar_t b) -> scalar_t { return std::abs(a) > std::abs(b) ? a : b; },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return maximum(a, b); });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES(iter.dtype(), "max_values_cpu", [&iter] {
+      binary_kernel_reduce_vec(
+        iter,
+        [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return maximum(a, b); });
+    });
+  }
 }
-
 }  // anonymous namespace
 
 REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
