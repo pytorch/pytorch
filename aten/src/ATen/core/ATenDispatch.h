@@ -6,9 +6,13 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <ATen/core/OpsAlreadyMovedToC10.h>
+#include <ATen/core/Variadic.h>
+#include <ATen/core/TensorBody.h>
 #include <c10/util/C++17.h>
 #include <memory>
 #include <mutex>
+#include <ATen/core/interned_strings.h>
+#include <ATen/core/stack.h>
 
 // TODO: Rewrite this comment
 //
@@ -40,6 +44,32 @@ static inline TensorTypeId dispatchTypeId(TensorTypeSet ts) {
 
 }
 
+namespace detail {
+  struct MultiDispatchTensorTypeSet : IterArgs<MultiDispatchTensorTypeSet> {
+    TensorTypeSet ts;
+    void operator()(const at::Tensor& x) {
+      ts = ts | x.type_set();
+    }
+    void operator()(TensorOptions x) {
+      ts = ts | x.type_set();
+    }
+    void operator()(at::ArrayRef<at::Tensor> xs) {
+      for (const auto& x : xs) {
+        ts = ts | x.type_set();
+      }
+    }
+    template <typename T>
+    void operator()(const T& x) {
+      // do nothing
+    }
+  };
+
+  template <typename... Args>
+  TensorTypeSet multi_dispatch_tensor_type_set(const Args&... args) {
+    return MultiDispatchTensorTypeSet().apply(args...).ts;
+  }
+}
+
 // ATenOpTable stores the implementations for each backend, in addition to
 // an implementation for variables.
 class CAFFE2_API ATenOpTable {
@@ -47,10 +77,32 @@ class CAFFE2_API ATenOpTable {
   ATenOpTable(std::string schema)
     : schema_(std::move(schema)) {}
 
-  template<class FuncType>
-  FuncType* getOp(TensorTypeSet ts) const {
-    return reinterpret_cast<FuncType*>(getOp(impl::dispatchTypeId(ts)));
+  template<class Result, class... Args>
+  Result callUnboxed(Args... args) const {
+    using FuncType = Result(Args...);
+    TensorTypeSet ts = detail::multi_dispatch_tensor_type_set(args...);
+    TensorTypeId tid = impl::dispatchTypeId(ts);
+
+    // You might think we can eliminate the second branch by maintaining a
+    // bitmask of registered operator keys, so we don't select dispatch ids
+    // which don't have implementations here.  But the net effect is that if you
+    // get a Variable CPUTensor, if there is no variable registration, you'll
+    // fall back to the CPU implementation.  Is this what you want?  Unlikely...
+
+    auto* unboxed_fn = reinterpret_cast<FuncType*>(function_table_[static_cast<int64_t>(tid)]);
+    if (C10_LIKELY(unboxed_fn != nullptr)) {
+      return (*unboxed_fn)(args...);
+    }
+
+    auto* unboxed_fallback_fn = reinterpret_cast<FuncType*>(function_table_[static_cast<int64_t>(TensorTypeId::UndefinedTensorId)]);
+    if (C10_LIKELY(unboxed_fallback_fn != nullptr)) {
+      return (*unboxed_fallback_fn)(args...);
+    }
+
+    reportError(tid);
+    TORCH_INTERNAL_ASSERT(0);
   }
+
  private:
   void registerOp(TensorTypeId tid, void* fn) {
     TORCH_CHECK(function_table_[static_cast<int64_t>(tid)] == nullptr,
@@ -60,19 +112,7 @@ class CAFFE2_API ATenOpTable {
     function_table_[static_cast<int64_t>(tid)] = fn;
   }
 
-  void* getFallbackOp(TensorTypeId tid) const;
-
-  void* getOp(TensorTypeId tid) const {
-    // You might think we can minorly optimize this further by maintaining a
-    // bitmask of registered operator keys, so we don't select dispatch ids
-    // which don't have implementations here.  But the net effect is that if you
-    // get a Variable CPUTensor, if there is no variable registration, you'll
-    // fall back to the CPU implementation.  Is this what you want?  Unlikely...
-    if (function_table_[static_cast<int64_t>(tid)] == nullptr) {
-      return getFallbackOp(tid);
-    }
-    return function_table_[static_cast<int64_t>(tid)];
-  }
+  C10_NORETURN void reportError(TensorTypeId tid) const;
 
   friend class ATenDispatch;
 

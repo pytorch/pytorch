@@ -387,6 +387,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/symbolic_script.cpp
     ${TORCH_SRC_DIR}/csrc/jit/profiling_record.cpp
     ${TORCH_SRC_DIR}/csrc/jit/profiling_graph_executor_impl.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/update_graph_executor_opt.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/bailout_graph.cpp
@@ -459,6 +460,17 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
     )
+
+  if (NOT INTERN_BUILD_MOBILE)
+    set (MOBILE_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_ops.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
+        )
+    list (APPEND TORCH_SRCS ${MOBILE_SRCS})
+  endif()
 
   if (NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND TORCH_SRCS
@@ -897,7 +909,12 @@ target_compile_definitions(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 #  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
 #  TBB - using TBB for intra- and native thread pool for inter-op parallelism
-set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+  set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
+else()
+  set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+endif()
+
 message(STATUS "Using ATen parallel backend: ${ATEN_THREADING}")
 if ("${ATEN_THREADING}" STREQUAL "OMP")
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_OPENMP=1")
