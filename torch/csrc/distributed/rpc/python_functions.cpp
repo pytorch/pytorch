@@ -53,7 +53,12 @@ py::object toPyObj(const Message& message) {
       ScriptRet ret = ScriptRet::fromMessage(message);
       Stack stack;
       stack.push_back(ret.value());
-      return torch::jit::createPyObjectForStack(std::move(stack));
+      {
+        AutoGIL ag;
+        // The createPyObjectForStack does not acquire GIL, but creating a new
+        // py::object requires GIL.
+        return torch::jit::createPyObjectForStack(std::move(stack));
+      }
     }
     case MessageType::PYTHON_RET: {
       return PythonRpcHandler::getInstance().loadPythonUDFResult(message);
