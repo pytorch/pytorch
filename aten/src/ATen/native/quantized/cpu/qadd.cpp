@@ -137,7 +137,14 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   pytorch_qnnp_operator_t qnnpack_operator{nullptr};
 
   size_t num_elems = qa_contig.numel() / qa_contig.size(0);
-
+  auto output_min = ReLUFused
+      ? activationLimits(scale, zero_point, Activation::RELU)
+            .first
+      : std::numeric_limits<uint8_t>::min();
+  auto output_max = ReLUFused
+      ? activationLimits(scale, zero_point, Activation::RELU)
+            .second
+      : std::numeric_limits<uint8_t>::max();
   const pytorch_qnnp_status createStatus = pytorch_qnnp_create_add_nc_q8(
       num_elems /* input size */,
       a_zero_point /* a zero_point */,
@@ -146,8 +153,8 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
       b_scale /* b scale */,
       static_cast<uint8_t>(zero_point) /* sum zero_point */,
       scale /* sum scale */,
-      std::numeric_limits<uint8_t>::min() /* output min */,
-      std::numeric_limits<uint8_t>::max() /* output max */,
+      output_min /* output min */,
+      output_max /* output max */,
       0 /* flags */,
       &qnnpack_operator);
 
