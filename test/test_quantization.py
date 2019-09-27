@@ -910,7 +910,7 @@ class ObserverTest(QuantizationTestCase):
                  'Quantization requires FBGEMM. FBGEMM does not play'
                  ' well with UBSAN at the moment, so we skip the test if'
                  ' we are in a UBSAN environment.')
-class NonScriptableObserverTest(QuantizationTestCase):
+class RecordHistogramObserverTest(QuantizationTestCase):
     def test_record_observer(self):
         model = SingleLayerLinearModel()
         model.qconfig = default_debug_qconfig
@@ -926,7 +926,7 @@ class NonScriptableObserverTest(QuantizationTestCase):
         self.assertEqual(len(observer_dict['fc1.module.observer'].get_tensor_value()), 2 * len(self.calib_data))
         self.assertEqual(observer_dict['fc1.module.observer'].get_tensor_value()[0], model(self.calib_data[0][0]))
 
-
+    @no_deadline
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
     def test_observer_scriptable(self, qdtype, qscheme):
