@@ -121,7 +121,7 @@ void lt_kernel(TensorIterator& iter) {
   }
 }
 
-void lt_kernel(TensorIterator& iter) {
+void ge_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "ge_cpu", [&]() {
       cpu_kernel(iter,
