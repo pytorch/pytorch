@@ -1,23 +1,24 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-import numpy as np
-import caffe2.python.hypothesis_test_util as hu
-from caffe2.python import core, dyndep, workspace
-from hypothesis import given
-import hypothesis.strategies as st
 import collections
+
+import caffe2.python.hypothesis_test_util as hu
+import hypothesis.strategies as st
+import numpy as np
+from caffe2.python import core, dyndep, workspace
 from dnnlowp_test_utils import check_quantized_results_close
+from hypothesis import given
+
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
 workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPReluOpTest(hu.HypothesisTestCase):
-    @given(size=st.integers(1024, 2048), **hu.gcs_cpu_only)
-    def test_dnnlowp_relu(self, size, gc, dc):
+    @given(size=st.integers(1024, 2048), is_empty=st.booleans(), **hu.gcs_cpu_only)
+    def test_dnnlowp_relu(self, size, is_empty, gc, dc):
+        if is_empty:
+            size = 0
         min_ = -10.0
         max_ = 10.0
         scale = (max_ - min_) / 255

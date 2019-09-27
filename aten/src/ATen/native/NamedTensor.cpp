@@ -241,29 +241,6 @@ Tensor gather(const Tensor& self, Dimname dim, const Tensor& index, bool sparse_
 Tensor& gather_out(Tensor& result, const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad) {
   reportNYIDimnameOverload("gather");
 }
-std::tuple<Tensor, Tensor> mode(const Tensor& self, Dimname dim, bool keepdim) {
-  reportNYIDimnameOverload("mode");
-}
-std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
-                                       const Tensor& self, Dimname dim, bool keepdim) {
-  reportNYIDimnameOverload("mode");
-}
-std::tuple<Tensor&, Tensor&> kthvalue_out(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
-    int64_t k,
-    Dimname dim,
-    bool keepdim) {
-  reportNYIDimnameOverload("kthvalue");
-}
-std::tuple<Tensor, Tensor> kthvalue(
-    const Tensor& self,
-    int64_t k,
-    Dimname dim,
-    bool keepdim) {
-  reportNYIDimnameOverload("kthvalue");
-}
 Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("index_add");
 }
