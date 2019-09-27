@@ -327,15 +327,20 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                          message="mulReLU.out failed")
 
-        # Scalar addition
-        mul = torch.ops.quantized.mul_scalar
+        # Scalar multiplication
         for b in B:
             C_ref = qA.dequantize().numpy() * b.item()
-            qC = _quantize(C_ref, scale, zero_point)
-            dqC = _dequantize(qC, scale, zero_point)
-            qC_hat = mul(qA, b.item(), scale, zero_point)
-            dqC_hat = qC_hat.dequantize()
-            self.assertEqual(dqC, dqC_hat)
+            qC_hat = torch.ops.quantized.mul_scalar(qA, b.item())
+
+            self.assertEqual(C_ref, qC_hat.dequantize())
+
+        # Scalar multiplication + relu
+        for b in B:
+            C_ref = qA.dequantize().numpy() * b.item()
+            C_ref[C_ref < 0] = 0
+            qC_hat = torch.ops.quantized.mul_scalar_relu(qA, b.item())
+
+            self.assertEqual(C_ref, qC_hat.dequantize())
 
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_relu_different_qparams(self):
@@ -1184,7 +1189,14 @@ def test_qlinear_op(self, batch_size, input_channels, output_channels, use_bias,
             Y_q_ref = np.reshape(
                 Y_q_ref, (3, int(batch_size / 3), output_channels))
         # Assert equal
-        np.testing.assert_equal(Y_q_ref, Y_q.int_repr().numpy())
+        if qengine == 'qnnpack':
+            # QNNPACK supports uint8 in the kernels. In the op we shift the int8
+            # weight values to uint8 to be on par with fbgemm. However, this causes
+            # some rounding issues in rare cases. So, we relax the check to allow
+            # off by one results.
+            np.testing.assert_array_almost_equal(Y_q_ref, Y_q.int_repr().numpy(), decimal=0)
+        else:
+            np.testing.assert_equal(Y_q_ref, Y_q.int_repr().numpy())
     # Test both per-tensor and per-channel quantization
     # Reference quantized result from PyTorch Linear operator
     W_fp32 = W_q.dequantize().to(dtype=torch.float)
@@ -1196,8 +1208,13 @@ def test_qlinear_op(self, batch_size, input_channels, output_channels, use_bias,
     Y_q_ref2 = torch.quantize_per_tensor(
         Y_fp32_ref, Y_scale, Y_zp, torch.quint8)
     # Assert equal
-    np.testing.assert_equal(
-        Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
+    if qengine == 'qnnpack':
+        np.testing.assert_array_almost_equal(
+            Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=0)
+    else:
+        np.testing.assert_equal(
+            Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
+
 """Tests the correctness of the quantized::linear_unpack op."""
 @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,),
                    qparams=hu.qparams(dtypes=torch.qint8)),
