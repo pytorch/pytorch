@@ -139,8 +139,6 @@ class TestQuantizedOps(TestCase):
             self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
 
     """Tests the correctness of the scalar addition."""
-    @unittest.skip("temporarily disable until failures are fixed. " +
-                   "See https://github.com/pytorch/pytorch/issues/26279")
     @no_deadline
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=st.floats(-1e6, 1e6, allow_nan=False),
@@ -155,22 +153,22 @@ class TestQuantizedOps(TestCase):
         A = A.astype(np.float32)
         qA = torch.quantize_per_tensor(torch.from_numpy(A), scale, zero_point, dtype)
 
-        C = qA.dequantize() + b
+        C = qA.dequantize() + round(b / scale) * scale
         C_relu = copy.deepcopy(C)
         C_relu[C_relu < 0] = 0
 
-        C_ref = torch.quantize_per_tensor(C, scale, zero_point, dtype)
-        C_relu_ref = torch.quantize_per_tensor(C_relu, scale, zero_point, dtype)
+        C_hat = add_scalar(qA, b)
+        C_ref = torch.quantize_per_tensor(C, C_hat.q_scale(), C_hat.q_zero_point(), dtype)
+        C_relu_hat = add_scalar_relu(qA, b)
+        C_relu_ref = torch.quantize_per_tensor(
+            C_relu, C_relu_hat.q_scale(), C_relu_hat.q_zero_point(), dtype)
 
-        C_hat = add_scalar(qA, b, scale=scale, zero_point=zero_point)
-        C_relu_hat = add_scalar_relu(qA, b, scale=scale, zero_point=zero_point)
-
-        self.assertEqual(C_ref, C_hat,
+        self.assertEqual(C_ref.dequantize(), C_hat.dequantize(),
                          message="Scalar add results don't match:\
-                         {} vs {}".format(C_ref, C_hat))
-        self.assertEqual(C_relu_ref, C_relu_hat,
+                         {} vs {}".format(C_ref.dequantize(), C_hat.dequantize()))
+        self.assertEqual(C_relu_ref.dequantize(), C_relu_hat.dequantize(),
                          message="Scalar add relu results don't match:\
-                         {} vs {}".format(C_relu_ref, C_relu_hat))
+                         {} vs {}".format(C_relu_ref.dequantize(), C_relu_hat.dequantize()))
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
@@ -396,21 +394,23 @@ class TestQuantizedOps(TestCase):
            kernel=st.sampled_from((3, 5, 7)),
            stride=st.sampled_from((None, 1, 2)),
            dilation=st.integers(1, 2),
-           padding=st.integers(0, 2))
-    def test_max_pool2d(self, X, kernel, stride, dilation, padding):
+           padding=st.integers(0, 2),
+           ceil_mode=st.booleans())
+    def test_max_pool2d(self, X, kernel, stride, dilation, padding, ceil_mode):
         X, (scale, zero_point, torch_type) = X
         # Check constraints
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
         iH, iW = X.shape[-2:]
-        oH = pool_output_shape(iH, kernel, padding, stride, dilation)
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation, ceil_mode)
         assume(oH > 0)
-        oW = pool_output_shape(iW, kernel, padding, stride, dilation)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation, ceil_mode)
         assume(oW > 0)
 
         a = torch.from_numpy(X)
         a_pool = torch.nn.functional.max_pool2d(a, kernel_size=kernel,
                                                 stride=stride,
-                                                padding=padding, dilation=dilation)
+                                                padding=padding, dilation=dilation,
+                                                ceil_mode=ceil_mode)
         a_ref = torch.quantize_per_tensor(a_pool, scale=scale,
                                           zero_point=zero_point, dtype=torch_type)
         a_ref = a_ref.dequantize()
@@ -425,14 +425,14 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
-                       dilation=dilation)
+                       dilation=dilation, ceil_mode=ceil_mode)
             self.assertEqual(a_ref, a_hat.dequantize(),
                              message="{} results are off".format(name))
         # Test the ops.quantized separately, because None is not treated.
         a_hat = torch.ops.quantized.max_pool2d(
             qa, kernel_size=_pair(kernel),
             stride=_pair(kernel if stride is None else stride),
-            padding=_pair(padding), dilation=_pair(dilation))
+            padding=_pair(padding), dilation=_pair(dilation), ceil_mode=ceil_mode)
         self.assertEqual(a_ref, a_hat.dequantize(),
                          message="ops.quantized.max_pool2d results are off")
 
@@ -443,8 +443,9 @@ class TestQuantizedOps(TestCase):
            kernel=st.sampled_from((3, 5, 7)),
            stride=st.sampled_from((None, 1, 2)),
            dilation=st.integers(1, 2),
-           padding=st.integers(0, 2))
-    def test_max_pool2d_nhwc(self, X, kernel, stride, dilation, padding):
+           padding=st.integers(0, 2),
+           ceil_mode=st.booleans())
+    def test_max_pool2d_nhwc(self, X, kernel, stride, dilation, padding, ceil_mode):
         X, (scale, zero_point, torch_type) = X
         # Ensure we hit the vectorized paths
         # 176 = 128 + 32 + 16
@@ -456,16 +457,17 @@ class TestQuantizedOps(TestCase):
         # Check constraints
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
         iH, iW = X.shape[-2:]
-        oH = pool_output_shape(iH, kernel, padding, stride, dilation)
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation, ceil_mode)
         assume(oH > 0)
-        oW = pool_output_shape(iW, kernel, padding, stride, dilation)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation, ceil_mode)
         assume(oW > 0)
 
         X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
         a = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
         a_pool = torch.nn.functional.max_pool2d(a, kernel_size=kernel,
                                                 stride=stride,
-                                                padding=padding, dilation=dilation)
+                                                padding=padding, dilation=dilation,
+                                                ceil_mode=ceil_mode)
         a_ref = torch.quantize_per_tensor(a_pool, scale=scale,
                                           zero_point=zero_point, dtype=torch_type)
         a_ref = a_ref.dequantize()
@@ -481,7 +483,7 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
-                       dilation=dilation)
+                       dilation=dilation, ceil_mode=ceil_mode)
             self.assertTrue(a_hat.stride() != sorted(a_hat.stride()))
             self.assertEqual(a_ref, a_hat.dequantize(),
                              message="{} results are off".format(name))
@@ -489,7 +491,7 @@ class TestQuantizedOps(TestCase):
         a_hat = torch.ops.quantized.max_pool2d(
             qa, kernel_size=_pair(kernel),
             stride=_pair(kernel if stride is None else stride),
-            padding=_pair(padding), dilation=_pair(dilation))
+            padding=_pair(padding), dilation=_pair(dilation), ceil_mode=ceil_mode)
         self.assertEqual(a_ref, a_hat.dequantize(),
                          message="ops.quantized.max_pool2d results are off")
 
