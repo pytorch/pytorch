@@ -1226,6 +1226,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::result_type", "Scalar"},
         {"aten::result_type", "Scalar_Tensor"},
         {"aten::result_type", "Scalar_Scalar"},
+        {"aten::can_cast", ""},
         {"aten::_thnn_fused_lstm_cell", ""},
         {"aten::_thnn_fused_lstm_cell_backward", ""},
         {"aten::_thnn_differentiable_lstm_cell_backward", ""},
@@ -1241,6 +1242,12 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::set_quantizer_", ""},
     #ifdef BUILD_NAMEDTENSOR
         {"aten::index_add", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_fill_", "dimname_Scalar"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_fill_", "dimname_Scalar"},
     #endif
     #ifdef BUILD_NAMEDTENSOR
         {"aten::index_fill", "dimname_Scalar"},
