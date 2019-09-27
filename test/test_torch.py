@@ -5344,19 +5344,19 @@ class _TestTorchMixin(object):
         self.assertEqual(s1.data_ptr() + 4, s2.data_ptr())
 
     def test_load_unicode_error_msg(self):
-        # This Pickle contains a Python 2 module with Unicode data and the 
+        # This Pickle contains a Python 2 module with Unicode data and the
         # loading should fail if the user explicitly specifies ascii encoding!
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
         if sys.version_info >= (3, 0):
             self.assertRaises(UnicodeDecodeError, lambda: torch.load(path, encoding='ascii'))
         else:
             # Just checks the module loaded
-            self.assertIsNotNone(torch.load(path)) 
+            self.assertIsNotNone(torch.load(path))
 
     def test_load_python2_unicode_module(self):
         # This Pickle contains some Unicode data!
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
-        self.assertIsNotNone(torch.load(path)) 
+        self.assertIsNotNone(torch.load(path))
 
     def test_load_error_msg(self):
         expected_err_msg = (".*You can only torch.load from a file that is seekable. " +
@@ -11615,6 +11615,11 @@ class TestTorchDeviceType(TestCase):
                         self.assertEqual(len(t), len(np1))
                         for i in range(len(t)):
                             self.assertEqual(t[i].cpu().numpy(), np1[i])
+
+    def test_nonzero_non_diff(self, device):
+        x = torch.randn(10, requires_grad=True)
+        nz = x.nonzero()
+        self.assertFalse(nz.requires_grad)
 
     def test_pdist_norm(self, device):
         def test_pdist_single(shape, device, p, dtype, trans):
