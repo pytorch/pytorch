@@ -8,7 +8,7 @@ C10_DEFINE_bool(
 
 C10_DEFINE_int32(
     caffe2_tvm_min_ops,
-    1,
+    8,
     "Minimal number of supported ops for the subgraph to be lowered to TVM");
 
 namespace caffe2 {

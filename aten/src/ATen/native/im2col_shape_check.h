@@ -166,7 +166,6 @@ static inline void im2col_shape_check(
     dim_batch = -1;
   }
 
-  int64_t n_input_plane = input.size(dim_batch + 1);
   int64_t input_height = input.size(dim_batch + 2);
   int64_t input_width = input.size(dim_batch + 3);
   int64_t output_height = div_rtn<int64_t>(

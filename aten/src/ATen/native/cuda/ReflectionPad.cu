@@ -194,7 +194,7 @@ void reflection_pad1d_out_template(
     input.scalar_type(), "reflection_pad1d_out_template", [&] {
       reflection_pad1d_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          input.data<scalar_t>(), output.data<scalar_t>(),
+          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
           input_w, pad_l, pad_r);
     }
   );
@@ -242,7 +242,7 @@ void reflection_pad1d_backward_out_template(
     grad_input.scalar_type(), "reflection_pad1d_backward_out_template", [&] {
       reflection_pad1d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          grad_input.data<scalar_t>(), grad_output.data<scalar_t>(),
+          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
           input_w, pad_l, pad_r);
     }
   );
@@ -314,7 +314,7 @@ void reflection_pad2d_out_template(
     input.scalar_type(), "reflection_pad2d_out_template", [&] {
       reflection_pad2d_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          input.data<scalar_t>(), output.data<scalar_t>(),
+          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
           input_w, input_h,
           pad_t, pad_b, pad_l, pad_r);
     }
@@ -371,7 +371,7 @@ void reflection_pad2d_backward_out_template(
     input.scalar_type(), "reflection_pad2d_backward_out_template", [&] {
       reflection_pad2d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          grad_input.data<scalar_t>(), grad_output.data<scalar_t>(),
+          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
           input_w, input_h,
           pad_t, pad_b, pad_l, pad_r);
     }

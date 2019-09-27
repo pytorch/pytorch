@@ -1,5 +1,6 @@
 #include <cmath>
 #include <type_traits>
+#include <c10/util/BFloat16.h>
 
 namespace at {
 
@@ -18,5 +19,7 @@ template <typename T,
 inline bool _isnan(T val) {
   return std::isnan(val);
 }
+
+inline bool _isnan(at::BFloat16 val) { return std::isnan(float(val)); }
 
 } // namespace at

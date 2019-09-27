@@ -69,6 +69,9 @@ bool SliceImpl(
     if (!backward) {
       output->Resize(dst_sizes);
       output->raw_mutable_data(data.dtype());
+    } else {
+      gdata->ResizeLike(data);
+      gdata->raw_mutable_data(go->dtype());
     }
     return true;
   }

@@ -13,7 +13,7 @@ C10_DEFINE_bool(
 
 namespace caffe2 {
 
-static void QuitIfFeatureUnsupported(
+inline void QuitIfFeatureUnsupported(
     const bool cpu_has_feature, const string& feature) {
   VLOG(1) << "Caffe2 built with " << feature << ".";
   if (!cpu_has_feature) {

@@ -60,7 +60,7 @@ void mean_kernel_impl(TensorIterator& iter) {
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
 void norm_kernel_cuda_impl(TensorIterator& iter, Scalar val) {
   float p;
-  if (val.isIntegral()) {
+  if (val.isIntegral(false)) {
      p = val.to<int64_t>();
   } else if (val.isFloatingPoint()) {
      p = val.to<acc_t>();

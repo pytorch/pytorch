@@ -4,8 +4,18 @@
 /docs/cpp @goldsborough @ebetica @yf225
 /torch/csrc/api/ @ebetica @goldsborough @yf225
 /test/cpp/api/ @ebetica @goldsborough @yf225
-/torch/lib/c10d/ @apaszke @pietern @mrshenli
-/torch/csrc/distributed/ @apaszke @pietern @mrshenli
+/torch/lib/c10d/ @pietern @mrshenli
+/torch/csrc/distributed/ @pietern @mrshenli
 /torch/distributed/ @apaszke @pietern @mrshenli
-/test/test_c10d.py @apaszke @pietern @mrshenli
-/torch/utils/cpp_extension.py @goldsborough @fmassa @apaszke @soumith @ezyang
+/test/test_c10d.py @pietern @mrshenli
+/torch/utils/cpp_extension.py @goldsborough @fmassa @soumith @ezyang
+
+# Not there to stricly require the approval, but to be tagged as a reviewer
+# on the PRs to push them into a high priority inbox.
+/torch/csrc/api/data/ @apaszke
+/torch/csrc/autograd/ @apaszke
+/torch/csrc/jit/ @apaszke
+/torch/nn/ @apaszke
+/torch/autograd/ @apaszke
+/torch/jit/ @apaszke
+/torch/utils/data/ @apaszke

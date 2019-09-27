@@ -3,14 +3,6 @@
 
 namespace c10 {
 
-namespace {
-  std::string serialize_schema(const FunctionSchema& schema) {
-    std::ostringstream str;
-    str << schema;
-    return str.str();
-  }
-}
-
 C10_EXPORT c10::optional<std::string> findSchemaDifferences(const FunctionSchema& lhs, const FunctionSchema& rhs) {
   if (lhs.arguments().size() != rhs.arguments().size()) {
     return "The number of arguments is different. " + guts::to_string(lhs.arguments().size()) +

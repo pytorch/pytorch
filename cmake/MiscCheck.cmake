@@ -154,31 +154,32 @@ endif()
 cmake_pop_check_state()
 
 # ---[ Check if the compiler has AVX/AVX2 support. We only check AVX2.
-cmake_push_check_state(RESET)
-if (MSVC)
-  set(CMAKE_REQUIRED_FLAGS "/arch:AVX2")
-else()
-  set(CMAKE_REQUIRED_FLAGS "-mavx2")
+if (NOT INTERN_BUILD_MOBILE)
+  cmake_push_check_state(RESET)
+  if (MSVC)
+    set(CMAKE_REQUIRED_FLAGS "/arch:AVX2")
+  else()
+    set(CMAKE_REQUIRED_FLAGS "-mavx2")
+  endif()
+  CHECK_CXX_SOURCE_COMPILES(
+      "#include <immintrin.h>
+      int main() {
+        __m256i a, b;
+        a = _mm256_set1_epi8 (1);
+        b = a;
+        _mm256_add_epi8 (a,a);
+        __m256i x;
+        _mm256_extract_epi64(x, 0); // we rely on this in our AVX2 code
+        return 0;
+      }" CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+  if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+    message(STATUS "Current compiler supports avx2 extension. Will build perfkernels.")
+    # Also see CMakeLists.txt under caffe2/perfkernels.
+    set(CAFFE2_PERF_WITH_AVX 1)
+    set(CAFFE2_PERF_WITH_AVX2 1)
+  endif()
+  cmake_pop_check_state()
 endif()
-CHECK_CXX_SOURCE_COMPILES(
-    "#include <immintrin.h>
-     int main() {
-       __m256i a, b;
-       a = _mm256_set1_epi8 (1);
-       b = a;
-       _mm256_add_epi8 (a,a);
-       __m256i x;
-       _mm256_extract_epi64(x, 0); // we rely on this in our AVX2 code
-       return 0;
-     }" CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
-if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
-  message(STATUS "Current compiler supports avx2 extension. Will build perfkernels.")
-  # Also see CMakeLists.txt under caffe2/perfkernels.
-  set(CAFFE2_PERF_WITH_AVX 1)
-  set(CAFFE2_PERF_WITH_AVX2 1)
-endif()
-cmake_pop_check_state()
-
 # ---[ Check if the compiler has AVX512 support.
 cmake_push_check_state(RESET)
 if (MSVC)
@@ -306,13 +307,12 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
               #      dllexport in cc file. The strategy is copied from gflags.
   )
 
+  # Make sure windows.h does not include additional headers.
+  add_definitions("/DWIN32_LEAN_AND_MEAN")
+
   # Make sure windef.h does not define max/min macros.
   # Required by ATen among others.
   add_definitions("/DNOMINMAX")
-
-  # Exception handing for compiler warining C4530, see
-  # https://msdn.microsoft.com/en-us/library/2axwkyt4.aspx
-  add_definitions("/EHsc")
 
   set(CMAKE_SHARED_LINKER_FLAGS
       "${CMAKE_SHARED_LINKER_FLAGS} /ignore:4049 /ignore:4217")

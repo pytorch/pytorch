@@ -32,35 +32,13 @@ from functools import wraps
 #
 # In general, we should avoid depending on the type of Tensor Values contained
 # within the trace graph. However, this is sometimes unavoidable (due to ONNX
-# spec requirements, etc). If you are implementing a symbolic and need Tensor
-# type information, note that there are several levels of Tensor types, defined
-# in aten/src/ATen/core/jit_type.h:
-#
-# TensorType - This is a Tensor, but we don't know anything about its
-#               properties (e.g. scalar type, # dims, shapes).
-#               Appears as `Tensor` in graph print-outs.
-# ProfiledTensorType <: TensorType - Denotes a Tensor for which we know the
-#                                       concrete sizes in addition to the information
-#                                       contained in TensorTyper. This adds a sizes()
-#                                       method which can be used to retrieve the
-#                                       concrete sizes.
-# @deprecated
-# DimensionedTensorType <: TensorType - Denotes a Tensor for which we know the scalar
-#                             type and number of dimensions, but not the concrete
-#                             shapes. For example, appears as 'Float(*, *)' in
-#                             graph print-outs. Useful accessor methods include
-#                             dim() and scalarType()
-# @deprecated
-# CompleteTensorType <: DimensionedTensorType - Denotes a Tensor for which we know the
-#                                               concrete sizes in addition to the information
-#                                               contained in TensorTyper. This adds a sizes()
-#                                               method which can be used to retrieve the
-#                                               concrete sizes.
+# spec requirements, etc). The TensorType object has accessors for these properties
+# that return the property if it is statically known and return nullopt otherwise. 
 #
 # In general, we should prefer to rely on the least specific information possible.
 # For example, not relying on tensor properties at all is better than relying
-# on the number of dimensions (DimensionedTensorType) which is better than relying on
-# concrete shapes (CompleteTensorType). Doing so will make the export symbolics
+# on the number of dimensions which is better than relying on
+# concrete shapes. Doing so will make the export symbolics
 # more robust to different graphs.
 
 # ---------------------------------------------------------------------------------
@@ -159,10 +137,6 @@ def _scalar(x):
     return x.item()
 
 
-def _is_complete_or_dimensioned_tensor_type(tensor):
-    return tensor.type().kind() == "DimensionedTensorType" or tensor.type().kind() == "CompleteTensorType"
-
-
 def _if_scalar_type_as(g, self, tensor):
     """
     Convert self into the same type of tensor, as necessary.
@@ -218,6 +192,41 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
         from torch.onnx.symbolic_opset10 import _slice
         return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
 
+def _interpolate_warning(interpolate_mode):
+    onnx_op = "onnx:Resize" if _export_onnx_opset_version >= 10 else "onnx:Upsample"
+    warnings.warn("You are trying to export the model with " + onnx_op + " for ONNX opset version "
+                  "" + str(_export_onnx_opset_version) + ". "
+                  "This operator might cause results to not match the expected results by PyTorch.\n"
+                  "ONNX's Upsample/Resize operator did not match Pytorch's Interpolation until opset 11. "
+                  "Attributes to determine how to transform the input were added in onnx:Resize in opset 11 "
+                  "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
+                  "We recommend using opset 11 and above for models using this operator. ")
+
+def _interpolate_size_to_scales(g, input, output_size, dim):
+    output_size = _maybe_get_const(output_size, 'is')
+    if _is_value(output_size):
+        offset = 2
+        offsets = g.op("Constant", value_t=torch.ones(offset))
+        dividend = g.op("Cast", output_size, to_i=cast_pytorch_to_onnx["Float"])
+        divisor = _slice_helper(g, g.op("Shape", input), axes=[0], ends=[dim], starts=[offset])
+        divisor = g.op("Cast", divisor, to_i=cast_pytorch_to_onnx["Float"])
+        scale_dims = g.op("Div", dividend, divisor)
+        scales = g.op("Concat", offsets, scale_dims, axis_i=0)
+    else:
+        scales_constant = [1. if i < 2 else
+                           float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
+                           for i in range(0, dim)]
+        scales = g.op("Constant", value_t=torch.tensor(scales_constant))
+    return scales
+
+
+def _scatter_helper(g, self, dim, index, src):
+    if _export_onnx_opset_version <= 10:
+        from torch.onnx.symbolic_opset9 import scatter
+    else:
+        from torch.onnx.symbolic_opset11 import scatter
+    return scatter(g, self, dim, index, src)
+
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
@@ -247,7 +256,7 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
 
 _default_onnx_opset_version = 9
 _onnx_master_opset = 10
-_onnx_stable_opsets = [7, 8, 9, 10]
+_onnx_stable_opsets = [7, 8, 9, 10, 11]
 _export_onnx_opset_version = _default_onnx_opset_version
 
 

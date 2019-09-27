@@ -50,7 +50,7 @@ PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_getDevice_wrap(PyObject *self)
+PyObject * THCPModule_getDevice_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   int device;
@@ -60,7 +60,7 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
+PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   //torch::utils::cuda_lazy_init();
@@ -68,7 +68,7 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_set_run_yet_variable_to_false_wrap(PyObject *self)
+PyObject * THCPModule_set_run_yet_variable_to_false_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   torch::utils::set_run_yet_variable_to_false();
@@ -117,7 +117,7 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_isDriverSufficient(PyObject *self)
+PyObject * THCPModule_isDriverSufficient(PyObject *self, PyObject *noargs)
 {
   int count;
   cudaError_t err = cudaGetDeviceCount(&count);
@@ -127,7 +127,7 @@ PyObject * THCPModule_isDriverSufficient(PyObject *self)
   return PyBool_FromLong(1);
 }
 
-PyObject * THCPModule_getDriverVersion(PyObject *self)
+PyObject * THCPModule_getDriverVersion(PyObject *self, PyObject *noargs)
 {
   int driverVersion = -1;
   cudaError_t err = cudaDriverGetVersion(&driverVersion);
@@ -140,12 +140,12 @@ PyObject * THCPModule_getDriverVersion(PyObject *self)
   return PyLong_FromLong((int64_t) driverVersion);
 }
 
-PyObject * THCPModule_getCompiledVersion(PyObject *self)
+PyObject * THCPModule_getCompiledVersion(PyObject *self, PyObject *noargs)
 {
   return PyLong_FromLong((long) CUDA_VERSION);
 }
 
-PyObject * THCPModule_cudaHostAllocator(PyObject *_unused)
+PyObject * THCPModule_cudaHostAllocator(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   c10::Allocator* allocator = THCState_getCudaHostAllocator(state);
@@ -153,7 +153,7 @@ PyObject * THCPModule_cudaHostAllocator(PyObject *_unused)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_cudaSynchronize(PyObject *_unused)
+PyObject * THCPModule_cudaSynchronize(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   THCudaCheck(cudaDeviceSynchronize());
@@ -161,7 +161,7 @@ PyObject * THCPModule_cudaSynchronize(PyObject *_unused)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_cudaIPCCollect(PyObject *_unused /* unused */)
+PyObject * THCPModule_cudaIPCCollect(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   torch::CudaIPCCollect();
@@ -185,7 +185,7 @@ PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles)
 // by the thread that owns the mutex (obviously there can be only one such thread).
 static PyGILState_STATE cudaMutexGILState;
 
-PyObject * THCPModule_cudaLockMutex(PyObject *module)
+PyObject * THCPModule_cudaLockMutex(PyObject *module, PyObject *noargs)
 {
   auto mutex = c10::cuda::CUDACachingAllocator::getFreeMutex();
   // This has to be a busy loop because we **absolutely need to** hold the GIL
@@ -206,7 +206,7 @@ PyObject * THCPModule_cudaLockMutex(PyObject *module)
   Py_RETURN_NONE;
 }
 
-PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
+PyObject * THCPModule_cudaUnlockMutex(PyObject *module, PyObject *noargs)
 {
   auto mutex = c10::cuda::CUDACachingAllocator::getFreeMutex();
   PyGILState_Release(cudaMutexGILState);
@@ -227,7 +227,7 @@ PyObject * THCPModule_hasPrimaryContext(PyObject *_unused, PyObject *arg)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_emptyCache(PyObject *_unused)
+PyObject * THCPModule_emptyCache(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   c10::cuda::CUDACachingAllocator::emptyCache();
@@ -323,7 +323,7 @@ static void bindCudaDeviceProperties(PyObject* module) {
 }
 
 // Callback for python part. Used for additional initialization of python classes
-static PyObject * THCPModule_initExtension(PyObject *self)
+static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   state = at::globalContext().lazyInitCUDA();
@@ -386,7 +386,7 @@ void THCPModule_useNccl()
 }
 #endif
 
-PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self)
+PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   cublasHandle_t handle = THCState_getCurrentBlasHandle(state);

@@ -175,7 +175,7 @@ class MaxNorm(Regularizer):
         assert self.norm > 0, "norm should be bigger than 0."
         if isinstance(grad, core.GradientSlice):
             net.SparseNormalize(
-                [param, grad.indices, grad.values],
+                [param, grad.indices],
                 [param],
                 use_max_norm=True,
                 norm=self.norm,
@@ -193,7 +193,7 @@ class ConstantNorm(Regularizer):
         assert self.norm > 0, "norm should be bigger than 0."
         if isinstance(grad, core.GradientSlice):
             net.SparseNormalize(
-                [param, grad.indices, grad.values],
+                [param, grad.indices],
                 [param],
                 use_max_norm=False,
                 norm=self.norm,

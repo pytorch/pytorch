@@ -76,6 +76,13 @@ class PackedSequence(PackedSequence_):
 
         # support being called as `PackedSequence(data, batch_sizes, sorted_indices)`
         if batch_sizes is not None:
+            if batch_sizes.device.type != 'cpu':
+                raise ValueError(
+                    "batch_sizes should always be on CPU. "
+                    "Instances of PackedSequence should never be created manually. "
+                    "They should be instantiated by functions like pack_sequence "
+                    "and pack_padded_sequences in nn.utils.rnn. "
+                    "https://pytorch.org/docs/stable/nn.html#torch.nn.utils.rnn.pack_sequence")
             return super(PackedSequence, cls).__new__(
                 cls, data, batch_sizes, sorted_indices, unsorted_indices)
 
@@ -419,7 +426,3 @@ def pack_sequence(sequences, enforce_sorted=True):
     """
     lengths = [v.size(0) for v in sequences]
     return pack_padded_sequence(pad_sequence(sequences), lengths, enforce_sorted=enforce_sorted)
-
-
-def get_packed_sequence(data, batch_sizes, sorted_indices, unsorted_indices):
-    return PackedSequence(data, batch_sizes, sorted_indices, unsorted_indices)

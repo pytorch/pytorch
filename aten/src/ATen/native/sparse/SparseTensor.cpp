@@ -75,12 +75,12 @@ SparseTensor new_sparse(const TensorOptions& options) {
   AT_ASSERT(options.layout() == kSparse);
   TensorTypeId type_id;
   if (options.device().is_cuda()) {
-    type_id = SparseCUDATensorId();
+    type_id = TensorTypeId::SparseCUDATensorId;
   } else {
-    type_id = SparseCPUTensorId();
+    type_id = TensorTypeId::SparseCPUTensorId;
   }
   return detail::make_tensor<SparseTensorImpl>(
-      type_id, options.dtype());
+      TensorTypeSet(type_id), options.dtype());
 }
 
 /** Actual dispatched creation methods ***/
@@ -281,6 +281,7 @@ namespace {
   }
 }
 
+// Invoked from native/Resize.cpp (no dynamic dispatch necessary)
 SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
   if (!_is_same_size_as_sparse(self, src)) {
     sparse_resize_(self, src.sizes(), src.sparse_dim(), src.dense_dim());
@@ -392,8 +393,8 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
       values.scalar_type(), "coalesce", [&] {
         int64_t prev = -1;
         int64_t blockSize = values.stride(0);
-        scalar_t* values_ptr = values.data<scalar_t>();
-        scalar_t* newValues_ptr = newValues.data<scalar_t>();
+        scalar_t* values_ptr = values.data_ptr<scalar_t>();
+        scalar_t* newValues_ptr = newValues.data_ptr<scalar_t>();
         for (int64_t j = 0; j < nnz; j++) {
           int64_t pos = indicesPermutationAccessor[j];
           int64_t curr = indicesBufferAccessor[j];
@@ -438,7 +439,7 @@ void inline sparse_mask_out_cpu_kernel(
 ) {
   auto r_values_accessor = r_values.accessor<scalar_t, 1>();
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
-  scalar_t* t_ptr = t.data<scalar_t>();
+  scalar_t* t_ptr = t.data_ptr<scalar_t>();
 
   at::parallel_for(0, r_nnz, 1000, [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {

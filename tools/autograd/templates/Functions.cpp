@@ -65,7 +65,7 @@ Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
   bool is_one = false;
   if (s.isFloatingPoint()) {
     is_one = s.toDouble() == 1;
-  } else if(s.isIntegral()) {
+  } else if(s.isIntegral(true)) {
     is_one = s.toLong() == 1;
   }
 
@@ -528,7 +528,7 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntArrayRef si
       int64_t out_cols = grad.size(1);
       Tensor t = at::zeros({}, grad.options()).expand({out_rows, out_cols}, true);
       Tensor r = at::empty({out_cols, out_rows}, grad.options()).t();
-      at::s_native_addmm_out(r, t, mat1.t(), grad, alpha, 1);
+      at::addmm_out(r, t, mat1.t(), grad, alpha, 1);
       return r;
     }
     return maybe_multiply(grad.t().mm(mat1).t(), alpha);
@@ -749,6 +749,22 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
 
   auto grad_input = at::matmul(at::matmul(L_inverse.transpose(-1, -2), phi), L_inverse);
   return grad_input.add(grad_input.transpose(-1, -2)).mul_(0.5);  // Symmetrizing the gradient
+}
+
+Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inverse) {
+  Tensor grad_L;
+  if (grad.defined()) {
+    Tensor common_term = grad + grad.transpose(-2, -1);
+    common_term = at::matmul(inverse, at::matmul(common_term, inverse));
+    if (upper) {
+      grad_L = -at::matmul(L, common_term);
+    } else {
+      grad_L = -at::matmul(common_term, L);
+    }
+  } else {
+    grad_L = at::zeros({1}, L.options()).expand_as(L);
+  }
+  return grad_L;
 }
 
 Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,
@@ -1700,37 +1716,39 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
-    TORCH_CHECK(eigenvectors,
-             "symeig_backward: Setting eigenvectors to false in torch.symeig doesn't compute eigenvectors ",
-             "and hence we cannot compute backward. Please use torch.symeig(eigenvectors=True)");
+  // This gradient is symmetric, and not triangular.
+  // symeig operates only on symmetric inputs, which is a subspace of
+  // R^{n x n}, and hence the derivative is not well-defined for off-diagonal
+  // elements. We resolve this by taking the gradient of the functionally independent
+  // elements of the matrix (i.e., the lower triangular portion of the input) and then
+  // reflect it on the upper triangular portion, thereby symmetrizing the gradient of
+  // the symeig operation. The motivation behind this choice is that symmetric gradient
+  // leads to stable gradient updates, and retains symmetry of the updated matrix if it
+  // were updated by a gradient based algorithm.
+  TORCH_CHECK(eigenvectors,
+           "symeig_backward: Setting eigenvectors to false in torch.symeig doesn't compute eigenvectors ",
+           "and hence we cannot compute backward. Please use torch.symeig(eigenvectors=True)");
 
-    auto glambda = grads[0];
-    auto gv = grads[1];
+  auto glambda = grads[0];
+  auto gv = grads[1];
 
-    auto vt = v.transpose(-2, -1);
+  auto vt = v.transpose(-2, -1);
 
-    Tensor result;
-    if (gv.defined()) {
-        Tensor F = lambda.unsqueeze(-2).expand_as(self).clone();
-        F.sub_(at::unsqueeze(lambda, -1));
-        F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
-        F.pow_(-1);
+  Tensor result;
+  if (gv.defined()) {
+      Tensor F = lambda.unsqueeze(-2) - lambda.unsqueeze(-1);
+      F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
+      F.pow_(-1);
+      F.mul_(at::matmul(vt, gv));
+      result = at::matmul(v, at::matmul(F, vt));
+  } else {
+      result = at::zeros_like(self);
+  }
 
-        F.mul_(at::matmul(vt, gv));
-        result = at::matmul(v, at::matmul(F, vt));
-    } else {
-        result = at::zeros_like(self);
-    }
-
-    if (glambda.defined()) {
-        result.add_(at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt));
-    }
-    if (upper) {
-        result = at::triu(result) + at::triu(result.transpose(-2, -1), 1);
-    } else {
-        result = at::tril(result) + at::tril(result.transpose(-2, -1), -1);
-    }
-    return result;
+  if (glambda.defined()) {
+      result.add_(at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt));
+  }
+  return result.add(result.transpose(-2, -1)).mul_(0.5);
 }
 
 // We refer Walter, S.F and Lehmann, L., Algorithmic Differentiation of Linear
@@ -1978,6 +1996,27 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
     grad_a = grad_a.add(grad_m);
   }
   return std::tuple<Tensor, Tensor>{grad_b, grad_a};
+}
+
+std::tuple<Tensor, Tensor> cholesky_solve_backward(
+    const Tensor& grad_x, const Tensor& self,
+    const Tensor& input2, const Tensor& result, const bool upper) {
+  Tensor grad_self, grad_input2;
+  if (grad_x.defined()) {
+    grad_self = grad_x.cholesky_solve(input2, /*upper=*/upper);
+  } else {
+    grad_self = at::zeros({1}, self.options()).expand_as(self);
+  }
+
+  Tensor common_term = at::matmul(grad_self, result.transpose(-2, -1));
+  common_term = common_term + common_term.transpose(-2, -1);
+
+  if (upper) {
+    grad_input2 = -at::matmul(input2, common_term);
+  } else {
+    grad_input2 = -at::matmul(common_term, input2);
+  }
+  return std::tuple<Tensor, Tensor>{grad_self, grad_input2};
 }
 
 // Generally speaking, fft's backward is ifft.
@@ -2301,9 +2340,8 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
   return gg_weight.view(size);
 }
 
-Tensor index_backward(const Tensor & self, TensorList indices, const Tensor& grad) {
-   auto zeros = at::zeros_like(self);
-   return at::_index_put_impl_(zeros, indices, grad, true, true);
+Tensor index_backward(Tensor zeros_like_self, TensorList indices, const Tensor& grad) {
+   return at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
 }
 
 

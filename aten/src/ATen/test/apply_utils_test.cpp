@@ -28,7 +28,7 @@ void test(DeprecatedTypeProperties& type, IntArrayRef shape, int64_t a = 0, int6
   zero_dim.fill_(2);
   zero_dim.exp_();
   AT_DISPATCH_FLOATING_TYPES(zero_dim.scalar_type(), "test0", [&] {
-    ASSERT(zero_dim.data<scalar_t>()[0] == std::exp(2));
+    ASSERT(zero_dim.data_ptr<scalar_t>()[0] == std::exp(2));
   });
 
   auto empty_t = at::empty({0}, type);
@@ -56,9 +56,9 @@ void test(DeprecatedTypeProperties& type, IntArrayRef shape, int64_t a = 0, int6
     CPU_tensor_apply2<double, scalar_t>(
         a4, a1, [](double& y, scalar_t x) { y = (double)(x * x); });
     for (int64_t i = 0; i < a0.numel(); i++) {
-      auto target = a1.data<scalar_t>()[i] * a1.data<scalar_t>()[i];
-      ASSERT(a0.data<scalar_t>()[i] == target);
-      ASSERT(a4.data<double>()[i] == target);
+      auto target = a1.data_ptr<scalar_t>()[i] * a1.data_ptr<scalar_t>()[i];
+      ASSERT(a0.data_ptr<scalar_t>()[i] == target);
+      ASSERT(a4.data_ptr<double>()[i] == target);
     }
   });
 
@@ -72,10 +72,10 @@ void test(DeprecatedTypeProperties& type, IntArrayRef shape, int64_t a = 0, int6
           y = (double)(x * x + z);
         });
     for (int64_t i = 0; i < a0.numel(); i++) {
-      auto target = a1.data<scalar_t>()[i] * a1.data<scalar_t>()[i];
-      target = target + a2.data<scalar_t>()[i];
-      ASSERT(a0.data<scalar_t>()[i] == target);
-      ASSERT(a4.data<double>()[i] == target);
+      auto target = a1.data_ptr<scalar_t>()[i] * a1.data_ptr<scalar_t>()[i];
+      target = target + a2.data_ptr<scalar_t>()[i];
+      ASSERT(a0.data_ptr<scalar_t>()[i] == target);
+      ASSERT(a4.data_ptr<double>()[i] == target);
     }
   });
 
@@ -98,10 +98,10 @@ void test(DeprecatedTypeProperties& type, IntArrayRef shape, int64_t a = 0, int6
           y = (double)(x * x + z * a);
         });
     for (int64_t i = 0; i < a0.numel(); i++) {
-      auto target = a1.data<scalar_t>()[i] * a1.data<scalar_t>()[i];
-      target = target + a2.data<scalar_t>()[i] * a3.data<scalar_t>()[i];
-      ASSERT(a0.data<scalar_t>()[i] == target);
-      ASSERT(a4.data<double>()[i] == target);
+      auto target = a1.data_ptr<scalar_t>()[i] * a1.data_ptr<scalar_t>()[i];
+      target = target + a2.data_ptr<scalar_t>()[i] * a3.data_ptr<scalar_t>()[i];
+      ASSERT(a0.data_ptr<scalar_t>()[i] == target);
+      ASSERT(a4.data_ptr<double>()[i] == target);
     }
   });
 }

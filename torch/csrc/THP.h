@@ -41,7 +41,7 @@
 #ifdef _THP_CORE
 #include <torch/csrc/serialization.h>
 
-#include <torch/csrc/autograd/autograd.h>
+#include <torch/csrc/autograd/python_autograd.h>
 #endif
 
 #endif

@@ -31,19 +31,13 @@ TH_API void THVector_(abs)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 /* floating point only now */
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
-TH_API void THVector_(log)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(lgamma)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(digamma)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(trigamma)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(log10)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(log1p)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(log2)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(sigmoid)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(exp)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(expm1)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(erf)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(erfc)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(erfinv)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(cos)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(acos)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(cosh)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);

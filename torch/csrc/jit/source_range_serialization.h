@@ -21,12 +21,9 @@ class SourceRangePickler {
  public:
   SourceRangePickler();
 
-  void pickle(const SourceRangeRecords& ranges);
-
-  const std::vector<char>& get_data();
+  std::vector<char> pickle(const SourceRangeRecords& ranges);
 
  private:
-  std::shared_ptr<Pickler> p;
   std::shared_ptr<SourceRangeSerializer> srs;
 };
 
