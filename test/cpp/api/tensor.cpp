@@ -248,25 +248,25 @@ TEST(TensorTest, MultidimTensorCtor_CUDA) {
   }
 }
 
-TEST(TensorTest, PrettyPrintListInitTensor) {
+TEST(TensorTest, PrettyPrintInitListTensor) {
   {
     ASSERT_EQ(
-      c10::str(torch::detail::ListInitTensor(1.1)),
+      c10::str(torch::detail::InitListTensor(1.1)),
       "1.1");
   }
   {
     ASSERT_EQ(
-      c10::str(torch::detail::ListInitTensor({1.1, 2.2})),
+      c10::str(torch::detail::InitListTensor({1.1, 2.2})),
       "{1.1, 2.2}");
   }
   {
     ASSERT_EQ(
-      c10::str(torch::detail::ListInitTensor({{1, 2}, {3, 4}})),
+      c10::str(torch::detail::InitListTensor({{1, 2}, {3, 4}})),
       "{{1, 2}, {3, 4}}");
   }
   {
     ASSERT_EQ(
-      c10::str(torch::detail::ListInitTensor({{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}})),
+      c10::str(torch::detail::InitListTensor({{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}})),
       "{{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}}");
   }
 }
@@ -390,10 +390,10 @@ TEST(TensorTest, DataPtr) {
 }
 
 TEST(TensorTest, Data) {
-  const auto tensor = torch::empty({3, 3});
+  const auto tensor = torch::rand({3, 3});
   ASSERT_TRUE(torch::equal(tensor, tensor.data()));
 
-  const auto tensor2 = at::empty({3, 3});
+  const auto tensor2 = at::rand({3, 3});
   ASSERT_THROW(tensor2.data(), c10::Error);
 }
 
@@ -488,4 +488,19 @@ TEST(TensorTest, DetachInplace) {
   const auto message = "detach_ is not implemented for Tensor";
   ASSERT_THROWS_WITH(x.detach_(), message);
   ASSERT_THROWS_WITH(y.detach_(), message);
+}
+
+TEST(TensorTest, SetData) {
+  auto x = torch::randn({5});
+  auto y = torch::randn({5});
+  ASSERT_FALSE(torch::equal(x, y));
+  ASSERT_NE(x.data_ptr<float>(), y.data_ptr<float>());
+
+  x.set_data(y);
+  ASSERT_TRUE(torch::equal(x, y));
+  ASSERT_EQ(x.data_ptr<float>(), y.data_ptr<float>());
+
+  x = at::tensor({5});
+  y = at::tensor({5});
+  ASSERT_THROWS_WITH(x.set_data(y), "set_data is not implemented for Tensor");
 }
