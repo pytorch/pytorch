@@ -29,8 +29,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/xla_tensor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tensor_iterator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_generator_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/pow_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/variant_test.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/pow_test.cpp)
 
 list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_integer_divider_test.cu
