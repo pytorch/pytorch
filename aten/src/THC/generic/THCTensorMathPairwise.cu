@@ -2,7 +2,12 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathPairwise.cu"
 #else
 
-#include <THC/THCTensorMathCompareT.cuh>
+template <typename T, typename TOut>
+struct TensorEQOp {
+  __device__ inline void operator()(TOut* out, T* a, T* b) {
+    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::eq(*a, *b));
+  }
+};
 
 int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_)
 {
