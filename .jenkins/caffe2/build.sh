@@ -204,8 +204,6 @@ if [[ $BUILD_ENVIRONMENT == *caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04* ]]; then
   cd ../../
   rm -rf onnx-tensorrt/
   build_args+=("USE_TENSORRT=ON")
-else
-  export SKIP_TENSORRT_TEST=1
 fi
 
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
