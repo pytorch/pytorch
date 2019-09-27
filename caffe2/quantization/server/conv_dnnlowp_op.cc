@@ -255,11 +255,13 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
             this->template Input<int8::Int8TensorCPU>(BIAS).scale;
         bias_qparams.zero_point =
             this->template Input<int8::Int8TensorCPU>(BIAS).zero_point;
-        CAFFE_ENFORCE_LE(
-            std::abs(
-                bias_qparams.scale -
-                in_qparams_[INPUT].scale * FilterQuantizationParams(0).scale),
-            1e-4);
+        if (InputTensorCPU_(INPUT).dim32(0) > 0) {
+          CAFFE_ENFORCE_LE(
+              std::abs(
+                  bias_qparams.scale -
+                  in_qparams_[INPUT].scale * FilterQuantizationParams(0).scale),
+              1e-4);
+        }
         CAFFE_ENFORCE_EQ(bias_qparams.zero_point, 0);
         b_quantized_data_ = bias.template data<int32_t>();
       } else {
@@ -1173,6 +1175,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             column_offsets_->empty() ? nullptr : column_offsets_->data(),
             b_quantized_data_,
             ReluFused,
+            nullptr, /*act_times_w_scale*/
             dnnlowp_get_thread_num(),
             dnnlowp_get_num_threads());
       } else {
@@ -1198,6 +1201,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             column_offsets_->empty() ? nullptr : column_offsets_->data(),
             b_quantized_data_,
             ReluFused,
+            1.0f, /*act_times_w_scale*/
             dnnlowp_get_thread_num(),
             dnnlowp_get_num_threads());
       }
@@ -1215,7 +1219,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
 #endif
     {
       if (quantize_groupwise_) {
-        depthwise_3x3_per_channel_quantization_pad_1(
+        depthwise_2d_per_channel_quantization_same_pad(
             N,
             H,
             W,
@@ -1235,10 +1239,11 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             column_offsets_->empty() ? nullptr : column_offsets_->data(),
             b_quantized_data_,
             ReluFused,
+            nullptr, /*act_times_w_scale*/
             dnnlowp_get_thread_num(),
             dnnlowp_get_num_threads());
       } else {
-        depthwise_3x3_pad_1(
+        depthwise_2d_same_pad(
             N,
             H,
             W,
@@ -1258,6 +1263,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             column_offsets_->empty() ? nullptr : column_offsets_->data(),
             b_quantized_data_,
             ReluFused,
+            1.0f, /*act_times_w_scale*/
             dnnlowp_get_thread_num(),
             dnnlowp_get_num_threads());
       }
