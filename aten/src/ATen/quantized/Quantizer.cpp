@@ -10,10 +10,9 @@
 
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>
-#else
+#endif
 #ifdef __ARM_NEON__
 #include <arm_neon.h>
-#endif
 #endif
 
 namespace at {
@@ -296,13 +295,12 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
     quantize_tensor_arm<T>(rdata, qtensor, rtensor.numel(), scale, zero_point);
     return qtensor;
   }
-#else
+#endif
   auto qdata = qtensor.data_ptr<T>();
   for (int i = 0; i < rtensor.numel(); ++i) {
     qdata[i] = quantize_val<T>(scale, zero_point, rdata[i]);
   }
   return qtensor;
-#endif
 }
 
 template <typename T>
