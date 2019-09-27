@@ -5,6 +5,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <type_traits>
+
 #include <gloo/allgather.h>
 #include <gloo/allgatherv.h>
 #include <gloo/allreduce.h>
@@ -113,7 +115,9 @@ class GlooStore : public ::gloo::rendezvous::Store {
 
 typedef void (*ReduceFunc)(void*, const void*, const void*, size_t);
 
-template <typename T>
+template <
+    typename T,
+    typename std::enable_if<!std::is_integral<T>::value, int>::type = 0>
 ReduceFunc toFunction(const ReduceOp& r) {
   switch (r) {
     case ReduceOp::SUM:
@@ -124,6 +128,83 @@ ReduceFunc toFunction(const ReduceOp& r) {
       return ReduceFunc(&::gloo::min<T>);
     case ReduceOp::MAX:
       return ReduceFunc(&::gloo::max<T>);
+    case ReduceOp::BAND:
+      throw std::runtime_error(
+          "Cannot use ReduceOp.BAND with non-integral dtype");
+      break;
+    case ReduceOp::BOR:
+      throw std::runtime_error(
+          "Cannot use ReduceOp.BOR with non-integral dtype");
+      break;
+    case ReduceOp::BXOR:
+      throw std::runtime_error(
+          "Cannot use ReduceOp.BXOR with non-integral dtype");
+      break;
+    case ReduceOp::UNUSED:
+      break;
+  }
+
+  throw std::runtime_error("Unhandled ReduceOp");
+}
+
+// Bitwise AND with SFINAE guard for integral types.
+template <
+    typename T,
+    typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+void band(void* c, const void* a, const void* b, size_t n) {
+  auto tc = static_cast<T*>(c);
+  auto ta = static_cast<const T*>(a);
+  auto tb = static_cast<const T*>(b);
+  for (size_t i = 0; i < n; i++) {
+    tc[i] = ta[i] & tb[i];
+  }
+}
+
+// Bitwise OR with SFINAE guard for integral types.
+template <
+    typename T,
+    typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+void bor(void* c, const void* a, const void* b, size_t n) {
+  auto tc = static_cast<T*>(c);
+  auto ta = static_cast<const T*>(a);
+  auto tb = static_cast<const T*>(b);
+  for (size_t i = 0; i < n; i++) {
+    tc[i] = ta[i] | tb[i];
+  }
+}
+
+// Bitwise XOR with SFINAE guard for integral types.
+template <
+    typename T,
+    typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+void bxor(void* c, const void* a, const void* b, size_t n) {
+  auto tc = static_cast<T*>(c);
+  auto ta = static_cast<const T*>(a);
+  auto tb = static_cast<const T*>(b);
+  for (size_t i = 0; i < n; i++) {
+    tc[i] = ta[i] ^ tb[i];
+  }
+}
+
+template <
+    typename T,
+    typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+ReduceFunc toFunction(const ReduceOp& r) {
+  switch (r) {
+    case ReduceOp::SUM:
+      return ReduceFunc(&::gloo::sum<T>);
+    case ReduceOp::PRODUCT:
+      return ReduceFunc(&::gloo::product<T>);
+    case ReduceOp::MIN:
+      return ReduceFunc(&::gloo::min<T>);
+    case ReduceOp::MAX:
+      return ReduceFunc(&::gloo::max<T>);
+    case ReduceOp::BAND:
+      return ReduceFunc(&band<T>);
+    case ReduceOp::BOR:
+      return ReduceFunc(&bor<T>);
+    case ReduceOp::BXOR:
+      return ReduceFunc(&bxor<T>);
     case ReduceOp::UNUSED:
       break;
   }
