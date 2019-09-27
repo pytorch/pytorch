@@ -36,6 +36,7 @@ import copy
     " with instruction set support avx2 or newer.",
 )
 class PostTrainingQuantTest(QuantizationTestCase):
+    @no_deadline
     @given(qconfig=st.sampled_from((torch.quantization.default_qconfig, torch.quantization.default_per_channel_qconfig)))
     def test_single_layer(self, qconfig):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
