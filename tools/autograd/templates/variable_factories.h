@@ -183,7 +183,9 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 
 /// NOTE: `torch::tensor({})` doesn't work at the moment because we would need to solve the
 /// ambiguous overload problem (see https://github.com/pytorch/pytorch/pull/26210#discussion_r325336686).
-/// If the user wants to create an empty tensor, they can use `torch::randn({0})` for now.
+/// We can create tensors with zero-size dimensions in the following way instead:
+/// - 1-D tensor: `torch::randn({0})`
+/// - N-D tensor: `torch::randn({2, 3, 0})`
 ///
 /// NOTE: Currently `torch::tensor(...)` doesn't support mixed data types
 /// (i.e. `torch::tensor({{bool, 2.0}})` doesn't work). We might be able to
