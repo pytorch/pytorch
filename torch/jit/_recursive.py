@@ -4,6 +4,7 @@ import collections
 import types
 import textwrap
 import functools
+import warnings
 
 import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args
