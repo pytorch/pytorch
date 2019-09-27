@@ -766,6 +766,9 @@ void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTenso
 
 accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
 {
+#ifdef BUILD_NAMEDTENSOR
+  at::NoNamesGuard guard;
+#endif
   if ( (THTensor_nDimension(tensor) != 1) || (THTensor_nDimension(src) != 1) ) {
     THError("1D tensors expected, got %dD, %dD tensors",
        THTensor_nDimension(tensor), THTensor_nDimension(src));
@@ -780,9 +783,6 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
                    tensor_data += sz*tensor_stride;
                    src_data += sz*src_stride;
                    break;);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::check_names_for_dot(tensor, src);
-#endif
   return sum;
 }
 
