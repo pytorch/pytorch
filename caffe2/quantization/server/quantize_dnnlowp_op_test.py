@@ -12,8 +12,10 @@ workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPQuantizeOpTest(hu.HypothesisTestCase):
-    @given(size=st.integers(1024, 2048), **hu.gcs_cpu_only)
-    def test_dnnlowp_quantize(self, size, gc, dc):
+    @given(size=st.integers(1024, 2048), is_empty=st.booleans(), **hu.gcs_cpu_only)
+    def test_dnnlowp_quantize(self, size, is_empty, gc, dc):
+        if is_empty:
+            size = 0
         min_ = -10.0
         max_ = 20.0
         X = (np.random.rand(size) * (max_ - min_) + min_).astype(np.float32)
@@ -34,8 +36,10 @@ class DNNLowPQuantizeOpTest(hu.HypothesisTestCase):
             X_q = self.ws.blobs["X_q"].fetch()[0]
 
             # Dequantize results and measure quantization error against inputs
-            X_scale = (max(np.max(X), 0) - min(np.min(X), 0)) / 255
-            X_zero = np.round(-np.min(X) / X_scale)
+            X_min = 0 if X.size == 0 else X.min()
+            X_max = 1 if X.size == 0 else X.max()
+            X_scale = (max(X_max, 0) - min(X_min, 0)) / 255
+            X_zero = np.round(-X_min / X_scale)
             X_dq = X_scale * (X_q - X_zero)
 
             # should be divided by 2 in an exact math, but divide by 1.9 here
