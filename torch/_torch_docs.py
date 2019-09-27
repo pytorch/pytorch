@@ -834,6 +834,25 @@ Arguments:
     dim (int): dimension along which to split the tensor
 """)
 
+add_docstr(torch.can_cast,
+           r"""
+can_cast(from, to) -> bool
+
+Determines if a type conversion is allowed under PyTorch casting rules
+described in the type promotion :ref:`documentation <type-promotion-doc>`.
+
+Args:
+    from (dtype): The original :class:`torch.dtype`.
+    to (dtype): The target :class:`torch.dtype`.
+
+Example::
+
+    >>> torch.can_cast(torch.double, torch.float)
+    True
+    >>> torch.can_cast(torch.float, torch.int)
+    False
+""")
+
 add_docstr(torch.cat,
            r"""
 cat(tensors, dim=0, out=None) -> Tensor
@@ -4432,6 +4451,27 @@ Example::
     >>> b = torch.tensor([[0, 1], [2, 3]])
     >>> torch.reshape(b, (-1,))
     tensor([ 0,  1,  2,  3])
+""")
+
+
+add_docstr(torch.result_type,
+           r"""
+result_type(tensor1, tensor2) -> dtype
+
+Returns the :class:`torch.dtype` that would result from performing an arithmetic
+operation on the provided input tensors. See type promotion :ref:`documentation <type-promotion-doc>`
+for more information on the type promotion logic.
+
+Args:
+    tensor1 (Tensor or Number): an input tensor or number
+    tensor2 (Tensor or Number): an input tensor or number
+
+Example::
+
+    >>> torch.result_type(torch.tensor([1, 2], dtype=torch.int), 1.0)
+    torch.float32
+    >>> torch.result_type(torch.tensor([1, 2], dtype=torch.uint8), torch.tensor(1))
+    torch.uint8
 """)
 
 

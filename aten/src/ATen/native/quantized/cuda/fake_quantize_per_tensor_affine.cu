@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <cmath>
+#include "fake_quantize_core.h"
 
 /* FakeQuantize Op for PerTensorAffine quantization scheme */
 namespace at {
@@ -41,19 +42,7 @@ Tensor fake_quantize_per_tensor_affine_cuda(
       zero_point >= quant_min && zero_point <= quant_max,
       "`zero_point` must be between `quant_min` and `quant_max`.");
   auto Y = at::empty_like(self);
-
-  float inv_scale = 1.0f / scale;
-  at::cuda::CUDA_tensor_apply2<float, float>(
-      self, Y, [=] __device__(const float& input_val, float& result_val) {
-        result_val = (fminf(
-                          quant_max,
-                          fmaxf(
-                              quant_min,
-                              static_cast<int64_t>(std::nearbyint(
-                                  input_val * inv_scale + zero_point)))) -
-                      zero_point) *
-            scale;
-      });
+  fake_quantize_slice_cuda(Y, self, scale, zero_point, quant_min, quant_max);
   return Y;
 }
 
@@ -101,13 +90,8 @@ Tensor fake_quantize_per_tensor_affine_backward_cuda(
   }
 
   auto dX = dY.clone();
-
-  float inv_scale = 1.0f / scale;
-  at::cuda::CUDA_tensor_apply3<float, float, float>(
-      dY, X, dX, [=] __device__(const float& dy, const float& x, float& dx) {
-        int64_t Xq = std::nearbyint(x * inv_scale + zero_point);
-        dx = (Xq >= quant_min && Xq <= quant_max) * dy;
-      });
+  fake_quantize_grad_slice_cuda(dX, X, dY, scale,
+                                zero_point, quant_min, quant_max);
   return dX;
 }
 
