@@ -99,7 +99,7 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
 #ifdef BUILD_NAMEDTENSOR
   else if (r.idx == 2) {
     if (jit::tracer::isTracing()) {
-      TORCH_INTERNAL_ASSERT("NYI: Named tensors w/ JIT");
+      TORCH_INTERNAL_ASSERT(false, "NYI: Named tensors w/ JIT");
     }
     return wrap(self_.size(r.dimname(0)));
   }

@@ -195,10 +195,10 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
       return qnnpack_linear_prepack(weight, bias);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::linear_prepack ",
         toString(ctx.qEngine()));
-    return at::Tensor();
   }
 };
 

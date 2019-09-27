@@ -176,7 +176,7 @@ static void polygamma_kernel(TensorIterator& iter, int64_t n) {
   switch (n) {
     case 0: digamma_kernel(iter); break;
     case 1: trigamma_kernel(iter); break;
-    default: TORCH_CHECK("polygamma(n,x) is not implemented for n>=2, but was ", n);
+    default: TORCH_CHECK(false, "polygamma(n,x) is not implemented for n>=2, but was ", n);
   }
 }
 
