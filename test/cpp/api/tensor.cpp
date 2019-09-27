@@ -390,10 +390,10 @@ TEST(TensorTest, DataPtr) {
 }
 
 TEST(TensorTest, Data) {
-  const auto tensor = torch::empty({3, 3});
+  const auto tensor = torch::rand({3, 3});
   ASSERT_TRUE(torch::equal(tensor, tensor.data()));
 
-  const auto tensor2 = at::empty({3, 3});
+  const auto tensor2 = at::rand({3, 3});
   ASSERT_THROW(tensor2.data(), c10::Error);
 }
 
