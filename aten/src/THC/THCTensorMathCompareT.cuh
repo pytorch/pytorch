@@ -36,13 +36,6 @@ struct TensorEQOp {
   }
 };
 
-template <typename T, typename TOut>
-struct TensorNEOp {
-  __device__ inline void operator()(TOut* out, T* a, T* b) {
-    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::ne(*a, *b));
-  }
-};
-
 template<typename ScalarTypeOut, typename ScalarType, typename TensorTypeOut, typename TensorType, typename Op>
 void THC_logicalTensor(THCState *state,
                        TensorTypeOut *self_,

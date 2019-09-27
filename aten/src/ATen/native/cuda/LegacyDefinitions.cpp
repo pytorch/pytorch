@@ -170,23 +170,4 @@ Tensor & eq_scalar_out_cuda(Tensor & result, const Tensor & self, const Scalar v
   }
 }
 
-Tensor & ne_out_cuda(Tensor & result, const Tensor & self, const Tensor & other) {
-  if (result.dtype() == at::ScalarType::Byte) {
-    AT_WARN("torch.ne received 'out' parameter with dtype torch.uint8, this behavior is now deprecated," \
-            "please use 'out' parameter with dtype torch.bool instead.");
-    return legacy::cuda::_th_ne_byte_out(result, self, other);
-  } else {
-    return legacy::cuda::_th_ne_out(result, self, other);
-  }
-}
-
-Tensor & ne_scalar_out_cuda(Tensor & result, const Tensor & self, const Scalar value) {
-  if (result.dtype() == at::ScalarType::Byte) {
-    AT_WARN("torch.ne received 'out' parameter with dtype torch.uint8, this behavior is now deprecated," \
-            "please use 'out' parameter with dtype torch.bool instead.");
-    return legacy::cuda::_th_ne_byte_out(result, self, value);
-  } else {
-    return legacy::cuda::_th_ne_out(result, self, value);
-  }
-}
 }} // namespace at::native

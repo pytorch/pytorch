@@ -4072,16 +4072,10 @@
 - func: ne_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_ne_
-    CUDA: legacy::cuda::_th_ne_
 
 - func: ne_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_ne_
-    CUDA: legacy::cuda::_th_ne_
 
 - func: __and__.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
@@ -4468,30 +4462,30 @@
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: ne_scalar_out_cpu
-    CUDA: ne_scalar_out_cuda
+    CPU: ne_out
+    CUDA: ne_out
     QuantizedCPU: ne_out_quantized_cpu
 
 - func: ne.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_ne
-    CUDA: legacy::cuda::_th_ne
+    CPU: ne
+    CUDA: ne
     QuantizedCPU: ne_quantized_cpu
 
 - func: ne.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: ne_out_cpu
-    CUDA: ne_out_cuda
+    CPU: ne_out
+    CUDA: ne_out
     QuantizedCPU: ne_out_quantized_cpu
 
 - func: ne.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_ne
-    CUDA: legacy::cuda::_th_ne
+    CPU: ne
+    CUDA: ne
     QuantizedCPU: ne_quantized_cpu
 
 - func: eq.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)

@@ -40,7 +40,6 @@ TENSOR_IMPLEMENT_LOGICAL(gt,>)
 TENSOR_IMPLEMENT_LOGICAL(le,<=)
 TENSOR_IMPLEMENT_LOGICAL(ge,>=)
 TENSOR_IMPLEMENT_LOGICAL(eq,==)
-TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 
 #define TENSOR_IMPLEMENT_LOGICAL_BYTE(NAME,OP)                                            \
   void THTensor_(NAME##ValueByte)(THByteTensor *r_, THTensor* t, scalar_t value)          \
@@ -60,7 +59,6 @@ TENSOR_IMPLEMENT_LOGICAL_BYTE(gt,>)
 TENSOR_IMPLEMENT_LOGICAL_BYTE(le,<=)
 TENSOR_IMPLEMENT_LOGICAL_BYTE(ge,>=)
 TENSOR_IMPLEMENT_LOGICAL_BYTE(eq,==)
-TENSOR_IMPLEMENT_LOGICAL_BYTE(ne,!=)
 
 ptrdiff_t THTensor_(numel)(THTensor *t)
 {
