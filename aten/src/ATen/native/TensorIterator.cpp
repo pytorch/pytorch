@@ -647,6 +647,8 @@ TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   iter.promote_gpu_output_dtypes_ = true;
   iter.resize_outputs_ = false;
   iter.is_reduction_ = true;
+  // TODO: This is only really necessary for arg{min,max}
+  iter.compute_common_dtype_only_for_inputs();
   iter.build();
   return iter;
 }

@@ -281,20 +281,6 @@ std::tuple<Tensor&,Tensor&> min_out(Tensor& min, Tensor& min_indices,
 }
 
 
-// argmax and argmin
-
-Tensor argmax(const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
-  if (dim)
-    return std::get<1>(self.max(dim.value(), keepdim));
-  return std::get<1>(self.reshape({-1}).max(/*dim=*/0));
-}
-
-Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
-  if (dim)
-    return std::get<1>(self.min(dim.value(), keepdim));
-  return std::get<1>(self.reshape({-1}).min(/*dim=*/0));
-}
-
 #ifdef BUILD_NAMEDTENSOR
 // Named tensor overloads
 
