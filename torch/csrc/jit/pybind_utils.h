@@ -337,7 +337,8 @@ template <class T>
 inline void guardAgainstNamedTensor(const T& var) {
 #ifdef BUILD_NAMEDTENSOR
   TORCH_CHECK(!var.has_names(),
-      "NYI: Named tensors are currently unsupported in TorchScript.");
+      "NYI: Named tensors are currently unsupported in TorchScript. As a  "
+      "workaround please drop names via `tensor = tensor.rename(None)`.");
 #endif
 }
 

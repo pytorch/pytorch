@@ -19,7 +19,7 @@ def check_serializing_named_tensor(tensor):
     if torch._C._BUILD_NAMEDTENSOR and tensor.has_names():
         raise RuntimeError(
             "NYI: Named tensors don't support serialization. Please drop "
-            "names before serialization and/or serialize them seperately.")
+            "names via `tensor = tensor.rename(None)` before serialization.")
 
 
 def build_dim_map(tensor):

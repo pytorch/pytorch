@@ -63,7 +63,7 @@ static void check_for_misalignment(
   TORCH_CHECK(it == other_names.end(),
       "Misaligned dims when attempting to ", action, " dims ", names, " and dims ",
       other_names, ": dim ", name, " appears in a different position from the right "
-      "across both lists");
+      "across both lists.");
 }
 
 // Assumption: A DimnameList can have no duplicate full names with
@@ -124,7 +124,7 @@ static void assert_names_equal(DimnameList a, DimnameList b) {
   TORCH_CHECK(a == b,
       "Name mismatch: specified out tensor with names ", a,
       " are not the same as the computed output names ", b,
-      ". Please rename the out tensor's dimensions.");
+      ". Please rename the out tensor's dims with `Tensor.rename`.");
 }
 
 void propagate_names(TensorImpl* result, optional<DimnameList> names) {
@@ -281,7 +281,7 @@ static void check_feature_names_are_distinct(
     " with Tensor", other_names,
     " would produce output tensor with duplicate names ",
     outnames,
-    ". Please rename the input tensors to prevent this.");
+    ". Please rename the input tensors with `Tensor.rename` to prevent this.");
 }
 
 static DimnameList batch_dims(DimnameList names) {
