@@ -11180,7 +11180,7 @@ class TestTorchDeviceType(TestCase):
                 torch.ne(x, b, out=boolRes)
                 self.assertEqual(byteRes.bool(), boolRes)
 
-                self.assertEquals(len(warningsCount), 5)
+                self.assertEquals(len(warningsCount), 4)
 
         # Bool Tensor
         x = torch.tensor([True, False, True, False], device=device)
