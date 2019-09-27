@@ -729,6 +729,26 @@ class TestOperators(TestCase):
         inputs = (scores, bbox_deltas, im_info, anchors)
         self.assertONNX(model, inputs)
 
+    def test_dict(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x_in):
+                x_out = {}
+                x_out["test_key_out"] = torch.add(x_in[list(x_in.keys())[0]], list(x_in.keys())[0])
+                return x_out
+
+        x = {torch.tensor(1.): torch.randn(1, 2, 3)}
+        self.assertONNX(MyModel(), (x,))
+
+    def test_dict_str(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x_in):
+                x_out = {}
+                x_out["test_key_out"] = torch.add(x_in["test_key_in"], 2.)
+                return x_out
+
+        x = {"test_key_in": torch.randn(1, 2, 3)}
+        self.assertONNX(MyModel(), (x,))
+
     def test_dyn_arange(self):
         class TestModel(torch.nn.Module):
             def forward(self, input):
@@ -769,6 +789,12 @@ class TestOperators(TestCase):
         x = torch.randint(3, (2, 3, 4, 5)).float()
         self.assertONNX(lambda x: torch.unique(x, dim=0, sorted=True, return_inverse=False, return_counts=True), x,
                         opset_version=11)
+
+    def test_baddbmm(self):
+        x = torch.randn(10, 3, 5)
+        b1 = torch.randn(10, 3, 4)
+        b2 = torch.randn(10, 4, 5)
+        self.assertONNX(lambda x, b1, b2: torch.baddbmm(x, b1, b2), (x, b1, b2))
 
     def test_round(self):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 2.5000], requires_grad=True)
