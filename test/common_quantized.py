@@ -65,12 +65,9 @@ def _calculate_dynamic_qparams(X, dtype):
 
 @contextmanager
 def enable_mobile_quantized_engine():
+    previous = torch.backends.quantized.engine
     torch.backends.quantized.engine = 'qnnpack'
     try:
         yield
     finally:
-        qengines = torch.backends.quantized.get_supported_qengines()
-        if 'fbgemm' in qengines:
-            torch.backends.quantized.engine = 'fbgemm'
-        else:
-            torch.backends.quantized.engine = 'none'
+        torch.backends.quantized.engine = previous

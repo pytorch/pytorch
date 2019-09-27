@@ -80,13 +80,13 @@ class ConvBn2d(nn.Conv2d):
             self.reset_bn_parameters()
 
     def enable_fake_quant(self):
-        self.observer.enable()
-        self.weight_fake_quant.enable()
+        self.observer.enable_fake_quant()
+        self.weight_fake_quant.enable_fake_quant()
         return self
 
     def disable_fake_quant(self):
-        self.observer.disable()
-        self.weight_fake_quant.disable()
+        self.observer.disable_fake_quant()
+        self.weight_fake_quant.disable_fake_quant()
         return self
 
     def _forward(self, input):

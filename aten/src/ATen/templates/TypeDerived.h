@@ -32,8 +32,10 @@ struct Quantizer;
 // to frontend
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
-struct TORCH_API ${Type} final {
+#ifdef USE_STATIC_DISPATCH
+namespace ${Type} {
   ${type_derived_method_declarations}
-};
+}
+#endif
 
 } // namespace at
