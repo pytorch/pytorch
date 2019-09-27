@@ -33,7 +33,7 @@ inline void parallel_for(
   }
   const int64_t chunk_size = divup(num_iter, num_threads);
 
-#pragma omp parallel num_threads(num_threads)
+#pragma omp parallel if(num_threads > 1) num_threads(num_threads)
   {
     int64_t tid = omp_get_thread_num();
     int64_t begin_tid = begin + tid * chunk_size;
