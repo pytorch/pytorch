@@ -226,16 +226,16 @@ class TestNamedTensor(TestCase):
             expected_names = ('N', 'C')
             x = torch.randn(3, 5, device=device, names=expected_names)
 
-            output = x.index_fill_('C', torch.tensor([0, 1]), 5)
+            output = x.index_fill_('C', torch.tensor([0, 1], device=device), 5)
             self.assertEqual(output.names, expected_names)
 
-            output = x.index_fill_('C', torch.tensor([0, 1]), torch.tensor(4.))
+            output = x.index_fill_('C', torch.tensor([0, 1], device=device), torch.tensor(4.))
             self.assertEqual(output.names, expected_names)
 
-            output = x.index_fill('C', torch.tensor([0, 1]), 5)
+            output = x.index_fill('C', torch.tensor([0, 1], device=device), 5)
             self.assertEqual(output.names, expected_names)
 
-            output = x.index_fill('C', torch.tensor([0, 1]), torch.tensor(4.))
+            output = x.index_fill('C', torch.tensor([0, 1], device=device), torch.tensor(4.))
             self.assertEqual(output.names, expected_names)
 
     def test_squeeze(self):
