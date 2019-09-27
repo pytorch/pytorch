@@ -148,7 +148,11 @@ class CAFFE2_API PyTorchStreamWriter final {
    std::ostream* out_;
    std::ofstream file_stream_;
    bool finalized_ = false;
-   friend size_t ostream_write_func(void *pOpaque, uint64_t file_ofs, const void *pBuf, size_t n);
+   friend size_t ostream_write_func(
+     void *pOpaque,
+     uint64_t file_ofs,
+     const void *pBuf,
+     size_t n);
 };
 
 } // namespace serialize
