@@ -29,6 +29,7 @@ Tensor fake_quantize_per_channel_affine_cpu(
     int64_t axis,
     int64_t quant_min,
     int64_t quant_max) {
+  // TODO: Use REGISTER_DISPATCH
   TORCH_CHECK(self.scalar_type() == ScalarType::Float);
   TORCH_CHECK(
       scale.dim() == 1, "scale should be a 1-D tensor");
