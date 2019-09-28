@@ -1704,8 +1704,8 @@ class TestNN(NNTestCase):
         mw = m.weight[:]
         m.double()
         mw[0][0] = 5
-        with self.assertRaisesRegex(RuntimeError, "Expected object of scalar type Float but got scalar type Double"):
-            mw[0][0] == mw._base[0][0]
+        self.assertTrue(mw[0][0].dtype == torch.float)
+        self.assertTrue(mw._base[0][0].dtype == torch.double)
 
         try:
             torch.__future__.set_overwrite_module_params_on_conversion(True)
