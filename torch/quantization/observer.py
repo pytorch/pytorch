@@ -107,19 +107,16 @@ class _ObserverBase(Observer):
                 min_vals[i] <= max_vals[i]
             ), "min {} should be less than max {}".format(min_vals[i], max_vals[i])
 
-        scales = torch.ones(min_vals.size())
-        zero_points = torch.ones(min_vals.size())
+        scales = torch.empty(min_vals.size(), dtype=torch.float32)
+        zero_points = torch.empty(min_vals.size(), dtype=torch.int64)
+
         for i in range(len(scales)):
             qparam = self._calculate_qparams(
                 min_vals[i], max_vals[i]
             )
             scales[i] = float(qparam[0])
             zero_points[i] = int(qparam[1])
-        # Convert scale to float precision
-        # Needed to ensure that fake quantization module and operator level numerics match
-        # for test:
-        # caffe2/test:fake_quant - test_fq_module (test_fake_quant.TestFakeQuantizePerChannel)
-        scales = scales.to(torch.float)
+
         return scales, zero_points
 
     def _calculate_qparams(self, min_val, max_val):

@@ -262,14 +262,16 @@ class TestFakeQuantizePerChannel(TestCase):
         Y_prime = fq_module(X)
         assert fq_module.scale is not None
         assert fq_module.zero_point is not None
-        Y = _fake_quantize_per_channel_affine_reference(X, fq_module.scale, fq_module.zero_point, axis, quant_min, quant_max)
+        print('scale dtype', fq_module.scale.dtype)
+        Y = _fake_quantize_per_channel_affine_reference(X, fq_module.scale,
+                                                        fq_module.zero_point, axis, quant_min, quant_max)
         np.testing.assert_allclose(Y.cpu().detach().numpy(), Y_prime.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
         # Test backward
         dout = torch.rand(X.shape, dtype=torch.float, device=device)
         Y_prime.backward(dout)
-        dX = _fake_quantize_per_channel_affine_grad_reference(dout, X, fq_module.scale, fq_module.zero_point,
-                                                              axis, quant_min, quant_max)
+        dX = _fake_quantize_per_channel_affine_grad_reference(dout, X, fq_module.scale,
+                                                              fq_module.zero_point, axis, quant_min, quant_max)
         np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
     def test_fq_serializable(self):

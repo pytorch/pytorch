@@ -77,9 +77,8 @@ class FakeQuantize(Module):
 
     def forward(self, X):
         if self.observer_enabled:
-            with torch.no_grad():
-                self.observer(X)
-                self.scale, self.zero_point = self.calculate_qparams()
+            self.observer(X.detach())
+            self.scale, self.zero_point = self.calculate_qparams()
         if self.fake_quant_enabled:
             if self.qscheme == torch.per_channel_symmetric or self.qscheme == torch.per_channel_affine:
                 X = torch.fake_quantize_per_channel_affine(X, self.scale, self.zero_point,

@@ -2,7 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <cmath>
-#include "fake_quantize_core.h"
+#include <ATen/native/quantized/cuda/fake_quantize_core.h>
 
 /* FakeQuantize Op for PerTensorAffine quantization scheme */
 namespace at {
@@ -33,7 +33,7 @@ Tensor fake_quantize_per_tensor_affine_cuda(
   TORCH_CHECK(
       zero_point >= quant_min && zero_point <= quant_max,
       "`zero_point` must be between `quant_min` and `quant_max`.");
-  auto Y = at::empty_like(self);
+  auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
   fake_quantize_slice_cuda(Y, self, scale, zero_point, quant_min, quant_max);
   return Y;
 }
@@ -73,9 +73,9 @@ Tensor fake_quantize_per_tensor_affine_backward_cuda(
     return X;
   }
 
-  auto dX = dY.clone();
-  fake_quantize_grad_slice_cuda(dX, X, dY, scale,
-                                zero_point, quant_min, quant_max);
+  auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
+  fake_quantize_grad_slice_cuda(
+      dX, X, dY, scale, zero_point, quant_min, quant_max);
   return dX;
 }
 
