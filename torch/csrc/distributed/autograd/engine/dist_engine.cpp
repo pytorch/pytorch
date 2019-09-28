@@ -239,6 +239,8 @@ void DistEngine::execute(const variable_list& roots) {
   variable_list grads;
   validateRootsAndRetrieveEdges(roots, rootEdges, grads);
 
+  std::shared_ptr<Node> graphRoot;
+  edge_list outputEdges;
   // Compute dependencies locally, starting from all roots and all 'send'
   // functions.
   {
@@ -248,14 +250,12 @@ void DistEngine::execute(const variable_list& roots) {
         initializedContextIds_.find(autogradContext.contextId()) ==
         initializedContextIds_.end());
 
+    computeDependencies(
+        autogradContext, rootEdges, grads, graphRoot, outputEdges);
+
     // Mark the autograd context id as initialized.
     initializedContextIds_.insert(autogradContext.contextId());
   }
-
-  std::shared_ptr<Node> graphRoot;
-  edge_list outputEdges;
-  computeDependencies(
-      autogradContext, rootEdges, grads, graphRoot, outputEdges);
 
   runEngineAndAccumulateGradients(autogradContext, graphRoot, outputEdges);
 
