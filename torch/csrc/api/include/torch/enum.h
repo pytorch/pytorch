@@ -13,7 +13,7 @@ namespace enumtype { \
     without a user-provided default constructor
     ```
   */ \
-  struct k##name { k##name() = default; }; \
+  struct k##name { k##name() {} }; \
 } \
 TORCH_API extern const enumtype::k##name k##name; \
 }
