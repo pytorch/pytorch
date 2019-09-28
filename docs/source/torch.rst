@@ -195,6 +195,7 @@ Pointwise Ops
 .. autofunction:: bitwise_not
 .. autofunction:: ceil
 .. autofunction:: clamp
+.. autofunction:: conj
 .. autofunction:: cos
 .. autofunction:: cosh
 .. autofunction:: div

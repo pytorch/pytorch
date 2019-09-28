@@ -89,6 +89,15 @@ static void imag_kernel(TensorIterator& iter) {
   });
 }
 
+static void conj_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "conj_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return conj_impl(a); },
+        [=](Vec256<scalar_t> a) { return a.conj(); });
+  });
+}
+
 static void bitwise_not_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     // Boolean type does not work with ~ (bitwise NOT) in C++. bitwise_not wraps this operation for both Boolean and

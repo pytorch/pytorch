@@ -135,6 +135,9 @@ public:
   Vec256<std::complex<double>> imag() const {
     return _mm256_permute_pd(imag_(), 0x05);        //b        a
   }
+  Vec256<std::complex<double>> conj() const {
+    return real_();
+  }
   Vec256<std::complex<double>> acos() const {
     return map(std::acos);
   }
