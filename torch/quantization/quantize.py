@@ -344,7 +344,8 @@ def convert(module, mapping=DEFAULT_MODULE_MAPPING, inplace=False):
 
     Args:
         module: calibrated module with observers
-        mapping: a dictionary that maps from float module type to quantized module type, can be overwrritten to allow swapping user defined Modules
+        mapping: a dictionary that maps from float module type to quantized module type, can be overwrritten 
+                 to allow swapping user defined Modules
         inplace: carry out model transformations in-place, the original module is mutated
     """
     if not inplace:

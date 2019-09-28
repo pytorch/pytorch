@@ -22,7 +22,9 @@ class FakeQuantize(Module):
 
     * :attr:`observer_enable` controls statistics collection on tensors
 
-    * :attr:`dtype` specifies the quantized dtype that is being emulated with fake-quantization, allowable values are torch.qint8 and torch.quint8. The values of quant_min and quant_max should be chosen to be consistent with the dtype
+    * :attr:`dtype` specifies the quantized dtype that is being emulated with fake-quantization, 
+                    allowable values are torch.qint8 and torch.quint8. The values of quant_min and 
+                    quant_max should be chosen to be consistent with the dtype
 
 
     Args:
