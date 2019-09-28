@@ -34,6 +34,8 @@ Boolean                    ``torch.bool``                                ``torch
 To find out if a :class:`torch.dtype` is a floating point data type, the property :attr:`is_floating_point`
 can be used, which returns ``True`` if the data type is a floating point data type.
 
+.. _type-promotion-doc:
+
 When the dtypes of inputs to an arithmetic operation (`add`, `sub`, `div`, `mul`) differ, we promote
 by finding the minimum dtype that satisfies the following rules:
 

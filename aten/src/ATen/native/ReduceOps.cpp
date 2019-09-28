@@ -159,7 +159,16 @@ static TensorIterator make_reduction(
 }
 
 Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  return at::_cumsum(integer_upcast(self, dtype), dim);
+  auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    return at::_cumsum(integer_upcast(self, dtype), dim);
+  }();
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+#endif
+  return result;
 }
 
 Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
@@ -171,11 +180,29 @@ Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optiona
       " and ",
       toString(dtype.value()),
       ".");
-  return at::_cumsum_out(result, self.toType(result.scalar_type()), dim);
+  {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    at::_cumsum_out(result, self.toType(result.scalar_type()), dim);
+  }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+#endif
+  return result;
 }
 
 Tensor cumprod(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  return at::_cumprod(integer_upcast(self, dtype), dim);
+  auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    return at::_cumprod(integer_upcast(self, dtype), dim);
+  }();
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+#endif
+  return result;
 }
 
 Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
@@ -187,7 +214,16 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
       " and ",
       toString(dtype.value()),
       ".");
-  return at::_cumprod_out(result, self.toType(result.scalar_type()), dim);
+  {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    at::_cumprod_out(result, self.toType(result.scalar_type()), dim);
+  }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+#endif
+  return result;
 }
 
 
@@ -342,7 +378,7 @@ static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
   return result;
 }
 
-Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
   // can't take max of empty tensor
   if (self.numel() != 0) {
     auto maxes = at::max_values(self, dims, true);
@@ -357,6 +393,19 @@ Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool
   return result;
 }
 
+Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+  {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    logsumexp_out_impl(result, self, dims, keepdim);
+  }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result, self, dims, keepdim);
+#endif
+  return result;
+}
+
 Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::logsumexp_out(result, self, dims, keepdim);
@@ -364,12 +413,10 @@ Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
 
 #ifdef BUILD_NAMEDTENSOR
 Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim) {
-  TORCH_CHECK(false, "NYI: logsumexp with names");
   return at::logsumexp(self, dimnames_to_positions(self, dims), keepdim);
 }
 
 Tensor& logsumexp_out(Tensor& result, const Tensor& self, DimnameList dims, bool keepdim) {
-  TORCH_CHECK(false, "NYI: logsumexp_out with names");
   return at::logsumexp_out(result, self, dimnames_to_positions(self, dims), keepdim);
 }
 #endif
@@ -716,6 +763,32 @@ Tensor norm(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdi
 Tensor norm(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim) {
   return at::norm(self, p, dimnames_to_positions(self, dim), keepdim);
 }
+
+Tensor any(const Tensor& self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("any");
+}
+Tensor& any_out(Tensor& result, const Tensor &self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("any");
+}
+Tensor all(const Tensor& self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("all");
+}
+Tensor& all_out(Tensor& result, const Tensor &self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("all");
+}
+Tensor cumsum(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+  return at::cumsum(self, dimname_to_position(self, dim), dtype);
+}
+Tensor& cumsum_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+  return at::cumsum_out(result, self, dimname_to_position(self, dim), dtype);
+}
+Tensor cumprod(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+  return at::cumprod(self, dimname_to_position(self, dim), dtype);
+}
+Tensor& cumprod_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+  return at::cumprod_out(result, self, dimname_to_position(self, dim), dtype);
+}
+
 #endif
 
 }} // namespace at::native

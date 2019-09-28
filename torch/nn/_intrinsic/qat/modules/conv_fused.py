@@ -79,18 +79,12 @@ class ConvBn2d(nn.Conv2d):
         if hasattr(self, 'gamma'):
             self.reset_bn_parameters()
 
-    def enable_fake_quant(self):
-        self.observer.enable_fake_quant()
-        self.observer.enable_observer()
-        self.weight_fake_quant.enable_fake_quant()
-        self.weight_fake_quant.enable_observer()
+    def update_bn_stats(self):
+        self.freeze_bn = False
         return self
 
-    def disable_fake_quant(self):
-        self.observer.disable_fake_quant()
-        self.observer.disable_observer()
-        self.weight_fake_quant.disable_fake_quant()
-        self.weight_fake_quant.disable_observer()
+    def freeze_bn_stats(self):
+        self.freeze_bn = True
         return self
 
     def _forward(self, input):
@@ -223,14 +217,6 @@ class ConvBnReLU2d(ConvBn2d):
     def forward(self, input):
         return self.observer(F.relu(super(ConvBnReLU2d, self)._forward(input)))
 
-    def update_bn_stats(self):
-        self.freeze_bn = False
-        return self
-
-    def freeze_bn_stats(self):
-        self.freeze_bn = True
-        return self
-
     @classmethod
     def from_float(cls, mod, qconfig=None):
         return super(ConvBnReLU2d, cls).from_float(mod, qconfig)
@@ -275,7 +261,7 @@ class ConvReLU2d(nnqat.Conv2d):
         return super(ConvReLU2d, cls).from_float(mod, qconfig)
 
 def update_bn_stats(mod):
-    if type(mod) in set([ConvBnReLU2d,ConvBn2d]):
+    if type(mod) in set([ConvBnReLU2d, ConvBn2d]):
         mod.update_bn_stats()
 
 def freeze_bn_stats(mod):
