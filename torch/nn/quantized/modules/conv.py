@@ -13,6 +13,7 @@ import torch.nn._intrinsic.qat as nniqat
 from torch.nn.utils import fuse_conv_bn_weights
 from torch._ops import ops
 from torch.nn.modules.utils import _pair
+from torch.nn.quantized.modules.utils import _quantize_weight
 
 class Conv2d(torch.nn.Module):
     r"""Applies a 2D convolution over a quantized input signal composed of
@@ -80,7 +81,6 @@ class Conv2d(torch.nn.Module):
             [out_channels, in_channels // self.groups, self.kernel_size[0],
                 self.kernel_size[1]],
             scale=1, zero_point=0, dtype=torch.qint8)
-        self.weight_scale = 1.0
         bias_float = None
         if bias:
             bias_float = torch.zeros(out_channels, dtype=torch.float)
@@ -106,7 +106,6 @@ class Conv2d(torch.nn.Module):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
         self._packed_params = torch.ops.quantized.conv_prepack(
             w, b, self.stride, self.padding, self.dilation, self.groups)
-        self.weight_scale = w.q_scale()
 
     def _weight_bias(self):
         return torch.ops.quantized.conv_unpack(self._packed_params)
@@ -236,11 +235,7 @@ class Conv2d(torch.nn.Module):
             weight_observer(mod.weight)
         act_scale, act_zp = activation_observer.calculate_qparams()
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have a dtype of qint8'
-        wt_scale, wt_zp = weight_observer.calculate_qparams()
-
-        qweight = torch.quantize_per_tensor(
-            mod.weight.float(),
-            float(wt_scale), int(wt_zp), torch.qint8)
+        qweight = _quantize_weight(mod.weight.float(), weight_observer)
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)

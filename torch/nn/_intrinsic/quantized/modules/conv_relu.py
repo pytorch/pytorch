@@ -33,7 +33,7 @@ class ConvReLU2d(nnq.Conv2d):
                                                self._packed_params,
                                                self.stride, self.padding,
                                                self.dilation, self.groups,
-                                               float(self.scale), int(self.zero_point))
+                                               self.scale, self.zero_point)
 
     @classmethod
     def from_float(cls, mod):

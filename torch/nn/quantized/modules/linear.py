@@ -6,7 +6,7 @@ from torch._jit_internal import Optional
 import torch.nn as nn
 import torch.nn._intrinsic as nni
 from torch.nn.modules import Module
-
+from torch.nn.quantized.modules.utils import _quantize_weight
 
 class Quantize(Module):
     r"""Quantizes an incoming tensor
@@ -117,7 +117,6 @@ class Linear(torch.nn.Module):
             [out_features, in_features], scale=1, zero_point=0, dtype=torch.qint8)
 
         self.set_weight_bias(qweight, bias)
-        self.weight_scale = 1.0
         self.scale = 1.0
         self.zero_point = 0
 
@@ -202,7 +201,6 @@ class Linear(torch.nn.Module):
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
         self._packed_params = torch.ops.quantized.linear_prepack(w, b)
-        self.weight_scale = w.q_scale()
 
     @classmethod
     def from_float(cls, mod):
@@ -232,8 +230,7 @@ class Linear(torch.nn.Module):
             weight_observer(mod.weight)
         act_scale, act_zp = activation_observer.calculate_qparams()
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
-        wt_scale, wt_zp = weight_observer.calculate_qparams()
-        qweight = torch.quantize_per_tensor(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
+        qweight = _quantize_weight(mod.weight.float(), weight_observer)
         qlinear = cls(mod.in_features, mod.out_features)
         qlinear.set_weight_bias(qweight, mod.bias)
         qlinear.scale = float(act_scale)

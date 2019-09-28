@@ -39,8 +39,9 @@ class FunctionalAPITest(QuantizationTestCase):
                          " with instruction set support avx2 or newer.")
     @given(
         use_bias=st.booleans(),
+        per_channel=st.booleans()
     )
-    def test_conv_api(self, use_bias):
+    def test_conv_api(self, use_bias, per_channel):
         """Tests the correctness of the conv module.
 
         The correctness is defined against the functional implementation.
@@ -58,7 +59,15 @@ class FunctionalAPITest(QuantizationTestCase):
 
         w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
 
-        qw = torch.quantize_per_tensor(w, scale=scale, zero_point=0, dtype=torch.qint8)
+        if per_channel:
+            scale_tensor = torch.ones(oC, dtype=torch.double)
+            zero_point_tensor = torch.zeros(oC, dtype=torch.long)
+            for i in range(len(scale_tensor)):
+                scale_tensor[i] = (i + 1.0) / 255.0
+
+            qw = torch.quantize_per_channel(w, scales=scale_tensor, zero_points=zero_point_tensor, axis=0, dtype=torch.qint8)
+        else:
+            qw = torch.quantize_per_tensor(w, scale=scale, zero_point=0, dtype=torch.qint8)
 
         b = torch.randn(oC, dtype=torch.float32) if use_bias else None
         q_filters_ref = torch.ops.quantized.conv_prepack(qw,
@@ -214,11 +223,20 @@ class ModuleAPITest(QuantizationTestCase):
         out_features=st.integers(4, 8),
         use_bias=st.booleans(),
         use_fused=st.booleans(),
+        per_channel=st.booleans()
     )
-    def test_linear_api(self, batch_size, in_features, out_features, use_bias, use_fused):
+    def test_linear_api(self, batch_size, in_features, out_features, use_bias, use_fused, per_channel):
         """test API functionality for nn.quantized.linear and nn._intrinsic.quantized.linear_relu"""
         W = torch.rand(out_features, in_features).float()
-        W_q = torch.quantize_per_tensor(W, 0.1, 4, torch.qint8)
+        if per_channel:
+            scale_tensor = torch.ones(out_features, dtype=torch.double)
+            zero_point_tensor = torch.zeros(out_features, dtype=torch.long)
+            for i in range(len(scale_tensor)):
+                scale_tensor[i] = (i + 1.0) / 255.0
+            W_q = torch.quantize_per_channel(W, scales=scale_tensor, zero_points=zero_point_tensor, axis=0, dtype=torch.qint8)
+        else:
+            W_q = torch.quantize_per_tensor(W, 0.1, 4, torch.qint8)
+
         X = torch.rand(batch_size, in_features).float()
         X_q = torch.quantize_per_tensor(X, 0.2, 10, torch.quint8)
         B = torch.rand(out_features).float() if use_bias else None
@@ -341,8 +359,9 @@ class ModuleAPITest(QuantizationTestCase):
     @given(
         use_bias=st.booleans(),
         use_fused=st.booleans(),
+        per_channel=st.booleans()
     )
-    def test_conv_api(self, use_bias, use_fused):
+    def test_conv_api(self, use_bias, use_fused, per_channel):
         """Tests the correctness of the conv module.
 
         The correctness is defined against the functional implementation.
@@ -357,7 +376,15 @@ class ModuleAPITest(QuantizationTestCase):
 
         w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
 
-        qw = torch.quantize_per_tensor(w, scale=scale, zero_point=0, dtype=torch.qint8)
+        if per_channel:
+            scale_tensor = torch.ones(oC, dtype=torch.double)
+            zero_point_tensor = torch.zeros(oC, dtype=torch.long)
+            for i in range(len(scale_tensor)):
+                scale_tensor[i] = (i + 1.0) / 255.0
+
+            qw = torch.quantize_per_channel(w, scales=scale_tensor, zero_points=zero_point_tensor, axis=0, dtype=torch.qint8)
+        else:
+            qw = torch.quantize_per_tensor(w, scale=scale, zero_point=0, dtype=torch.qint8)
 
         b = torch.randn(oC, dtype=torch.float32) if use_bias else None
 

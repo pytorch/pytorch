@@ -33,6 +33,8 @@ default_qconfig = QConfig(activation=default_observer,
 default_debug_qconfig = QConfig(weight=default_weight_observer,
                                 activation=default_debug_observer)
 
+default_per_channel_qconfig = QConfig(activation=default_observer,
+                                      weight=default_per_channel_weight_observer)
 
 class QConfigDynamic(namedtuple('QConfigDynamic', ['weight'])):
     """
