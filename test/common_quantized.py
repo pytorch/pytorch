@@ -68,13 +68,10 @@ def _calculate_dynamic_per_channel_qparams(X, dtype):
     according to the min and max element of the tensor"""
     if isinstance(X, torch.Tensor):
         X = X.numpy()
-    if dtype == torch.qint8:
-        qmin, qmax = -128, 127
-    else:  # dtype == torch.quint8
-        qmin, qmax = 0, 255
-    n_levels = 255.0
-    scale = np.zeros(X.shape[0], dtype = np.float64)
-    zero_point = np.zeros(X.shape[0], dtype = np.int64)
+    qmin, qmax = torch.iinfo(dtype).min, torch.iinfo(dtype).max
+    n_levels = qmax - qmin
+    scale = np.zeros(X.shape[0], dtype=np.float64)
+    zero_point = np.zeros(X.shape[0], dtype=np.int64)
     for i in range(zero_point.shape[0]):
         min_val = X.min()
         max_val = X.max()
@@ -94,12 +91,9 @@ def _calculate_dynamic_per_channel_qparams(X, dtype):
 
 @contextmanager
 def enable_mobile_quantized_engine():
+    previous = torch.backends.quantized.engine
     torch.backends.quantized.engine = 'qnnpack'
     try:
         yield
     finally:
-        qengines = torch.backends.quantized.get_supported_qengines()
-        if 'fbgemm' in qengines:
-            torch.backends.quantized.engine = 'fbgemm'
-        else:
-            torch.backends.quantized.engine = 'none'
+        torch.backends.quantized.engine = previous

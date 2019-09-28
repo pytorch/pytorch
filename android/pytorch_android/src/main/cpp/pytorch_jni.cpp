@@ -582,8 +582,15 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     return makeCxxInstance(modelPath);
   }
 
-  PytorchJni(facebook::jni::alias_ref<jstring> modelPath)
-      : module_(torch::jit::load(std::move(modelPath->toStdString()))) {}
+  PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
+    auto qengines = at::globalContext().supportedQEngines();
+    if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
+        qengines.end()) {
+      at::globalContext().setQEngine(at::QEngine::QNNPACK);
+    }
+    module_ = torch::jit::load(std::move(modelPath->toStdString()));
+    module_.eval();
+  }
 
   static void registerNatives() {
     registerHybrid({

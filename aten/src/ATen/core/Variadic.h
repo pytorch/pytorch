@@ -5,6 +5,8 @@
 #include <type_traits>
 #include <utility>
 
+#include <c10/util/ArrayRef.h>
+
 namespace at {
 
 // This class allows you to write variadic functions which
