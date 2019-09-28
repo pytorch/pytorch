@@ -78,6 +78,8 @@ class ModelNumerics(QuantizationTestCase):
         SQNRdB = 20 * torch.log10(torch.norm(out_fq) / (torch.norm(out_fq - out_q) + 1e-10))
         self.assertGreater(SQNRdB, 60, msg='Fake quant and true quant numerics diverge, expect SQNR > 60 dB')
 
+    # Test to compare weight only quantized model numerics and
+    # activation only quantized model numerics with float
     def test_weight_only_activation_only_fakequant(self):
         torch.manual_seed(67)
         calib_data = torch.rand(2048, 3, 15, 15, dtype=torch.float32)
