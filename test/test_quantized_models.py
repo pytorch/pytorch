@@ -1,6 +1,5 @@
 import torch
 import torch.jit
-import unittest
 from common_utils import run_tests, TEST_WITH_UBSAN, IS_WINDOWS, IS_PPC
 from common_quantization import QuantizationTestCase, ModelMultipleOps
 from common_quantized import enable_mobile_quantized_engine
