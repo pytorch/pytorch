@@ -89,6 +89,9 @@ class Conv2d(torch.nn.Module):
         self.scale = 1.0
         self.zero_point = 0
 
+    def _get_name(self):
+        return 'QuantizedConv2d'
+
     def extra_repr(self):
         s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'
              ', stride={stride}, scale={scale}, zero_point={zero_point}')
