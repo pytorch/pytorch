@@ -3,8 +3,8 @@
 #include <ATen/ATen.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/rpc_with_autograd.h>
 #include <torch/torch.h>
 
 using namespace torch::distributed::autograd;

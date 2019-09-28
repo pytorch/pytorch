@@ -79,7 +79,9 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
 
       // Attach 'recv' autograd function.
       addRecvRpcBackward(
-          rpcWithAutograd.autogradMetadata(), rpcWithAutograd.tensors());
+          rpcWithAutograd.autogradMetadata(),
+          rpcWithAutograd.tensors(),
+          rpcWithAutograd.fromWorkerId());
 
       // Handle the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
@@ -111,8 +113,9 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
 
     // Wrap the original rpc with autograd information.
     AutogradMetadata autogradMetadata(
-        autogradContext.context_id(), autogradContainer.newAutogradMessageId());
+        autogradContext.contextId(), autogradContainer.newAutogradMessageId());
     RpcWithAutograd rpcWithAutograd(
+        agent.getWorkerId().id_,
         MessageType::MESSAGE_WITH_AUTOGRAD_REQ,
         autogradMetadata,
         std::move(scriptCall));
@@ -137,7 +140,7 @@ std::shared_ptr<RRef> pyRemoteBuiltin(
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
 
   auto& ctx = RRefContext::getInstance();
-  auto userRRef = ctx->createUserRRef(dst.id_);
+  auto userRRef = ctx.createUserRRef(dst.id_);
   agent.send(
       dst,
       ScriptRemoteCall(

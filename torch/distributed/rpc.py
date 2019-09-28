@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from . import invoke_rpc_builtin, invoke_rpc_python_udf, invoke_remote_builtin
-from . import init_rref_context
+from . import init_rpc_agent
 from . import ProcessGroupAgent
 from . import WorkerId
 from .internal_rpc_utils import serialize, PythonUDF
@@ -75,16 +75,15 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
                                self_rank, group.rank()))
         # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
-        init_rref_context(_agent)
     elif is_rpc_backend_registered(backend):
         _agent = init_rpc_backend(
             backend,
             self_name=self_name,
             init_method=init_method,
         )
-        init_rref_context(_agent)
     else:
         raise RuntimeError("Unrecognized RPC backend ", backend)
+    init_rpc_agent(_agent)
 
 
 @_require_initialized

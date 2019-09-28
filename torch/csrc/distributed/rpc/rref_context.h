@@ -15,8 +15,7 @@ namespace rpc {
 // Manages RRef lifetime and keeps track of RRef forks.
 class RRefContext {
  public:
-  static void initInstance(std::shared_ptr<RpcAgent>);
-  static std::unique_ptr<RRefContext>& getInstance();
+  static RRefContext& getInstance();
 
   RRefContext(const RRefContext&) = delete;
   void operator=(const RRefContext&) = delete;
@@ -96,7 +95,6 @@ class RRefContext {
  private:
   RRefContext(std::shared_ptr<RpcAgent>);
 
-  static std::unique_ptr<RRefContext> context_;
   static std::atomic<local_id_t> nextLocalId_;
 
   const std::shared_ptr<RpcAgent> agent_;

@@ -2,12 +2,15 @@
 #include <c10/util/C++17.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/python_udf_call.h>
 #include <torch/csrc/distributed/rpc/python_udf_resp.h>
-#include <torch/csrc/distributed/rpc/rpc_with_autograd.h>
 #include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
@@ -62,7 +65,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
       TORCH_CHECK(rrefId != forkId, "Does not support remote call to self.");
 
       auto& ctx = RRefContext::getInstance();
-      auto ownerRRef = ctx->getOrCreateOwnerRRef<IValue>(rrefId);
+      auto ownerRRef = ctx.getOrCreateOwnerRRef<IValue>(rrefId);
 
       // TODO: make this asynchronous
       // src is only alive within this block, use reference to avoid copy
@@ -82,18 +85,18 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
-          RRefContext::getInstance()->getOrCreateOwnerRRef<IValue>(
+          RRefContext::getInstance().getOrCreateOwnerRRef<IValue>(
               RRefId::fromIValue(srf.value()));
       return c10::guts::make_unique<ScriptRRefFetchRet>(rref->getValue());
     }
     case MessageType::RREF_USER_CREATE: {
       auto& sra = static_cast<ScriptRRefCreate&>(rpc);
-      RRefContext::getInstance()->addFork(sra.valueRef());
+      RRefContext::getInstance().addFork(sra.valueRef());
       return nullptr;
     }
     case MessageType::RREF_USER_DELETE: {
       auto& srd = static_cast<ScriptRRefDelete&>(rpc);
-      RRefContext::getInstance()->delFork(srd.valueRef());
+      RRefContext::getInstance().delFork(srd.valueRef());
       return nullptr;
     }
     case MessageType::MESSAGE_WITH_AUTOGRAD_REQ: {
@@ -102,7 +105,9 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
 
       // Attach 'recv' autograd function.
       DistAutogradContext* autogradContext = addRecvRpcBackward(
-          rpcWithAutograd.autogradMetadata(), rpcWithAutograd.tensors());
+          rpcWithAutograd.autogradMetadata(),
+          rpcWithAutograd.tensors(),
+          rpcWithAutograd.fromWorkerId());
 
       // Process the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
@@ -117,6 +122,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
           autogradContainer.newAutogradMessageId());
 
       auto response = c10::guts::make_unique<RpcWithAutograd>(
+          rpc::RpcAgent::getDefaultRpcAgent()->getWorkerId().id_,
           MessageType::MESSAGE_WITH_AUTOGRAD_RESP,
           responseAutogradMetadata,
           std::move(wrappedRpcResponse));
@@ -127,6 +133,29 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
             *autogradContext, responseAutogradMetadata, response->tensors());
       }
       return response;
+    }
+    case MessageType::PROPAGATE_GRADIENTS_REQ: {
+      auto& gradientsCall = static_cast<PropagateGradientsReq&>(rpc);
+      const auto& autogradMetadata = gradientsCall.getAutogradMetadata();
+
+      // Retrieve the appropriate autograd context.
+      auto& autogradContext =
+          DistAutogradContainer::getInstance().retrieveContext(
+              autogradMetadata.autogradContextId);
+
+      // Lookup the appropriate 'send' function to enqueue.
+      std::shared_ptr<SendRpcBackward> sendFunction =
+          autogradContext.retrieveSendFunction(
+              autogradMetadata.autogradMessageId);
+
+      // Attach the gradients to the send function.
+      sendFunction->setGrads(gradientsCall.getGrads());
+
+      // Now execute the autograd graph using the "distributed engine."
+      DistEngine::getInstance().executeSendFunction(
+          autogradContext, sendFunction);
+
+      return c10::guts::make_unique<PropagateGradientsResp>();
     }
     default: {
       TORCH_INTERNAL_ASSERT(

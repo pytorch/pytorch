@@ -58,8 +58,7 @@ const RRefId& RRef::id() const {
 }
 
 at::IValue RRef::fork() const {
-  return RRefForkData(
-             ownerId_, rrefId_, RRefContext::getInstance()->genRRefId())
+  return RRefForkData(ownerId_, rrefId_, RRefContext::getInstance().genRRefId())
       .toIValue();
   // NB: does not support sharing RRefs between users
   // TODO: notify the owner
@@ -75,9 +74,9 @@ UserRRef::UserRRef(
   AT_ASSERT(
       !(forkId_ == rrefId_),
       "User RRef's fork ID should not be the same as its rref Id");
-  if (RRefContext::getInstance()->getWorkerId() == rrefId_.createdOn_) {
+  if (RRefContext::getInstance().getWorkerId() == rrefId_.createdOn_) {
     // creator user, notify owner.
-    auto& agent = RRefContext::getInstance()->agent();
+    auto& agent = RRefContext::getInstance().agent();
     agent->send(
         agent->getWorkerId(ownerId_),
         ScriptRRefCreate(RRefForkData(ownerId_, rrefId_, forkId_).toIValue())
@@ -89,9 +88,9 @@ UserRRef::UserRRef(
 
 UserRRef::~UserRRef() {
   auto& ctx = RRefContext::getInstance();
-  if (ctx->getWorkerId() != ownerId_) {
-    ctx->agent()->send(
-        ctx->agent()->getWorkerId(ownerId_),
+  if (ctx.getWorkerId() != ownerId_) {
+    ctx.agent()->send(
+        ctx.agent()->getWorkerId(ownerId_),
         ScriptRRefDelete(RRefForkData(ownerId_, rrefId_, forkId_).toIValue())
             .toMessage());
   }
@@ -106,7 +105,7 @@ bool UserRRef::isOwner() const {
 }
 
 IValue UserRRef::toHere() {
-  auto& agent = RRefContext::getInstance()->agent();
+  auto& agent = RRefContext::getInstance().agent();
   std::shared_ptr<FutureMessage> fm = agent->send(
       agent->getWorkerId(ownerId_),
       ScriptRRefFetchCall(id().toIValue()).toMessage());

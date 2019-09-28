@@ -70,20 +70,23 @@ bool Message::isRequest() const {
       MessageType::MESSAGE_WITH_AUTOGRAD_REQ == type_ ||
       MessageType::RREF_FETCH_CALL == type_ ||
       MessageType::RREF_USER_CREATE == type_ ||
-      MessageType::RREF_USER_DELETE == type_;
+      MessageType::RREF_USER_DELETE == type_ ||
+      MessageType::PROPAGATE_GRADIENTS_REQ == type_;
 }
 
 bool Message::requiresResponse() const {
   return MessageType::SCRIPT_CALL == type_ ||
       MessageType::PYTHON_CALL == type_ ||
       MessageType::MESSAGE_WITH_AUTOGRAD_REQ == type_ ||
-      MessageType::RREF_FETCH_CALL == type_;
+      MessageType::RREF_FETCH_CALL == type_ ||
+      MessageType::PROPAGATE_GRADIENTS_REQ == type_;
 }
 
 bool Message::isResponse() const {
   return MessageType::SCRIPT_RET == type_ || MessageType::PYTHON_RET == type_ ||
-      MessageType::RREF_FETCH_RET == type_ ||
-      MessageType::MESSAGE_WITH_AUTOGRAD_RESP == type_;
+      MessageType::RREF_FETCH_RET == type_ || MessageType::EXCEPTION == type_ ||
+      MessageType::MESSAGE_WITH_AUTOGRAD_RESP == type_ ||
+      MessageType::PROPAGATE_GRADIENTS_RESP == type_;
 }
 
 bool Message::isShutdown() const {
