@@ -37,10 +37,10 @@ struct TORCH_API Function {
   }
 
   std::shared_ptr<Graph> optimized_graph() const {
+    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
     if (optimized_graph_) {
       return *optimized_graph_;
     }
-    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
     optimized_graph_ = graph_->copy();
     preoptimizeGraph(*optimized_graph_);
     return *optimized_graph_;
