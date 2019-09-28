@@ -3691,6 +3691,26 @@ inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, const Tensor
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
+inline Tensor & Tensor::index_fill_(Dimname dim, const Tensor & index, Scalar value) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::index_fill_(const_cast<Tensor&>(*this), dim, index, value);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::index_fill_.dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)");
+    return table->callUnboxed<Tensor &, Tensor &, Dimname, const Tensor &, Scalar>(const_cast<Tensor&>(*this), dim, index, value);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor & Tensor::index_fill_(Dimname dim, const Tensor & index, const Tensor & value) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::index_fill_(const_cast<Tensor&>(*this), dim, index, value);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::index_fill_.dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Tensor value) -> Tensor(a!)");
+    return table->callUnboxed<Tensor &, Tensor &, Dimname, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), dim, index, value);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
 inline Tensor Tensor::index_fill(Dimname dim, const Tensor & index, Scalar value) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::index_fill(const_cast<Tensor&>(*this), dim, index, value);

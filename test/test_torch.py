@@ -2070,8 +2070,8 @@ class _TestTorchMixin(object):
         test_inference(torch.float64)
         test_inference(torch.float32)
 
-    def test_qengnie(self):
-        qengines = torch.backends.quantized.get_supported_qengines()
+    def test_qengine(self):
+        qengines = torch.backends.quantized.supported_engines
         original_qe = torch.backends.quantized.engine
         for qe in qengines:
             torch.backends.quantized.engine = qe
@@ -5356,19 +5356,19 @@ class _TestTorchMixin(object):
         self.assertEqual(s1.data_ptr() + 4, s2.data_ptr())
 
     def test_load_unicode_error_msg(self):
-        # This Pickle contains a Python 2 module with Unicode data and the 
+        # This Pickle contains a Python 2 module with Unicode data and the
         # loading should fail if the user explicitly specifies ascii encoding!
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
         if sys.version_info >= (3, 0):
             self.assertRaises(UnicodeDecodeError, lambda: torch.load(path, encoding='ascii'))
         else:
             # Just checks the module loaded
-            self.assertIsNotNone(torch.load(path)) 
+            self.assertIsNotNone(torch.load(path))
 
     def test_load_python2_unicode_module(self):
         # This Pickle contains some Unicode data!
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
-        self.assertIsNotNone(torch.load(path)) 
+        self.assertIsNotNone(torch.load(path))
 
     def test_load_error_msg(self):
         expected_err_msg = (".*You can only torch.load from a file that is seekable. " +
