@@ -30,7 +30,7 @@ def script_qconfig(qconfig):
         activation=torch.jit.script(qconfig.activation())._c,
         weight=torch.jit.script(qconfig.weight())._c)
 
-def _quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
+def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
     _check_is_script_module(model)
     if not model._c._has_method('forward'):
         raise ValueError('input script module does not have forward method')

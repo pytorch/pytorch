@@ -12,7 +12,7 @@ from torch.quantization import \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
     default_dynamic_qconfig, HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver, RecordingObserver, QuantWrapper
 
-from torch.quantization.quantize_script import _quantize_script
+from torch.quantization._quantize_script import quantize_script
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, \
@@ -650,7 +650,7 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
                 activation=default_observer,
                 weight=default_weight_observer)
         }
-        model_script = _quantize_script(
+        model_script = quantize_script(
             torch.jit.script(SingleLayerLinearModel()),
             qconfig_dict,
             test_only_eval_fn,
