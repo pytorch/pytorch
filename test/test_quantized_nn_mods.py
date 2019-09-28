@@ -34,11 +34,9 @@ class FunctionalAPITest(QuantizationTestCase):
         self.assertEqual(qY, qY_hat)
 
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         use_bias=st.booleans(),
     )
@@ -89,11 +87,9 @@ class FunctionalAPITest(QuantizationTestCase):
 
 class DynamicModuleAPITest(QuantizationTestCase):
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -154,15 +150,22 @@ class DynamicModuleAPITest(QuantizationTestCase):
         Z_dq2 = qlinear(X)
         self.assertEqual(Z_dq, Z_dq2)
 
-        # test serialization of module directly
-        b = io.BytesIO()
-        torch.save(qlinear, b)
-        b.seek(0)
-        loaded = torch.load(b)
-        # This check is disabled pending an issue in PyTorch serialization:
+        # The below check is meant to ensure that `torch.save` and `torch.load`
+        # serialization works, however it is currently broken by the following:
         # https://github.com/pytorch/pytorch/issues/24045
+        #
+        # Instead, we currently check that the proper exception is thrown on save.
+        # <start code>
+        # b = io.BytesIO()
+        # torch.save(qlinear, b)
+        # b.seek(0)
+        # loaded = torch.load(b)
         # self.assertEqual(qlinear.weight(), loaded.weight())
-        self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        # self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        # <end code>
+        with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
+            b = io.BytesIO()
+            torch.save(qlinear, b)
 
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X], [Z_ref])), check_save_load=True)
@@ -202,11 +205,9 @@ class ModuleAPITest(QuantizationTestCase):
 
 
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -283,16 +284,23 @@ class ModuleAPITest(QuantizationTestCase):
         Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
-        # test serialization of module directly
-        b = io.BytesIO()
-        torch.save(qlinear, b)
-        b.seek(0)
-        loaded = torch.load(b)
-        # This check is disabled pending an issue in PyTorch serialization:
+        # The below check is meant to ensure that `torch.save` and `torch.load`
+        # serialization works, however it is currently broken by the following:
         # https://github.com/pytorch/pytorch/issues/24045
+        #
+        # Instead, we currently check that the proper exception is thrown on save.
+        # <start code>
+        # b = io.BytesIO()
+        # torch.save(qlinear, b)
+        # b.seek(0)
+        # loaded = torch.load(b)
         # self.assertEqual(qlinear.weight(), loaded.weight())
-        self.assertEqual(qlinear.scale, loaded.scale)
-        self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        # self.assertEqual(qlinear.scale, loaded.scale)
+        # self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        # <end code>
+        with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
+            b = io.BytesIO()
+            torch.save(qlinear, b)
 
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X_q], [Z_ref])), check_save_load=True)
@@ -300,11 +308,11 @@ class ModuleAPITest(QuantizationTestCase):
         # Test from_float.
         float_linear = torch.nn.Linear(in_features, out_features).float()
         float_linear.qconfig = torch.quantization.default_qconfig
-        torch.quantization.prepare(float_linear)
+        torch.quantization.prepare(float_linear, inplace=True)
         float_linear(X.float())
         # Sequential allows swapping using "convert".
         quantized_float_linear = torch.nn.Sequential(float_linear)
-        torch.quantization.convert(quantized_float_linear)
+        quantized_float_linear = torch.quantization.convert(quantized_float_linear, inplace=True)
 
         # Smoke test to make sure the module actually runs
         quantized_float_linear(X_q)
@@ -327,11 +335,9 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(rqr, rqr2)
 
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         use_bias=st.booleans(),
         use_fused=st.booleans(),
@@ -463,14 +469,24 @@ class ModuleAPITest(QuantizationTestCase):
         loaded_result = loaded_conv_under_test(qX)
         self.assertEqual(loaded_result, result_reference)
 
-        b = io.BytesIO()
-        torch.save(conv_under_test, b)
-        b.seek(0)
-        loaded_conv = torch.load(b)
-
-        self.assertEqual(conv_under_test.bias(), loaded_conv.bias())
-        self.assertEqual(conv_under_test.scale, loaded_conv.scale)
-        self.assertEqual(conv_under_test.zero_point, loaded_conv.zero_point)
+        # The below check is meant to ensure that `torch.save` and `torch.load`
+        # serialization works, however it is currently broken by the following:
+        # https://github.com/pytorch/pytorch/issues/24045
+        #
+        # Instead, we currently check that the proper exception is thrown on save.
+        # <start code>
+        # b = io.BytesIO()
+        # torch.save(conv_under_test, b)
+        # b.seek(0)
+        # loaded_conv = torch.load(b)
+        #
+        # self.assertEqual(conv_under_test.bias(), loaded_conv.bias())
+        # self.assertEqual(conv_under_test.scale, loaded_conv.scale)
+        # self.assertEqual(conv_under_test.zero_point, loaded_conv.zero_point)
+        # <end code>
+        with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
+            b = io.BytesIO()
+            torch.save(conv_under_test, b)
 
         # JIT testing
         self.checkScriptable(conv_under_test, list(zip([qX], [result_reference])), check_save_load=True)
@@ -486,10 +502,10 @@ class ModuleAPITest(QuantizationTestCase):
                                      bias=use_bias,
                                      padding_mode='zeros').float()
         float_conv.qconfig = torch.quantization.default_qconfig
-        torch.quantization.prepare(float_conv)
+        torch.quantization.prepare(float_conv, inplace=True)
         float_conv(X.float())
         quantized_float_conv = torch.nn.Sequential(float_conv)
-        torch.quantization.convert(quantized_float_conv)
+        torch.quantization.convert(quantized_float_conv, inplace=True)
 
         # Smoke test to make sure the module actually runs
         quantized_float_conv(qX)

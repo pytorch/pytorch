@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <c10/util/C++17.h>
 #include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/unpickler.h>
 
 namespace torch {
 namespace distributed {

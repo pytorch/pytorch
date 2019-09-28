@@ -3,6 +3,7 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
 #include <algorithm>
 #include <string>
@@ -307,7 +308,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
         packB->getPackedWeights(),
         (uint8_t*)output.data_ptr<c10::quint8>(),
         rows_w /* output_stride */,
-        nullptr /* threadpool */);
+        caffe2::mobile_pthreadpool() /* threadpool */);
 
     TORCH_INTERNAL_ASSERT(
         runStatus == pytorch_qnnp_status_success,
@@ -335,10 +336,10 @@ class QLinearInt8 final : public torch::OperatorKernel {
           input, packed_weight, output_scale, output_zero_point);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::linear ",
         toString(ctx.qEngine()));
-    return at::Tensor();
   }
 };
 
