@@ -94,10 +94,10 @@ struct TORCH_API Function {
 
   GraphExecutor& get_executor() {
     ensure_defined();
+    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
     if (executor_) {
       return executor_;
     }
-    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
     check_single_output();
     executor_ = GraphExecutor(optimized_graph());
     return executor_;
