@@ -132,7 +132,7 @@ void _parallel_run(
     futures[task_id] = std::make_shared<c10::ivalue::Future>(c10::NoneType::get());
   }
   auto task = [f, &eptr, &err_flag, &futures, begin, end, chunk_size]
-      (int _, size_t task_id) {
+      (int /* unused */, size_t task_id) {
     int64_t local_start = begin + task_id * chunk_size;
     if (local_start < end) {
       int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
