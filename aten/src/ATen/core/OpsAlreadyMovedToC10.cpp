@@ -785,6 +785,8 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::real", "out"},
         {"aten::imag", ""},
         {"aten::imag", "out"},
+        {"aten::conj", ""},
+        {"aten::conj", "out"},
         {"aten::acos", "out"},
         {"aten::add", "out"},
         {"aten::addmv", "out"},

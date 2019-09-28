@@ -171,8 +171,12 @@ public:
   Vec256<std::complex<float>> imag() const {
     return _mm256_permute_ps(imag_(), 0x55);        //b        a
   }
+  __m256 conj_() const {
+    auto mask = _mm256_setr_ps(1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0);
+    return _mm256_mul_ps(values, mask);             //a        -b
+  }
   Vec256<std::complex<float>> conj() const {
-    return real_();
+    return conj_();
   }
   Vec256<std::complex<float>> acos() const {
     return map(std::acos);
@@ -299,19 +303,28 @@ template <> Vec256<std::complex<float>> inline operator*(const Vec256<std::compl
 }
 
 template <> Vec256<std::complex<float>> inline operator/(const Vec256<std::complex<float>> &a, const Vec256<std::complex<float>> &b) {
-  auto mask = _mm256_setr_ps(0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
-  Vec256<std::complex<float>> abs = Vec256<std::complex<float>>(_mm256_div_ps(a.abs_(), _mm256_add_ps(b.abs_(), mask)));
-  Vec256<std::complex<float>> i_angle = Vec256<std::complex<float>>(_mm256_sub_ps(a.angle_(), b.angle_()));
-  return abs*i_angle.exp();
+  //re + im*i = (a + bi)  / (c + di)
+  //re = (ac + bd)/abs_2()
+  //im = (bc - ad)/abs_2()
+  auto neg = _mm256_setr_ps(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
+  auto ac_bd = _mm256_mul_ps(a, b);         //ac       bd
+
+  auto d_c = _mm256_permute_ps(b, 0x05);    //d        c
+  d_c = _mm256_mul_ps(neg, d_c);            //-d       c
+  auto ad_bc = _mm256_mul_ps(a, d_c);       //-ad      bc
+
+  auto re_im = _mm256_hadd_ps(ac_bd, ad_bc);//ac + bd  bc - ad
+  return _mm256_div_ps(re_im, b.abs_2_());
 }
 
 // reciprocal. Implement this here so we can use multiplication.
 Vec256<std::complex<float>> Vec256<std::complex<float>>::reciprocal() const {
-  auto mask = _mm256_setr_ps(0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
-  auto ones = _mm256_permute_ps(mask, 0x55);
-  Vec256<std::complex<float>> abs = Vec256<std::complex<float>>(_mm256_div_ps(ones, _mm256_add_ps(abs_(), mask)));
-  Vec256<std::complex<float>> i_angle = Vec256<std::complex<float>>(angle_());
-  return abs*i_angle.neg().exp();
+  //re + im*i = (a + bi)  / (c + di)
+  //re = (ac + bd)/abs_2() = c/abs_2()
+  //im = (bc - ad)/abs_2() = d/abs_2()
+  auto neg = _mm256_setr_ps(1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0);
+  auto c_d = _mm256_mul_ps(neg, values);    //c       -d
+  return _mm256_div_ps(c_d, abs_2_());
 }
 
 template <>

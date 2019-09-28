@@ -250,6 +250,14 @@ inline Tensor Tensor::imag() const {
     return table->getOp<Tensor (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
 #endif
 }
+inline Tensor Tensor::conj() const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::conj(const_cast<Tensor&>(*this));
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::conj(Tensor self) -> Tensor");
+    return table->getOp<Tensor (const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this));
+#endif
+}
 inline Tensor Tensor::acos() const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::acos(const_cast<Tensor&>(*this));

@@ -83,17 +83,17 @@ inline std::complex<double> imag_impl <std::complex<double>> (std::complex<doubl
 
 template <typename TYPE>
 inline TYPE conj_impl (TYPE z) {
-  return 0;
+  return z; //No-Op
 }
 
 template<>
 inline std::complex<float> conj_impl <std::complex<float>> (std::complex<float> z) {
-  return std::complex<float>(std::real(z), 0.0);
+  return std::complex<float>(std::real(z), -std::imag(z));
 }
 
 template<>
 inline std::complex<double> conj_impl <std::complex<double>> (std::complex<double> z) {
-  return std::complex<double>(std::real(z), 0.0);
+  return std::complex<double>(std::real(z), -std::imag(z));
 }
 
 template <typename TYPE>
