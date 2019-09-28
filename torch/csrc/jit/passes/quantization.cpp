@@ -386,7 +386,6 @@ Node* insertQuantDeQuantCall(
 
   // Add quant-dequant nodes and replace for all uses of Value
   // Create qparam constant nodes
-  TORCH_INTERNAL_ASSERT(qparams.isTuple(), "qparams must be tuple");
   auto tp = qparams.toTuple();
   IValue scale = tp->elements()[0].toTensor().item().toFloat();
   IValue zero_point = tp->elements()[1].toTensor().item().toInt();
@@ -474,6 +473,27 @@ void QuantizeHelper::removeObserver(
   }
 }
 
+void checkCalculateQParamsResult(const IValue& qparams) {
+  TORCH_CHECK(
+      qparams.isTuple(),
+      "`calculate_qparams` function is expected to return a "
+      "Tuple, but got:",
+      qparams.tagKind());
+  auto tp = qparams.toTuple();
+  TORCH_CHECK(
+      tp->elements().size() == 2,
+      "`calculate_qparams` function is expected to reutrn a "
+      "Tuple of size 2, got Tuple of size ",
+      tp->elements().size());
+  for (size_t i = 0; i < tp->elements().size(); ++i) {
+    TORCH_CHECK(tp->elements()[i].isTensor(),
+                "Element of Tuple is expected to be Tensor, but element ",
+                i,
+                " has type: ",
+                tp->elements()[i].tagKind());
+  }
+}
+
 std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
   TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
   auto observer_name = findObserverName(v);
@@ -491,6 +511,7 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
   auto om = observer_module.value();
   auto calculate_qparams = om.get_method("calculate_qparams");
   IValue qparams = calculate_qparams(std::vector<IValue>());
+  checkCalculateQParamsResult(qparams);
   auto scalar_type = om.get_attribute("dtype");
   return std::make_tuple(qparams, scalar_type);
 }

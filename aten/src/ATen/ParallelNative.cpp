@@ -101,19 +101,16 @@ void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
 
 // RAII guard helps to support in_parallel_region() and get_thread_num() API.
 struct ParallelRegionGuard {
-  ParallelRegionGuard(int64_t task_id);
-  ~ParallelRegionGuard();
+  ParallelRegionGuard(int64_t task_id) {
+    _set_thread_num(task_id);
+    _set_in_parallel_region(true);
+  }
+
+  ~ParallelRegionGuard() {
+    _set_in_parallel_region(false);
+    _unset_thread_num();
+  }
 };
-
-ParallelRegionGuard::ParallelRegionGuard(int64_t task_id) {
-  _set_thread_num(task_id);
-  _set_in_parallel_region(true);
-}
-
-ParallelRegionGuard::~ParallelRegionGuard() {
-  _set_in_parallel_region(false);
-  _unset_thread_num();
-}
 
 } // namespace
 

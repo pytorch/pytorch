@@ -48,7 +48,7 @@ inline void parallel_for(
       begin,
       end,
       grain_size,
-      [f](int64_t start, int64_t end, size_t task_id) {
+      [f](int64_t start, int64_t end, size_t /* unused */) {
         f(start, end);
       }
   );
