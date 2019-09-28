@@ -9941,6 +9941,8 @@ class TestNNDeviceType(NNTestCase):
                 grads2 = [input.grad.data] + [p.grad.data for p in rnn.parameters()]
                 self.assertEqual(grads, grads2)
 
+    # Note: test fails sporadically when running on non-default stream
+    @skipCUDANonDefaultStreamIf(True)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.double)
     def test_rnn_retain_variables(self, device, dtype):
