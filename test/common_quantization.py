@@ -524,6 +524,10 @@ class ModelMultipleOps(torch.nn.Module):
         out = self.fc(out)
         return out
 
+# Model to ensure consistency of fake quant with true quant
+# Average pooling and mean operations are not modelled
+# accurately with fake-quant so this model does not
+# contain those operations
 class ModelMultipleOpsNoAvgPool(torch.nn.Module):
     def __init__(self):
         super(ModelMultipleOpsNoAvgPool, self).__init__()
