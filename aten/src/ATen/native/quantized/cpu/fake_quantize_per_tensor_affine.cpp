@@ -2,7 +2,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
-#include "fake_quantize_core.h"
+#include <ATen/native/quantized/cpu/fake_quantize_core.h>
+
 /* FakeQuantize Op for PerTensorAffine quantization scheme */
 namespace at {
 namespace native {
@@ -34,13 +35,8 @@ Tensor fake_quantize_per_tensor_affine_cpu(
       zero_point >= quant_min && zero_point <= quant_max,
       "`zero_point` must be between `quant_min` and `quant_max`.");
 
-  auto Y = at::empty_like(self);
-  fake_quantize_slice(Y,
-                      self,
-                      scale,
-                      zero_point,
-                      quant_min,
-                      quant_max);
+  auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
+  fake_quantize_slice(Y, self, scale, zero_point, quant_min, quant_max);
   return Y;
 }
 
@@ -85,14 +81,8 @@ Tensor fake_quantize_per_tensor_affine_backward_cpu(
     return X;
   }
 
-  Tensor dX = at::zeros_like(X);
-  fake_quantize_grad_slice(dX,
-                           X,
-                           dY,
-                           scale,
-                           zero_point,
-                           quant_min,
-                           quant_max);
+  auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
+  fake_quantize_grad_slice(dX, X, dY, scale, zero_point, quant_min, quant_max);
   return dX;
 }
 } // namespace native

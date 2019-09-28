@@ -26,8 +26,7 @@ def _fake_quantize_per_tensor_affine_grad_reference(dY, X, scale, zero_point, qu
 
 # Helper function used to simulate per-channel fake-quant against any axis
 def _permute_to_axis_zero(X, axis):
-    x_dim = X.dim()
-    new_axis_list = list(range(x_dim))
+    new_axis_list = list(range(X.dim()))
     new_axis_list[axis] = 0
     new_axis_list[0] = axis
     y = X.permute(tuple(new_axis_list))
@@ -57,7 +56,7 @@ def _fake_quantize_per_channel_affine_grad_reference(dY, X, per_channel_scale, p
     res[mask] = dY[mask]
     return res
 
-def to_tensor(self, X, device):
+def to_tensor(X, device):
     return torch.tensor(X).to(device=torch.device(device), dtype=torch.float32)
 
 NP_RANDOM_SEED = 19
@@ -79,7 +78,7 @@ class TestFakeQuantizePerTensor(TestCase):
         quant_min = torch.iinfo(torch_type).min
         quant_max = torch.iinfo(torch_type).max
 
-        X = torch.tensor(X).to(dtype=torch.float, device=device)
+        X = to_tensor(X, device)
         Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
         Y_prime = torch.fake_quantize_per_tensor_affine(
             X, scale, zero_point, quant_min, quant_max)
@@ -98,7 +97,7 @@ class TestFakeQuantizePerTensor(TestCase):
         quant_min = torch.iinfo(torch_type).min
         quant_max = torch.iinfo(torch_type).max
 
-        X = torch.tensor(X).to(dtype=torch.float, device=device)
+        X = to_tensor(X, device)
         X.requires_grad_()
         Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
         Y_prime = torch.fake_quantize_per_tensor_affine(
@@ -121,7 +120,7 @@ class TestFakeQuantizePerTensor(TestCase):
         quant_min = torch.iinfo(torch_type).min
         quant_max = torch.iinfo(torch_type).max
 
-        X = torch.tensor(X).to(dtype=torch.float, device=device)
+        X = to_tensor(X, device)
         # quantize_per_tensor and dequantize are only implemented in CPU
         Y = torch.dequantize(torch.quantize_per_tensor(X.cpu(), scale, zero_point, torch_type))
         Y_prime = torch.fake_quantize_per_tensor_affine(
@@ -138,7 +137,7 @@ class TestFakeQuantizePerTensor(TestCase):
         quant_min = torch.iinfo(torch_type).min
         quant_max = torch.iinfo(torch_type).max
 
-        X = torch.tensor(X).to(dtype=torch.float, device=device)
+        X = to_tensor(X, device)
         X.requires_grad_()
         fq_module = FakeQuantize(default_observer, quant_min, quant_max).to(device)
         Y_prime = fq_module(X)
@@ -191,8 +190,8 @@ class TestFakeQuantizePerChannel(TestCase):
         quant_min = torch.iinfo(torch_type).min
         quant_max = torch.iinfo(torch_type).max
 
-        X = torch.tensor(X).to(dtype=torch.float, device=device)
-        scale = torch.tensor(scale).to(dtype=torch.double, device=device)
+        X = to_tensor(X, device)
+        scale = to_tensor(scale, device)
         zero_point = torch.tensor(zero_point).to(dtype=torch.int64, device=device)
         Y = _fake_quantize_per_channel_affine_reference(X.cpu(), scale.cpu(), zero_point.cpu(), axis, quant_min, quant_max)
         Y_prime = torch.fake_quantize_per_channel_affine(
@@ -212,8 +211,8 @@ class TestFakeQuantizePerChannel(TestCase):
         quant_min = torch.iinfo(torch_type).min
         quant_max = torch.iinfo(torch_type).max
 
-        X = torch.tensor(X).to(dtype=torch.float, device=device)
-        scale = torch.tensor(scale).to(dtype=torch.double, device=device)
+        X = to_tensor(X, device)
+        scale = to_tensor(scale, device)
         zero_point = torch.tensor(zero_point).to(dtype=torch.int64, device=device)
         X.requires_grad_()
         Y_prime = torch.fake_quantize_per_channel_affine(
@@ -236,9 +235,8 @@ class TestFakeQuantizePerChannel(TestCase):
         quant_min = torch.iinfo(torch_type).min
         quant_max = torch.iinfo(torch_type).max
 
-        X = torch.tensor(X).to(dtype=torch.float, device=device)
-        X = torch.tensor(X).to(dtype=torch.float, device=device)
-        scale = torch.tensor(scale).to(dtype=torch.double, device=device)
+        X = to_tensor(X, device)
+        scale = to_tensor(scale, device)
         zero_point = torch.tensor(zero_point).to(dtype=torch.int64, device=device)
         # quantize_linear and dequantize are only implemented in CPU
         Y = torch.dequantize(torch.quantize_per_channel(X.cpu(), scale.cpu(), zero_point.cpu(), axis, torch_type))
@@ -256,20 +254,21 @@ class TestFakeQuantizePerChannel(TestCase):
         quant_min = torch.iinfo(torch_type).min
         quant_max = torch.iinfo(torch_type).max
 
-        X = torch.tensor(X).to(dtype=torch.float, device=device)
+        X = to_tensor(X, device)
         X.requires_grad_()
         fq_module = FakeQuantize(default_per_channel_weight_observer, quant_min, quant_max, ch_axis=axis)
         Y_prime = fq_module(X)
         assert fq_module.scale is not None
         assert fq_module.zero_point is not None
-        Y = _fake_quantize_per_channel_affine_reference(X, fq_module.scale, fq_module.zero_point, axis, quant_min, quant_max)
+        Y = _fake_quantize_per_channel_affine_reference(X, fq_module.scale,
+                                                        fq_module.zero_point, axis, quant_min, quant_max)
         np.testing.assert_allclose(Y.cpu().detach().numpy(), Y_prime.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
         # Test backward
         dout = torch.rand(X.shape, dtype=torch.float, device=device)
         Y_prime.backward(dout)
-        dX = _fake_quantize_per_channel_affine_grad_reference(dout, X, fq_module.scale, fq_module.zero_point,
-                                                              axis, quant_min, quant_max)
+        dX = _fake_quantize_per_channel_affine_grad_reference(dout, X, fq_module.scale,
+                                                              fq_module.zero_point, axis, quant_min, quant_max)
         np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
     def test_fq_serializable(self):
