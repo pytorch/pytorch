@@ -877,3 +877,9 @@ Utilities
 
 .. autoclass:: Flatten
     :members:
+
+.. _quantization:
+
+quantization_
+
+:ref:`quantization`
