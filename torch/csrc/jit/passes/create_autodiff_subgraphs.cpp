@@ -6,11 +6,110 @@
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/passes/graph_fuser.h>
+
+#include <functional>
 
 namespace torch {
 namespace jit {
 
 namespace {
+
+class AutodiffFuser {
+ public:
+  AutodiffFuser(
+      std::shared_ptr<Graph> graph,
+      std::function<bool(Node*)> isBackendFusable,
+      size_t minSubgraphSize
+      ):
+        graph_(std::move(graph)),
+        isBackendFusable_(isBackendFusable),
+        minSubgraphSize_(minSubgraphSize) {}
+
+  void run(Block* block, std::vector<Node*>& diffGraphs) {
+  
+
+    static const auto isFusable = [&](Node* n) {
+
+      if (n->owningBlock() != block)
+        return false;
+
+
+      std::cout << "isFusable lambda = " << *n << std::endl;
+
+      for (auto inp : n->inputs()) {
+        if (auto tt = inp->type()->cast<TensorType>()) {
+          if (!tt->undefined() || *tt->undefined() || !tt->requires_grad()) {
+            // std::cout << inp->debugName() << " is either undefined or requires_grad\n";
+            // std::cout << "undefined = " << tt->undefined().has_value() << " requires_grad " <<
+            // tt->requires_grad() << " *undefined = " << *tt->undefined() << std::endl;
+            return false;
+          }
+        }
+      }
+
+      std::cout << "isBackendFusable = " << isBackendFusable_(n) << std::endl;
+      return isBackendFusable_(n) || n->kind() == prim::DifferentiableGraph;
+    }; 
+
+    CustomFuseGraph(graph_, isFusable, prim::DifferentiableGraph);
+
+
+    // Done constructing subgraphs. Do some post-processing cleanup:
+    // 1. Run CSE to delete redundanet constant nodes.
+    // 2. We may need to re-inline ones that are too small.
+    auto curNode = *block->nodes().rbegin();
+    while (curNode != *block->nodes().rend()) {
+      for (auto subBlock : curNode->blocks()) {
+        AutodiffFuser(graph_, isBackendFusable_, minSubgraphSize_).run(subBlock, diffGraphs);
+      }
+
+      // Save the previous node, since we might delete `curNode` in next block
+      auto prevNode = curNode->prev();
+      if (curNode->kind() == prim::DifferentiableGraph) {
+        // Inlining nodes may cause some subexpression to come back in the
+        // subgraphs (for example, copying constants in repeatedly will generate
+        // redundant prim::Constants). Run CSE to clean them up.
+        EliminateCommonSubexpression(curNode->g(attr::Subgraph));
+
+        if (!inlineIfTooSmall(curNode)) {
+          diffGraphs.push_back(curNode);
+        }
+      }
+      curNode = prevNode;
+    }
+    // Run CSE one more time to eliminate duplicates that may have occured
+    // while re-inlining subgraphs.
+    EliminateCommonSubexpression(graph_);
+  }
+
+ private:
+
+  // Inline this node's group subgraph into the outer graph if it's smaller
+  // than the specified minimum size.
+  //
+  // Returns true if an inlining has occured, false otherwise.
+  bool inlineIfTooSmall(Node* n) {
+    AT_ASSERT(n->kind() == prim::DifferentiableGraph);
+    auto subgraph = SubgraphUtils::getSubgraph(n);
+    size_t i = 0;
+    for (auto it = subgraph->nodes().begin(); it != subgraph->nodes().end();
+         ++it) {
+      if (++i >= minSubgraphSize_) {
+        return false;
+      }
+    }
+
+    SubgraphUtils::unmergeSubgraph(n);
+    return true;
+  }
+
+  std::shared_ptr<Graph> graph_;
+  std::function<bool(Node*)> isBackendFusable_;
+  size_t minSubgraphSize_;
+};
+
+
 
 class SubgraphSlicer {
  public:
@@ -174,5 +273,17 @@ std::vector<Node*> CreateAutodiffSubgraphs(
   SubgraphSlicer(graph->block(), graph, threshold).run(diff_nodes);
   return diff_nodes;
 }
+
+
+std::vector<Node*> CreateAutodiffSubgraphs(const std::shared_ptr<Graph>& graph, 
+  std::function<bool(Node*)> isBackendFusable, 
+  size_t threshold) {
+  graph->dump();
+  std::vector<Node*> diff_nodes;
+  AutodiffFuser af(graph, isBackendFusable, threshold);
+  af.run(graph->block(), diff_nodes);
+  return diff_nodes;
+}
+
 } // namespace jit
 } // namespace torch

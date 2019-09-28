@@ -15,5 +15,10 @@ namespace jit {
 TORCH_API std::vector<Node*> CreateAutodiffSubgraphs(
     const std::shared_ptr<Graph>& graph,
     size_t threshold = 2);
+
+TORCH_API std::vector<Node*> CreateAutodiffSubgraphs(
+    const std::shared_ptr<Graph>& graph,
+    std::function<bool(Node*)> isBackendFusable,
+    size_t threshold = 2);
 } // namespace jit
 } // namespace torch

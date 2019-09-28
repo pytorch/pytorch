@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/profiling_graph_executor_impl.h>
+#include <torch/csrc/jit/passes/graph_fuser.h>
 
 namespace torch {
 namespace jit {
@@ -97,9 +98,13 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
 
   // TODO: insert grad propagation
   if (needsGradient(copy)) {
+    // auto diff_nodes = CreateAutodiffSubgraphs(
+    //     copy,
+    //     getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
     auto diff_nodes = CreateAutodiffSubgraphs(
-        copy,
-        getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
+    copy,
+    isFusableDefault,
+    getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
     for (Node *dnode : diff_nodes) {
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);

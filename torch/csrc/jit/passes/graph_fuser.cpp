@@ -21,6 +21,22 @@ namespace jit {
 
 namespace {
 
+static bool isFusableDevice(Value *v) {
+    if (!v->type()->isSubtypeOf(TensorType::get())) {
+      return true;
+    }
+    auto device = v->type()->expect<TensorType>()->device();
+    if (!device) {
+      return true;
+    }
+    if ((*device).is_cpu()) {
+      return canFuseOnCPU();
+    } else if ((*device).is_cuda()) {
+      return canFuseOnGPU();
+    }
+    throw std::runtime_error("Unknown device");
+  }  
+
 // What is a simple mappable operator?  It:
 //    - Has a single tensor output
 //    - Output and all tensor inputs have the same shape
@@ -356,6 +372,10 @@ struct GraphFuser {
           // so we generally don't allow fusing tensor-scalar operations unless
           // the scalar is constant. In those cases we inline the constants
           // directly in the body of the fused group.
+          if (input->node()->kind() != prim::Constant) {
+            std::cout << " node = " << *input->node() << std::endl;
+          }
+          
           AT_ASSERT(input->node()->kind() == prim::Constant);
           Node* in_const =
               subgraph.createClone(input->node(), [](Value*) -> Value* {
@@ -1220,6 +1240,18 @@ void CustomFuseGraph(
   g.setInputArgLimit(arg_limit);
   g.run();
 }
+
+  // Default fusability check - used when the user doesn't pass in
+  // a callback.
+  bool isFusableDefault(Node* node) {
+    bool fusableDevice = true;
+    for (const auto& output : node->outputs()) {
+      if (output->uses().size() > 0) {
+        fusableDevice &= isFusableDevice(output);
+      }
+    }
+    return fusableDevice && isSimpleMap(node);
+  }
 
 } // namespace jit
 } // namespace torch

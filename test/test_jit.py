@@ -2996,6 +2996,25 @@ graph(%Ra, %Rb):
 class TestScript(JitTestCase):
 
 
+    def test_fuser(self):
+
+        @torch.jit.script
+        def fusable(a, b):
+            c = a + b 
+            d = a * b
+            e = c - d
+            f = e * 3
+            return f
+
+        a = torch.randn(5, 5, requires_grad=True, device='cuda')
+        b = torch.randn(5, 5, requires_grad=True, device='cuda')
+
+        #jit = torch.jit.script(fusable)
+        fusable(a, b, profile=True)
+        #b_script.backward()
+        
+
+
     # def test_override(self):
 
     #     func_call = torch._C.Function.__call__

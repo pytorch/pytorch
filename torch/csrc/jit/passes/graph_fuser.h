@@ -5,6 +5,8 @@
 namespace torch {
 namespace jit {
 
+TORCH_API bool isFusableDefault(Node* node);
+
 // NB: Be sure to run DCE before fusion, because dead instructions
 // can prevent fusion opportunities from being exploited.
 // On Windows will noop, NYI

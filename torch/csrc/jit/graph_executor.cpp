@@ -587,9 +587,15 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     // Phase 5. Apply non-differentiable optimizations to the graphs we've found
     //          (or the whole grpah if we know we won't need its derivative).
     if (needsGradient(opt_graph)) {
+      // auto diff_nodes = CreateAutodiffSubgraphs(
+      //     opt_graph,
+      //     autodiff_subgraph_inlining ? autodiffSubgraphNodeThreshold : 1);
+
       auto diff_nodes = CreateAutodiffSubgraphs(
           opt_graph,
+          isFusableDefault,
           autodiff_subgraph_inlining ? autodiffSubgraphNodeThreshold : 1);
+
       for (Node* dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
