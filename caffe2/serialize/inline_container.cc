@@ -135,11 +135,11 @@ void PyTorchStreamReader::valid(const char* what, const char* info) {
   auto err = mz_zip_get_last_error(ar_.get());
   if (err != MZ_ZIP_NO_ERROR) {
     CAFFE_THROW(
-      "PytorchStreamReader failed ",
-      what,
-      info,
-      ": ",
-      mz_zip_get_error_string(err));
+        "PytorchStreamReader failed ",
+        what,
+        info,
+        ": ",
+        mz_zip_get_error_string(err));
   }
 }
 
@@ -318,11 +318,11 @@ void PyTorchStreamWriter::valid(const char* what, const char* info) {
   auto err = mz_zip_get_last_error(ar_.get());
   if (err != MZ_ZIP_NO_ERROR) {
     CAFFE_THROW(
-      "PytorchStreamWriter failed ",
-      what,
-      info,
-      ": ",
-      mz_zip_get_error_string(err));
+        "PytorchStreamWriter failed ",
+        what,
+        info,
+        ": ",
+        mz_zip_get_error_string(err));
   }
   if (!*out_) {
     CAFFE_THROW("PytorchStreamWriter failed ", what, info, ".");
