@@ -98,15 +98,6 @@ bool valueNeedsToBeQuantized(Value* v) {
   return false;
 }
 
-Node* traverseToQuantNode(Node* dq) {
-  TORCH_INTERNAL_ASSERT(dq != nullptr);
-  TORCH_INTERNAL_ASSERT(dq->inputs().size() != 0);
-  Node* intrepr = dq->inputs()[0]->node();
-  TORCH_INTERNAL_ASSERT(intrepr != nullptr);
-  TORCH_INTERNAL_ASSERT(intrepr->inputs().size() != 0);
-  return intrepr->inputs()[0]->node();
-}
-
 Value* insertScalarType(Node* ins_node, at::ScalarType t) {
   TORCH_INTERNAL_ASSERT(t != at::ScalarType::Undefined);
   WithInsertPoint ins(ins_node);
@@ -115,31 +106,6 @@ Value* insertScalarType(Node* ins_node, at::ScalarType t) {
   Value* scalartype_v =
       ins_node->owningGraph()->insertConstant(IValue(static_cast<int>(t)));
   return scalartype_v;
-}
-
-// Create Quant Node
-Node* createQuantNode(Value* v, Graph* g) {
-  Node* quant = g->create(at::Symbol::fromQualString("aten::quantize_per_tensor"));
-  TORCH_INTERNAL_ASSERT(quant != nullptr, "Failed to create quant node");
-  quant->output()->setDebugName(v->debugName() + ".quant");
-  return quant;
-}
-
-// Create Dequant node
-Node* createDeQuantNode(Value* v, Graph* g) {
-  Node* dequant =
-      g->create(at::Symbol::fromQualString("aten::dequantize"));
-  TORCH_INTERNAL_ASSERT(dequant != nullptr, "Failed to create dequant node");
-  dequant->output()->setDebugName(v->debugName() + ".dequant");
-  return dequant;
-}
-
-// Create IntTensor Node
-Node* createIntReprNode(Value* v, Graph* g) {
-  Node* intrepr = g->create(at::Symbol::fromQualString("aten::int_repr"));
-  TORCH_INTERNAL_ASSERT(intrepr != nullptr, "Failed to create inttensor node");
-  intrepr->output()->setDebugName(v->debugName() + ".intrepr");
-  return intrepr;
 }
 
 class InsertObserversHelper {
@@ -277,7 +243,7 @@ graph(%input, %weight, %bias, %4):
 void InsertObserversHelper::propagateValues(
     Node* n,
     std::shared_ptr<Graph>& graph) {
-  for (auto i = 1; i < n->inputs().size(); ++i) {
+  for (size_t i = 1; i < n->inputs().size(); ++i) {
     if (weight_values_.count(n->inputs()[i])) {
       weight_values_.emplace(graph->inputs()[i]);
     }
@@ -406,16 +372,20 @@ Node* insertQuantDeQuantCall(
     const IValue& scalar_type,
     bool insert_after = true) {
   Graph* g = v->node()->owningGraph();
-  Node* quant = createQuantNode(v, g);
-  Node* dequant = createDeQuantNode(v, g);
+
+  Node* quant = g->create(at::Symbol::aten("quantize_per_tensor"));
+  quant->output()->setDebugName(v->debugName() + ".quant");
+
+  Node* dequant = g->create(at::Symbol::aten("dequantize"));
+  dequant->output()->setDebugName(v->debugName() + ".dequant");
+
   Node* insert_point = insert_after ? v->node() : *g->nodes().begin();
   WithCurrentScope scope_guard(
       *insert_point->owningGraph(), insert_point->scope());
   WithInsertPoint ins(insert_point);
 
-  // Add quant-intrepr-dequant nodes and replace for all uses of Value
+  // Add quant-dequant nodes and replace for all uses of Value
   // Create qparam constant nodes
-  TORCH_INTERNAL_ASSERT(qparams.isTuple(), "qparams must be tuple");
   auto tp = qparams.toTuple();
   IValue scale = tp->elements()[0].toTensor().item().toFloat();
   IValue zero_point = tp->elements()[1].toTensor().item().toInt();
@@ -503,6 +473,27 @@ void QuantizeHelper::removeObserver(
   }
 }
 
+void checkCalculateQParamsResult(const IValue& qparams) {
+  TORCH_CHECK(
+      qparams.isTuple(),
+      "`calculate_qparams` function is expected to return a "
+      "Tuple, but got:",
+      qparams.tagKind());
+  auto tp = qparams.toTuple();
+  TORCH_CHECK(
+      tp->elements().size() == 2,
+      "`calculate_qparams` function is expected to reutrn a "
+      "Tuple of size 2, got Tuple of size ",
+      tp->elements().size());
+  for (size_t i = 0; i < tp->elements().size(); ++i) {
+    TORCH_CHECK(tp->elements()[i].isTensor(),
+                "Element of Tuple is expected to be Tensor, but element ",
+                i,
+                " has type: ",
+                tp->elements()[i].tagKind());
+  }
+}
+
 std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
   TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
   auto observer_name = findObserverName(v);
@@ -520,6 +511,7 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
   auto om = observer_module.value();
   auto calculate_qparams = om.get_method("calculate_qparams");
   IValue qparams = calculate_qparams(std::vector<IValue>());
+  checkCalculateQParamsResult(qparams);
   auto scalar_type = om.get_attribute("dtype");
   return std::make_tuple(qparams, scalar_type);
 }
@@ -536,8 +528,9 @@ void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
   Node* dequant;
   dequant = insertQuantDeQuantCall(v, qparams, scalar_type, insert_after);
   v->replaceAllUsesWith(dequant->output());
-  Node* q = traverseToQuantNode(dequant);
-  TORCH_INTERNAL_ASSERT(q);
+  Node* q = dequant->input(0)->node();
+  // replaceAllUsesWith rewrote all uses of V, but we want to keep one: the one
+  // used in quant node. Restore it here:
   q->replaceInputWith(dequant->output(), v);
 }
 

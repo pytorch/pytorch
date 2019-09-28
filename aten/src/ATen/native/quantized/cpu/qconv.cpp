@@ -453,10 +453,10 @@ class QConv2dInt8 final : public c10::OperatorKernel {
           output_zero_point);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::conv ",
         toString(ctx.qEngine()));
-    return at::Tensor();
   }
 };
 

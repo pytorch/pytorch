@@ -140,7 +140,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     if (bias_in.has_value()) {
       bias_fp32 = bias_in.value();
     } else {
-      bias_fp32 = at::zeros(rows_w, at::kFloat);
+      bias_fp32 = at::zeros(rows_w, weight.options().dtype(at::kFloat));
     }
     TORCH_CHECK(
         !bias_fp32.defined() || (bias_fp32.ndimension() == 1 && bias_fp32.size(0) == rows_w),
@@ -195,10 +195,10 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
       return qnnpack_linear_prepack(weight, bias);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::linear_prepack ",
         toString(ctx.qEngine()));
-    return at::Tensor();
   }
 };
 
