@@ -8,6 +8,6 @@ __all__ = [
     'ConvReLU2d',
     'ConvBn2d',
     'ConvBnReLU2d',
-    'update_bn_stats'
+    'update_bn_stats',
     'freeze_bn_stats'
 ]

@@ -9,6 +9,7 @@ from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType
 from textwrap import dedent
+from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
 
@@ -55,6 +56,7 @@ class EvalEnv(object):
             return self.env[name]
         if self.rcb is not None:
             return self.rcb(name)
+        return getattr(builtins, name, None)
 
 def get_signature(fn, rcb, loc):
     # Python 3.5 adds support for the nice annotation syntax, so try that first.

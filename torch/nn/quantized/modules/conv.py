@@ -107,7 +107,6 @@ class Conv2d(torch.nn.Module):
         self._packed_params = torch.ops.quantized.conv_prepack(
             w, b, self.stride, self.padding, self.dilation, self.groups)
 
-
     def _weight_bias(self):
         return torch.ops.quantized.conv_unpack(self._packed_params)
 
@@ -124,21 +123,17 @@ class Conv2d(torch.nn.Module):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
-        else:
-            return ops.quantized.conv2d(input,
-                                        self._packed_params,
-                                        self.stride, self.padding,
-                                        self.dilation, self.groups,
-                                        self.scale, self.zero_point)
-
+        return ops.quantized.conv2d(input,
+                                    self._packed_params,
+                                    self.stride, self.padding,
+                                    self.dilation, self.groups,
+                                    self.scale, self.zero_point)
 
     # ===== Serialization methods =====
     # The special consideration here is that we have to unpack the weights into their
     # regular QTensor form for serialization. Packed weights should not live
     # outside the process in which they were created, rather they should be derived
     # from the QTensor weight.
-
-
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(Conv2d, self)._save_to_state_dict(destination, prefix, keep_vars)
         (w, b) = self._weight_bias()
@@ -149,6 +144,10 @@ class Conv2d(torch.nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
+        if not torch.jit.is_scripting():
+            raise RuntimeError('torch.save() is not currently supported for quantized modules.'
+                               ' See https://github.com/pytorch/pytorch/issues/24045.'
+                               ' Please use state_dict or torch.jit serialization.')
         (w, b) = self._weight_bias()
         return (
             self.in_channels,

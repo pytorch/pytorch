@@ -6,7 +6,7 @@ from torch._jit_internal import Optional
 import torch.nn as nn
 import torch.nn._intrinsic as nni
 from torch.nn.modules import Module
-
+from torch.nn.quantized.modules.utils import _quantize_weight
 
 class Quantize(Module):
     r"""Quantizes an incoming tensor
@@ -144,6 +144,10 @@ class Linear(torch.nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
+        if not torch.jit.is_scripting():
+            raise RuntimeError('torch.save() is not currently supported for quantized modules.'
+                               ' See https://github.com/pytorch/pytorch/issues/24045.'
+                               ' Please use state_dict or torch.jit serialization.')
         (w, b) = self._weight_bias()
         return (
             self.in_features,

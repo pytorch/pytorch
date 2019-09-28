@@ -10,4 +10,6 @@ __all__ = [
     'ConvBnReLU2d',
     'ConvReLU2d',
     'LinearReLU',
+    'update_bn_stats',
+    'freeze_bn_stats'
 ]
