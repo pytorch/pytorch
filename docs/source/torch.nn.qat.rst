@@ -1,8 +1,0 @@
-torch.nn.qat.modules
-===========================
-.. automodule:: torch.nn.qat.modules
-
-.. autoclass:: Conv2d
-    :members:
-.. autoclass:: Linear
-    :members:

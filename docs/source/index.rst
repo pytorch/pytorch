@@ -25,14 +25,10 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
   community/*
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
    :caption: Package Reference
 
-   qat.modules
-   quantized.modules
-   torch.nn.qat
-   quantization
-   quantized
+
    torch
    nn.functional
    tensors
@@ -46,6 +42,7 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    nn.init
    onnx
    optim
+   quantization
    torch.random <random>
    sparse
    storage
