@@ -71,7 +71,7 @@ Tensor qnnpack_relu(Tensor input) {
       setupStatus == pytorch_qnnp_status_success,
       "failed to setup QNNPACK Relu operator");
 
-  pthreadpool_t threadpool = caffe2::mobile_threadpool();
+  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
 
   const pytorch_qnnp_status runStatus =
       pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
@@ -85,7 +85,7 @@ Tensor qnnpack_relu(Tensor input) {
 
 Tensor quantized_relu(const Tensor& qx) {
   #ifdef USE_PYTORCH_QNNPACK
-  if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+  if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8) {
     return qnnpack_relu(qx);
   }
   #endif

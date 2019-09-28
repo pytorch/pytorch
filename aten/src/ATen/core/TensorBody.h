@@ -14,7 +14,6 @@
 #include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/EnableNamedTensor.h>
@@ -438,8 +437,14 @@ class CAFFE2_API Tensor {
   Tensor addr(const Tensor & vec1, const Tensor & vec2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & addr_(const Tensor & vec1, const Tensor & vec2, Scalar beta=1, Scalar alpha=1) const;
   Tensor all(int64_t dim, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor all(Dimname dim, bool keepdim=false) const;
+  #endif
   bool allclose(const Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
   Tensor any(int64_t dim, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor any(Dimname dim, bool keepdim=false) const;
+  #endif
   Tensor argmax(c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false) const;
   Tensor argmin(c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false) const;
   Tensor as_strided(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset=c10::nullopt) const;
@@ -478,7 +483,13 @@ class CAFFE2_API Tensor {
   Tensor cosh() const;
   Tensor & cosh_() const;
   Tensor cumsum(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor cumsum(Dimname dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor cumprod(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor cumprod(Dimname dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor det() const;
   Tensor diag_embed(int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) const;
   Tensor diagflat(int64_t offset=0) const;
@@ -526,6 +537,12 @@ class CAFFE2_API Tensor {
   Tensor index(TensorList indices) const;
   Tensor & index_copy_(int64_t dim, const Tensor & index, const Tensor & source) const;
   Tensor index_copy(int64_t dim, const Tensor & index, const Tensor & source) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & index_copy_(Dimname dim, const Tensor & index, const Tensor & source) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor index_copy(Dimname dim, const Tensor & index, const Tensor & source) const;
+  #endif
   Tensor & index_put_(TensorList indices, const Tensor & values, bool accumulate=false) const;
   Tensor index_put(TensorList indices, const Tensor & values, bool accumulate=false) const;
   Tensor inverse() const;
@@ -537,6 +554,9 @@ class CAFFE2_API Tensor {
   bool is_same_size(const Tensor & other) const;
   bool is_signed() const;
   std::tuple<Tensor,Tensor> kthvalue(int64_t k, int64_t dim=-1, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  std::tuple<Tensor,Tensor> kthvalue(int64_t k, Dimname dim, bool keepdim=false) const;
+  #endif
   Tensor log() const;
   Tensor & log_() const;
   Tensor log10() const;
@@ -583,6 +603,9 @@ class CAFFE2_API Tensor {
   #endif
   Tensor mm(const Tensor & mat2) const;
   std::tuple<Tensor,Tensor> mode(int64_t dim=-1, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  std::tuple<Tensor,Tensor> mode(Dimname dim, bool keepdim=false) const;
+  #endif
   Tensor mul(const Tensor & other) const;
   Tensor & mul_(const Tensor & other) const;
   Tensor mul(Scalar other) const;
@@ -643,8 +666,14 @@ class CAFFE2_API Tensor {
   std::vector<Tensor> split_with_sizes(IntArrayRef split_sizes, int64_t dim=0) const;
   Tensor squeeze() const;
   Tensor squeeze(int64_t dim) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor squeeze(Dimname dim) const;
+  #endif
   Tensor & squeeze_() const;
   Tensor & squeeze_(int64_t dim) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & squeeze_(Dimname dim) const;
+  #endif
   Tensor sspaddmm(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1) const;
   Tensor stft(int64_t n_fft, c10::optional<int64_t> hop_length=c10::nullopt, c10::optional<int64_t> win_length=c10::nullopt, const Tensor & window={}, bool normalized=false, bool onesided=true) const;
   int64_t stride(int64_t dim) const;
@@ -744,7 +773,7 @@ class CAFFE2_API Tensor {
   int64_t q_zero_point() const;
   Tensor q_per_channel_scales() const;
   Tensor q_per_channel_zero_points() const;
-  IntArrayRef q_per_channel_axis() const;
+  int64_t q_per_channel_axis() const;
   Tensor int_repr() const;
   QScheme qscheme() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
@@ -768,16 +797,40 @@ class CAFFE2_API Tensor {
   Tensor & put_(const Tensor & index, const Tensor & source, bool accumulate=false) const;
   Tensor & index_add_(int64_t dim, const Tensor & index, const Tensor & source) const;
   Tensor index_add(int64_t dim, const Tensor & index, const Tensor & source) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor index_add(Dimname dim, const Tensor & index, const Tensor & source) const;
+  #endif
   Tensor & index_fill_(int64_t dim, const Tensor & index, Scalar value) const;
   Tensor index_fill(int64_t dim, const Tensor & index, Scalar value) const;
   Tensor & index_fill_(int64_t dim, const Tensor & index, const Tensor & value) const;
   Tensor index_fill(int64_t dim, const Tensor & index, const Tensor & value) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & index_fill_(Dimname dim, const Tensor & index, Scalar value) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & index_fill_(Dimname dim, const Tensor & index, const Tensor & value) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor index_fill(Dimname dim, const Tensor & index, Scalar value) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor index_fill(Dimname dim, const Tensor & index, const Tensor & value) const;
+  #endif
   Tensor & scatter_(int64_t dim, const Tensor & index, const Tensor & src) const;
   Tensor scatter(int64_t dim, const Tensor & index, const Tensor & src) const;
   Tensor & scatter_(int64_t dim, const Tensor & index, Scalar value) const;
   Tensor scatter(int64_t dim, const Tensor & index, Scalar value) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor scatter(Dimname dim, const Tensor & index, const Tensor & src) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor scatter(Dimname dim, const Tensor & index, Scalar value) const;
+  #endif
   Tensor & scatter_add_(int64_t dim, const Tensor & index, const Tensor & src) const;
   Tensor scatter_add(int64_t dim, const Tensor & index, const Tensor & src) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor scatter_add(Dimname dim, const Tensor & index, const Tensor & src) const;
+  #endif
   Tensor & lt_(Scalar other) const;
   Tensor & lt_(const Tensor & other) const;
   Tensor & gt_(Scalar other) const;
@@ -856,10 +909,16 @@ class CAFFE2_API Tensor {
   Tensor lt(const Tensor & other) const;
   Tensor take(const Tensor & index) const;
   Tensor index_select(int64_t dim, const Tensor & index) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor index_select(Dimname dim, const Tensor & index) const;
+  #endif
   Tensor masked_select(const Tensor & mask) const;
   Tensor nonzero() const;
   std::vector<Tensor> nonzero_numpy() const;
   Tensor gather(int64_t dim, const Tensor & index, bool sparse_grad=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor gather(Dimname dim, const Tensor & index, bool sparse_grad=false) const;
+  #endif
   Tensor addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   Tensor & addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   Tensor addcdiv(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
@@ -900,7 +959,13 @@ class CAFFE2_API Tensor {
   Tensor max() const;
   Tensor median() const;
   std::tuple<Tensor,Tensor> sort(int64_t dim=-1, bool descending=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  std::tuple<Tensor,Tensor> sort(Dimname dim, bool descending=false) const;
+  #endif
   Tensor argsort(int64_t dim=-1, bool descending=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor argsort(Dimname dim, bool descending=false) const;
+  #endif
   std::tuple<Tensor,Tensor> topk(int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) const;
   Tensor all() const;
   Tensor any() const;

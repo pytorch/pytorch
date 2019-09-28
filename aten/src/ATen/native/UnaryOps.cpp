@@ -65,13 +65,17 @@ Tensor& ceil_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
 Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 
-Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, erfinv_stub); }
-Tensor erfinv(const Tensor& self) { return unary_op_impl(self, at::erfinv_out); }
-Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
+Tensor& expm1_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, expm1_stub); }
+Tensor expm1(const Tensor& self) { return unary_op_impl(self, at::expm1_out); }
+Tensor& expm1_(Tensor& self) { return unary_op_impl_(self, at::expm1_out); }
 
 Tensor& floor_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, floor_stub); }
 Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
 Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
+
+Tensor& log_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log_stub); }
+Tensor log(const Tensor& self) { return unary_op_impl(self, at::log_out); }
+Tensor& log_(Tensor& self) { return unary_op_impl_(self, at::log_out); }
 
 Tensor& round_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, round_stub); }
 Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
@@ -84,6 +88,14 @@ Tensor& digamma_(Tensor& self) { return unary_op_impl_(self, digamma_out); }
 Tensor& rsqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, rsqrt_stub); }
 Tensor rsqrt(const Tensor& self) { return unary_op_impl(self, at::rsqrt_out); }
 Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
+
+Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sign_stub); }
+Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
+Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
+
+Tensor& trunc_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, trunc_stub); }
+Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
+Tensor& trunc_(Tensor& self) { return unary_op_impl_(self, at::trunc_out); }
 
 Tensor& neg_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
@@ -193,23 +205,6 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
   return result;
 }
 
-Tensor sign(const Tensor& self) {
-    Tensor result = at::empty({0}, self.options());
-    return at::sign_out(result, self);
-}
-
-Tensor& sign_(Tensor& self) {
-    return at::sign_out(self, self);
-}
-
-Tensor& sign_out(Tensor& result, const Tensor& self) {
-    checkBackend("sign", result, self.type().backend());
-    auto iter = TensorIterator::unary_op(result, self,
-      /*check_internal_overlap=*/true);
-    sign_stub(iter.device_type(), iter);
-    return result;
-}
-
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
            "mvlgamma is not implemented for ", self.type());
@@ -230,12 +225,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
-}
-
-inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor& src) {
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, src);
-#endif
 }
 
 // NB: If you use this macro, you may also need to add a CUDA forwarding
@@ -277,10 +266,9 @@ IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
+IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
-IMPLEMENT_UNARY_OP_VEC(expm1)
 IMPLEMENT_UNARY_OP_VEC(frac)
-IMPLEMENT_UNARY_OP_VEC(log)
 IMPLEMENT_UNARY_OP_VEC(log10)
 IMPLEMENT_UNARY_OP_VEC(log1p)
 IMPLEMENT_UNARY_OP_VEC(log2)
@@ -291,7 +279,6 @@ IMPLEMENT_UNARY_OP_VEC(sinh)
 IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
-IMPLEMENT_UNARY_OP_VEC(trunc)
 IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)
 
 DEFINE_DISPATCH(abs_stub);

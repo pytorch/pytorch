@@ -156,6 +156,12 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
     "torch/csrc/jit/function.cpp",
+    "torch/csrc/jit/update_graph_executor_opt.cpp",
+    "torch/csrc/jit/mobile/function.cpp",
+    "torch/csrc/jit/mobile/import.cpp",
+    "torch/csrc/jit/mobile/module.cpp",
+    "torch/csrc/jit/mobile/register_mobile_ops.cpp",
+    "torch/csrc/jit/mobile/interpreter.cpp",
 ]
 
 libtorch_cuda_sources = [
@@ -230,7 +236,6 @@ def add_torch_libs():
         "torch/csrc/Generator.cpp",
         "torch/csrc/Layout.cpp",
         "torch/csrc/MemoryFormat.cpp",
-        "torch/csrc/QEngine.cpp",
         "torch/csrc/QScheme.cpp",
         "torch/csrc/Module.cpp",
         "torch/csrc/PtrWrapper.cpp",
@@ -293,7 +298,6 @@ def add_torch_libs():
         "torch/csrc/utils/invalid_arguments.cpp",
         "torch/csrc/utils/object_ptr.cpp",
         "torch/csrc/utils/python_arg_parser.cpp",
-        "torch/csrc/utils/qengines.cpp",
         "torch/csrc/utils/structseq.cpp",
         "torch/csrc/utils/tensor_apply.cpp",
         "torch/csrc/utils/tensor_dtypes.cpp",

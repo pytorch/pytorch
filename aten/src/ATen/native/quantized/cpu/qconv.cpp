@@ -4,6 +4,7 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 #include <cmath>
 
 namespace at {
@@ -194,9 +195,9 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       TORCH_CHECK(false, "[QConv2D] Unknown quantization scheme");
     }
 
-    // TODO: change convOutputShape to return NCHW sizes once perf is fixed
-    auto outShape =
-        convOutputShape(N, K, H, W, kernel, stride, padding, dilation);
+    // TODO: change the following to NCHW sizes once perf is fixed
+    SmallVector<int64_t, 4> outShape{
+        N, conv_p.OUT_DIM[0], conv_p.OUT_DIM[1], K};
     TORCH_CHECK(
         std::all_of(
             outShape.begin(), outShape.end(), [](int64_t i) { return i > 0; }),
@@ -401,7 +402,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         output.q_scale(),
         output.q_zero_point(),
         (uint8_t*)output.data_ptr<c10::quint8>(),
-        nullptr);
+        caffe2::mobile_pthreadpool());
 
     TORCH_INTERNAL_ASSERT(
         runStatus == pytorch_qnnp_status_success,
@@ -447,10 +448,10 @@ class QConv2dInt8 final : public c10::OperatorKernel {
           output_zero_point);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::conv ",
         toString(ctx.qEngine()));
-    return at::Tensor();
   }
 };
 
