@@ -20,6 +20,7 @@ static OffsetCalculator<N> index_make_offset_calculator(const TensorIterator& it
   return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
 }
 
+
 template <typename func_t>
 void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
   int num_indices = index_size.size();
@@ -51,7 +52,7 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
 
   auto offset_calc = index_make_offset_calculator<3>(iter);
 
-  C10_KERNEL_ASSERT_ENABLE;
+  C10_PREPARE_KERNEL_ASSERT;
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int idx) {
     auto offsets = offset_calc.get(idx);
     char* out_data = out_ptr + offsets[0];
@@ -63,7 +64,7 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
       int64_t index = *(int64_t*)(index_ptrs[i] + offsets[2]);
 
       if (index < -sizes[i] || index >= sizes[i]) {
-        C10_KERNEL_ERROR_INDEX_ERROR(index, i, sizes[i], "index out of bounds");
+        C10_KERNEL_INDEX_ERROR_SOFT(index, i, sizes[i]);
         return;
       }
 

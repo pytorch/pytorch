@@ -2,43 +2,23 @@
 
 #include <cstdint>
 
-namespace c10 { namespace cuda {
+namespace c10 {
+namespace cuda {
 
-constexpr int MAX_ASSERT_MESSAGE_LENGTH = 1024;
-constexpr int MAX_ASSERT_FILE_LENGTH = 1024;
+constexpr size_t C10_ASSERT_BUFFER_SIZE = 2048;
+constexpr size_t C10_ASSERT_ARG_ALIGN_SIZE = sizeof(double);
 
-// Types of asynchronous CUDA assert reports
-enum class CUDAAssertKind : int32_t {
-  ASSERTION_FAILED,
-  INDEX_OUT_OF_BOUNDS,
-  ZERO_DIVISION,
-};
-
-// Details about an invalid tensor index access operation
-struct CUDAAssertDetailIndexError {
-  int64_t index;
-  int64_t axis;
-  int64_t size;
-};
-
-// Union of error specific data captured with a failed assertions
-union CUDAAssertDetails {
-  CUDAAssertDetailIndexError index_error;
-};
-
-// Stream assertion error information
-// The CUDA device must be synchronized before accessing other members than error_flag.
+// This class holds the assert state associated with a single CUDA stream.
+// The `error` field is set to a non-zero value with a CAS operation in the
+// kernel when a C10_KERNEL_ASSERT() fails. A device sync should be executed
+// prior to accessing the assert report in `buffer`.
 struct CUDAAssert {
-  volatile int32_t error;    // flag: a non-zero value indicates an assert-error occured
-  CUDAAssertKind kind;
-
-  // call site information of assertion
-  uint32_t line;
-  char message[MAX_ASSERT_MESSAGE_LENGTH];
-  char file[MAX_ASSERT_FILE_LENGTH];
-
-  // error specific additional data
-  CUDAAssertDetails details;
+  volatile int32_t error; // error signal, non-zero when assert failed
+  uint32_t length; // number of bytes of the assert report in buffer
+  alignas(C10_ASSERT_ARG_ALIGN_SIZE) char buffer[C10_ASSERT_BUFFER_SIZE];
 };
 
-}}
+void check_assert_error(c10::cuda::CUDAAssert* assert_state);
+
+} // namespace cuda
+} // namespace c10

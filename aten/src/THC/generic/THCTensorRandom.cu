@@ -5,6 +5,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/CUDAGenerator.h>
 #include <ATen/Utils.h>
+#include <ATen/native/cuda/Assert.cuh>
 #include <utility>
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)

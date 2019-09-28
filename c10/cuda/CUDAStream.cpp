@@ -306,7 +306,7 @@ LeakyStreamInternals* CUDAStream_internals(CUDAStream s) {
   }
 }
 
-void check_assert_state(const LeakyStreamInternals* ptr) {
+void check_stream_assert_state(const LeakyStreamInternals* ptr) {
   if (!ptr->assert_state) {
     return;
   }
@@ -314,54 +314,11 @@ void check_assert_state(const LeakyStreamInternals* ptr) {
   auto assert_state =
       ptr->assert_state.load(std::memory_order::memory_order_relaxed);
 
-  if (assert_state->error != 0) {
-    CUDAGuard device_guard(ptr->device_index);
-
-    // wait for kernel to complete
-    C10_CUDA_CHECK(cudaDeviceSynchronize());
-    std::atomic_thread_fence(std::memory_order_acquire);
-
-    CUDAAssert assert_state(*ptr->assert_state); // create local isolation copy
-
-    // reset assert state
-    std::memset(ptr->assert_state, 0, sizeof(CUDAAssert));
-
-    switch (assert_state.kind) {
-      case CUDAAssertKind::ASSERTION_FAILED:
-        // assertion failed
-        throw ::c10::Error(
-            {"unknown", assert_state.file, assert_state.line},
-            assert_state.message);
-
-      case CUDAAssertKind::INDEX_OUT_OF_BOUNDS: {
-        // index out of bounds
-        const auto& index_error = assert_state.details.index_error;
-        auto message = ::c10::str(
-            "index ",
-            index_error.index,
-            " is out of bounds for dimension ",
-            index_error.axis,
-            " with size ",
-            index_error.size);
-        throw ::c10::IndexError(
-            {"unknown", assert_state.file, assert_state.line}, message);
-      }
-
-      case CUDAAssertKind::ZERO_DIVISION:
-        // zero division error
-        throw ::c10::Error(
-            {"unknown", assert_state.file, assert_state.line},
-            assert_state.message);
-
-      default:
-        AT_ASSERTM(0, "Unsupported assertion type");
-        break;
-    }
-  }
+  check_assert_error(assert_state);
 }
 
 CUDAStream CUDAStream_fromInternals(const LeakyStreamInternals* ptr) {
-  check_assert_state(ptr);
+  check_stream_assert_state(ptr);
   return CUDAStream(
       CUDAStream::UNCHECKED,
       Stream(

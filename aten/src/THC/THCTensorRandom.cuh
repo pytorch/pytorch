@@ -4,6 +4,7 @@
 #include <THC/THCNumerics.cuh>
 #include <THC/THCReduceApplyUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
+#include <ATen/native/cuda/Assert.cuh>
 
 #include <curand_kernel.h>
 

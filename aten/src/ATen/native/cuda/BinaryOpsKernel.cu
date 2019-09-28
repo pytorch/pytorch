@@ -40,12 +40,12 @@ void div_kernel_cuda(TensorIterator& iter) {
       });
     });
   } else {
-    C10_KERNEL_ASSERT_ENABLE;
+    C10_PREPARE_KERNEL_ASSERT;
     AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "div_cuda", [&]() {
       gpu_kernel_with_scalars(iter, [=]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         if (b == 0) {
-            C10_KERNEL_ERROR_DIVISION_BY_ZERO("ZeroDivisionError: integer division by zero");
-            return 0;   // what to return in this case?
+          C10_KERNEL_ASSERT_SOFT(b != 0, "ZeroDivisionError: integer division by zero");
+          return 0;   // what to return in this case?
         }
         return a / b;
       });
