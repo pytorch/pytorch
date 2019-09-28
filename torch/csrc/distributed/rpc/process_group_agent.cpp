@@ -334,16 +334,18 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             futures_[id]->markCompleted(std::move(message));
             futures_.erase(id);
           }
+        } else {
+          // TODO: pass the error back to the caller instead of crashing here.
+          AT_ERROR("unrecognized message type ", message.type());
+          // Not incrementing the recv counter on errors to make it explicit
+          // instead of silent.
+          // TODO: after adding error handling, increment recv counters here
+          // as well.
         }
 
         {
           std::lock_guard<std::mutex> guard(recvCntMutex_);
           ++msgRecvCnts_[work.from_.id_];
-        }
-
-        if (!message.isRequest() && !message.isResponse()) {
-          // TODO: pass the error back to the caller instead of crashing here.
-          AT_ERROR("unrecognized message type ", message.type());
         }
       },
       std::move(work)));
