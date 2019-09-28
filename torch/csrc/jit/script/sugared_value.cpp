@@ -339,6 +339,15 @@ RangeValue::RangeValue(
     const SourceRange& loc,
     Function& m,
     std::vector<Value*> inputs) {
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    auto typ = inputs[i]->type();
+    if (!typ->cast<IntType>()) {
+      throw ErrorReport(loc)
+          << "all inputs of range must be ints, found " << typ->python_str()
+          << " in argument " << c10::guts::to_string(i);
+    }
+  }
+
   Graph& g = *m.graph();
   if (inputs.size() == 0) {
     throw ErrorReport(loc) << "range expected at least 1 arguments, got 0";
