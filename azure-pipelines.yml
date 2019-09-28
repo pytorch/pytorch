@@ -13,6 +13,16 @@ jobs:
   - script: pip install -r requirements.txt
   - script: cd .circleci && ./ensure-consistency.py
 
+- job: validate_docker_version
+  displayName: "Ensure Docker version is correctly deployed"
+  pool:
+    vmImage: 'Ubuntu 16.04'
+  steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "3.7"
+  - script: .circleci/validate-docker-version.py
+
 - job: shellcheck_jenkins
   displayName: "Shellcheck Jenkins scripts"
   pool:
