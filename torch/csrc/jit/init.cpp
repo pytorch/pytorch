@@ -153,9 +153,6 @@ void initJITBindings(PyObject* module) {
             return EliminateCommonSubexpression(g); // overload resolution
           })
       .def(
-          "_jit_pass_propagate_qinfo",
-          [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
-      .def(
           "_jit_pass_insert_observers",
           [](script::Module& module,
              const std::string& method_name,
@@ -189,9 +186,6 @@ void initJITBindings(PyObject* module) {
            [](script::Module& module, const std::string& method_name) {
              FoldQuantizeCallIntoBuffer(module, method_name);
            })
-      .def(
-          "_jit_pass_quantlint",
-          [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const script::Module& m) { return PatternBasedRewrite(m); })

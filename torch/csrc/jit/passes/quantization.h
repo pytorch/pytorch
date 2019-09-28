@@ -16,26 +16,6 @@ using QConfigDict = std::unordered_map<std::string, QConfig>;
 using ModuleQConfigMap =
     std::unordered_map<script::ModulePtr, c10::optional<QConfig>>;
 
-/** \brief Propagates QParams through nodes that are not supposed to change it.
- *
- * An example of such node is `Split`: even though the observed distribution
- * might be different for input and output tensors, we would like to use input's
- * qparams for output as well.
- */
-TORCH_API void PropagateQuantInfo(std::shared_ptr<Graph>& graph);
-
-/** \brief Check that all expected optimizations after quant-dequant nodes
- * insertion actually happened.
- *
- * Even though semantically it would be correct to just execute the initial
- * quant-dequant nodes as is, what we really wanted when we inserted them is to
- * fuse them into adjacent non-quantized ops resulting in quantized ops. Thus,
- * if after all the cleanups, optimizations (particularly, fusion) we find
- * quant-dequant pair in the graph, it indicates that quantization didn't go as
- * planned.
- */
-TORCH_API void QuantLinting(std::shared_ptr<Graph>& graph);
-
 /** \brief Quantize model's inputs and outputs.
  *
  * This pass folds quant/dequant ops into the input/output tensors, essentially
