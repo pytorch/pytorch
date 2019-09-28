@@ -13,17 +13,16 @@ namespace cuda {
 
 template <typename T>
 static std::string format_token(const std::string& fmt, const T& data) {
-  int ret = snprintf(nullptr, 0, fmt.c_str(), data) +
-      1; // len does not include the terminating '\0'
+  int ret = snprintf(nullptr, 0, fmt.c_str(), data);
   if (ret < 0) {
-    throw std::runtime_error("Formatting token failed.");
+    throw std::runtime_error("Calculating token output size failed.");
   }
 
   if (ret == 0) {
     return std::string{};
   }
 
-  size_t size = ret + 1;
+  size_t size = ret + 1; // ret does not include the terminating '\0'
   auto buff_ptr = std::unique_ptr<char[]>(new char[size]);
   ret = snprintf(buff_ptr.get(), size, fmt.c_str(), data);
   if (ret < 0 || ret >= size) {
