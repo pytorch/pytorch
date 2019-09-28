@@ -9946,7 +9946,7 @@ class TestNNDeviceType(NNTestCase):
     def test_rnn_retain_variables(self, device, dtype):
         self._test_rnn_retain_variables(device, dtype)
 
-        if torch.device(device).type == 'cuda':
+        if torch.device(device).type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_rnn_retain_variables(device, dtype)
 
