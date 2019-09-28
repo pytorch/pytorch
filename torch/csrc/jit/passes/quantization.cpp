@@ -866,5 +866,39 @@ graph(%self, %scale, %zero_point, %dtype):
   rewriter.RegisterRewritePattern(pattern, replacement);
   rewriter.runOnGraph(graph, filter);
 }
+
+void InsertPrepackUnpack(std::shared_ptr<Graph>& graph) {
+  std::string linear_with_quant = R"(
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %w_dequant = aten::dequantize(%w_quant)
+        %linear = prim::Constant[name="linear"]()
+        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
+        return (%r))";
+
+  std::string linear_with_quant_prepack = R"(
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %packed_params = quantized::linear_prepack(%w, %b)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %linear = prim::Constant[name="linear"]()
+        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b_unpacked)
+        return (%r))";
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
+  rewriter.runOnGraph(graph);
+}
+
+void InsertPrepackUnpack(script::Module& module) {
+  for (auto& method : module.get_methods()) {
+    auto graph = method.graph();
+    InsertPrepackUnpack(graph);
+    for (auto m : module.get_modules()) {
+      InsertPrepackUnpack(m);
+    }
+  }
+}
 } // namespace jit
 } // namespace torch
