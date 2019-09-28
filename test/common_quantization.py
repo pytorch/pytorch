@@ -14,7 +14,7 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
-    default_qconfig, QConfig, default_observer, default_weight_observer, \
+    default_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     default_qat_qconfig, propagate_qconfig_, convert, DEFAULT_DYNAMIC_MODULE_MAPPING
 
 def test_only_eval_fn(model, calib_data):
@@ -252,7 +252,7 @@ class AnnotatedNestedModel(torch.nn.Module):
         self.fc3 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
         self.fc3.qconfig = default_qconfig
         self.sub2.fc1 = QuantWrapper(self.sub2.fc1)
-        self.sub2.fc1.qconfig = default_qconfig
+        self.sub2.fc1.qconfig = default_per_channel_qconfig
 
     def forward(self, x):
         x = self.sub1(x)
