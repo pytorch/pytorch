@@ -1428,6 +1428,11 @@ graph(%input, %weight):
                    .check('GetAttr[name="_quantized_weight"]') \
                    .run(m._c._get_method('forward').graph)
 
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
     @_tmp_donotuse_dont_inline_everything
     def test_fold_prepack(self):
         # TODO: move to torch/quantization
@@ -4425,6 +4430,13 @@ a")
             # type: (int, float) -> float
             return a ** b
 
+        def func4():
+            # type: () -> float
+            return 2 ** -2
+
+        def func5(x, y):
+            return x.item() ** y.item()
+
         a = torch.rand(1, requires_grad=True)
         b = torch.rand(1, requires_grad=True)
         c = torch.rand(1, requires_grad=True)
@@ -4432,6 +4444,15 @@ a")
         self.checkScript(func, (a, b), optimize=True)
         self.checkScript(func2, (a, b, c, d), optimize=True)
         self.checkScript(func3, (4, -0.5), optimize=True)
+        self.checkScript(func4, ())
+
+        inputs = [torch.tensor(2), torch.tensor(-2), torch.tensor(.5), torch.tensor(.2)]
+        for x in inputs:
+            for y in inputs:
+                if x < 0:
+                    continue
+                else:
+                    self.checkScript(func5, (x, y))
 
     @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
     def test_pow_scalar_backward_cuda(self):
@@ -6057,7 +6078,7 @@ a")
         checkMath("isinf", 1, ret_type="bool")
         checkMath("ldexp", 2, is_float=False, ret_type="float", args_type="(float, int)",
                   vals=[(i, j) for i in float_vals for j in range(-10, 10)])
-        checkMath("pow", 2, is_float=False, ret_type="int")
+        checkMath("pow", 2, is_float=False, ret_type="float")
         checkMath("pow", 2, is_float=True, ret_type="float")
         if not PY2:
             checkMathWrap("floor", ret_type="int")
@@ -10823,13 +10844,19 @@ a")
         with self.assertRaisesRegex(RuntimeError, "must not be zero"):
             fn()
 
-    def test_for_in_range_no_arg(self):
+    def test_range_args(self):
         with self.assertRaisesRegex(RuntimeError, r'range expected at least 1 arguments, got 0'):
             @torch.jit.script
             def range_no_arg(x):
                 for _ in range():
                     x += 1
                 return x
+        with self.assertRaisesRegex(RuntimeError, r'found float'):
+            @torch.jit.script
+            def range_non_float():
+                for i in range(.5):
+                    print(i)
+
 
     def test_for_in_enumerate(self):
         def fn(x):
@@ -19783,7 +19810,7 @@ class TestClassType(JitTestCase):
 
             def __pow__(self, other):
                 # type: (int) -> int
-                return self.x ** other
+                return int(self.x ** other)
 
             def __truediv__(self, other):
                 # type: (int) -> float
