@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/ir.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/operator.h>

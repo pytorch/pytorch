@@ -11,6 +11,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/source_range.h>
 #include <algorithm>
