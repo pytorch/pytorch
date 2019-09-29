@@ -117,7 +117,7 @@ static void printStrList(
   for (auto& item : items) {
     if (i++ > 0)
       out << ", ";
-    printQuotedString(out, item);
+    c10::printQuotedString(out, item);
   }
   out << "]";
 }
@@ -137,7 +137,7 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       printPrimList(out, is(name));
       break;
     case AttributeKind::s:
-      printQuotedString(out, s(name));
+      c10::printQuotedString(out, s(name));
       break;
     case AttributeKind::ss:
       printStrList(out, ss(name));
