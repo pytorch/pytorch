@@ -133,7 +133,7 @@ Tensor fake_quantize_per_channel_affine_backward_cuda(
     auto X_slice = X.slice(axis, i, i + 1);
     auto dX_slice = dX.slice(axis, i, i + 1);
     float sc = scale[i].item().toFloat();
-    int64_t zp = scale[i].item().toLong();
+    int64_t zp = zero_point[i].item().toLong();
     fake_quantize_grad_slice_cuda(
         dX_slice, X_slice, dY_slice, sc, zp, quant_min, quant_max);
   }
