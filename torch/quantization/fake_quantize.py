@@ -125,10 +125,11 @@ default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=PerChann
                                                                reduce_range=False,
                                                                ch_axis=0)
 default_histogram_fake_quant = FakeQuantize.with_args(observer=HistogramObserver,
-                                                      quant_min=-128,
-                                                      quant_max=127,
+                                                      quant_min=0,
+                                                      quant_max=255,
+                                                      dtype=torch.quint8,
+                                                      qscheme=torch.per_tensor_affine,
                                                       reduce_range=True)
-
 def disable_fake_quant(mod):
     if type(mod) == FakeQuantize:
         mod.disable_fake_quant()
