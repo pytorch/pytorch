@@ -4,6 +4,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import functools
 import sys
 import unittest
+import unittest.mock
 
 import torch
 import torch.distributed as dist
