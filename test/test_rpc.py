@@ -4,7 +4,11 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import functools
 import sys
 import unittest
-import unittest.mock
+
+try:
+    from unittest import mock
+except ImportError:
+    import mock
 
 import torch
 import torch.distributed as dist
@@ -24,7 +28,7 @@ RPC_INIT_URL = getenv('RPC_INIT_URL', '')
 
 
 def stub_init_rpc_backend_handler(self_rank, self_name, init_method):
-    return unittest.mock.Mock()
+    return mock.Mock()
 
 
 # it is used to test python user defined function over rpc
@@ -138,8 +142,8 @@ class RpcTest(MultiProcessTestCase):
         ):
             dist.rpc(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
 
-    @unittest.mock.patch.object(torch.distributed.autograd, "_init")
-    @unittest.mock.patch.object(torch.distributed.rpc_api, "init_rref_context")
+    @mock.patch.object(torch.distributed.autograd, "_init")
+    @mock.patch.object(torch.distributed.rpc_api, "init_rref_context")
     def test_register_rpc_backend_and_init_rpc_backend(
         self,
         mock_init_rref_context,
