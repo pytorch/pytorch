@@ -1704,8 +1704,8 @@ class TestNN(NNTestCase):
         mw = m.weight[:]
         m.double()
         mw[0][0] = 5
-        with self.assertRaisesRegex(RuntimeError, "Expected object of scalar type Float but got scalar type Double"):
-            mw[0][0] == mw._base[0][0]
+        self.assertTrue(mw[0][0].dtype == torch.float)
+        self.assertTrue(mw._base[0][0].dtype == torch.double)
 
         try:
             torch.__future__.set_overwrite_module_params_on_conversion(True)
@@ -1793,8 +1793,8 @@ class TestNN(NNTestCase):
             # Without using `torch.no_grad()`, this will leak CUDA memory.
             # (Issue is filed at https://github.com/pytorch/pytorch/issues/21875)
             mw[0][0] = 5
-        with self.assertRaisesRegex(RuntimeError, "Expected object of device type cuda but got device type cpu"):
-            mw[0][0] == mw._base[0][0]
+            self.assertTrue(mw[0][0].device.type == "cpu")
+            self.assertTrue(mw._base[0][0].device.type == "cuda")
 
         try:
             torch.__future__.set_overwrite_module_params_on_conversion(True)
