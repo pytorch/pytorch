@@ -975,6 +975,29 @@ TEST_F(ModulesTest, Hardshrink) {
   }
 }
 
+TEST_F(ModulesTest, Hardtanh) {
+  const auto size = 3;
+  for (const auto min_val : {-4.2, -1.0, -0.42, 0.0}) {
+    for (const auto max_val : {0.0, 0.42, 1.0, 4.2}) {
+      Hardtanh model {HardtanhOptions().min_val(min_val).max_val(max_val)};
+      auto x = torch::linspace(-10.0, 10.0, size * size * size);
+      x.resize_({size, size, size}).set_requires_grad(true);
+      auto y = model(x);
+      torch::Tensor s = y.sum();
+
+      s.backward();
+      ASSERT_EQ(s.ndimension(), 0);
+
+      ASSERT_EQ(y.ndimension(), 3);
+      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      auto y_exp = (x < min_val) * min_val +
+                   ((x >= min_val) * (x <= max_val)) * x +
+                   (x > max_val) * max_val;
+      ASSERT_TRUE(torch::allclose(y, y_exp));
+    }
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1202,4 +1225,12 @@ TEST_F(ModulesTest, PrettyPrintHardshrink) {
   ASSERT_EQ(c10::str(Hardshrink()), "torch::nn::Hardshrink(lambda=0.5)");
   ASSERT_EQ(c10::str(Hardshrink(HardshrinkOptions().lambda(42.42))),
             "torch::nn::Hardshrink(lambda=42.42)");
+}
+
+TEST_F(ModulesTest, PrettyPrintHardtanh) {
+  ASSERT_EQ(c10::str(Hardtanh()),
+    "torch::nn::Hardtanh(min_val=-1, max_val=1, inplace=false)");
+  ASSERT_EQ(c10::str(Hardtanh(
+      HardtanhOptions().min_val(-42.42).max_val(0.42).inplace(true))),
+    "torch::nn::Hardtanh(min_val=-42.42, max_val=0.42, inplace=true)");
 }
