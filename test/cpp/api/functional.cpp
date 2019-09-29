@@ -124,3 +124,12 @@ TEST_F(FunctionalTest, AdaptiveAvgPool2d) {
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 3, 3})));
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 3}));
 }
+
+TEST_F(FunctionalTest, AdaptiveAvgPool3d) {
+  auto x = torch::ones({2, 5, 5, 5});
+  auto y = F::adaptive_avg_pool3d(x, AdaptiveAvgPool3dOptions(3));
+
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 3, 3, 3})));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 3, 3}));
+}
