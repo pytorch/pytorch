@@ -89,8 +89,7 @@ class TestFakeQuantizePerTensor(TestCase):
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
     def test_backward_per_tensor(self, device, X):
-        r"""Tests the backward method. Note that this runs the reference quantization
-        and thus the errors might be originating there.
+        r"""Tests the backward method.
         """
         np.random.seed(NP_RANDOM_SEED)
         X, (scale, zero_point, torch_type) = X
@@ -203,8 +202,7 @@ class TestFakeQuantizePerChannel(TestCase):
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
     def test_backward_per_channel(self, device, X):
-        r"""Tests the backward method. Note that this runs the reference quantization
-        and thus the errors might be originating there.
+        r"""Tests the backward method.
         """
         np.random.seed(NP_RANDOM_SEED)
         X, (scale, zero_point, axis, torch_type) = X
