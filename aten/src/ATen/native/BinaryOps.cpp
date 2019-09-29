@@ -16,6 +16,11 @@ DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(logical_xor_stub);
 DEFINE_DISPATCH(lt_stub);
+DEFINE_DISPATCH(le_stub);
+DEFINE_DISPATCH(gt_stub);
+DEFINE_DISPATCH(ge_stub);
+DEFINE_DISPATCH(eq_stub);
+DEFINE_DISPATCH(ne_stub);
 
 static constexpr char alpha_mismatch_err[] =
   "For integral input tensors, argument alpha must not be a floating point number.";
@@ -279,6 +284,41 @@ Tensor& lt_(Tensor& self, const Tensor& other) { return comparison_op_(self, oth
 Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, lt_stub); }
 Tensor lt(const Tensor& self, Scalar other) { return comparison_op(self, other, lt_stub); }
 Tensor& lt_(Tensor& self, Scalar other) { return comparison_op_(self, other, lt_stub); }
+
+Tensor& le_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, le_stub); }
+Tensor le(const Tensor& self, const Tensor& other) { return comparison_op(self, other, le_stub); }
+Tensor& le_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, le_stub); }
+Tensor& le_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, le_stub); }
+Tensor le(const Tensor& self, Scalar other) { return comparison_op(self, other, le_stub); }
+Tensor& le_(Tensor& self, Scalar other) { return comparison_op_(self, other, le_stub); }
+
+Tensor& gt_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, gt_stub); }
+Tensor gt(const Tensor& self, const Tensor& other) { return comparison_op(self, other, gt_stub); }
+Tensor& gt_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, gt_stub); }
+Tensor& gt_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, gt_stub); }
+Tensor gt(const Tensor& self, Scalar other) { return comparison_op(self, other, gt_stub); }
+Tensor& gt_(Tensor& self, Scalar other) { return comparison_op_(self, other, gt_stub); }
+
+Tensor& ge_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, ge_stub); }
+Tensor ge(const Tensor& self, const Tensor& other) { return comparison_op(self, other, ge_stub); }
+Tensor& ge_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, ge_stub); }
+Tensor& ge_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, ge_stub); }
+Tensor ge(const Tensor& self, Scalar other) { return comparison_op(self, other, ge_stub); }
+Tensor& ge_(Tensor& self, Scalar other) { return comparison_op_(self, other, ge_stub); }
+
+Tensor& eq_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, eq_stub); }
+Tensor eq(const Tensor& self, const Tensor& other) { return comparison_op(self, other, eq_stub); }
+Tensor& eq_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, eq_stub); }
+Tensor& eq_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, eq_stub); }
+Tensor eq(const Tensor& self, Scalar other) { return comparison_op(self, other, eq_stub); }
+Tensor& eq_(Tensor& self, Scalar other) { return comparison_op_(self, other, eq_stub); }
+
+Tensor& ne_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, ne_stub); }
+Tensor ne(const Tensor& self, const Tensor& other) { return comparison_op(self, other, ne_stub); }
+Tensor& ne_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, ne_stub); }
+Tensor& ne_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, ne_stub); }
+Tensor ne(const Tensor& self, Scalar other) { return comparison_op(self, other, ne_stub); }
+Tensor& ne_(Tensor& self, Scalar other) { return comparison_op_(self, other, ne_stub); }
 
 }
 }  // namespace at
