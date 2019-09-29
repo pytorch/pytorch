@@ -76,22 +76,28 @@ def get_default_qconfig(backend='fbgemm'):
     if backend == 'fbgemm':
         qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
                           weight=default_per_channel_weight_observer)
-    else:
+    elif backend == 'qnnpack':
         qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                           weight=default_weight_observer)
+    else:
+        raise ValueError("Unknown backend, please specify qconfig manually")
     return qconfig
 
 def get_default_qat_qconfig(backend='fbgemm'):
+    # Histogram observer is too slow for quantization aware training
     if backend == 'fbgemm':
-        qconfig = QConfig(activation=FakeQuantize.with_args(observer=default_histogram_observer,
-                                                            quant_min=-128,
-                                                            quant_max=127,
+        qconfig = QConfig(activation=FakeQuantize.with_args(observer=MinMaxObserver,
+                                                            quant_min=0,
+                                                            quant_max=255,
                                                             reduce_range=True),
                           weight=default_per_channel_weight_fake_quant)
-    else:
-        qconfig = QConfig(activation=FakeQuantize.with_args(observer=default_histogram_observer,
-                                                            quant_min=-128,
-                                                            quant_max=127,
+    elif backend == 'qnnpack':
+        qconfig = QConfig(activation=FakeQuantize.with_args(observer=MinMaxObserver,
+                                                            quant_min=0,
+                                                            quant_max=255,
                                                             reduce_range=False),
                           weight=default_weight_fake_quant)
+    else:
+        raise ValueError("Unknown backend, please specify qconfig manually")
+
     return qconfig
