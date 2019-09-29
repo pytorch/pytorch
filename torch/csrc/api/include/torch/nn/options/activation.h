@@ -16,5 +16,15 @@ struct ELUOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
+// ============================================================================
+
+/// Options for Hardshrink functional and module.
+struct HardshrinkOptions {
+  HardshrinkOptions() {}
+
+  // the lambda value for the Hardshrink formulation. Default: 0.5
+  TORCH_ARG(double, lambda) = 0.5;
+};
+
 } // namespace nn
 } // namespace torch
