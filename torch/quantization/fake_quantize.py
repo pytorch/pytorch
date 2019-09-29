@@ -62,6 +62,7 @@ class FakeQuantize(Module):
         self.scale = None
         self.zero_point = None
         self.dtype = self.observer.dtype
+        self.qscheme = self.observer.qscheme
 
     def enable_fake_quant(self, enabled=True):
         self.fake_quant_enabled = enabled
