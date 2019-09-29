@@ -96,8 +96,8 @@ class IntrinsicQATModuleTest(TestCase):
                 momentum,
                 freeze_bn,
                 default_qat_qconfig
-            ).to(dtype=torch.double).disable_fake_quant()
-
+            ).to(dtype=torch.double)
+            qat_op.apply(torch.quantization.disable_fake_quant)
             # align inputs and internal parameters
             input = torch.randn(batch_size, input_channels, height, width, dtype=torch.double, requires_grad=True)
             conv_op.weight = torch.nn.Parameter(qat_op.weight.detach())
