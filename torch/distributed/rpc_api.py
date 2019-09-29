@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
 from . import invoke_rpc_builtin, invoke_rpc_python_udf, invoke_remote_builtin
+from . import init_rref_context
 from . import ProcessGroupAgent
 from . import WorkerId
 from .internal_rpc_utils import serialize, PythonUDF
 from .rpc_backend_registry import is_rpc_backend_registered, init_rpc_backend
-from . import init_rref_context
 
+import functools
 import sys
 import torch
 from enum import Enum
@@ -16,6 +17,7 @@ _agent = None
 
 
 def _require_initialized(func):
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         if _agent is None:
             raise RuntimeError("RPC has not been initialized. "
