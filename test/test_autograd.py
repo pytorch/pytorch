@@ -22,7 +22,7 @@ from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, slowTest,
                           load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
-from common_cuda import TEST_CUDA, TEST_CUDNN
+from common_cuda import TEST_CUDA, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
@@ -3832,7 +3832,8 @@ class TestAutogradDeviceType(TestCase):
 
             gradcheck(ctc_after_softmax, [x], nondet_tol=1e-7)
 
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipCUDAIfRocm
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 7000), "needs cudnn >= 7.0")
     def test_ctc_loss_cudnn(self, device):
         batch_size = 16
         input_length = 30
