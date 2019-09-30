@@ -1968,8 +1968,10 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
 
     # Due to shape difference. we need to apply weight and bias after
     # instance norm computation and reshape
-    weight_ = g.op("Constant", value_t=torch.tensor([1.0] * input_sizes[0] * num_groups))
-    bias_ = g.op("Constant", value_t=torch.tensor([0.0] * input_sizes[0] * num_groups))
+    weight_ = g.op("Constant", value_t=torch.tensor([1.] * input_sizes[0] * num_groups).type(
+        'torch.' + input.type().scalarType() + 'Tensor'))
+    bias_ = g.op("Constant", value_t=torch.tensor([0.] * input_sizes[0] * num_groups).type(
+        'torch.' + input.type().scalarType() + 'Tensor'))
 
     norm_reshaped = g.op("InstanceNormalization", input_reshaped, weight_, bias_, epsilon_f=eps)
     norm = g.op('Reshape', norm_reshaped, g.op('Constant', value_t=torch.LongTensor(input_sizes)))
