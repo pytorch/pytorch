@@ -354,7 +354,7 @@ CUDAAssert* CUDAStream::assert_state() const {
     CUDAAssert* new_instance = nullptr;
     C10_CUDA_CHECK(cudaHostAlloc(
         (void**)&new_instance, sizeof(CUDAAssert), cudaHostAllocMapped));
-    memset(&new_instance, 0, sizeof(CUDAAssert)); // clear memory 
+    memset(new_instance, 0, sizeof(CUDAAssert)); // clear memory
     new_instance->mutex = new std::mutex();
 
     if (ptr->assert_state.compare_exchange_strong(assert_state, new_instance)) {
