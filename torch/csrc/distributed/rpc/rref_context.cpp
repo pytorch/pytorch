@@ -119,7 +119,6 @@ std::shared_ptr<OwnerRRef<T>> RRefContext::getOrCreateOwnerRRef(
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
     // Scenario (1) the first time this owner knows about this RRef
-    // Scenario (2) This owner is also the creator.
     //
     // NB: cannot use make_shared here as the constructor of OwnerRRef is
     // private.
@@ -129,7 +128,7 @@ std::shared_ptr<OwnerRRef<T>> RRefContext::getOrCreateOwnerRRef(
     return rref;
 
   } else {
-    // Scenario (3) retrieving an existing RRef
+    // Scenario (2) retrieving an existing RRef
     return std::static_pointer_cast<OwnerRRef<T>>(iter->second);
   }
 }
