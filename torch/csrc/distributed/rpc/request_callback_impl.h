@@ -10,12 +10,12 @@ namespace rpc {
 
 class TORCH_API RequestCallbackImpl : public RequestCallback {
  public:
-  Message processMessage(const Message& request) override;
+  Message processMessage(Message& request) const override;
 
  private:
   std::unique_ptr<RpcCommandBase> processRpc(
       RpcCommandBase& rpc,
-      MessageType messageType);
+      MessageType messageType) const;
 };
 
 } // namespace rpc

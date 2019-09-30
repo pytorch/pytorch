@@ -24,13 +24,13 @@ using namespace torch::distributed::autograd;
 
 std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
     RpcCommandBase& rpc,
-    MessageType messageType) {
+    MessageType messageType) const {
   // TODO: RpcCommandBase should have an abstract execute() method that we can
   // call here instead of having another switch statement here. Even better we
   // could have abstract classes RpcRequest and RpcResp which inherit from
-  // RpBase and RpcRequest declares the abstract method execute() that we can
-  // call here. RpcResponse could have an abstract method to convert it to a
-  // python object.
+  // RpcCommandBase and RpcRequest declares the abstract method execute() that
+  // we can call here. RpcResponse could have an abstract method to convert it
+  // to a python object.
   switch (messageType) {
     case MessageType::SCRIPT_CALL: {
       auto& scriptCall = static_cast<ScriptCall&>(rpc);
@@ -126,7 +126,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
         addSendRpcBackward(
             *autogradContext, responseAutogradMetadata, response->tensors());
       }
-      return response;
+      return std::move(response);
     }
     default: {
       TORCH_INTERNAL_ASSERT(
@@ -135,7 +135,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
   }
 }
 
-Message RequestCallbackImpl::processMessage(const Message& request) {
+Message RequestCallbackImpl::processMessage(Message& request) const {
   std::unique_ptr<RpcCommandBase> rpc = deserializeRequest(request);
   auto response = processRpc(*rpc, request.type());
   if (response == nullptr) {

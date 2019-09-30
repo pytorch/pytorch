@@ -79,6 +79,7 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
     elif is_rpc_backend_registered(backend):
         _agent = init_rpc_backend(
             backend,
+            self_rank=self_rank,
             self_name=self_name,
             init_method=init_method,
         )
