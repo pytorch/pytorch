@@ -403,11 +403,20 @@ class TestONNXRuntime(unittest.TestCase):
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, start, end):
-                return torch.arange(start, end, 1.5, dtype=torch.int)
+                return torch.arange(start, end, 1.5, dtype=torch.int64)
 
         x = torch.tensor(0)
         y = torch.tensor(6.2, dtype=torch.float)
         self.run_test(ArangeModel(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_arange_no_type(self):
+        class ArangeModel(torch.nn.Module):
+            def forward(self, end):
+                return torch.arange(0, end)
+
+        x = torch.tensor(6.2, dtype=torch.float)
+        self.run_test(ArangeModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_size(self):
