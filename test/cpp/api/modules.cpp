@@ -1272,20 +1272,20 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
 }
 
 TEST_F(ModulesTest, PrettyPrintELU) {
-  ASSERT_EQ(c10::str(ELU()), "torch::nn::ELU(alpha=1, inplace=false)");
+  ASSERT_EQ(c10::str(ELU()), "torch::nn::ELU(alpha=1)");
   ASSERT_EQ(c10::str(ELU(ELUOptions().alpha(42.42).inplace(true))),
             "torch::nn::ELU(alpha=42.42, inplace=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintHardshrink) {
-  ASSERT_EQ(c10::str(Hardshrink()), "torch::nn::Hardshrink(lambda=0.5)");
+  ASSERT_EQ(c10::str(Hardshrink()), "torch::nn::Hardshrink(0.5)");
   ASSERT_EQ(c10::str(Hardshrink(HardshrinkOptions().lambda(42.42))),
-            "torch::nn::Hardshrink(lambda=42.42)");
+            "torch::nn::Hardshrink(42.42)");
 }
 
 TEST_F(ModulesTest, PrettyPrintHardtanh) {
   ASSERT_EQ(c10::str(Hardtanh()),
-    "torch::nn::Hardtanh(min_val=-1, max_val=1, inplace=false)");
+    "torch::nn::Hardtanh(min_val=-1, max_val=1)");
   ASSERT_EQ(c10::str(Hardtanh(
       HardtanhOptions().min_val(-42.42).max_val(0.42).inplace(true))),
     "torch::nn::Hardtanh(min_val=-42.42, max_val=0.42, inplace=true)");
