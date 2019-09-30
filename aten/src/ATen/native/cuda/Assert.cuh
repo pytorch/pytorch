@@ -132,7 +132,7 @@ C10_HOST_DEVICE __noinline__ void assert_fail(
 }
 
 // handle case without format string, e.g. C10_KERNEL_ASSERT(false)
-inline C10_HOST_DEVICE void assert_fail(
+static inline C10_HOST_DEVICE void assert_fail(
     CUDAAssert* assert_state,
     bool persistent,
     const char* expression,
@@ -149,17 +149,22 @@ inline C10_HOST_DEVICE void assert_fail(
       "Assertion failed");
 }
 
-inline CUDAAssert* prepare_kernel_assert() {
+static inline CUDAAssert* prepare_kernel_assert() {
   auto current_stream = getCurrentCUDAStream();
-  auto default_stream_state = getDefaultCUDAStream().assert_state();
+  CUDAAssert* default_stream_state =
+      getDefaultCUDAStream(current_stream.device_index()).assert_state();
+
+  AT_ASSERT(default_stream_state);
+
   // write default stream's assert to constant memory
-  cudaMemcpyToSymbolAsync(
+  C10_CUDA_CHECK(cudaMemcpyToSymbolAsync(
       default_stream_assert_state,
       &default_stream_state,
       sizeof(CUDAAssert*),
       0,
       cudaMemcpyHostToDevice,
-      current_stream.stream());
+      current_stream.stream()));
+
   return current_stream.assert_state();
 }
 

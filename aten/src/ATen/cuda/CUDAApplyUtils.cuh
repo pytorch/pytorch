@@ -4,6 +4,7 @@
 #include <ATen/TensorUtils.h>
 #include <THC/THCAtomics.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/cuda/Assert.cuh>
 #include <c10/macros/Macros.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
 
@@ -723,6 +724,7 @@ inline bool CUDA_tensor_apply1(at::Tensor a,
   }                                         \
 }
 
+  C10_PREPARE_KERNEL_ASSERT;
   if (detail::canUse32BitIndexMath(a)) {
     detail::TensorInfo<scalar, unsigned int> aInfo =
       detail::getTensorInfo<scalar, unsigned int>(a);
@@ -865,6 +867,7 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
   }                                         \
 }
 
+  C10_PREPARE_KERNEL_ASSERT;
   if (detail::canUse32BitIndexMath(a) &&
       detail::canUse32BitIndexMath(b)) {
     detail::TensorInfo<scalar1, unsigned int> aInfo =
@@ -1041,6 +1044,7 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
   }                                         \
 }
 
+  C10_PREPARE_KERNEL_ASSERT;
   if (detail::canUse32BitIndexMath(a) &&
       detail::canUse32BitIndexMath(b) &&
       detail::canUse32BitIndexMath(c)) {
@@ -1268,6 +1272,7 @@ inline bool CUDA_tensor_apply4(at::Tensor a,
   }                                             \
 }
 
+  C10_PREPARE_KERNEL_ASSERT;
   if (detail::canUse32BitIndexMath(a) &&
       detail::canUse32BitIndexMath(b) &&
       detail::canUse32BitIndexMath(c) &&

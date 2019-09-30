@@ -371,7 +371,7 @@ CUDAAssert* CUDAStream::assert_state() const {
   return assert_state;
 }
 
-void CUDAStream::check_assert_state() const {
+void CUDAStream::check() const {
   auto ptr = CUDAStream_internals(*this);
   AT_ASSERT(ptr);
   checkStreamAssertState(ptr);

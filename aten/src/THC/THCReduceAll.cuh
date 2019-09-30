@@ -11,6 +11,7 @@
 
 #include <THC/THCReduceApplyUtils.cuh>
 #include <c10/macros/Macros.h>
+#include <ATen/native/cuda/Assert.cuh>
 
 // Size per each reduction block
 #define THC_REDUCE_ALL_BLOCK_SIZE 1024L
@@ -195,6 +196,7 @@ void callReduceAll(THCState* state,
   dim3 grid;
   dim3 block;
 
+  C10_PREPARE_KERNEL_ASSERT;
   if (isTwoPassReductionSize(totalElements)) {
     void* scratchSpace = THCudaMalloc(state, THCState_getCurrentDeviceScratchSpaceSize(state));
 

@@ -159,6 +159,7 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
   char* out_data = (char*)iter.data_ptr(0);
 
   auto stream = at::cuda::getCurrentCUDAStream();
+  C10_PREPARE_KERNEL_ASSERT;
   if (iter.is_trivial_1d()) {
     auto strides = iter.get_inner_strides();
     int stride0 = strides[0];
@@ -273,9 +274,10 @@ void bernoulli_tensor_cuda_kernel(
     std::pair<uint64_t, uint64_t> seeds) {
   // The template argument `4` below indicates that we want to operate on four
   // element at each time. See NOTE [ CUDA_tensor_applyN helpers ] for details.
+  C10_PREPARE_KERNEL_ASSERT;
   at::cuda::CUDA_tensor_apply2<scalar_t, prob_t, 4>(
       ret, p,
-      [seeds] __device__(
+      [=] __device__(
           int n, scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4,
           const prob_t& p1, const prob_t& p2, const prob_t& p3, const prob_t& p4) {
         curandStatePhilox4_32_10_t state;
@@ -288,22 +290,22 @@ void bernoulli_tensor_cuda_kernel(
         float4 rand = curand_uniform4(&state);
         switch (n) {
           case 4: {
-            C10_KERNEL_ASSERT(0 <= p4 && p4 <= 1);
+            C10_KERNEL_ASSERT_RETURN(0 <= p4 && p4 <= 1);
             v4 = static_cast<scalar_t>(rand.w <= p4);
             // fallthrough
           }
           case 3: {
-            C10_KERNEL_ASSERT(0 <= p3 && p3 <= 1);
+            C10_KERNEL_ASSERT_RETURN(0 <= p3 && p3 <= 1);
             v3 = static_cast<scalar_t>(rand.z <= p3);
             // fallthrough
           }
           case 2: {
-            C10_KERNEL_ASSERT(0 <= p2 && p2 <= 1);
+            C10_KERNEL_ASSERT_RETURN(0 <= p2 && p2 <= 1);
             v2 = static_cast<scalar_t>(rand.y <= p2);
             // fallthrough
           }
           case 1: {
-            C10_KERNEL_ASSERT(0 <= p1 && p1 <= 1);
+            C10_KERNEL_ASSERT_RETURN(0 <= p1 && p1 <= 1);
             v1 = static_cast<scalar_t>(rand.x <= p1);
           }
         }

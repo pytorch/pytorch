@@ -109,7 +109,7 @@ public:
     if (err == cudaSuccess) {
       return true;
     } else if (err != cudaErrorNotReady) {
-      check_assert_state();
+      check();
       C10_CUDA_CHECK(err);
     }
 
@@ -119,7 +119,7 @@ public:
   void synchronize() const {
     DeviceGuard guard{stream_.device()};
     cudaError_t err = cudaStreamSynchronize(stream());
-    check_assert_state();
+    check();
     C10_CUDA_CHECK(err);
   }
 
@@ -169,7 +169,7 @@ public:
   }
 
   CUDAAssert* assert_state() const;
-  void check_assert_state() const;
+  void check() const;
 
   // Deleted for now; use CUDAEvent::block instead
   // void synchronize_with(const CUDAEvent& event) const;

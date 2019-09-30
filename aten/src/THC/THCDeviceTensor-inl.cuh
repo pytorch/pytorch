@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <ATen/native/cuda/Assert.cuh>
 
 namespace detail {
 
@@ -184,8 +185,8 @@ THCDeviceTensor<T, Dim, IndexT, PtrTraits>::transpose(int dim1,
                                                       int dim2) const {
 #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
   // Device code
-  assert(dim1 >= 0 && dim1 < Dim);
-  assert(dim1 >= 0 && dim2 < Dim);
+  C10_KERNEL_ASSERT(dim1 >= 0 && dim1 < Dim, "dim1 out of bounds");
+  C10_KERNEL_ASSERT(dim2 >= 0 && dim2 < Dim, "dim2 out of bounds");
 #else
   // Host code
   if (dim1 < 0 || dim1 >= Dim) {
@@ -287,7 +288,7 @@ THCDeviceTensor<T, Dim, IndexT, PtrTraits>::downcastOuter() {
   bool cont = isContiguousRange(0, Dim - NewDim);
 #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
   // Device code
-  assert(cont);
+  C10_KERNEL_ASSERT(cont, "Can only downcast contiguous tensors");
 #else
   // Host code
   if (!cont) {
@@ -338,7 +339,7 @@ THCDeviceTensor<T, Dim, IndexT, PtrTraits>::downcastInner() {
   bool cont = isContiguousRange(NewDim, Dim);
 #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
   // Device code
-  assert(cont);
+  C10_KERNEL_ASSERT(cont, "Can only downcast contiguous tensors");
 #else
   // Host code
   if (!cont) {
@@ -405,7 +406,7 @@ template <typename T, int Dim,
 void
 THCDeviceTensor<T, Dim, IndexT, PtrTraits>::zero(cudaStream_t stream) {
 #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
-  assert(isContiguous());
+  C10_KERNEL_ASSERT(isContiguous(), "fillAsync only works on contiguous data");
 #else
   if (!isContiguous()) {
     THError("fillAsync only works on contiguous data");
