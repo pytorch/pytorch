@@ -12721,7 +12721,7 @@ class TestTorchDeviceType(TestCase):
     def test_memory_format_clone(self, device):
         nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
         # nhwc is not memory dense, but looks like channels last
-        nhwc = nhwc[:,:,::2,::2]
+        nhwc = nhwc[:, :, ::2, ::2]
         clone = nhwc.clone(memory_format=torch.preserve_format)
         self.assertFalse(clone.is_contiguous())
         self.assertTrue(clone.is_contiguous(memory_format=torch.channels_last))
@@ -12747,7 +12747,6 @@ class TestTorchDeviceType(TestCase):
             random.shuffle(permutation)
             x = x.permute(permutation)
             self.assertEqual(x.stride(), x.clone(memory_format=torch.preserve_format).stride())
-
 
     def test_unique(self, device):
         x = torch.tensor([1, 2, 3, 2, 8, 5, 2, 3], device=device)
