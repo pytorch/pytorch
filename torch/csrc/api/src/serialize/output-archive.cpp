@@ -18,6 +18,10 @@ OutputArchive::OutputArchive(std::shared_ptr<jit::script::CompilationUnit> cu)
     : cu_(std::move(cu)),
       module_("__torch__.Module", cu_, /*shouldMangle=*/true) {}
 
+void OutputArchive::write(const std::string& key, const c10::IValue& ivalue) {
+  module_.register_attribute(key, ivalue.type(), ivalue);
+}
+
 void OutputArchive::write(
     const std::string& key,
     const Tensor& tensor,

@@ -243,7 +243,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     return ScriptModule(_cpp_module=cpp_module)
 
 
-def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_inputs=False):
+def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
+                    return_inputs=False, _return_inputs_states=False):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value. If return_inputs,
@@ -271,7 +272,7 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_input
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return LegacyTracedModule(f, _force_outplace, return_inputs)(*args, **kwargs)
+    return LegacyTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -314,7 +315,7 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
 
 
 class LegacyTracedModule(Module):
-    def __init__(self, inner, force_outplace=False, return_inputs=False):
+    def __init__(self, inner, force_outplace=False, return_inputs=False, return_inputs_states=False):
         super(LegacyTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
@@ -322,6 +323,7 @@ class LegacyTracedModule(Module):
         self.inner = inner
         self._force_outplace = force_outplace
         self._return_inputs = return_inputs
+        self._return_inputs_states = return_inputs_states
 
     def forward(self, *args):
         in_vars, in_desc = _flatten(args)
@@ -338,7 +340,18 @@ class LegacyTracedModule(Module):
         torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
         try:
             trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
+            # inputs_states is a tuple of len == 2 that keeps track of
+            # the inputs before (inputs_states[0]) and after (inputs_states[1])
+            # the trace to verify if they were modified during the trace
+            if self._return_inputs_states:
+                # executing a deepcopy on trace_inputs will fail
+                # for tensors not explicitly created by the user.
+                # generating trace_inputs again by calling _unflatten
+                # for now.
+                inputs_states = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
             out = self.inner(*trace_inputs)
+            if self._return_inputs_states:
+                inputs_states = (inputs_states, trace_inputs)
             out_vars, _ = _flatten(out)
             torch._C._tracer_exit(tuple(out_vars))
         except Exception:
@@ -346,6 +359,8 @@ class LegacyTracedModule(Module):
             raise
         if self._return_inputs:
             return trace, out, ret_inputs
+        if self._return_inputs_states:
+            return trace, out, inputs_states
         else:
             return trace, out
 

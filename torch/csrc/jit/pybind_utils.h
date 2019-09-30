@@ -337,7 +337,8 @@ template <class T>
 inline void guardAgainstNamedTensor(const T& var) {
 #ifdef BUILD_NAMEDTENSOR
   TORCH_CHECK(!var.has_names(),
-      "NYI: Named tensors are currently unsupported in TorchScript.");
+      "NYI: Named tensors are currently unsupported in TorchScript. As a  "
+      "workaround please drop names via `tensor = tensor.rename(None)`.");
 #endif
 }
 
@@ -492,12 +493,15 @@ inline IValue toIValue(
             "a TorchScript compatible type, did you forget to",
             "turn it into a user defined TorchScript class?"));
       }
-      if (!classType->isSubtypeOf(interfaceType)) {
+      std::stringstream why_not;
+      if (!classType->isSubtypeOfExt(interfaceType, &why_not)) {
         throw py::cast_error(c10::str(
             "Object ",
             py::str(obj),
             " is not compatible with interface ",
-            interfaceType->python_str()));
+            interfaceType->python_str(),
+            "\n",
+            why_not.str()));
       }
       return toIValue(std::move(obj), classType);
     }
