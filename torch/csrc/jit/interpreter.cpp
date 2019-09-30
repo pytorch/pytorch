@@ -860,6 +860,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             af.operators[inst.X](stack);
             ++af.pc;
             break;
+          case OPN:
+            AT_ERROR("OPN is currently supported in mobile mode only.");
+            break;
           case LOAD:
             stack.emplace_back(reg(inst.X));
             ++af.pc;
