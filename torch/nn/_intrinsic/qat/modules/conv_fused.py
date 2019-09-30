@@ -79,14 +79,12 @@ class ConvBn2d(nn.Conv2d):
         if hasattr(self, 'gamma'):
             self.reset_bn_parameters()
 
-    def enable_fake_quant(self):
-        self.observer.enable()
-        self.weight_fake_quant.enable()
+    def update_bn_stats(self):
+        self.freeze_bn = False
         return self
 
-    def disable_fake_quant(self):
-        self.observer.disable()
-        self.weight_fake_quant.disable()
+    def freeze_bn_stats(self):
+        self.freeze_bn = True
         return self
 
     def _forward(self, input):
@@ -247,7 +245,7 @@ class ConvReLU2d(nnqat.Conv2d):
         super(ConvReLU2d, self).__init__(in_channels, out_channels, kernel_size,
                                          stride=stride, padding=padding, dilation=dilation,
                                          groups=groups, bias=bias, padding_mode=padding_mode,
-                                         qconfig = qconfig)
+                                         qconfig=qconfig)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.observer = self.qconfig.activation()
@@ -260,3 +258,11 @@ class ConvReLU2d(nnqat.Conv2d):
     @classmethod
     def from_float(cls, mod, qconfig=None):
         return super(ConvReLU2d, cls).from_float(mod, qconfig)
+
+def update_bn_stats(mod):
+    if type(mod) in set([ConvBnReLU2d, ConvBn2d]):
+        mod.update_bn_stats()
+
+def freeze_bn_stats(mod):
+    if type(mod) in set([ConvBnReLU2d, ConvBn2d]):
+        mod.freeze_bn_stats()

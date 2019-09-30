@@ -532,6 +532,10 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     }
   }
 
+  virtual std::string debug_info_string() const {
+    return "";
+  }
+
   inline const OperatorDef& debug_def() const {
     CAFFE_ENFORCE(has_debug_def(), "operator_def was null!");
     return *operator_def_;

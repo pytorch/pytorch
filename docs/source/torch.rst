@@ -331,7 +331,6 @@ BLAS and LAPACK Operations
 .. autofunction:: cholesky_solve
 .. autofunction:: dot
 .. autofunction:: eig
-.. autofunction:: gels
 .. autofunction:: geqrf
 .. autofunction:: ger
 .. autofunction:: inverse
@@ -360,3 +359,6 @@ BLAS and LAPACK Operations
 Utilities
 ----------------------------------
 .. autofunction:: compiled_with_cxx11_abi
+.. autofunction:: result_type
+.. autofunction:: can_cast
+.. autofunction:: promote_types

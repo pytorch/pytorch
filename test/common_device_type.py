@@ -10,13 +10,40 @@ from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
 # [WRITING TESTS]
 #
 # Write your test class as usual except:
-#   (1) Only define test methods in the test class itself. Helper methods
-#       and non-methods must be inherited. This limitation is for Python2
-#       compatibility.
-#   (2) Each test method should have the signature
-#           testX(self, device)
-#       The device argument will be a string like 'cpu' or 'cuda.'
-#   (3) Prefer using test decorators defined in this file to others.
+#   (1) Each test method should have one of four signatures:
+#
+#           (1a) testX(self, device)
+#
+#           (1b) @deviceCountAtLeast(<minimum number of devices to run test with>)
+#                testX(self, devices)
+#
+#           (1c) @dtypes(<list of dtypes>)
+#                testX(self, device, dtype)
+#
+#           (1d) @deviceCountAtLeast(<minimum number of devices to run test with>)
+#                @dtypes(<list of dtypes>)
+#                testX(self, devices, dtype)
+#
+#
+#       Note that the decorators are required for signatures (1b), (1c) and
+#       (1d).
+#
+#       When a test like (1a) is called it will be given a device string,
+#       like 'cpu' or 'cuda:0.'
+#
+#       Tests like (1b) are called with a list of device strings, like
+#       ['cuda:0', 'cuda:1']. The first device string will be the
+#       primary device. These tests will be skipped if the device type
+#       has fewer available devices than the argument to @deviceCountAtLeast.
+#
+#       Tests like (1c) are called with a device string and a torch.dtype from
+#       the list of dtypes specified in the @dtypes decorator. Device-specific
+#       dtype overrides can be specified using @dtypesIfCPU and @dtypesIfCUDA.
+#
+#       Tests like (1d) take a devices argument like (1b) and a dtype
+#       argument from (1c).
+#
+#   (2) Prefer using test decorators defined in this file to others.
 #       For example, using the @skipIfNoLapack decorator instead of the
 #       @skipCPUIfNoLapack will cause the test to not run on CUDA if
 #       LAPACK is not available, which is wrong. If you need to use a decorator
@@ -29,12 +56,20 @@ from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
 # After defining your test class call instantiate_device_type_tests on it
 # and pass in globals() for the second argument. This will instantiate
 # discoverable device-specific test classes from your generic class. It will
-# also hide the tests in your generic class so they're not run directly.
+# also hide the tests in your generic class so they're not run.
 #
-# For each generic testX, a new test textX_<device_type>  will be created.
-# These tests will be put in classes named GenericTestClassName<DEVICE_TYPE>.
-# For example, test_diagonal in TestTorchDeviceType becomes test_diagonal_cpu
-# in TestTorchDeviceTypeCPU and test_diagonal_cuda in TestTorchDeviceTypeCUDA.
+# If you device-generic test class is TestClass then new classes with names
+# TestClass<DEVICE_TYPE> will be created for each available device type.
+# TestClassCPU and TestClassCUDA, for example. Tests in these classes also
+# have the device type and dtype, if provided, appended to their original
+# name. testX, for instance, becomes testX_<device_type> or
+# testX_<device_type>_<dtype>.
+#
+# More concretely, TestTorchDeviceType becomes TestTorchDeviceTypeCPU,
+# TestTorchDeviceTypeCUDA, ... test_diagonal in TestTorchDeviceType becomes
+# test_diagonal_cpu, test_diagonal_cuda, ... test_erfinv, which accepts a dtype,
+# becomes test_erfinv_cpu_float, test_erfinv_cpu_double, test_erfinv_cuda_half,
+# ...
 #
 # In short, if you write a test signature like
 #   def textX(self, device)
@@ -47,13 +82,18 @@ from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
 # These tests can be run directly like normal tests:
 # "python test_torch.py TestTorchDeviceTypeCPU.test_diagonal_cpu"
 #
-# Collections of tests can be run using pytest filtering. For example,
+# All the tests for a particular device type can be run using the class, and
+# other collections of tests can be run using pytest filtering, like
+#
 # "pytest test_torch.py -k 'test_diag'"
-# will run test_diag on every available device.
+#
+# which will run test_diag on every available device.
+#
 # To specify particular device types the 'and' keyword can be used:
-# "pytest test_torch.py -k 'test_diag and cpu'"
-# pytest filtering also makes it easy to run all tests on a particular device
-# type.
+#
+# "pytest test_torch.py -k 'test_erfinv and cpu'"
+#
+# will run test_erfinv on all cpu dtypes.
 #
 # [ADDING A DEVICE TYPE]
 #
@@ -81,36 +121,92 @@ device_type_test_bases = []
 
 
 class DeviceTypeTestBase(TestCase):
-    device_type = "generic_device_type"
+    device_type = 'generic_device_type'
+
+    # Returns a string representing the device that single device tests should use.
+    # Note: single device tests use this device exclusively.
+    @classmethod
+    def get_primary_device(cls):
+        return cls.device_type
+
+    # Returns a list of strings representing all available devices of this
+    # device type. The primary device must be the first string in the list
+    # and the list must contain no duplicates.
+    # Note: UNSTABLE API. Will be replaced once PyTorch has a device generic
+    #   mechanism of acquiring all available devices.
+    @classmethod
+    def get_all_devices(cls):
+        return [cls.get_primary_device()]
+
+    # Returns the dtypes the test has requested.
+    # Prefers device-specific dtype specifications over generic ones.
+    @classmethod
+    def _get_dtypes(cls, test):
+        if not hasattr(test, 'dtypes'):
+            return None
+        return test.dtypes.get(cls.device_type, test.dtypes.get('all', None))
 
     # Creates device-specific tests.
     @classmethod
     def instantiate_test(cls, test):
         test_name = test.__name__ + "_" + cls.device_type
 
-        assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
+        dtypes = cls._get_dtypes(test)
+        if dtypes is None:  # Test has no dtype variants
+            assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
 
-        @wraps(test)
-        def instantiated_test(self, test=test):
-            return test(self, cls.device_type)
+            @wraps(test)
+            def instantiated_test(self, test=test):
+                device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
+                return test(self, device_arg)
 
-        setattr(cls, test_name, instantiated_test)
+            setattr(cls, test_name, instantiated_test)
+        else:  # Test has dtype variants
+            for dtype in dtypes:
+                dtype_str = str(dtype).split('.')[1]
+                dtype_test_name = test_name + "_" + dtype_str
+                assert not hasattr(cls, dtype_test_name), "Redefinition of test {0}".format(dtype_test_name)
+
+                @wraps(test)
+                def instantiated_test(self, test=test, dtype=dtype):
+                    device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
+                    return test(self, device_arg, dtype)
+
+                setattr(cls, dtype_test_name, instantiated_test)
 
 
 class CPUTestBase(DeviceTypeTestBase):
-    device_type = "cpu"
+    device_type = 'cpu'
 
 
 class CUDATestBase(DeviceTypeTestBase):
-    device_type = "cuda"
+    device_type = 'cuda'
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+
+    @classmethod
+    def get_primary_device(cls):
+        return cls.primary_device
+
+    @classmethod
+    def get_all_devices(cls):
+        primary_device_idx = int(cls.get_primary_device().split(':')[1])
+        num_devices = torch.cuda.device_count()
+
+        devices = [cls.get_primary_device()]
+        cuda_str = 'cuda:{0}'
+        non_primary_devices = [cuda_str.format(idx) for idx in range(num_devices) if idx != primary_device_idx]
+        devices.extend(non_primary_devices)
+        return devices
 
     @classmethod
     def setUpClass(cls):
         # has_magma shows up after cuda is initialized
         torch.ones(1).cuda()
         cls.no_magma = not torch.cuda.has_magma
+
+        # Acquires the current device as the primary (test) device
+        cls.primary_device = 'cuda:{0}'.format(torch.cuda.current_device())
 
 
 # Adds available device-type-specific test base classes
@@ -141,26 +237,32 @@ def instantiate_device_type_tests(generic_test_class, scope):
     generic_members = set(dir(generic_test_class)) - set(dir(empty_class))
     generic_tests = [x for x in generic_members if x.startswith('test')]
 
-    # Checks that the generic test suite only has test members
-    # Note: for Python2 compat.
-    # Note: Nontest members can be inherited, so if you want to use a helper
-    #   function you can put it in a base class.
-    generic_nontests = generic_members - set(generic_tests)
-    assert len(generic_nontests) == 0, "Generic device class has non-test members"
-
+    # Creates device-specific test cases
     for base in device_type_test_bases:
-        # Creates the device-specific test case
         class_name = generic_test_class.__name__ + base.device_type.upper()
         device_type_test_class = type(class_name, (base, empty_class), {})
 
-        for name in generic_tests:
-            # Attempts to acquire a function from the attribute
-            test = getattr(generic_test_class, name)
-            if hasattr(test, '__func__'):
-                test = test.__func__
-            assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
-            # Instantiates the device-specific tests
-            device_type_test_class.instantiate_test(test)
+        for name in generic_members:
+            if name in generic_tests:  # Instantiates test member
+
+                # Requires tests be a function for Python2 compat
+                # (In Python2 tests are type checked methods wrapping functions)
+                test = getattr(generic_test_class, name)
+                if hasattr(test, '__func__'):
+                    test = test.__func__
+                assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
+
+                # Instantiates the device-specific tests
+                device_type_test_class.instantiate_test(test)
+            else:  # Ports non-test member
+                assert not hasattr(device_type_test_class, name), "Redefinition of non-test member {0}".format(name)
+
+                # Unwraps to functions (when available) for Python2 compat
+                nontest = getattr(generic_test_class, name)
+                if hasattr(nontest, '__func__'):
+                    nontest = nontest.__func__
+
+                setattr(device_type_test_class, name, nontest)
 
         # Mimics defining the instantiated class in the caller's file
         # by setting its module to the given class's and adding
@@ -227,6 +329,68 @@ class onlyOn(object):
             return fn(slf, device, *args, **kwargs)
 
         return only_fn
+
+
+# Decorator that provides all available devices of the device type to the test
+# as a list of strings instead of providing a single device string.
+# Skips the test if the number of available devices of the variant's device
+# type is less than the 'num_required_devices' arg.
+class deviceCountAtLeast(object):
+
+    def __init__(self, num_required_devices):
+        self.num_required_devices = num_required_devices
+
+    def __call__(self, fn):
+        assert not hasattr(fn, 'num_required_devices'), "deviceCountAtLeast redefinition for {0}".format(fn.__name__)
+        fn.num_required_devices = self.num_required_devices
+
+        @wraps(fn)
+        def multi_fn(slf, devices, *args, **kwargs):
+            if len(devices) < self.num_required_devices:
+                reason = "fewer than {0} devices detected".format(self.num_required_devices)
+                raise unittest.SkipTest(reason)
+
+            return fn(slf, devices, *args, **kwargs)
+
+        return multi_fn
+
+
+# Decorator that instantiates a variant of the test for each given dtype.
+# Notes:
+#   (1) Tests that accept the dtype argument MUST use this decorator.
+#   (2) Can be overriden for the CPU or CUDA, respectively, using dtypesIfCPU
+#       or dtypesIfCUDA.
+#   (3) Prefer the existing decorators to defining the 'device_type' kwarg.
+class dtypes(object):
+
+    # Note: *args, **kwargs for Python2 compat.
+    # Python 3 allows (self, *args, device_type='all').
+    def __init__(self, *args, **kwargs):
+        assert args is not None and len(args) != 0, "No dtypes given"
+        assert all(isinstance(arg, torch.dtype) for arg in args), "Unknown dtype in {0}".format(str(args))
+        self.args = args
+        self.device_type = kwargs.get('device_type', 'all')
+
+    def __call__(self, fn):
+        d = getattr(fn, 'dtypes', {})
+        assert self.device_type not in d, "dtypes redefinition for {0}".format(self.device_type)
+        d[self.device_type] = self.args
+        fn.dtypes = d
+        return fn
+
+
+# Overrides specified dtypes on the CPU.
+class dtypesIfCPU(dtypes):
+
+    def __init__(self, *args):
+        super(dtypesIfCPU, self).__init__(*args, device_type='cpu')
+
+
+# Overrides specified dtypes on CUDA.
+class dtypesIfCUDA(dtypes):
+
+    def __init__(self, *args):
+        super(dtypesIfCUDA, self).__init__(*args, device_type='cuda')
 
 
 def onlyCPU(fn):

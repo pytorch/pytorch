@@ -2123,13 +2123,13 @@ class TestCuda(TestCase):
     def test_sum_cpu_gpu_mismatch(self):
         x = torch.randn(20, dtype=torch.float32, device='cuda:0')
         y = torch.randn(1, dtype=torch.float32)
-        with self.assertRaisesRegex(RuntimeError,
-                                    'expected device cpu but got device cuda:0'):
+        with self.assertRaisesRegex(RuntimeError, "output with device cpu "
+                                    "doesn't match the desired device cuda:0"):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
         # makeing sure half to float promotion is also properly working.
         x = x.half()
-        with self.assertRaisesRegex(RuntimeError,
-                                    'expected dtype Float but got dtype Half'):
+        with self.assertRaisesRegex(RuntimeError, "output with device cpu "
+                                    "doesn't match the desired device cuda:0"):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
 
     @skipIfRocm
@@ -2245,11 +2245,6 @@ class TestCuda(TestCase):
                         with torch.cuda.device(0):
                             self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
                         self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
-
-    # passes on ROCm w/ python 2.7, fails w/ python 3.6
-    @skipIfRocm
-    def test_stft(self):
-        _TestTorchMixin._test_stft(self, device=torch.device('cuda'))
 
     def test_multinomial(self):
         _TestTorchMixin._test_multinomial(self, torch.cuda.FloatTensor)
@@ -2380,11 +2375,6 @@ class TestCuda(TestCase):
         res = src[idx]
         res_cpu = src.cpu()[idx.cpu()]
         self.assertEqual(res.cpu(), res_cpu)
-
-    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_lu(self):
-        _TestTorchMixin._test_lu(self, lambda t: t.cuda(), pivot=False)
-        _TestTorchMixin._test_lu(self, lambda t: t.cuda(), pivot=True)
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lu_solve(self):
