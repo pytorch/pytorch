@@ -400,6 +400,10 @@ struct CodeImpl {
     return instructions_;
   }
 
+  const std::vector<Node*>& instructions_source() const {
+    return instructions_source_;
+  }
+
   const std::vector<c10::OperatorName>& opname_table() const {
     return opname_table_;
   }
@@ -848,8 +852,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-        // std::cout << "RUNNING ";
-        // frames.back().function->dump(std::cout, af.pc);
+//         std::cout << "RUNNING ";
+//         frames.back().function->dump(std::cout, af.pc);
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:
@@ -1130,6 +1134,10 @@ const std::vector<c10::IValue>& Code::constant_table() const {
 
 const std::vector<Instruction>& Code::instructions() const {
   return pImpl->instructions();
+}
+
+const std::vector<Node*>& Code::instructions_source() const {
+  return pImpl->instructions_source();
 }
 
 const std::vector<c10::OperatorName>& Code::opname_table() const {

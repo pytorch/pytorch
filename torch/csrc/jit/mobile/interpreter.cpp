@@ -10,10 +10,16 @@ InterpreterState::InterpreterState(std::shared_ptr<Code> code) : code_(code) {
   registers_.resize(code_->register_size_);
 }
 
-//InterpreterState::InterpreterState(Function* function)
-//    : function_(function) {
-//  registers_.resize(function->register_size());
-//}
+namespace {
+template <typename dtype> // int64_t, bool, double
+void listConstruct(Stack& stack, int num_inputs) {
+  auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
+  c10::List<dtype> vals =
+      c10::impl::toList(fmap(inputs, [](const IValue& v) { return v.to<dtype>(); }));
+  drop(stack, num_inputs);
+  push(stack, std::move(vals));
+}
+}
 
 bool InterpreterState::run(Stack& stack) {
   size_t pc = 0;
@@ -28,11 +34,33 @@ bool InterpreterState::run(Stack& stack) {
     //      }
     //    }
     Instruction inst = code_->instructions_[pc];
-    TORCH_CHECK(isOpSupportedInMobile(inst.op), toString(inst.op),
-                " is not supported in mobile module.");
     switch (inst.op) {
       case OP: {
         c10::Dispatcher::singleton().callBoxed(*code_->operators_[inst.X], &stack);
+        ++pc;
+      } break;
+      case OPN: {
+        auto opname = code_->op_names_[inst.X];
+        if (opname.name == "prim::ListConstruct") {
+          if (opname.overload_name == "int") {
+            listConstruct<int64_t>(stack, inst.N);
+          } else if (opname.overload_name == "float") {
+            listConstruct<double>(stack, inst.N);
+          } else if (opname.overload_name == "bool") {
+            listConstruct<bool>(stack, inst.N);
+          } else if (opname.overload_name == "tensor") {
+            const size_t stack_size = stack.size();
+            c10::List<at::Tensor> vals;
+            vals.reserve(inst.N);
+            for (size_t i = stack_size - inst.N; i < stack_size; ++i) {
+              vals.emplace_back(std::move(stack[i]).toTensor());
+            }
+            drop(stack, inst.N);
+            push(stack, std::move(vals));
+          } else {
+            AT_ERROR("Type of ListConstruct is not supported.");
+          }
+        }
         ++pc;
       } break;
       case LOAD:

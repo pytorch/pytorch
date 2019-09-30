@@ -19,6 +19,7 @@ namespace jit {
 
 #define FORALL_OPCODES(_)                                                   \
   _(OP, "O") /* invoke operator X */                                        \
+  _(OPN, "OI") /* invoke operator X and an interger value N */              \
   _(LOAD, "R") /* push a value from a register X */                         \
   _(MOVE, "R") /* push a value from register X, clearing the register */    \
   _(STOREN, "RI") /* store N values to registers [X, X+N) */                \
