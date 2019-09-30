@@ -157,7 +157,9 @@ static_assert(
 // messages are processed by the owner before all messages from Y, including the
 // delete message. Nevertheless, this does not cause any problem. Because, at
 // least one of Y's ancestor will be alive, and it will prevent the owner from
-// deleting the OwnerRRef. Consider the following example:
+// deleting the OwnerRRef. Consider the following example: (NB: this scenario
+// will no longer relevant when we block UDF until all RRefs are confirmed by
+// the owner)
 //
 //     OwnerRRef -> A -> Y -> Z
 //

@@ -144,6 +144,16 @@ template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
 RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
   auto rfd = rref->fork();
   if (rref->isOwner()) {
+    // Note [Early Fork Registration]
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // If the parent (caller) is the owner, directly register the fork, instead
+    // of waiting for another RREF_FORK_REQUEST or RREF_CHILD_ACCEPT message. An
+    // Alternative is adding the fork when the callee user ACKs. However, before
+    // that, the owner still have to adds the OwnerRRef into some map to keep it
+    // alive (e.g., in pendingChildren_). Hence, adding the fork here or in the
+    // ACK does not making any difference but only add complexity.
+    // TODO: When adding failure retries and timeout, this fork needs to be
+    // deleted if the owner does not receive the ACK within the timeout.
     addForkOfOwner(rfd.rrefId_, rfd.forkId_);
   } else {
     if (rref->isPyObj()) {
@@ -161,22 +171,29 @@ void RRefContext::notifyOwnerAndParentOfFork(
     const ForkId& forkId,
     worker_id_t parent,
     const std::shared_ptr<RRef>& rref) {
-  if (parent != rref->owner()) {
-    if (rref->isOwner()) {
-      auto fm = agent_->send(
-          agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
-      fm->addCallback([](const Message& message) { handleException(message); });
-    } else {
-      auto fm = agent_->send(
-          agent_->getWorkerInfo(rref->owner()),
-          RRefForkRequest(rref->rrefId(), forkId).toMessage());
-
-      fm->addCallback([this, forkId, parent](const Message& message) {
-        handleException(message);
-        this->finishForkRequest(forkId, parent);
-      });
-    }
+  if (parent == rref->owner()) {
+    // If the parent is the owner, this fork has already been added into the
+    // forks_ map when the owner sends the message to the callee user. Hence,
+    // it is not necessary to send another RREF_CHILD_ACCEPT or
+    // RREF_FORK_REQUEST back to the owner. See Note [Early Fork Registration].
+    return;
   }
+
+  if (rref->isOwner()) {
+    auto fm = agent_->send(
+        agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
+    fm->addCallback([](const Message& message) { handleException(message); });
+  } else {
+    auto fm = agent_->send(
+        agent_->getWorkerInfo(rref->owner()),
+        RRefForkRequest(rref->rrefId(), forkId).toMessage());
+
+    fm->addCallback([this, forkId, parent](const Message& message) {
+      handleException(message);
+      this->finishForkRequest(forkId, parent);
+    });
+  }
+
 }
 
 template <typename T>

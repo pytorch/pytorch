@@ -10,13 +10,16 @@ namespace rpc {
 
 namespace {
 
-constexpr int RFD_TUPLE_SIZE = 6; // number of RRefForkData fields in py::tuple
 constexpr int OWNER_IDX = 0; // index of ownerId in the tuple
 constexpr int RREFID_ON_IDX = 1; // index of RRefId.createdOn_ in the tuple
 constexpr int RREFID_ID_IDX = 2; // index of RRefId.localId_ in the tuple
 constexpr int FORKID_ON_IDX = 3; // index of ForkId.createdOn_ in the tuple
 constexpr int FORKID_ID_IDX = 4; // index of ForkId.localId_ in the tuple
 constexpr int PARENT_IDX = 5; // index of parent in the tuple
+
+// NB: if more fields are added, make sure this field is also bumped
+constexpr int RFD_TUPLE_SIZE = 6; // number of RRefForkData fields in py::tuple
+
 
 } // namespace
 

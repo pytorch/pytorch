@@ -45,14 +45,6 @@ Message processRequestBlocking(Message&& request) {
                    PythonRpcHandler::getInstance().serialize(rref->getValue()))
             .toMessage();
       }
-      /*
-      case MessageType::RREF_USER_ACCEPT: {
-        RRefUserAccept rua = RRefUserAccept::fromMessage(request);
-        auto& ctx = RRefContext::getInstance();
-        ctx->delPendingUser(rua.forkId());
-        return Message({}, {}, MessageType::ACK);
-      }
-      */
       case MessageType::RREF_USER_DELETE: {
         RRefUserDelete rud = RRefUserDelete::fromMessage(request);
         auto& ctx = RRefContext::getInstance();
