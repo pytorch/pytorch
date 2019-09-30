@@ -1156,61 +1156,48 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         return (%r_dequant)""",
             # addmm -> quantized::linear
             """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::dequantize
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        # CHECK: aten::t
-        # CHECK: quantized::linear_prepack
+        %w_dequant_t = aten::t(%w_dequant)
         # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
-        %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
-        # CHECK-NOT: aten::quantize_per_tensor
+        %r = aten::addmm(%b, %a_dequant, %w_dequant_t, %4, %4)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # matmul(with bias) -> quantized::linear
             """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::dequantize
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        # CHECK: aten::t
-        # CHECK: quantized::linear_prepack
+        %w_dequant_t = aten::t(%w_dequant)
         # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
-        %output = aten::matmul(%a_dequant, %w_dequant)
+        %output = aten::matmul(%a_dequant, %w_dequant_t)
         %r = aten::add_(%output, %b, %4)
-        # CHECK-NOT: aten::quantize_per_tensor
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # matmul(without bias) -> quantized::linear
             """
-graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::dequantize
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        # CHECK: aten::t
-        # CHECK: prim::Constant()
-        # CHECK: quantized::linear_prepack
+        %w_dequant_t = aten::t(%w_dequant)
         # CHECK: quantized::linear
         # CHECK-NOT: aten::matmul
-        %r = aten::matmul(%a_dequant, %w_dequant)
-        # CHECK-NOT: aten::quantize_per_tensor
+        %r = aten::matmul(%a_dequant, %w_dequant_t)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)"""
         ]

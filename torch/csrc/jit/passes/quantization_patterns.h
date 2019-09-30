@@ -29,49 +29,50 @@ graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %stride, %paddi
         return (%r_perm))";
 
   std::string addmm = R"(
-graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_dequant = aten::dequantize(%a_quant)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
+        %w_dequant_t = aten::t(%w_dequant)
+        %r = aten::addmm(%b, %a_dequant, %w_dequant_t, %4, %4)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))";
 
   std::string matmul_with_bias = R"(
-graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_dequant = aten::dequantize(%a_quant)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        %output = aten::matmul(%a_dequant, %w_dequant)
+        %w_dequant_t = aten::t(%w_dequant)
+        %output = aten::matmul(%a_dequant, %w_dequant_t)
         %r = aten::add_(%output, %b, %4)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))";
 
-  std::string quantized_linear_with_bias = R"(
-graph(%a_quant, %w_quant, %b, %r_scale, %r_zero_point, %r_dtype, %4):
-        %w_quant_t = aten::t(%w_quant)
-        %packed_params = quantized::linear_prepack(%w_quant_t, %b)
+  std::string quantized_linear = R"(
+graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype, %4):
         %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r))";
 
   std::string matmul_no_bias = R"(
-graph(%a_quant, %w_quant, %r_scale, %r_zero_point, %r_dtype):
+graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype):
         %a_dequant = aten::dequantize(%a_quant)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        %r = aten::matmul(%a_dequant, %w_dequant)
+        %w_dequant_t = aten::t(%w_dequant)
+        %r = aten::matmul(%a_dequant, %w_dequant_t)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant))";
 
   std::string quantized_linear_no_bias = R"(
-graph(%a_quant, %w_quant, %r_scale, %r_zero_point, %r_dtype):
-        %w_quant_t = aten::t(%w_quant)
-        %bias: Tensor? = prim::Constant()
-        %packed_params = quantized::linear_prepack(%w_quant_t, %bias)
+graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype):
         %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r))";
 
   return {
     {conv2d, quantized_conv2d},
-    {addmm, quantized_linear_with_bias},
-    {matmul_with_bias, quantized_linear_with_bias},
+    {addmm, quantized_linear},
+    {matmul_with_bias, quantized_linear},
     {matmul_no_bias, quantized_linear_no_bias}
   };
 
