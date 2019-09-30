@@ -227,6 +227,10 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.result_type(torch.tensor([1., 1.], dtype=torch.float), 1.), torch.float)
         self.assertEqual(torch.result_type(torch.tensor(1., dtype=torch.float), torch.tensor(1, dtype=torch.double)), torch.double)
 
+    def test_can_cast(self):
+        self.assertTrue(torch.can_cast(torch.double, torch.float))
+        self.assertFalse(torch.can_cast(torch.float, torch.int))
+
     def test_comparison_ops_with_type_promotion(self):
         value_for_type = {
             torch.uint8: (1 << 5),
@@ -244,6 +248,36 @@ class TestTypePromotion(TestCase):
                 out_op=lambda x, y, d: torch.lt(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.lt(x, y),
                 compare_op=lambda x, y: x < y,
+            ),
+            dict(
+                name="le",
+                out_op=lambda x, y, d: torch.le(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                ret_op=lambda x, y: torch.le(x, y),
+                compare_op=lambda x, y: x <= y,
+            ),
+            dict(
+                name="gt",
+                out_op=lambda x, y, d: torch.gt(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                ret_op=lambda x, y: torch.gt(x, y),
+                compare_op=lambda x, y: x > y,
+            ),
+            dict(
+                name="ge",
+                out_op=lambda x, y, d: torch.ge(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                ret_op=lambda x, y: torch.ge(x, y),
+                compare_op=lambda x, y: x >= y,
+            ),
+            dict(
+                name="eq",
+                out_op=lambda x, y, d: torch.eq(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                ret_op=lambda x, y: torch.eq(x, y),
+                compare_op=lambda x, y: x == y,
+            ),
+            dict(
+                name="ne",
+                out_op=lambda x, y, d: torch.ne(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                ret_op=lambda x, y: torch.ne(x, y),
+                compare_op=lambda x, y: x != y,
             ),
         ]
         device = self.device
@@ -307,6 +341,11 @@ class TestTypePromotion(TestCase):
             actual = x < torch.tensor(0.5)
             self.assertTrue(actual, expected)
             self.assertTrue(actual.dtype == torch.bool)
+
+    def test_promote_types(self):
+        self.assertEqual(torch.promote_types(torch.float, torch.int), torch.float)
+        self.assertEqual(torch.promote_types(torch.float, torch.double), torch.double)
+        self.assertEqual(torch.promote_types(torch.int, torch.uint8), torch.int)
 
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):
