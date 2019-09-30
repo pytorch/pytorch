@@ -25,6 +25,8 @@ class FloatFunctional(torch.nn.Module):
         - cat
         - mul
         - add_relu
+        - add_scalar
+        - mul_scalar
     """
     def __init__(self):
         super(FloatFunctional, self).__init__()
@@ -100,7 +102,9 @@ class QFunctional(torch.nn.Module):
         - add
         - cat
         - mul
-        -add_relu
+        - add_relu
+        - add_scalar
+        - mul_scalar
     """
     def __init__(self):
         super(QFunctional, self).__init__()
