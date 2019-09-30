@@ -30,6 +30,7 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 
 
    torch
+   nn
    nn.functional
    tensors
    tensor_attributes
