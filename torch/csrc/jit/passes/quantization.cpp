@@ -879,7 +879,7 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
   std::string linear_with_quant_prepack = R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        %packed_params = quantized::linear_prepack(%w, %b)
+        %packed_params = quantized::linear_prepack(%w_quant, %b)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %linear = prim::Constant[name="linear"]()
