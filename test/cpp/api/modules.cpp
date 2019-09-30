@@ -1327,7 +1327,7 @@ TEST_F(ModulesTest, PrettyPrintHardtanh) {
     "torch::nn::Hardtanh(min_val=-42.42, max_val=0.42, inplace=true)");
 }
 
-TEST_F(ModulesTest, PrettyPrintHLeakyReLU) {
+TEST_F(ModulesTest, PrettyPrintLeakyReLU) {
   ASSERT_EQ(c10::str(LeakyReLU()),
     "torch::nn::LeakyReLU(negative_slope=0.01)");
   ASSERT_EQ(c10::str(LeakyReLU(
