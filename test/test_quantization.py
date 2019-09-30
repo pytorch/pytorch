@@ -510,6 +510,10 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         model_int8 = quantize_dynamic(model=model, dtype=torch.qint8)
         model_fp16 = quantize_dynamic(model=model, dtype=torch.float16)
+
+        # Smoke test extra reprs
+        self.assertTrue('DynamicQuantizedLSTM' in str(model_int8))
+        self.assertTrue('DynamicQuantizedLSTM' in str(model_fp16))
         cell_int8 = model_int8.lstm
         cell_fp16 = model_fp16.lstm
 
