@@ -9,14 +9,14 @@ import torch
 # functions that use `with torch.no_grad()`. The JIT doesn't support context
 # managers, so these need to be implemented as builtins. Using these wrappers
 # lets us keep those builtins small and re-usable.
-def _no_grad_uniform_(tensor, a, b):
+def _no_grad_uniform_(tensor, a, b, generator=None):
     with torch.no_grad():
-        return tensor.uniform_(a, b)
+        return tensor.uniform_(a, b, generator=generator)
 
 
-def _no_grad_normal_(tensor, mean, std):
+def _no_grad_normal_(tensor, mean, std, generator=None):
     with torch.no_grad():
-        return tensor.normal_(mean, std)
+        return tensor.normal_(mean, std, generator=generator)
 
 
 def _no_grad_fill_(tensor, val):
@@ -71,7 +71,7 @@ def calculate_gain(nonlinearity, param=None):
         raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
 
 
-def uniform_(tensor, a=0., b=1.):
+def uniform_(tensor, a=0., b=1., generator=None):
     # type: (Tensor, float, float) -> Tensor
     r"""Fills the input Tensor with values drawn from the uniform
     distribution :math:`\mathcal{U}(a, b)`.
@@ -85,10 +85,10 @@ def uniform_(tensor, a=0., b=1.):
         >>> w = torch.empty(3, 5)
         >>> nn.init.uniform_(w)
     """
-    return _no_grad_uniform_(tensor, a, b)
+    return _no_grad_uniform_(tensor, a, b, generator=generator)
 
 
-def normal_(tensor, mean=0., std=1.):
+def normal_(tensor, mean=0., std=1., generator=None):
     # type: (Tensor, float, float) -> Tensor
     r"""Fills the input Tensor with values drawn from the normal
     distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`.
@@ -102,7 +102,7 @@ def normal_(tensor, mean=0., std=1.):
         >>> w = torch.empty(3, 5)
         >>> nn.init.normal_(w)
     """
-    return _no_grad_normal_(tensor, mean, std)
+    return _no_grad_normal_(tensor, mean, std, generator=generator)
 
 
 def constant_(tensor, val):
@@ -219,7 +219,7 @@ def _calculate_fan_in_and_fan_out(tensor):
     return fan_in, fan_out
 
 
-def xavier_uniform_(tensor, gain=1.):
+def xavier_uniform_(tensor, gain=1., generator=None):
     # type: (Tensor, float) -> Tensor
     r"""Fills the input `Tensor` with values according to the method
     described in `Understanding the difficulty of training deep feedforward
@@ -244,10 +244,10 @@ def xavier_uniform_(tensor, gain=1.):
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
     a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
 
-    return _no_grad_uniform_(tensor, -a, a)
+    return _no_grad_uniform_(tensor, -a, a, generator=generator)
 
 
-def xavier_normal_(tensor, gain=1.):
+def xavier_normal_(tensor, gain=1., generator=None):
     # type: (Tensor, float) -> Tensor
     r"""Fills the input `Tensor` with values according to the method
     described in `Understanding the difficulty of training deep feedforward
@@ -271,7 +271,7 @@ def xavier_normal_(tensor, gain=1.):
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
 
-    return _no_grad_normal_(tensor, 0., std)
+    return _no_grad_normal_(tensor, 0., std, generator=generator)
 
 
 def _calculate_correct_fan(tensor, mode):
@@ -284,7 +284,7 @@ def _calculate_correct_fan(tensor, mode):
     return fan_in if mode == 'fan_in' else fan_out
 
 
-def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
+def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu', generator=None):
     r"""Fills the input `Tensor` with values according to the method
     described in `Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification` - He, K. et al. (2015), using a
@@ -316,10 +316,10 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     std = gain / math.sqrt(fan)
     bound = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
     with torch.no_grad():
-        return tensor.uniform_(-bound, bound)
+        return tensor.uniform_(-bound, bound, generator=generator)
 
 
-def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
+def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu', generator=None):
     r"""Fills the input `Tensor` with values according to the method
     described in `Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification` - He, K. et al. (2015), using a
@@ -350,10 +350,10 @@ def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     gain = calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
     with torch.no_grad():
-        return tensor.normal_(0, std)
+        return tensor.normal_(0, std, generator=generator)
 
 
-def orthogonal_(tensor, gain=1):
+def orthogonal_(tensor, gain=1, generator=None):
     r"""Fills the input `Tensor` with a (semi) orthogonal matrix, as
     described in `Exact solutions to the nonlinear dynamics of learning in deep
     linear neural networks` - Saxe, A. et al. (2013). The input tensor must have
@@ -373,7 +373,7 @@ def orthogonal_(tensor, gain=1):
 
     rows = tensor.size(0)
     cols = tensor.numel() // rows
-    flattened = tensor.new(rows, cols).normal_(0, 1)
+    flattened = tensor.new(rows, cols).normal_(0, 1, generator=generator)
 
     if rows < cols:
         flattened.t_()
@@ -394,7 +394,7 @@ def orthogonal_(tensor, gain=1):
     return tensor
 
 
-def sparse_(tensor, sparsity, std=0.01):
+def sparse_(tensor, sparsity, std=0.01, generator=None):
     r"""Fills the 2D input `Tensor` as a sparse matrix, where the
     non-zero elements will be drawn from the normal distribution
     :math:`\mathcal{N}(0, 0.01)`, as described in `Deep learning via
@@ -417,9 +417,9 @@ def sparse_(tensor, sparsity, std=0.01):
     num_zeros = int(math.ceil(sparsity * rows))
 
     with torch.no_grad():
-        tensor.normal_(0, std)
+        tensor.normal_(0, std, generator=generator)
         for col_idx in range(cols):
-            row_indices = torch.randperm(rows)
+            row_indices = torch.randperm(rows, generator=generator)
             zero_indices = row_indices[:num_zeros]
             tensor[zero_indices, col_idx] = 0
     return tensor
