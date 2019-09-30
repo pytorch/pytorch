@@ -213,7 +213,7 @@ EncoderBase::EncoderBase(
   // stable. only bump it when it's necessary
   model_proto_.set_ir_version(4);
   // TODO: set the producer version using appropriate function call
-  model_proto_.set_producer_version("1.2");
+  model_proto_.set_producer_version("1.3");
 }
 
 void EncoderBase::EncodeValueInfo(
@@ -613,8 +613,8 @@ class ScriptModuleSerializer {
       auto& type_info = item.value();
 
       // For the type, foo.bar.Baz
-      const std::string filename = ImportExportHelpers::qualifierToPath(
-          converted_type->name()->prefix(), "code/");
+      const std::string filename =
+          qualifierToArchivePath(converted_type->name()->prefix(), "code/");
       // End state: filename is "foo/bar.py", in which we will define a class
       // named Baz
       auto& stream = fileToSrc[filename];
