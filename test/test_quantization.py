@@ -663,9 +663,8 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
                 activation=default_observer,
                 weight=default_weight_observer)
         }
-        original_scripted = torch.jit.script(linear_model)
         model_script = quantize_script(
-            original_scripted,
+            torch.jit.script(linear_model),
             qconfig_dict,
             test_only_eval_fn,
             [self.calib_data],

@@ -66,6 +66,7 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
     _check_is_script_module(model)
     if not model._c._has_method('forward'):
         raise ValueError('input script module does not have forward method')
+    assert not inplace, "We don't support inplace right now"
     if not inplace:
         model = model.copy()
     scripted_qconfig_dict = {k: script_qconfig(v) for k, v in qconfig_dict.items()}
