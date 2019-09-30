@@ -74,7 +74,7 @@ bool Message::isResponse() const {
       MessageType::PYTHON_RET == type_ ||  // ret of dist.rpc on Python UDFs
       MessageType::REMOTE_RET == type_ ||  // ret of dist.remote
       MessageType::RREF_FETCH_RET == type_ ||  // ret on RRef::toHere()
-      MessageType::EXCEPTION ||  // propagate back exceptions
+      MessageType::EXCEPTION == type_ ||  // propagate back exceptions
       MessageType::ACK == type_;  // ret of other types
 
 }
