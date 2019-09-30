@@ -1555,8 +1555,8 @@
   supports_named_tensor: True
   variants: function, method
   dispatch:
-    CPU: log1p
-    CUDA: log1p
+    CPU: log1p_
+    CUDA: log1p_
     SparseCPU: log1p_sparse_
     SparseCUDA: log1p_sparse_
 
