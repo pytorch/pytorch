@@ -120,6 +120,9 @@ class Linear(torch.nn.Module):
         self.scale = 1.0
         self.zero_point = 0
 
+    def _get_name(self):
+        return 'QuantizedLinear'
+
     def extra_repr(self):
         return 'in_features={}, out_features={}, scale={}, zero_point={}'.format(
             self.in_features, self.out_features, self.scale, self.zero_point
