@@ -285,6 +285,9 @@ void THCTensor_(put)(THCState *state, THCTensor *dst, THCudaLongTensor *index, T
 
 void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongTensor *indices, scalar_t val)
 {
+#ifdef BUILD_NAMEDTENSOR
+  at::NoNamesGuard guard;
+#endif
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, dst));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
   int dims = THCTensor_(nDimensionLegacyNoScalars)(state, dst);
