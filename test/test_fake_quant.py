@@ -2,7 +2,7 @@ import torch
 import torch.cuda
 import torch.jit
 import numpy as np
-from hypothesis import given, assume
+from hypothesis import given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
 from hypothesis_utils import no_deadline
