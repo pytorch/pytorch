@@ -10,6 +10,7 @@
 #include <THC/THCGeneral.hpp>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/Assert.cuh>
 #include <c10/macros/Macros.h>
 #include <functional>
 #include <iosfwd>
@@ -475,7 +476,7 @@ struct ReduceOp {
     out_scalar_t* out, arg_t value,
     typename std::enable_if<can_acc>::type* = nullptr
   ) const {
-    assert(!final_output);
+    C10_KERNEL_ASSERT(!final_output);
     return (out_scalar_t)value;
   }
 
@@ -487,7 +488,7 @@ struct ReduceOp {
     out_scalar_t*, arg_t,
     typename std::enable_if<!can_acc>::type* = nullptr
   ) const {
-    assert(false); // can't use AT_ASSERT in Cuda.
+    C10_KERNEL_ASSERT(false);
     return arg_t {};
   }
 
@@ -499,13 +500,13 @@ struct ReduceOp {
     out_scalar_t* out, arg_t value,
     typename std::enable_if<!can_acc>::type* = nullptr
   ) const {
-    assert(false);
+    C10_KERNEL_ASSERT(false);
     return *out;
   }
 
   template<class T>
   C10_DEVICE void set_results(const T x, const index_t base_offset) const {
-    assert(noutputs == 1);
+    C10_KERNEL_ASSERT(noutputs == 1);
     auto res = (out_scalar_t*)((char*)dst[0] + base_offset);
     *res = x;
   }
@@ -524,7 +525,7 @@ struct ReduceOp {
   }
 
   C10_DEVICE void set_results_to_output(arg_t value, index_t base_offset) const {
-    assert(final_output);
+    C10_KERNEL_ASSERT(final_output);
     set_results(ops.project(value), base_offset);
   }
 
@@ -601,6 +602,7 @@ static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction)
 
   auto stream = at::cuda::getCurrentCUDAStream();
   int shared_memory = config.shared_memory_size();
+  C10_PREPARE_KERNEL_ASSERT;
   reduce_kernel<nt, R><<<grid, block, shared_memory, stream>>>(reduction);
   AT_CUDA_CHECK(cudaGetLastError());
 }

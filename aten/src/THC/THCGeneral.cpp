@@ -252,6 +252,8 @@ void __THCudaCheck(cudaError_t err, const char *file, const int line)
 {
   if(err != cudaSuccess)
   {
+    at::cuda::getCurrentCUDAStream(); // check for assert failure first
+
     static int alreadyFailed = 0;
     if(!alreadyFailed) {
       fprintf(stderr, "THCudaCheck FAIL file=%s line=%i error=%i : %s\n", file, line, err, cudaGetErrorString(err));

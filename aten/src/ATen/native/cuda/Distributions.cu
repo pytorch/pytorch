@@ -13,6 +13,7 @@
 
 #include <ATen/native/Distributions.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/Assert.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
 
@@ -287,22 +288,22 @@ void bernoulli_tensor_cuda_kernel(
         float4 rand = curand_uniform4(&state);
         switch (n) {
           case 4: {
-            assert(0 <= p4 && p4 <= 1);
+            C10_KERNEL_ASSERT(0 <= p4 && p4 <= 1);
             v4 = static_cast<scalar_t>(rand.w <= p4);
             // fallthrough
           }
           case 3: {
-            assert(0 <= p3 && p3 <= 1);
+            C10_KERNEL_ASSERT(0 <= p3 && p3 <= 1);
             v3 = static_cast<scalar_t>(rand.z <= p3);
             // fallthrough
           }
           case 2: {
-            assert(0 <= p2 && p2 <= 1);
+            C10_KERNEL_ASSERT(0 <= p2 && p2 <= 1);
             v2 = static_cast<scalar_t>(rand.y <= p2);
             // fallthrough
           }
           case 1: {
-            assert(0 <= p1 && p1 <= 1);
+            C10_KERNEL_ASSERT(0 <= p1 && p1 <= 1);
             v1 = static_cast<scalar_t>(rand.x <= p1);
           }
         }
@@ -404,6 +405,7 @@ Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen_) 
     rng_engine_inputs = gen->philox_engine_inputs(10);
   }
   auto p = std::get<0>(expand_inplace(self, p_.to(kCUDA)));
+  C10_PREPARE_KERNEL_ASSERT;
   AT_DISPATCH_ALL_TYPES_AND2(
     at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
       using self_t = scalar_t;

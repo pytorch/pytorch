@@ -313,8 +313,13 @@ void check_stream_assert_state(const LeakyStreamInternals* ptr) {
 
   auto assert_state =
       ptr->assert_state.load(std::memory_order::memory_order_relaxed);
-
   check_assert_error(assert_state);
+
+  if (ptr != &default_streams[ptr->device_index]) {
+    // check global default device
+    assert_state = default_streams[ptr->device_index].assert_state.load();
+    check_assert_error(assert_state);
+  }
 }
 
 CUDAStream CUDAStream_fromInternals(const LeakyStreamInternals* ptr) {

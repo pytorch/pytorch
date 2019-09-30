@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/native/cuda/Assert.cuh>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
@@ -85,8 +86,8 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
       }
     }
 
-    assert(maxVal != at::numeric_limits<scalar_t>::lowest());
-    assert(maxIndex != -1);
+    C10_KERNEL_ASSERT(maxVal != at::numeric_limits<scalar_t>::lowest());
+    C10_KERNEL_ASSERT(maxIndex != -1);
 
     indices[batch][plane][outputH][outputW] = maxIndex;
     output[batch][plane][outputH][outputW] = maxVal;
@@ -110,10 +111,10 @@ __global__ void fractional_max_pool2d_backward_out_cuda_frame(
     int outputH = ourOutputPoint / gradOutput.size(3);
 
     int index = indices[batch][plane][outputH][outputW];
-    assert(index >= 0);
+    C10_KERNEL_ASSERT(index >= 0);
     int inputW = index % gradInput.size(3);
     int inputH = index / gradInput.size(3);
-    assert(inputH < gradInput.size(2));
+    C10_KERNEL_ASSERT(inputH < gradInput.size(2));
 
     atomicAdd(
       &gradInput[batch][plane][inputH][inputW],
@@ -195,6 +196,7 @@ void fractional_max_pool2d_out_cuda_template(
             input_.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
+  C10_PREPARE_KERNEL_ASSERT;
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
     "fractional_max_pool2d_out_cuda_frame",
     [&] {

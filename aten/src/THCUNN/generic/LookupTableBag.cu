@@ -38,6 +38,7 @@ void THNN_(LookupTableBag_updateOutput)(
 
   dim3 block = dim3(32, 8);
   int grid = 1024;
+  C10_PREPARE_KERNEL_ASSERT;
   cunn_LookupTableBag_updateOutputKernel<scalar_t, accreal><<<grid, block, 0, stream>>>(
     THCIndexTensor_(data)(state, input),
     THCIndexTensor_(data)(state, offsets),

@@ -10,6 +10,8 @@ namespace assert {
 
 using namespace c10::cuda;
 
+__constant__ CUDAAssert* default_stream_assert_state = nullptr;
+
 static inline C10_HOST_DEVICE char* write_string(
     char* dst,
     const char* src,
@@ -20,7 +22,7 @@ static inline C10_HOST_DEVICE char* write_string(
       dst[i] = src[i];
       ++i;
     }
-    dst[i] = '\0';  // ensure strings are terminated
+    dst[i] = '\0'; // ensure strings are null-terminated
     ++i;
   }
   return dst + i;
@@ -106,6 +108,7 @@ C10_HOST_DEVICE bool assert_(
     const char* func,
     const char* format,
     Args... args) {
+  assert(assert_state);
   if (!condition) {
 #ifdef __CUDA_ARCH__
     if (atomicCAS(const_cast<int32_t*>(&assert_state->error), 0, 1) != 0) {
@@ -149,37 +152,70 @@ inline C10_HOST_DEVICE bool assert_(
       "Assertion failed");
 }
 
+inline CUDAAssert* prepare_kernel_assert() {
+  auto current_stream = getCurrentCUDAStream();
+  auto default_stream_state = getDefaultCUDAStream().assert_state();
+  // write default stream's assert to constant memory
+  cudaMemcpyToSymbolAsync(
+      default_stream_assert_state,
+      &default_stream_state,
+      sizeof(CUDAAssert*),
+      0,
+      cudaMemcpyHostToDevice,
+      current_stream.stream());
+  return current_stream.assert_state();
+}
+
 } // namespace assert
 } // namespace native
 } // namespace at
 
 #define C10_PREPARE_KERNEL_ASSERT \
-  auto __c10_assert_state = at::cuda::getCurrentCUDAStream().assert_state();
+  auto __c10_assert_state = at::native::assert::prepare_kernel_assert();
 
-#define C10_KERNEL_ASSERT(exp, ...)        \
-  do {                                     \
-    if (!exp) {                            \
-      at::native::assert::assert_(         \
-          __c10_assert_state,              \
-          false,                           \
-          #exp,                            \
-          static_cast<uint32_t>(__LINE__), \
-          __FILE__,                        \
-          __func__,                        \
-          ##__VA_ARGS__);                  \
-      assert(exp);                         \
-      assert(false);                       \
-    }                                      \
+#define C10_KERNEL_ASSERT(exp, ...)                        \
+  do {                                                     \
+    if (!(exp)) {                                          \
+      at::native::assert::assert_(                         \
+          at::native::assert::default_stream_assert_state, \
+          false,                                           \
+          #exp,                                            \
+          static_cast<uint32_t>(__LINE__),                 \
+          __FILE__,                                        \
+          __func__,                                        \
+          ##__VA_ARGS__);                                  \
+      assert(exp);                                         \
+      assert(false);                                       \
+    }                                                      \
   } while (false)
 
+#define C10_KERNEL_ASSERT_RETURN_(rval, exp, ...) \
+  if (!(exp)) {                                   \
+    at::native::assert::assert_(                  \
+        __c10_assert_state,                       \
+        false,                                    \
+        #exp,                                     \
+        static_cast<uint32_t>(__LINE__),          \
+        __FILE__,                                 \
+        __func__,                                 \
+        ##__VA_ARGS__);                           \
+    return rval;                                  \
+  }
+
+#define C10_KERNEL_ASSERT_RETURN(exp, ...) \
+  C10_KERNEL_ASSERT_RETURN_(, exp, ##__VA_ARGS__)
+
+#define C10_KERNEL_ASSERT_RETURN_0(exp, ...) \
+  C10_KERNEL_ASSERT_RETURN_(0, exp, ##__VA_ARGS__)
+
 #define C10_KERNEL_ASSERT_SOFT(exp, ...) \
-  at::native::assert::assert_(                \
-      __c10_assert_state,                     \
-      exp,                                    \
-      #exp,                                   \
-      static_cast<uint32_t>(__LINE__),        \
-      __FILE__,                               \
-      __func__,                               \
+  at::native::assert::assert_(           \
+      __c10_assert_state,                \
+      (exp),                             \
+      #exp,                              \
+      static_cast<uint32_t>(__LINE__),   \
+      __FILE__,                          \
+      __func__,                          \
       ##__VA_ARGS__)
 
 #define C10_KERNEL_INDEX_ERROR_SOFT(index, axis, size)           \

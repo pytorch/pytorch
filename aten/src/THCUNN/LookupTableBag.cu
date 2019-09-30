@@ -14,6 +14,7 @@
 #include <TH/THHalf.h>
 #include <THC/THCTensorSort.cuh>
 #include <c10/macros/Macros.h>
+#include <ATen/native/cuda/Assert.cuh>
 
 const int MODE_SUM = 0;
 const int MODE_MEAN = 1;
@@ -38,7 +39,7 @@ __global__ void cunn_LookupTableBag_updateOutputKernel(
       Dtype*  weightFeat = weight + featureDim;
       int64_t begin = offsets[bag];
       int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
-      assert(end >= begin);
+      C10_KERNEL_ASSERT(end >= begin);
       Acctype weightFeatSum = ScalarConvert<float, Acctype>::to(0);
       int64_t bag_size_ = 0;
       for (int64_t emb = begin; emb < end; emb++) {
