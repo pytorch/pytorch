@@ -99,9 +99,8 @@ C10_HOST_DEVICE char* copy_args(
 }
 
 template <typename... Args>
-C10_HOST_DEVICE bool assert_(
+C10_HOST_DEVICE __noinline__ void assert_fail(
     CUDAAssert* assert_state,
-    bool condition,
     const char* expression,
     uint32_t line,
     const char* file,
@@ -109,47 +108,36 @@ C10_HOST_DEVICE bool assert_(
     const char* format,
     Args... args) {
   assert(assert_state);
-  if (!condition) {
 #ifdef __CUDA_ARCH__
-    if (atomicCAS(const_cast<int32_t*>(&assert_state->error), 0, 1) != 0) {
-      return false;
-    }
+  if (atomicCAS(const_cast<int32_t*>(&assert_state->error), 0, 1) != 0) {
+    return;
+  }
 #else
-    assert(false); // should never be called
+  assert(false); // should never be called
 #endif
 
-    char* buffer = assert_state->buffer;
-    char* dst = buffer;
-    char* const end = dst + sizeof(assert_state->buffer);
+  char* buffer = assert_state->buffer;
+  char* dst = buffer;
+  char* const end = dst + sizeof(assert_state->buffer);
 
-    dst = copy_string(dst, end, file);
-    dst = copy_string(dst, end, func);
-    dst = copy_string(dst, end, expression);
-    dst = copy_string(dst, end, format);
-    dst = copy_args(dst, end, line, args...);
+  dst = copy_string(dst, end, file);
+  dst = copy_string(dst, end, func);
+  dst = copy_string(dst, end, expression);
+  dst = copy_string(dst, end, format);
+  dst = copy_args(dst, end, line, args...);
 
-    assert_state->length = dst ? dst - buffer : 0;
-  }
-
-  return !assert_state->error;
+  assert_state->length = dst ? dst - buffer : 0;
 }
 
 // handle case without format string, e.g. C10_KERNEL_ASSERT(false)
-inline C10_HOST_DEVICE bool assert_(
+inline C10_HOST_DEVICE void assert_fail(
     CUDAAssert* assert_state,
-    bool condition,
     const char* expression,
     uint32_t line,
     const char* file,
     const char* func) {
-  return assert_(
-      assert_state,
-      condition,
-      expression,
-      line,
-      file,
-      func,
-      "Assertion failed");
+  assert_fail(
+      assert_state, expression, line, file, func, "Assertion failed");
 }
 
 inline CUDAAssert* prepare_kernel_assert() {
@@ -176,9 +164,8 @@ inline CUDAAssert* prepare_kernel_assert() {
 #define C10_KERNEL_ASSERT(exp, ...)                        \
   do {                                                     \
     if (!(exp)) {                                          \
-      at::native::assert::assert_(                         \
+      at::native::assert::assert_fail(                     \
           at::native::assert::default_stream_assert_state, \
-          false,                                           \
           #exp,                                            \
           static_cast<uint32_t>(__LINE__),                 \
           __FILE__,                                        \
@@ -191,9 +178,8 @@ inline CUDAAssert* prepare_kernel_assert() {
 
 #define C10_KERNEL_ASSERT_RETURN_(rval, exp, ...) \
   if (!(exp)) {                                   \
-    at::native::assert::assert_(                  \
+    at::native::assert::assert_fail(              \
         __c10_assert_state,                       \
-        false,                                    \
         #exp,                                     \
         static_cast<uint32_t>(__LINE__),          \
         __FILE__,                                 \
@@ -208,15 +194,15 @@ inline CUDAAssert* prepare_kernel_assert() {
 #define C10_KERNEL_ASSERT_RETURN_0(exp, ...) \
   C10_KERNEL_ASSERT_RETURN_(0, exp, ##__VA_ARGS__)
 
-#define C10_KERNEL_ASSERT_SOFT(exp, ...) \
-  at::native::assert::assert_(           \
-      __c10_assert_state,                \
-      (exp),                             \
-      #exp,                              \
-      static_cast<uint32_t>(__LINE__),   \
-      __FILE__,                          \
-      __func__,                          \
-      ##__VA_ARGS__)
+#define C10_KERNEL_ASSERT_SOFT(exp, ...)       \
+  (exp) ? ((void)0)                            \
+        : at::native::assert::assert_fail(     \
+              __c10_assert_state,              \
+              #exp,                            \
+              static_cast<uint32_t>(__LINE__), \
+              __FILE__,                        \
+              __func__,                        \
+              ##__VA_ARGS__)
 
 #define C10_KERNEL_INDEX_ERROR_SOFT(index, axis, size)           \
   C10_KERNEL_ASSERT_SOFT(                                        \
