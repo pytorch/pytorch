@@ -60,9 +60,7 @@ Tensor fake_quantize_per_channel_affine_cpu(
   for (int i = 0; i < self.size(axis); i++) {
     auto input_slice = self.slice(axis, i, i + 1);
     auto output_slice = Y.slice(axis, i, i + 1);
-
     float sc = scale[i].item().toFloat();
-    float inv_scale = 1.0f / sc;
     int64_t z_point = zero_point[i].item().toLong();
     fake_quantize_slice(
         output_slice, input_slice, sc, z_point, quant_min, quant_max);
@@ -134,14 +132,13 @@ Tensor fake_quantize_per_channel_affine_backward_cpu(
   auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
 
   for (int i = 0; i < X.size(axis); i++) {
-    auto ZX = X.slice(axis, i, i + 1);
-    auto ZdY = dY.slice(axis, i, i + 1);
-    auto ZdX = dX.slice(axis, i, i + 1);
-
+    auto X_slice = X.slice(axis, i, i + 1);
+    auto dY_slice = dY.slice(axis, i, i + 1);
+    auto dX_slice = dX.slice(axis, i, i + 1);
     float sc = scale[i].item().toFloat();
-    float inv_scale = 1.0f / sc;
     int64_t z_point = zero_point[i].item().toLong();
-    fake_quantize_grad_slice(ZdX, ZX, ZdY, sc, z_point, quant_min, quant_max);
+    fake_quantize_grad_slice(dX_slice, X_slice, dY_slice,
+                             sc, z_point, quant_min, quant_max);
   }
 
   return dX;
