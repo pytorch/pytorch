@@ -565,7 +565,8 @@ class TestJit(JitTestCase):
                 x.is_cuda,
                 x.is_mkldnn,
                 x.is_quantized,
-                x.requires_grad
+                x.requires_grad,
+                # x.layout TODO: layout long -> instance conversion
             )
 
         scripted = torch.jit.script(foo)
