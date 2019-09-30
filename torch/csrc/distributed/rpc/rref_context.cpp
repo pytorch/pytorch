@@ -77,9 +77,9 @@ std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(
   // is no shared_ptrs pointing to it.
   //
   // NB: cannot use make_shared here as the constructor of UserRRef is private.
-  // NB: This UserRRef has not been confirmed by the owner yet. The call site
-  // is responsible for adding this UserRRef to pendingUsers_. Currently, there
-  // are two call sites.
+  // NB: This UserRRef has not been confirmed by the owner yet. This function's
+  // call site is responsible for adding this UserRRef to pendingUsers_.
+  // Currently, there are two call sites.
   // (1) The creator user in python_functions.cpp
   // (2) The callee user in RRefContext::notifyOwnerAndParentOfFork.
   //
