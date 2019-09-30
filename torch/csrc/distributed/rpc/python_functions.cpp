@@ -140,6 +140,7 @@ PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     const std::string& pickledPythonUDF) {
   auto& ctx = RRefContext::getInstance();
+  // TODO: support creaing RRefs on a local object.
   TORCH_INTERNAL_ASSERT(
       ctx->getWorkerId() != dst.id_,
       "Does not support creating RRef on self yet.");

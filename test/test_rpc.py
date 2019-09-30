@@ -49,12 +49,6 @@ def nested_remote(dst):
     return rref.to_here()
 
 
-def remote_without_fetching(dst):
-    # This test ensures the RRef "delete fork" signal could be sent out
-    # before the RPC backend shut down.
-    dist.remote(dst, no_result)
-
-
 def rref_forward_chain(dst, world_size, rref, ttl):
     if ttl > 0:
         current_dst = 'worker{}'.format(dst)
@@ -534,13 +528,13 @@ class RpcTest(MultiProcessTestCase):
         user_rank = (n + 1) % self.world_size
         rref_a = dist.remote(
             'worker{}'.format(owner_rank),
-            torch.add,
-            args=(torch.ones(n, n), 2)
+            my_function,
+            args=(torch.ones(n, n), 2, 0)
         )
         rref_b = dist.remote(
             'worker{}'.format(owner_rank),
-            torch.add,
-            args=(torch.ones(n, n), 1)
+            my_function,
+            args=(torch.ones(n, n), 1, 0)
         )
         rref_c = dist.remote(
             'worker{}'.format(user_rank),
@@ -556,13 +550,13 @@ class RpcTest(MultiProcessTestCase):
         dst_rank = n % self.world_size
         rref_a = dist.remote(
             'worker{}'.format(dst_rank),
-            torch.add,
-            args=(torch.ones(n, n), 2)
+            my_function,
+            args=(torch.ones(n, n), 2, 0)
         )
         rref_b = dist.remote(
             'worker{}'.format(dst_rank),
-            torch.add,
-            args=(torch.ones(n, n), 1)
+            my_function,
+            args=(torch.ones(n, n), 1, 0)
         )
 
         c = dist.rpc(
