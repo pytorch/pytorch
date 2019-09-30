@@ -219,7 +219,6 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::fbgemm_linear_fp16_weight", ""},
         {"aten::fbgemm_pack_quantized_matrix", ""},
         {"aten::fbgemm_pack_quantized_matrix", "KN"},
-        {"aten::fbgemm_is_cpu_supported", ""},
         {"aten::log", ""},
         {"aten::log_", ""},
         {"aten::log10", ""},
@@ -1219,6 +1218,8 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::quantize_per_channel", ""},
         {"aten::q_per_channel_axis", ""},
         {"aten::qscheme", ""},
+        {"aten::fake_quantize_per_channel_affine", ""},
+        {"aten::fake_quantize_per_channel_affine_backward", ""},
         {"aten::to", "dtype_layout"},
         {"aten::to", "device"},
         {"aten::to", "dtype"},
@@ -1226,6 +1227,8 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::result_type", "Scalar"},
         {"aten::result_type", "Scalar_Tensor"},
         {"aten::result_type", "Scalar_Scalar"},
+        {"aten::can_cast", ""},
+        {"aten::promote_types", ""},
         {"aten::_thnn_fused_lstm_cell", ""},
         {"aten::_thnn_fused_lstm_cell_backward", ""},
         {"aten::_thnn_differentiable_lstm_cell_backward", ""},
@@ -1241,6 +1244,12 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::set_quantizer_", ""},
     #ifdef BUILD_NAMEDTENSOR
         {"aten::index_add", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_fill_", "dimname_Scalar"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_fill_", "dimname_Scalar"},
     #endif
     #ifdef BUILD_NAMEDTENSOR
         {"aten::index_fill", "dimname_Scalar"},

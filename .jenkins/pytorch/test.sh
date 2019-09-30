@@ -138,17 +138,20 @@ test_torchvision() {
 }
 
 test_libtorch() {
-  echo "Testing libtorch"
-  python test/cpp/jit/tests_setup.py setup
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-    build/bin/test_jit
-  else
-    build/bin/test_jit "[cpu]"
+  # It doesn't look like test_jit is built in rocm presently
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    echo "Testing libtorch"
+    python test/cpp/jit/tests_setup.py setup
+    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+      build/bin/test_jit
+    else
+      build/bin/test_jit "[cpu]"
+    fi
+    python test/cpp/jit/tests_setup.py shutdown
+    python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
+    assert_git_not_dirty
   fi
-  python test/cpp/jit/tests_setup.py shutdown
-  python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-  OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
-  assert_git_not_dirty
 }
 
 test_custom_script_ops() {
