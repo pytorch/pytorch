@@ -20,8 +20,6 @@
 namespace torch {
 namespace jit {
 
-void printQuotedString(std::ostream& stmt, const std::string& str);
-
 // Constants relating to maintaining the topological index of nodes.
 //
 // Lower and upper bounds of the index. Inclusive range.

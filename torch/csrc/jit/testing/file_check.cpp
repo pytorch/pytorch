@@ -25,8 +25,6 @@
 namespace torch {
 namespace jit {
 
-void printQuotedString(std::ostream& stmt, const std::string& str);
-
 namespace testing {
 
 enum CheckType {

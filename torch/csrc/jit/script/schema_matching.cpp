@@ -264,7 +264,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     std::ostream* failure_messages,
     bool allow_conversions) {
   auto err = [&]() -> std::ostream& {
-    *failure_messages << "Hi Egor\n" << schema << ":Bye 'test' Egor\n";
+    *failure_messages << "\n" << schema << ":\n";
     return *failure_messages;
   };
 
