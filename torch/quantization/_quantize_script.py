@@ -3,6 +3,36 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from .QConfig import QConfig
 
+class PackedParams(torch.nn.Module):
+    def __init__(self):
+        super(PackedParams, self).__init__()
+        w = torch.rand((5, 5), dtype=torch.float)
+        wq = torch.quantize_per_tensor(w, 2.0, 0, torch.qint8)
+        self.set_weight_bias(wq, torch.rand(5))
+
+    @torch.jit.export
+    def set_weight_bias(self, weight, bias):
+        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+        self._packed_params = torch.ops.quantized.linear_prepack(weight, bias)
+
+    @torch.jit.export
+    def _weight_bias(self):
+        return torch.ops.quantized.linear_unpack(self._packed_params)
+
+    def forward(self, x):
+        return x
+
+    @torch.jit.export
+    def __getstate__(self):
+        return self._weight_bias()
+
+    @torch.jit.export
+    def __setstate__(self, state):
+        self.set_weight_bias(state[0], state[1])
+
+
+_packed_params_scripted = torch.jit.script(PackedParams())._c
+
 def _check_is_script_module(model):
     if not isinstance(model, torch.jit.ScriptModule):
         raise ValueError('input must be a script module, got: ' + str(type(model)))
@@ -22,6 +52,8 @@ def convert_script(model, inplace=False):
     if not inplace:
         model = model.copy()
     torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', True)
+    torch._C._jit_pass_insert_prepack_unpack(model._c)
+    torch._C._jit_pass_fold_prepack(model._c, _packed_params_scripted)
     return model
 
 # TODO: non-scriptable QConfig will be supported later

@@ -21,6 +21,7 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.optim as optim
 from torch.quantization import QConfig
+from torch.quantization._quantize_script import PackedParams
 
 # Testing utils
 from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
@@ -1378,34 +1379,6 @@ graph(%input, %weight):
     )
     @_tmp_donotuse_dont_inline_everything
     def test_fold_prepack(self):
-        # TODO: move to torch/quantization
-        class PackedParams(torch.nn.Module):
-            def __init__(self):
-                super(PackedParams, self).__init__()
-                w = torch.rand((5, 5), dtype=torch.float)
-                wq = torch.quantize_per_tensor(w, 2.0, 0, torch.qint8)
-                self.set_weight_bias(wq, torch.rand(5))
-
-            @torch.jit.export
-            def set_weight_bias(self, weight, bias):
-                # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-                self._packed_params = torch.ops.quantized.linear_prepack(weight, bias)
-
-            @torch.jit.export
-            def _weight_bias(self):
-                return torch.ops.quantized.linear_unpack(self._packed_params)
-
-            def forward(self, x):
-                return x
-
-            @torch.jit.export
-            def __getstate__(self):
-                return self._weight_bias()
-
-            @torch.jit.export
-            def __setstate__(self, state):
-                self.set_weight_bias(state[0], state[1])
-
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
