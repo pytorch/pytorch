@@ -72,7 +72,6 @@ if PY36:
 
 WINDOWS_BLACKLIST = [
     'distributed',
-    'rpc',
 ]
 
 ROCM_BLACKLIST = [
@@ -80,7 +79,6 @@ ROCM_BLACKLIST = [
     'cpp_api_parity',
     'cpp_extensions',
     'distributed',
-    'rpc',
     'multiprocessing',
     'nccl',
 ]
