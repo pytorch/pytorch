@@ -1654,6 +1654,9 @@ protected:
   // contiguous memory block.
   bool is_channels_last_contiguous_ = false;
 
+  // Dense tensor is the tensor that store values in a contiguous block of memory.
+  // Non-overlapping tensor is the tensor in which elements occupy individual
+  // non-repetitive memory.
   bool is_non_overlapping_and_dense_ = false;
 
   bool is_wrapped_number_ = false;
