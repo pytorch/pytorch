@@ -16,26 +16,6 @@ using QConfigDict = std::unordered_map<std::string, QConfig>;
 using ModuleQConfigMap =
     std::unordered_map<script::ModulePtr, c10::optional<QConfig>>;
 
-/** \brief Propagates QParams through nodes that are not supposed to change it.
- *
- * An example of such node is `Split`: even though the observed distribution
- * might be different for input and output tensors, we would like to use input's
- * qparams for output as well.
- */
-TORCH_API void PropagateQuantInfo(std::shared_ptr<Graph>& graph);
-
-/** \brief Check that all expected optimizations after quant-dequant nodes
- * insertion actually happened.
- *
- * Even though semantically it would be correct to just execute the initial
- * quant-dequant nodes as is, what we really wanted when we inserted them is to
- * fuse them into adjacent non-quantized ops resulting in quantized ops. Thus,
- * if after all the cleanups, optimizations (particularly, fusion) we find
- * quant-dequant pair in the graph, it indicates that quantization didn't go as
- * planned.
- */
-TORCH_API void QuantLinting(std::shared_ptr<Graph>& graph);
-
 /** \brief Quantize model's inputs and outputs.
  *
  * This pass folds quant/dequant ops into the input/output tensors, essentially
@@ -118,6 +98,25 @@ TORCH_API void FoldConvBatchNorm2d(const script::Module& module);
  */
 TORCH_API void FoldQuantizeCallIntoBuffer(script::Module& module, const std::string& method_name);
 
+/** \brief Insert prepack and unpack function in graph
+ *  We want add pack/unpack functions for quantized weight because later we want to
+ *  fold the packed weight as an attribute of the module, in order
+ *  to reduce the cost of packing the weight on the fly in quantized
+ *  models.
+ *
+ *  Each quantized op has it's corresponding prepack/unpack function,
+ *  right now, we only need to do prepack/unpack for quantized::linear
+ * and quantized::conv2d.
+ */
+TORCH_API void InsertPrepackUnpack(std::shared_ptr<Graph>& graph);
+
+/** \brief Insert pack and unpack function in all graphs
+ *   of module
+ *
+ *   Go through graphs of all the methods of all child modules
+ *   and call InsertPrepackUnpack on the graph.
+ */
+TORCH_API void InsertPrepackUnpack(script::Module& module);
 
 } // namespace jit
 } // namespace torch
