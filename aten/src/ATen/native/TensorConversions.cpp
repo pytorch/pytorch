@@ -19,13 +19,25 @@ static inline Device ensure_has_index(Device device) {
   return impl->getDevice();
 }
 
-static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking) {
-  auto r = at::empty(self.sizes(), options);
+static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto memory_format =
+      optional_memory_format.value_or(MemoryFormat::Contiguous);
+  if (memory_format == MemoryFormat::Preserve) {
+    if (self.is_non_overlapping_and_dense()) {
+      // Copy all strides
+      auto r = at::empty_strided(self.sizes(), self.strides(), options);
+      r.copy_(self);
+      return r;
+    } else {
+      memory_format = self.suggest_memory_format();
+    }
+  }
+  auto r = at::empty(self.sizes(), options, memory_format);
   r.copy_(self, non_blocking);
   return r;
 }
 
-Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy) {
+Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(options.requires_grad_opt() == c10::nullopt,
            "to(options) expects unset requires_grad flag, but got "
            "options.requires_grad set as ", options.requires_grad());
@@ -52,25 +64,25 @@ Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, b
   if (dtype_opt) {
     specified_options = specified_options.dtype(dtype_opt.value());
   }
-  return to_impl(self, specified_options, non_blocking);
+  return to_impl(self, specified_options, non_blocking, optional_memory_format);
 }
 
-Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy) {
+Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   device = ensure_has_index(device);
   if (self.device() == device && self.dtype() == dtype && !copy) {
     return self;
   }
-  return to_impl(self, self.options().device(device).dtype(dtype), non_blocking);
+  return to_impl(self, self.options().device(device).dtype(dtype), non_blocking, optional_memory_format);
 }
 
-Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy) {
+Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   if (self.dtype() == dtype && !copy) {
     return self;
   }
-  return to_impl(self, self.options().dtype(dtype), non_blocking);
+  return to_impl(self, self.options().dtype(dtype), non_blocking, optional_memory_format);
 }
 
-Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy) {
+Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto self_options = self.options();
   auto options = other.options();
   // Tensor.options() always have everything filled so we are happy and don't
@@ -78,7 +90,7 @@ Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy)
   if (self_options == options && !copy) {
     return self;
   }
-  return to_impl(self, options, non_blocking);
+  return to_impl(self, options, non_blocking, optional_memory_format);
 }
 
 Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {

@@ -3670,41 +3670,40 @@ inline QScheme Tensor::qscheme() const {
     return table->callUnboxed<QScheme, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
-inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
+inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy, c10::optional<MemoryFormat> memory_format) const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::to(const_cast<Tensor&>(*this), options, non_blocking, copy);
+    return TypeDefault::to(const_cast<Tensor&>(*this), options, non_blocking, copy, memory_format);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::to.dtype_layout(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, bool non_blocking=False, bool copy=False) -> Tensor");
-    return table->callUnboxed<Tensor, const Tensor &, const TensorOptions &, bool, bool>(const_cast<Tensor&>(*this), options, non_blocking, copy);
+    static auto table = globalATenDispatch().getOpTable("aten::to.dtype_layout(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
+    return table->callUnboxed<Tensor, const Tensor &, const TensorOptions &, bool, bool, c10::optional<MemoryFormat>>(const_cast<Tensor&>(*this), options, non_blocking, copy, memory_format);
 #endif
 }
-inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking, bool copy) const {
+inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<MemoryFormat> memory_format) const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::to(const_cast<Tensor&>(*this), device, dtype, non_blocking, copy);
+    return TypeDefault::to(const_cast<Tensor&>(*this), device, dtype, non_blocking, copy, memory_format);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False) -> Tensor");
-    return table->callUnboxed<Tensor, const Tensor &, Device, ScalarType, bool, bool>(const_cast<Tensor&>(*this), device, dtype, non_blocking, copy);
+    static auto table = globalATenDispatch().getOpTable("aten::to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
+    return table->callUnboxed<Tensor, const Tensor &, Device, ScalarType, bool, bool, c10::optional<MemoryFormat>>(const_cast<Tensor&>(*this), device, dtype, non_blocking, copy, memory_format);
 #endif
 }
-inline Tensor Tensor::to(ScalarType dtype, bool non_blocking, bool copy) const {
+inline Tensor Tensor::to(ScalarType dtype, bool non_blocking, bool copy, c10::optional<MemoryFormat> memory_format) const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::to(const_cast<Tensor&>(*this), dtype, non_blocking, copy);
+    return TypeDefault::to(const_cast<Tensor&>(*this), dtype, non_blocking, copy, memory_format);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False) -> Tensor");
-    return table->callUnboxed<Tensor, const Tensor &, ScalarType, bool, bool>(const_cast<Tensor&>(*this), dtype, non_blocking, copy);
+    static auto table = globalATenDispatch().getOpTable("aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
+    return table->callUnboxed<Tensor, const Tensor &, ScalarType, bool, bool, c10::optional<MemoryFormat>>(const_cast<Tensor&>(*this), dtype, non_blocking, copy, memory_format);
 #endif
 }
-inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) const {
+inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy, c10::optional<MemoryFormat> memory_format) const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::to(const_cast<Tensor&>(*this), other, non_blocking, copy);
+    return TypeDefault::to(const_cast<Tensor&>(*this), other, non_blocking, copy, memory_format);
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::to", "other"}).value();
-    return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor &, const Tensor &, bool, bool>(
-        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this, other)), const_cast<Tensor&>(*this), other, non_blocking, copy);
+    static auto table = globalATenDispatch().getOpTable("aten::to.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
+    return table->callUnboxed<Tensor, const Tensor &, const Tensor &, bool, bool, c10::optional<MemoryFormat>>(const_cast<Tensor&>(*this), other, non_blocking, copy, memory_format);
 #endif
 }
 inline Scalar Tensor::item() const {

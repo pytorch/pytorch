@@ -781,10 +781,10 @@ class CAFFE2_API Tensor {
   int64_t q_per_channel_axis() const;
   Tensor int_repr() const;
   QScheme qscheme() const;
-  Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
-  Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
-  Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
-  Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
+  Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false, c10::optional<MemoryFormat> memory_format=c10::nullopt) const;
+  Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false, c10::optional<MemoryFormat> memory_format=c10::nullopt) const;
+  Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false, c10::optional<MemoryFormat> memory_format=c10::nullopt) const;
+  Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false, c10::optional<MemoryFormat> memory_format=c10::nullopt) const;
   Scalar item() const;
   Tensor & set_(Storage source) const;
   Tensor & set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride={}) const;
