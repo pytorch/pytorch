@@ -1,8 +1,9 @@
 #pragma once
 
-#include <ATen/core/blob.h>
-#include <c10/util/intrusive_ptr.h>
 #include <ATen/core/TensorBody.h>
+#include <ATen/core/blob.h>
+#include <c10/util/C++17.h>
+#include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
@@ -172,6 +173,16 @@ struct CAFFE2_API IValue final {
 
   // Tuple
   IValue(c10::intrusive_ptr<ivalue::Tuple> v);
+
+  template <
+      typename... Args,
+      c10::guts::enable_if_t<
+          !c10::guts::disjunction<
+              std::is_lvalue_reference<Args>...,
+              c10::guts::negation<std::is_constructible<IValue, Args>>...>::
+              value,
+          std::nullptr_t> = nullptr>
+  IValue(const std::tuple<Args...>& t);
   bool isTuple() const { return Tag::Tuple == tag; }
   c10::intrusive_ptr<ivalue::Tuple> toTuple() &&;
   c10::intrusive_ptr<ivalue::Tuple> toTuple() const &;

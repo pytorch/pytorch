@@ -249,6 +249,36 @@ class TestTypePromotion(TestCase):
                 ret_op=lambda x, y: torch.lt(x, y),
                 compare_op=lambda x, y: x < y,
             ),
+            dict(
+                name="le",
+                out_op=lambda x, y, d: torch.le(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                ret_op=lambda x, y: torch.le(x, y),
+                compare_op=lambda x, y: x <= y,
+            ),
+            dict(
+                name="gt",
+                out_op=lambda x, y, d: torch.gt(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                ret_op=lambda x, y: torch.gt(x, y),
+                compare_op=lambda x, y: x > y,
+            ),
+            dict(
+                name="ge",
+                out_op=lambda x, y, d: torch.ge(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                ret_op=lambda x, y: torch.ge(x, y),
+                compare_op=lambda x, y: x >= y,
+            ),
+            dict(
+                name="eq",
+                out_op=lambda x, y, d: torch.eq(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                ret_op=lambda x, y: torch.eq(x, y),
+                compare_op=lambda x, y: x == y,
+            ),
+            dict(
+                name="ne",
+                out_op=lambda x, y, d: torch.ne(x, y, out=torch.empty(1, dtype=torch.bool, device=d)),
+                ret_op=lambda x, y: torch.ne(x, y),
+                compare_op=lambda x, y: x != y,
+            ),
         ]
         device = self.device
         for op in comparison_ops:
@@ -311,6 +341,11 @@ class TestTypePromotion(TestCase):
             actual = x < torch.tensor(0.5)
             self.assertTrue(actual, expected)
             self.assertTrue(actual.dtype == torch.bool)
+
+    def test_promote_types(self):
+        self.assertEqual(torch.promote_types(torch.float, torch.int), torch.float)
+        self.assertEqual(torch.promote_types(torch.float, torch.double), torch.double)
+        self.assertEqual(torch.promote_types(torch.int, torch.uint8), torch.int)
 
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):
