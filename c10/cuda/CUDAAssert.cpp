@@ -12,7 +12,7 @@ namespace c10 {
 namespace cuda {
 
 template <typename T>
-static std::string format_token(const std::string& fmt, const T& data) {
+static std::string formatToken(const std::string& fmt, const T& data) {
   int ret = snprintf(nullptr, 0, fmt.c_str(), data);
   if (ret < 0) {
     throw std::runtime_error("Calculating token output size failed.");
@@ -32,7 +32,7 @@ static std::string format_token(const std::string& fmt, const T& data) {
   return std::string(buff_ptr.get());
 }
 
-static std::string format_assert_output(const char* format, char* data) {
+static std::string formatAssertOutput(const char* format, char* data) {
   std::stringstream ss;
 
   const char* p = std::strchr(format, '%');
@@ -69,7 +69,7 @@ static std::string format_assert_output(const char* format, char* data) {
       case 'x':
       case 'X':
       case 'p':
-        ss << format_token(format_spec, *reinterpret_cast<int*>(data));
+        ss << formatToken(format_spec, *reinterpret_cast<int*>(data));
         break;
 
       // floating point arguments
@@ -81,24 +81,24 @@ static std::string format_assert_output(const char* format, char* data) {
       case 'a':
       case 'A':
         if (arglen == sizeof(float)) // float or double
-          ss << format_token(format_spec, *reinterpret_cast<float*>(data));
+          ss << formatToken(format_spec, *reinterpret_cast<float*>(data));
         else
-          ss << format_token(format_spec, *reinterpret_cast<double*>(data));
+          ss << formatToken(format_spec, *reinterpret_cast<double*>(data));
         break;
 
       // Strings are handled in a special way
       case 's':
-        ss << format_token(format_spec, (const char*)data);
+        ss << formatToken(format_spec, (const char*)data);
         break;
 
       // % is special
       case '%':
-        ss << format_token("%%", 0);
+        ss << formatToken("%%", 0);
         break;
 
       // Everything else is just printed out as-is
       default:
-        ss << format_token("%s", fmt);
+        ss << formatToken("%s", fmt);
         break;
     }
 
@@ -118,7 +118,7 @@ static std::string format_assert_output(const char* format, char* data) {
   return ss.str();
 }
 
-static char* next_field(char*& ptr) {
+static char* nextField(char*& ptr) {
   constexpr size_t align_size = c10::cuda::C10_ASSERT_ARG_ALIGN_SIZE;
 
   size_t size = *reinterpret_cast<size_t*>(ptr);
@@ -132,28 +132,25 @@ static char* next_field(char*& ptr) {
   return field_data;
 }
 
-void check_assert_error(c10::cuda::CUDAAssert* assert_state) {
+void checkAssertError(c10::cuda::CUDAAssert* assert_state) {
   if (assert_state->error != 0) {
-    cudaError_t error = cudaDeviceSynchronize(); // wait for kernel to complete
+    cudaError_t error = cudaDeviceSynchronize(); // wait for kernels to complete
     if (error != cudaErrorAssert) {
       C10_CUDA_CHECK(error);
     }
 
-    c10::cuda::CUDAAssert isolation_copy(*assert_state);
-
-    // reset assert state
-    memset(assert_state, 0, sizeof(c10::cuda::CUDAAssert));
+    std::lock_guard<std::mutex> lock(*assert_state->mutex);
 
     // decode output
-    char* ptr = isolation_copy.buffer;
-    const char* file = next_field(ptr);
-    const char* func = next_field(ptr);
-    const char* expression = next_field(ptr);
-    char* format = next_field(ptr);
-    int32_t line = *reinterpret_cast<int32_t*>(next_field(ptr));
+    char* ptr = assert_state->buffer;
+    const char* file = nextField(ptr);
+    const char* func = nextField(ptr);
+    const char* expression = nextField(ptr);
+    char* format = nextField(ptr);
+    int32_t line = *reinterpret_cast<int32_t*>(nextField(ptr));
     char* args = ptr;
 
-    auto message = format_assert_output(format, args);
+    auto message = formatAssertOutput(format, args);
 
     // generate full error message
     auto error_message = c10::str(
@@ -165,6 +162,14 @@ void check_assert_error(c10::cuda::CUDAAssert* assert_state) {
         ": Assertion `",
         expression,
         "` failed.");
+
+    if (!assert_state->persistent) {
+      // reset assert state if error is not persistent
+      memset(assert_state->buffer, 0, sizeof(assert_state->buffer));
+      assert_state->length = 0;
+      assert_state->persistent = false;
+      assert_state->error = 0;
+    }
 
     throw ::c10::Error({func, file, line}, error_message);
   }

@@ -101,6 +101,7 @@ C10_HOST_DEVICE char* copy_args(
 template <typename... Args>
 C10_HOST_DEVICE __noinline__ void assert_fail(
     CUDAAssert* assert_state,
+    bool persistent,
     const char* expression,
     uint32_t line,
     const char* file,
@@ -127,17 +128,25 @@ C10_HOST_DEVICE __noinline__ void assert_fail(
   dst = copy_args(dst, end, line, args...);
 
   assert_state->length = dst ? dst - buffer : 0;
+  assert_state->persistent = persistent;
 }
 
 // handle case without format string, e.g. C10_KERNEL_ASSERT(false)
 inline C10_HOST_DEVICE void assert_fail(
     CUDAAssert* assert_state,
+    bool persistent,
     const char* expression,
     uint32_t line,
     const char* file,
     const char* func) {
   assert_fail(
-      assert_state, expression, line, file, func, "Assertion failed");
+      assert_state,
+      persistent,
+      expression,
+      line,
+      file,
+      func,
+      "Assertion failed");
 }
 
 inline CUDAAssert* prepare_kernel_assert() {
@@ -166,6 +175,7 @@ inline CUDAAssert* prepare_kernel_assert() {
     if (!(exp)) {                                          \
       at::native::assert::assert_fail(                     \
           at::native::assert::default_stream_assert_state, \
+          true,                                            \
           #exp,                                            \
           static_cast<uint32_t>(__LINE__),                 \
           __FILE__,                                        \
@@ -180,6 +190,7 @@ inline CUDAAssert* prepare_kernel_assert() {
   if (!(exp)) {                                   \
     at::native::assert::assert_fail(              \
         __c10_assert_state,                       \
+        false,                                    \
         #exp,                                     \
         static_cast<uint32_t>(__LINE__),          \
         __FILE__,                                 \
@@ -198,6 +209,7 @@ inline CUDAAssert* prepare_kernel_assert() {
   (exp) ? ((void)0)                            \
         : at::native::assert::assert_fail(     \
               __c10_assert_state,              \
+              false,                           \
               #exp,                            \
               static_cast<uint32_t>(__LINE__), \
               __FILE__,                        \

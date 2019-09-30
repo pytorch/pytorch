@@ -191,6 +191,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     AT_CUDA_CHECK(THCCachingHostAllocator_recordEvent(ptr, stream));
   } else {
     AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+    stream.check_assert_state();
   }
 }
 

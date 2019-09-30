@@ -306,24 +306,24 @@ LeakyStreamInternals* CUDAStream_internals(CUDAStream s) {
   }
 }
 
-void check_stream_assert_state(const LeakyStreamInternals* ptr) {
-  if (!ptr->assert_state) {
+void checkStreamAssertState(const LeakyStreamInternals* ptr) {
+  if (!ptr || !ptr->assert_state) {
     return;
   }
 
   auto assert_state =
       ptr->assert_state.load(std::memory_order::memory_order_relaxed);
-  check_assert_error(assert_state);
+  checkAssertError(assert_state);
 
   if (ptr != &default_streams[ptr->device_index]) {
-    // check global default device
-    assert_state = default_streams[ptr->device_index].assert_state.load();
-    check_assert_error(assert_state);
+    // also check default stream of device
+    auto default_stream_assert_state = default_streams[ptr->device_index].assert_state.load();
+    checkAssertError(default_stream_assert_state);
   }
 }
 
 CUDAStream CUDAStream_fromInternals(const LeakyStreamInternals* ptr) {
-  check_stream_assert_state(ptr);
+  checkStreamAssertState(ptr);
   return CUDAStream(
       CUDAStream::UNCHECKED,
       Stream(
@@ -354,11 +354,14 @@ CUDAAssert* CUDAStream::assert_state() const {
     CUDAAssert* new_instance = nullptr;
     C10_CUDA_CHECK(cudaHostAlloc(
         (void**)&new_instance, sizeof(CUDAAssert), cudaHostAllocMapped));
+    memset(&new_instance, 0, sizeof(CUDAAssert)); // clear memory 
+    new_instance->mutex = new std::mutex();
 
     if (ptr->assert_state.compare_exchange_strong(assert_state, new_instance)) {
       assert_state = new_instance;
     } else {
       // we lost the race: deallocate & load effective value
+      delete new_instance->mutex;
       C10_CUDA_CHECK(cudaFreeHost(new_instance));
       assert_state = ptr->assert_state.load();
       AT_ASSERT(assert_state);
@@ -366,6 +369,12 @@ CUDAAssert* CUDAStream::assert_state() const {
   }
 
   return assert_state;
+}
+
+void CUDAStream::check_assert_state() const {
+  auto ptr = CUDAStream_internals(*this);
+  AT_ASSERT(ptr);
+  checkStreamAssertState(ptr);
 }
 
 // Returns a stream from the requested pool
@@ -415,6 +424,23 @@ void setCurrentCUDAStream(CUDAStream stream) {
   AT_ASSERT(ptr);
   current_streams[ptr->device_index] = ptr;
 }
+
+/*
+void checkCUDAStreamsAssertState() {
+  // check assert state of all streams
+  for (size_t i = 0; i < num_gpus; ++i) {
+    checkStreamAssertState(&default_streams[i]);
+
+    for (auto&& s : low_priority_streams) {
+      checkStreamAssertState(&s[i]);
+    }
+
+    for (auto&& s : high_priority_streams) {
+      checkStreamAssertState(&s[i]);
+    }
+  }
+}
+*/
 
 std::ostream& operator<<(std::ostream& stream, const CUDAStream& s) {
   return stream << s.unwrap();
