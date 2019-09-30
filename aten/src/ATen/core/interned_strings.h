@@ -183,6 +183,7 @@ namespace c10 {
   _(onnx, Loop)                      \
   _(onnx, If)                        \
   _(onnx, Reshape)                   \
+  _(onnx, Expand)                    \
   _(onnx, Equal)                     \
   _(onnx, Greater)                   \
   _(onnx, Less)                      \

@@ -28,21 +28,20 @@ class FunctionalAPITest(QuantizationTestCase):
         X = torch.arange(-5, 5, dtype=torch.float)
         scale = 2.0
         zero_point = 1
-        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
         qY = torch.relu(qX)
         qY_hat = qF.relu(qX)
         self.assertEqual(qY, qY_hat)
 
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         use_bias=st.booleans(),
+        per_channel=st.booleans()
     )
-    def test_conv_api(self, use_bias):
+    def test_conv_api(self, use_bias, per_channel):
         """Tests the correctness of the conv module.
 
         The correctness is defined against the functional implementation.
@@ -56,11 +55,19 @@ class FunctionalAPITest(QuantizationTestCase):
         dilation = (1, 1)
 
         X = torch.randn(N, iC, H, W, dtype=torch.float32)
-        qX = torch.quantize_linear(X, scale=scale, zero_point=128, dtype=torch.quint8)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=128, dtype=torch.quint8)
 
         w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
 
-        qw = torch.quantize_linear(w, scale=scale, zero_point=0, dtype=torch.qint8)
+        if per_channel:
+            scale_tensor = torch.ones(oC, dtype=torch.double)
+            zero_point_tensor = torch.zeros(oC, dtype=torch.long)
+            for i in range(len(scale_tensor)):
+                scale_tensor[i] = (i + 1.0) / 255.0
+
+            qw = torch.quantize_per_channel(w, scales=scale_tensor, zero_points=zero_point_tensor, axis=0, dtype=torch.qint8)
+        else:
+            qw = torch.quantize_per_tensor(w, scale=scale, zero_point=0, dtype=torch.qint8)
 
         b = torch.randn(oC, dtype=torch.float32) if use_bias else None
         q_filters_ref = torch.ops.quantized.conv_prepack(qw,
@@ -89,11 +96,9 @@ class FunctionalAPITest(QuantizationTestCase):
 
 class DynamicModuleAPITest(QuantizationTestCase):
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -105,7 +110,7 @@ class DynamicModuleAPITest(QuantizationTestCase):
         """test API functionality for nn.quantized.dynamic.Linear"""
         W = torch.rand(out_features, in_features).float()
         W_scale, W_zp = _calculate_dynamic_qparams(W, torch.qint8)
-        W_q = torch.quantize_linear(W, W_scale, W_zp, torch.qint8)
+        W_q = torch.quantize_per_tensor(W, W_scale, W_zp, torch.qint8)
         X = torch.rand(batch_size, in_features).float()
         B = torch.rand(out_features).float() if use_bias else None
         qlinear = nnqd.Linear(in_features, out_features)
@@ -154,15 +159,22 @@ class DynamicModuleAPITest(QuantizationTestCase):
         Z_dq2 = qlinear(X)
         self.assertEqual(Z_dq, Z_dq2)
 
-        # test serialization of module directly
-        b = io.BytesIO()
-        torch.save(qlinear, b)
-        b.seek(0)
-        loaded = torch.load(b)
-        # This check is disabled pending an issue in PyTorch serialization:
+        # The below check is meant to ensure that `torch.save` and `torch.load`
+        # serialization works, however it is currently broken by the following:
         # https://github.com/pytorch/pytorch/issues/24045
+        #
+        # Instead, we currently check that the proper exception is thrown on save.
+        # <start code>
+        # b = io.BytesIO()
+        # torch.save(qlinear, b)
+        # b.seek(0)
+        # loaded = torch.load(b)
         # self.assertEqual(qlinear.weight(), loaded.weight())
-        self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        # self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        # <end code>
+        with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
+            b = io.BytesIO()
+            torch.save(qlinear, b)
 
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X], [Z_ref])), check_save_load=True)
@@ -179,7 +191,7 @@ class DynamicModuleAPITest(QuantizationTestCase):
         quantized_float_linear(X)
 
         # Smoke test extra_repr
-        str(quantized_float_linear)
+        self.assertTrue('QuantizedLinear' in str(quantized_float_linear))
 
 
 class ModuleAPITest(QuantizationTestCase):
@@ -191,7 +203,7 @@ class ModuleAPITest(QuantizationTestCase):
         y_ref = torch.relu(x)
         y6_ref = torch.nn.modules.ReLU6()(x)
 
-        qx = torch.quantize_linear(x, 1.0, 0, dtype=torch.qint32)
+        qx = torch.quantize_per_tensor(x, 1.0, 0, dtype=torch.qint32)
         qy = relu_module(qx)
         qy6 = relu6_module(qx)
 
@@ -202,24 +214,31 @@ class ModuleAPITest(QuantizationTestCase):
 
 
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
         out_features=st.integers(4, 8),
         use_bias=st.booleans(),
         use_fused=st.booleans(),
+        per_channel=st.booleans()
     )
-    def test_linear_api(self, batch_size, in_features, out_features, use_bias, use_fused):
+    def test_linear_api(self, batch_size, in_features, out_features, use_bias, use_fused, per_channel):
         """test API functionality for nn.quantized.linear and nn._intrinsic.quantized.linear_relu"""
         W = torch.rand(out_features, in_features).float()
-        W_q = torch.quantize_linear(W, 0.1, 4, torch.qint8)
+        if per_channel:
+            scale_tensor = torch.ones(out_features, dtype=torch.double)
+            zero_point_tensor = torch.zeros(out_features, dtype=torch.long)
+            for i in range(len(scale_tensor)):
+                scale_tensor[i] = (i + 1.0) / 255.0
+            W_q = torch.quantize_per_channel(W, scales=scale_tensor, zero_points=zero_point_tensor, axis=0, dtype=torch.qint8)
+        else:
+            W_q = torch.quantize_per_tensor(W, 0.1, 4, torch.qint8)
+
         X = torch.rand(batch_size, in_features).float()
-        X_q = torch.quantize_linear(X, 0.2, 10, torch.quint8)
+        X_q = torch.quantize_per_tensor(X, 0.2, 10, torch.quint8)
         B = torch.rand(out_features).float() if use_bias else None
         scale = 0.5
         zero_point = 3
@@ -283,16 +302,23 @@ class ModuleAPITest(QuantizationTestCase):
         Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
-        # test serialization of module directly
-        b = io.BytesIO()
-        torch.save(qlinear, b)
-        b.seek(0)
-        loaded = torch.load(b)
-        # This check is disabled pending an issue in PyTorch serialization:
+        # The below check is meant to ensure that `torch.save` and `torch.load`
+        # serialization works, however it is currently broken by the following:
         # https://github.com/pytorch/pytorch/issues/24045
+        #
+        # Instead, we currently check that the proper exception is thrown on save.
+        # <start code>
+        # b = io.BytesIO()
+        # torch.save(qlinear, b)
+        # b.seek(0)
+        # loaded = torch.load(b)
         # self.assertEqual(qlinear.weight(), loaded.weight())
-        self.assertEqual(qlinear.scale, loaded.scale)
-        self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        # self.assertEqual(qlinear.scale, loaded.scale)
+        # self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        # <end code>
+        with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
+            b = io.BytesIO()
+            torch.save(qlinear, b)
 
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X_q], [Z_ref])), check_save_load=True)
@@ -300,23 +326,23 @@ class ModuleAPITest(QuantizationTestCase):
         # Test from_float.
         float_linear = torch.nn.Linear(in_features, out_features).float()
         float_linear.qconfig = torch.quantization.default_qconfig
-        torch.quantization.prepare(float_linear)
+        torch.quantization.prepare(float_linear, inplace=True)
         float_linear(X.float())
         # Sequential allows swapping using "convert".
         quantized_float_linear = torch.nn.Sequential(float_linear)
-        torch.quantization.convert(quantized_float_linear)
+        quantized_float_linear = torch.quantization.convert(quantized_float_linear, inplace=True)
 
         # Smoke test to make sure the module actually runs
         quantized_float_linear(X_q)
 
         # Smoke test extra_repr
-        str(quantized_float_linear)
+        self.assertTrue('QuantizedLinear' in str(quantized_float_linear))
 
     def test_quant_dequant_api(self):
         r = torch.tensor([[1., -1.], [1., -1.]], dtype=torch.float)
         scale, zero_point, dtype = 1.0, 2, torch.qint8
         # testing Quantize API
-        qr = torch.quantize_linear(r, scale, zero_point, dtype)
+        qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
         quant_m = nnq.Quantize(scale, zero_point, dtype)
         qr2 = quant_m(r)
         self.assertEqual(qr, qr2)
@@ -327,16 +353,15 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(rqr, rqr2)
 
     @no_deadline
-    @unittest.skipIf(
-        not torch.fbgemm_is_cpu_supported(),
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     @given(
         use_bias=st.booleans(),
         use_fused=st.booleans(),
+        per_channel=st.booleans()
     )
-    def test_conv_api(self, use_bias, use_fused):
+    def test_conv_api(self, use_bias, use_fused, per_channel):
         """Tests the correctness of the conv module.
 
         The correctness is defined against the functional implementation.
@@ -347,11 +372,19 @@ class ModuleAPITest(QuantizationTestCase):
         scale, zero_point = 1.0 / 255, 128
 
         X = torch.randn(N, iC, H, W, dtype=torch.float32)
-        qX = torch.quantize_linear(X, scale=scale, zero_point=128, dtype=torch.quint8)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=128, dtype=torch.quint8)
 
         w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
 
-        qw = torch.quantize_linear(w, scale=scale, zero_point=0, dtype=torch.qint8)
+        if per_channel:
+            scale_tensor = torch.ones(oC, dtype=torch.double)
+            zero_point_tensor = torch.zeros(oC, dtype=torch.long)
+            for i in range(len(scale_tensor)):
+                scale_tensor[i] = (i + 1.0) / 255.0
+
+            qw = torch.quantize_per_channel(w, scales=scale_tensor, zero_points=zero_point_tensor, axis=0, dtype=torch.qint8)
+        else:
+            qw = torch.quantize_per_tensor(w, scale=scale, zero_point=0, dtype=torch.qint8)
 
         b = torch.randn(oC, dtype=torch.float32) if use_bias else None
 
@@ -463,14 +496,24 @@ class ModuleAPITest(QuantizationTestCase):
         loaded_result = loaded_conv_under_test(qX)
         self.assertEqual(loaded_result, result_reference)
 
-        b = io.BytesIO()
-        torch.save(conv_under_test, b)
-        b.seek(0)
-        loaded_conv = torch.load(b)
-
-        self.assertEqual(conv_under_test.bias(), loaded_conv.bias())
-        self.assertEqual(conv_under_test.scale, loaded_conv.scale)
-        self.assertEqual(conv_under_test.zero_point, loaded_conv.zero_point)
+        # The below check is meant to ensure that `torch.save` and `torch.load`
+        # serialization works, however it is currently broken by the following:
+        # https://github.com/pytorch/pytorch/issues/24045
+        #
+        # Instead, we currently check that the proper exception is thrown on save.
+        # <start code>
+        # b = io.BytesIO()
+        # torch.save(conv_under_test, b)
+        # b.seek(0)
+        # loaded_conv = torch.load(b)
+        #
+        # self.assertEqual(conv_under_test.bias(), loaded_conv.bias())
+        # self.assertEqual(conv_under_test.scale, loaded_conv.scale)
+        # self.assertEqual(conv_under_test.zero_point, loaded_conv.zero_point)
+        # <end code>
+        with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
+            b = io.BytesIO()
+            torch.save(conv_under_test, b)
 
         # JIT testing
         self.checkScriptable(conv_under_test, list(zip([qX], [result_reference])), check_save_load=True)
@@ -486,17 +529,17 @@ class ModuleAPITest(QuantizationTestCase):
                                      bias=use_bias,
                                      padding_mode='zeros').float()
         float_conv.qconfig = torch.quantization.default_qconfig
-        torch.quantization.prepare(float_conv)
+        torch.quantization.prepare(float_conv, inplace=True)
         float_conv(X.float())
         quantized_float_conv = torch.nn.Sequential(float_conv)
-        torch.quantization.convert(quantized_float_conv)
+        torch.quantization.convert(quantized_float_conv, inplace=True)
 
         # Smoke test to make sure the module actually runs
         quantized_float_conv(qX)
         if use_bias:
             self.assertEqual(quantized_float_conv[0].bias(), float_conv.bias)
         # Smoke test extra_repr
-        str(quantized_float_conv)
+        self.assertTrue('QuantizedConv2d' in str(quantized_float_conv))
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.
@@ -514,8 +557,8 @@ class ModuleAPITest(QuantizationTestCase):
         scale, zero_point = 1.0 / 255, 128
 
         X = torch.randn(N, C, H, W, dtype=torch.float32)
-        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
-                                   dtype=torch.quint8)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch.quint8)
         qX_expect = torch.nn.functional.max_pool2d(qX, **kwargs)
 
         pool_under_test = torch.nn.quantized.MaxPool2d(**kwargs)

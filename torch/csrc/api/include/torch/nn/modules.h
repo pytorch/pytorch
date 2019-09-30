@@ -11,6 +11,7 @@
 #include <torch/nn/modules/batchnorm.h>
 #include <torch/nn/modules/conv.h>
 #include <torch/nn/modules/dropout.h>
+#include <torch/nn/modules/distance.h>
 #include <torch/nn/modules/embedding.h>
 #include <torch/nn/modules/fold.h>
 #include <torch/nn/modules/linear.h>

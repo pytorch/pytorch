@@ -45,8 +45,7 @@ class FloatFunctional(torch.nn.Module):
     def add_scalar(self, x, y):
         # type: (Tensor, float) -> Tensor
         r = torch.add(x, y)
-        # TODO: Fix for QAT.
-        self.observer(r)
+        # No observer needed for scalar add
         return r
 
     r"""Operation equivalent to ``torch.mul(Tensor, Tensor)``"""
@@ -60,8 +59,7 @@ class FloatFunctional(torch.nn.Module):
     def mul_scalar(self, x, y):
         # type: (Tensor, float) -> Tensor
         r = torch.mul(x, y)
-        # TODO: Fix for QAT.
-        self.observer(r)
+        # No observer needed for scalar multiply
         return r
 
     r"""Operation equivalent to ``torch.cat``"""
@@ -94,8 +92,8 @@ class QFunctional(torch.nn.Module):
     .. Examples::
 
         >>> q_add = QFunctional('add')
-        >>> a = torch.quantize_linear(torch.tensor(3.0), 1.0, 0, torch.qint32)
-        >>> b = torch.quantize_linear(torch.tensor(4.0), 1.0, 0, torch.qint32)
+        >>> a = torch.quantize_per_tensor(torch.tensor(3.0), 1.0, 0, torch.qint32)
+        >>> b = torch.quantize_per_tensor(torch.tensor(4.0), 1.0, 0, torch.qint32)
         >>> q_add.add(a, b)  # Equivalent to ``torch.ops.quantized.add(3, 4)
 
     Valid operation names:
@@ -135,8 +133,7 @@ class QFunctional(torch.nn.Module):
     r"""Operation equivalent to ``torch.ops.quantized.add(Tensor, float)``"""
     def add_scalar(self, x, y):
         # type: (Tensor, float) -> Tensor
-        return ops.quantized.add_scalar(x, y, scale=self.scale,
-                                        zero_point=self.zero_point)
+        return ops.quantized.add_scalar(x, y)
 
     r"""Operation equivalent to ``torch.ops.quantized.mul(Tensor, Tensor)``"""
     def mul(self, x, y):
@@ -147,8 +144,7 @@ class QFunctional(torch.nn.Module):
     r"""Operation equivalent to ``torch.ops.quantized.mul(Tensor, float)``"""
     def mul_scalar(self, x, y):
         # type: (Tensor, float) -> Tensor
-        return ops.quantized.mul_scalar(x, y, scale=self.scale,
-                                        zero_point=self.zero_point)
+        return ops.quantized.mul_scalar(x, y)
 
     r"""Operation equivalent to ``torch.ops.quantized.cat``"""
     def cat(self, x, dim=0):

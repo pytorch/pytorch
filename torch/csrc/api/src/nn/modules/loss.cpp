@@ -3,8 +3,8 @@
 namespace torch {
 namespace nn {
 
-L1LossImpl::L1LossImpl(torch::nn::L1LossOptions options)
-    : options(options) {}
+L1LossImpl::L1LossImpl(const torch::nn::L1LossOptions& options_)
+    : options(options_) {}
 
 void L1LossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::L1Loss";
