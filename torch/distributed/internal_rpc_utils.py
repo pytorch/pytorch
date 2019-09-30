@@ -14,17 +14,20 @@ import torch
 # objects
 _thread_local_tensor_tables = threading.local()
 
-# This class provides serialize() and deserialize() interfaces to serialize
-# data to be "binary string + tensor table" format
-# So for RPC python UDF function and args, non tensor data will be serialized
-# into regular binary string, tensor data will be put into thread local tensor
-# tables, this serialization format is consistent with builtin operator and args
-# using JIT pickler. This format will make tensor handling in C++ much easier,
-# e.g. attach tensor to distributed autograd graph in C++
-class InternalRPCPickler:
+
+class _InternalRPCPickler:
+    r"""
+    This class provides serialize() and deserialize() interfaces to serialize
+    data to be "binary string + tensor table" format
+    So for RPC python UDF function and args, non tensor data will be serialized
+    into regular binary string, tensor data will be put into thread local tensor
+    tables, this serialization format is consistent with builtin operator and args
+    using JIT pickler. This format will make tensor handling in C++ much easier,
+    e.g. attach tensor to distributed autograd graph in C++
+    """
     def __init__(self):
         # python2 does not have dispatch_table, add "if six.PY3" condition,
-        # as InternalRPCPickler still got build in python2 even
+        # as _InternalRPCPickler still got build in python2 even
         # we skipped python 2 tests for rpc_test
         if six.PY3:
             self._dispatch_table = copyreg.dispatch_table.copy()
@@ -39,11 +42,13 @@ class InternalRPCPickler:
         global _thread_local_tensor_tables
         _thread_local_tensor_tables.send_tables.append(obj)
         tensor_index = len(_thread_local_tensor_tables.send_tables) - 1
-        return (InternalRPCPickler._tensor_receiver, (tensor_index, ))
+        return (_InternalRPCPickler._tensor_receiver, (tensor_index, ))
 
-    # Serialize non tensor data into binary string, tensor data into
-    # tensor table
     def serialize(self, obj):
+        r"""
+        Serialize non tensor data into binary string, tensor data into
+        tensor table
+        """
         f = io.BytesIO()
         p = pickle.Pickler(f)
         p.dispatch_table = self._dispatch_table
@@ -68,8 +73,10 @@ class InternalRPCPickler:
 
         return (f.getvalue(), tensors)
 
-    # Deserilize binary string + tensor table to original obj
     def deserialize(self, binary_data, tensor_table):
+        r"""
+        Deserilize binary string + tensor table to original obj
+        """
         # save _thread_local_tensor_tables.recv_tables if it is in nested call
         global _thread_local_tensor_tables
         if hasattr(_thread_local_tensor_tables, "recv_tables"):
@@ -89,14 +96,17 @@ class InternalRPCPickler:
 
         return ret
 
+
 # Create _internal_rpc_pickler only once to initialize _dispatch_table only once
-_internal_rpc_pickler = InternalRPCPickler()
+_internal_rpc_pickler = _InternalRPCPickler()
 
 
-# Internal python function will be imported and executed in C++ land
-# it unpickles pickled python udf strings and tensors and run the python
-# udf, return serialized result and tensor tables
 def run_python_udf_internal(pickled_python_udf, tensors):
+    r"""
+    Internal python function will be imported and executed in C++ land
+    it unpickles pickled python udf strings and tensors and run the python
+    udf, return serialized result and tensor tables
+    """
     python_udf = _internal_rpc_pickler.deserialize(pickled_python_udf, tensors)
     try:
         result = python_udf.func(*python_udf.args, **python_udf.kwargs)
@@ -107,9 +117,11 @@ def run_python_udf_internal(pickled_python_udf, tensors):
     return _internal_rpc_pickler.serialize(result)
 
 
-# Internal python function will be imported and executed in C++ land
-# it unpickled pickled python udf result and tensor tables, return python object
 def load_python_udf_result_internal(pickled_python_result, tensors):
+    r"""
+    Internal python function will be imported and executed in C++ land
+    it unpickled pickled python udf result and tensor tables, return python object
+    """
     result = _internal_rpc_pickler.deserialize(pickled_python_result, tensors)
     if isinstance(result, RemoteException):
         raise Exception(result.msg)
