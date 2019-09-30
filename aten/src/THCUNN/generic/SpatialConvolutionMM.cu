@@ -14,7 +14,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 11,
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
-
+ 
   if (weight != NULL) {
     THCUNN_argCheck(state, !weight->is_empty() && (weight->dim() == 2 || weight->dim() == 4), 5, weight,
                     "non-empty 2D or 4D weight tensor expected, but got: %s");
@@ -36,7 +36,16 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
     dimw++;
   }
 
-  THCUNN_argCheck(state, !input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
+  // Allow for empty batch size but not other dimensions
+  bool valid_empty = false;
+  if (ndim == 3) {
+    valid_empty = input->size(0) == 0 && input->size(1) != 0 && input->size(2) != 0;
+  } else if (ndim == 4) {
+    valid_empty = input->size(0) == 0 && input->size(1) != 0 && input->size(2) != 0 && input->size(3) != 0;
+  }
+         
+
+  THCUNN_argCheck(state, (!input->is_empty() || valid_empty) && (ndim == 3 || ndim == 4), 2, input,
                   "non-empty 3D or 4D input tensor expected but got: %s");
 
   int64_t inputHeight  = input->size(dimh);

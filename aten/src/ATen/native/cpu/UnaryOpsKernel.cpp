@@ -156,14 +156,6 @@ static void cosh_kernel(TensorIterator& iter) {
   });
 }
 
-static void erfinv_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "erfinv_cpu", [&]() {
-    cpu_kernel(
-        iter,
-        [=](scalar_t a) -> scalar_t { return calc_erfinv(a); });
-  });
-}
-
 static void digamma_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "digamma", [&]() {
     cpu_kernel(
@@ -184,7 +176,7 @@ static void polygamma_kernel(TensorIterator& iter, int64_t n) {
   switch (n) {
     case 0: digamma_kernel(iter); break;
     case 1: trigamma_kernel(iter); break;
-    default: TORCH_CHECK("polygamma(n,x) is not implemented for n>=2, but was ", n);
+    default: TORCH_CHECK(false, "polygamma(n,x) is not implemented for n>=2, but was ", n);
   }
 }
 
@@ -337,7 +329,6 @@ REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sign_stub, &sign_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
-REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel);
 REGISTER_DISPATCH(digamma_stub, &digamma_kernel);
 REGISTER_DISPATCH(trigamma_stub, &trigamma_kernel);
 REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
@@ -355,6 +346,7 @@ IMPLEMENT_FLOAT_KERNEL(FLOATING, cos)
 // IMPLEMENT_FLOAT_KERNEL(FLOATING, cosh)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erf)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erfc)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, erfinv)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, exp)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, expm1)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, floor)

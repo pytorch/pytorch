@@ -94,9 +94,14 @@ class IntrinsicQATModuleTest(TestCase):
                 padding_mode,
                 eps,
                 momentum,
-                freeze_bn,
-                default_qat_qconfig
-            ).to(dtype=torch.double).disable_fake_quant()
+                freeze_bn=True,
+                qconfig=default_qat_qconfig
+            ).to(dtype=torch.double)
+            qat_op.apply(torch.quantization.disable_fake_quant)
+            if freeze_bn:
+                qat_op.apply(torch.nn._intrinsic.qat.freeze_bn_stats)
+            else:
+                qat_op.apply(torch.nn._intrinsic.qat.update_bn_stats)
 
             # align inputs and internal parameters
             input = torch.randn(batch_size, input_channels, height, width, dtype=torch.double, requires_grad=True)
