@@ -211,7 +211,7 @@ Tensor empty_like(
     }
   }
 
-  if (self.is_quantized()) {
+  if (self.is_quantized() && options.dtype() == self.dtype()) {
     // We could check if dtype is still quantized?  But then should we shift/scale
     // the q_zero_point / q_scale or not?
     TORCH_CHECK(!options.has_dtype() || options.dtype() == self.dtype(),
