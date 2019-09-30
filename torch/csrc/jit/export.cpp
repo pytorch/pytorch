@@ -543,8 +543,6 @@ class ScriptModuleSerializer {
       bool bytecode_format) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
-    // try to find all the materialized interface instances to collect class
-    // types that is necessary for code info serialization
     // The tensor constants from the code are written to a separate archive
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(

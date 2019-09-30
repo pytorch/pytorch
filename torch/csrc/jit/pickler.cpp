@@ -107,7 +107,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     auto type = obj->type();
     // Memorize every class type the Pickler encountered
     // This is used to make sure we capture all the run-time types
-    // and serialize them for class/interface polymorphism
+    // and serialize them properly for class/interface polymorphism
     memorized_class_types_.emplace_back(type);
 
     pushGlobal(type->name()->prefix(), type->name()->name());
