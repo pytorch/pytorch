@@ -109,7 +109,51 @@ std::tuple<Tensor, Tensor> AdaptiveMaxPool1dImpl::forward_with_indices(const Ten
   return F::adaptive_max_pool1d_with_indices(input, options);
 }
 
+Tensor AdaptiveMaxPool2dImpl::forward(const Tensor& input) {
+  return F::adaptive_max_pool2d(input, options);
+}
+
+std::tuple<Tensor, Tensor> AdaptiveMaxPool2dImpl::forward_with_indices(const Tensor& input) {
+  return F::adaptive_max_pool2d_with_indices(input, options);
+}
+
+Tensor AdaptiveMaxPool3dImpl::forward(const Tensor& input) {
+  return F::adaptive_max_pool3d(input, options);
+}
+
+std::tuple<Tensor, Tensor> AdaptiveMaxPool3dImpl::forward_with_indices(const Tensor& input) {
+  return F::adaptive_max_pool3d_with_indices(input, options);
+}
+
 template class AdaptiveMaxPoolImpl<1, AdaptiveMaxPool1dImpl>;
+template class AdaptiveMaxPoolImpl<2, AdaptiveMaxPool2dImpl>;
+template class AdaptiveMaxPoolImpl<3, AdaptiveMaxPool3dImpl>;
+
+// ============================================================================
+
+template <size_t D, typename Derived>
+AdaptiveAvgPoolImpl<D, Derived>::AdaptiveAvgPoolImpl(
+  const AdaptiveAvgPoolOptions<D>& options_) : options(options_) {}
+
+template <size_t D, typename Derived>
+void AdaptiveAvgPoolImpl<D, Derived>::reset() {}
+
+template <size_t D, typename Derived>
+void AdaptiveAvgPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::AdaptiveAvgPool" << D << "d"
+         << "(output_size=" << options.output_size() << ")";
+}
+
+Tensor AdaptiveAvgPool1dImpl::forward(const Tensor& input) {
+  return F::adaptive_avg_pool1d(input, options);
+}
+
+Tensor AdaptiveAvgPool2dImpl::forward(const Tensor& input) {
+  return F::adaptive_avg_pool2d(input, options);
+}
+
+template class AdaptiveAvgPoolImpl<1, AdaptiveAvgPool1dImpl>;
+template class AdaptiveAvgPoolImpl<2, AdaptiveAvgPool2dImpl>;
 
 } // namespace nn
 } // namespace torch
