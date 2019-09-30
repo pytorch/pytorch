@@ -1971,7 +1971,7 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     weight_ = g.op("Constant", value_t=torch.tensor([1.0] * input_sizes[0] * num_groups))
     bias_ = g.op("Constant", value_t=torch.tensor([0.0] * input_sizes[0] * num_groups))
 
-    norm_reshaped = instance_norm(g, input_reshaped, weight_, bias_, None, None, None, None, eps, cudnn_enabled)
+    norm_reshaped = g.op("InstanceNormalization", input_reshaped, weight_, bias_, epsilon_f=eps)
     norm = g.op('Reshape', norm_reshaped, g.op('Constant', value_t=torch.LongTensor(input_sizes)))
 
     if weight is None or weight.node().mustBeNone():
