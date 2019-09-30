@@ -12,9 +12,9 @@ namespace torch { namespace autograd { namespace utils {
 inline std::tuple<c10::optional<at::Device>, c10::optional<at::ScalarType>, bool, bool, c10::optional<at::MemoryFormat>>
   parse_to_conversion(PyObject *args, PyObject *kwargs, bool allow_copy) {
   static PythonArgParser parser({
-    "to(Device device=None, ScalarType dtype=None, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None)",
-    "to(ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None)",
-    "to(Tensor tensor, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None)",
+    "to(Device device=None, ScalarType dtype=None, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
+    "to(ScalarType dtype, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
+    "to(Tensor tensor, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
   });
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);

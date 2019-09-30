@@ -672,16 +672,17 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "type(PyObject* dtype=None, bool non_blocking=False)",
-    "type(PyObject* dtype=None, bool async=False)|deprecated"
+    "type(PyObject* dtype=None, bool non_blocking=False, *, MemoryFormat? memory_format=None)",
+    "type(PyObject* dtype=None, bool async=False, *, MemoryFormat? memory_format=None)|deprecated"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  ParsedArgs<2> parsed_args;
+  ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.isNone(0)) {
     return THPUtils_packString(torch::utils::type_to_string(self_.type()));
   }
   auto obj = r.pyobject(0);
+  auto opt_memory_format = r.memoryformatOptional(2);
   std::string type_name;
   bool is_dtype = false;
   if (PyType_Check(obj)) {
@@ -712,7 +713,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   if (device.is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
-  return THPVariable_Wrap(dispatch_to(self_, device, scalar_type, /*non_blocking=*/ r.toBool(1), /*copy=*/ false, MemoryFormat::Contiguous));
+  return THPVariable_Wrap(dispatch_to(self_, device, scalar_type, /*non_blocking=*/ r.toBool(1), /*copy=*/ false, opt_memory_format));
   END_HANDLE_TH_ERRORS
 }
 
