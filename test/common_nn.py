@@ -1219,6 +1219,14 @@ new_module_tests = [
         desc='pad2size1',
     ),
     dict(
+        module_name='Conv1d',
+        constructor_args=(4, 5, 3),
+        input_size=(0, 4, 10),
+        cudnn=True,
+        desc='zero_batch',
+        test_cuda=(not TEST_WITH_ROCM),
+    ),
+    dict(
         fullname='Conv1d_dilated',
         constructor=lambda: nn.Conv1d(4, 5, kernel_size=3, dilation=2),
         input_size=(2, 4, 10),
@@ -1306,6 +1314,15 @@ new_module_tests = [
         cudnn=True,
         desc='no_bias',
         check_with_long_tensor=True,
+    ),
+    dict(
+        module_name='Conv2d',
+        constructor_args=(3, 4, (3, 2)),
+        input_size=(0, 3, 7, 5),
+        cudnn=True,
+        desc='zero_batch',
+        check_with_long_tensor=True,
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv2d_groups',
@@ -1558,6 +1575,15 @@ new_module_tests = [
         cudnn=True,
         desc='stride_padding',
         check_with_long_tensor=True,
+    ),
+    dict(
+        module_name='Conv3d',
+        constructor_args=(3, 4, (2, 3, 4)),
+        input_size=(0, 3, 3, 4, 5),
+        cudnn=True,
+        check_with_long_tensor=True,
+        desc='zero_batch',
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv3d_groups',
@@ -3343,10 +3369,11 @@ class NNTestCase(TestCase):
         numerical_t = list(iter_tensors(numerical))
 
         # TODO: compare structure
-        self.assertLessEqual(
-            max(a.add(-1, n).abs().max() for a, n in zip(analytical_t, numerical_t)),
-            PRECISION
-        )
+        if input.numel() != 0:
+            self.assertLessEqual(
+                max(a.add(-1, n).abs().max() for a, n in zip(analytical_t, numerical_t)),
+                PRECISION
+            )
 
     def check_criterion_jacobian(self, criterion, input, target):
         eps = 1e-6
@@ -3510,7 +3537,7 @@ class ModuleTest(TestBase):
                 dim = d + 1
                 break
         noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
-        assert noncontig.numel() == 1 or not noncontig.is_contiguous()
+        assert noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()
         noncontig.requires_grad = tensor.requires_grad
         return noncontig
 

@@ -31,7 +31,8 @@ FunctionSchema PythonValue::getSchema(
     const size_t n_binders,
     const SourceRange& loc) {
   auto annotations = py::module::import("torch.jit.annotations");
-  auto signature = annotations.attr("get_signature")(self);
+  auto signature =
+      annotations.attr("get_signature")(self, rcb ? *rcb : py::none(), loc);
   std::vector<Argument> args, rets;
   // We may mutate this if we can determine the number of args from Python
   // introspection.
@@ -225,7 +226,6 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  std::stringstream err;
   std::vector<NamedValue> new_inputs = inputs.vec();
   new_inputs.insert(new_inputs.begin(), module_);
 
@@ -244,7 +244,7 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
           c10::nullopt,
           new_inputs,
           attributes,
-          &err,
+          &failure_messages,
           allow_conversions);
       if (match) {
         return MethodValue(module_, method_name)
@@ -659,6 +659,14 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     if (auto callee = as_function(compiled_fn)) {
       return std::make_shared<FunctionValue>(*callee);
     }
+  }
+
+  py::bool_ isMethod = py::module::import("inspect").attr("ismethod")(obj);
+  // methods here have been explicitly annotated to not be compiled,
+  // so they do not have the same overload and compile checks as for functions
+  if (isFunction || isMethod) {
+    auto rcb = py::module::import("torch.jit").attr("_gen_rcb")(obj, 0);
+    return std::make_shared<PythonValue>(obj, rcb);
   }
 
   return std::make_shared<PythonValue>(obj);

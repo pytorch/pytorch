@@ -188,10 +188,28 @@ test_xla() {
   assert_git_not_dirty
 }
 
+# Do NOT run this test before any other tests, like test_python_nn, etc.
+# Because this function uninstalls the torch built from branch, and install
+# nightly version.
+test_backward_compatibility() {
+  set -x
+  pushd test/backward_compatibility
+  python dump_all_function_schemas.py --filename new_schemas.txt
+  pip_uninstall torch
+  pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+  python check_backward_compatibility.py --new-schemas new_schemas.txt
+  popd
+  set +x
+  assert_git_not_dirty
+}
+
 (cd test && python -c "import torch; print(torch.__config__.show())")
 (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 
-if [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
+  test_backward_compatibility
+  # Do NOT add tests after bc check tests, see its comment.
+elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   test_torchvision
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then

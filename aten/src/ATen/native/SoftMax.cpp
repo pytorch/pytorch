@@ -233,29 +233,65 @@ Tensor log_softmax_backward_cpu(
 }
 
 Tensor softmax(const Tensor& input_, const int64_t dim_) {
-  return at::_softmax(input_, dim_, false);
+  auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    return at::_softmax(input_, dim_, false);
+  }();
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, input_);
+#endif
+  return result;
 }
 
 Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
-  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
-      return at::_softmax(input_, dim_, true);
-  } else {
-      Tensor converted = dtype.has_value() ? input_.toType(dtype.value()) : input_;
-      return at::_softmax(converted, dim_, false);
-  }
+  auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
+        return at::_softmax(input_, dim_, true);
+    } else {
+        Tensor converted = dtype.has_value() ? input_.toType(dtype.value()) : input_;
+        return at::_softmax(converted, dim_, false);
+    }
+  }();
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, input_);
+#endif
+  return result;
 }
 
 Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
-  return at::_log_softmax(input_, dim_, false);
+  auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    return at::_log_softmax(input_, dim_, false);
+  }();
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, input_);
+#endif
+  return result;
 }
 
 Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
-  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
-      return at::_log_softmax(input_, dim_, true);
-  } else {
-      Tensor converted = dtype.has_value()? input_.toType(dtype.value()) : input_;
-      return at::_log_softmax(converted, dim_, false);
-  }
+  auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
+        return at::_log_softmax(input_, dim_, true);
+    } else {
+        Tensor converted = dtype.has_value()? input_.toType(dtype.value()) : input_;
+        return at::_log_softmax(converted, dim_, false);
+    }
+  }();
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, input_);
+#endif
+  return result;
 }
 
 DEFINE_DISPATCH(softmax_lastdim_kernel);
