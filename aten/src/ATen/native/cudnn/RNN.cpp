@@ -778,6 +778,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           &reserve_size
           ));
     reserve = at::empty(reserve_size, input.options().dtype(kByte));
+    setCuDNNStreamToCurrent();
     AT_CUDNN_CHECK(cudnnRNNForwardTraining(
           handle,
           descs.rnn_desc.desc(),
@@ -794,6 +795,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           ));
   } else { // inference
     reserve = at::empty({0}, input.options().dtype(kByte));
+    setCuDNNStreamToCurrent();
     AT_CUDNN_CHECK(cudnnRNNForwardInference(
           handle,
           descs.rnn_desc.desc(),
@@ -912,7 +914,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
         ));
   // TODO: put this in the correct device???
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
-
+  setCuDNNStreamToCurrent();
   AT_CUDNN_CHECK(cudnnRNNBackwardData(
         handle,
         descs.rnn_desc.desc(),
@@ -1016,7 +1018,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
         &workspace_size
         ));
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
-
+  setCuDNNStreamToCurrent();
   AT_CUDNN_CHECK(cudnnRNNBackwardWeights(
         handle,
         descs.rnn_desc.desc(),
