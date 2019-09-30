@@ -613,6 +613,7 @@ struct CodeImpl {
     const auto type = node->input()->type()->expect<ClassType>();
     const auto& field = node->s(attr::name);
     const auto slot = type->getAttributeSlot(field);
+    std::cout << "Emitting getattr for " << field << " as " << type->getAttribute(field) << "\n";
     insertInstruction(GET_ATTR, slot);
   }
 

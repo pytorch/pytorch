@@ -546,6 +546,11 @@ void initJitScriptBindings(PyObject* module) {
       .def("_get_parameter", &Module::get_parameter)
       .def("_get_buffer", &Module::get_buffer)
       .def("_get_attribute", &Module::get_attribute)
+      .def("_get_attribute_type", [](Module& self, const std::string& attr) {
+        auto slot = self.find_attribute(attr);
+        TORCH_INTERNAL_ASSERT(slot);
+        return slot->type();
+      })
       .def("_get_module", &Module::get_module)
       .def(
           "_get_modules",

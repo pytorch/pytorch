@@ -114,8 +114,10 @@ struct TORCH_API Module {
       std::shared_ptr<CompilationUnit> cu,
       bool shouldMangle = false);
   // module_value_ null and will be lazily initialized if is needed
-  Module() {}
-  Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
+  Module() : Module(nullptr) {}
+  Module(ModulePtr module_value) : module_value_(std::move(module_value)) {
+    register_attribute("training", BoolType::get(), true);
+  }
   ~Module() {}
 
   const c10::QualifiedName& name() const {
@@ -257,11 +259,7 @@ struct TORCH_API Module {
   }
   /// True if the module is in training mode.
   bool is_training() {
-    if (auto p = find_attribute("training")) {
-      return p->value().toBool();
-    }
-    // We are in training mode by default
-    return true;
+    return get_attribute("training").toBool();
   }
 
   /// Recursively casts all parameters to the given `dtype` and `device`.

@@ -1466,6 +1466,7 @@ if _enabled:
     # which always throws an exception.
     class _CachedForward(object):
         def __get__(self, obj, cls):
+            print("GETTING forward")
             return self.__getattr__('forward')
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):
@@ -1498,7 +1499,7 @@ if _enabled:
                 self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit, True)
 
             Module._Module__construct(self)
-            Module.__setattr__(self, "training", True)
+#            Module.__setattr__(self, "training", True)
 
             self._parameters = OrderedParameterDict(self._c)
             self._buffers = OrderedBufferDict(self._c)
@@ -1527,6 +1528,10 @@ if _enabled:
             for details.
             """
             return self.forward.code
+
+        # @property
+        # def training(self):
+        #     return self._c._get_attribute('training')
 
         def save(self, *args, **kwargs):
             r"""
@@ -1564,11 +1569,6 @@ if _enabled:
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
-                if attr == 'training':
-                    if self._c._has_attribute('training'):
-                        self.__dict__['training'] = value
-                        self._c._set_attribute('training', value)
-                        return
                 if isinstance(value, Attribute):
                     the_type = torch.jit.annotations.ann_to_type(value.type)
                     try:
@@ -1577,6 +1577,10 @@ if _enabled:
                         raise RuntimeError("Could not register attribute '{}' of type '{}' for a value of type '{}'"
                                            .format(attr, value.type, type(value.value)))
                     return
+                if self._c._has_attribute(attr):
+                    print("setting", attr, value)
+                    attr_type = self._c._get_attribute_type(attr)
+                    self._c._register_attribute(attr, attr_type, value)
                 return super(ScriptModule, self).__setattr__(attr, value)
 
             if hasattr(self, attr):

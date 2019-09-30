@@ -340,21 +340,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
-  // workaround to make self.training work
-  // it adds a buffer 'training' to the model if one doesn't exist
-  // and then loads that parameter, casting it to bool
-  if (field == "training") {
-    c10::optional<Slot> v = module_.find_attribute(field);
-    if (!v) {
-      bool training = py::cast<bool>(py::getattr(py_module_, "training"));
-      module_.register_attribute(
-          "training", BoolType::get(), std::move(training));
-      v = module_.find_attribute(field);
-    }
-    Value* the_bool = m.graph()->insertGetAttr(self_, "training");
-    return std::make_shared<SimpleValue>(the_bool);
-  }
-
   if (auto v = module_.find_module(field)) {
     return std::make_shared<ModuleValue>(
         m.graph()->insertGetAttr(self_, field),
