@@ -12,9 +12,12 @@ namespace {
 // Constants below are used in PyRRef pickling and unpickling. PyRRef is
 // converted into a py::tuple in pickling, and reconstructed from the py::tuple
 // in unpickling.
-constexpr int RREF_TUPLE_SIZE = 2; // number of data fields in the py::tuple
 constexpr int RFD_IDX = 0; // index of RRefForkData
 constexpr int TYPE_IDX = 1; // index of type (py::object or IValue)
+
+// number of data fields in the py::tuple.
+// NB: if more fields are added, make sure this field is also bumped
+constexpr int RREF_TUPLE_SIZE = 2;
 
 } // namespace
 
@@ -31,28 +34,44 @@ worker_id_t PyRRef::owner() const {
 }
 
 py::object PyRRef::toHere() {
-  if (rref_->isPyObj()) {
-    if (rref_->isOwner()) {
+  if (rref_->isOwner()) {
+    if (rref_->isPyObj()) {
       const py::object& value =
           std::static_pointer_cast<OwnerRRef<py::object>>(rref_)->getValue();
-      // acquiring GIL as the return statement construct a new py::object from
-      // a const reference.
-      AutoGIL ag;
-      return value;
+
+      {
+        // acquiring GIL as the return statement construct a new py::object from
+        // a const reference.
+        AutoGIL ag;
+        return value;
+      }
     } else {
-      return std::static_pointer_cast<UserRRef<py::object>>(rref_)->toHere();
+      IValue value =
+          std::static_pointer_cast<OwnerRRef<IValue>>(rref_)->getValue();
+
+      {
+        // acquiring GIL as torch::jit::toPyObject creates new py::object without
+        // grabbing the GIL.
+        AutoGIL ag;
+        return torch::jit::toPyObject(std::move(value));
+      }
     }
   } else {
-    IValue value;
-    if (rref_->isOwner()) {
-      value = std::static_pointer_cast<OwnerRRef<IValue>>(rref_)->getValue();
+    if (rref_->isPyObj()) {
+      // UserRRef<py::object>::toHere() calls python_rpc_handler which acquires
+      // GIL.
+      return std::static_pointer_cast<UserRRef<py::object>>(rref_)->toHere();
     } else {
-      value = std::static_pointer_cast<UserRRef<IValue>>(rref_)->toHere();
+      IValue value =
+          std::static_pointer_cast<UserRRef<IValue>>(rref_)->toHere();
+
+      {
+        // acquiring GIL as torch::jit::toPyObject creates new py::object without
+        // grabbing the GIL.
+        AutoGIL ag;
+        return torch::jit::toPyObject(std::move(value));
+      }
     }
-    // acquiring GIL as torch::jit::toPyObject creates new py::object without
-    // grabbing the GIL.
-    AutoGIL ag;
-    return torch::jit::toPyObject(std::move(value));
   }
 }
 
@@ -65,17 +84,22 @@ py::object PyRRef::localValue() {
   if (rref_->isPyObj()) {
     const py::object& value =
         std::dynamic_pointer_cast<OwnerRRef<py::object>>(rref_)->getValue();
-    // acquiring GIL as the return statement construct a new py::object from
-    // a const reference.
-    AutoGIL ag;
-    return value;
+
+    {
+      // acquiring GIL as the return statement construct a new py::object from
+      // a const reference.
+      AutoGIL ag;
+      return value;
+    }
   } else {
     auto value =
         std::dynamic_pointer_cast<OwnerRRef<IValue>>(rref_)->getValue();
-    // acquiring GIL as torch::jit::toPyObject creates new py::object without
-    // grabbing the GIL.
-    AutoGIL ag;
-    return torch::jit::toPyObject(std::move(value));
+    {
+      // acquiring GIL as torch::jit::toPyObject creates new py::object without
+      // grabbing the GIL.
+      AutoGIL ag;
+      return torch::jit::toPyObject(std::move(value));
+    }
   }
 }
 

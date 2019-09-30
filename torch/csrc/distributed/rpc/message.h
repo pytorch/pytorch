@@ -8,24 +8,32 @@ namespace distributed {
 namespace rpc {
 
 enum MessageType {
+  // messages for dist.rpc on builtin operators
   SCRIPT_CALL = 0,
   SCRIPT_RET = 1,
+
+  // messages for dist.rpc on Python UDF
   PYTHON_CALL = 2,
   PYTHON_RET = 3,
+
+  // messages for dist.remote on builtin operators and Python UDF
   SCRIPT_REMOTE_CALL = 4, // A remote call on a builtin operator
   PYTHON_REMOTE_CALL = 5, // A remote call on a Python UDF
   REMOTE_RET = 6, // A remote call on a Python UDF
+
+  // RRef related internal messages
   SCRIPT_RREF_FETCH_CALL = 7, // A UserRRef<IValue> fetches value from owner
   PYTHON_RREF_FETCH_CALL = 8, // A UserRRef<py::object> fetches value from owner
   RREF_FETCH_RET = 9, // An OwnerRRef sends value to user
-  RREF_USER_ACCEPT = 10, // An OwnerRRef accepts a user
-  RREF_USER_DELETE = 11, // A UserRRef tells the owner to deref
-  RREF_FORK_REQUEST = 12, // A child UserRRef tells the owner about itself
-  RREF_CHILD_ACCEPT = 13, // A child UserRRef tells parent that owner knows it
-  SHUTDOWN = 14,
-  EXCEPTION = 15,
-  ACK = 16,
-  UNKNOWN = 17
+  RREF_USER_DELETE = 10, // A UserRRef tells the owner to deref
+  RREF_FORK_REQUEST = 11, // A child UserRRef tells the owner about itself
+  RREF_CHILD_ACCEPT = 12, // A child UserRRef tells parent that owner knows it
+
+  // Other internal message types
+  SHUTDOWN = 13,
+  EXCEPTION = 14,
+  ACK = 15,
+  UNKNOWN = 16
 };
 
 // A message to be sent/received by an RpcAgent.

@@ -84,16 +84,6 @@ class TORCH_API RRefUserDelete final : public ForkMessageBase {
   static RRefUserDelete fromMessage(const Message& message);
 };
 
-// The OwnerRRef uses this message to accept a UserRRef. A UserRRef cannot be
-// deleted before receiving this message.
-class TORCH_API RRefUserAccept final : public ForkMessageBase {
- public:
-  RRefUserAccept(const RRefId& rrefId, const ForkId& forkId)
-      : ForkMessageBase(rrefId, forkId, MessageType::RREF_USER_ACCEPT) {}
-
-  static RRefUserAccept fromMessage(const Message& message);
-};
-
 class TORCH_API RemoteRet final : public ForkMessageBase {
  public:
   RemoteRet(const RRefId& rrefId, const ForkId& forkId)

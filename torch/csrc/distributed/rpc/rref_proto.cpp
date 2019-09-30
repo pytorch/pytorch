@@ -120,12 +120,6 @@ RRefUserDelete RRefUserDelete::fromMessage(const Message& message) {
   return RRefUserDelete(pair.first, pair.second);
 }
 
-RRefUserAccept RRefUserAccept::fromMessage(const Message& message) {
-  auto pair =
-      ForkMessageBase::fromMessage(message, MessageType::RREF_USER_ACCEPT);
-  return RRefUserAccept(pair.first, pair.second);
-}
-
 RemoteRet RemoteRet::fromMessage(const Message& message) {
   auto pair = ForkMessageBase::fromMessage(message, MessageType::REMOTE_RET);
   return RemoteRet(pair.first, pair.second);

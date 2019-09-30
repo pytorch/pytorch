@@ -57,23 +57,26 @@ const MessageType& Message::type() const {
 }
 
 bool Message::isRequest() const {
-  return MessageType::PYTHON_CALL == type_ ||
-      MessageType::PYTHON_REMOTE_CALL == type_ ||
+  return MessageType::SCRIPT_CALL == type_ ||  // dist.rpc on builtin ops
+      MessageType::PYTHON_CALL == type_ ||  // dist.rpc on Python UDFs
+      MessageType::SCRIPT_REMOTE_CALL == type_ ||  // dist.remote on builtin ops
+      MessageType::PYTHON_REMOTE_CALL == type_ ||  // dist.remote on Python UDFs
+      // RRef related internal messages
+      MessageType::SCRIPT_RREF_FETCH_CALL == type_ ||
       MessageType::PYTHON_RREF_FETCH_CALL == type_ ||
       MessageType::RREF_USER_DELETE == type_ ||
-      MessageType::SCRIPT_CALL == type_ ||
-      MessageType::SCRIPT_REMOTE_CALL == type_ ||
-      MessageType::SCRIPT_RREF_FETCH_CALL == type_ ||
-      MessageType::RREF_USER_ACCEPT == type_ ||
       MessageType::RREF_CHILD_ACCEPT == type_ ||
       MessageType::RREF_FORK_REQUEST == type_;
 }
 
 bool Message::isResponse() const {
-  return MessageType::PYTHON_RET == type_ || MessageType::REMOTE_RET == type_ ||
-      MessageType::RREF_FETCH_RET == type_ ||
-      MessageType::SCRIPT_RET == type_ || MessageType::ACK == type_ ||
-      MessageType::REMOTE_RET == type_;
+  return MessageType::SCRIPT_RET == type_ ||  // ret of dist.rpc on builtin ops
+      MessageType::PYTHON_RET == type_ ||  // ret of dist.rpc on Python UDFs
+      MessageType::REMOTE_RET == type_ ||  // ret of dist.remote
+      MessageType::RREF_FETCH_RET == type_ ||  // ret on RRef::toHere()
+      MessageType::EXCEPTION ||  // propagate back exceptions
+      MessageType::ACK == type_;  // ret of other types
+
 }
 
 bool Message::isInternal() const {
