@@ -572,6 +572,27 @@ TEST_F(ModulesTest, MaxUnpool1d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 5}));
 }
 
+TEST_F(ModulesTest, MaxPool1d_MaxUnpool1d) {
+  MaxPool1d pool {MaxPool1dOptions(2).stride(2)};
+  MaxUnpool1d unpool {MaxUnpool1dOptions(2).stride(2)};
+  auto input = torch::tensor({{{1, 2, 3, 4, 5, 6, 7, 8}}}, torch::kFloat);
+  torch::Tensor output, indices;
+  std::tie(output, indices) = pool->forward_with_indices(input);
+  ASSERT_TRUE(torch::allclose(
+    unpool(output, indices),
+    torch::tensor({{{0, 2, 0, 4, 0, 6, 0, 8}}} , torch::kFloat)));
+
+  // Example showcasing the use of output_size
+  input = torch::tensor({{{1, 2, 3, 4, 5, 6, 7, 8, 9}}}, torch::kFloat);
+  std::tie(output, indices) = pool->forward_with_indices(input);
+  ASSERT_TRUE(torch::allclose(
+    unpool(output, indices, input.sizes()),
+    torch::tensor({{{0, 2, 0, 4, 0, 6, 0, 8, 0}}} , torch::kFloat)));
+  ASSERT_TRUE(torch::allclose(
+    unpool(output, indices),
+    torch::tensor({{{0, 2, 0, 4, 0, 6, 0, 8}}} , torch::kFloat)));
+}
+
 TEST_F(ModulesTest, MaxUnpool2d) {
   auto indices = torch::tensor({
   {{{ 6,  8,  9},
@@ -603,6 +624,31 @@ TEST_F(ModulesTest, MaxUnpool2d) {
       { 0, 41,  0, 43, 44},
       { 0, 46,  0, 48, 49}}}} , torch::kFloat)));
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 1, 5, 5}));
+}
+
+TEST_F(ModulesTest, MaxPool2d_MaxUnpool2d) {
+  MaxPool2d pool {MaxPool2dOptions(2).stride(2)};
+  MaxUnpool2d unpool {MaxUnpool2dOptions(2).stride(2)};
+  auto input = torch::tensor({{{{ 1,  2,  3,  4},
+                                { 5,  6,  7,  8},
+                                { 9, 10, 11, 12},
+                                {13, 14, 15, 16}}}}, torch::kFloat);
+  torch::Tensor output, indices;
+  std::tie(output, indices) = pool->forward_with_indices(input);
+  ASSERT_TRUE(torch::allclose(
+    unpool(output, indices),
+    torch::tensor({{{{ 0,  0, 0,  0},
+                     { 0,  6, 0,  8},
+                     { 0,  0, 0,  0},
+                     { 0, 14, 0, 16}}}} , torch::kFloat)));
+
+  ASSERT_TRUE(torch::allclose(
+    unpool(output, indices, torch::IntArrayRef{1, 1, 5, 5}),
+    torch::tensor({{{{ 0, 0, 0,  0, 0},
+                     { 6, 0, 8,  0, 0},
+                     { 0, 0, 0, 14, 0},
+                     { 16, 0, 0, 0, 0},
+                     { 0, 0, 0,  0, 0}}}}, torch::kFloat)));
 }
 
 TEST_F(ModulesTest, MaxUnpool3d) {
@@ -658,6 +704,16 @@ TEST_F(ModulesTest, MaxUnpool3dOutputSize) {
        { 0,  0,  0,  0},
        { 0, 61,  0, 63}}}}}, torch::kFloat)));
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 4, 4, 4}));
+}
+
+TEST_F(ModulesTest, MaxPool3d_MaxUnpool3d) {
+  MaxPool3d pool {MaxPool3dOptions(3).stride(2)};
+  MaxUnpool3d unpool {MaxUnpool3dOptions(3).stride(2)};
+  auto input = torch::randn({20, 16, 51, 33, 15});
+  torch::Tensor output, indices;
+  std::tie(output, indices) = pool->forward_with_indices(input);
+  auto unpooled_output = unpool(output, indices);
+  ASSERT_EQ(unpooled_output.sizes(), torch::IntArrayRef({20, 16, 51, 33, 15}));
 }
 
 TEST_F(ModulesTest, Linear) {
