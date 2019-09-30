@@ -906,31 +906,30 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
   auto eps = 1e-12;
   auto num = input * input - 2 * input * target + target;
   auto denom = (input + eps) * (input + eps) * (1 - input + eps) * (1 - input + eps);
-  auto output = num/denom;
-  output *=grad;
-  output *= grad_output;
+  auto output = num / denom;
+  output *= (grad * grad_output);
   if (weight.defined()) {
     output *= weight;
   }
   if (reduction == Reduction::Mean) {
-    return output/input.numel();
+    return output / input.numel();
   } else if (reduction == Reduction::Sum) {
     return output.sum();
   }
   return output;
 }
 
-Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad_output, const Tensor & input, const Tensor & target, const Tensor& weight, int64_t reduction) {
+Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, const Tensor& weight, int64_t reduction) {
   auto eps = 1e-12;
   auto num = input - target;
   auto denom = (input + eps) * (1 - input + eps);
-  auto output = num/denom;
-  output *= grad_output;
+  auto output = num / denom;
+  output *= grad;
   if (weight.defined()) {
     output *= weight;
   }
   if (reduction == Reduction::Mean) {
-    return output/input.numel();
+    return output / input.numel();
   } else if (reduction == Reduction::Sum) {
     return output.sum();
   }
