@@ -4,33 +4,43 @@
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/variable_tensor_list.h>
+#include <torch/csrc/jit/update_graph_executor_opt.h>
 #include <memory>
 
 namespace torch {
 namespace jit {
-
 struct GraphExecutorState;
 struct Code;
+
+struct ExecutionPlan {
+  ExecutionPlan() = default;
+  ExecutionPlan(std::shared_ptr<Graph> graph)
+      : code(graph), graph(std::move(graph)) {}
+
+  operator bool() const {
+    return static_cast<bool>(graph);
+  }
+
+  Code code;
+  std::shared_ptr<Graph> graph;
+};
 
 // Notice that those structs don't manage lifetime of their members.
 // They is only valid only right after you call getDebugState() and should never
 // be used again once another GraphExecutor function is called.
-struct ExecutionPlanState {
-  Code* code = nullptr;
-  const Graph* graph = nullptr;
-};
 
 struct GraphExecutorState {
   const Graph* graph = nullptr;
-  ExecutionPlanState fallback; // XXX: members of this field are optional
-  std::unordered_map<ArgumentSpec, ExecutionPlanState> execution_plans;
+  ExecutionPlan fallback; // XXX: members of this field are optional
+  std::unordered_map<ArgumentSpec, ExecutionPlan> execution_plans;
 };
 
 struct GraphExecutorImplBase;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
-  GraphExecutor(std::shared_ptr<Graph> graph, bool optimize = true);
+  GraphExecutor(std::shared_ptr<Graph> graph);
   void run(Stack& inputs);
+  ExecutionPlan getPlanFor(Stack& inputs);
   explicit operator bool() const {
     return pImpl != nullptr;
   }
@@ -49,6 +59,19 @@ TORCH_API void debugSetAutodiffSubgraphInlining(bool state);
 TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();
 
 TORCH_API bool& getProfilingMode();
+
+struct TORCH_API GraphOptimizerEnabledGuard {
+  GraphOptimizerEnabledGuard(bool state)
+      : old_state_(getGraphExecutorOptimize()) {
+    setGraphExecutorOptimize(state);
+  }
+
+  ~GraphOptimizerEnabledGuard() {
+    setGraphExecutorOptimize(old_state_);
+  }
+
+  bool old_state_;
+};
 
 namespace detail {
 

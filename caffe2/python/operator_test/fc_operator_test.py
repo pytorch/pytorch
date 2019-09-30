@@ -44,7 +44,7 @@ class TestFcOperator(serial.SerializedTestCase):
         def fc_op(X, W, b):
             return [np.dot(X, W.reshape(n, k).transpose()) + b.reshape(n)]
 
-        def fc_tranposed_op(X, W, b):
+        def fc_transposed_op(X, W, b):
             return [np.dot(X, W.reshape(k, n)) + b.reshape(n)]
 
         op = core.CreateOperator(
@@ -67,7 +67,7 @@ class TestFcOperator(serial.SerializedTestCase):
             device_option=gc,
             op=op,
             inputs=[X, W, b],
-            reference=fc_tranposed_op if transposed else fc_op,
+            reference=fc_transposed_op if transposed else fc_op,
             threshold=threshold
         )
         # Check over multiple devices

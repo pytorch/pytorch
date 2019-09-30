@@ -148,9 +148,22 @@ class DNNLowPOp : public Operator<CPUContext> {
     }
 
     const float* actual = nullptr;
-    vector<float> actual_temp;
+    std::vector<float> actual_temp;
     if (OutputTensorCPU_(0)->template IsType<float>()) {
       actual = OutputTensorCPU_(0)->template data<float>();
+      std::string op_type = this->debug_def().type();
+      bool relu_fused = op_type.length() >= 4 &&
+          op_type.compare(op_type.length() - 4, 4, "Relu") == 0;
+      if (GetSingleArgument<std::string>("followed_by", "") == "Relu" &&
+          !relu_fused) {
+        // If dequantize_output_ is true and relu is not fused,
+        // dnnlowp op won't clip negative values. Do it here.
+        actual_temp.resize(OutputTensorCPU_(0)->numel());
+        for (int i = 0; i < Output(0)->numel(); ++i) {
+          actual_temp[i] = std::max(0.f, actual[i]);
+        }
+        actual = actual_temp.data();
+      }
     } else {
       actual_temp.resize(OutputTensorCPU_(0)->numel());
       fbgemm::Dequantize<T>(
@@ -163,7 +176,7 @@ class DNNLowPOp : public Operator<CPUContext> {
 
     float* ref = Fp32Op_()->Get()->Output(0)->template mutable_data<float>();
     if (followed_by_ == "Relu") {
-      for (int i = 0; i < Output(0)->numel(); ++i) {
+      for (int i = 0; i < OutputTensorCPU_(0)->numel(); ++i) {
         ref[i] = std::max(0.f, ref[i]);
       }
     }

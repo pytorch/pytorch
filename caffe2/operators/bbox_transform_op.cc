@@ -186,7 +186,7 @@ using BBoxTransformOpFloatCPU =
     caffe2::BBoxTransformOp<float, caffe2::CPUContext>;
 
 // clang-format off
-C10_REGISTER_CAFFE2_OPERATOR_CPU(
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     BBoxTransform,
     "_caffe2::BBoxTransform("
       "Tensor rois, "

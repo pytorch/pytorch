@@ -1,6 +1,6 @@
 #include <THCUNN/THCUNN.h>
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCNumerics.cuh>
 #include <THC/THCAtomics.cuh>
 #include <THCUNN/common.h>
 #include <THC/THCDeviceTensor.cuh>
@@ -8,6 +8,7 @@
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCApply.cuh>
 #include <c10/macros/Macros.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 
 #include <thrust/functional.h>
 

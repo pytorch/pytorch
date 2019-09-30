@@ -9,6 +9,7 @@ from datetime import timedelta
 from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
 from . import (
     AllreduceOptions,
+    AllreduceCoalescedOptions,
     BroadcastOptions,
     GatherOptions,
     ReduceOptions,
@@ -206,30 +207,23 @@ def _get_group_size(group):
 
 def _check_single_tensor(param, param_name):
     """
-    Helper that check the parameter: param_name is a single Tensor
+    Helper to check that the parameter ``param_name`` is a single tensor.
 
     """
     if not isinstance(param, torch.Tensor):
-        raise RuntimeError("Invalid function argument. Expecting parameter: {} "
-                           "to be a torch.Tensor type".format(param_name))
+        raise RuntimeError("Invalid function argument. Expected parameter `{}` "
+                           "to be of type torch.Tensor.".format(param_name))
 
 
 def _check_tensor_list(param, param_name):
     """
-    Helper that check the parameter: param_name is a Tensor list
+    Helper to check that the parameter ``param_name`` is a list of tensors.
 
     """
-    wrong_type = False
-    if isinstance(param, list):
-        for p in param:
-            if not isinstance(p, torch.Tensor):
-                wrong_type = True
-                break
-    else:
-        wrong_type = True
-    if wrong_type:
-        raise RuntimeError("Invalid function argument. Expecting parameter: {} "
-                           "to be a List[torch.Tensor] type".format(param_name))
+    if not isinstance(param, list) or \
+       not all(isinstance(p, torch.Tensor) for p in param):
+        raise RuntimeError("Invalid function argument. Expected parameter `{}` "
+                           "to be of type List[torch.Tensor].".format(param_name))
 
 
 def is_mpi_available():
@@ -491,8 +485,7 @@ def _new_process_group_helper(world_size,
             pg = ProcessGroupNCCL(
                 prefix_store,
                 rank,
-                world_size,
-                group_name)
+                world_size)
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
@@ -516,6 +509,7 @@ def destroy_process_group(group=group.WORLD):
     global _pg_group_ranks
     global _default_pg
     global _default_pg_init_method
+    global _group_count
 
     if group == GroupMember.NON_GROUP_MEMBER:
         return
@@ -534,6 +528,16 @@ def destroy_process_group(group=group.WORLD):
         _pg_map.clear()
         _pg_names.clear()
         _pg_group_ranks.clear()
+
+        # when process group doesn't have an explicit name (only WORLD (default)
+        # process group can have an explicit name), we use global _group_counter
+        # to generate the name. We need to reset the counter on destruction to
+        # allow consistent value to be generated when we re-create process
+        # groups after some trainers recover from failure
+        #
+        # We only reset this when WORLD is being destroyed because if this
+        # process group is in good state, we aren't dealing with failures.
+        _group_count = 0
     else:
         del _pg_map[pg]
         del _pg_names[pg]
@@ -907,6 +911,57 @@ def all_reduce(tensor,
         work.wait()
 
 
+def all_reduce_coalesced(tensors,
+                         op=ReduceOp.SUM,
+                         group=group.WORLD,
+                         async_op=False):
+    """
+    WARNING: at this time individual shape checking is not implemented across nodes.
+    For example, if the rank 0 node passes [torch.rand(4), torch.rand(2)] and the
+    rank 1 node passes [torch.rand(2), torch.rand(2), torch.rand(2)], the allreduce
+    operation will proceed without complaint and return erroneous outputs. This lack
+    of shape checking results in significant performance improvements but users of this
+    function should take extra care to ensure that each node passes in tensors whose
+    shapes match across nodes.
+
+    Reduces each tensor in tensors (residing on the same device) across all machines
+    in such a way that all get the final result.
+
+    After the call each tensor in tensors is going to bitwise identical
+    in all processes.
+
+    Arguments:
+        tensors (List[Tensor]): Input and output of the collective. The function
+            operates in-place.
+        op (Optional[ReduceOp]): One of the values from
+            ``torch.distributed.ReduceOp`` enum. Specifies an operation used for
+            element-wise reductions.
+        group (Optional[ProcessGroup]): The process group to work on.
+        async_op (Optional[bool]): Whether this op should be an async op.
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group.
+
+    """
+    _check_tensor_list(tensors, "tensor")
+    if _rank_not_in_group(group):
+        return
+
+    opts = AllreduceCoalescedOptions()
+    opts.reduceOp = op
+    if group == GroupMember.WORLD:
+        _check_default_pg()
+        work = _default_pg.allreduce_coalesced(tensors, opts)
+    else:
+        work = group.allreduce_coalesced(tensors, opts)
+
+    if async_op:
+        return work
+    else:
+        work.wait()
+
+
 def reduce_multigpu(tensor_list,
                     dst,
                     op=ReduceOp.SUM,
@@ -1106,8 +1161,8 @@ def all_gather(tensor_list,
 
 
 def gather(tensor,
-           gather_list,
-           dst,
+           gather_list=None,
+           dst=0,
            group=group.WORLD,
            async_op=False):
     """
@@ -1115,10 +1170,10 @@ def gather(tensor,
 
     Arguments:
         tensor (Tensor): Input tensor.
-        gather_list (list[Tensor]): List of appropriately-sized tensors to
-            use for received data. Required only in the receiving process.
-        dst (int): Destination rank. Required in all processes except the one
-            that is receiveing the data.
+        gather_list (list[Tensor], optional): List of appropriately-sized
+            tensors to use for gathered data (default is None, must be specified
+            on the destination rank)
+        dst (int, optional): Destination rank (default is 0)
         group (ProcessGroup, optional): The process group to work on
         async_op (bool, optional): Whether this op should be an async op
 
@@ -1128,21 +1183,27 @@ def gather(tensor,
 
     """
     _check_single_tensor(tensor, "tensor")
-    _check_tensor_list(gather_list, "gather_list")
+
+    # Parameter ``gather_list`` may be left unspecified on non-dst ranks.
+    if gather_list:
+        _check_tensor_list(gather_list, "gather_list")
+    else:
+        gather_list = []
+
     if _rank_not_in_group(group):
         return
 
     my_rank = get_rank()
     if dst == my_rank:
-        if gather_list is None:
-            raise RuntimeError("gather_list is a required argument in gather "
-                               "destination")
+        if not gather_list:
+            raise ValueError("Argument ``gather_list`` must be specified "
+                             "on destination rank.")
         input_tensors = [tensor]
         output_tensors = [gather_list]
     else:
         if gather_list:
-            raise RuntimeError("non-empty gather_list can be given only "
-                               "to gather destination")
+            raise ValueError("Argument ``gather_list`` must NOT be specified "
+                             "on non-destination ranks.")
         input_tensors = [tensor]
         output_tensors = []
 
@@ -1164,8 +1225,8 @@ def gather(tensor,
 
 
 def scatter(tensor,
-            scatter_list,
-            src,
+            scatter_list=None,
+            src=0,
             group=group.WORLD,
             async_op=False):
     """
@@ -1176,10 +1237,9 @@ def scatter(tensor,
 
     Arguments:
         tensor (Tensor): Output tensor.
-        scatter_list (list[Tensor]): List of tensors to scatter. Required only
-            in the process that is sending the data.
-        src (int): Source rank. Required in all processes except the one that
-            is sending the data.
+        scatter_list (list[Tensor]): List of tensors to scatter (default is
+            None, must be specified on the source rank)
+        src (int): Source rank (default is 0)
         group (ProcessGroup, optional): The process group to work on
         async_op (bool, optional): Whether this op should be an async op
 
@@ -1189,21 +1249,27 @@ def scatter(tensor,
 
     """
     _check_single_tensor(tensor, "tensor")
-    _check_tensor_list(scatter_list, "scatter_list")
+
+    # Parameter ``scatter_list`` may be left unspecified on non-src ranks.
+    if scatter_list:
+        _check_tensor_list(scatter_list, "scatter_list")
+    else:
+        scatter_list = []
+
     if _rank_not_in_group(group):
         return
 
     my_rank = get_rank()
     if src == my_rank:
-        if scatter_list is None:
-            raise RuntimeError("scatter_list is a required argument in "
-                               "scatter source")
+        if not scatter_list:
+            raise ValueError("Argument ``scatter_list`` must be specified "
+                             "on source rank.")
         input_tensors = [scatter_list]
         output_tensors = [tensor]
     else:
         if scatter_list:
-            raise RuntimeError("non-empty can be given only to scatter "
-                               "source")
+            raise ValueError("Argument ``scatter_list`` must NOT be specified "
+                             "on non-source ranks.")
         input_tensors = []
         output_tensors = [tensor]
 

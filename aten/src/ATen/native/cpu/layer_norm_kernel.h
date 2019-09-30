@@ -18,7 +18,36 @@ using forward_fn = void (*)(
     Tensor* /* mean */,
     Tensor* /* rstd */);
 
+using backward_fn = void (*)(
+    const Tensor& /* dY */,
+    const Tensor& /* X */,
+    const Tensor& /* mean */,
+    const Tensor& /* rstd */,
+    const Tensor& /* gamma */,
+    int64_t /* M */,
+    int64_t /* N */,
+    Tensor* /* dX */,
+    Tensor* /* dgamma */,
+    Tensor* /* dbeta */);
+
+using double_backward_fn = void (*)(
+    const Tensor& /* ddX */,
+    const Tensor& /* ddgamma */,
+    const Tensor& /* ddbeta */,
+    const Tensor& /* dY */,
+    const Tensor& /* X */,
+    const Tensor& /* mean */,
+    const Tensor& /* rstd */,
+    const Tensor& /* gamma */,
+    int64_t /* M */,
+    int64_t /* N */,
+    Tensor* /* ddY */,
+    Tensor* /* dX */,
+    Tensor* /* dgamma */);
+
 DECLARE_DISPATCH(forward_fn, LayerNormKernel);
+DECLARE_DISPATCH(backward_fn, LayerNormBackwardKernel);
+DECLARE_DISPATCH(double_backward_fn, LayerNormDoubleBackwardKernel);
 
 } // namespace native
 } // namespace at

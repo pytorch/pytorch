@@ -205,7 +205,7 @@ def TryReadProtoWithClass(cls, s):
     try:
         text_format.Parse(s, obj)
         return obj
-    except text_format.ParseError:
+    except (text_format.ParseError, UnicodeDecodeError):
         obj.ParseFromString(s)
         return obj
 

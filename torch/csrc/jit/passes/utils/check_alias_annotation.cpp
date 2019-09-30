@@ -16,8 +16,8 @@ IValue deepCopy(const IValue& self) {
     return IValue(self.toTensor().clone());
   }
   if (self.isTensorList()) {
-    std::vector<at::Tensor> newList;
-    for (const auto& oldTensor : self.toTensorListRef()) {
+    c10::List<at::Tensor> newList;
+    for (const at::Tensor& oldTensor : self.toTensorListRef()) {
       newList.push_back(oldTensor.clone());
     }
     return newList;
@@ -25,8 +25,10 @@ IValue deepCopy(const IValue& self) {
 
   // Lists of ivalues should recursively deep copy their contents
   if (self.isGenericList()) {
-    std::vector<IValue> newList;
-    for (const auto& value : self.toGenericListRef()) {
+    auto source = std::move(self).toGenericList();
+    auto newList = c10::impl::GenericList(source.elementType());
+    newList.reserve(source.size());
+    for (const IValue& value : source) {
       newList.push_back(deepCopy(value));
     }
     return newList;
@@ -34,11 +36,11 @@ IValue deepCopy(const IValue& self) {
 
   // Regular lists can copy assign
   if (self.isIntList()) {
-    return IValue(self.toIntListRef());
+    return IValue(self.toIntList().copy());
   } else if (self.isDoubleList()) {
-    return IValue(self.toDoubleListRef());
+    return IValue(self.toDoubleList().copy());
   } else if (self.isBoolList()) {
-    return IValue(self.toBoolListRef());
+    return IValue(self.toBoolList().copy());
   } else if (self.isString()) {
     return IValue(self.toStringRef());
   }
@@ -65,7 +67,7 @@ bool deepEquals(const IValue& lhs, const IValue& rhs) {
   } else if (lhs.isNone() && rhs.isNone()) {
     return true;
   } else if (lhs.isIntList() && rhs.isIntList()) {
-    return lhs.toIntList()->elements() == rhs.toIntList()->elements();
+    return lhs.toIntListRef().equals(rhs.toIntListRef());
   } else if (lhs.isTensor() && rhs.isTensor()) {
     return lhs.toTensor().equal(rhs.toTensor());
   }
@@ -165,17 +167,17 @@ c10::optional<IValue> toIValueProp(const Value* v) {
     auto listType = v->node()->output()->type();
     auto containedType = listType->containedTypes().at(0);
     if (containedType == IntType::get()) {
-      return fmap(genericList, [](const IValue& v) { return v.toInt(); });
+      return c10::impl::toList(fmap(genericList, [](const IValue& v) { return v.toInt(); }));
     } else if (containedType == FloatType::get()) {
-      return fmap(genericList, [](const IValue& v) { return v.toDouble(); });
+      return c10::impl::toList(fmap(genericList, [](const IValue& v) { return v.toDouble(); }));
     } else if (containedType->isSubtypeOf(TensorType::get())) {
-      return fmap(genericList, [](const IValue& v) { return v.toTensor(); });
+      return c10::impl::toList(fmap(genericList, [](const IValue& v) { return v.toTensor(); }));
     } else {
       return c10::nullopt;
     }
   }
 
-  if (v->node()->kind() == prim::Float) {
+  if (v->node()->kind() == aten::Float) {
     auto op = getOperation(v->node());
     if (auto input = toIValue(v->node()->input())) {
       auto op = getOperation(v->node());

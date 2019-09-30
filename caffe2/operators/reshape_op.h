@@ -58,18 +58,22 @@ class ReshapeOp : public Operator<Context> {
       }
     }
 
-    // Copy over the dimensions for those that are specified zero.
-    for (size_t i = 0; i < actual_new_shape.size() && i < input.dim(); ++i) {
-      if (actual_new_shape[i] == 0) {
-        actual_new_shape[i] = input.size(i);
-      }
-    }
-
     // Checks if the new shape is valid and fills in the missing dimension
     // specified by -1.
     // NOTE: At most one dimension can be -1.
     auto total_size = input.numel();
     T size = 1;
+
+    // NOTE: support for legacy caffe1 syntax
+    // Copy over the dimensions for those that are specified zero.
+    if (total_size != 0) {
+      for (size_t i = 0; i < actual_new_shape.size() && i < input.dim(); ++i) {
+        if (actual_new_shape[i] == 0) {
+          actual_new_shape[i] = input.size(i);
+        }
+      }
+    }
+
     int unknown_idx = -1;
     for (int i = 0; i < actual_new_shape.size(); ++i) {
       const auto dim = actual_new_shape[i];
@@ -83,39 +87,46 @@ class ReshapeOp : public Operator<Context> {
       }
     }
     if (size == 0 && total_size != 0) {
-      CAFFE_THROW("Can not reshape a non-zero size (", total_size, ") tensor to zero size.");
+      CAFFE_THROW(
+          "Can not reshape a non-zero size (",
+          total_size,
+          ") tensor to zero size.");
     }
-
-    if (unknown_idx != -1) {
-      CAFFE_ENFORCE_NE(
-          size,
-          0,
-          "New shape at dim ",
-          unknown_idx,
-          " can not be inferred since new size is zero.");
-      CAFFE_ENFORCE(
-          total_size % size == 0,
-          "Argument `shape` does not agree with the input data.",
-          " (",
-          total_size,
-          " vs ",
-          size,
-          ")");
-      actual_new_shape[unknown_idx] = total_size / size;
-    } else {
-      CAFFE_ENFORCE_EQ(
-          total_size,
-          size,
-          "Argument `shape` does not agree with the input data.",
-          " (",
-          total_size,
-          " != ",
-          size,
-          ")");
+    if (total_size != 0) {
+      // if tensor is not empty, infer the size of the unknown index
+      if (unknown_idx != -1) {
+        CAFFE_ENFORCE_NE(
+            size,
+            0,
+            "New shape at dim ",
+            unknown_idx,
+            " can not be inferred since new size is zero.");
+        CAFFE_ENFORCE(
+            total_size % size == 0,
+            "Argument `shape` does not agree with the input data.",
+            " (",
+            total_size,
+            " vs ",
+            size,
+            ")");
+        actual_new_shape[unknown_idx] = total_size / size;
+      } else {
+        CAFFE_ENFORCE_EQ(
+            total_size,
+            size,
+            "Argument `shape` does not agree with the input data.",
+            " (",
+            total_size,
+            " != ",
+            size,
+            ")");
+      }
+    } else if (unknown_idx != -1) {
+      // if size is empty, then set unknown index to be 0 (empty tensor)
+      actual_new_shape[unknown_idx] = 0;
     }
 
     // Write the original shape to the second output.
-
     auto* old_shape = Output(1, {input.dim()}, at::dtype<T>());
     T* old_shape_data = old_shape->template mutable_data<T>();
     for (int i = 0; i < input.dim(); ++i) {

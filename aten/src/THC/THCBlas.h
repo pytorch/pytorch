@@ -42,7 +42,4 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
                                                                   THHalf beta, THHalf *c, int64_t ldc, int64_t strideC, int64_t batchCount);
 #endif
 
-THC_API void THCudaBlas_Sgetrs(THCState *state, char transa, int n, int nrhs, const float **a, int lda, int *pivot, float **b, int ldb, int *info, int batchSize);
-THC_API void THCudaBlas_Dgetrs(THCState *state, char transa, int n, int nrhs, const double **a, int lda, int *pivot, double **b, int ldb, int *info, int batchSize);
-
 #endif

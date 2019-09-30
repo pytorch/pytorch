@@ -34,7 +34,7 @@ AsyncTaskFuture::AsyncTaskFuture(const std::vector<AsyncTaskFuture*>& futures)
       });
     }
   } else {
-    CAFFE_ENFORCE_EQ(futures.size(), 1);
+    CAFFE_ENFORCE_EQ(futures.size(), (size_t)1);
     auto future = futures.back();
     future->SetCallback([this](const AsyncTaskFuture* f) {
       if (!f->IsFailed()) {

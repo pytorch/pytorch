@@ -1,11 +1,16 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
+import logging
 from collections import defaultdict
 
 import numpy as np
 from caffe2.python import core, utils
 from caffe2.python.fb import hardcode_scale_zp
+
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 def pairwise(iterable):
@@ -25,26 +30,49 @@ def blob_uses(net, blob):
     return u
 
 
-def fuse_first_bn(net, params, removed_tensors):
+def fuse_first_bn(net, params, removed_tensors, begin_op_index):
     net = copy.deepcopy(net)
     params = copy.deepcopy(params)
 
-    for ((i, current), (j, next_)) in pairwise(enumerate(net.op)):
-        if next_.input[0] != current.output[0]:
+    for i, conv in enumerate(net.op[begin_op_index:], begin_op_index):
+        if conv.type not in ["Conv", "ConvTranspose"]:
             continue
 
-        if current.type not in ("Conv", "ConvTranspose") or next_.type != "SpatialBN":
+        uses = blob_uses(net, conv.output[0])
+        if len(uses) == 0:
             continue
-        if (
-            len(blob_uses(net, current.output[0])) != 1
-            and current.output[0] != next_.output[0]
-        ):
+
+        j = uses[0]
+        bn = net.op[j]
+        if bn.type != "SpatialBN" or (len(uses) > 1 and conv.output[0] != bn.output[0]):
+            if bn.type == "SpatialBN":
+                logger.debug("Can't fuse if more than one user {}".format(uses))
             # Can't fuse if more than one user unless SpatialBN is inplace
+            # An example of inplace SpatialBN where we want to allow multiple uses:
+            # x = Conv(...)
+            # ... // no interferring use or def of x (will be checked below)
+            # x = SpatialBN(x, ...)
+            # ...
+            # z = Foo(..., x, ...)
+            # ...
+            # w = Boo(..., x, ...)
+            # Here, we still want to fuse Conv and SpatialBN
+            continue
+
+        # There shouldn't be any def of conv.output[0] and any use or def of bn.output[0] between conv and bn
+        if any(
+            blob in net.op[k].input or blob in net.op[k].output
+            for blob in [conv.output[0], bn.output[0]]
+            for k in range(i + 1, j)
+        ):
+            logger.debug(
+                "Can't fuse because of the following interferring uses or defs:"
+            )
+            for k in range(i, j + 1):
+                logger.debug(net.op[k])
             continue
 
         # else, can fuse
-        conv = current
-        bn = next_
         fused_conv = copy.deepcopy(conv)
         fused_conv.output[0] = bn.output[0]
         conv_weight = params[conv.input[1]]
@@ -121,7 +149,7 @@ def fuse_first_bn(net, params, removed_tensors):
             params[bn.input[2]] = C
             fused_conv.input.append(bn.input[2])
 
-        new_ops = net.op[:i] + [fused_conv] + net.op[j + 1 :]
+        new_ops = net.op[:i] + [fused_conv] + net.op[i + 1 : j] + net.op[j + 1 :]
         del net.op[:]
         removed_tensors.append(bn.input[1])
         if len(conv.input) > 2:
@@ -134,18 +162,20 @@ def fuse_first_bn(net, params, removed_tensors):
         del params[bn.input[3]]
         del params[bn.input[4]]
         net.op.extend(new_ops)
-        break
-    return net, params, removed_tensors
+        return net, params, removed_tensors, i + 1
+
+    return net, params, removed_tensors, None
 
 
 def fuse_bn(net, params, ignore_failure):
     # Run until we hit a fixed point
     removed_tensors = []
+    begin_op_index = 0
     while True:
-        (next_net, next_params, removed_tensors) = fuse_first_bn(
-            net, params, removed_tensors
+        (next_net, next_params, removed_tensors, begin_op_index) = fuse_first_bn(
+            net, params, removed_tensors, begin_op_index
         )
-        if len(next_net.op) == len(net.op):
+        if begin_op_index is None:
             if any(op.type == "SpatialBN" for op in next_net.op) and not ignore_failure:
                 raise Exception(
                     "Model contains SpatialBN op after fusion: %s", next_net
@@ -208,38 +238,62 @@ def fuse_scale(net, params, ignore_failure):
         net, params, removed_tensors = (next_net, next_params, removed_tensors)
 
 
-def fuse_first_relu(net, ignore_op_with_output=None):
+def fuse_first_relu(net, begin_op_index, ignore_op_with_output=None):
     net = copy.deepcopy(net)
 
-    for ((i, current), (j, next_)) in pairwise(enumerate(net.op)):
-        if next_.input[0] != current.output[0]:
+    for i, conv in enumerate(net.op[begin_op_index:], begin_op_index):
+        if conv.type not in ["Conv", "ConvTranspose", "Sum", "SpatialBN"]:
             continue
 
-        if current.type not in ("Conv", "Sum") or next_.type != "Relu":
+        uses = blob_uses(net, conv.output[0])
+        if (
+            len(uses) == 0
+            or ignore_op_with_output
+            and conv.output[0] in ignore_op_with_output
+        ):
             continue
 
-        if ignore_op_with_output and current.output[0] in ignore_op_with_output:
+        j = uses[0]
+        relu = net.op[j]
+        if relu.type != "Relu" or len(uses) > 1 and conv.output[0] != relu.output[0]:
+            # Can't fuse if more than one user unless Relu is inplace
+            if relu.type == "Relu":
+                logger.debug("Can't fuse if more than one user {}".format(uses))
+            continue
+
+        # There shouldn't be any def of conv.output[0] and any use or def of relu.output[0] between conv and relu
+        if any(
+            blob in net.op[k].input or blob in net.op[k].output
+            for blob in [conv.output[0], relu.output[0]]
+            for k in range(i + 1, j)
+        ):
+            logger.debug(
+                "Can't fuse because of the following interferring uses or defs:"
+            )
+            for k in range(i, j + 1):
+                logger.debug(net.op[k])
             continue
 
         # else, can fuse
-        conv = current
-        relu = next_
         fused_conv = copy.deepcopy(conv)
-        fused_conv.type = "ConvRelu" if current.type == "Conv" else "SumRelu"
+        fused_conv.type = conv.type + "Relu"
         fused_conv.output[0] = relu.output[0]
 
-        new_ops = net.op[:i] + [fused_conv] + net.op[j + 1 :]
+        new_ops = net.op[:i] + [fused_conv] + net.op[i + 1 : j] + net.op[j + 1 :]
         del net.op[:]
         net.op.extend(new_ops)
-        break
-    return net
+        return net, i + 1
+    return net, None
 
 
 def fuse_relu(net, ignore_failure, ignore_op_with_output=None):
     # Run until we hit a fixed point
+    begin_op_index = 0
     while True:
-        next_net = fuse_first_relu(net, ignore_op_with_output)
-        if len(next_net.op) == len(net.op):
+        next_net, begin_op_index = fuse_first_relu(
+            net, begin_op_index, ignore_op_with_output
+        )
+        if begin_op_index is None:
             if any(op.type == "Relu" for op in next_net.op) and not ignore_failure:
                 raise Exception("Model contains Relu op after fusion: %s", next_net)
             return next_net

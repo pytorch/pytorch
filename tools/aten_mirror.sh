@@ -27,7 +27,7 @@ git fetch fullrepo
 git checkout -b temporary-split-branch fullrepo/master
 # Cribbed from https://stackoverflow.com/questions/2982055/detach-many-subdirectories-into-a-new-separate-git-repository
 # and https://stackoverflow.com/questions/42355621/git-filter-branch-moving-a-folder-with-index-filter-does-not-work
-git filter-branch -f --index-filter 'git rm --cached -qr --ignore-unmatch -- . && git reset -q $GIT_COMMIT -- aten cmake third_party/catch third_party/cpuinfo && (git ls-files -s | sed "s-.travis.aten.yml-.travis.yml-" | sed "s-.gitmodules.aten-.gitmodules-" | git update-index --index-info)'
+git filter-branch -f --index-filter 'git rm --cached -qr --ignore-unmatch -- . && git reset -q $GIT_COMMIT -- aten cmake third_party/tbb third_party/catch third_party/cpuinfo && (git ls-files -s | sed "s-.travis.aten.yml-.travis.yml-" | sed "s-.gitmodules.aten-.gitmodules-" | git update-index --index-info)'
 git checkout master
 git merge temporary-split-branch
 git push

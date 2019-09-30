@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/core/jit_type.h>
 #include <ATen/core/alias_info.h>
 #include <torch/csrc/jit/script/lexer.h>

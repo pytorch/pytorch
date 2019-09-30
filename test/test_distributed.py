@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import copy
+import errno
 import fcntl
 import multiprocessing
 import os
@@ -35,10 +36,6 @@ INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 
 DEFAULT_TIMEOUT = 300
 CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
-
-
-if INIT_METHOD.startswith("file://"):
-    FOLDER = INIT_METHOD[7:]
 
 
 class _FC2(nn.Module):
@@ -87,6 +84,7 @@ class BatchNormNet(nn.Module):
 
 DDP_NET = Net()
 BN_NET = BatchNormNet()
+ONLY_SBN_NET = nn.SyncBatchNorm(2, momentum=0.99)
 
 
 def get_timeout(test_id):
@@ -645,7 +643,7 @@ class _DistTestBase(object):
                         tensor = tensor.cuda(rank_to_GPU[rank][0])
                     dist.broadcast(tensor, src, group_id)
                     self.assertEqual(tensor.size(), expected_tensor.size())
-                    self.assertEqual(tensor.ne(expected_tensor).max(), 0)
+                    self.assertEqual(tensor.ne(expected_tensor).max(), torch.tensor(False))
 
         self._barrier()
 
@@ -1008,6 +1006,223 @@ class _DistTestBase(object):
             group, group_id, rank, dist.ReduceOp.MAX, -1, 10, 10
         )
 
+    # ALL REDUCE - COALESCED
+    @staticmethod
+    def _all_reduce_coalesced_sum_test_cases(group_size):
+        return (
+            [2, 3],
+            [10, 11],
+            [2 + 10 * (group_size - 1), 3 + 11 * (group_size - 1)]
+        )
+
+    @staticmethod
+    def _all_reduce_coalesced_product_test_cases(group_size):
+        return (
+            [1, 2],
+            [3, 4],
+            [1 * 3 ** (group_size - 1), 2 * 4 ** (group_size - 1)]
+        )
+
+    @staticmethod
+    def _all_reduce_coalesced_min_test_cases(group_size):
+        return (
+            [1, 4],
+            [2, 3],
+            [1, 3]
+        )
+
+    @staticmethod
+    def _all_reduce_coalesced_max_test_cases(group_size):
+        return (
+            [1, 4],
+            [2, 3],
+            [2, 4]
+        )
+
+    def _test_all_reduce_coalesced_helper(
+        self,
+        group,
+        group_id,
+        rank,
+        op,
+        cuda=False,
+        rank_to_GPU=None,
+    ):
+        test_case_func = {
+            dist.ReduceOp.SUM: self._all_reduce_coalesced_sum_test_cases,
+            dist.ReduceOp.PRODUCT: self._all_reduce_coalesced_product_test_cases,
+            dist.ReduceOp.MIN: self._all_reduce_coalesced_min_test_cases,
+            dist.ReduceOp.MAX: self._all_reduce_coalesced_max_test_cases
+        }[op]
+
+        master_values, worker_values, expected_values = test_case_func(len(group))
+
+        for src in group:
+            tensors = [
+                _build_tensor(src + 1, val)
+                for val in (master_values if rank == src else worker_values)
+            ]
+            if cuda:
+                tensors = list(map(tensors, lambda t: t.cuda(rank_to_GPU[rank][0])))
+            dist.all_reduce_coalesced(tensors, op, group_id)
+            self.assertEqual(
+                tensors,
+                [
+                    _build_tensor(src + 1, expected_value)
+                    for expected_value in expected_values
+                ]
+            )
+
+        self._barrier()
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_sum(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.SUM,
+            cuda=False,
+            rank_to_GPU=None,
+        )
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_product(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.PRODUCT,
+            cuda=False,
+            rank_to_GPU=None,
+        )
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_min(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.MIN,
+            cuda=False,
+            rank_to_GPU=None,
+        )
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_max(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.MAX,
+            cuda=False,
+            rank_to_GPU=None
+        )
+
+    @skip_if_small_worldsize
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_group_sum(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.SUM,
+            cuda=False,
+            rank_to_GPU=None
+        )
+
+    @skip_if_small_worldsize
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_group_product(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.PRODUCT,
+            cuda=False,
+            rank_to_GPU=None
+        )
+
+    @skip_if_small_worldsize
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_group_min(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.MIN,
+            cuda=False,
+            rank_to_GPU=None
+        )
+
+    @skip_if_small_worldsize
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_group_max(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.MAX,
+            cuda=False,
+            rank_to_GPU=None
+        )
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_full_group_sum(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.SUM,
+            cuda=False,
+            rank_to_GPU=None
+        )
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_full_group_product(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.PRODUCT,
+            cuda=False,
+            rank_to_GPU=None
+        )
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_full_group_min(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.MIN,
+            cuda=False,
+            rank_to_GPU=None,
+        )
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_full_group_max(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.MAX,
+            cuda=False,
+            rank_to_GPU=None
+        )
+
     # SCATTER
     def _test_scatter_helper(self, group, group_id, rank):
         for dest in group:
@@ -1020,6 +1235,29 @@ class _DistTestBase(object):
             self.assertEqual(tensor, expected_tensor)
 
         self._barrier()
+
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    def test_scatter_checks(self):
+        group, group_id, rank = self._init_global_test()
+        one = torch.ones([1])
+
+        # Specify scatter_list argument only on source rank.
+        output = one.clone() * -1
+        if rank == 0:
+            scatter_list = [one.clone() * i for i in group]
+            dist.scatter(output, src=0, scatter_list=scatter_list)
+        else:
+            dist.scatter(output, src=0)
+        self.assertEqual(output, one * rank)
+
+        # Don't specify src argument.
+        output = one.clone() * -1
+        if rank == 0:
+            scatter_list = [one.clone() * i for i in group]
+            dist.scatter(output, scatter_list=scatter_list)
+        else:
+            dist.scatter(output)
+        self.assertEqual(output, one * rank)
 
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support scatter")
     def test_scatter(self):
@@ -1051,6 +1289,29 @@ class _DistTestBase(object):
                     self.assertEqual(t1, t2)
 
         self._barrier()
+
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    def test_gather_checks(self):
+        group, group_id, rank = self._init_global_test()
+        one = torch.ones([1])
+
+        # Specify gather_list argument only on destination rank.
+        if rank == 0:
+            gather_list = [one.clone() for _ in group]
+            dist.gather(one * rank, dst=0, gather_list=gather_list)
+            for i in group:
+                self.assertEqual(gather_list[i], one * i)
+        else:
+            dist.gather(one * rank, dst=0)
+
+        # Don't specify dst argument.
+        if rank == 0:
+            gather_list = [one.clone() for _ in group]
+            dist.gather(one * rank, gather_list=gather_list)
+            for i in group:
+                self.assertEqual(gather_list[i], one * i)
+        else:
+            dist.gather(one * rank)
 
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_gather(self):
@@ -1379,9 +1640,9 @@ class _DistTestBase(object):
 
             # save the model in the middle and reload
             if test_save and idx == 2 and INIT_METHOD.startswith("file://"):
-                _, filename = tempfile.mkstemp(prefix=FOLDER)
-                torch.save(model_DDP, filename)
-                model_DDP = torch.load(filename)
+                with tempfile.NamedTemporaryFile() as tmp:
+                    torch.save(model_DDP, tmp.name)
+                    model_DDP = torch.load(tmp.name)
 
         with tempfile.TemporaryFile() as tmp_file:
             torch.save(model_DDP, tmp_file)
@@ -1410,10 +1671,9 @@ class _DistTestBase(object):
         )
 
         # test serializable/unserializable
-        if INIT_METHOD.startswith("file://"):
-            _, filename = tempfile.mkstemp(prefix=FOLDER)
-            torch.save(model_DDP, filename)
-            model_DDP = torch.load(filename)
+        with tempfile.NamedTemporaryFile() as tmp:
+            torch.save(model_DDP, tmp.name)
+            model_DDP = torch.load(tmp.name)
 
         # dummy data initialization
         local_bs = len(gpu_subset)
@@ -1434,7 +1694,7 @@ class _DistTestBase(object):
         self._barrier()
 
     @unittest.skipIf(
-        BACKEND == "nccl", "nccl does not support DistributedDataParallelCPU"
+        BACKEND == "nccl", "nccl does not support DDP on CPU models"
     )
     def test_DistributedDataParallelCPU(self):
         # Run a simple end to end DDP-CPU model, use result of single node
@@ -1453,7 +1713,6 @@ class _DistTestBase(object):
         global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
 
         # check two model parameters over 5 iterations
-        # TODO: add state pickling support for DistributedDataParallelCPU
         self._test_DDP_5iter(
             model_base, model_DDP, input_cpu, target, loss, local_bs, rank, global_bs, False
         )
@@ -1495,10 +1754,9 @@ class _DistTestBase(object):
         )
 
         # test serializable/unserializable
-        if INIT_METHOD.startswith("file://"):
-            _, filename = tempfile.mkstemp(prefix=FOLDER)
-            torch.save(model_DDP, filename)
-            model_DDP = torch.load(filename)
+        with tempfile.NamedTemporaryFile() as tmp:
+            torch.save(model_DDP, tmp.name)
+            model_DDP = torch.load(tmp.name)
 
         # dummy data initialization
         local_bs = len(gpu_subset)
@@ -1536,6 +1794,36 @@ class _DistTestBase(object):
         # test device_ids
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
         self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
+    def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_Running_Value(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        model = nn.parallel.DistributedDataParallel(ONLY_SBN_NET.cuda(rank), device_ids=[rank])
+
+        input_var = []
+        for i in range(int(WORLD_SIZE)):
+            input_var_rank = torch.cat([
+                torch.ones(2, 1, 10 ** (i + 1)) * (0.1 ** (i - 1)),
+                torch.ones(2, 1, 10 ** (i + 1)) * (0.3 ** (i - 1))
+            ], dim=1)
+            input_var.append(input_var_rank)
+
+        all_input_var = torch.cat(
+            [x.permute(1, 0, 2).contiguous().view(ONLY_SBN_NET.num_features, -1) for x in input_var],
+            dim=1
+        ).cuda(rank)
+
+        for i in range(100):
+            y = model(input_var[rank].cuda(rank))
+            y.mean().backward()
+
+        running_mean, running_var = model.module.running_mean, model.module.running_var
+        torch.testing.assert_allclose(running_mean, all_input_var.mean(1))
+        torch.testing.assert_allclose(running_var, all_input_var.var(1))
 
     @skipIfNoTorchVision
     def test_SyncBatchNorm_process_group(self):
@@ -1580,12 +1868,12 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 
         def setUp(self):
             super(TestDistBackend, self).setUp()
-            # Adding this hack until we fix the FileStore to delete its
-            # content at the end
+            # We rely on the manager process to delete the temporary file.
             global INIT_METHOD
+            self.temporary_file = None
             if INIT_METHOD.startswith("file://"):
-                _, filename = tempfile.mkstemp(prefix=FOLDER)
-                INIT_METHOD = "file://{}".format(filename)
+                self.temporary_file = tempfile.NamedTemporaryFile(delete=False)
+                INIT_METHOD = "file://{}".format(self.temporary_file.name)
 
             self.processes = []
             self.rank = self.MANAGER_PROCESS_RANK
@@ -1595,6 +1883,16 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 
         def tearDown(self):
             super(TestDistBackend, self).tearDown()
+
+            # Clean up temporary file if we used one.
+            if self.temporary_file:
+                try:
+                    os.unlink(self.temporary_file.name)
+                except OSError as err:
+                    # ENOENT is OK because the test is supposed to clean it up.
+                    if err.errno != errno.ENOENT:
+                        raise
+
             for p in self.processes:
                 p.terminate()
 

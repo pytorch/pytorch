@@ -23,7 +23,7 @@ class IRParser {
       const std::string& str,
       torch::jit::Graph* graph,
       std::unordered_map<std::string, Value*>& vmap)
-      : L(str),
+      : L(std::make_shared<Source>(str)),
         g(graph),
         vmap(vmap),
         type_parser(L, /*parse_complete_tensor_types*/ true) {}
@@ -54,6 +54,8 @@ class IRParser {
       int sep,
       int end,
       const std::function<void()>& callback);
+
+  Value* findValueInVMap(const std::string& name);
 
   torch::jit::script::Lexer L;
   torch::jit::Graph* g = nullptr;
@@ -255,8 +257,7 @@ void IRParser::parseOperatorInputs(Node* n) {
   }
   parseList('(', ',', ')', [&] {
     std::string var_name = parseVar();
-    AT_ASSERT(vmap.count(var_name));
-    n->addInput(vmap[var_name]);
+    n->addInput(findValueInVMap(var_name));
   });
 }
 
@@ -282,8 +283,7 @@ void IRParser::parseBlockOutputs(Block* b) {
   L.expect(TK_ARROW);
   parseList('(', ',', ')', [&] {
     std::string var_name = parseVar();
-    AT_ASSERT(vmap.count(var_name));
-    b->registerOutput(vmap[var_name]);
+    b->registerOutput(findValueInVMap(var_name));
   });
   L.expect(TK_NEWLINE);
   L.expect(TK_DEDENT);
@@ -385,10 +385,7 @@ void IRParser::parseReturnOperator() {
   // Parse output names and types
   parseList('(', ',', ')', [&] {
     std::string var_name = parseVar();
-    // Outputs should already be in VMAP, otherwise we're trying to return
-    // undefined value.
-    AT_ASSERT(vmap.count(var_name));
-    g->registerOutput(vmap.at(var_name));
+    g->registerOutput(findValueInVMap(var_name));
   });
 
   // Consume ending tokens
@@ -439,6 +436,15 @@ void IRParser::parseList(
     L.expect(end);
   }
 }
+
+Value* IRParser::findValueInVMap(const std::string& name) {
+  if (!vmap.count(name)) {
+    throw ErrorReport(L.cur().range)
+        << "Cannot find a variable with name '" << name << "'";
+  }
+  return vmap.at(name);
+}
+
 } // namespace script
 } // namespace jit
 } // namespace torch

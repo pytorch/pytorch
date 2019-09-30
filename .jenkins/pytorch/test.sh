@@ -35,30 +35,30 @@ fi
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # JIT C++ extensions require ninja.
-  pip install -q ninja --user
+  pip_install --user ninja
   # ninja is installed in /var/lib/jenkins/.local/bin
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
   # TODO: move this to Docker
-  pip install -q hypothesis --user
+  pip_install --user hypothesis
 
   # TODO: move this to Docker
   PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
   echo $PYTHON_VERSION
-  if [[ $PYTHON_VERSION == "2" ]]; then
-    pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl --user
-  else
-    pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl --user
-  fi
-
+  # if [[ $PYTHON_VERSION == "2" ]]; then
+  #   pip_install --user https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl
+  # else
+  #   pip_install --user https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl
+  # fi
+  pip_install --user tb-nightly
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
-  pip install mypy --user || true
+  pip_install --user mypy || true
 fi
 
 # faulthandler become built-in since 3.3
 if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
-  pip install -q faulthandler --user
+  pip_install --user faulthandler
 fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
@@ -92,10 +92,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export PYTORCH_TEST_WITH_ROCM=1
-fi
-
 if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
@@ -108,7 +104,7 @@ test_python_nn() {
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude nn --verbose
+  time python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods quantizer
   assert_git_not_dirty
 }
 
@@ -138,22 +134,7 @@ test_aten() {
 }
 
 test_torchvision() {
-  rm -rf ninja
-
-  echo "Installing torchvision at branch master"
-  rm -rf vision
-  # TODO: This git clone is bad, it means pushes to torchvision can break
-  # PyTorch CI
-  git clone https://github.com/pytorch/vision --quiet
-  pushd vision
-  # python setup.py install with a tqdm dependency is broken in the
-  # Travis Python nightly (but not in latest Python nightlies, so
-  # this should be a transient requirement...)
-  # See https://github.com/pytorch/pytorch/issues/7525
-  #time python setup.py install
-  pip install -q --user .
-  popd
-  rm -rf vision
+  pip_install --user git+https://github.com/pytorch/vision.git@2b73a4846773a670632b29fb2fc2ac57df7bce5d
 }
 
 test_libtorch() {
@@ -162,13 +143,13 @@ test_libtorch() {
     python test/cpp/jit/tests_setup.py setup
     CPP_BUILD="$PWD/../cpp-build"
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      "$CPP_BUILD"/caffe2/bin/test_jit
+      "$CPP_BUILD"/caffe2/build/bin/test_jit
     else
-      "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
+      "$CPP_BUILD"/caffe2/build/bin/test_jit "[cpu]"
     fi
     python test/cpp/jit/tests_setup.py shutdown
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/build/bin/test_api
     assert_git_not_dirty
   fi
 }
@@ -181,6 +162,7 @@ test_custom_script_ops() {
     cp -a "$CUSTOM_OP_BUILD" build
     # Run tests Python-side and export a script module.
     python test_custom_ops.py -v
+    python test_custom_classes.py -v
     python model.py --export-script-module=model.pt
     # Run tests C++-side and load the exported script module.
     build/test_custom_ops ./model.pt
@@ -193,22 +175,47 @@ test_xla() {
   export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
   export XRT_WORKERS="localservice:0;grpc://localhost:40934"
   pushd xla
-  python test/test_operations.py
+  echo "Running Python Tests"
+  ./test/run_tests.sh
+
+  echo "Running MNIST Test"
   python test/test_train_mnist.py --tidy
+
+  echo "Running C++ Tests"
+  pushd test/cpp
+  CC=clang-7 CXX=clang++-7 ./run_tests.sh
   popd
+  assert_git_not_dirty
+}
+
+# Do NOT run this test before any other tests, like test_python_nn, etc.
+# Because this function uninstalls the torch built from branch, and install
+# nightly version.
+test_backward_compatibility() {
+  set -x
+  pushd test/backward_compatibility
+  python dump_all_function_schemas.py --filename new_schemas.txt
+  pip_uninstall torch
+  pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+  python check_backward_compatibility.py --new-schemas new_schemas.txt
+  popd
+  set +x
   assert_git_not_dirty
 }
 
 (cd test && python -c "import torch; print(torch.__config__.show())")
 (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 
-if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
+  test_backward_compatibility
+  # Do NOT add tests after bc check tests, see its comment.
+elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   test_torchvision
   test_xla
-elif [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
   test_torchvision
   test_python_nn
-elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   test_python_all_except_nn
   test_aten
   test_libtorch

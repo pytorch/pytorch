@@ -63,9 +63,29 @@ void pushRangeImpl(
     return;
   }
   if (state == ProfilerState::NVTX) {
-    if(sequence_nr >= 0) {
+    if(sequence_nr >= 0 || shapes.size() > 0) {
       std::stringstream s;
-      s << name.str() << msg << sequence_nr;
+      if(sequence_nr >= 0)
+        s << name.str() << msg << sequence_nr;
+      if(shapes.size() > 0) {
+        s << ", sizes = [";
+        for(int i = 0; i < shapes.size(); i++) {
+          if(shapes[i].size() > 0) {
+            s << "[";
+            for(int dim = 0; dim < shapes[i].size(); dim++) {
+              s << shapes[i][dim];
+              if(dim < shapes[i].size() - 1)
+                s << ", ";
+            }
+            s << "]";
+          }
+          else
+            s << "[]";
+          if(i < shapes.size() - 1)
+            s << ", ";
+        }
+        s << "]";
+      }
       cuda_stubs->nvtxRangePushA(s.str().c_str());
     } else {
       cuda_stubs->nvtxRangePushA(name.str());

@@ -2,6 +2,8 @@
 
 #include <map>
 
+#include <c10/core/DeviceGuard.h>
+
 #if defined(OPEN_MPI) && OPEN_MPI
 #include <mpi-ext.h> // Needed for CUDA-aware check
 #endif
@@ -316,6 +318,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts, this](std::unique_ptr<WorkEntry>& entry) {
         auto data = (entry->src)[0];
+        c10::DeviceGuard guard(data.device());
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
         MPI_CHECK(MPI_Bcast(
             data.data_ptr(),
@@ -337,6 +340,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts, this](std::unique_ptr<WorkEntry>& entry) {
         auto data = (entry->src)[0];
+        c10::DeviceGuard guard(data.device());
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
         MPI_CHECK(MPI_Allreduce(
             MPI_IN_PLACE,
@@ -351,6 +355,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
   return enqueue(std::move(entry));
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce_coalesced(
+    std::vector<at::Tensor>& tensors,
+    const AllreduceCoalescedOptions& opts) {
+  throw std::runtime_error(
+      "allreduce_coalesced is currently not supported with MPI");
+}
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
@@ -363,6 +374,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
         void* sendbuf = (rank_ == opts.rootRank) ? MPI_IN_PLACE : dataPtr;
         void* recvbuf = (rank_ == opts.rootRank) ? dataPtr : nullptr;
 
+        c10::DeviceGuard guard(data.device());
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
         MPI_CHECK(MPI_Reduce(
             sendbuf,
@@ -402,6 +414,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
         std::vector<at::Tensor>& outputDataVec = entry->dst;
         auto flatOutputTensor = newLikeFlat(outputDataVec);
 
+        c10::DeviceGuard guard(data.device());
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
         MPI_CHECK(MPI_Allgather(
             data.data_ptr(),
@@ -456,6 +469,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
           recvbuf = flatOutputTensor.data_ptr();
         }
 
+        c10::DeviceGuard guard(data.device());
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
         MPI_CHECK(MPI_Gather(
             data.data_ptr(),
@@ -529,6 +543,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
           }
         }
 
+        c10::DeviceGuard guard(data.device());
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
         MPI_CHECK(MPI_Scatter(
             sendbuf,
@@ -569,6 +584,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
   MPI_Request request = MPI_REQUEST_NULL;
 
   {
+    c10::DeviceGuard guard(tensor.device());
     std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
     MPI_CHECK(MPI_Isend(
         tensor.data_ptr(),
@@ -593,6 +609,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
   MPI_Request request = MPI_REQUEST_NULL;
 
   {
+    c10::DeviceGuard guard(tensor.device());
     std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
     MPI_CHECK(MPI_Irecv(
         tensor.data_ptr(),
@@ -616,6 +633,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
   MPI_Request request = MPI_REQUEST_NULL;
 
   {
+    c10::DeviceGuard guard(tensor.device());
     std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
     MPI_CHECK(MPI_Irecv(
         tensor.data_ptr(),

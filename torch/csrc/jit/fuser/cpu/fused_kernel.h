@@ -2,7 +2,6 @@
 
 #include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/fuser/cpu/dynamic_library.h>
 #include <torch/csrc/jit/fuser/fused_kernel.h>
 #include <torch/csrc/utils/disallow_copy.h>
 
@@ -36,7 +35,7 @@ struct TORCH_API FusedKernelCPU : public ::torch::jit::fuser::FusedKernel {
   }
 
  private:
-  std::unique_ptr<DynamicLibrary> so_lib;
+  std::unique_ptr<at::DynamicLibrary> so_lib;
   void (*kernel)(uint32_t, void**) = nullptr;
 };
 

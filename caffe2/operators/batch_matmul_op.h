@@ -203,39 +203,67 @@ class BatchMatMulOp final : public Operator<Context> {
           Y_data,
           &context_);
     } else if (A_batch_size == 1) {
-      math::GemmStridedBatched<T, Context, Engine>(
-          trans_a_ ? CblasTrans : CblasNoTrans,
-          trans_b_ ? CblasTrans : CblasNoTrans,
-          Y_batch_size,
-          M,
-          N,
-          K,
-          1.0f,
-          A_data,
-          0,
-          B_data,
-          K * N,
-          0.0f,
-          Y_data,
-          M * N,
-          &context_);
+      if (M == 1 && trans_b_) {
+        math::Gemv<T, Context, Engine>(
+            CblasNoTrans,
+            B_batch_size * N,
+            K,
+            1.0f,
+            B_data,
+            A_data,
+            0.0f,
+            Y_data,
+            &context_);
+      } else {
+        math::GemmStridedBatched<T, Context, Engine>(
+            trans_a_ ? CblasTrans : CblasNoTrans,
+            trans_b_ ? CblasTrans : CblasNoTrans,
+            Y_batch_size,
+            M,
+            N,
+            K,
+            1.0f,
+            A_data,
+            0,
+            B_data,
+            K * N,
+            0.0f,
+            Y_data,
+            M * N,
+            &context_);
+      }
     } else if (B_batch_size == 1) {
-      math::GemmStridedBatched<T, Context, Engine>(
-          trans_a_ ? CblasTrans : CblasNoTrans,
-          trans_b_ ? CblasTrans : CblasNoTrans,
-          Y_batch_size,
-          M,
-          N,
-          K,
-          1.0f,
-          A_data,
-          M * K,
-          B_data,
-          0,
-          0.0f,
-          Y_data,
-          M * N,
-          &context_);
+      if (!trans_a_) {
+        math::Gemm<T, Context, Engine>(
+            CblasNoTrans,
+            trans_b_ ? CblasTrans : CblasNoTrans,
+            A_batch_size * M,
+            N,
+            K,
+            1.0f,
+            A_data,
+            B_data,
+            0.0f,
+            Y_data,
+            &context_);
+      } else {
+        math::GemmStridedBatched<T, Context, Engine>(
+            CblasTrans,
+            trans_b_ ? CblasTrans : CblasNoTrans,
+            Y_batch_size,
+            M,
+            N,
+            K,
+            1.0f,
+            A_data,
+            M * K,
+            B_data,
+            0,
+            0.0f,
+            Y_data,
+            M * N,
+            &context_);
+      }
     } else if (!is_broadcast_dims) {
       math::GemmStridedBatched<T, Context, Engine>(
           trans_a_ ? CblasTrans : CblasNoTrans,

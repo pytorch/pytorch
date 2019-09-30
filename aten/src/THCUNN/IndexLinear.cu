@@ -1,6 +1,6 @@
 #include <THCUNN/THCUNN.h>
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCNumerics.cuh>
 #include <THC/THCAtomics.cuh>
 #include <THC/THCTensor.hpp>
 #include <THC/THCStorage.hpp>

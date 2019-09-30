@@ -164,5 +164,49 @@ class TestRegularizer(LayersTestCase):
 
         workspace.RunNetOnce(train_init_net)
         workspace.RunNetOnce(train_net)
-
         compare_reference(weight, group_boundaries, reg_weight * 0.1, output)
+
+    @given(
+        param_dim=st.integers(10, 30),
+        k=st.integers(5, 9),
+        reg_weight=st.integers(0, 10)
+    )
+    def test_l1_norm_trimmed(self, param_dim, k, reg_weight):
+        weight = np.random.rand(param_dim).astype(np.float32)
+        weight_blob = core.BlobReference("weight_blob")
+        workspace.FeedBlob(weight_blob, weight)
+
+        train_init_net, train_net = self.get_training_nets()
+        reg = regularizer.L1NormTrimmed(reg_weight * 0.1, k)
+        output = reg(
+            train_net, train_init_net, weight_blob, by=RegularizationBy.ON_LOSS
+        )
+
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+        result = np.sum(np.sort(np.absolute(weight))[:(param_dim - k)]) * reg_weight * 0.1
+        npt.assert_almost_equal(result, workspace.blobs[output], decimal=2)
+
+    @given(
+        param_dim=st.integers(10, 30),
+        k=st.integers(5, 9),
+        l1=st.integers(0, 10),
+        l2=st.integers(0, 10)
+    )
+    def test_elastic_l1_norm_trimmed(self, param_dim, k, l1, l2):
+        weight = np.random.rand(param_dim).astype(np.float32)
+        weight_blob = core.BlobReference("weight_blob")
+        workspace.FeedBlob(weight_blob, weight)
+
+        train_init_net, train_net = self.get_training_nets()
+        reg = regularizer.ElasticNetL1NormTrimmed(l1 * 0.1, l2 * 0.1, k)
+        output = reg(
+            train_net, train_init_net, weight_blob, by=RegularizationBy.ON_LOSS
+        )
+
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+        l1_norm = np.sum(np.sort(np.absolute(weight))[:(param_dim - k)])
+        l2_norm = np.sum(np.square(weight))
+        result = l1_norm * l1 * 0.1 + l2_norm * l2 * 0.1
+        npt.assert_almost_equal(result, workspace.blobs[output], decimal=2)

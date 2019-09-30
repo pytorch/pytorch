@@ -4,14 +4,24 @@
 
 namespace caffe2 {
 
-namespace {
-void annotateOpIndex(NetDef* net) {
-  int i = 0;
+// Populate 'net_pos' argument for any ops that don't already have it. 'net_pos'
+// we populate here starts after the max 'net_pos' value we encountered.
+void BackendTransformerBase::annotateOpIndex(NetDef* net) {
+  // find the max net_pos that we have so far.
+  int i = -1;
+  for (const auto& op : net->op()) {
+    ArgumentHelper helper(op);
+    int old_index = helper.GetSingleArgument(op, kNetPos, -1);
+    i = std::max(i, old_index);
+  }
+
+  // populate net_pos for any op that doesn't already have it.
   for (auto& op : *(net->mutable_op())) {
-    AddArgument(kNetPos, i++, &op);
+    if (!ArgumentHelper::HasArgument(op, kNetPos)) {
+      AddArgument(kNetPos, ++i, &op);
+    }
   }
 }
-} // namespace
 
 std::string BackendTransformerBase::getModelId(const NetDef& net) {
   static std::atomic<size_t> seq_id{0};
@@ -42,6 +52,7 @@ TensorProto BackendTransformerBase::wrapShapeInfoIntoTensorProto(
   for (const auto i : shape_info.shape.dims()) {
     t.add_dims(i);
   }
+  t.add_int32_data(static_cast<int32_t>(shape_info.dim_type));
   return t;
 }
 
@@ -71,6 +82,7 @@ QTensorProto BackendTransformerBase::wrapShapeInfoIntoQTensorProto(
   for (const auto i : shape_info.shape.dims()) {
     t.add_dims(i);
   }
+  t.add_data(static_cast<int32_t>(shape_info.dim_type));
   return t;
 }
 
@@ -144,11 +156,9 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
   return shape_map;
 }
 
-void BackendTransformerBase::dumpNet(
-    const NetDef& pred_net,
-    const ShapeInfoMap& shape_hints,
-    const std::string& fname) const {
-  NetDef shape_net(pred_net);
+void BackendTransformerBase::addShapeToNet(
+    NetDef& shape_net,
+    const ShapeInfoMap& shape_hints) const {
   auto* shape_arg = shape_net.add_arg();
   auto* qshape_arg = shape_net.add_arg();
   shape_arg->set_name("shape_info");
@@ -156,14 +166,20 @@ void BackendTransformerBase::dumpNet(
   for (const auto& kv : shape_hints) {
     if (!kv.second.is_quantized) {
       auto t = wrapShapeInfoIntoTensorProto(kv.first, kv.second);
-      t.add_int32_data(static_cast<int32_t>(kv.second.dim_type));
       shape_arg->mutable_tensors()->Add()->CopyFrom(t);
     } else {
       auto t = wrapShapeInfoIntoQTensorProto(kv.first, kv.second);
-      t.add_data(static_cast<int32_t>(kv.second.dim_type));
       qshape_arg->mutable_qtensors()->Add()->CopyFrom(t);
     }
   }
+}
+
+void BackendTransformerBase::dumpNet(
+    const NetDef& pred_net,
+    const ShapeInfoMap& shape_hints,
+    const std::string& fname) const {
+  NetDef shape_net(pred_net);
+  addShapeToNet(shape_net, shape_hints);
   WriteProtoToTextFile(shape_net, fname);
 }
 } // namespace caffe2

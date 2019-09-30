@@ -264,7 +264,7 @@ class GradientChecker:
             # hack.
             grad_ops, g_input = getGradientForOp(op)
 
-        
+
         _input_device_options = input_device_options or \
             core.InferOpBlobDevicesAsDict(op)[0]
         # First, feed in the input.
@@ -285,7 +285,7 @@ class GradientChecker:
             raise Exception(
                 "Mismatched gradient shapes: estimated ({}), grad ({})".format(
                     grad_estimate.shape, grad.shape))
-            
+
         dims_to_check = inputs[input_to_check].size
         for current_dim in range(dims_to_check):
             # Positive gradient

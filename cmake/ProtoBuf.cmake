@@ -41,6 +41,8 @@ macro(custom_protobuf_find)
   if (MSVC)
     if(MSVC_Z7_OVERRIDE)
       foreach(flag_var
+          CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+          CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
           CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
           CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
         if(${flag_var} MATCHES "/Z[iI]")
@@ -115,12 +117,9 @@ if ((NOT TARGET protobuf::libprotobuf) AND (NOT TARGET protobuf::libprotobuf-lit
   #     "Please set the proper paths so that I can find protobuf correctly.")
 endif()
 
-# Protobuf generated files use <> as inclusion path, so maybe we should use
-# SYSTEM inclusion path. But we need these include dirs to be found before
-# other protobuf include dirs in Anaconda
 get_target_property(__tmp protobuf::libprotobuf INTERFACE_INCLUDE_DIRECTORIES)
 message(STATUS "Caffe2 protobuf include directory: " ${__tmp})
-include_directories(BEFORE ${__tmp})
+include_directories(BEFORE SYSTEM ${__tmp})
 
 # If Protobuf_VERSION is known (true in most cases, false if we are building
 # local protobuf), then we will add a protobuf version check in

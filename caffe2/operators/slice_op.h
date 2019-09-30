@@ -7,8 +7,6 @@
 
 namespace caffe2 {
 
-namespace {
-
 template <class SIndex, class Context>
 bool SliceImpl(
     Tensor* output,
@@ -71,6 +69,9 @@ bool SliceImpl(
     if (!backward) {
       output->Resize(dst_sizes);
       output->raw_mutable_data(data.dtype());
+    } else {
+      gdata->ResizeLike(data);
+      gdata->raw_mutable_data(go->dtype());
     }
     return true;
   }
@@ -195,8 +196,6 @@ bool SliceImpl(
   }
   return true;
 }
-
-} // namespace
 
 template <class Context>
 class SliceOp : public Operator<Context> {

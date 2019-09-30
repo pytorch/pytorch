@@ -11,7 +11,7 @@ REGISTER_CPU_OPERATOR(Int8FC, int8::Int8FCOp);
 using namespace std::placeholders;
 OPERATOR_SCHEMA(Int8FC)
     .NumInputs(3)
-    .NumOutputs(1)
+    .NumOutputs(1, 4)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
     .CostInferenceFunction(std::bind(CostInferenceForFC, _1, _2, false))
     .SetDoc(R"DOC(

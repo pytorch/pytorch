@@ -3,7 +3,6 @@
 #include <THC/THCGeneral.h>
 #include <THC/THCBlas.h>
 #include <THC/THCTensorCopy.h>
-#include <THC/THCTensorRandom.h>
 #include <TH/THHalf.h>
 #include <THC/THCApply.cuh>
 #include <THC/THCReduce.cuh>
@@ -480,3 +479,7 @@ void dispatchTakePut(THCState *state, TensorType *a, TensorType *b, THCudaLongTe
 
 #include <THC/generic/THCTensorIndex.cu>
 #include <THC/THCGenerateAllTypes.h>
+
+
+#include <THC/generic/THCTensorIndex.cu>
+#include <THC/THCGenerateBoolType.h>

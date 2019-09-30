@@ -3,7 +3,6 @@ import math
 import numpy as np
 from ._convert_np import make_np
 from ._utils import make_grid
-from PIL import Image
 from posixpath import join
 
 
@@ -23,6 +22,8 @@ def make_tsv(metadata, save_path, metadata_header=None):
 
 
 def make_sprite(label_img, save_path):
+    from PIL import Image
+
     # this ensures the sprite image has correct dimension as described in
     # https://www.tensorflow.org/get_started/embedding_viz
     nrow = int(math.ceil((label_img.size(0)) ** 0.5))

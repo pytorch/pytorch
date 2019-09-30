@@ -14,6 +14,7 @@ torch/csrc/jit/generated/
 
 import argparse
 import copy
+import re
 from itertools import groupby
 from ..autograd.utils import CodeTemplate, write
 from ..autograd.gen_autograd import load_aten_declarations
@@ -41,6 +42,8 @@ TYPE_MAP = {
     'std::string': 'str',
     'Scalar': 'Scalar',
     'MemoryFormat': 'MemoryFormat',
+    'MemoryFormat?': 'MemoryFormat?',
+    'QScheme': 'QScheme',
     'Scalar?': 'Scalar?',
     'Tensor': 'Tensor',
     'Tensor?': 'Tensor?',
@@ -94,10 +97,12 @@ def jit_type_of(arg):
 FROM_IVALUE = {
     'Device': '{}.toDevice()',
     'Device?': '{}.toOptional<c10::Device>()',
-    'IntArrayRef': '{}.toIntList()->elements()',
+    'IntArrayRef': '{}.toIntListRef()',
     'Layout': '{}.toLayout()',
     'Layout?': '{}.toOptional<c10::Layout>()',
     'MemoryFormat': '{}.toMemoryFormat()',
+    'MemoryFormat?': '{}.toOptional<c10::MemoryFormat>()',
+    'QScheme': '{}.toQScheme()',
     'Scalar': '{}.toScalar()',
     'Scalar?': '{}.toOptional<Scalar>()',
     'ScalarType': '{}.toScalarType()',
@@ -105,17 +110,17 @@ FROM_IVALUE = {
     'Tensor': '{}.toTensor()',
     'Tensor?': 'toOptionalTensor({})',
     'Tensor?[]': 'toListOfOptionalTensor({})',
-    'TensorList': '{}.toTensorList()->elements()',
+    'TensorList': '{}.toTensorListRef()',
     'bool': '{}.toBool()',
     'bool?': '{}.toOptional<bool>()',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
-    'std::string': '{}.toString()->string()',
+    'std::string': '{}.toStringRef()',
     'Generator': 'nullptr',
-    'std::array<bool,2>': 'as_bool_array<2>({}.toBoolListRef())',
-    'std::array<bool,3>': 'as_bool_array<3>({}.toBoolListRef())',
-    'std::array<bool,4>': 'as_bool_array<4>({}.toBoolListRef())',
+    'std::array<bool,2>': 'as_bool_array<2>({}.toBoolList())',
+    'std::array<bool,3>': 'as_bool_array<3>({}.toBoolList())',
+    'std::array<bool,4>': 'as_bool_array<4>({}.toBoolList())',
 }
 
 
@@ -140,7 +145,11 @@ const auto options = TensorOptions()
         .layout(${layout})
         .device(${device})
         .pinned_memory(${pin_memory});
-auto result_ = torch::${name}(${args_with_tensor_options});
+#ifdef USE_STATIC_DISPATCH
+    auto result_ = at::${name}(${args_with_tensor_options});
+#else
+    auto result_ = torch::${name}(${args_with_tensor_options});
+#endif
 """)
 CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
@@ -164,12 +173,20 @@ CONSTRUCTOR = CodeTemplate("""\
 OPERATOR = CodeTemplate("""\
 Operator(
     "${signature}",
-    ${op}
+    ${op},
+    atenOperatorOptions()
 ),
 """)
 
 
-blacklisted_types = {'SparseTensorRef', 'Storage', 'void*'}
+blacklisted_types = {
+    'Storage',
+    'DimnameList?',
+    'ConstQuantizerPtr',
+    'Dimname',
+    'DimnameList',
+}
+
 default_only_types = {'Generator'}
 
 
@@ -222,6 +239,19 @@ def is_out_variant(decl):
     return decl['name'].endswith('_out')
 
 
+# Copied from ..autograd.gen_python_functions.SKIP_PYTHON_BINDINGS
+BACKWARD_OP_PATTERNS = [
+    '.*_backward',
+    '.*_backward_(out|input|weight|bias)',
+]
+
+def is_backward_op(decl):
+    for pattern in BACKWARD_OP_PATTERNS:
+        if re.match('^' + pattern + '$', decl['name']):
+            return True
+    return False
+
+
 # for each argument in decl, the location it should appear in the
 # jit schema declaration. e.g.
 # arguments = [x, y, z] # the order in aten
@@ -232,7 +262,7 @@ def argument_order(decl):
     return decl.get('jit_argument_order') or list(range(len(decl['arguments'])))
 
 
-def gen_jit_dispatch(declarations, out, template_path):
+def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False):
     REGISTER_ATEN_OPS_CPP = CodeTemplate.from_file(template_path + '/register_aten_ops.cpp')
 
     ops = []
@@ -306,6 +336,14 @@ def gen_jit_dispatch(declarations, out, template_path):
                                              lvalues=lvalues)
         return constructor
 
+    def filter_decls(jit_decls, disable_autograd):
+        result = []
+        for decl in jit_decls:
+            if disable_autograd and is_backward_op(decl):
+                continue
+            result.append(decl)
+        return result
+
     # This function declares an order on declarations. This is necessary because
     # there is some ambiguity in the choice of overload: if an argument is overloaded
     # to accept both Scalar and Tensor, the schema with the Tensor should come first
@@ -334,6 +372,7 @@ def gen_jit_dispatch(declarations, out, template_path):
     tensor_impl_methods = [{
         'name': name,
         'api_name': name,
+        'overload_name': '',
         'method_of': ['Tensor'],
         'arguments': [{'name': 'self', 'simple_type': 'Tensor'}],
         'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t', 'simple_type': 'int64_t'}],
@@ -390,6 +429,7 @@ def gen_jit_dispatch(declarations, out, template_path):
                 additional_jit_decls.append(decl_copy)
 
     jit_decls.extend(additional_jit_decls)
+    jit_decls = filter_decls(jit_decls, disable_autograd)
 
     # Group and sort the generated snippets to ensure that the
     # generation is deterministic
@@ -486,6 +526,7 @@ def signature(decl, should_match_schema=True):
                 .replace('false', 'False') \
                 .replace('Reduction::Mean', 'Mean') \
                 .replace('MemoryFormat::Contiguous', 'contiguous_format') \
+                .replace('QScheme::PER_TENSOR_AFFINE', 'per_tensor_affine') \
                 .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
                 .replace('{', '[') \
                 .replace('}', ']')
@@ -515,7 +556,8 @@ def signature(decl, should_match_schema=True):
             return '{} {}'.format(jit_type_of(r), r['field_name']) if 'field_name' in r else jit_type_of(r)
         ret_list = '({})'.format(', '.join(type_maybe_field(r) for r in decl['returns']))
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
-    constructed_string = 'aten::{}({}) -> {}'.format(name, arg_list, ret_list)
+    overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
+    constructed_string = 'aten::{}{}({}) -> {}'.format(name, overload_name, arg_list, ret_list)
     return match_signature(decl, constructed_string, should_match_schema)
 
 

@@ -2,7 +2,8 @@
 
 // ${generated_comment}
 
-#include "torch/csrc/utils/auto_gil.h"
+#include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/utils/cuda_lazy_init.h>
 
 #include <ATen/ATen.h>
 
@@ -16,7 +17,6 @@ using at::Scalar;
 using at::TensorList;
 using at::IntArrayRef;
 using at::Generator;
-using at::SparseTensorRef;
 using at::Storage;
 
 ${py_method_dispatch}

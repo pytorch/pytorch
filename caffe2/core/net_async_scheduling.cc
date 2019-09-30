@@ -156,6 +156,7 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) noexcept {
             // SetFinished may throw, e.g. when we call it on already finished
             // event, and in some other cases (CUDA)
             try {
+              lastTaskOp(tid)->CancelAsyncCallback();
               event(tid).SetFinished("Cancelled");
             } catch (const EnforceNotMet&) {
               // ignore

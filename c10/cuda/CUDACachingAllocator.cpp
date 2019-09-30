@@ -383,15 +383,16 @@ struct THCCachingAllocator
     if (ptr) {
       std::lock_guard<std::recursive_mutex> lock(mutex);
       Block* block = find_allocated_block(ptr);
-      if (!block) {
-        AT_ERROR("invalid device pointer: ", ptr);
+      // block could be nullptr in some cases, e.g., tensor loaded from blob, or
+      // shared from another process, or not pointing to a CUDA tensor.
+      if (block) {
+        if (stream.stream() == block->stream) {
+          // ignore uses on the allocation stream, since those don't require any
+          // special synchronization
+          return;
+        }
+        block->stream_uses.insert(stream);
       }
-      if (stream.stream() == block->stream) {
-        // ignore uses on the allocation stream, since those don't require any
-        // special synchronization
-        return;
-      }
-      block->stream_uses.insert(stream);
     }
   }
 

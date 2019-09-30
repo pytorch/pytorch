@@ -5,6 +5,7 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/ATen.h>
 
@@ -21,6 +22,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"Scalar", ParameterType::SCALAR},
   {"int64_t", ParameterType::INT64},
   {"double", ParameterType::DOUBLE},
+  {"complex", ParameterType::COMPLEX},
   {"TensorList", ParameterType::TENSOR_LIST},
   {"IntArrayRef", ParameterType::INT_LIST},
   {"Generator", ParameterType::GENERATOR},
@@ -30,8 +32,11 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"ScalarType", ParameterType::SCALARTYPE},
   {"Layout", ParameterType::LAYOUT},
   {"MemoryFormat", ParameterType::MEMORY_FORMAT},
+  {"QScheme", ParameterType::QSCHEME},
   {"Device", ParameterType::DEVICE},
   {"std::string", ParameterType::STRING},
+  {"Dimname", ParameterType::DIMNAME},
+  {"DimnameList", ParameterType::DIMNAME_LIST},
 };
 
 // Default arg name translations for compatibility with NumPy.
@@ -130,9 +135,10 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
 bool FunctionParameter::check(PyObject* obj) {
   switch (type_) {
     case ParameterType::TENSOR: {
-      return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkDouble(obj));
+      return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
     }
     case ParameterType::SCALAR:
+    case ParameterType::COMPLEX:
       if (PyComplex_Check(obj)) {
         return true;
       }
@@ -153,10 +159,20 @@ bool FunctionParameter::check(PyObject* obj) {
       }
       if (THPVariable_Check(obj)) {
         auto& var = ((THPVariable*)obj)->cdata;
-        return at::isIntegralType(var.scalar_type()) && !var.requires_grad() && var.dim() == 0;
+        return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
       }
       return false;
     }
+#ifdef BUILD_NAMEDTENSOR
+    case ParameterType::DIMNAME: return THPUtils_checkDimname(obj);
+    case ParameterType::DIMNAME_LIST: {
+      if (THPUtils_checkDimnameList(obj)) {
+        return true;
+      }
+      // if a size is specified (e.g. DimnameList[1]) we also allow passing a single Dimname
+      return size == 1 && THPUtils_checkDimname(obj);
+    }
+#endif
     case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
@@ -169,9 +185,10 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::BOOL: return PyBool_Check(obj);
     case ParameterType::STORAGE: return isStorage(obj);
     case ParameterType::PYOBJECT: return true;
-    case ParameterType::SCALARTYPE: return THPDtype_Check(obj);
+    case ParameterType::SCALARTYPE: return THPDtype_Check(obj) || THPPythonScalarType_Check(obj);
     case ParameterType::LAYOUT: return THPLayout_Check(obj);
     case ParameterType::MEMORY_FORMAT: return THPMemoryFormat_Check(obj);
+    case ParameterType::QSCHEME: return THPQScheme_Check(obj);
     case ParameterType::DEVICE:
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
     case ParameterType::STRING: return THPUtils_checkString(obj);
@@ -185,6 +202,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::SCALAR: return "Number";
     case ParameterType::INT64: return "int";
     case ParameterType::DOUBLE: return "float";
+    case ParameterType::COMPLEX: return "complex";
     case ParameterType::TENSOR_LIST: return "tuple of Tensors";
     case ParameterType::INT_LIST: return "tuple of ints";
     case ParameterType::GENERATOR: return "torch.Generator";
@@ -194,8 +212,13 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::SCALARTYPE: return "torch.dtype";
     case ParameterType::LAYOUT: return "torch.layout";
     case ParameterType::MEMORY_FORMAT: return "torch.memory_format";
+    case ParameterType::QSCHEME: return "torch.qscheme";
     case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
+#ifdef BUILD_NAMEDTENSOR
+    case ParameterType::DIMNAME: return "name";
+    case ParameterType::DIMNAME_LIST: return "tuple of names";
+#endif
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -255,6 +278,9 @@ void FunctionParameter::set_default_str(const std::string& str) {
     default_bool = (str == "True" || str == "true");
   } else if (type_ == ParameterType::DOUBLE) {
     default_double = atof(str.c_str());
+  } else if (type_ == ParameterType::COMPLEX) {
+    default_complex[0] = atof(str.c_str()); // TODO: parse "x + xj"?
+    default_complex[1] = 0;
   } else if (type_ == ParameterType::SCALAR) {
     if (str != "None") {
       // we sometimes rely on integer-vs-float values, e.g. with arange.
@@ -614,5 +640,63 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
   throw TypeError("%s", msg.c_str());
 }
 
+at::Tensor PythonArgs::tensor_slow(int i) {
+  PyObject* obj = args[i];
+  if (!obj) {
+    return at::Tensor();
+  }
+  if (THPVariable_Check(obj)) {
+    return reinterpret_cast<THPVariable*>(obj)->cdata;
+  }
+
+  at::Scalar scalar;
+  if (PyBool_Check(obj)) {
+    scalar = at::Scalar(THPUtils_unpackBool(obj));
+  } else if (THPUtils_checkLong(obj)) {
+    scalar = at::Scalar(THPUtils_unpackLong(obj));
+  }else if (PyComplex_Check(obj)) {
+    scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
+  }else if (THPUtils_checkDouble(obj)) {
+    scalar = at::Scalar(THPUtils_unpackDouble(obj));
+  } else {
+    // NB: Are you here because you passed None to a Variable method,
+    // and you expected an undefined tensor to be returned?   Don't add
+    // a test for Py_None here; instead, you need to mark the argument
+    // as *allowing none*; you can do this by writing 'Tensor?' instead
+    // of 'Tensor' in the ATen metadata.
+    throw TypeError("expected Tensor as argument %d, but got %s", i,
+        Py_TYPE(obj)->tp_name);
+  }
+  auto tensor = scalar_to_tensor(scalar);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return autograd::make_variable(tensor);
+}
+
+at::Scalar PythonArgs::scalar_slow(int i) {
+  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
+    auto& var = THPVariable_Unpack(args[i]);
+    jit::tracer::ArgumentStash::stashValue(
+        signature.params[i].name, idx, var, jit::NumberType::get());
+  }
+
+  // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
+  // handle most NumPy scalar types except np.float64.
+  if (THPVariable_Check(args[i])) {
+    return ((THPVariable*)args[i])->cdata.item();
+  }
+
+  if (THPUtils_checkLong(args[i])) {
+    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+  }
+
+  if (PyBool_Check(args[i])) {
+    return at::Scalar(THPUtils_unpackBool(args[i]));
+  }
+
+  if (PyComplex_Check(args[i])) {
+    return at::Scalar(THPUtils_unpackComplexDouble(args[i]));
+  }
+  return at::Scalar(THPUtils_unpackDouble(args[i]));
+}
 
 } // namespace torch

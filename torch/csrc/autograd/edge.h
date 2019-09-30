@@ -8,13 +8,13 @@
 
 namespace torch { namespace autograd {
 
-struct Function;
+struct Node;
 
 /// Represents a particular input of a function.
 struct Edge {
   Edge() noexcept : function(nullptr), input_nr(0) {}
 
-  Edge(std::shared_ptr<Function> function_, uint32_t input_nr_) noexcept
+  Edge(std::shared_ptr<Node> function_, uint32_t input_nr_) noexcept
       : function(std::move(function_)), input_nr(input_nr_) {}
 
   /// Convenience method to test if an edge is valid.
@@ -32,7 +32,7 @@ struct Edge {
   }
 
   /// The function this `Edge` points to.
-  std::shared_ptr<Function> function;
+  std::shared_ptr<Node> function;
 
   /// The identifier of a particular input to the function.
   uint32_t input_nr;

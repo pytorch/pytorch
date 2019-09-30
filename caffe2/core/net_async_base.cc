@@ -16,6 +16,11 @@ C10_DEFINE_bool(
     false,
     "If set, use one single chain containing all ops");
 
+C10_DEFINE_bool(
+    caffe2_net_async_profile_operators,
+    false,
+    "If set, profile operators of the net regardless of net being prof_dag.");
+
 C10_DEFINE_int(
     caffe2_net_async_max_gpus,
     16,
@@ -394,6 +399,10 @@ bool AsyncNetBase::run(int task_id, int stream_id) noexcept {
     if (!options_.finish_chain_) {
       asyncWait(task_id, stream_id, parents(task_id));
     }
+    int iter_id = -1;
+    if (tracer_) {
+      iter_id = tracer_->getIter();
+    }
     for (auto& op_id : chains_[task_id]) {
       op = operators_[op_id];
       bool success = false;
@@ -404,7 +413,9 @@ bool AsyncNetBase::run(int task_id, int stream_id) noexcept {
             tracing::TRACE_TASK,
             task_id,
             tracing::TRACE_STREAM,
-            stream_id);
+            stream_id,
+            tracing::TRACE_ITER,
+            iter_id);
         success = op->RunAsync(stream_id);
       } else {
         counters_.AddPerOpStartTime(op_id);
@@ -534,6 +545,9 @@ ExecutionOptions::ExecutionOptions(
     }
   }
 
+  if (FLAGS_caffe2_net_async_profile_operators) {
+    report_stats_ = true;
+  }
   run_root_tasks_inline_ = FLAGS_caffe2_net_async_run_root_tasks_inline;
 }
 

@@ -1,6 +1,6 @@
 ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.1"
+producer_version: "1.3"
 graph {
   node {
     input: "input"
@@ -53,7 +53,7 @@ graph {
     dims: 2
     data_type: 1
     name: "weight"
-    raw_data: "\340e\355<\246\305\315>"
+    raw_data: "\000\000\200?\000\000\200?"
   }
   input {
     name: "input"

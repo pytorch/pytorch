@@ -59,6 +59,7 @@ struct IODescriptor {
   // NOTE: if extend() was ever called then metadata.size() can be
   // different than the number of 'v's in structure.
   std::string structure;
+  std::vector<std::string> strings;
   std::vector<VariableMetadata> metadata;
   bool grad_enabled = false;
 };
@@ -67,7 +68,7 @@ static inline std::ostream& operator<<(
     std::ostream& out,
     const IODescriptor::VariableMetadata& meta) {
   at::Device meta_device = meta.device;
-  auto& t = at::getNonVariableType(
+  auto& t = at::getNonVariableDeprecatedTypeProperties(
       meta_device.is_cpu() ? at::Backend::CPU : at::Backend::CUDA, meta.type);
   out << t << "(requires_grad=" << meta.requires_grad;
   if (meta_device.is_cuda()) {

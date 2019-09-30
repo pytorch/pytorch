@@ -3,6 +3,7 @@
 #include <THC/THCNumerics.cuh>
 #include <THC/THCTensorCopy.hpp>
 #include <type_traits>
+#include <c10/util/BFloat16.h>
 
 // Copy operator for the pointwise apply kernel
 template <typename T>
@@ -23,8 +24,18 @@ struct CopyOp <bool> {
   }
 };
 
+template <>
+struct CopyOp <at::BFloat16> {
+  __device__ __forceinline__ void operator()(at::BFloat16* dst, at::BFloat16* src) {
+      *dst = ScalarConvert<at::BFloat16, at::BFloat16>::to(*src);
+  }
+};
+
 #include <THC/generic/THCTensorCopy.cu>
 #include <THC/THCGenerateAllTypes.h>
 
 #include <THC/generic/THCTensorCopy.cu>
 #include <THC/THCGenerateBoolType.h>
+
+#include <THC/generic/THCTensorCopy.cu>
+#include <THC/THCGenerateBFloat16Type.h>

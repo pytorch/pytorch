@@ -510,7 +510,12 @@ class HypothesisTestCase(test_util.TestCase):
                     np.testing.assert_allclose(indices, ref_indices,
                                                atol=1e-4, rtol=1e-4)
 
-    def _assertInferTensorChecks(self, name, shapes, types, output):
+    def _assertInferTensorChecks(self, name, shapes, types, output,
+                                 ensure_output_is_inferred=False):
+        self.assertTrue(
+            not ensure_output_is_inferred or (name in shapes),
+            'Shape for {0} was not inferred'.format(name))
+
         if name not in shapes:
             # No inferred shape or type available
             return
@@ -565,6 +570,7 @@ class HypothesisTestCase(test_util.TestCase):
         grad_reference=None,
         atol=None,
         outputs_to_check=None,
+        ensure_outputs_are_inferred=False,
     ):
         """
         This runs the reference Python function implementation
@@ -643,7 +649,8 @@ class HypothesisTestCase(test_util.TestCase):
                     )
                 if test_shape_inference:
                     self._assertInferTensorChecks(
-                        output_blob_name, shapes, types, output)
+                        output_blob_name, shapes, types, output,
+                        ensure_output_is_inferred=ensure_outputs_are_inferred)
                 outs.append(output)
             if grad_reference is not None:
                 assert output_to_grad is not None, \

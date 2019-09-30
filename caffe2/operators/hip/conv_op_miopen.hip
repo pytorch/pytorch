@@ -619,9 +619,6 @@ bool MIOPENConvGradientOp::DoRunWithType() {
         bwdWeightWsSize_));
   });
 
-  // Synchronize the work across groups.
-  hipDeviceSynchronize();
-
   ////////////////////////////////////// BIAS ///////////////////////////
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD);

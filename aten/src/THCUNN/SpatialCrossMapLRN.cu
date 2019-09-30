@@ -1,9 +1,10 @@
 #include <THCUNN/THCUNN.h>
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCNumerics.cuh>
 #include <THC/THCTensor.hpp>
 #include <THC/THCStorage.hpp>
 #include <THCUNN/common.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 #include <c10/macros/Macros.h>
 
 template <typename Dtype, typename Acctype>

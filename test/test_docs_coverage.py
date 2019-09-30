@@ -43,7 +43,7 @@ class TestDocCoverage(unittest.TestCase):
             # below are some jit functions
             'wait', 'fork', 'parse_type_comment', 'import_ir_module',
             'import_ir_module_from_buffer', 'merge_type_from_type_comment',
-            'parse_ir',
+            'parse_ir', 'parse_schema',
 
             # below are symbols mistakely binded to torch.*, but should
             # go to torch.nn.functional.* instead
@@ -60,16 +60,16 @@ class TestDocCoverage(unittest.TestCase):
             has_docstring & whitelist, whitelist,
             textwrap.dedent('''
             The whitelist in test_docs_coverage.py contains something
-            that don't have docstring or not in torch.*. If you just
-            removed something from torch.*, please remove it from whiltelist
+            that doesn't have a docstring or isn't in torch.*. If you just
+            removed something from torch.*, please remove it from the whitelist
             in test_docs_coverage.py'''))
         has_docstring -= whitelist
         # assert they are equal
         self.assertEqual(
             has_docstring, in_rst,
             textwrap.dedent('''
-            List of functions documented in torch.rst and in python are different.
-            Do you forget to add new thing to torch.rst, or whitelist things you
+            The lists of functions documented in torch.rst and in python are different.
+            Did you forget to add a new thing to torch.rst, or whitelist things you
             don't want to document?''')
         )
 
@@ -80,8 +80,8 @@ class TestDocCoverage(unittest.TestCase):
         self.assertEqual(
             has_docstring, in_rst,
             textwrap.dedent('''
-            List of tensor methods documented in tensor.rst and in python are
-            different. Do you forget to add new thing to tensor.rst, or whitelist
+            The lists of tensor methods documented in tensors.rst and in python are
+            different. Did you forget to add a new thing to tensors.rst, or whitelist
             things you don't want to document?''')
         )
 

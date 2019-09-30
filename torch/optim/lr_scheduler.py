@@ -1,8 +1,10 @@
 import types
 import math
 from torch._six import inf
-from collections import Counter
-from functools import partial
+from functools import wraps
+import warnings
+import weakref
+from bisect import bisect_right
 
 from .optimizer import Optimizer
 
@@ -24,6 +26,38 @@ class _LRScheduler(object):
                                    "in param_groups[{}] when resuming an optimizer".format(i))
         self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
         self.last_epoch = last_epoch
+
+        # Following https://github.com/pytorch/pytorch/issues/20124
+        # We would like to ensure that `lr_scheduler.step()` is called after
+        # `optimizer.step()`
+        def with_counter(method):
+            if getattr(method, '_with_counter', False):
+                # `optimizer.step()` has already been replaced, return.
+                return method
+
+            # Keep a weak reference to the optimizer instance to prevent
+            # cyclic references.
+            instance_ref = weakref.ref(method.__self__)
+            # Get the unbound method for the same purpose.
+            func = method.__func__
+            cls = instance_ref().__class__
+            del method
+
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                instance = instance_ref()
+                instance._step_count += 1
+                wrapped = func.__get__(instance, cls)
+                return wrapped(*args, **kwargs)
+
+            # Note that the returned function here is no longer a bound method,
+            # so attributes like `__func__` and `__self__` no longer exist.
+            wrapper._with_counter = True
+            return wrapper
+
+        self.optimizer.step = with_counter(self.optimizer.step)
+        self.optimizer._step_count = 0
+        self._step_count = 0
         self.step(last_epoch)
 
     def state_dict(self):
@@ -47,6 +81,25 @@ class _LRScheduler(object):
         raise NotImplementedError
 
     def step(self, epoch=None):
+        # Raise a warning if old pattern is detected
+        # https://github.com/pytorch/pytorch/issues/20124
+        if self._step_count == 1:
+            if not hasattr(self.optimizer.step, "_with_counter"):
+                warnings.warn("Seems like `optimizer.step()` has been overridden after learning rate scheduler "
+                              "initialization. Please, make sure to call `optimizer.step()` before "
+                              "`lr_scheduler.step()`. See more details at "
+                              "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
+
+            # Just check if there were two first lr_scheduler.step() calls before optimizer.step()
+            elif self.optimizer._step_count < 1:
+                warnings.warn("Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
+                              "In PyTorch 1.1.0 and later, you should call them in the opposite order: "
+                              "`optimizer.step()` before `lr_scheduler.step()`.  Failure to do this "
+                              "will result in PyTorch skipping the first value of the learning rate schedule."
+                              "See more details at "
+                              "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
+        self._step_count += 1
+
         if epoch is None:
             epoch = self.last_epoch + 1
         self.last_epoch = epoch
@@ -125,10 +178,9 @@ class LambdaLR(_LRScheduler):
 
 
 class StepLR(_LRScheduler):
-    """Decays the learning rate of each parameter group by gamma every
-    step_size epochs. Notice that such decay can happen simultaneously with
-    other changes to the learning rate from outside this scheduler. When
-    last_epoch=-1, sets initial lr as lr.
+    """Sets the learning rate of each parameter group to the initial lr
+    decayed by gamma every step_size epochs. When last_epoch=-1, sets
+    initial lr as lr.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
@@ -156,17 +208,14 @@ class StepLR(_LRScheduler):
         super(StepLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
-        if (self.last_epoch == 0) or (self.last_epoch % self.step_size != 0):
-            return [group['lr'] for group in self.optimizer.param_groups]
-        return [group['lr'] * self.gamma
-                for group in self.optimizer.param_groups]
+        return [base_lr * self.gamma ** (self.last_epoch // self.step_size)
+                for base_lr in self.base_lrs]
 
 
 class MultiStepLR(_LRScheduler):
-    """Decays the learning rate of each parameter group by gamma once the
-    number of epoch reaches one of the milestones. Notice that such decay can
-    happen simultaneously with other changes to the learning rate from outside
-    this scheduler. When last_epoch=-1, sets initial lr as lr.
+    """Set the learning rate of each parameter group to the initial lr decayed
+    by gamma once the number of epoch reaches one of the milestones. When
+    last_epoch=-1, sets initial lr as lr.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
@@ -188,20 +237,21 @@ class MultiStepLR(_LRScheduler):
     """
 
     def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1):
-        self.milestones = Counter(milestones)
+        if not list(milestones) == sorted(milestones):
+            raise ValueError('Milestones should be a list of'
+                             ' increasing integers. Got {}', milestones)
+        self.milestones = milestones
         self.gamma = gamma
         super(MultiStepLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
-        if self.last_epoch not in self.milestones:
-            return [group['lr'] for group in self.optimizer.param_groups]
-        return [group['lr'] * self.gamma ** self.milestones[self.last_epoch]
-                for group in self.optimizer.param_groups]
+        return [base_lr * self.gamma ** bisect_right(self.milestones, self.last_epoch)
+                for base_lr in self.base_lrs]
 
 
 class ExponentialLR(_LRScheduler):
-    """Decays the learning rate of each parameter group by gamma every epoch.
-    When last_epoch=-1, sets initial lr as lr.
+    """Set the learning rate of each parameter group to the initial lr decayed
+    by gamma every epoch. When last_epoch=-1, sets initial lr as lr.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
@@ -214,10 +264,8 @@ class ExponentialLR(_LRScheduler):
         super(ExponentialLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
-        if self.last_epoch == 0:
-            return self.base_lrs
-        return [group['lr'] * self.gamma
-                for group in self.optimizer.param_groups]
+        return [base_lr * self.gamma ** self.last_epoch
+                for base_lr in self.base_lrs]
 
 
 class CosineAnnealingLR(_LRScheduler):
@@ -226,21 +274,10 @@ class CosineAnnealingLR(_LRScheduler):
     :math:`T_{cur}` is the number of epochs since the last restart in SGDR:
 
     .. math::
-        \eta_{t+1} = \eta_{min} + (\eta_t - \eta_{min})\frac{1 +
-        \cos(\frac{T_{cur}+1}{T_{max}}\pi)}{1 + \cos(\frac{T_{cur}}{T_{max}}\pi)},
-        T_{cur} \neq (2k+1)T_{max};\\
-        \eta_{t+1} = \eta_{t} + (\eta_{max} - \eta_{min})\frac{1 -
-        \cos(\frac{1}{T_{max}}\pi)}{2},
-        T_{cur} = (2k+1)T_{max}.\\
-
-    When last_epoch=-1, sets initial lr as lr. Notice that because the schedule
-    is defined recursively, the learning rate can be simultaneously modified
-    outside this scheduler by other operators. If the learning rate is set
-    solely by this scheduler, the learning rate at each step becomes:
-
-    .. math::
         \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})(1 +
         \cos(\frac{T_{cur}}{T_{max}}\pi))
+
+    When last_epoch=-1, sets initial lr as lr.
 
     It has been proposed in
     `SGDR: Stochastic Gradient Descent with Warm Restarts`_. Note that this only
@@ -262,17 +299,9 @@ class CosineAnnealingLR(_LRScheduler):
         super(CosineAnnealingLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
-        if self.last_epoch == 0:
-            return self.base_lrs
-        elif (self.last_epoch - 1 - self.T_max) % (2 * self.T_max) == 0:
-            return [group['lr'] + (base_lr - self.eta_min) *
-                    (1 - math.cos(math.pi / self.T_max)) / 2
-                    for base_lr, group in
-                    zip(self.base_lrs, self.optimizer.param_groups)]
-        return [(1 + math.cos(math.pi * self.last_epoch / self.T_max)) /
-                (1 + math.cos(math.pi * (self.last_epoch - 1) / self.T_max)) *
-                (group['lr'] - self.eta_min) + self.eta_min
-                for group in self.optimizer.param_groups]
+        return [self.eta_min + (base_lr - self.eta_min) *
+                (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2
+                for base_lr in self.base_lrs]
 
 
 class ReduceLROnPlateau(object):
@@ -355,7 +384,6 @@ class ReduceLROnPlateau(object):
         self.best = None
         self.num_bad_epochs = None
         self.mode_worse = None  # the worse value for the chosen mode
-        self.is_better = None
         self.eps = eps
         self.last_epoch = -1
         self._init_is_better(mode=mode, threshold=threshold,
@@ -404,20 +432,20 @@ class ReduceLROnPlateau(object):
     def in_cooldown(self):
         return self.cooldown_counter > 0
 
-    def _cmp(self, mode, threshold_mode, threshold, a, best):
-        if mode == 'min' and threshold_mode == 'rel':
-            rel_epsilon = 1. - threshold
+    def is_better(self, a, best):
+        if self.mode == 'min' and self.threshold_mode == 'rel':
+            rel_epsilon = 1. - self.threshold
             return a < best * rel_epsilon
 
-        elif mode == 'min' and threshold_mode == 'abs':
-            return a < best - threshold
+        elif self.mode == 'min' and self.threshold_mode == 'abs':
+            return a < best - self.threshold
 
-        elif mode == 'max' and threshold_mode == 'rel':
-            rel_epsilon = threshold + 1.
+        elif self.mode == 'max' and self.threshold_mode == 'rel':
+            rel_epsilon = self.threshold + 1.
             return a > best * rel_epsilon
 
         else:  # mode == 'max' and epsilon_mode == 'abs':
-            return a > best + threshold
+            return a > best + self.threshold
 
     def _init_is_better(self, mode, threshold, threshold_mode):
         if mode not in {'min', 'max'}:
@@ -430,10 +458,12 @@ class ReduceLROnPlateau(object):
         else:  # mode == 'max':
             self.mode_worse = -inf
 
-        self.is_better = partial(self._cmp, mode, threshold_mode, threshold)
+        self.mode = mode
+        self.threshold = threshold
+        self.threshold_mode = threshold_mode
 
     def state_dict(self):
-        return {key: value for key, value in self.__dict__.items() if key not in {'optimizer', 'is_better'}}
+        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
 
     def load_state_dict(self, state_dict):
         self.__dict__.update(state_dict)
@@ -498,8 +528,10 @@ class CyclicLR(_LRScheduler):
         cycle_momentum (bool): If ``True``, momentum is cycled inversely
             to learning rate between 'base_momentum' and 'max_momentum'.
             Default: True
-        base_momentum (float or list): Initial momentum which is the
-            lower boundary in the cycle for each parameter group.
+        base_momentum (float or list): Lower momentum boundaries in the cycle
+            for each parameter group. Note that momentum is cycled inversely
+            to learning rate; at the peak of a cycle, momentum is
+            'base_momentum' and learning rate is 'max_lr'.
             Default: 0.8
         max_momentum (float or list): Upper momentum boundaries in the cycle
             for each parameter group. Functionally,
@@ -507,7 +539,10 @@ class CyclicLR(_LRScheduler):
             The momentum at any cycle is the difference of max_momentum
             and some scaling of the amplitude; therefore
             base_momentum may not actually be reached depending on
-            scaling function. Default: 0.9
+            scaling function. Note that momentum is cycled inversely
+            to learning rate; at the start of a cycle, momentum is 'max_momentum'
+            and learning rate is 'base_lr'
+            Default: 0.9
         last_epoch (int): The index of the last batch. This parameter is used when
             resuming a training job. Since `step()` should be invoked after each
             batch instead of after each epoch, this number represents the total
@@ -517,7 +552,7 @@ class CyclicLR(_LRScheduler):
 
     Example:
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        >>> scheduler = torch.optim.CyclicLR(optimizer)
+        >>> scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.01, max_lr=0.1)
         >>> data_loader = torch.utils.data.DataLoader(...)
         >>> for epoch in range(10):
         >>>     for batch in data_loader:
@@ -591,10 +626,11 @@ class CyclicLR(_LRScheduler):
             if last_epoch == -1:
                 for momentum, group in zip(base_momentums, optimizer.param_groups):
                     group['momentum'] = momentum
-        self.base_momentums = list(map(lambda group: group['momentum'], optimizer.param_groups))
-        self.max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
+            self.base_momentums = list(map(lambda group: group['momentum'], optimizer.param_groups))
+            self.max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
 
         super(CyclicLR, self).__init__(optimizer, last_epoch)
+        self.base_lrs = base_lrs
 
     def _format_param(self, name, optimizer, param):
         """Return correctly formatted lr/momentum for each param group."""
@@ -690,7 +726,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self.T_mult = T_mult
         self.eta_min = eta_min
         super(CosineAnnealingWarmRestarts, self).__init__(optimizer, last_epoch)
-        self.T_cur = last_epoch
+        self.T_cur = self.last_epoch
 
     def get_lr(self):
         return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
@@ -743,3 +779,223 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self.last_epoch = math.floor(epoch)
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
             param_group['lr'] = lr
+
+class OneCycleLR(_LRScheduler):
+    r"""Sets the learning rate of each parameter group according to the
+    1cycle learning rate policy. The 1cycle policy anneals the learning
+    rate from an initial learning rate to some maximum learning rate and then
+    from that maximum learning rate to some minimum learning rate much lower
+    than the initial learning rate.
+    This policy was initially described in the paper `Super-Convergence:
+    Very Fast Training of Neural Networks Using Large Learning Rates`_.
+
+    The 1cycle learning rate policy changes the learning rate after every batch.
+    `step` should be called after a batch has been used for training.
+
+    This scheduler is not chainable.
+
+    This class has two built-in annealing strategies:
+    "cos":
+        Cosine annealing
+    "linear":
+        Linear annealing
+
+    Note also that the total number of steps in the cycle can be determined in one
+    of two ways (listed in order of precedence):
+    1) A value for total_steps is explicitly provided.
+    2) A number of epochs (epochs) and a number of steps per epoch
+       (steps_per_epoch) are provided.
+       In this case, the number of total steps is inferred by
+       total_steps = epochs * steps_per_epoch
+    You must either provide a value for total_steps or provide a value for both
+    epochs and steps_per_epoch.
+
+    Args:
+        optimizer (Optimizer): Wrapped optimizer.
+        max_lr (float or list): Upper learning rate boundaries in the cycle
+            for each parameter group.
+        total_steps (int): The total number of steps in the cycle. Note that
+            if a value is provided here, then it must be inferred by providing
+            a value for epochs and steps_per_epoch.
+            Default: None
+        epochs (int): The number of epochs to train for. This is used along
+            with steps_per_epoch in order to infer the total number of steps in the cycle
+            if a value for total_steps is not provided.
+            Default: None
+        steps_per_epoch (int): The number of steps per epoch to train for. This is
+            used along with epochs in order to infer the total number of steps in the
+            cycle if a value for total_steps is not provided.
+            Default: None
+        pct_start (float): The percentage of the cycle (in number of steps) spent
+            increasing the learning rate.
+            Default: 0.3
+        anneal_strategy (str): {'cos', 'linear'}
+            Specifies the annealing strategy.
+            Default: 'cos'
+        cycle_momentum (bool): If ``True``, momentum is cycled inversely
+            to learning rate between 'base_momentum' and 'max_momentum'.
+            Default: True
+        base_momentum (float or list): Lower momentum boundaries in the cycle
+            for each parameter group. Note that momentum is cycled inversely
+            to learning rate; at the peak of a cycle, momentum is
+            'base_momentum' and learning rate is 'max_lr'.
+            Default: 0.85
+        max_momentum (float or list): Upper momentum boundaries in the cycle
+            for each parameter group. Functionally,
+            it defines the cycle amplitude (max_momentum - base_momentum).
+            Note that momentum is cycled inversely
+            to learning rate; at the start of a cycle, momentum is 'max_momentum'
+            and learning rate is 'base_lr'
+            Default: 0.95
+        div_factor (float): Determines the initial learning rate via
+            initial_lr = max_lr/div_factor
+            Default: 25
+        final_div_factor (float): Determines the minimum learning rate via
+            min_lr = initial_lr/final_div_factor
+            Default: 1e4
+        last_epoch (int): The index of the last batch. This parameter is used when
+            resuming a training job. Since `step()` should be invoked after each
+            batch instead of after each epoch, this number represents the total
+            number of *batches* computed, not the total number of epochs computed.
+            When last_epoch=-1, the schedule is started from the beginning.
+            Default: -1
+
+    Example:
+        >>> data_loader = torch.utils.data.DataLoader(...)
+        >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+        >>> scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.01, steps_per_epoch=len(data_loader), epochs=10)
+        >>> for epoch in range(10):
+        >>>     for batch in data_loader:
+        >>>         train_batch(...)
+        >>>         scheduler.step()
+
+
+    .. _Super-Convergence\: Very Fast Training of Neural Networks Using Large Learning Rates:
+        https://arxiv.org/abs/1708.07120
+    """
+    def __init__(self,
+                 optimizer,
+                 max_lr,
+                 total_steps=None,
+                 epochs=None,
+                 steps_per_epoch=None,
+                 pct_start=0.3,
+                 anneal_strategy='cos',
+                 cycle_momentum=True,
+                 base_momentum=0.85,
+                 max_momentum=0.95,
+                 div_factor=25.,
+                 final_div_factor=1e4,
+                 last_epoch=-1):
+
+        # Validate optimizer
+        if not isinstance(optimizer, Optimizer):
+            raise TypeError('{} is not an Optimizer'.format(
+                type(optimizer).__name__))
+        self.optimizer = optimizer
+
+        # Validate total_steps
+        if total_steps is None and epochs is None and steps_per_epoch is None:
+            raise ValueError("You must define either total_steps OR (epochs AND steps_per_epoch)")
+        elif total_steps is not None:
+            if total_steps <= 0 or not isinstance(total_steps, int):
+                raise ValueError("Expected non-negative integer total_steps, but got {}".format(total_steps))
+            self.total_steps = total_steps
+        else:
+            if epochs <= 0 or not isinstance(epochs, int):
+                raise ValueError("Expected non-negative integer epochs, but got {}".format(epochs))
+            if steps_per_epoch <= 0 or not isinstance(steps_per_epoch, int):
+                raise ValueError("Expected non-negative integer steps_per_epoch, but got {}".format(steps_per_epoch))
+            self.total_steps = epochs * steps_per_epoch
+        self.step_size_up = float(pct_start * self.total_steps) - 1
+        self.step_size_down = float(self.total_steps - self.step_size_up) - 1
+
+        # Validate pct_start
+        if pct_start < 0 or pct_start > 1 or not isinstance(pct_start, float):
+            raise ValueError("Expected float between 0 and 1 pct_start, but got {}".format(pct_start))
+
+        # Validate anneal_strategy
+        if anneal_strategy not in ['cos', 'linear']:
+            raise ValueError("anneal_strategy must by one of 'cos' or 'linear', instead got {}".format(anneal_strategy))
+        elif anneal_strategy == 'cos':
+            self.anneal_func = self._annealing_cos
+        elif anneal_strategy == 'linear':
+            self.anneal_func = self._annealing_linear
+
+        # Initialize learning rate variables
+        max_lrs = self._format_param('max_lr', self.optimizer, max_lr)
+        if last_epoch == -1:
+            for idx, group in enumerate(self.optimizer.param_groups):
+                group['lr'] = max_lrs[idx] / div_factor
+                group['max_lr'] = max_lrs[idx]
+                group['min_lr'] = group['lr'] / final_div_factor
+
+        # Initialize momentum variables
+        self.cycle_momentum = cycle_momentum
+        if self.cycle_momentum:
+            if 'momentum' not in self.optimizer.defaults and 'betas' not in self.optimizer.defaults:
+                raise ValueError('optimizer must support momentum with `cycle_momentum` option enabled')
+            self.use_beta1 = 'betas' in self.optimizer.defaults
+            max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
+            base_momentums = self._format_param('base_momentum', optimizer, base_momentum)
+            if last_epoch == -1:
+                for m_momentum, b_momentum, group in zip(max_momentums, base_momentums, optimizer.param_groups):
+                    if self.use_beta1:
+                        _, beta2 = group['betas']
+                        group['betas'] = (m_momentum, beta2)
+                    else:
+                        group['momentum'] = m_momentum
+                    group['max_momentum'] = m_momentum
+                    group['base_momentum'] = b_momentum
+
+        super(OneCycleLR, self).__init__(optimizer, last_epoch)
+
+    def _format_param(self, name, optimizer, param):
+        """Return correctly formatted lr/momentum for each param group."""
+        if isinstance(param, (list, tuple)):
+            if len(param) != len(optimizer.param_groups):
+                raise ValueError("expected {} values for {}, got {}".format(
+                    len(optimizer.param_groups), name, len(param)))
+            return param
+        else:
+            return [param] * len(optimizer.param_groups)
+
+    def _annealing_cos(self, start, end, pct):
+        "Cosine anneal from `start` to `end` as pct goes from 0.0 to 1.0."
+        cos_out = math.cos(math.pi * pct) + 1
+        return end + (start - end) / 2.0 * cos_out
+
+    def _annealing_linear(self, start, end, pct):
+        "Linearly anneal from `start` to `end` as pct goes from 0.0 to 1.0."
+        return (end - start) * pct + start
+
+    def get_lr(self):
+        lrs = []
+        step_num = self.last_epoch
+
+        if step_num > self.total_steps:
+            raise ValueError("Tried to step {} times. The specified number of total steps is {}"
+                             .format(step_num + 1, self.total_steps))
+
+        for group in self.optimizer.param_groups:
+            if step_num <= self.step_size_up:
+                computed_lr = self.anneal_func(group['initial_lr'], group['max_lr'], step_num / self.step_size_up)
+                if self.cycle_momentum:
+                    computed_momentum = self.anneal_func(group['max_momentum'], group['base_momentum'],
+                                                         step_num / self.step_size_up)
+            else:
+                down_step_num = step_num - self.step_size_up
+                computed_lr = self.anneal_func(group['max_lr'], group['min_lr'], down_step_num / self.step_size_down)
+                if self.cycle_momentum:
+                    computed_momentum = self.anneal_func(group['base_momentum'], group['max_momentum'],
+                                                         down_step_num / self.step_size_down)
+
+            lrs.append(computed_lr)
+            if self.cycle_momentum:
+                if self.use_beta1:
+                    _, beta2 = group['betas']
+                    group['betas'] = (computed_momentum, beta2)
+                else:
+                    group['momentum'] = computed_momentum
+
+        return lrs

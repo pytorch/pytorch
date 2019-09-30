@@ -11,44 +11,6 @@ namespace c10 {
 class CAFFE2_API OperatorHandle;
 
 /**
- * This class represents an operator kernel, i.e. an operator *after* it was
- * dispatched to a certain device. You can use it to call the kernel.
- *
- * You can keep this OpKernel instance around to avoid future dispatch
- * when you know it'd dispatch to the same kernel anyhow.
- *
- * Also, keeping around the OpKernel instance will keep around a local cache
- * that is used by some kernels to get better performance when they're called
- * multiple times (mostly Caffe2 kernels do that).
- *
- * OpKernel is only threadsafe if the kernel is threadsafe. There are no mutexes
- * protecting the kernel cache, so if the kernel uses the cache and doesn't have
- * mutexes for it, it will likely not be threadsafe.
- */
-class CAFFE2_API OpKernel final {
-public:
-  OpKernel(OpKernel&&) noexcept = default;
-  OpKernel& operator=(OpKernel&&) noexcept = default;
-  OpKernel(const OpKernel&) = delete;
-  OpKernel& operator=(const OpKernel&) = delete;
-
-  /**
-   * Call the operator kernel with the given arguments.
-   */
-  void call(Stack* stack) const {
-    return (*kernel_)(stack, cache_.get());
-  }
-
-private:
-  explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator)
-  : kernel_(kernel), cache_(cache_creator()) {}
-  friend class Dispatcher;
-
-  KernelFunction* kernel_;
-  std::unique_ptr<c10::KernelCache> cache_;
-};
-
-/**
  * Implement this interface and register your instance with the dispatcher
  * to get notified when operators are registered or deregistered with
  * the dispatcher.
@@ -72,8 +34,8 @@ class SchemaRegistrationHandleRAII;
 class CAFFE2_API Dispatcher final {
 private:
   struct OperatorDef final {
-    explicit OperatorDef(FunctionSchema&& schema)
-    : op(std::move(schema)), refcount(0) {}
+    explicit OperatorDef(FunctionSchema&& schema, OperatorOptions&& options)
+    : op(std::move(schema), std::move(options)), refcount(0) {}
 
     impl::OperatorEntry op;
     size_t refcount;
@@ -100,14 +62,14 @@ public:
    *         object that manages the lifetime of the registration. Once that
    *         object is destructed, the kernel will be deregistered.
    */
-  SchemaRegistrationHandleRAII registerSchema(FunctionSchema schema);
+  SchemaRegistrationHandleRAII registerSchema(FunctionSchema schema, OperatorOptions options);
 
   /**
    * Looks for an operator schema with the given name and overload name
    * and returns it if it is registered.
    * Returns nullopt otherwise.
    */
-  c10::optional<OperatorHandle> findSchema(const char* operator_name, const char* overload_name);
+  c10::optional<OperatorHandle> findSchema(const OperatorName& operator_name);
 
   /**
    * Register a kernel to the dispatch table for an operator.
@@ -116,7 +78,7 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func);
+  RegistrationHandleRAII registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction kernel);
 
   /**
    * Register a fallback kernel for an operator.
@@ -126,12 +88,15 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func);
+  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction kernel);
 
-  /**
-   * Perform a dynamic dispatch and get the kernel for an operator.
-   */
-  OpKernel lookup(const OperatorHandle& op, const Stack* stack) const;
+  template<class Return, class... Args>
+  Return callUnboxed(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const;
+
+  template<class Return, class... Args>
+  Return callUnboxedOnly(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const;
+
+  void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
   /**
    * Add a listener that gets called whenever a new op is registered or an existing
@@ -144,11 +109,12 @@ public:
 private:
   Dispatcher();
 
-  OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema);
+  OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options);
 
-  void deregisterSchema_(const OperatorHandle& op);
+  void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
 
   std::list<OperatorDef> operators_;
+  LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
   std::mutex mutex_;
 };
@@ -167,6 +133,10 @@ public:
 
   const FunctionSchema& schema() const {
     return operatorIterator_->op.schema();
+  }
+
+  const OperatorOptions& options() const {
+    return operatorIterator_->op.options();
   }
 
 private:
@@ -192,10 +162,23 @@ private:
   RegistrationHandleRAII registrationHandle_;
 };
 
-inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
+template<class Return, class... Args>
+inline Return Dispatcher::callUnboxed(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(stack);
-  return OpKernel(kernel.kernel_func, kernel.cache_creator_func);
+  // TODO Remove dispatchKey argument and instead infer dispatchKey from args...
+  return op.operatorIterator_->op.callUnboxed<Return, Args...>(std::move(dispatchKey), std::forward<Args>(args)...);
+}
+
+template<class Return, class... Args>
+inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  // TODO Remove dispatchKey argument and instead infer dispatchKey from args...
+  return op.operatorIterator_->op.callUnboxedOnly<Return, Args...>(std::move(dispatchKey), std::forward<Args>(args)...);
+}
+
+inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  return op.operatorIterator_->op.callBoxed(stack);
 }
 
 } // namespace c10

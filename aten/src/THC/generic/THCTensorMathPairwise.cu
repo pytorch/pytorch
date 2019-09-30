@@ -13,6 +13,9 @@ int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_)
   // 1 if the two tensors are equal at a position, otherwise 0. If the minimum value
   // in this buffer is 1, the two tensors are equal, otherwise they are not
 
+  // Both tensors are empty
+  if(THTensor_(nElement)(self_) == 0) return true;
+
   THCudaByteTensor *buf = THCudaByteTensor_newWithSize(state, self_->sizes(), {});
 
   if (!THC_pointwiseApply3<uint8_t, scalar_t, scalar_t>(state, buf, self_, src_, TensorEQOp<scalar_t, unsigned char>())) {
@@ -90,52 +93,6 @@ void THCTensor_(bitxor)(THCState* state, THCTensor *self_, THCTensor *src_, scal
 }
 
 #if !defined(THC_REAL_IS_BOOL)
-
-void THCTensor_(add)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
-  if (self_ == src_) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorAddConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src_);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorAddConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
-void THCTensor_(sub)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
-  if (self_ == src_) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorSubConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src_);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorSubConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
-void THCTensor_(add_scaled)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value, scalar_t alpha)
-{
-  THCTensor_(add)(state, self_, src_, value * alpha);
-}
-
-void THCTensor_(sub_scaled)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value, scalar_t alpha)
-{
-  THCTensor_(sub)(state, self_, src_, value * alpha);
-}
 
 void THCTensor_(mul)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {

@@ -21,10 +21,11 @@ class DNNLowPOpSpatialBNTest(hu.HypothesisTestCase):
         size=st.integers(10, 16),
         input_channels=st.integers(2, 16),
         output_channels=st.integers(2, 16),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 3),
         order=st.sampled_from(["NCHW", "NHWC"]),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
+        fuse_relu=st.booleans(),
         **hu.gcs_cpu_only
     )
     def test_dnnlowp_spatial_bn_int(
@@ -36,6 +37,7 @@ class DNNLowPOpSpatialBNTest(hu.HypothesisTestCase):
         order,
         in_quantized,
         out_quantized,
+        fuse_relu,
         gc,
         dc,
     ):
@@ -44,8 +46,9 @@ class DNNLowPOpSpatialBNTest(hu.HypothesisTestCase):
         X = np.round(np.random.rand(batch_size, size, size, input_channels)).astype(
             np.float32
         )
-        X[0, 0, 0, 0] = X_min
-        X[0, 0, 0, 1] = X_max
+        if batch_size != 0:
+            X[0, 0, 0, 0] = X_min
+            X[0, 0, 0, 1] = X_max
 
         epsilon = np.abs(np.random.rand())
         scale = np.random.rand(input_channels).astype(np.float32)
@@ -61,9 +64,16 @@ class DNNLowPOpSpatialBNTest(hu.HypothesisTestCase):
 
         op_engine_list = [
             ("SpatialBN", ""),
-            ("SpatialBN", "DNNLOWP"),
-            ("Int8SpatialBN", "DNNLOWP"),
         ]
+        if fuse_relu:
+            op_engine_list += [
+                ("Int8SpatialBNRelu", "DNNLOWP"),
+            ]
+        else:
+            op_engine_list += [
+                ("SpatialBN", "DNNLOWP"),
+                ("Int8SpatialBN", "DNNLOWP"),
+            ]
 
         for op_type, engine in op_engine_list:
             net = core.Net("test_net")
@@ -90,6 +100,8 @@ class DNNLowPOpSpatialBNTest(hu.HypothesisTestCase):
             net.Proto().op.extend([bn])
             if "DNNLOWP" in engine:
                 dnnlowp_utils.add_quantization_param_args(bn, outputs[0][0])
+            if fuse_relu and "DNNLOWP" not in engine:
+                net.Relu(["Y"], "Y")
 
             if do_dequantize:
                 dequantize = core.CreateOperator(

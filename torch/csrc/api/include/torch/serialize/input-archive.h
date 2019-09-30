@@ -4,6 +4,7 @@
 #include <c10/core/Device.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/types.h>
+#include <torch/csrc/jit/script/module.h>
 
 #include <iosfwd>
 #include <memory>
@@ -43,6 +44,9 @@ class TORCH_API InputArchive final {
   InputArchive& operator=(InputArchive&) = delete;
 
   ~InputArchive() = default;
+
+  /// Reads an `IValue` associated with a given `key`.
+  void read(const std::string& key, c10::IValue& ivalue);
 
   /// Reads a `tensor` associated with a given `key`. If there is no `tensor`
   /// associated with the `key`, this returns false, otherwise it returns true.
@@ -86,7 +90,7 @@ class TORCH_API InputArchive final {
   }
 
  private:
-  std::shared_ptr<jit::script::Module> module_;
+  jit::script::Module module_;
 };
 } // namespace serialize
 } // namespace torch

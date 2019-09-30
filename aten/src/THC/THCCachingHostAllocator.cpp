@@ -1,4 +1,6 @@
 #include <THC/THCCachingHostAllocator.h>
+#include <ATen/DeviceGuard.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 
 
 #include <cuda_runtime_api.h>
@@ -78,6 +80,17 @@ struct HostAllocator
       *ptr = block.ptr;
       available.erase(it);
       return cudaSuccess;
+    }
+
+    // Pinned memory pointers allocated by any device can be directly used by any
+    // other device, regardless of the current device at the time of allocation,
+    // since we assume unified addressing.
+    // So we grab any existing primary context, if available.
+    // See pytorch/pytorch#21081.
+    at::OptionalDeviceGuard device_guard;
+    auto primary_ctx_device_index = at::detail::getCUDAHooks().getDevceIndexWithPrimaryContext();
+    if (primary_ctx_device_index.has_value()) {
+      device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
     }
 
     // note that cudaHostAlloc may not touch pointer if size is 0

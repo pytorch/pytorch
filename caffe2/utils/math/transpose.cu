@@ -37,7 +37,7 @@ __global__ void BatchTranspose2DCUDAKernel(
   int x = c * kTileDim + threadIdx.x;
   int y = r * kTileDim + threadIdx.y;
   if (x < W) {
-    for (int i = 0; i < kTileDim && y + i < H; i += kBlockRows) {
+    for (int i = 0; threadIdx.y + i < kTileDim && y + i < H; i += kBlockRows) {
 #if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
       tile[threadIdx.y + i][threadIdx.x] = __ldg(X + offset + (y + i) * W + x);
 #else
@@ -49,7 +49,7 @@ __global__ void BatchTranspose2DCUDAKernel(
   x = r * kTileDim + threadIdx.x;
   y = c * kTileDim + threadIdx.y;
   if (x < H) {
-    for (int i = 0; i < kTileDim && y + i < W; i += kBlockRows) {
+    for (int i = 0; threadIdx.y + i < kTileDim && y + i < W; i += kBlockRows) {
       Y[offset + (y + i) * H + x] = tile[threadIdx.x][threadIdx.y + i];
     }
   }

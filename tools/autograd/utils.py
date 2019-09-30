@@ -37,7 +37,7 @@ IDENT_REGEX = r'(^|\W){}($|\W)'
 # TODO: Use a real parser here; this will get bamboozled
 # by signatures that contain things like std::array<bool, 2> (note the space)
 def split_name_params(prototype):
-    name, params = re.match(r'(\w+)\((.*)\)', prototype).groups()
+    name, overload_name, params = re.match(r'(\w+)(\.\w+)?\((.*)\)', prototype).groups()
     return name, params.split(', ')
 
 

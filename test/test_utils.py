@@ -6,7 +6,6 @@ import shutil
 import random
 import tempfile
 import unittest
-import contextlib
 import torch
 import torch.nn as nn
 import torch.utils.data
@@ -15,20 +14,11 @@ from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.hub as hub
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common_utils import skipIfRocm, load_tests
+from common_utils import skipIfRocm, load_tests, IS_SANDCASTLE
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
-
-try:
-    import torchvision.models as models
-    HAS_TORCHVISION = True
-except ImportError:
-    HAS_TORCHVISION = False
-
-
-skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -196,6 +186,34 @@ class TestCheckpoint(TestCase):
             2,
             torch.randn(1, 100, requires_grad=True),
             torch.randn(1, 60, requires_grad=True)
+        )
+
+    def test_checkpoint_sequential_deprecated_multiple_args(self):
+        class Two(nn.Module):
+            def forward(self, a, b):
+                return a, b
+
+        model = nn.Sequential(Two())
+        a = torch.randn(1, 100, requires_grad=True)
+        b = torch.randn(1, 100, requires_grad=True)
+
+        self.assertWarnsRegex(
+            lambda: checkpoint_sequential(model, 1, a, b),
+            'deprecated',
+            'checkpoint_sequential with multiple args should be deprecated',
+        )
+
+    def test_checkpoint_sequential_deprecated_no_args(self):
+        class Noop(nn.Module):
+            def forward(self):
+                pass
+
+        model = nn.Sequential(Noop())
+
+        self.assertWarnsRegex(
+            lambda: checkpoint_sequential(model, 1),
+            'deprecated',
+            'checkpoint_sequential with no args should be deprecated',
         )
 
     def test_checkpoint_rng_cpu(self):
@@ -493,50 +511,64 @@ class TestONNXUtils(TestCase):
         try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
-# Errors will still be raised and reported
-@contextlib.contextmanager
-def suppress_stderr():
-    original = sys.stderr
-    sys.stderr = open(os.devnull, 'w')
-    yield
-    sys.stderr = original
+def sum_of_state_dict(state_dict):
+    s = 0
+    for _, v in state_dict.items():
+        s += v.sum()
+    return s
 
+SUM_OF_HUB_EXAMPLE = 431080
+TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/releases/download/0.1/mnist_init_ones'
 
+@unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
 class TestHub(TestCase):
-    @classmethod
-    @skipIfNoTorchVision
-    def setUpClass(cls):
-        # The current torchvision code does not provide a way to disable tqdm
-        # progress bar, leading this download printing a huge number of lines
-        # in CI.
-        # TODO: remove this context manager when torchvision provides a way.
-        #       See pytorch/torchvision#862
-        with suppress_stderr():
-            cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
-
-    @skipIfNoTorchVision
     def test_load_from_github(self):
         hub_model = hub.load(
-            'pytorch/vision',
-            'resnet18',
-            pretrained=True)
-        self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
+            'ailzhang/torchhub_example',
+            'mnist',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
 
-    @skipIfNoTorchVision
     def test_set_dir(self):
         temp_dir = tempfile.gettempdir()
         hub.set_dir(temp_dir)
         hub_model = hub.load(
-            'pytorch/vision',
-            'resnet18',
-            pretrained=True)
-        self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
-        assert os.path.exists(temp_dir + '/pytorch_vision_master')
-        shutil.rmtree(temp_dir + '/pytorch_vision_master')
+            'ailzhang/torchhub_example',
+            'mnist',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+        assert os.path.exists(temp_dir + '/ailzhang_torchhub_example_master')
+        shutil.rmtree(temp_dir + '/ailzhang_torchhub_example_master')
 
     def test_list_entrypoints(self):
-        entry_lists = hub.list('pytorch/vision', force_reload=True)
-        self.assertObjectIn('resnet18', entry_lists)
+        entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
+        self.assertObjectIn('mnist', entry_lists)
+
+    def test_download_url_to_file(self):
+        temp_file = os.path.join(tempfile.gettempdir(), 'temp')
+        hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, temp_file, progress=False)
+        loaded_state = torch.load(temp_file)
+        self.assertEqual(sum_of_state_dict(loaded_state),
+                         SUM_OF_HUB_EXAMPLE)
+
+    def test_load_state_dict_from_url(self):
+        loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL)
+        self.assertEqual(sum_of_state_dict(loaded_state),
+                         SUM_OF_HUB_EXAMPLE)
+
+    def test_load_zip_checkpoint(self):
+        hub_model = hub.load(
+            'ailzhang/torchhub_example',
+            'mnist_zip',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
 
 if __name__ == '__main__':
     run_tests()

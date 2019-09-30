@@ -21,16 +21,22 @@ SKIP_PYTHON_BINDINGS = [
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
-    '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
+    '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*', '_sparse_dense_add_out',
     'index', 'unique_dim_consecutive',
     '_indexCopy_', 'max_values', 'min_values',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
-    'arange.*', 'range.*', '_solve.*', '_getri.*', '_inverse.*',
-    '_cholesky.*', '_triangular_solve.*',
+    'arange.*', 'range.*', '_solve.*', '_inverse.*',
+    '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*', '_svd.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
     'copy_sparse_to_sparse_', 'copy_',
+    'numpy_T',  # this needs to be an attribute in Python, not a function
+    'nonzero(_(out|numpy))?',
+    'set_quantizer_',  # return types not supported yet
+    'set_data',
+    '.*_overrideable',  # overrideable functions for backend extension
+    'data', 'is_leaf', 'output_nr', '_version'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -112,7 +118,7 @@ inline ${simple_return_type} ${dispatch_name}(${formal_args}) {
 """)
 
 PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
-{"${name}", (PyCFunction)${pycname}, ${flags}, NULL},""")
+{"${name}", (PyCFunction)${pycfunc_voidcast}${pycname}, ${flags}, NULL},""")
 
 PY_RETURN_NAMEDTUPLE_DEF = CodeTemplate("""\
 static PyStructSequence_Field fields${namedtuple_type_index}[] = {
@@ -149,6 +155,9 @@ SUPPORTED_RETURN_TYPES = {
     'std::tuple<Tensor,Tensor,double,int64_t>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
+    'QScheme', 'double',
+    'IntArrayRef',
+    'ScalarType'
 }
 
 TENSOR_OPTIONS = CodeTemplate("""\
@@ -160,7 +169,6 @@ const auto options = TensorOptions()
     .pinned_memory(${pin_memory});
 """)
 
-
 def should_generate_python_binding(declaration):
     name = declaration['name']
     for pattern in SKIP_PYTHON_BINDINGS:
@@ -171,15 +179,6 @@ def should_generate_python_binding(declaration):
     signature = '{}({})'.format(name, ', '.join(simple_types))
     for pattern in SKIP_PYTHON_BINDINGS_SIGNATURES:
         if pattern == signature:
-            return False
-
-    # TODO: fix handling of SparseTensor. We don't want to generate Python
-    # bindings to SparseTensor overloads, such as add(Tensor, SparseTensorRef),
-    # since the Tensor-based signature already dynamically dispatches correctly.
-    # However, sparse_mask only has a SparseTensor signature so we need to bind
-    # that function.
-    for arg in declaration['arguments']:
-        if arg['type'] == 'SparseTensorRef' and declaration['name'] != 'sparse_mask':
             return False
 
     return True
@@ -290,14 +289,15 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
     unpack_methods = {
         'const Tensor &': 'tensor',
-        'SparseTensorRef': 'tensor',
         'Tensor &': 'tensor',
         'Generator *': 'generator',
         'Storage &': 'storage',
         'const Type &': 'scalartype',
         'const THPLayout &': 'layout',
         'const Device &': 'device',
+        'c10::optional<DimnameList>': 'toDimnameListOptional',
         'c10::optional<ScalarType>': 'scalartypeOptional',
+        'c10::optional<MemoryFormat>': 'memoryformatOptional',
         'c10::optional<Scalar>': 'scalarOptional',
         'c10::optional<int64_t>': 'toInt64Optional',
         'c10::optional<bool>': 'toBoolOptional',
@@ -353,6 +353,19 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         if type_args and len(outputs) > 1:
             raise RuntimeError("Not supported: type dispatched parameter with multiple outputs")
 
+        def unpack_variable(name, unpack_expr, typename):
+            # optional<ArrayRef<T>> are special. The PythonArgParser returns an
+            # optional<vector<T>>, which cannot be implictly converted to
+            # optional<ArrayRef<T>>. One needs to unwrap the optional and rewrap.
+            if typename == 'c10::optional<DimnameList>':
+                result = """\
+                    auto __{name} = {expr};
+                    c10::optional<{typ}> {name} = __{name} ? c10::make_optional({typ}(__{name}.value())) : c10::nullopt;
+                """.format(name=name, expr=unpack_expr, typ='DimnameList')
+                return [line.strip() for line in result.split('\n')]
+
+            return ['auto {} = {};'.format(name, unpack_expr)]
+
         def parse_arg(arg, arg_index, unpack_args=False):
             name = arg['name']
             typename = arg['type']
@@ -360,6 +373,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 typename = 'IntArrayRef'
             if typename.startswith('LongTensor'):
                 typename = 'Tensor'
+            if typename == 'c10::optional<DimnameList>':
+                unpack_args = True
 
             if arg.get('python_default_init'):
                 assert typename in unpack_with_default_methods, \
@@ -372,11 +387,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 expr = 'r.{}({})'.format(unpack, arg_index)
 
             if unpack_args:
-                body.append('auto {} = {};'.format(name, expr))
+                body.extend(unpack_variable(name, expr, typename))
                 expr = name
-
-            if typename == 'SparseTensorRef':
-                expr = 'SparseTensorRef({})'.format(expr)
 
             dispatch_type = typename
             if dispatch_type == 'Tensor':
@@ -484,7 +496,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['actuals'] = actuals
 
         if has_tensor_options:
-            env['initialize_cuda'] = 'maybe_initialize_cuda(options);'
+            env['initialize_cuda'] = 'torch::utils::maybe_initialize_cuda(options);'
         else:
             env['initialize_cuda'] = ''
 
@@ -545,7 +557,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['call_dispatch_out'] = emit_single_dispatch(dictionary['out'], out_idx, base_env)
             env['call_dispatch'] = emit_single_dispatch(dictionary['base'], out_idx, base_env)
 
-            has_dtype_bind = 'dtype' in [d['name'] for d in dictionary['out'].get('python_binding_arguments', [])]
+            has_dtype_bind = 'dtype' in (d['name'] for d in dictionary['out'].get('python_binding_arguments', []))
             if has_dtype_bind:
                 body = PY_VARIABLE_OUT_CHECK_TYPE.substitute(env, out_idx=out_idx, type_idx=out_idx + 1,
                                                              layout_idx=out_idx + 2, device_idx=out_idx + 3).split('\n')
@@ -582,14 +594,18 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 # produce a compile-time error that is obvious
                 has_tensor_return = True
 
-        is_like_function = name.endswith('_like')
+        category_override = declaration['category_override']
+        is_like_function = name.endswith('_like') or category_override == 'like'
         is_like_function_with_options = is_like_function and has_options_arg
-        is_factory_function = has_tensor_return and not has_tensor_input_arg
-        is_factory_or_like_function = has_tensor_return and (not has_tensor_input_arg or is_like_function)
+        is_new_function = name.startswith('new_') or category_override == 'new'
+        is_new_function_with_options = is_new_function and has_options_arg
+        is_factory_function = has_tensor_return and not has_tensor_input_arg or category_override == 'factory'
+        is_factory_or_like_or_new_function = has_tensor_return and (is_factory_function or is_like_function or is_new_function)
+        is_like_or_new_function_with_options = is_like_function_with_options or is_new_function_with_options
 
         if (is_factory_function and not has_type_input_arg) or has_options_arg:
             default_type = get_type_default(declaration)
-            py_default_dtype = 'self.scalar_type()' if is_like_function_with_options else None
+            py_default_dtype = 'self.scalar_type()' if is_like_or_new_function_with_options else None
             dtype_arg = {
                 'default': default_type,
                 'dynamic_type': 'Type',
@@ -600,8 +616,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'python_default_init': py_default_dtype,
             }
             python_binding_arguments.append(dtype_arg)
-        if is_factory_function or is_like_function_with_options:
-            py_default_layout = '*torch::getLayout(self.type().backend())' if is_like_function_with_options else None
+        if is_factory_function or is_like_or_new_function_with_options:
+            py_default_layout = '*torch::getLayout(self.type().backend())' if is_like_or_new_function_with_options else None
             layout_arg = {
                 'default': 'torch.strided',
                 'dynamic_type': 'Layout',
@@ -612,10 +628,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'python_default_init': py_default_layout,
             }
             python_binding_arguments.append(layout_arg)
-            py_default_device = 'self.device()' if is_like_function_with_options else None
+            py_default_device = 'self.device()' if is_like_or_new_function_with_options else None
             device_arg = {
                 'default': 'None',
-                'default_init': 'None',
                 'dynamic_type': 'Device',
                 'kwarg_only': True,
                 'name': 'device',
@@ -633,7 +648,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'simple_type': 'bool',
             }
             python_binding_arguments.append(pin_memory_arg)
-        if is_factory_or_like_function:
+        if is_factory_or_like_or_new_function:
             requires_grad_arg = {
                 'default': False,
                 'dynamic_type': 'bool',
@@ -643,6 +658,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'simple_type': 'bool',
             }
             python_binding_arguments.append(requires_grad_arg)
+
         return python_binding_arguments
 
     def emit_namedtuple_return_type_def(declaration, next_index):
@@ -679,6 +695,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             'name': name,
             'dispatch_name': 'dispatch_{}'.format(name),
             'pycname': 'THPVariable_{}'.format(name),
+            'pycfunc_voidcast': '',
             'signatures': [],
             'max_args': max(len(o['arguments']) + len(o['python_binding_arguments']) for o in declarations),
             'unpack_self': [],
@@ -705,7 +722,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             if not has_self:
                 # Use 'input' instead of 'self' for NN functions
                 signature = signature.replace('Tensor self', 'Tensor input')
-            signature = signature.replace('SparseTensorRef', 'Tensor')
             if dictionary['base'].get('deprecated', False):
                 signature += '|deprecated'
             env['signatures'].append('"{}",'.format(signature))
@@ -723,6 +739,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         else:
             tmpl = PY_VARIABLE_METHOD_VARARGS
             env['flags'] = 'METH_VARARGS | METH_KEYWORDS'
+            env['pycfunc_voidcast'] = '(void(*)(void))'
 
         if not is_module and not has_self:
             env['flags'] += ' | METH_STATIC'
@@ -763,9 +780,9 @@ def group_declarations(declarations):
                 v['signature'] = signature
 
     result = []
-    for _, dictionary in sorted(grouped.items()):
+    for x, dictionary in sorted(grouped.items()):
         if 'base' not in dictionary:
-            raise RuntimeError("'base' not in dictionary", dictionary)
+            raise RuntimeError("'base' not in dictionary for " + str(x), dictionary)
         result.append(dictionary)
     return sort_declarations(result)
 
@@ -868,7 +885,7 @@ def get_python_signature(declaration, include_out):
         default = None
         if arg.get('default') is not None:
             default = arg['default']
-            if default == 'nullptr' or default == 'nullopt' or default == '{}':
+            if default == 'nullptr' or default == 'c10::nullopt' or default == '{}':
                 default = 'None'
         if default is not None:
             param += '=' + str(default)

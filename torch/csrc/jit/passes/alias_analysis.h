@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/flat_hash_map.h>
 #include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/passes/utils/memory_dag.h>
@@ -42,10 +43,7 @@ class AliasDb {
 
   // Does `n` write to an alias of one of the values in `vs`?
   // if `recurseBlocks` is true, consider writes on the nodes in `n`s sub-blocks
-  TORCH_API bool writesToAlias(
-      Node* n,
-      const ValueSet& vs,
-      bool recurseBlocks = false) const;
+  TORCH_API bool writesToAlias(Node* n, const ValueSet& vs) const;
 
   // Does `a` and `b` potentially share a memory location or do either
   // hold in memory any element that exists in the other
@@ -61,43 +59,20 @@ class AliasDb {
   TORCH_API bool mayAlias(const Value* a, const Value* b) const;
   // Do any values in group `a` potentially share a memory location with any
   // value in group `b`? i.e. may they overlap?
-  //
-  // NOTE: Bit of ugly templating, but this is just to make sure we can
-  // transform an arbitrary container of `Values` to the same container of
-  // `Elements`.
-  template <
-      typename... Other1,
-      template <typename, typename...>
-      class T,
-      typename... Other2,
-      template <typename, typename...>
-      class U>
-  bool mayAlias(
-      const T<const Value*, Other1...>& a,
-      const U<const Value*, Other2...>& b) const {
-    if (a.empty() || b.empty()) {
-      return false;
-    }
+  TORCH_API bool mayAlias(const ValueSet& a, const ValueSet& b) const;
 
-    T<Element*> aElements;
-    for (const Value* v : a) {
-      if (elementMap_.count(v)) {
-        aElements.insert(elementMap_.at(v));
-      }
-    }
+  // Do any nodes write to an alias set input to `n`?
+  TORCH_API bool hasInputWriters(const Node* n) const;
 
-    U<Element*> bElements;
-    for (const Value* v : b) {
-      if (elementMap_.count(v)) {
-        bElements.insert(elementMap_.at(v));
-      }
-    }
-
-    return memoryDAG_->mayAlias(aElements, bElements);
-  }
+  // Do any nodes write to an alias set output by `n`?
+  TORCH_API bool hasOutputWriters(const Node* n) const;
 
   // Do any nodes write to an alias set inputed/outputed by `n`?
   TORCH_API bool hasWriters(const Node* n) const;
+
+  // Is the operation in-place? i.e. doesn't write anywhere but locations it
+  // reads from.
+  TORCH_API bool isMutable(Node* n) const;
 
   // Move 'n' (already in the graph) after 'movePoint' in the topological order.
   //
@@ -116,6 +91,7 @@ class AliasDb {
 
   // For debugging: print alias db state to stdout
   TORCH_API void dump() const;
+  TORCH_API std::string toString() const;
 
  private:
   // Helper for topologically-safe node moves.
@@ -132,17 +108,17 @@ class AliasDb {
   // NOTE: this only returns values directly written to, not aliases thereof
   //
   // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
-  ValueSet getWrites(Node* n, bool recurseBlocks = false) const;
-  void getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks = false) const;
-  void getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
+  MemoryLocations getWrites(Node* n) const;
+  void getWritesImpl(Node* n, MemoryLocations& ret) const;
   // Do any nodes write to `v`s memory location?
   TORCH_API bool hasWriters(const Value* v) const;
   // Register the fact that `n` writes to `v`.
   void registerWrite(const Value* v, Node* n);
+  void registerWrite(const Element* e, Node* n);
   // Get all the values that `n` reads from.
   // if `recurseBlocks` is true, gather reads on the nodes in `n`s sub-blocks
-  ValueSet getReads(Node* n, bool recurseBlocks = false) const;
-  void getReadsImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
+  MemoryLocations getReads(Node* n) const;
+  void getReadsImpl(Node* n, MemoryLocations& ret) const;
 
   /**
    * Wildcard methods
@@ -153,6 +129,9 @@ class AliasDb {
   // Is the element a wildcard or an unhandled container type,
   // or does the element contain an element for which that's true
   bool cannotCheckAliasContainment(const Value* elem) const;
+
+  // Is this a value which will not alias
+  bool nonAliasingValue(const Value* elem) const;
 
   /**
    * Special analysis methods
@@ -173,7 +152,7 @@ class AliasDb {
   void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
   void analyzeTupleConstruct(Node* node);
-  void analyzeCustomOp(Node* node);
+  void analyzeConservative(Node* node);
   void analyzeContainerConstruct(Node* node);
   bool tryRegisteredAnalysis(Node* node);
 
@@ -200,7 +179,7 @@ class AliasDb {
   // The points-to graph that stores aliasing relationships
   std::unique_ptr<MemoryDAG> memoryDAG_;
   // Mapping of values to MemoryDAG elements
-  std::unordered_map<const Value*, Element*> elementMap_;
+  ska::flat_hash_map<const Value*, Element*> elementMap_;
   // All wildcard elements (one for each unique mutable type).
   std::map<TypeKind, Element*> wildcardIndex_;
   Element* getWildcard(const TypePtr& type) const;
@@ -210,12 +189,13 @@ class AliasDb {
   /**
    * State for tracking write info.
    */
-  // Map of nodes to the values that they write to
-  std::unordered_map<Node*, ValueSet> writeIndex_;
+  // Map of nodes to the memory locations that they write to
+  ska::flat_hash_map<Node*, MemoryLocations> writeIndex_;
   // Set of all memory locations that may have been written to.
-  mutable std::unordered_set<const Element*> writeCache_;
+  mutable MemoryLocations writeCache_;
   mutable bool isWriteCacheStale_ = true;
   void rebuildWriteCache() const;
+  std::string getElementName(const Element* e) const;
 };
 
 // Used to assert that unschematized operators have an analysis method written

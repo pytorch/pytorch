@@ -1,6 +1,8 @@
 import sys
 import torch
 import torch._C as _C
+from torch._namedtensor_internals import update_names, check_serializing_named_tensor, resolve_ellipsis
+from torch._namedtensor_internals import unzip_namedshape
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
@@ -36,15 +38,40 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
+        check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
-        args = (self.storage(),
-                self.storage_offset(),
-                tuple(self.size()),
-                self.stride(),
-                self.requires_grad,
-                OrderedDict())  # previously was self._backward_hooks
-        return (torch._utils._rebuild_tensor_v2, args)
+        if self.is_quantized:
+            if self.qscheme() == torch.per_tensor_affine:
+                quantizer_params = (torch.per_tensor_affine,
+                                    self.q_scale(),
+                                    self.q_zero_point())
+            elif self.qscheme() == torch.per_channel_affine:
+                # convert scales and zero points to tuple to avoid recursive calls
+                # when/if we get multi-axis quantized tensors in the future, the shape
+                # is recoverable from the main tensor shape
+                quantizer_params = (torch.per_channel_affine,
+                                    [e.item() for e in self.q_per_channel_scales().reshape(-1)],
+                                    [e.item() for e in self.q_per_channel_zero_points().reshape(-1)],
+                                    self.q_per_channel_axis())
+            else:
+                raise RuntimeError("Serialization is not supported for tensors of type {}".format(self.qscheme()))
+            args = (self.storage(),
+                    self.storage_offset(),
+                    tuple(self.size()),
+                    self.stride(),
+                    quantizer_params,
+                    self.requires_grad,
+                    OrderedDict())
+            return (torch._utils._rebuild_qtensor, args)
+        else:
+            args = (self.storage(),
+                    self.storage_offset(),
+                    tuple(self.size()),
+                    self.stride(),
+                    self.requires_grad,
+                    OrderedDict())  # previously was self._backward_hooks
+            return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):
         # Warning: this method is NOT called when you torch.load() a tensor;
@@ -220,11 +247,6 @@ class Tensor(torch._C._TensorBase):
         self.register_hook(retain_grad_hook)
         self.retains_grad = True
 
-    def is_pinned(self):
-        r"""Returns true if this tensor resides in pinned memory"""
-        storage = self.storage()
-        return storage.is_pinned() if storage else False
-
     def is_shared(self):
         r"""Checks if tensor is in shared memory.
 
@@ -251,69 +273,6 @@ class Tensor(torch._C._TensorBase):
     def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
         r"""See :func:`torch.norm`"""
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
-
-    def pstrf(self, upper=True):
-        r"""See :func:`torch.pstrf`"""
-        warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
-                      "in the next release.", stacklevel=2)
-        return super(Tensor, self).pstrf(upper=upper)
-
-    def potrf(self, upper=True):
-        r"""See :func:`torch.cholesky`"""
-        warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed "
-                      "in the next release. Please use torch.cholesky instead and note that the "
-                      ":attr:`upper` argument in torch.cholesky defaults to ``False``.", stacklevel=2)
-        return super(Tensor, self).cholesky(upper=upper)
-
-    def potri(self, upper=True):
-        r"""See :func:`torch.cholesky_inverse`"""
-        warnings.warn("torch.potri is deprecated in favour of torch.cholesky_inverse and will be "
-                      "removed in the next release. Please use torch.cholesky_inverse instead and "
-                      "note that the :attr:`upper` argument in torch.cholesky_inverse defaults to "
-                      "``False``.", stacklevel=2)
-        return super(Tensor, self).cholesky_inverse(upper=upper)
-
-    def potrs(self, u, upper=True):
-        r"""See :func:`torch.cholesky_solve`"""
-        warnings.warn("torch.potrs is deprecated in favour of torch.cholesky_solve and "
-                      "will be removed in the next release. Please use torch.cholesky_solve instead "
-                      "and note that the :attr:`upper` argument in torch.cholesky_solve defaults "
-                      "to ``False``.", stacklevel=2)
-        return super(Tensor, self).cholesky_solve(u, upper=upper)
-
-    def gesv(self, A):
-        r"""See :func:`torch.solve`"""
-        warnings.warn("torch.gesv is deprecated in favour of torch.solve and will be removed in the "
-                      "next release. Please use torch.solve instead.", stacklevel=2)
-        return super(Tensor, self).solve(A)
-
-    def trtrs(self, A, upper=True, transpose=False, unitriangular=False):
-        r"""See :func:`torch.triangular_solve`"""
-        warnings.warn("torch.trtrs is deprecated in favour of torch.triangular_solve and will be "
-                      "removed in the next release. Please use torch.triangular_solve instead.",
-                      stacklevel=2)
-        return super(Tensor, self).triangular_solve(A, upper=upper,
-                                                    transpose=transpose, unitriangular=unitriangular)
-
-    def btrifact(self, pivot=True):
-        r"""See :func:`torch.lu`"""
-        warnings.warn("torch.btrifact is deprecated in favour of torch.lu and will be removed in "
-                      "the next release. Please use torch.lu instead.", stacklevel=2)
-        return torch._lu_with_info(self, pivot=pivot, check_errors=True)
-
-    def btrifact_with_info(self, pivot=True):
-        r"""See :func:`torch.lu`"""
-        warnings.warn("torch.btrifact_with_info is deprecated in favour of torch.lu with the "
-                      "get_infos argument and will be removed in the next release. Please use "
-                      "torch.lu with the get_infos argument set to True instead.", stacklevel=2)
-        return torch._lu_with_info(self, pivot=pivot, check_errors=False)
-
-    def btrisolve(self, LU_data, LU_pivots):
-        r"""See :func:`torch.lu_solve`"""
-        warnings.warn("torch.btrisolve is deprecated in favour of torch.lu_solve and will be "
-                      "removed in the next release. Please use torch.lu_solve instead.",
-                      stacklevel=2)
-        return super(Tensor, self).lu_solve(LU_data=LU_data, LU_pivots=LU_pivots)
 
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
@@ -414,18 +373,6 @@ class Tensor(torch._C._TensorBase):
     __ge__ = _C._TensorBase.ge
     __abs__ = _C._TensorBase.abs
 
-    def __std_mean__(self, dim=None, unbiased=True, keepdim=False):
-        if dim is None:
-            return _C._VariableFunctions.std_mean(self, unbiased)
-        else:
-            return _C._VariableFunctions.std_mean(self, dim, unbiased, keepdim)
-
-    def __var_mean__(self, dim=None, unbiased=True, keepdim=False):
-        if dim is None:
-            return _C._VariableFunctions.var_mean(self, unbiased)
-        else:
-            return _C._VariableFunctions.var_mean(self, dim, unbiased, keepdim)
-
     def __len__(self):
         if self.dim() == 0:
             raise TypeError("len() of a 0-d tensor")
@@ -488,7 +435,11 @@ class Tensor(torch._C._TensorBase):
         """
         if isinstance(element, (torch.Tensor, Number)):
             return (element == self).any().item()
-        return NotImplemented
+
+        raise RuntimeError(
+            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a %s." %
+            type(element)
+        )
 
     @property
     def __cuda_array_interface__(self):
@@ -536,10 +487,41 @@ class Tensor(torch._C._TensorBase):
 
         itemsize = self.storage().element_size()
 
-        shape = self.shape
+        shape = tuple(self.shape)
         strides = tuple(s * itemsize for s in self.stride())
         data = (self.data_ptr(), False)  # read-only is false
 
-        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=0)
+        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=1)
+
+    def refine_names(self, *names):
+        names = resolve_ellipsis(names, self.names, 'refine_names')
+        return super(Tensor, self).refine_names(names)
+
+    def align_to(self, *names):
+        return super(Tensor, self).align_to(
+            resolve_ellipsis(names, self.names, 'align_to', is_positional=False))
+
+    def unflatten(self, dim, namedshape):
+        names, sizes = unzip_namedshape(namedshape)
+        return super(Tensor, self).unflatten(dim, sizes, names)
+
+    def rename_(self, *names, **rename_map):
+        # Note [rename_ / rename API]
+        # The Python API for these is different from the C++ API. In Python:
+        # 1) tensor.rename(*names) takes a vararglist of names
+        # 2) tensor.rename(**rename_map) takes a map of names to rename.
+        # C++ is static, making it difficult to implement similar behavior.
+        return update_names(self, names, rename_map, inplace=True)
+
+    def rename(self, *names, **rename_map):
+        # See Note [rename_ / rename API]
+        return update_names(self, names, rename_map, inplace=False)
+
+    def _update_names(self, names, inplace):
+        # See Note [rename_ / rename API]
+        if inplace:
+            return super(Tensor, self).rename_(names)
+        else:
+            return super(Tensor, self).rename(names)
 
     __module__ = 'torch'

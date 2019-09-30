@@ -8,9 +8,12 @@
 
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/QScheme.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/tensor_qschemes.h>
+#include <torch/csrc/DynamicTypes.h>
 
 namespace torch { namespace autograd { namespace utils {
 
@@ -45,6 +48,10 @@ inline PyObject* wrap(THPDtype *dtype) {
   return (PyObject*)dtype;
 }
 
+inline PyObject* wrap(at::ScalarType scalarType) {
+  return wrap(getDtype(scalarType));
+}
+
 inline PyObject* wrap(THPLayout *layout) {
   Py_INCREF(layout);
   return (PyObject*)layout;
@@ -56,6 +63,12 @@ inline PyObject* wrap(at::Tensor tensor) {
 
 inline PyObject* wrap(at::Scalar scalar) {
   return wrap(make_variable(scalar_to_tensor(scalar)));
+}
+
+inline PyObject* wrap(at::QScheme qscheme) {
+  auto* thp_qscheme = torch::utils::getTHPQScheme(qscheme);
+  Py_INCREF(thp_qscheme);
+  return thp_qscheme;
 }
 
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor> tensors) {
@@ -142,4 +155,12 @@ inline PyObject* wrap(at::TensorList tl) {
   return r.release();
 }
 
+inline PyObject* wrap(at::IntArrayRef list) {
+  auto r = THPObjectPtr{PyTuple_New(list.size())};
+  if (!r) throw python_error();
+  for (size_t i = 0; i < list.size(); ++i) {
+    PyTuple_SET_ITEM(r.get(), i, wrap(list[i]));
+  }
+  return r.release();
+}
 }}} // namespace torch::autograd::utils

@@ -14,13 +14,16 @@ ProfDAGCounters::ProfDAGCounters(const std::shared_ptr<const NetDef>& net_def) {
   report_.op_extra_info_.reserve(num_ops);
 
   for (auto op_id = 0; op_id < num_ops; ++op_id) {
-    report_.op_types_.push_back(net_def->op(op_id).type());
+    const auto& op = net_def->op(op_id);
+    if (op.engine() == "") {
+      report_.op_types_.push_back(op.type());
+    } else {
+      report_.op_types_.push_back(op.type() + "(" + op.engine() + ")");
+    }
     vector<std::string> op_extra_info;
-    if (net_def->op(op_id).has_device_option() &&
-        net_def->op(op_id).device_option().extra_info_size() > 0) {
-      for (auto i = 0; i < net_def->op(op_id).device_option().extra_info_size();
-           ++i) {
-        auto extra_info_str = net_def->op(op_id).device_option().extra_info(i);
+    if (op.has_device_option() && op.device_option().extra_info_size() > 0) {
+      for (uint64_t i = 0; i < op.device_option().extra_info_size(); ++i) {
+        std::string extra_info_str = op.device_option().extra_info(i);
         op_extra_info.push_back(extra_info_str);
       }
     }

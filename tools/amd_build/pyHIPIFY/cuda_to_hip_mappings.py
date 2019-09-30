@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import collections
 
 from pyHIPIFY.constants import *
@@ -107,6 +108,7 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict([
     ("CUstreamBatchMemOpType", ("hipStreamBatchMemOpType", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
     ("CUdevice_P2PAttribute", ("hipDeviceP2PAttribute", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
     ("CUevent", ("hipEvent_t", CONV_TYPE, API_DRIVER)),
+    ("CUevent_st", ("ihipEvent_t", CONV_TYPE, API_DRIVER)),
     ("CUevent_flags", ("hipEventFlags", CONV_EVENT, API_DRIVER, HIP_UNSUPPORTED)),
     ("CUfilter_mode", ("hipTextureFilterMode", CONV_TEX, API_DRIVER)),
     ("CUGLDeviceList", ("hipGLDeviceList", CONV_GL, API_DRIVER, HIP_UNSUPPORTED)),
@@ -276,6 +278,14 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("cusparse.h", ("hipsparse.h", CONV_INCLUDE, API_RAND)),
     ("cufft.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
     ("cufftXt.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
+    ("nvrtc.h", ("hip/hiprtc.h", CONV_INCLUDE, API_RTC)),
+    ("thrust/system/cuda/", ("thrust/system/hip/", CONV_INCLUDE, API_BLAS)),
+    ("cub/util_allocator.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+    ("cub/block/block_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+    ("cub/cub.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+    ("cub/block/block_load.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+    ("cub/device/device_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+    ("cub/device/device_scan.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
 ])
 
 CUDA_IDENTIFIER_MAP = collections.OrderedDict([
@@ -2173,6 +2183,31 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cufftDestroy", ("hipfftDestroy", CONV_MATH_FUNC, API_FFT)),
     ("cufftGetVersion", ("hipfftGetVersion", CONV_MATH_FUNC, API_FFT)),
     ("cufftGetProperty", ("hipfftGetProperty", CONV_MATH_FUNC, API_FFT, HIP_UNSUPPORTED)),
+    ("nvrtcResult", ("hiprtcResult", CONV_TYPE, API_RTC)),
+    ("NVRTC_SUCCESS", ("HIPRTC_SUCCESS", CONV_TYPE, API_RTC)),
+    ("NVRTC_ERROR_OUT_OF_MEMORY", ("HIPRTC_ERROR_OUT_OF_MEMORY", CONV_TYPE, API_RTC)),
+    ("NVRTC_ERROR_PROGRAM_CREATION_FAILURE", ("HIPRTC_ERROR_PROGRAM_CREATION_FAILURE", CONV_TYPE, API_RTC)),
+    ("NVRTC_ERROR_INVALID_INPUT", ("HIPRTC_ERROR_INVALID_INPUT", CONV_TYPE, API_RTC)),
+    ("NVRTC_ERROR_INVALID_PROGRAM", ("HIPRTC_ERROR_INVALID_PROGRAM", CONV_TYPE, API_RTC)),
+    ("NVRTC_ERROR_COMPILATION", ("HIPRTC_ERROR_COMPILATION", CONV_TYPE, API_RTC)),
+    ("NVRTC_ERROR_BUILTIN_OPERATION_FAILURE", ("HIPRTC_ERROR_BUILTIN_OPERATION_FAILURE", CONV_TYPE, API_RTC)),
+    ("NVRTC_ERROR_NO_NAME_EXPRESSIONS_AFTER_COMPILATION", ("HIPRTC_ERROR_NO_NAME_EXPRESSIONS_AFTER_COMPILATION", CONV_TYPE, API_RTC)),
+    ("NVRTC_ERROR_NAME_EXPRESSION_NOT_VALID", ("HIPRTC_ERROR_NAME_EXPRESSION_NOT_VALID", CONV_TYPE, API_RTC)),
+    ("NVRTC_ERROR_INTERNAL_ERROR", ("HIPRTC_ERROR_INTERNAL_ERROR", CONV_TYPE, API_RTC)),
+    ("nvrtcGetErrorString", ("hiprtcGetErrorString", CONV_JIT, API_RTC)),
+    ("nvrtcVersion", ("hiprtcVersion", CONV_JIT, API_RTC)),
+    ("nvrtcProgram", ("hiprtcProgram", CONV_TYPE, API_RTC)),
+    ("nvrtcAddNameExpression", ("hiprtcAddNameExpression", CONV_JIT, API_RTC)),
+    ("nvrtcCompileProgram", ("hiprtcCompileProgram", CONV_JIT, API_RTC)),
+    ("nvrtcCreateProgram", ("hiprtcCreateProgram", CONV_JIT, API_RTC)),
+    ("nvrtcDestroyProgram", ("hiprtcDestroyProgram", CONV_JIT, API_RTC)),
+    ("nvrtcGetLoweredName", ("hiprtcGetLoweredName", CONV_JIT, API_RTC)),
+    ("nvrtcGetProgramLog", ("hiprtcGetProgramLog", CONV_JIT, API_RTC)),
+    ("nvrtcGetProgramLogSize", ("hiprtcGetProgramLogSize", CONV_JIT, API_RTC)),
+    ("nvrtcGetPTX", ("hiprtcGetCode", CONV_JIT, API_RTC)),
+    ("nvrtcGetPTXSize", ("hiprtcGetCodeSize", CONV_JIT, API_RTC)),
+    ("thrust::cuda::", ("thrust::hip::", CONV_MATH_FUNC, API_BLAS)),
+    ("cub::", ("hipcub::", CONV_MATH_FUNC, API_BLAS)),
 ])
 
 CUDA_SPARSE_MAP = collections.OrderedDict([
@@ -2345,6 +2380,7 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/impl/CUDAGuardImpl.h", ("c10/hip/impl/HIPGuardImpl.h", API_C10)),
     ("c10/cuda/impl/cuda_cmake_macros.h", ("c10/hip/impl/hip_cmake_macros.h", API_C10)),
     ("C10_CUDA_CHECK", ("C10_HIP_CHECK", API_C10)),
+    ("C10_CUDA_CHECK_WARN", ("C10_HIP_CHECK_WARN", API_C10)),
     ("c10::cuda", ("c10::hip", API_C10)),
     ("cuda::CUDAStream", ("hip::HIPStream", API_C10)),
     ("CUDAStream", ("HIPStream", API_C10)),

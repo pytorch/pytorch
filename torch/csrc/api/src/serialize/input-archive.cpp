@@ -16,16 +16,27 @@
 namespace torch {
 namespace serialize {
 
-InputArchive::InputArchive()
-    : module_(std::make_shared<jit::script::Module>()) {}
+InputArchive::InputArchive() {}
+
+void InputArchive::read(const std::string& key, c10::IValue& ivalue) {
+  if (auto named_attr = module_.find_attribute(key)) {
+    ivalue = named_attr->value();
+  } else {
+    TORCH_CHECK(
+      false,
+      "No such serialized IValue '",
+      key,
+      "'");
+  }
+}
 
 bool InputArchive::try_read(
     const std::string& key,
     Tensor& tensor,
     bool is_buffer) {
-  auto param = module_->find_parameter(key);
-  auto buffer = module_->find_buffer(key);
-  if (param == nullptr && buffer == nullptr) return false;
+  auto param = module_.find_parameter(key);
+  auto buffer = module_.find_buffer(key);
+  if (!param && !buffer) return false;
 
   // clang-format off
   auto read_param = is_buffer ? buffer : param;
@@ -60,8 +71,8 @@ void InputArchive::read(
 }
 
 bool InputArchive::try_read(const std::string& key, InputArchive& archive) {
-  if (auto named_module = module_->find_module(key)) {
-    archive.module_ = std::move(named_module);
+  if (auto named_module = module_.find_module(key)) {
+    archive.module_ = std::move(*named_module);
     return true;
   } else {
     return false;

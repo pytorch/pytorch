@@ -49,6 +49,46 @@ class TestCaffe2Basic(TestCase):
                                    "Don't know how to map unexpected argument (foo|bar)"):
             b2.convert_node(bad_node_def.SerializeToString())
 
+    def test_dynamicslice_3inputs_graph(self):
+        node_def = make_node(
+            "DynamicSlice", ["X1", "X2", "X3"], ["Y"])
+
+        graph_def = make_graph(
+            [node_def],
+            name="test",
+            inputs=[make_tensor_value_info("X1", onnx.TensorProto.FLOAT, (2, 4)),
+             make_tensor_value_info("X2", onnx.TensorProto.INT32, (1, 2)),
+             make_tensor_value_info("X3", onnx.TensorProto.INT32, (1, 2))],
+            outputs=[make_tensor_value_info("Y", onnx.TensorProto.FLOAT, (1, 2))])
+        model_def = make_model(graph_def, producer_name='caffe2-ref-test')
+
+        x = [[1,2,3,4],[5,6,7,8]]
+        start = [0, 0]
+        end = [-1, 4]
+        prepared = c2.prepare(model_def)
+        output = prepared.run(inputs=[np.array(x), np.array(start), np.array(end)])
+        self.assertSameOutputs(output[0], np.array(x)[0:-1, 0:4])
+
+    def test_dynamicslice_4inputs_graph(self):
+        node_def = make_node(
+            "DynamicSlice", ["X1", "X2", "X3", "axes"], ["Y"])
+        graph_def = make_graph(
+            [node_def],
+            name="test",
+            inputs=[make_tensor_value_info("X1", onnx.TensorProto.FLOAT, (2, 4)),
+             make_tensor_value_info("X2", onnx.TensorProto.INT32, (1, 2)),
+             make_tensor_value_info("X3", onnx.TensorProto.INT32, (1, 2)),
+             make_tensor_value_info("axes", onnx.TensorProto.INT32, (1, 2))],
+            outputs=[make_tensor_value_info("Y", onnx.TensorProto.FLOAT, (1, 2))])
+        model_def = make_model(graph_def, producer_name='caffe2-ref-test')
+        x = [[1,2,3,4],[5,6,7,8]]
+        start = [0, 1]
+        end = [4, 5]
+        axes = [1, 0]
+        prepared = c2.prepare(model_def)
+        output = prepared.run(inputs=[np.array(x), np.array(start), np.array(end), np.array(axes)])
+        self.assertSameOutputs(output[0], np.array(x)[1:5, 0:4])
+
     def test_relu_graph(self):
         X = np.random.randn(3, 2).astype(np.float32)
         Y_ref = np.clip(X, 0, np.inf)

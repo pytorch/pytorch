@@ -3,6 +3,10 @@ import shutil
 import sys
 import unittest
 import warnings
+import re
+import tempfile
+import subprocess
+import glob
 
 import common_utils as common
 import torch
@@ -140,6 +144,95 @@ class TestCppExtension(common.TestCase):
 
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
+
+    def _run_jit_cuda_archflags(self, flags, expected):
+        # Compile an extension with given `flags`
+        def _check_cuobjdump_output(expected_values, is_ptx=False):
+            elf_or_ptx = '--list-ptx' if is_ptx else '--list-elf'
+            lib_ext = '.pyd' if IS_WINDOWS else '.so'
+            # Note, .extension name may include _v1, _v2, so first find exact name
+            ext_filename = glob.glob(os.path.join(temp_dir,
+                                                  'cudaext_archflag*' + lib_ext))[0]
+            command = ['cuobjdump', elf_or_ptx, ext_filename]
+            p = subprocess.Popen(command,
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            output, err = p.communicate()
+            if common.PY3:
+                output = output.decode("ascii")
+                err = err.decode("ascii")
+
+            if not p.returncode == 0 or not err == '':
+                raise AssertionError("Flags: {}\nReturncode: {}\nStderr: {}\n"
+                                     "Output: {} ".format(flags, p.returncode,
+                                                          err, output))
+
+            actual_arches = sorted(re.findall(r'sm_\d\d', output))
+            expected_arches = ['sm_' + xx for xx in expected_values]
+            self.assertEqual(actual_arches, expected_arches,
+                             message="Flags: {},  Actual: {},  Expected: {}\n"
+                                     "Stderr: {}\nOutput: {}".format(
+                                         flags, actual_arches, expected_arches,
+                                         err, output))
+
+        temp_dir = tempfile.mkdtemp()
+        old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
+        try:
+            os.environ['TORCH_CUDA_ARCH_LIST'] = flags
+            torch.utils.cpp_extension.load(
+                name="cudaext_archflags",
+                sources=[
+                    "cpp_extensions/cuda_extension.cpp",
+                    "cpp_extensions/cuda_extension.cu",
+                ],
+                extra_cuda_cflags=["-O2"],
+                verbose=True,
+                build_directory=temp_dir,
+            )
+
+            # Expected output for --list-elf:
+            #   ELF file    1: cudaext_archflags.1.sm_61.cubin
+            #   ELF file    2: cudaext_archflags.2.sm_52.cubin
+            _check_cuobjdump_output(expected[0])
+            if expected[1] is not None:
+                # Expected output for --list-ptx:
+                #   PTX file    1: cudaext_archflags.1.sm_61.ptx
+                _check_cuobjdump_output(expected[1], is_ptx=True)
+        finally:
+            if IS_WINDOWS:
+                print("Not wiping extensions build folder because Windows")
+            else:
+                shutil.rmtree(temp_dir)
+
+            if old_envvar is None:
+                os.environ.pop('TORCH_CUDA_ARCH_LIST')
+            else:
+                os.environ['TORCH_CUDA_ARCH_LIST'] = old_envvar
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_jit_cuda_archflags(self):
+        # Test a number of combinations:
+        #   - the default for the machine we're testing on
+        #   - Separators, can be ';' (most common) or ' '
+        #   - Architecture names
+        #   - With/without '+PTX'
+
+        capability = torch.cuda.get_device_capability()
+        # expected values is length-2 tuple: (list of ELF, list of PTX)
+        # note: there should not be more than one PTX value
+        archflags = {
+            '': (['{}{}'.format(capability[0], capability[1])], None),
+            "Maxwell+Tegra;6.1": (['53', '61'], None),
+            "Pascal 3.5": (['35', '60', '61'], None),
+            "Volta": (['70'], ['70']),
+        }
+        if int(torch.version.cuda.split('.')[0]) >= 10:
+            # CUDA 9 only supports compute capability <= 7.2
+            archflags["7.5+PTX"] = (['75'], ['75'])
+            archflags["5.0;6.0+PTX;7.0;7.5"] = (['50', '60', '70', '75'], ['60'])
+
+        for flags, expected in archflags.items():
+            self._run_jit_cuda_archflags(flags, expected)
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     def test_jit_cudnn_extension(self):
@@ -622,6 +715,18 @@ class TestCppExtension(common.TestCase):
         finally:
             torch.set_default_dtype(initial_default)
 
+    def test_compilation_error_formatting(self):
+        # Test that the missing-semicolon error message has linebreaks in it.
+        # This'll fail if the message has been munged into a single line.
+        # It's hard to write anything more specific as every compiler has it's own
+        # error formatting.
+        with self.assertRaises(RuntimeError) as e:
+            torch.utils.cpp_extension.load_inline(
+                name="test_compilation_error_formatting",
+                cpp_sources="int main() { return 0 }")
+        pattern = r'.*(\\n|\\r).*'
+        self.assertNotRegex(str(e), pattern)
+
 
 class TestMSNPUTensor(common.TestCase):
     @classmethod
@@ -629,50 +734,52 @@ class TestMSNPUTensor(common.TestCase):
         msnpu_extension.init_msnpu_extension()
 
     def test_unregistered(self):
-        a = torch.empty(5, 5, device='cpu')
-        with self.assertRaisesRegex(RuntimeError, "No function registered"):
-            b = torch.empty(5, 5, device='msnpu')
+        a = torch.arange(0, 10, device='cpu')
+        with self.assertRaisesRegex(RuntimeError, "No function is registered"):
+            b = torch.arange(0, 10, device='msnpu')
 
     def test_zeros(self):
-        a = torch.zeros(5, 5, device='cpu')
+        a = torch.empty(5, 5, device='cpu')
         self.assertEqual(a.device, torch.device('cpu'))
-        self.assertEqual(a.sum(), 0)
 
-        b = torch.zeros(5, 5, device='msnpu')
+        b = torch.empty(5, 5, device='msnpu')
         self.assertEqual(b.device, torch.device('msnpu', 0))
         self.assertEqual(msnpu_extension.get_test_int(), 0)
         self.assertEqual(torch.get_default_dtype(), b.dtype)
 
-        c = torch.zeros((5, 5), dtype=torch.int64, device='msnpu')
+        c = torch.empty((5, 5), dtype=torch.int64, device='msnpu')
         self.assertEqual(msnpu_extension.get_test_int(), 0)
         self.assertEqual(torch.int64, c.dtype)
 
     def test_add(self):
-        a = torch.zeros(5, 5, device='msnpu')
+        a = torch.empty(5, 5, device='msnpu', requires_grad=True)
         self.assertEqual(msnpu_extension.get_test_int(), 0)
 
-        b = torch.zeros(5, 5, device='msnpu')
+        b = torch.empty(5, 5, device='msnpu')
         self.assertEqual(msnpu_extension.get_test_int(), 0)
 
-        c = torch.add(a, b)
+        c = a + b
         self.assertEqual(msnpu_extension.get_test_int(), 1)
 
-    def test_backwards(self):
-        a = torch.zeros(5, 5, device='msnpu', requires_grad=True)
-        self.assertEqual(msnpu_extension.get_test_int(), 0)
+    def test_conv_backend_override(self):
+        # To simplify tests, we use 4d input here to avoid doing view4d( which
+        # needs more overrides) in _convolution.
+        input = torch.empty(2, 4, 10, 2, device='msnpu', requires_grad=True)
+        weight = torch.empty(6, 4, 2, 2, device='msnpu', requires_grad=True)
+        bias = torch.empty(6, device='msnpu')
 
-        b = torch.zeros(5, 5, device='msnpu')
-        self.assertEqual(msnpu_extension.get_test_int(), 0)
-
-        c = torch.kl_div(a, b)
-        self.assertEqual(msnpu_extension.get_test_int(), 3)
-
-        d = c.sum()
+        # Make sure forward is overriden
+        out = torch.nn.functional.conv1d(input, weight, bias, 2, 0, 1, 1)
         self.assertEqual(msnpu_extension.get_test_int(), 2)
+        self.assertEqual(out.shape[0], input.shape[0])
+        self.assertEqual(out.shape[1], weight.shape[0])
 
-        d.backward(torch.zeros(0, device='msnpu'))
-        self.assertEqual(msnpu_extension.get_test_int(), 4)
-
+        # Make sure backward is overriden
+        # Double backward is dispatched to _convolution_double_backward.
+        # It is not tested here as it involves more computation/overrides.
+        grad = torch.autograd.grad(out, input, out, create_graph=True)
+        self.assertEqual(msnpu_extension.get_test_int(), 3)
+        self.assertEqual(grad[0].shape, input.shape)
 
 if __name__ == "__main__":
     common.run_tests()

@@ -27,6 +27,10 @@ int ProcessGroup::Work::sourceRank() const {
       "that correspond to a recv or recv-from-any call.");
 }
 
+std::vector<at::Tensor> ProcessGroup::Work::result() const {
+  throw std::runtime_error("result() not implemented.");
+}
+
 void ProcessGroup::Work::synchronize() {}
 
 void ProcessGroup::Work::wait() {

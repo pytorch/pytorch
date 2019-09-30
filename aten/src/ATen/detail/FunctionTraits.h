@@ -32,12 +32,19 @@ template <typename ClassType, typename ReturnType, typename... Args>
 struct function_traits<ReturnType(ClassType::*)(Args...) const> : public function_traits<ReturnType(Args...)> {
 };
 
+// Reference types
+template <typename T>
+struct function_traits<T&> : public function_traits<T> {};
+template <typename T>
+struct function_traits<T*> : public function_traits<T> {};
+
 // Free functions
 template <typename ReturnType, typename... Args>
 struct function_traits<ReturnType(Args...)> {
   // arity is the number of arguments.
   enum { arity = sizeof...(Args) };
 
+  typedef std::tuple<Args...> ArgsTuple;
   typedef ReturnType result_type;
 
   template <size_t i>

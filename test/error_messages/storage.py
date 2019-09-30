@@ -14,7 +14,7 @@ def check_error(desc, fn, *required_substrings):
         for sub in required_substrings:
             assert sub in error_message
         return
-    assert False, "given function ({}) didn't raise an error".format(desc)
+    raise AssertionError("given function ({}) didn't raise an error".format(desc))
 
 check_error(
     'Wrong argument types',

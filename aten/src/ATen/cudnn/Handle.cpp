@@ -6,6 +6,7 @@
 #include <vector>
 #include <utility>
 #include <mutex>
+#include <memory>
 
 namespace at { namespace native {
 
@@ -136,7 +137,7 @@ class PoolWindow
 
 // This will be destroyed when the thread terminates,
 // releasing its reserved handles back to the pool.
-thread_local PoolWindow myPoolWindow;
+thread_local std::unique_ptr<PoolWindow> myPoolWindow;
 }  // namespace
 
 
@@ -145,7 +146,10 @@ cudnnHandle_t getCudnnHandle()
   int device;
   AT_CUDA_CHECK(cudaGetDevice(&device));
 
-  return myPoolWindow.reserve(device);
+  if (!myPoolWindow)
+    myPoolWindow.reset(new PoolWindow());
+
+  return myPoolWindow->reserve(device);
 }
 
 }} // namespace at::cudnn

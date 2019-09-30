@@ -30,17 +30,18 @@ struct GuardInserter {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
       auto n = *it;
       if (n->kind() == prim::profile && n->outputs().size() == 1) {
-        // n->input() is Tensor type
-        auto guard = graph_->create(prim::Guard, {n->input()}, 1);
-        auto go = guard->output();
-        // make a *copy* of ProfilingTensorType, in case we'd like
-        // to make changes to it independently from the one being
-        // profiled
-        auto copy = ProfiledTensorType::create(
-            n->output()->type()->expect<ProfiledTensorType>());
-        go->setType(copy);
-        guard->insertBefore(n);
-        n->output()->replaceAllUsesWith(go);
+        auto pttp = n->output()->type()->cast<TensorType>();
+        if (pttp) {
+          auto guard = graph_->create(prim::Guard, {n->input()}, 1);
+          auto go = guard->output();
+          go->setType(pttp);
+          guard->insertBefore(n);
+          n->output()->replaceAllUsesWith(go);
+        } else {
+          // we didn't go down this path i.e
+          // no profiling information is available
+          n->output()->replaceAllUsesWith(n->input());
+        }
         it.destroyCurrent();
       } else {
         for (Block* ib : n->blocks()) {

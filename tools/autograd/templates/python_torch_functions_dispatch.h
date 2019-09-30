@@ -21,23 +21,7 @@ using at::ScalarType;
 using at::TensorList;
 using at::IntArrayRef;
 using at::Generator;
-using at::SparseTensorRef;
 using at::Storage;
-using at::TensorOptions;
-
-static at::Type& default_type() {
-  return torch::tensors::get_default_tensor_type();
-}
-
-static ScalarType default_scalar_type() {
-  return torch::tensors::get_default_scalar_type();
-}
-
-static void maybe_initialize_cuda(const at::TensorOptions& options) {
-  if (options.device().is_cuda()) {
-    torch::utils::cuda_lazy_init();
-  }
-}
 
 ${py_method_dispatch}
 

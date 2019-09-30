@@ -85,7 +85,7 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   AT_ASSERT(input_.layout() != c10::kStrided);
   if (input_.layout() == c10::kSparse) {
     auto input = input_.coalesce();
-    return grad.sparse_mask(at::SparseTensorRef(input));
+    return grad.sparse_mask(input);
   } else if (input_.layout() == c10::kMkldnn) {
     return grad.to_mkldnn();
   } else {

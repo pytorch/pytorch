@@ -23,7 +23,13 @@ static void inline THNN_(VolumetricConvolutionMM_shapeCheck)(
                          int pW,
                          int pH,
                          int weight_nullable) {
-  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
+  bool valid_empty = false;
+  if (input->dim() == 4) {
+    valid_empty = input->size(0) == 0 && input->size(1) != 0 && input->size(2) != 0 && input->size(3) != 0;
+  } else if (input->dim() == 5) {
+    valid_empty = input->size(0) == 0 && input->size(1) != 0 && input->size(2) != 0 && input->size(3) != 0 && input->size(4) != 0;
+  }
+  THNN_ARGCHECK((!input->is_empty() || valid_empty) && (input->dim() == 4 || input->dim() == 5), 2, input,
                 "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
   THArgCheck(kT > 0 && kW > 0 && kH > 0, 8,
              "kernel size should be greater than zero, but got kT: %d kH: %d kW: %d", kT, kH, kW);
@@ -126,6 +132,293 @@ static THTensor* THNN_(newViewWeight)(THTensor *weight)
   return weight;
 }
 
+/*
+  Modified from the version of CUDA implementation, but the loop iterations is larger than that one.
+  The larger loop could lower the proportion of openmp overhead. And the inner part in loop is simpler.
+  The naive code is below:
+
+  scalar_t *input_data = input->data<scalar_t>();
+  scalar_t *finput_data = finput->data<scalar_t>();
+
+  int64_t n = nInputPlane*kT*kH*kW*outputDepth*outputWidth*outputHeight;
+  #pragma omp parallel for firstprivate(finput_data, input_data, outputWidth, outputHeight, outputDepth, kW, kH, kT, dW, dH, dT, pW, pH, pT, inputHeight, inputWidth, inputDepth)
+  for (int64_t idx = 0; idx < n ; ++idx) {
+    int64_t w_out = line_index_offset % outputWidth;
+    int64_t remained = line_index_offset / outputWidth;
+    int64_t h_out = remained % outputHeight;
+    remained /= outputHeight;
+    int64_t d_out = remained % outputDepth;
+    remained /= outputDepth;
+    int k = remained % kW;
+    remained /= kW;
+    int j = remained % kH;
+    remained /= kH;
+    int i = remained % kT;
+    int64_t nip = remained / kT;
+
+    int64_t d = d_out * dT - pT + i;
+    int64_t h = h_out * dH - pH + j;
+    int64_t w = w_out * dW - pW + k;
+
+    finput_data[idx] = (h >= 0 && w >= 0 && d >= 0 && h < inputHeight && w < inputWidth && d < inputDepth) ?
+      input_data[nip*inputDepth*inputWidth*inputHeight+ d*inputHeight*inputWidth + h*inputWidth + w] : 0;
+  }
+
+  However, there are 6 quotient and 6 module operations which are very time-consuming. So we choose relatively
+  more complex but more efficient pattern.
+*/
+static void THNN_(unfolded_copy_vol)(
+          THTensor *finput,
+          THTensor *input,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH,
+          int64_t nInputPlane,
+          int64_t inputDepth,
+          int64_t inputWidth,
+          int64_t inputHeight,
+          int64_t outputDepth,
+          int64_t outputWidth,
+          int64_t outputHeight)
+{
+  scalar_t *input_data = input->data<scalar_t>();
+  scalar_t *finput_data = finput->data<scalar_t>();
+
+  int64_t n = nInputPlane*kT*kH*kW*outputDepth*outputWidth*outputHeight;
+  at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+    int64_t line_index_offset = start;
+    int64_t line_seg_len = (end - start);
+
+    int64_t w_out = line_index_offset % outputWidth;
+    int64_t remained = line_index_offset / outputWidth;
+    int64_t h_out = remained % outputHeight;
+    remained /= outputHeight;
+    int64_t d_out = remained % outputDepth;
+    remained /= outputDepth;
+    int k = remained % kW;
+    remained /= kW;
+    int j = remained % kH;
+    remained /= kH;
+    int i = remained % kT;
+    int64_t nip = remained / kT;
+
+    int64_t count = 0;
+    scalar_t* dst = finput_data + line_index_offset;
+    int64_t inputHW = inputHeight*inputWidth;
+    int64_t inputDHW = inputHW*inputDepth;
+
+    while (count < line_seg_len) {
+      int64_t w = w_out * dW - pW + k;
+      int64_t h = h_out * dH - pH + j;
+      int64_t d = d_out * dT - pT + i;
+
+
+      *dst = (h >= 0 && w >= 0 && d >= 0 && h < inputHeight && w < inputWidth && d < inputDepth) ?
+        input_data[nip*inputDHW+ d*inputHW + h*inputWidth + w] : scalar_t(0);
+
+      count++;
+      if (count < line_seg_len) {
+        dst++;
+        w_out++;
+        if (w_out == outputWidth) {
+          w_out = 0;
+          h_out++;
+          if (h_out == outputHeight) {
+            h_out = 0;
+            d_out++;
+            if (d_out == outputDepth) {
+              d_out = 0;
+              k++;
+              if(k == kW) {
+                k = 0;
+                j++;
+                if(j == kH) {
+                  j = 0;
+                  i++;
+                  if(i == kT) {
+                    i = 0;
+                    nip++;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+static void THNN_(VolumetricConvolutionMM_updateOutput_frame)(
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          THTensor *finput,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH,
+          int64_t nInputPlane,
+          int64_t inputDepth,
+          int64_t inputWidth,
+          int64_t inputHeight,
+          int64_t nOutputPlane,
+          int64_t outputDepth,
+          int64_t outputWidth,
+          int64_t outputHeight)
+{
+  int64_t i;
+  THTensor *output2d;
+
+  THNN_(unfolded_copy_vol)(
+    finput, input,
+    kT, kW, kH,
+    dT, dW, dH,
+    pT, pW, pH,
+    nInputPlane,
+    inputDepth, inputWidth, inputHeight,
+    outputDepth, outputWidth, outputHeight
+  );
+
+  output2d = THTensor_(newWithStorage2d)(
+    THTensor_getStoragePtr(output), output->storage_offset(), nOutputPlane, -1,
+    outputDepth*outputHeight*outputWidth, -1
+  );
+
+  if (bias) {
+      for (i = 0; i < nOutputPlane; i++)
+      {
+        THVector_(fill)(
+          THStorage_(data)(THTensor_getStoragePtr(output))+output->storage_offset()+output->stride(0)*i,
+          THTensor_(get1d)(bias, i),
+          outputDepth*outputHeight*outputWidth
+        );
+      }
+  } else {
+    THTensor_(zero)(output);
+  }
+
+  THTensor_(addmm)(output2d, output2d, weight, finput, 1, 1);
+
+  c10::raw::intrusive_ptr::decref(output2d);
+}
+
+void THNN_(VolumetricConvolutionMM_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,
+          THTensor *finput,
+          THTensor *fgradInput, // unused
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH,
+          int pT,
+          int pW,
+          int pH)
+{
+  int dimf = 0;
+  int dimt = 1;
+  int dimh = 2;
+  int dimw = 3;
+
+  int64_t nInputPlane;
+  int64_t inputDepth;
+  int64_t inputHeight;
+  int64_t inputWidth;
+  int64_t nOutputPlane;
+  int64_t outputDepth;
+  int64_t outputHeight;
+  int64_t outputWidth;
+
+  THNN_(VolumetricConvolutionMM_shapeCheck)(
+        state, input, NULL, weight, bias,
+        kT, kW, kH, dT, dW, dH, pT, pW, pH, 0);
+  input = THTensor_(newContiguous)(input);
+
+  if (input->dim() == 5)
+  {
+    dimf++;
+    dimt++;
+    dimh++;
+    dimw++;
+  }
+
+  nInputPlane = input->size(dimf);
+  inputDepth = input->size(dimt);
+  inputHeight  = input->size(dimh);
+  inputWidth   = input->size(dimw);
+  nOutputPlane = weight->size(0);
+  outputDepth  = (inputDepth + 2*pT - kT) / dT + 1;
+  outputHeight = (inputHeight + 2*pH - kH) / dH + 1;
+  outputWidth  = (inputWidth + 2*pW - kW) / dW + 1;
+
+  weight = THNN_(newViewWeight)(weight);
+
+  if (input->dim() == 4)
+  {
+    THTensor_(resize2d)(finput, kT*kW*kH*nInputPlane, outputDepth*outputHeight*outputWidth);
+    THTensor_(resize4d)(output, nOutputPlane, outputDepth, outputHeight, outputWidth);
+
+    THNN_(VolumetricConvolutionMM_updateOutput_frame)(
+      input, output, weight, bias, finput,
+      kT, kW, kH,
+      dT, dW, dH,
+      pT, pW, pH,
+      nInputPlane, inputDepth, inputWidth, inputHeight,
+      nOutputPlane, outputDepth, outputWidth, outputHeight
+    );
+  }
+  else
+  {
+    int64_t T = input->size(0);
+
+    THTensor_(resize3d)(finput, T, kT*kW*kH*nInputPlane, outputDepth*outputHeight*outputWidth);
+    THTensor_(resize5d)(output, T, nOutputPlane, outputDepth, outputHeight, outputWidth);
+    at::parallel_for(0, T, CONV3D_OMP_THRESHOLD, [&](int64_t start, int64_t end) {
+      for (auto t = start; t < end; t++)
+      {
+        THTensor *input_t = THTensor_(newSelect)(input, 0, t);
+        THTensor *output_t = THTensor_(newSelect)(output, 0, t);
+        THTensor *finput_t = THTensor_(newSelect)(finput, 0, t);
+
+        THNN_(VolumetricConvolutionMM_updateOutput_frame)(
+          input_t, output_t, weight, bias, finput_t,
+          kT, kW, kH,
+          dT, dW, dH,
+          pT, pW, pH,
+          nInputPlane, inputDepth, inputWidth, inputHeight,
+          nOutputPlane, outputDepth, outputWidth, outputHeight
+        );
+
+        c10::raw::intrusive_ptr::decref(input_t);
+        c10::raw::intrusive_ptr::decref(output_t);
+        c10::raw::intrusive_ptr::decref(finput_t);
+      }
+    });
+  }
+
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(weight);
+}
+
+#if !defined(TH_REAL_IS_LONG)
 
 // Kernel for fast unfold+copy
 // Borrowed from Theano
@@ -235,291 +528,6 @@ static void THNN_(unfolded_acc_vol)(
   });
 }
 
-/*
-  Modified from the version of CUDA implementation, but the loop iterations is larger than that one.
-  The larger loop could lower the proportion of openmp overhead. And the inner part in loop is simpler.
-  The naive code is below:
-
-  scalar_t *input_data = input->data<scalar_t>();
-  scalar_t *finput_data = finput->data<scalar_t>();
-
-  int64_t n = nInputPlane*kT*kH*kW*outputDepth*outputWidth*outputHeight;
-  #pragma omp parallel for firstprivate(finput_data, input_data, outputWidth, outputHeight, outputDepth, kW, kH, kT, dW, dH, dT, pW, pH, pT, inputHeight, inputWidth, inputDepth)
-  for (int64_t idx = 0; idx < n ; ++idx) {
-    int64_t w_out = line_index_offset % outputWidth;
-    int64_t remained = line_index_offset / outputWidth;
-    int64_t h_out = remained % outputHeight;
-    remained /= outputHeight;
-    int64_t d_out = remained % outputDepth;
-    remained /= outputDepth;
-    int k = remained % kW;
-    remained /= kW;
-    int j = remained % kH;
-    remained /= kH;
-    int i = remained % kT;
-    int64_t nip = remained / kT;
-
-    int64_t d = d_out * dT - pT + i;
-    int64_t h = h_out * dH - pH + j;
-    int64_t w = w_out * dW - pW + k;
-
-    finput_data[idx] = (h >= 0 && w >= 0 && d >= 0 && h < inputHeight && w < inputWidth && d < inputDepth) ?
-      input_data[nip*inputDepth*inputWidth*inputHeight+ d*inputHeight*inputWidth + h*inputWidth + w] : 0;
-  }
-
-  However, there are 6 quotient and 6 module operations which are very time-consuming. So we choose relatively
-  more complex but more efficient pattern.
-*/
-static void THNN_(unfolded_copy_vol)(
-          THTensor *finput,
-          THTensor *input,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH,
-          int64_t nInputPlane,
-          int64_t inputDepth,
-          int64_t inputWidth,
-          int64_t inputHeight,
-          int64_t outputDepth,
-          int64_t outputWidth,
-          int64_t outputHeight)
-{
-  scalar_t *input_data = input->data<scalar_t>();
-  scalar_t *finput_data = finput->data<scalar_t>();
-
-  int64_t n = nInputPlane*kT*kH*kW*outputDepth*outputWidth*outputHeight;
-  at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
-    int64_t line_index_offset = start;
-    int64_t line_seg_len = (end - start);
-
-    int64_t w_out = line_index_offset % outputWidth;
-    int64_t remained = line_index_offset / outputWidth;
-    int64_t h_out = remained % outputHeight;
-    remained /= outputHeight;
-    int64_t d_out = remained % outputDepth;
-    remained /= outputDepth;
-    int k = remained % kW;
-    remained /= kW;
-    int j = remained % kH;
-    remained /= kH;
-    int i = remained % kT;
-    int64_t nip = remained / kT;
-
-    int64_t count = 0;
-    scalar_t* dst = finput_data + line_index_offset;
-    int64_t inputHW = inputHeight*inputWidth;
-    int64_t inputDHW = inputHW*inputDepth;
-
-    while (count < line_seg_len) {
-      int64_t w = w_out * dW - pW + k;
-      int64_t h = h_out * dH - pH + j;
-      int64_t d = d_out * dT - pT + i;
-
-
-      *dst = (h >= 0 && w >= 0 && d >= 0 && h < inputHeight && w < inputWidth && d < inputDepth) ?
-        input_data[nip*inputDHW+ d*inputHW + h*inputWidth + w] : 0;
-
-      count++;
-      if (count < line_seg_len) {
-        dst++;
-        w_out++;
-        if (w_out == outputWidth) {
-          w_out = 0;
-          h_out++;
-          if (h_out == outputHeight) {
-            h_out = 0;
-            d_out++;
-            if (d_out == outputDepth) {
-              d_out = 0;
-              k++;
-              if(k == kW) {
-                k = 0;
-                j++;
-                if(j == kH) {
-                  j = 0;
-                  i++;
-                  if(i == kT) {
-                    i = 0;
-                    nip++;
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  });
-}
-
-static void THNN_(VolumetricConvolutionMM_updateOutput_frame)(
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,
-          THTensor *finput,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH,
-          int64_t nInputPlane,
-          int64_t inputDepth,
-          int64_t inputWidth,
-          int64_t inputHeight,
-          int64_t nOutputPlane,
-          int64_t outputDepth,
-          int64_t outputWidth,
-          int64_t outputHeight)
-{
-  int64_t i;
-  THTensor *output2d;
-
-  THNN_(unfolded_copy_vol)(
-    finput, input,
-    kT, kW, kH,
-    dT, dW, dH,
-    pT, pW, pH,
-    nInputPlane,
-    inputDepth, inputWidth, inputHeight,
-    outputDepth, outputWidth, outputHeight
-  );
-
-  output2d = THTensor_(newWithStorage2d)(
-    THTensor_getStoragePtr(output), output->storage_offset(), nOutputPlane, -1,
-    outputDepth*outputHeight*outputWidth, -1
-  );
-
-  if (bias) {
-      for (i = 0; i < nOutputPlane; i++)
-      {
-        THVector_(fill)(
-          THStorage_(data)(THTensor_getStoragePtr(output))+output->storage_offset()+output->stride(0)*i,
-          THTensor_(get1d)(bias, i),
-          outputDepth*outputHeight*outputWidth
-        );
-      }
-  } else {
-    THTensor_(zero)(output);
-  }
-
-  THTensor_(addmm)(output2d, 1, output2d, 1, weight, finput);
-
-  c10::raw::intrusive_ptr::decref(output2d);
-}
-
-void THNN_(VolumetricConvolutionMM_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,
-          THTensor *finput,
-          THTensor *fgradInput, // unused
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH)
-{
-  int dimf = 0;
-  int dimt = 1;
-  int dimh = 2;
-  int dimw = 3;
-
-  int64_t nInputPlane;
-  int64_t inputDepth;
-  int64_t inputHeight;
-  int64_t inputWidth;
-  int64_t nOutputPlane;
-  int64_t outputDepth;
-  int64_t outputHeight;
-  int64_t outputWidth;
-
-  THNN_(VolumetricConvolutionMM_shapeCheck)(
-        state, input, NULL, weight, bias,
-        kT, kW, kH, dT, dW, dH, pT, pW, pH, 0);
-  input = THTensor_(newContiguous)(input);
-
-  if (input->dim() == 5)
-  {
-    dimf++;
-    dimt++;
-    dimh++;
-    dimw++;
-  }
-
-  nInputPlane = input->size(dimf);
-  inputDepth = input->size(dimt);
-  inputHeight  = input->size(dimh);
-  inputWidth   = input->size(dimw);
-  nOutputPlane = weight->size(0);
-  outputDepth  = (inputDepth + 2*pT - kT) / dT + 1;
-  outputHeight = (inputHeight + 2*pH - kH) / dH + 1;
-  outputWidth  = (inputWidth + 2*pW - kW) / dW + 1;
-
-  weight = THNN_(newViewWeight)(weight);
-
-  if (input->dim() == 4)
-  {
-    THTensor_(resize2d)(finput, kT*kW*kH*nInputPlane, outputDepth*outputHeight*outputWidth);
-    THTensor_(resize4d)(output, nOutputPlane, outputDepth, outputHeight, outputWidth);
-
-    THNN_(VolumetricConvolutionMM_updateOutput_frame)(
-      input, output, weight, bias, finput,
-      kT, kW, kH,
-      dT, dW, dH,
-      pT, pW, pH,
-      nInputPlane, inputDepth, inputWidth, inputHeight,
-      nOutputPlane, outputDepth, outputWidth, outputHeight
-    );
-  }
-  else
-  {
-    int64_t T = input->size(0);
-
-    THTensor_(resize3d)(finput, T, kT*kW*kH*nInputPlane, outputDepth*outputHeight*outputWidth);
-    THTensor_(resize5d)(output, T, nOutputPlane, outputDepth, outputHeight, outputWidth);
-    at::parallel_for(0, T, CONV3D_OMP_THRESHOLD, [&](int64_t start, int64_t end) {
-      for (auto t = start; t < end; t++)
-      {
-        THTensor *input_t = THTensor_(newSelect)(input, 0, t);
-        THTensor *output_t = THTensor_(newSelect)(output, 0, t);
-        THTensor *finput_t = THTensor_(newSelect)(finput, 0, t);
-
-        THNN_(VolumetricConvolutionMM_updateOutput_frame)(
-          input_t, output_t, weight, bias, finput_t,
-          kT, kW, kH,
-          dT, dW, dH,
-          pT, pW, pH,
-          nInputPlane, inputDepth, inputWidth, inputHeight,
-          nOutputPlane, outputDepth, outputWidth, outputHeight
-        );
-
-        c10::raw::intrusive_ptr::decref(input_t);
-        c10::raw::intrusive_ptr::decref(output_t);
-        c10::raw::intrusive_ptr::decref(finput_t);
-      }
-    });
-  }
-
-  c10::raw::intrusive_ptr::decref(input);
-  c10::raw::intrusive_ptr::decref(weight);
-}
 
 static void THNN_(VolumetricConvolutionMM_updateGradInput_frame)(
           THTensor *gradInput,
@@ -542,7 +550,7 @@ static void THNN_(VolumetricConvolutionMM_updateGradInput_frame)(
     gradOutput->size(1)*gradOutput->size(2)*gradOutput->size(3), -1
   );
 
-  THTensor_(addmm)(fgradInput, 0, fgradInput, 1, weight, gradOutput2d);
+  THTensor_(addmm)(fgradInput, fgradInput, weight, gradOutput2d, 0, 1);
   c10::raw::intrusive_ptr::decref(gradOutput2d);
 
   THTensor_(zero)(gradInput);
@@ -648,7 +656,7 @@ static void THNN_(VolumetricConvolutionMM_accGradParameters_frame)(
   if (gradWeight){
     THTensor *tfinput = THTensor_(new)();
     THTensor_(transpose)(tfinput, finput, 0, 1);
-    THTensor_(addmm)(gradWeight, 1, gradWeight, scale, gradOutput2d, tfinput);
+    THTensor_(addmm)(gradWeight, gradWeight, gradOutput2d, tfinput, 1, scale);
     c10::raw::intrusive_ptr::decref(tfinput);
   }
 
@@ -727,4 +735,5 @@ void THNN_(VolumetricConvolutionMM_accGradParameters)(
   }
 }
 
+#endif
 #endif

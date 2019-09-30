@@ -110,7 +110,35 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
+template <>
+template <class T>
+bool BooleanMaskOpGradient<CPUContext>::DoRunWithType() {
+  const auto& mask = Input(0);
+  const auto& dY = Input(1);
+  auto* dX = Output(0);
+
+  const int data_length_before_mask = mask.size(0);
+
+  dX->Resize(data_length_before_mask);
+
+  // TODO: we should support any type, not just float
+  T* dXdata = dX->template mutable_data<T>();
+  const T* dYdata = dY.template data<T>();
+  const bool* mask_data = mask.template data<bool>();
+
+  int ind = 0;
+
+  for (int i = 0; i < data_length_before_mask; i++) {
+    dXdata[i] = mask_data[i] ? dYdata[ind++] : 0;
+  }
+
+  return true;
+}
+
 REGISTER_CPU_OPERATOR(BooleanMask, BooleanMaskOp<CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    BooleanMaskGradient,
+    BooleanMaskOpGradient<CPUContext>);
 REGISTER_CPU_OPERATOR(BooleanMaskLengths, BooleanMaskLengthsOp<CPUContext>);
 
 OPERATOR_SCHEMA(BooleanMask)
@@ -164,9 +192,18 @@ masked_indices: [0 3 4]
 
 )DOC")
     .Input(0, "data", "(*Tensor*): 1D input tensor")
-    .Input(1, "mask", "(*Tensor`<bool>`*): tensor of bools which determines the input elements that will be left in the `masked_data` output tensor; same shape as `data`")
-    .Output(0, "masked_data", "(*Tensor*): 1D tensor of same type as `data` input that contains the masked input tensor")
-    .Output(1, "masked_indices", "(*Tensor`<int>`*): 1D tensor of indices of the True elements in the `mask` tensor");
+    .Input(
+        1,
+        "mask",
+        "(*Tensor`<bool>`*): tensor of bools which determines the input elements that will be left in the `masked_data` output tensor; same shape as `data`")
+    .Output(
+        0,
+        "masked_data",
+        "(*Tensor*): 1D tensor of same type as `data` input that contains the masked input tensor")
+    .Output(
+        1,
+        "masked_indices",
+        "(*Tensor`<int>`*): 1D tensor of indices of the True elements in the `mask` tensor");
 
 OPERATOR_SCHEMA(BooleanMaskLengths)
     .NumInputs(2)
@@ -218,12 +255,34 @@ masked_lengths: [0 2 2]
 </details>
 
 )DOC")
-    .Input(0, "lengths", "(*Tensor`<int>`*): input tensor containing segment lengths")
+    .Input(
+        0,
+        "lengths",
+        "(*Tensor`<int>`*): input tensor containing segment lengths")
     .Input(1, "mask", "(*Tensor`<bool>`*): A 1D bool tensor of values to keep.")
-    .Output(0, "masked_lengths", "(*Tensor`<int>`*): 1D tensor of same type as inputs that contains the sequence");
+    .Output(
+        0,
+        "masked_lengths",
+        "(*Tensor`<int>`*): 1D tensor of same type as inputs that contains the sequence");
 
-NO_GRADIENT(BooleanMask)
+GRADIENT_OPERATOR_SCHEMA(BooleanMaskGradient).NumInputs(2).NumOutputs(1);
+
+namespace {
+class GetBooleanMaskGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "BooleanMaskGradient",
+        "",
+        vector<string>{I(1), GO(0)},
+        vector<string>{GI(0)});
+  }
+};
+
+REGISTER_GRADIENT(BooleanMask, GetBooleanMaskGradient);
 NO_GRADIENT(BooleanMaskLengths);
+
+} // namespace
 
 const float minf = -1.0f * std::numeric_limits<float>::infinity();
 

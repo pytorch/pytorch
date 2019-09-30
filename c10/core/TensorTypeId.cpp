@@ -1,14 +1,52 @@
 #include "c10/core/TensorTypeId.h"
-#include "c10/util/string_utils.h"
 
 namespace c10 {
 
-std::ostream& operator<<(std::ostream& str, c10::TensorTypeId rhs) {
-  return str << c10::to_string(rhs.underlyingId());
+const char* toString(TensorTypeId t) {
+  switch (t) {
+    case TensorTypeId::UndefinedTensorId:
+      return "UndefinedTensorId";
+    case TensorTypeId::CPUTensorId:
+      return "CPUTensorId";
+    case TensorTypeId::CUDATensorId:
+      return "CUDATensorId";
+    case TensorTypeId::SparseCPUTensorId:
+      return "SparseCPUTensorId";
+    case TensorTypeId::SparseCUDATensorId:
+      return "SparseCUDATensorId";
+    case TensorTypeId::MKLDNNTensorId:
+      return "MKLDNNTensorId";
+    case TensorTypeId::OpenGLTensorId:
+      return "OpenGLTensorId";
+    case TensorTypeId::OpenCLTensorId:
+      return "OpenCLTensorId";
+    case TensorTypeId::IDEEPTensorId:
+      return "IDEEPTensorId";
+    case TensorTypeId::HIPTensorId:
+      return "HIPTensorId";
+    case TensorTypeId::SparseHIPTensorId:
+      return "SparseHIPTensorId";
+    case TensorTypeId::MSNPUTensorId:
+      return "MSNPUTensorId";
+    case TensorTypeId::XLATensorId:
+      return "XLATensorId";
+    case TensorTypeId::MkldnnCPUTensorId:
+      return "MkldnnCPUTensorId";
+    case TensorTypeId::QuantizedCPUTensorId:
+      return "QuantizedCPUTensorId";
+    case TensorTypeId::ComplexCPUTensorId:
+      return "ComplexCPUTensorId";
+    case TensorTypeId::ComplexCUDATensorId:
+      return "ComplexCUDATensorId";
+    case TensorTypeId::VariableTensorId:
+      return "VariableTensorId";
+    default:
+      return "UNKNOWN_TENSOR_TYPE_ID";
+  }
 }
 
-std::string toString(TensorTypeId id) {
-  return c10::to_string(id.underlyingId());
+std::ostream& operator<<(std::ostream& str, TensorTypeId rhs) {
+  return str << toString(rhs);
 }
 
 } // namespace c10

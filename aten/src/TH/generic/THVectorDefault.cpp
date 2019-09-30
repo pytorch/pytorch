@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "TH/generic/THVectorDefault.cpp"
 #else
 
-#include <TH/THRandom.h>
+#include <ATen/Context.h>
 
 void THVector_(fill_DEFAULT)(scalar_t *x, const scalar_t c, const ptrdiff_t n) {
   ptrdiff_t i = 0;
@@ -152,17 +152,22 @@ static void THVector_(interleaved_normal_fill_16)(scalar_t *data,
 
 void THVector_(normal_fill_DEFAULT)(scalar_t *data,
                                     int64_t size,
-                                    THGenerator *generator,
+                                    at::Generator *generator,
                                     const scalar_t mean,
                                     const scalar_t stddev)
 {
   THAssert(size >= 16 && "Size must be >= 16 for normal fill");
-
+  auto gen = at::get_generator_or_default<at::CPUGenerator>(generator, at::detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
+  std::lock_guard<std::mutex> lock(gen->mutex_);
+  
   for (int64_t i = 0; i < size; ++i) {
 #ifdef TH_REAL_IS_FLOAT
-    data[i] = THRandom_uniformFloat(generator, 0, 1);
+    at::uniform_real_distribution<float> uniform(0, 1);
+    data[i] = uniform(gen);
 #else
-    data[i] = THRandom_uniform(generator, 0, 1);
+    at::uniform_real_distribution<double> uniform(0, 1);
+    data[i] = uniform(gen);
 #endif
   }
 
@@ -175,9 +180,11 @@ void THVector_(normal_fill_DEFAULT)(scalar_t *data,
     data = data + size - 16;
     for (int64_t i = 0; i < 16; ++i) {
 #ifdef TH_REAL_IS_FLOAT
-      data[i] = THRandom_uniformFloat(generator, 0, 1);
+    at::uniform_real_distribution<float> uniform(0, 1);
+    data[i] = uniform(gen);
 #else
-      data[i] = THRandom_uniform(generator, 0, 1);
+    at::uniform_real_distribution<double> uniform(0, 1);
+    data[i] = uniform(gen);
 #endif
     }
     THVector_(interleaved_normal_fill_16)(data, mean, stddev);
@@ -236,19 +243,13 @@ VECTOR_IMPLEMENT_FUNCTION(abs,)
 #define TH_MATH_NAME(fn) fn
 #endif
 
-VECTOR_IMPLEMENT_FUNCTION(log,TH_MATH_NAME(log))
-VECTOR_IMPLEMENT_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
-VECTOR_IMPLEMENT_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
-VECTOR_IMPLEMENT_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
 VECTOR_IMPLEMENT_FUNCTION(log10,TH_MATH_NAME(log10))
 VECTOR_IMPLEMENT_FUNCTION(log1p,TH_MATH_NAME(log1p))
 VECTOR_IMPLEMENT_FUNCTION(log2,TH_MATH_NAME(log2))
 VECTOR_IMPLEMENT_FUNCTION(sigmoid_DEFAULT,TH_MATH_NAME(TH_sigmoid))
 VECTOR_IMPLEMENT_FUNCTION(exp,TH_MATH_NAME(exp))
-VECTOR_IMPLEMENT_FUNCTION(expm1,TH_MATH_NAME(expm1))
 VECTOR_IMPLEMENT_FUNCTION(erf,TH_MATH_NAME(erf))
 VECTOR_IMPLEMENT_FUNCTION(erfc,TH_MATH_NAME(erfc))
-VECTOR_IMPLEMENT_FUNCTION(erfinv, TH_erfinv)
 VECTOR_IMPLEMENT_FUNCTION(cos,TH_MATH_NAME(cos))
 VECTOR_IMPLEMENT_FUNCTION(acos,TH_MATH_NAME(acos))
 VECTOR_IMPLEMENT_FUNCTION(cosh,TH_MATH_NAME(cosh))

@@ -29,10 +29,22 @@ done
 # See if we actually were successful
 systemctl list-units --all | cat
 
+# For good luck, try even harder to kill apt-get
+sudo pkill apt-get || true
+
+# For even better luck, purge unattended-upgrades
 sudo apt-get purge -y unattended-upgrades
 
 cat /etc/apt/sources.list
 
-# Bail out early if we detect apt/dpkg is stuck
-ps auxfww | (! grep '[a]pt')
-ps auxfww | (! grep '[d]pkg')
+# For the bestest luck, kill again now
+sudo pkill apt || true
+sudo pkill dpkg || true
+
+# Try to detect if apt/dpkg is stuck
+if ps auxfww | grep '[a]pt'; then
+  echo "WARNING: There are leftover apt processes; subsequent apt update will likely fail"
+fi
+if ps auxfww | grep '[d]pkg'; then
+  echo "WARNING: There are leftover dpkg processes; subsequent apt update will likely fail"
+fi

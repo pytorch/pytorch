@@ -29,7 +29,8 @@ from .gen_autograd_functions import uses_single_grad
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_'
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward',
+    'set_data', 'data', 'is_leaf', 'output_nr', '_version'
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -78,6 +79,8 @@ DONT_REQUIRE_DERIVATIVE = {
     '_sobol_engine_initialize_state_',
     # This is an unsafe method that is meant to be out of reach of autograd.
     '_coalesced_',
+    # Quantize functions should not record gradients
+    'quantize_per_tensor', 'quantize_per_channel'
 }
 
 # NOTE [ Invariant: TensorImpl and Storage Pointer Equality ]
@@ -136,18 +139,39 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 # The following list contains functions that we don't enforce the invariant on.
 DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
     # These functions are expected to change impl or storage of input tensors
-    '_th_set_', '_cudnn_rnn_flatten_weight',
+    'set_', '_cudnn_rnn_flatten_weight',
 }
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
+${return_type} ${api_name}(${type_method_formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} VariableType::${method_prefix_derived}${api_name}(${type_method_formals}) const {
+${return_type} ${api_name}(${type_method_formals}) {
   ${type_definition_body}
 }
+""")
+
+LEGACY_WRAPPER_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .impl_unboxedOnlyATenKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
+
+UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .impl_unboxedOnlyC10Kernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
+
+WRAPPER_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .kernel<${return_type} (${formal_types})>(TensorTypeId::VariableTensorId, &VariableType::${api_name})
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -167,17 +191,20 @@ if (compute_requires_grad( ${args_with_derivatives} )) {
 """)
 
 ASSIGN_GRAD_FN = CodeTemplate("""\
-grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteFunction);
+grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
-CALL_VIA_TYPE = CodeTemplate("""\
-TypeDefault::${method_prefix_derived}${api_name}(${type_method_args})""")
+CALL_DEFAULT = CodeTemplate("""\
+TypeDefault::${api_name}(${type_method_args})""")
 
-CALL_VIA_DERIVED = CodeTemplate("""\
-baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
+CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
+at::${api_name}(${unpacked_args})""")
 
-# If the `baseType` operation has return values, we use the `tmp` variable to hold the
+CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
+self_.${api_name}(${unpacked_method_args})""")
+
+# If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
 # `at::AutoNonVariableTypeMode` guard block.
 DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
@@ -208,7 +235,7 @@ if (${cond}) {
 """)
 
 RECORD_FUNCTION = CodeTemplate("""\
-RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Function::peek_at_next_sequence_nr());
+RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
 """)
 
 SELECT = CodeTemplate("""\
@@ -273,7 +300,7 @@ def find_factory_functions(declarations):
 
 def should_trace(declaration):
     # Operations involving Storage or Type are not traceable at the moment
-    if any(arg['simple_type'] in {'Storage', 'Type'} for arg in declaration['arguments']):
+    if any(arg['simple_type'] in {'Storage', 'Type', 'ConstQuantizerPtr'} for arg in declaration['arguments']):
         return False
     # We can't trace functions which don't have any Tensor or TensorList returns
     if 'Tensor' not in declaration['return_type']:
@@ -400,6 +427,8 @@ def format_prerecord_trace(declaration):
 
 
 def format_trace(declaration):
+    if not should_trace(declaration):
+        return ('', '')
     return (format_prerecord_trace(declaration), format_postrecord_trace(declaration))
 
 
@@ -439,30 +468,35 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
 
     type_declarations = []
     type_definitions = []
+    wrapper_registrations = []
 
     for declaration in aten_declarations:
-        # Factory methods usually do not appear in `VariableType` at all, since they
-        # don't dispatch via `Type`; except in the case where the implementation is 'abstract'
-        # in which case they do!
-        if declaration['is_factory_method']:
-            continue
+        formal_types = [arg['type'] for arg in declaration['arguments']]
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
-            type_definitions.append(emit_method_definition(declaration))
+            body = emit_body(declaration)
+            type_definitions.append(METHOD_DEFINITION.substitute(
+                declaration, type_definition_body=body))
+        if declaration['use_c10_dispatcher'] == 'full':
+            wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+                declaration, formal_types=formal_types))
+        elif declaration['use_c10_dispatcher'] == 'unboxed_only':
+            wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                declaration, formal_types=formal_types))
+        else:
+            assert declaration['use_c10_dispatcher'] == 'no'
+            wrapper_registrations.append(LEGACY_WRAPPER_REGISTRATION.substitute(
+                declaration, formal_types=formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,
         'type_derived_method_definitions': type_definitions,
+        'wrapper_registrations': wrapper_registrations,
     }
     if header:
         write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
     else:
         write(out, 'VariableType%s.cpp' % suffix, VARIABLE_TYPE_CPP, env)
-
-
-def emit_method_definition(declaration):
-    body = emit_body(declaration)
-    return METHOD_DEFINITION.substitute(declaration, type_definition_body=body)
 
 
 def emit_body(declaration):
@@ -484,12 +518,6 @@ def emit_body(declaration):
         if 'TensorOptions' in arg['type']:
             return False
         if 'Tensor' not in arg['type']:
-            return False
-        if arg['dynamic_type'] in {'IndexTensor', 'ByteTensor', 'BoolTensor'}:
-            # These are necessary for legacy code and should be
-            # used by legacy code only!
-            assert declaration['mode'] == 'TH' or declaration['mode'] == 'NN', \
-                "IndexTensor and BoolTensor are restricted to legacy TH/THNN functions only."
             return False
         if arg['name'] in declaration.get('non_differentiable_arg_names', []):
             return False
@@ -515,6 +543,8 @@ def emit_body(declaration):
     if declaration['output_differentiability'] is not None:
         differentiable_outputs = []
         output_differentiability = declaration['output_differentiability']
+        if False in output_differentiability and inplace:
+            raise RuntimeError("output_differentiability=False for inplace operation (version_counter won't get updated)")
         for differentiable, output in zip(output_differentiability, returns):
             if differentiable:
                 differentiable_outputs.append(output)
@@ -580,7 +610,7 @@ def emit_body(declaration):
                 if arg['name'] == derivative_var_name:
                     break
             else:
-                assert False
+                raise AssertionError()
 
             return 'grad_fn->should_compute_output({})'.format(edge_off)
 
@@ -594,20 +624,20 @@ def emit_body(declaration):
     def setup_derivative(differentiable_inputs):
 
         env = {}
-        env['args_with_derivatives'] = reference_args(args_with_derivatives)
+        env['args_with_derivatives'] = [arg['name'] for arg in args_with_derivatives]
         env['op'] = func['op'] if func is not None else 'NotImplemented'
         env['op_ctor'] = '' if func is not None else '"{}"'.format(declaration['api_name'])
 
         if is_out_fn:
             setup = ['throw_error_out_requires_grad("{}");'.format(base_name)]
             body = []
-            body.append(DECLARE_GRAD_FN.substitute(op='Function'))
+            body.append(DECLARE_GRAD_FN.substitute(op='Node'))
             body.append(SETUP_DERIVATIVE.substitute(
                 setup=setup,
-                args_with_derivatives=reference_args(differentiable_inputs)))
+                args_with_derivatives=[arg['name'] for arg in differentiable_inputs]))
             body.append(SETUP_DERIVATIVE.substitute(
                 setup=setup,
-                args_with_derivatives=reference_args(differentiable_outputs)))
+                args_with_derivatives=[arg['name'] for arg in differentiable_outputs]))
             return body
 
         setup = []
@@ -652,7 +682,10 @@ def emit_body(declaration):
                     assert not is_output
                 if inplace and is_output:
                     var = 'self'
-                expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
+                    is_inplace_view = "as_variable_ref({}).is_view()".format(var)
+                    expr = 'SavedVariable({}, {}, {})'.format(var, str(is_output).lower(), is_inplace_view)
+                else:
+                    expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
             elif arg['type'] == 'TensorList':
                 name += '_'
                 expr = 'make_saved_variable_list({})'.format(arg['name'])
@@ -666,20 +699,6 @@ def emit_body(declaration):
                 stmts.append('  grad_fn->{} = {};'.format(name, expr))
                 stmts.append('}')
         return stmts
-
-    def reference_args(args):
-        res = []
-        for arg in args:
-            if arg['type'] == 'SparseTensorRef':
-                res.append('{}.tref'.format(arg['name']))
-            else:
-                res.append(arg['name'])
-        return res
-
-    def emit_record_trace(env):
-        if not should_trace(declaration):
-            return ('', '')
-        return format_trace(declaration)
 
     def declare_returned_variables():
         if modifies_arguments:
@@ -745,7 +764,7 @@ def emit_body(declaration):
                 extra_wrapping_stmts.append(stmt)
             return call, extra_wrapping_stmts
         else:
-            return 'as_variable({})'.format(call), []
+            return 'as_variable(std::move({}))'.format(call), []
 
     def enforce_same_tensorimpl_and_storage(env, call):
         save_ptrs_stmts = []
@@ -774,12 +793,17 @@ def emit_body(declaration):
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
         if strategy == 'use_derived':
-            # We only care about adding `at::AutoNonVariableTypeMode` guard for `baseType` dispatch
+            # We only care about adding `at::AutoNonVariableTypeMode` guard for non-variable dispatch
             # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
             # the baseType operations still dispatch to non-Variable type, even if the arguments passed
             # in are now Variables.
             # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
-            base_type_call = CALL_VIA_DERIVED.substitute(combined)
+            if 'namespace' in declaration['method_of']:
+                base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(combined)
+            else:
+                unpacked_method_args = combined['unpacked_args'][1:]
+                base_type_call = CALL_DISPATCH_VIA_METHOD.substitute(
+                    combined, unpacked_method_args=unpacked_method_args)
             if not modifies_arguments and not returns_void:
                 rhs_value, extra_wrapping_stmts = wrap_output('tmp')
                 call = DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
@@ -790,7 +814,7 @@ def emit_body(declaration):
                 call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)
         else:
-            call = CALL_VIA_TYPE.substitute(declaration)
+            call = CALL_DEFAULT.substitute(declaration)
             if not modifies_arguments and not returns_void:
                 call = '{} = {}'.format(tie_return_values(), call)
             call = call + ';'
@@ -873,7 +897,7 @@ def emit_body(declaration):
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables())
 
-    pre_record_trace, post_record_trace = emit_record_trace(env)
+    pre_record_trace, post_record_trace = format_trace(declaration)
 
     body.append(pre_record_trace)
     body.append(emit_call(env))
@@ -908,7 +932,7 @@ def unpack_args(env, declaration):
         dynamic_type = arg['dynamic_type']
         if 'TensorOptions' not in dynamic_type:
             is_nullable = arg.get('is_nullable', False)
-            ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensorRef']
+            ref = (not is_nullable) and dynamic_type not in ['TensorList']
             suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
 
             body.append(UNPACK_TENSOR.substitute(

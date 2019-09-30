@@ -11,7 +11,7 @@ if (BUILD_TEST)
       caffe2_module_test_dynamic
       ${CMAKE_CURRENT_SOURCE_DIR}/module_test_dynamic.cc)
 
-  target_link_libraries(caffe2_module_test_dynamic caffe2_library)
+  target_link_libraries(caffe2_module_test_dynamic torch_library)
   install(TARGETS caffe2_module_test_dynamic DESTINATION lib)
   if (MSVC AND BUILD_SHARED_LIBS)
     install(FILES $<TARGET_PDB_FILE:caffe2_module_test_dynamic> DESTINATION lib OPTIONAL)

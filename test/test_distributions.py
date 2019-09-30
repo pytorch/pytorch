@@ -651,6 +651,7 @@ BAD_EXAMPLES = [
 
 class TestDistributions(TestCase):
     _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
 
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
@@ -1781,6 +1782,11 @@ class TestDistributions(TestCase):
         multivariate_normal_log_prob_gradcheck(mean, None, None, scale_tril)
         multivariate_normal_log_prob_gradcheck(mean_no_batch, None, None, scale_tril_batched)
 
+    def test_multivariate_normal_stable_with_precision_matrix(self):
+        x = torch.randn(10)
+        P = torch.exp(-(x - x.unsqueeze(-1)) ** 2)  # RBF kernel
+        MultivariateNormal(x.new_zeros(10), precision_matrix=P)
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multivariate_normal_log_prob(self):
         mean = torch.randn(3, requires_grad=True)
@@ -2901,7 +2907,8 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(halfcauchy.sample().size(), torch.Size())
         self.assertEqual(halfcauchy.sample(torch.Size((3, 2))).size(),
                          torch.Size((3, 2)))
-        self.assertRaises(ValueError, halfcauchy.log_prob, self.scalar_sample)
+        self.assertEqual(halfcauchy.log_prob(self.scalar_sample).size(),
+                         torch.Size())
         self.assertEqual(halfcauchy.log_prob(self.tensor_sample_1).size(),
                          torch.Size((3, 2)))
         self.assertEqual(halfcauchy.log_prob(self.tensor_sample_2).size(),
@@ -2939,7 +2946,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(gamma._event_shape, torch.Size())
         self.assertEqual(gamma.sample().size(), torch.Size())
         self.assertEqual(gamma.sample((3, 2)).size(), torch.Size((3, 2)))
-        self.assertRaises(ValueError, gamma.log_prob, self.scalar_sample)
+        self.assertEqual(gamma.log_prob(self.scalar_sample).size(), torch.Size())
         self.assertEqual(gamma.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(gamma.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
@@ -2959,7 +2966,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(chi2._event_shape, torch.Size())
         self.assertEqual(chi2.sample().size(), torch.Size())
         self.assertEqual(chi2.sample((3, 2)).size(), torch.Size((3, 2)))
-        self.assertRaises(ValueError, chi2.log_prob, self.scalar_sample)
+        self.assertEqual(chi2.log_prob(self.scalar_sample).size(), torch.Size())
         self.assertEqual(chi2.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(chi2.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
@@ -3463,7 +3470,7 @@ class TestKL(TestCase):
 
 
 class TestConstraints(TestCase):
-    def test_params_contains(self):
+    def test_params_constraints(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
@@ -3486,7 +3493,7 @@ class TestConstraints(TestCase):
                         Dist.__name__, i + 1, len(params), name, value)
                     self.assertTrue(constraint.check(value).all(), msg=message)
 
-    def test_support_contains(self):
+    def test_support_constraints(self):
         for Dist, params in EXAMPLES:
             self.assertIsInstance(Dist.support, Constraint)
             for i, param in enumerate(params):

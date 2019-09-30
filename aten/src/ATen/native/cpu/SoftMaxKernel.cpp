@@ -65,19 +65,25 @@ inline void _vec_log_softmax_lastdim(
           }
           // See [Note AVX-SSE transitions] for why this should call the
           // vectorized version (aside from perf improvements).
-          vec256::map2(
-              [](Vec x, Vec y) { return x.log() + y; },
+          vec256::map(
+              [](Vec x) { return x.log(); },
               tmp_sum_scalar,
               tmp_sum_scalar,
-              max_input_arr,
               loop_end);
           for (int64_t j = 0; j < loop_end; j++) {
             int64_t i = ii + j;
             scalar_t* input_data = input_data_base + i * dim_size;
             scalar_t* output_data = output_data_base + i * dim_size;
             scalar_t tmp_sum = tmp_sum_scalar[j];
+            scalar_t max_input = max_input_arr[j];
+            
+            // It's necessary to keep the order of the operations below.
+            // In some cases that input is large digits and the difference
+            // is small, if we compute `max_input` plus `tmp_sum` before,
+            // there would be a numerical problem. See an example in
+            // https://github.com/pytorch/pytorch/issues/11752#issuecomment-422883379
             vec256::map(
-                [tmp_sum](Vec x) { return x - Vec(tmp_sum); },
+                [tmp_sum, max_input](Vec x) { return x - Vec(max_input) - Vec(tmp_sum); },
                 output_data,
                 input_data,
                 dim_size);
@@ -185,8 +191,8 @@ struct vec_host_softmax_lastdim {
     int64_t dim_size = input.size(input.ndimension() - 1);
     for (int64_t i = 0; i < input.ndimension() - 1; ++i)
       outer_size *= input.size(i);
-    scalar_t* input_data_base = input.data<scalar_t>();
-    scalar_t* output_data_base = output.data<scalar_t>();
+    scalar_t* input_data_base = input.data_ptr<scalar_t>();
+    scalar_t* output_data_base = output.data_ptr<scalar_t>();
     if (LogSoftMax) {
       _vec_log_softmax_lastdim(
           input_data_base, output_data_base, outer_size, dim_size);
@@ -205,9 +211,9 @@ struct vec_host_softmax_backward_lastdim {
     int64_t dim_size = grad.size(grad.ndimension() - 1);
     for (int64_t i = 0; i < grad.ndimension() - 1; ++i)
       outer_size *= grad.size(i);
-    scalar_t* grad_input_data_base = grad_input.data<scalar_t>();
-    scalar_t* grad_data_base = grad.data<scalar_t>();
-    scalar_t* output_data_base = output.data<scalar_t>();
+    scalar_t* grad_input_data_base = grad_input.data_ptr<scalar_t>();
+    scalar_t* grad_data_base = grad.data_ptr<scalar_t>();
+    scalar_t* output_data_base = output.data_ptr<scalar_t>();
     _vec_host_softmax_backward_lastdim<scalar_t, LogSoftMax>(
         grad_input_data_base,
         grad_data_base,
@@ -226,10 +232,10 @@ static void softmax_lastdim_kernel_impl(Tensor& result, const Tensor& self) {
 static void log_softmax_lastdim_kernel_impl(
     Tensor& result,
     const Tensor& self) {
-  AT_DISPATCH_FLOATING_TYPES(
-      self.scalar_type(), "log_softmax_lastdim_kernel_impl", [&] {
-        vec_host_softmax_lastdim<scalar_t, true>::apply(result, self);
-      });
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      at::ScalarType::BFloat16, self.scalar_type(),
+      "log_softmax_lastdim_kernel_impl",
+      [&] { vec_host_softmax_lastdim<scalar_t, true>::apply(result, self); });
 }
 
 static void softmax_backward_lastdim_kernel_impl(
@@ -247,8 +253,9 @@ static void log_softmax_backward_lastdim_kernel_impl(
     Tensor& grad_input,
     const Tensor& grad,
     const Tensor& output) {
-  AT_DISPATCH_FLOATING_TYPES(
-      grad.scalar_type(), "log_softmax_backward_lastdim_kernel_impl", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      at::ScalarType::BFloat16, grad.scalar_type(),
+      "log_softmax_backward_lastdim_kernel_impl", [&] {
         vec_host_softmax_backward_lastdim<scalar_t, true>::apply(
             grad_input, grad, output);
       });

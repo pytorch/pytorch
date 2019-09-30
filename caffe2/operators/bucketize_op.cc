@@ -58,6 +58,12 @@ output = [[1, 2], [2, 1], [1, 2]]
         "output",
         "indices of bins given by boundaries to which each value"
         "in data belongs")
+    .TensorInferenceFunction([](const OperatorDef& /* def */,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(in);
+      out[0].set_data_type(TensorProto::INT32);
+      return out;
+    })
     .Arg("boundaries", "bucketization boundaries");
 
 NO_GRADIENT(BucketizeOp);

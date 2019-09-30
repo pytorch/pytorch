@@ -54,7 +54,7 @@ static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
 // Creates an array of size elements of type T, backed by pinned memory
 // wrapped in a Storage
 template<class T>
-static inline Storage pin_memory(int64_t size, Tensor dummy) {
+static inline Storage pin_memory(int64_t size) {
   auto* allocator = cuda::getPinnedMemoryAllocator();
   int64_t adjusted_size = size * sizeof(T);
   return Storage(

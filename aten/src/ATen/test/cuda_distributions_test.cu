@@ -125,3 +125,24 @@ TEST(DistributionsTest, TestPhiloxIncrementBigUniformTensor) {
   // expected uniforms will start from counter offset of 8
   assert_with_expected_uniforms(8);
 }
+
+TEST(DistributionsTest, TestPhiloxIncrementSmallMultinomialTensor) {
+  // Test Description:
+  //   Same concept as TestPhiloxIncrementSmallUniformTensor.
+  //   Multinomial increments offset by 4. Tests if uniform starts from the correct offset.
+
+  // if cuda not available, return
+  if (!at::cuda::is_available()) return;
+
+  // manual seed to 123
+  at::manual_seed(123);
+
+  // get some multinomial samples
+  // this will trigger torch.multinomial without replacement
+  // which increments philox offset by 4*num_samples times.
+  // num_samples in the following call is 4.
+  at::ones({10}, at::TensorOptions(at::kCUDA)).multinomial(4);
+
+  // expected uniforms will start from counter offset of 4*4
+  assert_with_expected_uniforms(16);
+}

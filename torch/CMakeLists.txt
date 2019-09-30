@@ -4,13 +4,17 @@
 if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
   project(torch CXX C)
-  find_package(Caffe2 REQUIRED)
+  find_package(torch REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
   set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endif()
 
 if (NOT BUILD_PYTHON)
   return()
+endif()
+
+if (USE_TBB)
+include_directories(${TBB_ROOT_DIR}/include)
 endif()
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -47,6 +51,8 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/Generator.cpp
     ${TORCH_SRC_DIR}/csrc/Layout.cpp
     ${TORCH_SRC_DIR}/csrc/MemoryFormat.cpp
+    ${TORCH_SRC_DIR}/csrc/python_dimname.cpp
+    ${TORCH_SRC_DIR}/csrc/QScheme.cpp
     ${TORCH_SRC_DIR}/csrc/Module.cpp
     ${TORCH_SRC_DIR}/csrc/PtrWrapper.cpp
     ${TORCH_SRC_DIR}/csrc/Size.cpp
@@ -68,7 +74,9 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_loop.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/peephole.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/constant_fold.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/scalar_type_analysis.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_arg_flatten.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_interpreter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_ir.cpp
@@ -78,6 +86,8 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/script/python_tree_views.cpp
     ${TORCH_SRC_DIR}/csrc/multiprocessing/init.cpp
     ${TORCH_SRC_DIR}/csrc/onnx/init.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/init.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp
     ${TORCH_SRC_DIR}/csrc/serialization.cpp
     ${TORCH_SRC_DIR}/csrc/tensor/python_tensor.cpp
     ${TORCH_SRC_DIR}/csrc/utils.cpp
@@ -91,10 +101,13 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/utils/tensor_layouts.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_list.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_memoryformats.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/tensor_qschemes.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_new.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tuple_parser.cpp
+    ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
+    ${JIT_TEST_SRCS}
     )
 
 set(TORCH_PYTHON_INCLUDE_DIRECTORIES
@@ -124,7 +137,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
-    caffe2_library
+    torch_library
     shm)
 
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
@@ -171,7 +184,6 @@ if (USE_CUDA)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${LIBNVTOOLSEXT})
     endif()
 
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES caffe2_gpu_library)
 endif()
 
 if (USE_CUDNN)
@@ -182,14 +194,8 @@ if (USE_CUDNN)
     # Basically, this is the case where $CUDA_HOME/lib64 has an old or
     # incompatible libcudnn.so, which we can inadvertently link to if
     # we're not careful.
-    list(INSERT 0 TORCH_PYTHON_LINK_LIBRARIES ${CUDNN_LIBRARY})
-    list(INSERT 0 TORCH_PYTHON_INCLUDE_DIRECTORIES ${CUDNN_INCLUDE_DIR})
-endif()
-
-if (USE_MIOPEN)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_MIOPEN)
-    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${MIOPEN_INCLUDE_DIR})
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${MIOPEN_LIBRARY})
+    list(INSERT 0 TORCH_PYTHON_LINK_LIBRARIES ${CUDNN_LIBRARY_PATH})
+    list(INSERT 0 TORCH_PYTHON_INCLUDE_DIRECTORIES ${CUDNN_INCLUDE_PATH})
 endif()
 
 if (USE_NUMPY)
@@ -207,7 +213,7 @@ if (USE_ROCM)
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
       ${GENERATED_THNN_CXX_CUDA}
       )
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES caffe2_hip_library)
+
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS
       USE_ROCM
       __HIP_PLATFORM_HCC__
@@ -215,15 +221,24 @@ if (USE_ROCM)
 endif()
 
 if (USE_DISTRIBUTED)
-    list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/distributed/Module.cpp)
-    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${TORCH_SRC_DIR}/lib/THD)
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES THD)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
-    if (NOT MSVC AND NOT APPLE)
+    if (NOT MSVC)
       list(APPEND TORCH_PYTHON_SRCS
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/comm.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/reducer.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/functions.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_functions.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_rpc_handler.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_context.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/types.cpp
         )
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
@@ -243,29 +258,109 @@ if (USE_NCCL)
     endif()
 endif()
 
-
-
-
-
-add_custom_target(torch_python_stubs DEPENDS "${TORCH_SRC_DIR}/__init__.pyi")
+# In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists
+# of type stub files to be omitted.
+# For comptability with older CMake versions, we omit it for now, but leave it as a comment in case comptability with the older
+# CMake versions is eventually dropped.
+# set(Modules
+#     __init__
+#     activation
+#     adaptive
+#     batchnorm
+#     container
+#     conv
+#     distance
+#     dropout
+#     fold
+#     instancenorm
+#     linear
+#     loss
+#     module
+#     normalization
+#     padding
+#     pixelshuffle
+#     pooling
+#     rnn
+#     sparse
+#     upsampling
+# )
+# list(TRANSFORM Modules PREPEND "${TORCH_SRC_DIR}/nn/modules/")
+# set(ModuleStubIn ${Modules})
+# set(ModuleStubOut ${Modules})
+# list(TRANSFORM ModuleStubIn APPEND ".pyi.in")
+# list(TRANSFORM ModuleStubOut APPEND ".pyi")
+set(ModulesStubIn
+    ${TORCH_SRC_DIR}/nn/modules/__init__.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/activation.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/adaptive.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/batchnorm.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/container.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/conv.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/distance.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/dropout.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/fold.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/flatten.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/instancenorm.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/linear.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/loss.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/module.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/normalization.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/padding.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/pixelshuffle.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/pooling.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/rnn.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/sparse.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/upsampling.pyi.in
+)
+set(ModulesStubOut
+    ${TORCH_SRC_DIR}/nn/modules/__init__.pyi
+    ${TORCH_SRC_DIR}/nn/modules/activation.pyi
+    ${TORCH_SRC_DIR}/nn/modules/adaptive.pyi
+    ${TORCH_SRC_DIR}/nn/modules/batchnorm.pyi
+    ${TORCH_SRC_DIR}/nn/modules/container.pyi
+    ${TORCH_SRC_DIR}/nn/modules/conv.pyi
+    ${TORCH_SRC_DIR}/nn/modules/distance.pyi
+    ${TORCH_SRC_DIR}/nn/modules/dropout.pyi
+    ${TORCH_SRC_DIR}/nn/modules/fold.pyi
+    ${TORCH_SRC_DIR}/nn/modules/instancenorm.pyi
+    ${TORCH_SRC_DIR}/nn/modules/linear.pyi
+    ${TORCH_SRC_DIR}/nn/modules/loss.pyi
+    ${TORCH_SRC_DIR}/nn/modules/module.pyi
+    ${TORCH_SRC_DIR}/nn/modules/normalization.pyi
+    ${TORCH_SRC_DIR}/nn/modules/padding.pyi
+    ${TORCH_SRC_DIR}/nn/modules/pixelshuffle.pyi
+    ${TORCH_SRC_DIR}/nn/modules/pooling.pyi
+    ${TORCH_SRC_DIR}/nn/modules/rnn.pyi
+    ${TORCH_SRC_DIR}/nn/modules/sparse.pyi
+    ${TORCH_SRC_DIR}/nn/modules/upsampling.pyi
+)
+add_custom_target(torch_python_stubs DEPENDS
+    "${TORCH_SRC_DIR}/__init__.pyi"
+    "${TORCH_SRC_DIR}/nn/functional.pyi"
+    ${ModuleStubOut}
+)
 # For Declarations.yaml dependency
 add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
 add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/__init__.pyi"
+    "${TORCH_SRC_DIR}/nn/functional.pyi"
+    ${ModuleStubOut}
     COMMAND
     "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TORCH_SRC_DIR}/__init__.pyi.in"
+    "${TORCH_SRC_DIR}/nn/functional.pyi.in"
+    ${ModuleStubIn}
+    "${TOOLS_PATH}/pyi/gen_pyi.py"
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
-    )
-
-
+)
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+add_dependencies(torch_python torch_python_stubs)
 
 # Required workaround for generated sources
 # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
@@ -277,8 +372,6 @@ set_source_files_properties(
     )
 
 target_compile_definitions(torch_python PUBLIC _THP_CORE)
-
-add_dependencies(torch_python torch_python_stubs)
 
 target_link_libraries(torch_python ${TORCH_PYTHON_LINK_LIBRARIES})
 

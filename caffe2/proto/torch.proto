@@ -21,6 +21,10 @@ message TensorDef {
   // device field stores the canonical device string, and it follows the
   // format below: `(cpu|cuda)[:<device-index>]`, e.g., 'cuda:0'
   optional string device = 7;
+
+  optional bool is_quantized = 8;
+  optional double scale = 9;
+  optional int64 zero_point = 10;
 }
 
 message AttributeDef {
@@ -72,6 +76,8 @@ message ModuleDef {
 
   // Used for retrieving module state from the pickled IValues table
   optional int64 get_state_attribute_id = 10;
+
+  optional RecordRef torchscript_debug_arena = 11;
 }
 
 // Represents all non-module code that the model depends on.
@@ -82,7 +88,7 @@ message LibDef {
 }
 
 enum ProtoVersion {
-  PROTO_VERSION_NEWEST = 0x0000000000000005;
+  PROTO_VERSION_NEWEST = 0x0000000000000006;
 }
 
 message ModelDef {

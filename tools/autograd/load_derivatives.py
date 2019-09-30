@@ -16,11 +16,15 @@ def load_derivatives(path, declarations):
         definitions = yaml.load(f, Loader=YamlLoader)
 
     declarations_by_signature = defaultdict(list)
+    declarations_by_schema = dict()
     for declaration in declarations:
         declarations_by_signature[get_signature(declaration)].append(declaration)
+        if declaration['schema_string']:
+            assert declaration['schema_string'] not in declarations_by_schema
+            declarations_by_schema[declaration['schema_string']] = declaration
 
     differentiability_infos = [
-        process_definition(defn, declarations_by_signature)
+        process_definition(defn, declarations_by_signature, declarations_by_schema)
         for defn in definitions]
 
     autograd_functions = [d['autograd_fn'] for d in differentiability_infos if d['autograd_fn'] is not None]
@@ -86,7 +90,7 @@ def create_derivative(arguments, returns, name, formula, var_names):
     }
 
 
-def process_definition(defn, declarations_by_signature):
+def process_definition(defn, declarations_by_signature, declarations_by_schema):
     """Processes a single entry `defn` in derivatives.yaml"""
 
     def canonical_declaration(declarations, name):
@@ -179,42 +183,36 @@ def process_definition(defn, declarations_by_signature):
         return zip(*xs)
 
     # NB: Removes 'name' from defn dictionary
-    defn_name, params = split_name_params(defn.pop('name'))
+    specification = defn.pop('name')
+    defn_name, params = split_name_params(specification)
     # NB: Removes 'output_differentiability' from defn dictionary
     #     `None` means all differentiable.
     output_differentiability = defn.pop('output_differentiability', None)
-    param_types, param_names = unzip([p.split(' ') for p in params if p != '*'])
 
-    if 'grad_input_mask' in param_names:
-        raise RuntimeError("Signature for {} has an argument named grad_input_mask, "
-                           "but this name would be shadowed by our codegen. "
-                           "Please use a different name in Declarations.cwrap."
-                           .format(defn_name))
-    signature = '{}({})'.format(defn_name, ', '.join(param_types))
+    schema_declaration = declarations_by_schema.get('aten::' + specification)
+    if not schema_declaration:
+        avail = [k.replace('aten::', '') for k, v in declarations_by_schema.items()
+                 if k.replace('aten::', '').startswith(defn_name + '(') and len(v) > 0]
+        raise RuntimeError('could not find ATen declaration for schema: {} '
+                           '.  Available signatures:\n{}'.format(specification, '\n'.join(avail)))
 
+    # now map this to the legacy schema; this isn't technically necessary, but we'd need some logic here
+    # to map in-place schemas to the out-of-place variants.
+    signature = get_signature(schema_declaration)
     declarations = declarations_by_signature[signature]
     if len(declarations) == 0:
         avail = [k for k, v in declarations_by_signature.items()
                  if k.startswith(defn_name + '(') and len(v) > 0]
-        raise RuntimeError('no ATen declaration found for: {}.  '
-                           'Available signatures: {}'.format(signature, ', '.join(avail)))
-    canonical = canonical_declaration(declarations, defn_name)
+        raise RuntimeError('could not find ATen declaration for legacy signature: {} '
+                           'corresponding to schema {}.  Please report a bug to PyTorch. '
+                           'Available signatures: {}'.format(signature, specification, ', '.join(avail)))
 
-    # TODO: Check the types line up
-    if len(param_names) != len(canonical['args']):
-        raise RuntimeError('Signature for {} has {} arguments ({}), but '
-                           'Declarations.yaml records {} arguments ({})'
-                           .format(defn_name,
-                                   len(param_names),
-                                   ', '.join(param_names),
-                                   len(canonical['args']),
-                                   ', '.join(canonical['args'])))
-    for i, (x, y) in enumerate(zip(param_names, canonical['args'])):
-        if x != y:
-            raise RuntimeError('Argument {} of {} has different names in '
-                               'derivatives.yaml ({}) and '
-                               'Declarations.yaml ({})'
-                               .format(i, defn_name, x, y))
+    canonical = canonical_declaration(declarations, defn_name)
+    if 'grad_input_mask' in (a['name'] for a in canonical['arguments']):
+        raise RuntimeError("Schema for {} has an argument named grad_input_mask, "
+                           "but this name would be shadowed by our codegen. "
+                           "Please use a different name in native_functions.yaml."
+                           .format(defn_name))
 
     derivatives, args_with_derivatives, non_differentiable_arg_names = set_up_derivatives(defn_name, defn, canonical)
     autograd_fn = None
@@ -307,6 +305,10 @@ def saved_variables(formula, args):
         (r'TensorGeometry\({}\)', {
             'suffix': '_geometry',
             'type': 'TensorGeometry',
+        }),
+        (r'{}.scalar_type\(\)', {
+            'suffix': '_scalar_type',
+            'type': 'ScalarType',
         }),
     ]
 

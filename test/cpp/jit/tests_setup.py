@@ -11,6 +11,7 @@ def testEvalModeForLoadedModule_setup():
             super(Model, self).__init__()
             self.dropout = torch.nn.Dropout(0.1)
 
+        @torch.jit.script_method
         def forward(self, x):
             x = self.dropout(x)
             return x

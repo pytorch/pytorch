@@ -415,7 +415,7 @@ SHOULD_NOT_DO_GRADIENT(GenerateProposalsCPP);
 } // namespace caffe2
 
 // clang-format off
-C10_REGISTER_CAFFE2_OPERATOR_CPU(
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     GenerateProposals,
     "_caffe2::GenerateProposals("
       "Tensor scores, "

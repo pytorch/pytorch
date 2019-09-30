@@ -29,6 +29,7 @@
 #define D_PINF ((double)+INFINITY)
 
 namespace {
+#ifdef __ANDROID__
 int case_insensitive_match(const char *s, const char *t)
 {
     while (*t && tolower(*s) == *t) {
@@ -69,6 +70,7 @@ double parse_inf_or_nan(const char *p, char **endptr)
     *endptr = (char *)s;
     return retval;
 }
+#endif
 
 }
 
@@ -82,7 +84,7 @@ C10_EXPORT double strtod_c(const char *nptr, char **endptr)
     static _locale_t loc = _create_locale(LC_ALL, "C");
     return _strtod_l(nptr, endptr, loc);
 }
-#else
+#elif defined(__ANDROID__)
 C10_EXPORT double strtod_c(const char *nptr, char **endptr)
 {
     char *fail_pos;
@@ -246,6 +248,12 @@ invalid_string:
     *endptr = (char*)nptr;
     errno = EINVAL;
     return -1.0;
+}
+#else
+C10_EXPORT double strtod_c(const char* nptr, char** endptr) {
+  /// NOLINTNEXTLINE(hicpp-signed-bitwise)
+  static locale_t loc = newlocale(LC_ALL_MASK, "C", nullptr);
+  return strtod_l(nptr, endptr, loc);
 }
 #endif
 

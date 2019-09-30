@@ -1,7 +1,7 @@
 #include <THCUNN/THCUNN.h>
 #include <THCUNN/common.h>
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCNumerics.cuh>
 #include <THC/THCApply.cuh>
 
 #include <thrust/fill.h>
