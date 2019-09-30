@@ -11,9 +11,6 @@
 namespace torch {
 namespace jit {
 
-using ClassResolver =
-    std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
-
 // See Python's pickletools.py for a detailed description of each of these codes
 enum class PickleOpCode : char {
   MARK = '(',
@@ -144,6 +141,10 @@ class Pickler {
   const std::vector<WriteableTensorData>& tensorData() {
     return tensor_data_;
   }
+
+  const std::vector<c10::ClassTypePtr>& memorizedClassTypes() {
+    return memorized_class_types_;
+  }
   void pushEmptyDict();
   void pushDict(const IValue& ivalue);
   void pushInt(int64_t value);
@@ -215,6 +216,9 @@ class Pickler {
   // Otherwise, it is possible that a raw address gets reused for another
   // object, and we will alias it to the old object at that address.
   std::vector<IValue> memoized_ivalues_;
+
+  // List of all the types that it wrote, inspect from the IValues it wrote.
+  std::vector<c10::ClassTypePtr> memorized_class_types_;
 
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT
