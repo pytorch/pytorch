@@ -23,7 +23,7 @@ const at::IValue& ScriptRemoteCall::retForkId() {
   return retForkId_;
 }
 
-Message ScriptRemoteCall::toMessage() {
+Message ScriptRemoteCall::toMessage() && {
   std::vector<IValue> ivalues;
   ScriptCall::toIValues(ivalues);
   ivalues.push_back(retRRefId_);

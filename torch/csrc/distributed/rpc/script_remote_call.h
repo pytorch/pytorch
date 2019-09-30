@@ -25,7 +25,7 @@ class TORCH_API ScriptRemoteCall final : public ScriptCall {
   const at::IValue& retRRefId();
   const at::IValue& retForkId();
 
-  Message toMessage() override;
+  Message toMessage() && override;
   static std::unique_ptr<ScriptRemoteCall> fromMessage(const Message& message);
 
  private:

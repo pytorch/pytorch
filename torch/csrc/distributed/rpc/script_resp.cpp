@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <c10/util/C++17.h>
 #include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/unpickler.h>
 
 namespace torch {
 namespace distributed {
@@ -19,7 +20,7 @@ const at::IValue& ScriptResp::value() {
   return value_;
 }
 
-Message ScriptResp::toMessage() {
+Message ScriptResp::toMessage() && {
   std::vector<torch::Tensor> tensor_table;
   auto payload = jit::pickle(value_, &tensor_table);
   ;

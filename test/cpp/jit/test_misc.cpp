@@ -905,7 +905,7 @@ void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](const Node* node) {
+          [](const Node* node) -> Operation {
             return [](Stack& stack) {
               push(stack, IValue());
               return 0;
@@ -914,7 +914,7 @@ void testNoneSchemaMatch() {
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](const Node* node) {
+          [](const Node* node) -> Operation {
             return [](Stack& stack) {
               IValue a = pop(stack);
               if (a.isNone()) {

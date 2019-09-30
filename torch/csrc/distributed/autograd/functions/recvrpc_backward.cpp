@@ -12,9 +12,9 @@ torch::autograd::variable_list RecvRpcBackward::apply(
   std::vector<Variable> outputGrads;
   for (const auto& grad : grads) {
     if (grad.defined()) {
-      outputGrads.push_back(grad);
+      outputGrads.emplace_back(grad);
     } else {
-      outputGrads.push_back(at::zeros_like(grad));
+      outputGrads.emplace_back(at::zeros_like(grad));
     }
   }
 

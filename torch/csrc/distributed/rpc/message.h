@@ -65,7 +65,7 @@ class TORCH_API Message final {
   void swap(Message& rhs) noexcept;
 
   // Destructively retrieves the payload.
-  std::vector<char>&& movePayload();
+  std::vector<char>&& movePayload() &&;
 
   const std::vector<char>& payload() const;
   std::vector<torch::Tensor>& tensors();

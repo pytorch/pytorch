@@ -64,7 +64,7 @@ std::shared_ptr<Operator> ScriptCall::fromIValues(
   }
 }
 
-Message ScriptCall::toMessage() {
+Message ScriptCall::toMessage() && {
   std::vector<IValue> ivalues;
   toIValues(ivalues);
 

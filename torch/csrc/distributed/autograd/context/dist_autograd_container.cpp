@@ -75,7 +75,6 @@ DistAutogradContext& DistAutogradContainer::getOrCreateContext(
                           std::forward_as_tuple(context_id),
                           std::forward_as_tuple(context_id))
                       .first->second;
-  current_context_id_ = context_id;
   return context;
 }
 

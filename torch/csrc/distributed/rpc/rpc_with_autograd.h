@@ -22,13 +22,13 @@ struct TORCH_API AutogradMetadata {
 // additional autograd information associated with that RPC.
 class TORCH_API RpcWithAutograd final : public RpcCommandBase {
  public:
+  // Used when we are sending an RPC over the wire.
   RpcWithAutograd(
       MessageType messageType,
       const AutogradMetadata& autogradMetadata,
       std::unique_ptr<RpcCommandBase> wrappedRpc);
 
-  // This variant is used when we already have a serialized message for
-  // wrappedRpc.
+  // Used when receiving an RPC over the wire.
   RpcWithAutograd(
       MessageType messageType,
       const AutogradMetadata& autogradMetadata,
@@ -36,8 +36,7 @@ class TORCH_API RpcWithAutograd final : public RpcCommandBase {
       MessageType wrappedMessageType,
       std::vector<torch::Tensor> tensors);
 
-  // Destructively creates a message to avoid copies.
-  Message toMessage() override;
+  Message toMessage() && override;
 
   static std::unique_ptr<RpcWithAutograd> fromMessage(const Message& message);
 
@@ -47,8 +46,7 @@ class TORCH_API RpcWithAutograd final : public RpcCommandBase {
 
   const AutogradMetadata& autogradMetadata() const;
 
-  // Destructively retrieves the wrapped rpc.
-  std::unique_ptr<RpcCommandBase> moveWrappedRpc();
+  RpcCommandBase& wrappedRpc();
 
   // Message type of the wrapped RPC.
   MessageType wrappedMessageType() const;

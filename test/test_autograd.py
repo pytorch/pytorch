@@ -20,7 +20,7 @@ from torch.autograd.profiler import (profile, format_time, EventList,
                                      FunctionEvent, record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
-                          suppress_warnings, skipIfRocm, slowTest,
+                          suppress_warnings, slowTest,
                           load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
@@ -35,7 +35,7 @@ from common_methods_invocations import (method_tests,
                                         mask_not_all_zeros,
                                         S)
 from common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
-                                onlyCUDA)
+                                onlyCUDA, dtypes, dtypesIfCUDA)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -832,21 +832,6 @@ class TestAutograd(TestCase):
         # Should not stack overflow
         scope()
 
-    @unittest.skipIf(not TEST_CUDA, "need CUDA memory stats")
-    def test_free_unneeded_tensor(self):
-        x = torch.randn(2, 3, 10, 10, device='cuda', requires_grad=True)
-        m = torch.randn(1, 3, 1, 1, device='cuda')
-
-        z = x.sum()
-        base_mem = torch.cuda.memory_allocated()
-        z = ((x + 2) * m).sum()
-        end_mem = torch.cuda.memory_allocated()
-
-        # In the end the memory usage should remain equal, because neither of
-        # (x + 2) and ((x + 2) * m) should be kept alive for backward, while the
-        # previous allocation of z had the same size as the current one.
-        self.assertEqual(base_mem, end_mem)
-
     def test_no_unnecessary_save(self):
         # If we kept x in the derivative Function of x * 2 we would
         # get an error in the backward that would complain that we've
@@ -1588,58 +1573,6 @@ class TestAutograd(TestCase):
         expected_grad[:2] = grad_output
         self.assertEqual(x.grad.data, expected_grad)
 
-    @skipIfRocm
-    def test_ctc_loss(self):
-        batch_size = 64
-        num_labels = 101
-        target_length = 15
-        gradcheck_input_size = 10
-
-        ZERO_NONE = 0
-        ZERO_SOME = 1
-        ZERO_ALL = 2
-
-        # device, input_length, vary_lengths, zero_lengths
-        tests = [('cpu', 150, False, ZERO_NONE),
-                 ('cpu', 150, True, ZERO_NONE),
-                 ('cpu', 50, True, ZERO_SOME),
-                 ('cpu', 50, True, ZERO_ALL)]
-        if torch.cuda.is_available():
-            tests += [('cuda', 50, False, ZERO_NONE),
-                      ('cuda', 150, False, ZERO_NONE),
-                      ('cuda', 50, True, ZERO_NONE),
-                      ('cuda', 150, True, ZERO_NONE),
-                      ('cuda', 50, True, ZERO_SOME),
-                      ('cuda', 150, True, ZERO_SOME),
-                      ('cuda', 50, True, ZERO_ALL),
-                      ('cuda', 150, True, ZERO_ALL)]
-
-        for device, input_length, vary_lengths, zero_mode in tests:
-            targets = torch.randint(1, num_labels, (batch_size, target_length),
-                                    device=device, dtype=torch.long)
-            x = torch.randn(gradcheck_input_size, device=device, requires_grad=True)
-            tile_factors = torch.randn(input_length * batch_size * num_labels // gradcheck_input_size + 1,
-                                       device=device)
-            input_lengths = [(torch.randint(input_length // 2, input_length + 1, ()).item()
-                              if vary_lengths or i == 0 else input_length) for i in range(batch_size)]
-            if zero_mode == ZERO_ALL:
-                target_lengths = [0 for _ in range(batch_size)]
-            else:
-                target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
-                                   if vary_lengths else target_length) for _ in range(batch_size)]
-                if zero_mode == ZERO_SOME:
-                    idxes = torch.randint(0, batch_size, (10,))
-                    for i in idxes:
-                        target_lengths[i] = 0
-
-            def ctc_after_softmax(x):
-                x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
-                          .view(input_length, batch_size, num_labels))
-                log_probs = torch.log_softmax(x_full, 2)
-                return torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
-
-            gradcheck(ctc_after_softmax, [x], nondet_tol=1e-7)
-
     def _test_sparse_gather(self, size_x, size_ind, dim):
         x = torch.randn(size_x, requires_grad=True)
         if len(size_ind) > 0 and len(size_x) > 0:
@@ -2011,15 +1944,6 @@ class TestAutograd(TestCase):
                 # one of these has to be the non-default device
                 self._test_type_conversion_backward(lambda x: x.cuda(0))
                 self._test_type_conversion_backward(lambda x: x.cuda(1))
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    def test_pin_memory(self):
-        x = torch.randn(2, 2, requires_grad=True)
-        self.assertEqual(x, x.pin_memory())
-        self.assertIsNot(x, x.pin_memory())
-        self.assertTrue(x.pin_memory().requires_grad)
-        gradcheck(lambda x: x.pin_memory(), [x])
-        gradgradcheck(lambda x: x.pin_memory(), [x])
 
     def test_isolated_node(self):
         x = torch.randn(5, 5, requires_grad=True)
@@ -2443,6 +2367,29 @@ class TestAutograd(TestCase):
             run_test(upper, dims)
 
     @skipIfNoLapack
+    def test_cholesky_inverse(self):
+        def _test_with_size(upper, dims):
+            # We require to create a Cholesky factor which requires that the diagonal elements are positive.
+            # Initializing too small values for the diagonal elements could cause issues when being perturbed
+            # to obtain the numerical Jacobian, thereby leading to inconsistent gradcheck
+            A = torch.randn(*dims)
+            A.diagonal().uniform_(0.1, 5.0)
+            A.requires_grad_()
+
+            def func(A, upper):
+                if upper:
+                    root = A.triu()
+                else:
+                    root = A.tril()
+                return torch.cholesky_inverse(root, upper)
+
+            gradcheck(func, [A, upper])
+            gradgradcheck(func, [A, upper])
+
+        for upper, dims in product([True, False], [(3, 3), (5, 5)]):
+            _test_with_size(upper, dims)
+
+    @skipIfNoLapack
     def test_triangular_solve(self):
         def _test_with_size(A_dims, B_dims):
             A = torch.rand(*A_dims).requires_grad_()
@@ -2766,18 +2713,6 @@ class TestAutograd(TestCase):
             self.assertGreater(info.cpu_interval.start, last_end)
             self.assertEqual(info.name, expected_name)
             last_end = info.cpu_interval.end
-
-    @skipIfRocm
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    def test_profiler_emit_nvtx(self):
-        # This test is not intended to ensure correctness of nvtx ranges.
-        # That would require something a great deal more complex (you'd have to create a
-        # profile in a subprocess, open it, and parse the sql somehow).
-        # This test is merely intended to catch if emit_nvtx breaks on construction.
-        a = torch.tensor([1, 2, 3], dtype=torch.float32, device='cuda')
-        with torch.cuda.profiler.profile():
-            with emit_nvtx():
-                a.add(1.0)
 
     def test_dir(self):
         x = torch.randn(10, 10)
@@ -3104,32 +3039,6 @@ class TestAutograd(TestCase):
         c = b.sum()
         d, = torch.autograd.grad(c, a, retain_graph=True, create_graph=True)
         self.assertTrue(d.requires_grad)
-
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    def test_rnn_backward_to_input_but_not_parameters_cuda(self):
-        # this checks whether it is possible to not require
-        # weight parameters, but require inputs, see #7722
-        dev = torch.device('cuda')
-        l = torch.nn.LSTM(2, 3).to(dev)
-        for p in l.parameters():
-            p.requires_grad = False
-        s = torch.randn(1, 1, 2, requires_grad=True, device=dev)
-        out, _ = l(s)
-        out.sum().backward()
-        self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    def test_lstmcell_backward_only_one_output_grad(self):
-        # checks that undefined gradients doen't hamper the backward
-        # see #11872
-        dev = torch.device('cuda')
-        l = torch.nn.LSTMCell(2, 3).to(dev).double()
-        s = torch.randn(1, 2, device=dev, dtype=torch.double, requires_grad=True)
-        for i in range(2):
-            out = l(s)[i]
-            out.sum().backward()
-            self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
     def test_anomaly_detect_nan(self):
         size = 10
@@ -3810,35 +3719,30 @@ class TestAutogradDeviceType(TestCase):
         if sys.version_info[0] == 2:
             _test_pyscalar_conversions(lambda x: x.to(device), lambda x: long(x))
 
-    def test_set_requires_grad_only_for_floats(self, device):
-        dtypes = [torch.int64, torch.int32, torch.int16, torch.int8,
-                  torch.float, torch.double]
-        if device == 'cuda':
-            dtypes.append(torch.half)
-
-        def f1(dt):
-            a = torch.ones(1, dtype=dt, device=device)
+    @dtypesIfCUDA(torch.half, torch.float, torch.double, torch.int8, torch.int16, torch.int32, torch.int64)
+    @dtypes(torch.float, torch.double, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_set_requires_grad_only_for_floats(self, device, dtype):
+        def f1():
+            a = torch.ones(1, dtype=dtype, device=device)
             a.requires_grad_()
 
-        def f2(dt):
-            a = torch.ones(1, dtype=dt, device=device)
+        def f2():
+            a = torch.ones(1, dtype=dtype, device=device)
             a.requires_grad = True
 
-        def f3(dt):
-            torch.ones(1, dtype=dt, device=device, requires_grad=True)
+        def f3():
+            torch.ones(1, dtype=dtype, device=device, requires_grad=True)
 
-        for dt in dtypes:
-            a = torch.ones(1, dtype=dt, device=device)
-            a.requires_grad = False  # should always work
-            a.requires_grad_(False)
+        a = torch.ones(1, dtype=dtype, device=device)
+        a.requires_grad = False  # should always work
+        a.requires_grad_(False)
 
-            for f in [f1, f2, f3]:
-                if dt.is_floating_point:
-                    f(dt)
-                else:
-                    with self.assertRaisesRegex(RuntimeError, 'floating point',
-                                                msg="dt: {} device: {}".format(a.dtype, a.device)):
-                        f(dt)
+        for f in [f1, f2, f3]:
+            if dtype.is_floating_point:
+                f()
+            else:
+                with self.assertRaisesRegex(RuntimeError, 'floating point', msg="dt: {} device: {}".format(a.dtype, a.device)):
+                    f()
 
     @onlyCUDA
     def test_advanced_indexing_backwards_large(self, device):
@@ -3879,6 +3783,138 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(where, [cond, x, y], raise_exception=True)
         gradgradcheck(where, [cond, x, y], [torch.randn(5, 5, 5, device=device)])
 
+    @skipCUDAIfRocm
+    def test_ctc_loss(self, device):
+        batch_size = 64
+        num_labels = 101
+        target_length = 15
+        gradcheck_input_size = 10
+
+        ZERO_NONE = 0
+        ZERO_SOME = 1
+        ZERO_ALL = 2
+
+        # input_length, vary_lengths, zero_lengths
+        tests = [(150, False, ZERO_NONE),
+                 (150, True, ZERO_NONE),
+                 (50, True, ZERO_SOME),
+                 (50, True, ZERO_ALL)]
+
+        if 'cuda' in device:
+            tests += [(50, False, ZERO_NONE),
+                      (50, True, ZERO_NONE),
+                      (150, True, ZERO_SOME),
+                      (150, True, ZERO_ALL)]
+
+        for input_length, vary_lengths, zero_mode in tests:
+            targets = torch.randint(1, num_labels, (batch_size, target_length),
+                                    device=device, dtype=torch.long)
+            x = torch.randn(gradcheck_input_size, device=device, requires_grad=True)
+            tile_factors = torch.randn(input_length * batch_size * num_labels // gradcheck_input_size + 1,
+                                       device=device)
+            input_lengths = [(torch.randint(input_length // 2, input_length + 1, ()).item()
+                              if vary_lengths or i == 0 else input_length) for i in range(batch_size)]
+            if zero_mode == ZERO_ALL:
+                target_lengths = [0 for _ in range(batch_size)]
+            else:
+                target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
+                                   if vary_lengths else target_length) for _ in range(batch_size)]
+                if zero_mode == ZERO_SOME:
+                    idxes = torch.randint(0, batch_size, (10,))
+                    for i in idxes:
+                        target_lengths[i] = 0
+
+            def ctc_after_softmax(x):
+                x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
+                          .view(input_length, batch_size, num_labels))
+                log_probs = torch.log_softmax(x_full, 2)
+                return torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+
+            gradcheck(ctc_after_softmax, [x], nondet_tol=1e-7)
+
+    @onlyCUDA
+    def test_free_unneeded_tensor(self, device):
+        x = torch.randn(2, 3, 10, 10, device=device, requires_grad=True)
+        m = torch.randn(1, 3, 1, 1, device=device)
+
+        z = x.sum()
+        base_mem = torch.cuda.memory_allocated()
+        z = ((x + 2) * m).sum()
+        end_mem = torch.cuda.memory_allocated()
+
+        # In the end the memory usage should remain equal, because neither of
+        # (x + 2) and ((x + 2) * m) should be kept alive for backward, while the
+        # previous allocation of z had the same size as the current one.
+        self.assertEqual(base_mem, end_mem)
+
+    @onlyCUDA
+    def test_pin_memory(self, device):
+        x = torch.randn(2, 2, requires_grad=True)
+        self.assertEqual(x, x.pin_memory())
+        self.assertIsNot(x, x.pin_memory())
+        self.assertTrue(x.pin_memory().requires_grad)
+        gradcheck(lambda x: x.pin_memory(), [x])
+        gradgradcheck(lambda x: x.pin_memory(), [x])
+
+    @skipCUDAIfRocm
+    @onlyCUDA
+    def test_profiler_emit_nvtx(self, device):
+        # This test is not intended to ensure correctness of nvtx ranges.
+        # That would require something a great deal more complex (you'd have to create a
+        # profile in a subprocess, open it, and parse the sql somehow).
+        # This test is merely intended to catch if emit_nvtx breaks on construction.
+        a = torch.tensor([1, 2, 3], dtype=torch.float32, device=device)
+        with torch.cuda.profiler.profile():
+            with emit_nvtx():
+                a.add(1.0)
+
+    @onlyCUDA
+    def test_rnn_backward_to_input_but_not_parameters(self, device):
+        # this checks whether it is possible to not require
+        # weight parameters, but require inputs, see #7722
+        l = torch.nn.LSTM(2, 3).to(device)
+        for p in l.parameters():
+            p.requires_grad = False
+        s = torch.randn(1, 1, 2, requires_grad=True, device=device)
+        out, _ = l(s)
+        out.sum().backward()
+        self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
+
+    @onlyCUDA
+    def test_lstmcell_backward_only_one_output_grad(self, device):
+        # checks that undefined gradients doen't hamper the backward
+        # see #11872
+        l = torch.nn.LSTMCell(2, 3).to(device).double()
+        s = torch.randn(1, 2, device=device, dtype=torch.double, requires_grad=True)
+        for i in range(2):
+            out = l(s)[i]
+            out.sum().backward()
+            self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
+
+    def _test_rnn_mod(self, mod, inp):
+        from functools import partial
+
+        def flatten_out(mod, inp):
+            out = mod(inp)
+            return tuple([t if isinstance(t, torch.Tensor) else tt for t in out for tt in t])
+        gradcheckfunc = partial(flatten_out, mod)
+        with torch.backends.cudnn.flags(enabled=False):
+            torch.autograd.gradcheck(gradcheckfunc, inp)
+            torch.autograd.gradgradcheck(gradcheckfunc, inp)
+
+    def test_LSTM_grad_and_gradgrad(self, device):
+        hsize = 4
+        inp = torch.rand(1, 3, hsize, device=device, dtype=torch.float64, requires_grad=True)
+        for bias in [True, False]:
+            mod = torch.nn.LSTM(hsize, hsize, bias=bias).to(device).to(torch.float64)
+            self._test_rnn_mod(mod, inp)
+
+    def test_GRU_grad_and_gradgrad(self, device):
+        hsize = 4
+        inp = torch.rand(1, 3, hsize, device=device, dtype=torch.float64, requires_grad=True)
+        for bias in [True, False]:
+            mod = torch.nn.GRU(hsize, hsize, bias=bias).to(device).to(torch.float64)
+            self._test_rnn_mod(mod, inp)
 
 instantiate_device_type_tests(TestAutogradDeviceType, globals())
 

@@ -55,31 +55,35 @@ std::shared_ptr<Operator> matchBuiltinOp(
 
 using namespace torch::distributed::autograd;
 
-py::object toPyObjInternal(RpcCommandBase* rpc, MessageType messageType) {
+py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
   switch (messageType) {
     case MessageType::SCRIPT_RET: {
-      auto ret = static_cast<ScriptResp*>(rpc);
+      auto& ret = static_cast<ScriptResp&>(rpc);
       Stack stack;
-      stack.push_back(ret->value());
-      return torch::jit::createPyObjectForStack(std::move(stack));
+      stack.push_back(ret.value());
+      {
+        AutoGIL ag;
+        // The createPyObjectForStack does not acquire GIL, but creating a new
+        // py::object requires GIL.
+        return torch::jit::createPyObjectForStack(std::move(stack));
+      }
     }
     case MessageType::PYTHON_RET: {
       // TODO: Try to avoid a copy here.
-      auto resp = static_cast<PythonUDFResp*>(rpc);
+      auto& resp = static_cast<PythonUDFResp&>(rpc);
       return PythonRpcHandler::getInstance().loadPythonUDFResult(
-          resp->pickledPayload());
+          resp.pickledPayload());
     }
     case MessageType::MESSAGE_WITH_AUTOGRAD_RESP: {
-      auto rpcWithAutograd = static_cast<RpcWithAutograd*>(rpc);
+      auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
 
       // Attach 'recv' autograd function.
       addRecvRpcBackward(
-          rpcWithAutograd->autogradMetadata(), rpcWithAutograd->tensors());
+          rpcWithAutograd.autogradMetadata(), rpcWithAutograd.tensors());
 
       // Handle the original RPC.
-      auto wrappedMessageType = rpcWithAutograd->wrappedMessageType();
-      return toPyObjInternal(
-          rpcWithAutograd->moveWrappedRpc().get(), wrappedMessageType);
+      auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
+      return toPyObjInternal(rpcWithAutograd.wrappedRpc(), wrappedMessageType);
     }
     default: {
       AT_ERROR("Unrecognized response message type ", messageType);
@@ -88,7 +92,7 @@ py::object toPyObjInternal(RpcCommandBase* rpc, MessageType messageType) {
 }
 
 py::object toPyObj(const Message& message) {
-  return toPyObjInternal(deserializeResponse(message).get(), message.type());
+  return toPyObjInternal(*deserializeResponse(message), message.type());
 }
 
 std::shared_ptr<FutureMessage> pyRpcBuiltin(
@@ -117,9 +121,9 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
     addSendRpcBackward(
         autogradContext, autogradMetadata, rpcWithAutograd.tensors(), dst.id_);
 
-    return agent.send(dst, std::move(rpcWithAutograd.toMessage()));
+    return agent.send(dst, std::move(rpcWithAutograd).toMessage());
   } else {
-    return agent.send(dst, std::move(scriptCall->toMessage()));
+    return agent.send(dst, std::move(*scriptCall).toMessage());
   }
 }
 
