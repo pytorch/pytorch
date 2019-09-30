@@ -2801,7 +2801,7 @@ inline Tensor Tensor::clone(c10::optional<MemoryFormat> memory_format) const {
     }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, c10::optional<MemoryFormat>)>(at::detail::multi_dispatch_tensor_type_set(*this))(const_cast<Tensor&>(*this), memory_format);
+    return table->callUnboxed<Tensor, const Tensor &, c10::optional<MemoryFormat>>(const_cast<Tensor&>(*this), memory_format);
 #endif
 }
 inline Tensor & Tensor::resize_as_(const Tensor & the_template) const {
