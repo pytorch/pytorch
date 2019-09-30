@@ -72,5 +72,5 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
     torch._C._jit_pass_fold_convbn(model._c)
     prepare_script(model, scripted_qconfig_dict, True)
     run_fn(model._c._get_method('forward'), *run_args)
-    convert_script(model, True)
+    model = convert_script(model, False)
     return model

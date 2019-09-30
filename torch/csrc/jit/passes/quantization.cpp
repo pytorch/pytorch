@@ -869,26 +869,35 @@ graph(%self, %scale, %zero_point, %dtype):
 
 void InsertPrepackUnpack(std::shared_ptr<Graph>& graph) {
   std::string linear_with_quant = R"(
-graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
+graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
         %w_dequant = aten::dequantize(%w_quant)
-        %linear = prim::Constant[name="linear"]()
         %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
         return (%r))";
 
   std::string linear_with_quant_prepack = R"(
-graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
+graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
         %packed_params = quantized::linear_prepack(%w_quant, %b)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
-        %linear = prim::Constant[name="linear"]()
-        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b_unpacked)
+        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
         return (%r))";
+
+  // Filter to match linear CallFunction
+  auto filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+     const auto& match_vmap = match.values_map;
+     auto linear_node = match_vmap.at(vmap.at("linear"))->node();
+     if (linear_node->kind() == prim::Constant && linear_node->s(attr::name) == "linear") {
+       return true;
+     }
+     return false;
+  };
 
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
-  rewriter.runOnGraph(graph);
+  rewriter.runOnGraph(graph, filter);
 }
 
 void InsertPrepackUnpack(script::Module& module) {
