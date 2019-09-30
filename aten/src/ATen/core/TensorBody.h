@@ -11,14 +11,13 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#ifdef BUILD_NAMEDTENSOR
+#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/NamedTensor.h>
-#endif
 
 namespace caffe2 {
 class Tensor;
@@ -42,6 +41,7 @@ struct Quantizer;
 // This is temporary typedef to enable Quantizer in aten native function API
 // we'll remove them when we are actually exposing Quantizer class
 // to frontend
+using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
@@ -219,12 +219,12 @@ class CAFFE2_API Tensor {
 
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        tensorTypeIdToBackend(type_id()),
+        tensorTypeIdToBackend(legacyExtractTypeId(type_set())),
         scalar_type(),
         is_variable());
   }
-  TensorTypeId type_id() const {
-    return impl_->type_id();
+  TensorTypeSet type_set() const {
+    return impl_->type_set();
   }
   ScalarType scalar_type() const {
     return typeMetaToScalarType(impl_->dtype());
@@ -274,6 +274,10 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
+  /// If a tensor is a quantized tensor, returns its quantizer
+  /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
+  QuantizerPtr quantizer() const;
+
 #ifdef BUILD_NAMEDTENSOR
   /// Returns if a `Tensor` has any dimension names
   bool has_names() const;
@@ -317,19 +321,42 @@ class CAFFE2_API Tensor {
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() && = delete;
 
-  // Return a `PackedTensorAccessor` for CUDA `Tensor`s. You have to specify scalar type and
+  // Return a `GenericPackedTensorAccessor` for CUDA `Tensor`s. You have to specify scalar type and
   // dimension. You can optionally specify RestrictPtrTraits as a template parameter to
   // cast the data pointer to a __restrict__ pointer.
-  // In order to use this, your CUDA kernel has to take a corresponding PackedTensorAccessor
+  // In order to use this, your CUDA kernel has to take a corresponding GenericPackedTensorAccessor
   // as an argument.
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-  PackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const& {
+  GenericPackedTensorAccessor<T,N,PtrTraits,index_t> generic_packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
-    return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data_ptr<T>()),sizes().data(),strides().data());
+    return GenericPackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data_ptr<T>()),sizes().data(),strides().data());
   }
-  template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-  PackedTensorAccessor<T,N> packed_accessor() && = delete;
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+  GenericPackedTensorAccessor<T,N> generic_packed_accessor() && = delete;
+
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor32<T,N,PtrTraits> packed_accessor32() const& {
+    return generic_packed_accessor<T,N,PtrTraits,int32_t>();
+  }
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor32<T,N,PtrTraits> packed_accessor32() && = delete;
+
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor64<T,N,PtrTraits> packed_accessor64() const& {
+    return generic_packed_accessor<T,N,PtrTraits,int64_t>();
+  }
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor64<T,N,PtrTraits> packed_accessor64() && = delete;
+
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+  C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
+  GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const & {
+    return generic_packed_accessor<T,N,PtrTraits,index_t>();
+  }
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+  C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
+  GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() && = delete;
 
   Tensor operator-() const;
   Tensor& operator+=(const Tensor & other);
@@ -372,14 +399,30 @@ class CAFFE2_API Tensor {
   //Tensor * add(Tensor & b);
   void backward(const Tensor & gradient={}, bool keep_graph=false, bool create_graph=false) const;
   void set_data(const Tensor & new_data) const;
+  Tensor data() const;
+  bool is_leaf() const;
+  int64_t output_nr() const;
+  int64_t _version() const;
   #ifdef BUILD_NAMEDTENSOR
-  Tensor & names_(c10::optional<DimnameList> names) const;
+  Tensor & rename_(c10::optional<DimnameList> names) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
-  Tensor view_names(c10::optional<DimnameList> names) const;
+  Tensor rename(c10::optional<DimnameList> names) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
   Tensor align_to(DimnameList names) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor align_as(const Tensor & other) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor refine_names(DimnameList names) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor unflatten(Dimname dim, IntArrayRef sizes, DimnameList names) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor unflatten(int64_t dim, IntArrayRef sizes, DimnameList names) const;
   #endif
   Tensor abs() const;
   Tensor & abs_() const;
@@ -394,8 +437,14 @@ class CAFFE2_API Tensor {
   Tensor addr(const Tensor & vec1, const Tensor & vec2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & addr_(const Tensor & vec1, const Tensor & vec2, Scalar beta=1, Scalar alpha=1) const;
   Tensor all(int64_t dim, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor all(Dimname dim, bool keepdim=false) const;
+  #endif
   bool allclose(const Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
   Tensor any(int64_t dim, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor any(Dimname dim, bool keepdim=false) const;
+  #endif
   Tensor argmax(c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false) const;
   Tensor argmin(c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false) const;
   Tensor as_strided(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset=c10::nullopt) const;
@@ -434,7 +483,13 @@ class CAFFE2_API Tensor {
   Tensor cosh() const;
   Tensor & cosh_() const;
   Tensor cumsum(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor cumsum(Dimname dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor cumprod(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor cumprod(Dimname dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor det() const;
   Tensor diag_embed(int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) const;
   Tensor diagflat(int64_t offset=0) const;
@@ -459,6 +514,15 @@ class CAFFE2_API Tensor {
   Tensor expand(IntArrayRef size, bool implicit=false) const;
   Tensor expand_as(const Tensor & other) const;
   Tensor flatten(int64_t start_dim=0, int64_t end_dim=-1) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor flatten(int64_t start_dim, int64_t end_dim, Dimname out_dim) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor flatten(Dimname start_dim, Dimname end_dim, Dimname out_dim) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor flatten(DimnameList dims, Dimname out_dim) const;
+  #endif
   Tensor & fill_(Scalar value) const;
   Tensor & fill_(const Tensor & value) const;
   Tensor floor() const;
@@ -473,6 +537,12 @@ class CAFFE2_API Tensor {
   Tensor index(TensorList indices) const;
   Tensor & index_copy_(int64_t dim, const Tensor & index, const Tensor & source) const;
   Tensor index_copy(int64_t dim, const Tensor & index, const Tensor & source) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & index_copy_(Dimname dim, const Tensor & index, const Tensor & source) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor index_copy(Dimname dim, const Tensor & index, const Tensor & source) const;
+  #endif
   Tensor & index_put_(TensorList indices, const Tensor & values, bool accumulate=false) const;
   Tensor index_put(TensorList indices, const Tensor & values, bool accumulate=false) const;
   Tensor inverse() const;
@@ -484,6 +554,9 @@ class CAFFE2_API Tensor {
   bool is_same_size(const Tensor & other) const;
   bool is_signed() const;
   std::tuple<Tensor,Tensor> kthvalue(int64_t k, int64_t dim=-1, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  std::tuple<Tensor,Tensor> kthvalue(int64_t k, Dimname dim, bool keepdim=false) const;
+  #endif
   Tensor log() const;
   Tensor & log_() const;
   Tensor log10() const;
@@ -530,6 +603,9 @@ class CAFFE2_API Tensor {
   #endif
   Tensor mm(const Tensor & mat2) const;
   std::tuple<Tensor,Tensor> mode(int64_t dim=-1, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  std::tuple<Tensor,Tensor> mode(Dimname dim, bool keepdim=false) const;
+  #endif
   Tensor mul(const Tensor & other) const;
   Tensor & mul_(const Tensor & other) const;
   Tensor mul(Scalar other) const;
@@ -590,8 +666,14 @@ class CAFFE2_API Tensor {
   std::vector<Tensor> split_with_sizes(IntArrayRef split_sizes, int64_t dim=0) const;
   Tensor squeeze() const;
   Tensor squeeze(int64_t dim) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor squeeze(Dimname dim) const;
+  #endif
   Tensor & squeeze_() const;
   Tensor & squeeze_(int64_t dim) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & squeeze_(Dimname dim) const;
+  #endif
   Tensor sspaddmm(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1) const;
   Tensor stft(int64_t n_fft, c10::optional<int64_t> hop_length=c10::nullopt, c10::optional<int64_t> win_length=c10::nullopt, const Tensor & window={}, bool normalized=false, bool onesided=true) const;
   int64_t stride(int64_t dim) const;
@@ -680,6 +762,9 @@ class CAFFE2_API Tensor {
   Tensor values() const;
   int64_t numel() const;
   std::vector<Tensor> unbind(int64_t dim=0) const;
+  #ifdef BUILD_NAMEDTENSOR
+  std::vector<Tensor> unbind(Dimname dim) const;
+  #endif
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
   Tensor to_mkldnn() const;
@@ -688,6 +773,7 @@ class CAFFE2_API Tensor {
   int64_t q_zero_point() const;
   Tensor q_per_channel_scales() const;
   Tensor q_per_channel_zero_points() const;
+  int64_t q_per_channel_axis() const;
   Tensor int_repr() const;
   QScheme qscheme() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
@@ -711,16 +797,40 @@ class CAFFE2_API Tensor {
   Tensor & put_(const Tensor & index, const Tensor & source, bool accumulate=false) const;
   Tensor & index_add_(int64_t dim, const Tensor & index, const Tensor & source) const;
   Tensor index_add(int64_t dim, const Tensor & index, const Tensor & source) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor index_add(Dimname dim, const Tensor & index, const Tensor & source) const;
+  #endif
   Tensor & index_fill_(int64_t dim, const Tensor & index, Scalar value) const;
   Tensor index_fill(int64_t dim, const Tensor & index, Scalar value) const;
   Tensor & index_fill_(int64_t dim, const Tensor & index, const Tensor & value) const;
   Tensor index_fill(int64_t dim, const Tensor & index, const Tensor & value) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & index_fill_(Dimname dim, const Tensor & index, Scalar value) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & index_fill_(Dimname dim, const Tensor & index, const Tensor & value) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor index_fill(Dimname dim, const Tensor & index, Scalar value) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor index_fill(Dimname dim, const Tensor & index, const Tensor & value) const;
+  #endif
   Tensor & scatter_(int64_t dim, const Tensor & index, const Tensor & src) const;
   Tensor scatter(int64_t dim, const Tensor & index, const Tensor & src) const;
   Tensor & scatter_(int64_t dim, const Tensor & index, Scalar value) const;
   Tensor scatter(int64_t dim, const Tensor & index, Scalar value) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor scatter(Dimname dim, const Tensor & index, const Tensor & src) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor scatter(Dimname dim, const Tensor & index, Scalar value) const;
+  #endif
   Tensor & scatter_add_(int64_t dim, const Tensor & index, const Tensor & src) const;
   Tensor scatter_add(int64_t dim, const Tensor & index, const Tensor & src) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor scatter_add(Dimname dim, const Tensor & index, const Tensor & src) const;
+  #endif
   Tensor & lt_(Scalar other) const;
   Tensor & lt_(const Tensor & other) const;
   Tensor & gt_(Scalar other) const;
@@ -799,10 +909,16 @@ class CAFFE2_API Tensor {
   Tensor lt(const Tensor & other) const;
   Tensor take(const Tensor & index) const;
   Tensor index_select(int64_t dim, const Tensor & index) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor index_select(Dimname dim, const Tensor & index) const;
+  #endif
   Tensor masked_select(const Tensor & mask) const;
   Tensor nonzero() const;
   std::vector<Tensor> nonzero_numpy() const;
   Tensor gather(int64_t dim, const Tensor & index, bool sparse_grad=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor gather(Dimname dim, const Tensor & index, bool sparse_grad=false) const;
+  #endif
   Tensor addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   Tensor & addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   Tensor addcdiv(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
@@ -843,7 +959,13 @@ class CAFFE2_API Tensor {
   Tensor max() const;
   Tensor median() const;
   std::tuple<Tensor,Tensor> sort(int64_t dim=-1, bool descending=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  std::tuple<Tensor,Tensor> sort(Dimname dim, bool descending=false) const;
+  #endif
   Tensor argsort(int64_t dim=-1, bool descending=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor argsort(Dimname dim, bool descending=false) const;
+  #endif
   std::tuple<Tensor,Tensor> topk(int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) const;
   Tensor all() const;
   Tensor any() const;
@@ -878,7 +1000,7 @@ protected:
 };
 
 namespace detail {
-// Helper creator for Tensor clas which doesn't requires the users to pass
+// Helper creator for Tensor class which doesn't requires the users to pass
 // in an intrusive_ptr instead it just converts the argument passed to
 // requested intrusive_ptr type.
 template <typename T, typename... Args>
@@ -886,23 +1008,10 @@ Tensor make_tensor(Args&&... args) {
   return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
 }
 
-inline Backend infer_backend(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return tensorTypeIdToBackend(t.type_id());
-}
-inline Backend infer_backend(const TensorList & tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tensorTypeIdToBackend(tl[0].type_id());
-}
-
-inline bool infer_is_variable(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return t.is_variable();
-}
-inline bool infer_is_variable(const TensorList & tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tl[0].is_variable();
-}
 } // namespace detail
+
+static inline TensorTypeId legacyExtractTypeId(const Tensor& t) {
+  return legacyExtractTypeId(t.type_set());
+}
 
 } // namespace at

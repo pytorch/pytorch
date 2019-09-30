@@ -5,6 +5,7 @@ from . import init_rref_context
 from . import ProcessGroupAgent
 from . import WorkerId
 from .internal_rpc_utils import serialize, PythonUDF
+from .rpc_backend_registry import is_rpc_backend_registered, init_rpc_backend
 
 import sys
 import torch
@@ -52,7 +53,11 @@ class RpcBackend(Enum):
 
 
 # TODO: add a context manager to wrap _init_rpc and join_rpc
-def _init_rpc(name, backend=RpcBackend.PROCESS_GROUP):
+def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
+              self_name=None,
+              self_rank=-1,
+              init_method=None,
+              num_send_recv_threads=4):
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
 
@@ -63,9 +68,20 @@ def _init_rpc(name, backend=RpcBackend.PROCESS_GROUP):
 
     if backend == RpcBackend.PROCESS_GROUP:
         from .distributed_c10d import _get_default_group
+
         group = _get_default_group()
+        if (self_rank != -1) and (self_rank != group.rank()):
+            raise RuntimeError("self_rank argument {} doesn't match pg rank {}".format(
+                               self_rank, group.rank()))
         # TODO: add try-except and destroy _agent in all processes if any fails.
-        _agent = ProcessGroupAgent(name, group)
+        _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
+        init_rref_context(_agent)
+    elif is_rpc_backend_registered(backend):
+        _agent = init_rpc_backend(
+            backend,
+            self_name=self_name,
+            init_method=init_method,
+        )
         init_rref_context(_agent)
     else:
         raise RuntimeError("Unrecognized RPC backend ", backend)

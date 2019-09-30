@@ -85,8 +85,8 @@ class QFunctional(torch.nn.Module):
     .. Examples::
 
         >>> q_add = QFunctional('add')
-        >>> a = torch.quantize_linear(torch.tensor(3.0), 1.0, 0, torch.qint32)
-        >>> b = torch.quantize_linear(torch.tensor(4.0), 1.0, 0, torch.qint32)
+        >>> a = torch.quantize_per_tensor(torch.tensor(3.0), 1.0, 0, torch.qint32)
+        >>> b = torch.quantize_per_tensor(torch.tensor(4.0), 1.0, 0, torch.qint32)
         >>> q_add.add(a, b)  # Equivalent to ``torch.ops.quantized.add(3, 4)
 
     Valid operation names:

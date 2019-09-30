@@ -15,6 +15,7 @@ from sys import platform
 
 from itertools import groupby
 from functools import partial, reduce
+import operator
 
 import torch
 import common_utils as common
@@ -60,7 +61,7 @@ def gpus_for_rank(world_size):
 
 
 def simple_reduce_tests(rank, world_size):
-    return [
+    tests = [
         (
             c10d.ReduceOp.SUM,
             torch.Tensor([rank + 1.0]),
@@ -82,6 +83,50 @@ def simple_reduce_tests(rank, world_size):
             torch.Tensor([world_size]),
         ),
     ]
+
+    # Generate tests for BAND.
+    # The bit that is set changes in every iteration to check
+    # that the output changes accordingly.
+    for i in range(4):
+        vin = rank | (1 << i)
+        vout = (1 << i)
+        tests.append(
+            (
+                c10d.ReduceOp.BAND,
+                torch.tensor([vin], dtype=torch.int32),
+                torch.tensor([vout], dtype=torch.int32),
+            ),
+        )
+
+    # Generate tests for BOR.
+    # These emulate a larger world size per iteration by having every
+    # rank contribute multiple values that are pre-OR'ed.
+    for i in range(1, 5):
+        vin = reduce(operator.or_, [rank * i + j for j in range(i)])
+        vout = reduce(operator.or_, range(world_size * i))
+        tests.append(
+            (
+                c10d.ReduceOp.BOR,
+                torch.tensor([vin], dtype=torch.int32),
+                torch.tensor([vout], dtype=torch.int32),
+            ),
+        )
+
+    # Generate tests for XOR.
+    # These emulate a larger world size per iteration by having every
+    # rank contribute multiple values that are pre-XOR'ed.
+    for i in range(1, 5):
+        vin = reduce(operator.xor, [rank * i + j for j in range(i)])
+        vout = reduce(operator.xor, range(world_size * i))
+        tests.append(
+            (
+                c10d.ReduceOp.BXOR,
+                torch.tensor([vin], dtype=torch.int32),
+                torch.tensor([vout], dtype=torch.int32),
+            ),
+        )
+
+    return tests
 
 
 def simple_coalesced_reduce_tests(rank, world_size):
@@ -2993,7 +3038,11 @@ class CommTest(MultiProcessTestCase):
     def _test_nccl_errors_blocking(self, func):
         os.environ["NCCL_BLOCKING_WAIT"] = "1"
         store = c10d.FileStore(self.file.name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, "", timeout=timedelta(seconds=self.op_timeout_sec))
+        process_group = c10d.ProcessGroupNCCL(
+            store,
+            self.rank,
+            self.world_size,
+            timeout=timedelta(seconds=self.op_timeout_sec))
         process_group.allreduce(torch.rand(10).cuda(self.rank))
         if self.rank == 0:
             work = process_group.allreduce(torch.rand(10).cuda(self.rank))

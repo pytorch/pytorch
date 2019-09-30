@@ -210,7 +210,7 @@ endif()
 
 if(AT_NNPACK_ENABLED)
   include_directories(${NNPACK_INCLUDE_DIRS})
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS nnpack pthreadpool) # cpuinfo is added below
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS nnpack) # cpuinfo is added below
 endif()
 
 if(MKLDNN_FOUND)

@@ -201,7 +201,7 @@ def _tensor_str(self, indent):
         # - tensor data needs to be summarized
         # Some of the codepaths don't fully support named tensors, so we send in
         # an unnamed tensor to the formatting code as a workaround.
-        self = self.view_names(None)
+        self = self.rename(None)
 
     summarize = self.numel() > PRINT_OPTS.threshold
     if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
@@ -288,6 +288,7 @@ def _str(self):
         elif self.qscheme() == torch.per_channel_affine or self.qscheme() == torch.per_channel_symmetric:
             suffixes.append('scale=' + str(self.q_per_channel_scales()))
             suffixes.append('zero_point=' + str(self.q_per_channel_zero_points()))
+            suffixes.append('axis=' + str(self.q_per_channel_axis()))
         tensor_str = _tensor_str(self.dequantize(), indent)
     else:
         if self.numel() == 0 and not self.is_sparse:

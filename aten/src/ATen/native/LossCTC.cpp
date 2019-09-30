@@ -84,7 +84,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   int64_t max_input_length = log_probs.size(0);
   for (int64_t b = 0; b < batch_size; b++) {
     TORCH_CHECK(input_lengths[b] <= max_input_length,
-             "Expected tensor to have size at least ", max_input_length, " at dimension 1, but got size ", input_lengths[b], " for ", log_probs_arg,
+             "Expected input_lengths to have value at most ", max_input_length, ", but got value ", input_lengths[b],
              " (while checking arguments for ", c, ")");
   }
 

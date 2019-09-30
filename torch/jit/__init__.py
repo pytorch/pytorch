@@ -9,7 +9,7 @@ import torch.jit._recursive
 from torch._jit_internal import _qualified_name
 from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
-from torch.nn import Module, ModuleList, Sequential
+from torch.nn import Module, ModuleList, Sequential, ModuleDict
 from torch.serialization import validate_cuda_device
 from torch._six import PY2, PY37, with_metaclass, string_classes
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
@@ -32,7 +32,7 @@ from collections import OrderedDict, namedtuple
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method  # noqa: F401
-from torch._jit_internal import ignore, export  # noqa: F401
+from torch._jit_internal import ignore, export, unused  # noqa: F401
 
 if sys.version_info[0] > 2:
     import pathlib
@@ -243,7 +243,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     return ScriptModule(_cpp_module=cpp_module)
 
 
-def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_inputs=False):
+def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
+                    return_inputs=False, _return_inputs_states=False):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value. If return_inputs,
@@ -271,7 +272,7 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_input
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return LegacyTracedModule(f, _force_outplace, return_inputs)(*args, **kwargs)
+    return LegacyTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -314,7 +315,7 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
 
 
 class LegacyTracedModule(Module):
-    def __init__(self, inner, force_outplace=False, return_inputs=False):
+    def __init__(self, inner, force_outplace=False, return_inputs=False, return_inputs_states=False):
         super(LegacyTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
@@ -322,6 +323,7 @@ class LegacyTracedModule(Module):
         self.inner = inner
         self._force_outplace = force_outplace
         self._return_inputs = return_inputs
+        self._return_inputs_states = return_inputs_states
 
     def forward(self, *args):
         in_vars, in_desc = _flatten(args)
@@ -338,7 +340,18 @@ class LegacyTracedModule(Module):
         torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
         try:
             trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
+            # inputs_states is a tuple of len == 2 that keeps track of
+            # the inputs before (inputs_states[0]) and after (inputs_states[1])
+            # the trace to verify if they were modified during the trace
+            if self._return_inputs_states:
+                # executing a deepcopy on trace_inputs will fail
+                # for tensors not explicitly created by the user.
+                # generating trace_inputs again by calling _unflatten
+                # for now.
+                inputs_states = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
             out = self.inner(*trace_inputs)
+            if self._return_inputs_states:
+                inputs_states = (inputs_states, trace_inputs)
             out_vars, _ = _flatten(out)
             torch._C._tracer_exit(tuple(out_vars))
         except Exception:
@@ -346,6 +359,8 @@ class LegacyTracedModule(Module):
             raise
         if self._return_inputs:
             return trace, out, ret_inputs
+        if self._return_inputs_states:
+            return trace, out, inputs_states
         else:
             return trace, out
 
@@ -1583,16 +1598,21 @@ if _enabled:
                 raise RuntimeError("attempting to re-assign constant '{}' in {}".format(attr, type(self).__name__))
 
             def conv_module_to_const(module_value):
-                if not isinstance(module_value, (ModuleList, Sequential)):
+                if not isinstance(module_value, (ModuleList, Sequential, ModuleDict)):
                     return module_value
-                for i in range(len(module_value)):
-                    module_value[i] = conv_module_to_const(module_value[i])
-                if isinstance(module_value, Sequential):
-                    return _ConstSequential(module_value)
+                if isinstance(module_value, ModuleDict):
+                    for key, val in module_value:
+                        module_value[key] = conv_module_to_const(val)
+                    return _ConstModuleDict(module_value)
                 else:
-                    return _ConstModuleList(module_value)
+                    for i in range(len(module_value)):
+                        module_value[i] = conv_module_to_const(module_value[i])
+                    if isinstance(module_value, Sequential):
+                        return _ConstSequential(module_value)
+                    else:
+                        return _ConstModuleList(module_value)
 
-            if isinstance(value, (ModuleList, Sequential)):
+            if isinstance(value, (ModuleList, Sequential, ModuleDict)):
                 # special case for list of modules. Modules need to be registered with their
                 # parent module. To do this, we create a ConstModuleList, which is itself a module, that
                 # contains each of these modules as submodules. The ConstModuleList then
@@ -1627,6 +1647,15 @@ if _enabled:
 
         def graph_for(self, *args, **kwargs):
             return self.forward.graph_for(*args, **kwargs)
+
+        def extra_repr(self):
+            return 'original_name={}'.format(self.original_name)
+
+        @property
+        def original_name(self):
+            if type(self) == self._c.name:
+                return ''
+            return self._c.name
 
 else:
     class ScriptModule(torch.nn.Module):
@@ -1757,6 +1786,48 @@ class _ConstModuleList(ScriptModule):
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
+class _ConstModuleDict(ScriptModule):
+    def __init__(self, modules):
+        super(_ConstModuleDict, self).__init__()
+
+        assert isinstance(modules, OrderedDict)
+
+        for key, module in modules.items():
+            if isinstance(module, torch.nn.Module):
+                module = torch.jit._recursive.recursive_script(module)
+            self.add_module(key, module)
+
+
+    def __getitem__(self, key):
+        return self._modules[key]
+
+    def __contains__(self, key):
+        return key in self._modules
+
+    def keys(self):
+        r"""Return an iterable of the ModuleDict keys.
+        """
+        return self._modules.keys()
+
+    def items(self):
+        r"""Return an iterable of the ModuleDict key/value pairs.
+        """
+        return self._modules.items()
+
+    def values(self):
+        r"""Return an iterable of the ModuleDict values.
+        """
+        return self._modules.values()
+
+    def __len__(self):
+        return len(self._modules)
+
+    def __iter__(self):
+        return iter(self._modules.values())
+
+    def forward(self):
+        raise NotImplementedError()
+
 
 class _ConstSequential(_ConstModuleList):
     __constants__ = ['mods']
@@ -1776,6 +1847,23 @@ class _ConstSequential(_ConstModuleList):
             return input
         """)
 
+def is_scripting():
+    r"""
+    Function that returns True when in compilation and False otherwise. This
+    is useful especially with the @unused decorator to leave code in your
+    model that is not yet TorchScript compatible.
+
+    @torch.jit.unused
+    def unsupported_linear_op(x):
+        return x
+
+    def linear(x):
+       if not torch.jit.is_scripting():
+          return torch.linear(x)
+       else:
+          return unsupported_linear_op(x)
+    """
+    return False
 
 def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"
@@ -1794,6 +1882,9 @@ _builtin_ops = [
     (_triple, "aten::_triple"),
     (_unwrap_optional, "aten::_unwrap_optional"),
     (_wait, 'aten::wait'),
+    (is_scripting, "aten::is_scripting"),
+    (OrderedDict, "aten::dict"),
+    (dict, "aten::dict"),
     (cudnn.is_acceptable, "aten::cudnn_is_acceptable"),
     (math.ceil, "aten::ceil"),
     (math.copysign, "aten::copysign"),
@@ -1920,7 +2011,7 @@ def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_
     return fn
 
 def _check_no_signature(func):
-    signature = torch.jit.annotations.get_signature(func)
+    signature = torch.jit.annotations.get_signature(func, None, None)
     if signature is None:
         qual_name = _qualified_name(func)
         raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))

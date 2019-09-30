@@ -206,9 +206,9 @@ struct TORCH_API Module {
   slot_list get_module_slots() const;
 
   void dump(
-      bool omit_method_bodies,
-      bool omit_attr_values,
-      bool omit_param_values) const;
+      bool print_method_bodies,
+      bool print_attr_values,
+      bool print_param_values) const;
 
   const std::vector<Method> get_methods() const {
     return fmap(
@@ -311,6 +311,14 @@ struct TORCH_API Module {
       const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
   void save(
+      const std::string& filename,
+      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
+
+  void _save_for_mobile(
+      std::ostream& out,
+      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
+
+  void _save_for_mobile(
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 

@@ -19,6 +19,7 @@ android {
     buildTypes {
         debug {
             minifyEnabled false
+            debuggable true
         }
         release {
             minifyEnabled false
@@ -32,6 +33,14 @@ android {
     externalNativeBuild {
         cmake {
             path "CMakeLists.txt"
+        }
+    }
+
+    packagingOptions {
+        if (rootProject.isPublishing()) {
+            exclude '**/libfbjni.so'
+        } else {
+            pickFirst '**/libfbjni.so'
         }
     }
 
@@ -59,7 +68,7 @@ apply from: rootProject.file('gradle/release.gradle')
 
 task sourcesJar(type: Jar) {
     from android.sourceSets.main.java.srcDirs
-    archiveClassifier.set('sources')
+    classifier = 'sources'
 }
 
 artifacts.add('archives', sourcesJar)

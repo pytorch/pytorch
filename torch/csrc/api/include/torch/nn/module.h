@@ -504,6 +504,10 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
       const std::string& name,
       ModuleHolder<ModuleType> module_holder);
 
+  /// Unregisters a submodule from this `Module`. If there is no such module
+  /// with `name` an exception is thrown.
+  void unregister_module(const std::string& name);
+
  private:
   // Friend classes.
 

@@ -16,8 +16,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
 #ifdef USE_FBGEMM
   at::Tensor operator()(
       at::Tensor input,
-      at::Tensor packed_weight,
-      c10::optional<Tensor> bias) {
+      at::Tensor packed_weight) {
     // fp32 * int8 -> fp32 (with quantization on activation, and dequantization
     // on the result).
 
@@ -110,8 +109,9 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     fbgemm::DoNothing<float, float> doNothingObj{};
 
     const float* bias_ptr = nullptr;
-    if (bias.has_value()) {
-      Tensor bias_vec = bias.value();
+    at::Tensor bias_vec;
+    if (pack_ptr.bias.has_value()) {
+      bias_vec = pack_ptr.bias.value();
       TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
       TORCH_CHECK(
           bias_vec.size(0) == N,
@@ -120,7 +120,6 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
       auto bias_contig = bias_vec.contiguous();
       bias_ptr = bias_contig.data_ptr<float>();
     }
-
     // The resulting matrix here is 2-D, let's view it with the original
     // left hand dimensions of the input. Here are two examples:
     // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
@@ -128,8 +127,8 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     std::vector<int64_t> out_sizes = input.sizes().vec();
     out_sizes.back() = N;
     // Allocate output Tensor and a buffer for fbgemmPacked to use
-    auto output = at::zeros(out_sizes, input.options().dtype(at::kFloat));
-    auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
+    auto output = at::empty(out_sizes, input.options().dtype(at::kFloat));
+    auto buffer = at::empty_like(output, output.options().dtype(at::kInt));
 
     if (pack_ptr.q_scheme == kPerTensorAffine) {
       // Process the per tensor quantization.
@@ -200,8 +199,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
 #else // USE_FBGEMM
   at::Tensor operator()(
       at::Tensor /* input */,
-      at::Tensor /* packed_weight */,
-      c10::optional<Tensor> /* bias */) {
+      at::Tensor /* packed_weight */) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -213,10 +211,10 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
 
 static auto registry =
     torch::RegisterOperators()
-        .op("quantized::fbgemm_linear_dynamic(Tensor X, Tensor W_prepack, Tensor? b) -> Tensor Y",
+        .op("quantized::linear_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
                 .kernel<QLinearDynamicInt8<false>>(TensorTypeId::CPUTensorId))
-        .op("quantized::fbgemm_linear_relu_dynamic(Tensor X, Tensor W_prepack, Tensor? b) -> Tensor Y",
+        .op("quantized::linear_relu_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
                 .kernel<QLinearDynamicInt8<true>>(TensorTypeId::CPUTensorId));
 } // namespace

@@ -1,13 +1,11 @@
 package org.pytorch;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-
 import android.content.Context;
-import androidx.test.ext.junit.runners.AndroidJUnit4;
-import androidx.test.platform.app.InstrumentationRegistry;
+
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -15,9 +13,14 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.HashMap;
 import java.util.Map;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
+
+import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
+
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 @RunWith(AndroidJUnit4.class)
 public class PytorchInstrumentedTests {
@@ -33,7 +36,7 @@ public class PytorchInstrumentedTests {
   public void testForwardNull() throws IOException {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     final IValue input =
-        IValue.tensor(Tensor.newByteTensor(new long[] {1}, Tensor.allocateByteBuffer(1)));
+        IValue.tensor(Tensor.newInt8Tensor(new long[] {1}, Tensor.allocateByteBuffer(1)));
     assertTrue(input.isTensor());
     final IValue output = module.forward(input);
     assertTrue(output.isNull());
@@ -94,13 +97,13 @@ public class PytorchInstrumentedTests {
 
   @Test
   public void testEqTensor() throws IOException {
-    final long[] inputTensorDims = new long[] {1, 3, 224, 224};
-    final long numElements = Tensor.numElements(inputTensorDims);
+    final long[] inputTensorShape = new long[] {1, 3, 224, 224};
+    final long numElements = Tensor.numel(inputTensorShape);
     final float[] inputTensorData = new float[(int) numElements];
     for (int i = 0; i < numElements; ++i) {
       inputTensorData[i] = i;
     }
-    final Tensor inputTensor = Tensor.newFloatTensor(inputTensorDims, inputTensorData);
+    final Tensor inputTensor = Tensor.newFloat32Tensor(inputTensorShape, inputTensorData);
 
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     final IValue input = IValue.tensor(inputTensor);
@@ -110,7 +113,7 @@ public class PytorchInstrumentedTests {
     assertTrue(output.isTensor());
     final Tensor outputTensor = output.getTensor();
     assertNotNull(outputTensor);
-    assertArrayEquals(inputTensorDims, outputTensor.dims);
+    assertArrayEquals(inputTensorShape, outputTensor.shape);
     float[] outputData = outputTensor.getDataAsFloatArray();
     for (int i = 0; i < numElements; i++) {
       assertTrue(inputTensorData[i] == outputData[i]);
@@ -216,8 +219,8 @@ public class PytorchInstrumentedTests {
 
   @Test
   public void testTensorMethods() {
-    long[] dims = new long[] {1, 3, 224, 224};
-    final int numel = (int) Tensor.numElements(dims);
+    long[] shape = new long[] {1, 3, 224, 224};
+    final int numel = (int) Tensor.numel(shape);
     int[] ints = new int[numel];
     float[] floats = new float[numel];
 
@@ -228,16 +231,16 @@ public class PytorchInstrumentedTests {
       floats[i] = i / 1000.f;
     }
 
-    Tensor tensorBytes = Tensor.newByteTensor(dims, bytes);
-    assertTrue(tensorBytes.isByteTensor());
+    Tensor tensorBytes = Tensor.newInt8Tensor(shape, bytes);
+    assertTrue(tensorBytes.dtype() == Tensor.DTYPE_INT8);
     assertArrayEquals(bytes, tensorBytes.getDataAsByteArray());
 
-    Tensor tensorInts = Tensor.newIntTensor(dims, ints);
-    assertTrue(tensorInts.isIntTensor());
+    Tensor tensorInts = Tensor.newInt32Tensor(shape, ints);
+    assertTrue(tensorInts.dtype() == Tensor.DTYPE_INT32);
     assertArrayEquals(ints, tensorInts.getDataAsIntArray());
 
-    Tensor tensorFloats = Tensor.newFloatTensor(dims, floats);
-    assertTrue(tensorFloats.isFloatTensor());
+    Tensor tensorFloats = Tensor.newFloat32Tensor(shape, floats);
+    assertTrue(tensorFloats.dtype() == Tensor.DTYPE_FLOAT32);
     float[] floatsOut = tensorFloats.getDataAsFloatArray();
     assertTrue(floatsOut.length == numel);
     for (int i = 0; i < numel; i++) {
@@ -247,12 +250,52 @@ public class PytorchInstrumentedTests {
 
   @Test(expected = IllegalStateException.class)
   public void testTensorIllegalStateOnWrongType() {
-    long[] dims = new long[] {1, 3, 224, 224};
-    final int numel = (int) Tensor.numElements(dims);
+    long[] shape = new long[] {1, 3, 224, 224};
+    final int numel = (int) Tensor.numel(shape);
     float[] floats = new float[numel];
-    Tensor tensorFloats = Tensor.newFloatTensor(dims, floats);
-    assertTrue(tensorFloats.isFloatTensor());
+    Tensor tensorFloats = Tensor.newFloat32Tensor(shape, floats);
+    assertTrue(tensorFloats.dtype() == Tensor.DTYPE_FLOAT32);
     tensorFloats.getDataAsByteArray();
+  }
+
+
+  @Test
+  public void testEqString() throws IOException {
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    String[] values =
+        new String[] {
+            "smoketest",
+            "проверка не латинских символов", // not latin symbols check
+            "#@$!@#)($*!@#$)(!@*#$"
+        };
+    for (String value : values) {
+      final IValue input = IValue.string(value);
+      assertTrue(input.isString());
+      assertTrue(value.equals(input.getString()));
+      final IValue output = module.runMethod("eqStr", input);
+      assertTrue(output.isString());
+      assertTrue(value.equals(output.getString()));
+    }
+  }
+
+  @Test
+  public void testStr3Concat() throws IOException {
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    String[] values =
+        new String[] {
+            "smoketest",
+            "проверка не латинских символов", // not latin symbols check
+            "#@$!@#)($*!@#$)(!@*#$"
+        };
+    for (String value : values) {
+      final IValue input = IValue.string(value);
+      assertTrue(input.isString());
+      assertTrue(value.equals(input.getString()));
+      final IValue output = module.runMethod("str3Concat", input);
+      assertTrue(output.isString());
+      String expectedOutput = new StringBuilder().append(value).append(value).append(value).toString();
+      assertTrue(expectedOutput.equals(output.getString()));
+    }
   }
 
   private static String assetFilePath(String assetName) throws IOException {

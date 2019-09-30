@@ -651,7 +651,7 @@ BAD_EXAMPLES = [
 
 class TestDistributions(TestCase):
     _do_cuda_memory_leak_check = True
-    _do_cuda_non_default_stream = False
+    _do_cuda_non_default_stream = True
 
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
@@ -2908,7 +2908,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(halfcauchy.sample(torch.Size((3, 2))).size(),
                          torch.Size((3, 2)))
         self.assertEqual(halfcauchy.log_prob(self.scalar_sample).size(),
-                         torch.Size()) 
+                         torch.Size())
         self.assertEqual(halfcauchy.log_prob(self.tensor_sample_1).size(),
                          torch.Size((3, 2)))
         self.assertEqual(halfcauchy.log_prob(self.tensor_sample_2).size(),

@@ -7,7 +7,7 @@ import torch
 from torch.nn import Conv2d, BatchNorm2d, ReLU
 from torch.nn._intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.quantization.QConfig import default_qat_qconfig
-from torch.utils.mkldnn import disable_mkldnn_conv
+import torch.backends.mkldnn
 from common_utils import TestCase, run_tests
 from hypothesis import given
 from hypothesis import strategies as st
@@ -59,7 +59,11 @@ class IntrinsicQATModuleTest(TestCase):
             momentum,
             freeze_bn
     ):
-        with disable_mkldnn_conv():
+        # **** WARNING: This is used to temporarily disable MKL-DNN convolution due
+        # to a bug: https://github.com/pytorch/pytorch/issues/23825
+        # Once this bug is fixed, this context manager as well as its callsites
+        # should be removed!
+        with torch.backends.mkldnn.flags(enabled=False):
             input_channels = input_channels_per_group * groups
             output_channels = output_channels_per_group * groups
             dilation_h = dilation_w = dilation
@@ -90,9 +94,14 @@ class IntrinsicQATModuleTest(TestCase):
                 padding_mode,
                 eps,
                 momentum,
-                freeze_bn,
-                default_qat_qconfig
-            ).to(dtype=torch.double).disable_fake_quant()
+                freeze_bn=True,
+                qconfig=default_qat_qconfig
+            ).to(dtype=torch.double)
+            qat_op.apply(torch.quantization.disable_fake_quant)
+            if freeze_bn:
+                qat_op.apply(torch.nn._intrinsic.qat.freeze_bn_stats)
+            else:
+                qat_op.apply(torch.nn._intrinsic.qat.update_bn_stats)
 
             # align inputs and internal parameters
             input = torch.randn(batch_size, input_channels, height, width, dtype=torch.double, requires_grad=True)

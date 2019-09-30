@@ -169,7 +169,7 @@ If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xa
 
 Common
 ```
-conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests
+conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
 ```
 
 On Linux
@@ -274,7 +274,7 @@ ccmake build  # or cmake-gui build
 
 Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass `-e PYTHON_VERSION=x.y` flag to specify which Python version is to be used by Miniconda, or leave it unset to use the default. Build from pytorch repo directory as docker needs to copy git repo into docker filesystem while building the image.
 ```
-docker build -t pytorch -f docker/pytorch/Dockerfile .
+docker build -t pytorch -f docker/pytorch/Dockerfile .  # [optional] --build-arg WITH_TORCHVISION=0
 ```
 
 You can also pull a pre-built docker image from Docker Hub and run with nvidia-docker,

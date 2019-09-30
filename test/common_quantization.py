@@ -14,8 +14,8 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
-    default_qconfig, QConfig, default_observer, default_weight_observer, \
-    default_qat_qconfig, propagate_qconfig, convert, DEFAULT_DYNAMIC_MODULE_MAPPING
+    default_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
+    propagate_qconfig_, convert, DEFAULT_DYNAMIC_MODULE_MAPPING
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -53,14 +53,15 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
     return train_loss, correct, total
 
 def convert_dynamic(module):
-    convert(module, DEFAULT_DYNAMIC_MODULE_MAPPING)
+    convert(module, DEFAULT_DYNAMIC_MODULE_MAPPING, inplace=True)
 
 def prepare_dynamic(model, qconfig_dict=None):
-    propagate_qconfig(model, qconfig_dict)
+    propagate_qconfig_(model, qconfig_dict)
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
     def setUp(self):
+        super(QuantizationTestCase, self).setUp()
         self.calib_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
         self.train_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
         self.img_data = [(torch.rand(2, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
@@ -106,19 +107,16 @@ class QuantizationTestCase(TestCase):
             has Quantize and DeQuantize submodules
         """
         self.assertEqual(type(mod.module), nnq.Linear)
-        self.assertEqual(mod.module.bias.dtype, torch.qint32)
         self.checkQuantDequant(mod)
 
     def checkQuantizedLinear(self, mod):
         self.assertEqual(type(mod), nnq.Linear)
-        self.assertEqual(mod.bias.dtype, torch.qint32)
 
     def checkDynamicQuantizedLinear(self, mod):
         r"""Checks that mod has been swapped for an nnqd.Linear
             module, the bias is float.
         """
         self.assertEqual(type(mod), nnqd.Linear)
-        self.assertEqual(mod.bias.dtype, torch.float)
 
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
@@ -164,6 +162,15 @@ class QuantizationTestCase(TestCase):
 class SingleLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super(SingleLayerLinearModel, self).__init__()
+        self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        return x
+
+class AnnotatedSingleLayerLinearModel(torch.nn.Module):
+    def __init__(self):
+        super(AnnotatedSingleLayerLinearModel, self).__init__()
         self.qconfig = default_qconfig
         self.fc1 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
 
@@ -207,7 +214,7 @@ class AnnotatedTwoLayerLinearModel(torch.nn.Module):
         super(AnnotatedTwoLayerLinearModel, self).__init__()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.fc2 = QuantWrapper(torch.nn.Linear(8, 5).to(dtype=torch.float))
-        self.fc2.qconfig = default_qconfig
+        self.fc2.qconfig = torch.quantization.get_default_qconfig("fbgemm")
 
     def forward(self, x):
         x = self.fc1(x)
@@ -245,7 +252,7 @@ class AnnotatedNestedModel(torch.nn.Module):
         self.fc3 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
         self.fc3.qconfig = default_qconfig
         self.sub2.fc1 = QuantWrapper(self.sub2.fc1)
-        self.sub2.fc1.qconfig = default_qconfig
+        self.sub2.fc1.qconfig = default_per_channel_qconfig
 
     def forward(self, x):
         x = self.sub1(x)
@@ -281,8 +288,8 @@ class AnnotatedCustomConfigNestedModel(torch.nn.Module):
             'dtype': torch.quint8,
             'qscheme': torch.per_tensor_affine
         }
-        custom_qconfig = QConfig(weight=default_weight_observer(),
-                                 activation=default_observer(**custom_options))
+        custom_qconfig = QConfig(activation=default_observer.with_args(**custom_options),
+                                 weight=default_weight_observer)
         self.sub2.fc1.qconfig = custom_qconfig
 
         self.sub2.fc1 = QuantWrapper(self.sub2.fc1)
@@ -339,7 +346,7 @@ class QuantStubModel(torch.nn.Module):
     """
     def __init__(self):
         super(QuantStubModel, self).__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = torch.quantization.get_default_qconfig("qnnpack")
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
@@ -354,7 +361,7 @@ class ManualLinearQATModel(torch.nn.Module):
     """
     def __init__(self):
         super(ManualLinearQATModel, self).__init__()
-        self.qconfig = default_qat_qconfig
+        self.qconfig = torch.quantization.get_default_qat_qconfig("fbgemm")
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.fc1 = torch.nn.Linear(5, 1).to(dtype=torch.float)
@@ -372,7 +379,7 @@ class ManualConvLinearQATModel(torch.nn.Module):
     """
     def __init__(self):
         super(ManualConvLinearQATModel, self).__init__()
-        self.qconfig = default_qat_qconfig
+        self.qconfig = torch.quantization.get_default_qat_qconfig("qnnpack")
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.conv = torch.nn.Conv2d(3, 1, kernel_size=3).to(dtype=torch.float)
@@ -493,4 +500,69 @@ class ResNetBase(torch.nn.Module):
         out = self.myop.add(out, identity)
         out = self.relu2(out)
         out = self.avgpool(out)
+        return out
+
+class ModelMultipleOps(torch.nn.Module):
+    def __init__(self):
+        super(ModelMultipleOps, self).__init__()
+        norm_layer = nn.BatchNorm2d
+        inplanes = 3
+        self.conv1 = nn.Conv2d(inplanes, inplanes, (1, 1), bias=False)
+        self.conv2 = nn.Conv2d(inplanes, inplanes, (1, 1), bias=False)
+        self.bn1 = norm_layer(inplanes)
+        self.relu1 = nn.ReLU()
+        self.relu2 = nn.ReLU()
+        self.downsample = torch.nn.Identity()
+        self.skip_add = nn.quantized.FloatFunctional()
+        self.cat = nn.quantized.FloatFunctional()
+        self.avgpool = nn.AdaptiveAvgPool2d((4, 4))
+        self.fc = nn.Linear(12, 6)
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out)
+        identity = self.downsample(x)
+        out = self.skip_add.add(out, identity)
+        out = self.relu2(out)
+        out = self.avgpool(out)
+        out = self.conv2(out)
+        out = torch.nn.functional.max_pool2d(out, 2, 2)
+        out = self.cat.cat([out, out])
+        out = out.view(-1, 3 * 2 * 2)
+        out = self.fc(out)
+        return out
+
+# Model to ensure consistency of fake quant with true quant
+# Average pooling and mean operations are not modelled
+# accurately with fake-quant so this model does not
+# contain those operations
+class ModelMultipleOpsNoAvgPool(torch.nn.Module):
+    def __init__(self):
+        super(ModelMultipleOpsNoAvgPool, self).__init__()
+        norm_layer = nn.BatchNorm2d
+        inplanes = 3
+        self.conv1 = nn.Conv2d(inplanes, inplanes, (1, 1), bias=False)
+        self.conv2 = nn.Conv2d(inplanes, inplanes, (1, 1), bias=False)
+        self.bn1 = norm_layer(inplanes)
+        self.relu1 = nn.ReLU()
+        self.relu2 = nn.ReLU()
+        self.skip_add = nn.quantized.FloatFunctional()
+        self.cat = nn.quantized.FloatFunctional()
+        self.maxpool = nn.MaxPool2d((4, 4))
+        self.fc = nn.Linear(12, 6)
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out)
+        skip = self.conv2(x)
+        out = self.skip_add.add(out, skip)
+        out = self.relu2(out)
+        out = self.maxpool(out)
+        out = self.conv2(out)
+        out = torch.nn.functional.max_pool2d(out, 2, 2)
+        out = self.cat.cat([out, out])
+        out = out.view(-1, 3 * 2 * 2)
+        out = self.fc(out)
         return out

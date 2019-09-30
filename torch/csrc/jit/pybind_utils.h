@@ -17,6 +17,7 @@
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
@@ -336,7 +337,8 @@ template <class T>
 inline void guardAgainstNamedTensor(const T& var) {
 #ifdef BUILD_NAMEDTENSOR
   TORCH_CHECK(!var.has_names(),
-      "NYI: Named tensors are currently unsupported in TorchScript.");
+      "NYI: Named tensors are currently unsupported in TorchScript. As a  "
+      "workaround please drop names via `tensor = tensor.rename(None)`.");
 #endif
 }
 
@@ -394,7 +396,9 @@ inline IValue toIValue(
       for (size_t i = 0; i < tuple_size; ++i) {
         values.push_back(toIValue(tuple[i], elem_types[i]));
       }
-      return c10::ivalue::Tuple::create(std::move(values), tuple_type);
+      return tuple_type->name()
+          ? c10::ivalue::Tuple::createNamed(std::move(values), tuple_type)
+          : c10::ivalue::Tuple::create(std::move(values));
     }
     case TypeKind::StringType:
       return ConstantString::create(py::cast<std::string>(obj));
@@ -430,6 +434,8 @@ inline IValue toIValue(
             }
             return repeated;
           }
+        case TypeKind::BoolType:
+          return c10::impl::toList(py::cast<std::vector<bool>>(obj));
         case TypeKind::TensorType:
           return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
         default:
@@ -492,6 +498,8 @@ inline IValue toIValue(
       AT_ERROR("Function Values aren't yet supported");
     case TypeKind::CapsuleType:
       AT_ERROR("Capsule Values aren't supported");
+    case TypeKind::AnyType:
+      AT_ERROR("AnyType Values aren't supported");
   }
   AT_ERROR(
       "Missing cases in toIValue for type: ",
@@ -609,11 +617,11 @@ inline py::object toPyObject(IValue&& ivalue) {
     for (size_t i = 0; i < elements.size(); ++i) {
       t[i] = toPyObject(IValue{elements.at(i)});
     }
-    if (tuple->type && tuple->type->schema() &&
-        tuple->type->schema()->name() != "") {
-      auto unqualName = tuple->type->name()->name();
+    if (tuple->type() && tuple->type()->schema() &&
+        tuple->type()->schema()->name() != "") {
+      auto unqualName = tuple->type()->name()->name();
       auto fieldNames = fmap(
-          tuple->type->schema()->arguments(),
+          tuple->type()->schema()->arguments(),
           [](const Argument& arg) { return arg.name(); });
       return py::module::import("torch.jit")
           .attr("_create_named_tuple")(

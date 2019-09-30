@@ -61,7 +61,7 @@
 #   BUILD_CAFFE2_OPS=0
 #     disable Caffe2 operators build
 #
-#   USE_GLOO_IBVERBS
+#   USE_IBVERBS
 #     toggle features related to distributed support
 #
 #   USE_OPENCV
@@ -350,9 +350,6 @@ install_requires = []
 
 if sys.version_info <= (2, 7):
     install_requires += ['future']
-
-if sys.version_info[0] == 2:
-    install_requires += ['requests']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -804,6 +801,7 @@ if __name__ == '__main__':
                 'include/c10/*.h',
                 'include/c10/macros/*.h',
                 'include/c10/core/*.h',
+                'include/ATen/core/boxing/*.h',
                 'include/ATen/core/dispatch/*.h',
                 'include/ATen/core/op_registration/*.h',
                 'include/c10/core/impl/*.h',
@@ -825,7 +823,10 @@ if __name__ == '__main__':
                 'include/torch/csrc/api/include/torch/detail/*.h',
                 'include/torch/csrc/api/include/torch/detail/ordered_dict.h',
                 'include/torch/csrc/api/include/torch/nn/*.h',
+                'include/torch/csrc/api/include/torch/nn/functional/*.h',
+                'include/torch/csrc/api/include/torch/nn/options/*.h',
                 'include/torch/csrc/api/include/torch/nn/modules/*.h',
+                'include/torch/csrc/api/include/torch/nn/modules/container/*.h',
                 'include/torch/csrc/api/include/torch/nn/parallel/*.h',
                 'include/torch/csrc/api/include/torch/optim/*.h',
                 'include/torch/csrc/api/include/torch/serialize/*.h',
