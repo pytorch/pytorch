@@ -359,8 +359,3 @@ BLAS and LAPACK Operations
 Utilities
 ----------------------------------
 .. autofunction:: compiled_with_cxx11_abi
-
-Quantization
-----------------------------------
-
-:ref:`torch.quantization`
