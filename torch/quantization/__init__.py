@@ -15,9 +15,9 @@ def default_eval_fn(model, calib_data):
 
 _all__ = [
     'QuantWrapper', 'QuantStub', 'DeQuantStub', 'DEFAULT_MODULE_MAPPING',
-    # Top level API for quantizing a float model
+    # Top level API for eager mode quantization
     'quantize',
-    # Sub functions called by quantize
+    # Sub functions used by eager mode quantization
     'prepare', 'convert',
     # Sub functions for `prepare` and `swap_module`
     'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',

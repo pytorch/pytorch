@@ -52,6 +52,15 @@ void testIValue() {
   ASSERT_TRUE(ten2.toTensor().equal(ten.toTensor()));
   std::move(ten2).toTensor();
   ASSERT_EQ(tv.use_count(), 2);
+
+  {
+    std::tuple<int64_t, at::Tensor> t = std::make_tuple(123, at::randn({1}));
+    auto iv = IValue(t);
+    auto t_ = iv.to<std::tuple<int64_t, at::Tensor>>();
+    ASSERT_EQ(std::get<0>(t_), 123);
+    ASSERT_EQ(
+        std::get<1>(t_).item().to<float>(), std::get<1>(t).item().to<float>());
+  }
 }
 
 } // namespace jit
