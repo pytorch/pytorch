@@ -11636,6 +11636,11 @@ class TestTorchDeviceType(TestCase):
                         for i in range(len(t)):
                             self.assertEqual(t[i].cpu().numpy(), np1[i])
 
+    def test_nonzero_non_diff(self, device):
+        x = torch.randn(10, requires_grad=True)
+        nz = x.nonzero()
+        self.assertFalse(nz.requires_grad)
+
     def test_pdist_norm(self, device):
         def test_pdist_single(shape, device, p, dtype, trans):
             x = torch.randn(shape, dtype=dtype, device=device)

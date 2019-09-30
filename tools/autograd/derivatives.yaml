@@ -1578,3 +1578,6 @@
 
 - name: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
   output_differentiability: [False]
+
+- name: nonzero(Tensor self) -> Tensor
+  output_differentiability: [False]
