@@ -279,7 +279,7 @@ TEST_F(FunctionalTest, LogSigmoid) {
   LogSigmoid model;
   auto x = torch::linspace(-10.0, 10.0, size * size * size);
   x.resize_({size, size, size});
-  auto y = F::log_sigmoid(x);
+  auto y = F::logsigmoid(x);
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));

@@ -8,16 +8,18 @@ namespace nn {
 
 ELUImpl::ELUImpl(const ELUOptions& options_) : options(options_) {}
 
-Tensor ELUImpl::forward(const Tensor& input) {
+Tensor ELUImpl::forward(Tensor& input) {
   return F::elu(input, options);
 }
 
 void ELUImpl::reset() {}
 
 void ELUImpl::pretty_print(std::ostream& stream) const {
-  stream << std::boolalpha
-         << "torch::nn::ELU(alpha=" << options.alpha()
-         << ", inplace=" << options.inplace() << ")";
+  stream << "torch::nn::ELU(alpha=" << options.alpha();
+  if (options.inplace()) {
+    stream << std::boolalpha  << ", inplace=" << options.inplace();
+  }
+  stream << ")";
 }
 
 // ============================================================================
@@ -33,7 +35,7 @@ void HardshrinkImpl::reset() {}
 
 void HardshrinkImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha
-         << "torch::nn::Hardshrink(lambda=" << options.lambda() << ")";
+         << "torch::nn::Hardshrink(" << options.lambda() << ")";
 }
 
 // ============================================================================
@@ -41,7 +43,7 @@ void HardshrinkImpl::pretty_print(std::ostream& stream) const {
 HardtanhImpl::HardtanhImpl(const HardtanhOptions& options_)
     : options(options_) {}
 
-Tensor HardtanhImpl::forward(const Tensor& input) {
+Tensor HardtanhImpl::forward(Tensor& input) {
   return F::hardtanh(input, options);
 }
 
@@ -50,8 +52,11 @@ void HardtanhImpl::reset() {}
 void HardtanhImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha
          << "torch::nn::Hardtanh(min_val=" << options.min_val()
-         << ", max_val=" << options.max_val()
-         << ", inplace=" << options.inplace() << ")";
+         << ", max_val=" << options.max_val();
+  if (options.inplace()) {
+    stream << std::boolalpha  << ", inplace=" << options.inplace();
+  }
+  stream << ")";
 }
 
 // ============================================================================
@@ -59,7 +64,7 @@ void HardtanhImpl::pretty_print(std::ostream& stream) const {
 LeakyReLUImpl::LeakyReLUImpl(const LeakyReLUOptions& options_)
     : options(options_) {}
 
-Tensor LeakyReLUImpl::forward(const Tensor& input) {
+Tensor LeakyReLUImpl::forward(Tensor& input) {
   return F::leaky_relu(input, options);
 }
 
@@ -67,14 +72,17 @@ void LeakyReLUImpl::reset() {}
 
 void LeakyReLUImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha
-         << "torch::nn::LeakyReLU(negative_slope=" << options.negative_slope()
-         << ", inplace=" << options.inplace() << ")";
+         << "torch::nn::LeakyReLU(negative_slope=" << options.negative_slope();
+  if (options.inplace()) {
+    stream << std::boolalpha  << ", inplace=" << options.inplace();
+  }
+  stream << ")";
 }
 
 // ============================================================================
 
 Tensor LogSigmoidImpl::forward(const Tensor& input) {
-  return F::log_sigmoid(input);
+  return F::logsigmoid(input);
 }
 
 void LogSigmoidImpl::reset() {}

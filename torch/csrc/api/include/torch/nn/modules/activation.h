@@ -19,7 +19,7 @@ class TORCH_API ELUImpl : public torch::nn::Cloneable<ELUImpl> {
   ELUImpl() : ELUImpl(ELUOptions()) {}
   explicit ELUImpl(const ELUOptions& options_);
 
-  Tensor forward(const Tensor& input);
+  Tensor forward(Tensor& input);
 
   void reset() override;
 
@@ -65,7 +65,7 @@ class TORCH_API HardtanhImpl : public torch::nn::Cloneable<HardtanhImpl> {
   HardtanhImpl() : HardtanhImpl(HardtanhOptions()) {}
   explicit HardtanhImpl(const HardtanhOptions& options_);
 
-  Tensor forward(const Tensor& input);
+  Tensor forward(Tensor& input);
 
   void reset() override;
 
@@ -88,7 +88,7 @@ class TORCH_API LeakyReLUImpl : public torch::nn::Cloneable<LeakyReLUImpl> {
   LeakyReLUImpl() : LeakyReLUImpl(LeakyReLUOptions()) {}
   explicit LeakyReLUImpl(const LeakyReLUOptions& options_);
 
-  Tensor forward(const Tensor& input);
+  Tensor forward(Tensor& input);
 
   void reset() override;
 
@@ -116,9 +116,6 @@ class TORCH_API LogSigmoidImpl : public torch::nn::Cloneable<LogSigmoidImpl> {
 
   /// Pretty prints the `LogSigmoid` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
-
-  /// The options with which this `Module` was constructed.
-  LeakyReLUOptions options;
 };
 
 TORCH_MODULE(LogSigmoid);
