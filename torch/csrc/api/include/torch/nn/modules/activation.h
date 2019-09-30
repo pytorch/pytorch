@@ -19,7 +19,7 @@ class TORCH_API ELUImpl : public torch::nn::Cloneable<ELUImpl> {
   ELUImpl() : ELUImpl(ELUOptions()) {}
   explicit ELUImpl(const ELUOptions& options_);
 
-  Tensor forward(const Tensor& input);
+  Tensor forward(Tensor& input);
 
   void reset() override;
 

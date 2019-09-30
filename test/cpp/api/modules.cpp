@@ -1230,7 +1230,7 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
 }
 
 TEST_F(ModulesTest, PrettyPrintELU) {
-  ASSERT_EQ(c10::str(ELU()), "torch::nn::ELU(alpha=1, inplace=false)");
+  ASSERT_EQ(c10::str(ELU()), "torch::nn::ELU(alpha=1)");
   ASSERT_EQ(c10::str(ELU(ELUOptions().alpha(42.42).inplace(true))),
             "torch::nn::ELU(alpha=42.42, inplace=true)");
 }
