@@ -158,7 +158,7 @@ auto reg_str_ops_2 =
         .op("aten::slice.str(str string, int start, int end=9223372036854775807, int step=1) -> str",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel<decltype(stringSlice), &stringSlice>())
+                .catchAllKernel(&stringSlice))
 
         // upper and lower require there to be at least one alpha character,
         // and ignore all other characters

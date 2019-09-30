@@ -27,7 +27,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   auto registry1 = torch::RegisterOperators()
     .op(torch::RegisterOperators::options()
       .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-      .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(TensorTypeId::MSNPUTensorId)
+      .impl_unboxedOnlyKernel<decltype(empty_override)>(TensorTypeId::MSNPUTensorId, &empty_override)
       .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);
@@ -44,7 +44,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   auto registry2 = torch::RegisterOperators()
     .op(torch::RegisterOperators::options()
       .schema("aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor")
-      .impl_unboxedOnlyKernel<decltype(add_override), &add_override>(TensorTypeId::MSNPUTensorId)
+      .impl_unboxedOnlyKernel<decltype(add_override)>(TensorTypeId::MSNPUTensorId, &add_override)
       .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
   add(a, b);
   ASSERT_EQ(test_int, 2);
@@ -58,7 +58,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
     torch::RegisterOperators()
       .op(torch::RegisterOperators::options()
         .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-        .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(TensorTypeId::MSNPUTensorId)
+        .impl_unboxedOnlyKernel<decltype(empty_override)>(TensorTypeId::MSNPUTensorId, &empty_override)
         .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   );
 }

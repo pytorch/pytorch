@@ -115,25 +115,25 @@ ${return_type} ${api_name}(${type_method_formals}) {
 DEFAULT_LEGACY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyATenCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
+  .impl_unboxedOnlyATenCatchAllKernel<${return_type} (${formals_types})>(&TypeDefault::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 BACKEND_LEGACY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyATenKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
+  .impl_unboxedOnlyATenKernel<${return_type} (${formals_types})>(TensorTypeId::${Backend}TensorId, &${Type}::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyC10CatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
+  .impl_unboxedOnlyC10CatchAllKernel<${return_type} (${formals_types})>(&TypeDefault::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyC10Kernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
+  .impl_unboxedOnlyC10Kernel<${return_type} (${formals_types})>(TensorTypeId::${Backend}TensorId, &${Type}::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\

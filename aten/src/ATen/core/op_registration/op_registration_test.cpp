@@ -629,7 +629,7 @@ void autograd_kernel(Tensor a) {
 
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutogradKernel) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .impl_unboxedOnlyKernel<decltype(autograd_kernel), &autograd_kernel>(TensorTypeId::VariableTensorId));
+    .impl_unboxedOnlyKernel(TensorTypeId::VariableTensorId, &autograd_kernel));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
@@ -641,8 +641,8 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutograd
 
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_thenCanCallAutogradKernel) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .impl_unboxedOnlyCatchAllKernel<decltype(catchall_kernel), &catchall_kernel>()
-    .impl_unboxedOnlyKernel<decltype(autograd_kernel), &autograd_kernel>(TensorTypeId::VariableTensorId));
+    .impl_unboxedOnlyCatchAllKernel(&catchall_kernel)
+    .impl_unboxedOnlyKernel(TensorTypeId::VariableTensorId, &autograd_kernel));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());

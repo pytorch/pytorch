@@ -156,14 +156,14 @@ ${return_type} ${api_name}(${type_method_formals}) {
 LEGACY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyATenKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .impl_unboxedOnlyATenKernel<${return_type} (${formal_types})>(TensorTypeId::VariableTensorId, &VariableType::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyC10Kernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .impl_unboxedOnlyC10Kernel<${return_type} (${formal_types})>(TensorTypeId::VariableTensorId, &VariableType::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
