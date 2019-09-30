@@ -878,8 +878,7 @@ Utilities
 .. autoclass:: Flatten
     :members:
 
-.. _quantization:
+Quantized Functions
+--------------------
 
-quantization_
-
-:ref:`quantization`
+:ref:`torch.quantization`
