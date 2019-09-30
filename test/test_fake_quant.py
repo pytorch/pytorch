@@ -129,19 +129,14 @@ class TestFakeQuantizePerTensor(TestCase):
     @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
-                       qparams=hu.qparams(dtypes=[torch.quint8, torch.qint8])),
+                       qparams=hu.qparams(dtypes=[torch.quint8])),
            fq_module=st.sampled_from([torch.quantization.default_fake_quant,
                                       torch.quantization.default_histogram_fake_quant,
-                                      torch.quantization.default_weight_fake_quant])
+                                      ])
            )
     def test_fq_module(self, device, X, fq_module):
         np.random.seed(NP_RANDOM_SEED)
         X, (scale, zero_point, torch_type) = X
-        if fq_module == torch.quantization.default_weight_fake_quant:
-            assume(torch_type == torch.qint8)
-        else:
-            assume(torch_type == torch.quint8)
-
         quant_min = torch.iinfo(torch_type).min
         quant_max = torch.iinfo(torch_type).max
 
