@@ -197,7 +197,7 @@ void InsertObserversHelper::findIntermediateValuesInPattern(
   std::unordered_map<std::string, Value*> vmap;
   script::parseIR(pattern, &pattern_graph, vmap);
 
-  auto matches = findPatternMatches(pattern_graph, graph);
+  const auto& matches = findPatternMatches(pattern_graph, graph);
   for (const auto& match : matches) {
     auto output_value = vmap.at("intermediate_val");
     TORCH_INTERNAL_ASSERT(
@@ -830,7 +830,7 @@ graph(%self, %scale, %zero_point, %dtype):
   script::parseIR(pattern, &pattern_graph, vmap);
   auto method = module.get_method(method_name);
   auto graph = method.graph();
-  auto matches = findPatternMatches(pattern_graph, *graph);
+  const auto& matches = findPatternMatches(pattern_graph, *graph);
   // Extra filter on scale/zero_point/dtype to make sure they are Constant
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
@@ -897,6 +897,88 @@ void InsertPrepackUnpack(script::Module& module) {
     InsertPrepackUnpack(graph);
     for (auto m : module.get_modules()) {
       InsertPrepackUnpack(m);
+    }
+  }
+}
+
+void FoldPrepackedWeightIntoModule(
+    script::Module& module,
+    const std::string& method_name,
+    const script::Module& wrapper_module) {
+  auto method = module.get_method(method_name);
+  auto graph = method.graph();
+  std::string linear_with_quant = R"(
+graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype):
+        %w = prim::GetAttr[name="weight"](%self)
+        %b = prim::GetAttr[name="bias"](%self)
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %packed_params = quantized::linear_prepack(%w_quant, %b)
+        return (%packed_params))";
+
+  auto patterns = {linear_with_quant};
+  for (const auto& pattern : patterns) {
+    Graph pattern_graph;
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(pattern, &pattern_graph, vmap);
+    const auto& matches = findPatternMatches(pattern_graph, *graph);
+    TORCH_INTERNAL_ASSERT(
+        matches.size() <= 1, "We only support at most one match right now");
+    for (const auto& match : matches) {
+      const auto& match_vmap = match.values_map;
+      auto w_scale =
+          toIValue(match_vmap.at(vmap.at("w_scale"))).value().toDouble();
+      auto w_zero_point =
+          toIValue(match_vmap.at(vmap.at("w_zero_point"))).value().toInt();
+      auto w_dtype =
+          toIValue(match_vmap.at(vmap.at("w_dtype"))).value().toScalarType();
+      auto w = module.get_parameter("weight").variable_data();
+      auto w_quant = at::quantize_per_tensor(w, w_scale, w_zero_point, w_dtype);
+      auto b = module.get_parameter("bias").variable_data();
+      auto wrapper = wrapper_module.clone();
+      auto set_weight_bias = wrapper.get_method("set_weight_bias");
+      set_weight_bias(std::vector<IValue>{IValue(w_quant), IValue(b)});
+      // TODO: we need to make sure this name is unique
+      module.register_module("_packed_linear_weight_bias", wrapper);
+
+      // Replace GetAttr on %self with PackedParams module
+      auto w_val = match_vmap.at(vmap.at("w"));
+      auto b_val = match_vmap.at(vmap.at("b"));
+      auto w_quant_val = match_vmap.at(vmap.at("w_quant"));
+      auto packed_params_val = match_vmap.at(vmap.at("packed_params"));
+
+      WithInsertPoint ins(packed_params_val->node());
+      // wrapper_module = self._packed_linear_weight_bias
+      Value* packed_params_module =
+          graph->insertGetAttr(graph->inputs()[0], "_packed_linear_weight_bias")
+              ->setType(wrapper.type());
+
+      // packed_params = wrapper_module._packed_params
+      Value* packed_params_from_attr =
+          graph->insertGetAttr(packed_params_module, "_packed_params");
+      packed_params_val->replaceAllUsesWith(packed_params_from_attr);
+
+      // Delete nodes
+      std::vector<Node*> nodes_to_delete = {w_val->node(),
+                                            b_val->node(),
+                                            w_quant_val->node(),
+                                            packed_params_val->node()};
+      for (auto n : nodes_to_delete) {
+        n->removeAllInputs();
+      }
+      for (auto n : nodes_to_delete) {
+        n->destroy();
+      }
+    }
+  }
+}
+
+void FoldPrepackedWeightIntoModule(
+    script::Module& module,
+    const script::Module& wrapper_module) {
+  for (auto& method : module.get_methods()) {
+    FoldPrepackedWeightIntoModule(module, method.name(), wrapper_module);
+    for (auto m : module.get_modules()) {
+      FoldPrepackedWeightIntoModule(m, wrapper_module);
     }
   }
 }
