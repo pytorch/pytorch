@@ -79,6 +79,14 @@ class ConvBn2d(nn.Conv2d):
         if hasattr(self, 'gamma'):
             self.reset_bn_parameters()
 
+    def update_bn_stats(self):
+        self.freeze_bn = False
+        return self
+
+    def freeze_bn_stats(self):
+        self.freeze_bn = True
+        return self
+
     def _forward(self, input):
         # exponential_average_factor is self.momentum set to
         # (when it is available) only so that if gets updated
@@ -251,3 +259,11 @@ class ConvReLU2d(nnqat.Conv2d):
     @classmethod
     def from_float(cls, mod, qconfig=None):
         return super(ConvReLU2d, cls).from_float(mod, qconfig)
+
+def update_bn_stats(mod):
+    if type(mod) in set([ConvBnReLU2d, ConvBn2d]):
+        mod.update_bn_stats()
+
+def freeze_bn_stats(mod):
+    if type(mod) in set([ConvBnReLU2d, ConvBn2d]):
+        mod.freeze_bn_stats()
