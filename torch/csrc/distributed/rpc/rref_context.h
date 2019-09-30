@@ -86,18 +86,12 @@ class RRefContext {
   // previously submitted rpc/remote calls are acked before sending out the
   // RREF_USER_DELETE message. Otherwise, the OwnerRRef could be deleted too
   // soon.
-  template <typename T>
-  void addPendingChild(
-      const ForkId& forkId,
-      const std::shared_ptr<UserRRef<T>>& rref);
+  void addPendingChild(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
   void delPendingChild(const ForkId& forkId);
 
   // When a UserRRef is created, it is added into pendingUsers_ to be held alive
   // until it receives RREF_USER_ACCEPT from the owner.
-  template <typename T>
-  void addPendingUser(
-      const ForkId& forkId,
-      const std::shared_ptr<UserRRef<T>>& rref);
+  void addPendingUser(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
   void delPendingUser(const ForkId& forkId);
 
   // If there is any leak on any RRef, this method will throw an error.

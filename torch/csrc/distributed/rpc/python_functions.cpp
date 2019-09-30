@@ -116,6 +116,8 @@ PyRRef pyRemoteBuiltin(
       ScriptRemoteCall(
           op, std::move(stack), userRRef->rrefId(), userRRef->forkId())
           .toMessage());
+
+  ctx->addPendingUser(userRRef->forkId(), userRRef);
   fm->addCallback(finishAcceptUserRRef);
   return PyRRef(userRRef);
 }
@@ -150,6 +152,7 @@ PyRRef pyRemotePythonUdf(
           userRRef->forkId().toIValue())
           .toMessage());
 
+  ctx->addPendingUser(userRRef->forkId(), userRRef);
   fm->addCallback(finishAcceptUserRRef);
   return PyRRef(userRRef);
 }
