@@ -121,6 +121,7 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   }
 
   cudaStream_t stream = THCState_getCurrentStream(state);
+  C10_PREPARE_KERNEL_ASSERT;
   int indContig = THCudaLongTensor_isContiguous(state, indices);
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
@@ -129,7 +130,7 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   indexCopySmallIndex<TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM>       \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(           \
       dstInfo, srcInfo, indicesInfo,                            \
-      dstCopyDim, srcCopyDim, sliceSize, dstCopyDimSize);
+      dstCopyDim, srcCopyDim, sliceSize, dstCopyDimSize, __c10_assert_state);
 
 #define LARGE_INDEX(TENSOR_TYPE, TYPE,                         \
                     DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)   \
@@ -139,7 +140,7 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
       dstInfo, srcInfo, indicesInfo,                           \
       dstCopyDim, srcCopyDim, srcTotalSize,                    \
       (IDX_IS_MAJOR) ? sliceSize : numIndices,                 \
-      dstCopyDimSize);
+      dstCopyDimSize, __c10_assert_state);
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
@@ -310,6 +311,7 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
     return;
   }
   cudaStream_t stream = THCState_getCurrentStream(state);
+  C10_PREPARE_KERNEL_ASSERT;
   int indContig = THCudaLongTensor_isContiguous(state, indices);
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
@@ -318,7 +320,7 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   indexFillSmallIndex<TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM> \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(   \
       dstInfo, indicesInfo,                             \
-      dstFillDim, sliceSize, dstFillDimSize, val);
+      dstFillDim, sliceSize, dstFillDimSize, val, __c10_assert_state);
 
 #define LARGE_INDEX(TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM, IDX_IS_MAJOR)   \
   indexFillLargeIndex<TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM, IDX_IS_MAJOR> \
@@ -326,7 +328,7 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
       dstInfo, indicesInfo,                                              \
       dstFillDim, sliceSize * numIndices,                                \
       (IDX_IS_MAJOR) ? sliceSize : numIndices,                           \
-      dstFillDimSize, val);
+      dstFillDimSize, val, __c10_assert_state);
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
@@ -410,6 +412,7 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
 
   int srcDims = THCTensor_(nDimensionLegacyNoScalars)(state, src);
   cudaStream_t stream = THCState_getCurrentStream(state);
+  C10_PREPARE_KERNEL_ASSERT;
 
   THArgCheck(THCudaLongTensor_nDimensionLegacyNoScalars(state, indices) <= 1, 3,
              "Index is supposed to be an empty tensor or a vector");
@@ -442,7 +445,7 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(           \
       dstInfo, srcInfo, indicesInfo,                            \
       dstSelectDim, srcSelectDim, static_cast<TYPE>(sliceSize), \
-      srcSelectDimSize);
+      srcSelectDimSize, __c10_assert_state);
 
 #define LARGE_INDEX(TENSOR_TYPE, TYPE,                           \
                     DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)     \
@@ -452,7 +455,7 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
       dstInfo, srcInfo, indicesInfo,                             \
       dstSelectDim, srcSelectDim, static_cast<TYPE>(dstTotalSize), \
       static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndices),  \
-      srcSelectDimSize);
+      srcSelectDimSize, __c10_assert_state);
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
@@ -560,6 +563,7 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
     return;
   }
   cudaStream_t stream = THCState_getCurrentStream(state);
+  C10_PREPARE_KERNEL_ASSERT;
   int indContig = THCudaLongTensor_isContiguous(state, indices);
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
@@ -568,7 +572,7 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
   indexAddSmallIndex<TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM> \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(   \
       dstInfo, srcInfo, indicesInfo,                    \
-      dstAddDim, srcAddDim, sliceSize, dstAddDimSize);
+      dstAddDim, srcAddDim, sliceSize, dstAddDimSize, __c10_assert_state);
 
 #define LARGE_INDEX(TENSOR_TYPE, TYPE,                        \
                     DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)  \
@@ -578,7 +582,7 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
       dstInfo, srcInfo, indicesInfo,                          \
       dstAddDim, srcAddDim, srcTotalSize,                     \
       (IDX_IS_MAJOR) ? sliceSize : numIndices,                \
-      dstAddDimSize);
+      dstAddDimSize, __c10_assert_state);
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));

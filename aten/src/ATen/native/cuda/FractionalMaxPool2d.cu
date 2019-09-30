@@ -40,7 +40,8 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
   PackedTensorAccessor<int64_t, 4> indices,
   PackedTensorAccessor<scalar_t, 4> input,
   PackedTensorAccessor<scalar_t, 3> samples,
-  int poolSizeH, int poolSizeW) {
+  int poolSizeH, int poolSizeW,
+  c10::cuda::CUDAAssert* __c10_assert_state) {
 
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
 
@@ -86,8 +87,8 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
       }
     }
 
-    C10_KERNEL_ASSERT(maxVal != at::numeric_limits<scalar_t>::lowest());
-    C10_KERNEL_ASSERT(maxIndex != -1);
+    C10_KERNEL_ASSERT_RETURN(maxVal != at::numeric_limits<scalar_t>::lowest());
+    C10_KERNEL_ASSERT_RETURN(maxIndex != -1);
 
     indices[batch][plane][outputH][outputW] = maxIndex;
     output[batch][plane][outputH][outputW] = maxVal;
@@ -98,7 +99,8 @@ template <typename scalar_t>
 __global__ void fractional_max_pool2d_backward_out_cuda_frame(
   PackedTensorAccessor<scalar_t, 4> gradInput,
   PackedTensorAccessor<scalar_t, 4> gradOutput,
-  PackedTensorAccessor<int64_t, 4> indices) {
+  PackedTensorAccessor<int64_t, 4> indices,
+  c10::cuda::CUDAAssert* __c10_assert_state) {
   // Output (h, w) point that this thread is responsible for
   int ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
   int plane = blockIdx.y;
@@ -111,10 +113,10 @@ __global__ void fractional_max_pool2d_backward_out_cuda_frame(
     int outputH = ourOutputPoint / gradOutput.size(3);
 
     int index = indices[batch][plane][outputH][outputW];
-    C10_KERNEL_ASSERT(index >= 0);
+    C10_KERNEL_ASSERT_RETURN(index >= 0);
     int inputW = index % gradInput.size(3);
     int inputH = index / gradInput.size(3);
-    C10_KERNEL_ASSERT(inputH < gradInput.size(2));
+    C10_KERNEL_ASSERT_RETURN(inputH < gradInput.size(2));
 
     atomicAdd(
       &gradInput[batch][plane][inputH][inputW],
@@ -195,11 +197,10 @@ void fractional_max_pool2d_out_cuda_template(
             input_.size(1),
             input_.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
-
-  C10_PREPARE_KERNEL_ASSERT;
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
     "fractional_max_pool2d_out_cuda_frame",
     [&] {
+      C10_PREPARE_KERNEL_ASSERT;
       auto devInput = input_.packed_accessor<scalar_t, 4>();
       auto devOutput = output_.packed_accessor<scalar_t, 4>();
       auto devIndices = indices_.packed_accessor<int64_t, 4>();
@@ -207,7 +208,8 @@ void fractional_max_pool2d_out_cuda_template(
       fractional_max_pool2d_out_cuda_frame<scalar_t>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           devOutput, devIndices, devInput, devSamples,
-          poolSizeH, poolSizeW);
+          poolSizeH, poolSizeW,
+          __c10_assert_state);
        }
      );
   TORCH_CHECK(cudaGetLastError() == cudaSuccess,
@@ -272,11 +274,13 @@ void fractional_max_pool2d_backward_out_cuda_template(
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.scalar_type(),
     "fractional_max_pool2d_backward_out_cuda_frame",
     [&] {
+      C10_PREPARE_KERNEL_ASSERT;
       auto devGradInput = gradInput_.packed_accessor<scalar_t, 4>();
       auto devGradOutput = gradOutput_.packed_accessor<scalar_t, 4>();
       fractional_max_pool2d_backward_out_cuda_frame<scalar_t>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        devGradInput, devGradOutput, devIndices);
+        devGradInput, devGradOutput, devIndices,
+        __c10_assert_state);
       }
     );
   TORCH_CHECK(cudaGetLastError() == cudaSuccess,

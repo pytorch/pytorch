@@ -6,6 +6,7 @@
 #include <THC/THCTensorTypeUtils.cuh>
 #include <THC/THCTensorCopy.hpp>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/cuda/Assert.cuh>
 
 //
 // This file contains pointwise operation functions and kernels that
@@ -265,6 +266,8 @@ bool THC_pointwiseApply1(THCState* state,
   }                                         \
 }
 
+  C10_PREPARE_KERNEL_ASSERT;
+
   // Can we use 32-bit integer math in the kernel (the linear ID for the copy
   // and the resulting non-linear offset is all computable using 32-bit math?)
   // We also use unsigned index math in the kernel, as signed div/mod has
@@ -430,6 +433,8 @@ bool THC_pointwiseApply2(THCState* state,
       break;                                \
   }                                         \
 }
+
+  C10_PREPARE_KERNEL_ASSERT;
 
   if (THCTensor_canUse32BitIndexMath(state, a) &&
       THCTensor_canUse32BitIndexMath(state, b)) {
@@ -641,6 +646,8 @@ bool THC_pointwiseApply3(THCState* state,
       break;                                \
   }                                         \
 }
+
+  C10_PREPARE_KERNEL_ASSERT;
 
   if (THCTensor_canUse32BitIndexMath(state, a) &&
       THCTensor_canUse32BitIndexMath(state, b) &&

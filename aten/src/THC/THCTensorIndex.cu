@@ -15,6 +15,7 @@
 #include <THC/THCStorage.hpp>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
+#include <ATen/native/cuda/Assert.cuh>
 #include <algorithm> // for std::min
 
 // We prefer this kernel to avoid reloading index points if the number
@@ -30,7 +31,8 @@ __global__ void indexCopySmallIndex(TensorInfo<T, IndexType> dst,
                                     int dstCopyDim,
                                     int srcCopyDim,
                                     IndexType innerSize,
-                                    int64_t dstCopyDimSize) {
+                                    int64_t dstCopyDimSize,
+                                    c10::cuda::CUDAAssert* __c10_assert_state) {
   // In order to avoid reloading the index that we are copying, load
   // it once to handle all of the points that are being selected, so
   // it can be reused as much as possible. This kernel is chosen when
@@ -40,7 +42,7 @@ __global__ void indexCopySmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
-    assert(dstIndex < dstCopyDimSize);
+    C10_KERNEL_ASSERT_RETURN(dstIndex < dstCopyDimSize);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -76,7 +78,8 @@ __global__ void indexCopyLargeIndex(TensorInfo<T, IndexType> dst,
                                     int srcCopyDim,
                                     IndexType totalSize,
                                     IndexType innerSize,
-                                    int64_t dstCopyDimSize) {
+                                    int64_t dstCopyDimSize,
+                                    c10::cuda::CUDAAssert* __c10_assert_state) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
@@ -95,7 +98,7 @@ __global__ void indexCopyLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
-    assert(dstIndex < dstCopyDimSize);
+    C10_KERNEL_ASSERT_RETURN(dstIndex < dstCopyDimSize);
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
@@ -122,7 +125,8 @@ __global__ void indexAddSmallIndex(TensorInfo<T, IndexType> dst,
                                    int dstAddDim,
                                    int srcAddDim,
                                    IndexType innerSize,
-                                   int64_t dstAddDimSize) {
+                                   int64_t dstAddDimSize,
+                                   c10::cuda::CUDAAssert* __c10_assert_state) {
   // In order to avoid reloading the index that we are copying, load
   // it once to handle all of the points that are being selected, so
   // it can be reused as much as possible. This kernel is chosen when
@@ -132,7 +136,7 @@ __global__ void indexAddSmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
-    assert(dstIndex < dstAddDimSize);
+    C10_KERNEL_ASSERT_RETURN(dstIndex < dstAddDimSize);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -167,7 +171,8 @@ __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
                                    int srcAddDim,
                                    IndexType totalSize,
                                    IndexType innerSize,
-                                   int64_t dstAddDimSize) {
+                                   int64_t dstAddDimSize,
+                                   c10::cuda::CUDAAssert* __c10_assert_state) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
@@ -186,7 +191,7 @@ __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
-    assert(dstIndex < dstAddDimSize);
+    C10_KERNEL_ASSERT_RETURN(dstIndex < dstAddDimSize);
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
@@ -212,7 +217,8 @@ __global__ void indexFillSmallIndex(TensorInfo<T, IndexType> dst,
                                     int dstFillDim,
                                     IndexType innerSize,
                                     int64_t dstFillDimSize,
-                                    T val) {
+                                    T val,
+                                    c10::cuda::CUDAAssert* __c10_assert_state) {
   // In order to avoid reloading the index that we are copying, load
   // it once to handle all of the points that are being selected, so
   // it can be reused as much as possible. This kernel is chosen when
@@ -222,7 +228,7 @@ __global__ void indexFillSmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex_ =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
-    assert(dstIndex_ < dstFillDimSize);
+    C10_KERNEL_ASSERT_RETURN(dstIndex_ < dstFillDimSize);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -252,7 +258,8 @@ __global__ void indexFillLargeIndex(TensorInfo<T, IndexType> dst,
                                     IndexType totalSize,
                                     IndexType innerSize,
                                     int64_t dstFillDimSize,
-                                    T val) {
+                                    T val,
+                                    c10::cuda::CUDAAssert* __c10_assert_state) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
@@ -271,7 +278,7 @@ __global__ void indexFillLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex_ =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
-    assert(dstIndex_ < dstFillDimSize);
+    C10_KERNEL_ASSERT_RETURN(dstIndex_ < dstFillDimSize);
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
@@ -294,7 +301,8 @@ __global__ void indexSelectSmallIndex(TensorInfo<T, IndexType> dst,
                                       int dstSelectDim,
                                       int srcSelectDim,
                                       IndexType innerSize,
-                                      int64_t srcSelectDimSize) {
+                                      int64_t srcSelectDimSize,
+                                      c10::cuda::CUDAAssert* __c10_assert_state) {
   // In order to avoid reloading the index that we are copying, load
   // it once to handle all of the points that are being selected, so
   // it can be reused as much as possible. This kernel is chosen when
@@ -304,7 +312,7 @@ __global__ void indexSelectSmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType srcIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
-    assert(srcIndex < srcSelectDimSize);
+    C10_KERNEL_ASSERT_RETURN(srcIndex < srcSelectDimSize);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -339,7 +347,8 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
                                       int srcSelectDim,
                                       IndexType totalSize,
                                       IndexType innerSize,
-                                      int64_t srcSelectDimSize) {
+                                      int64_t srcSelectDimSize,
+                                      c10::cuda::CUDAAssert* __c10_assert_state) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
@@ -358,7 +367,7 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType srcIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
-    assert(srcIndex < srcSelectDimSize);
+    C10_KERNEL_ASSERT_RETURN(srcIndex < srcSelectDimSize);
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
@@ -379,7 +388,7 @@ __device__ __forceinline__ IndexType indexToOffset(
     IndexType size)
 {
   IndexType linearIndex = static_cast<IndexType>(index);
-  assert(linearIndex < size && linearIndex >= -size);
+  C10_KERNEL_ASSERT(linearIndex < size && linearIndex >= -size);
   if (linearIndex < 0) {
     linearIndex += size;
   }
@@ -387,11 +396,12 @@ __device__ __forceinline__ IndexType indexToOffset(
 }
 
 struct WrapIndexOp {
-  WrapIndexOp(int64_t size) : size(size) {}
+  WrapIndexOp(int64_t size)
+    : size(size) {}
 
   __device__ __forceinline__ void operator()(int64_t* out, int64_t* in) {
     auto idx = *in;
-    assert(idx < size && idx >= -size);
+    C10_KERNEL_ASSERT(idx < size && idx >= -size);
     *out = idx < 0 ? idx + size : idx;
   }
 

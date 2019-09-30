@@ -42,6 +42,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
             " but got weight tensor of shape: %s", n_classes, s1.str);
   }
 
+  C10_PREPARE_KERNEL_ASSERT;
+
   if (reduction == Reduction::None && n_dims == 2) {
     THCTensor_(resize1d)(state, output, batch_size);
     if (weights) {
@@ -56,7 +58,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         toDeviceTensor<scalar_t, 1>(state, output),
         weights ? THCTensor_(data)(state, weights) : NULL,
         n_classes,
-        ignore_index);
+        ignore_index,
+        __c10_assert_state);
 
     THCudaCheck(cudaGetLastError());
 
@@ -89,7 +92,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         weights_data,
         reduction == Reduction::Mean,
         n_classes,
-        ignore_index
+        ignore_index,
+        __c10_assert_state
     );
 
   } else if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 2) {
@@ -104,7 +108,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         THCTensor_(size)(state, input, 0),
         THCTensor_(size)(state, input, 1),
         n_classes,
-        ignore_index
+        ignore_index,
+        __c10_assert_state
     );
   }
   THCudaCheck(cudaGetLastError());
@@ -160,6 +165,8 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     THError("weight tensor should be defined either for all or no classes");
   }
 
+  C10_PREPARE_KERNEL_ASSERT;
+
   if (reduction == Reduction::None && n_dims == 2) {
     THCUNN_check_dim_size(state, gradOutput, 1, 0, batch_size);
     if (weights) {
@@ -174,7 +181,8 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         toDeviceTensor<scalar_t, 2>(state, gradInput),
         weights ? THCTensor_(data)(state, weights) : NULL,
         n_classes,
-        ignore_index);
+        ignore_index,
+        __c10_assert_state);
 
     THCudaCheck(cudaGetLastError());
 
@@ -204,7 +212,8 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         total_weight_data,
         reduction == Reduction::Mean,
         n_classes,
-        ignore_index
+        ignore_index,
+        __c10_assert_state
     );
   } else {
     cunn_ClassNLLCriterion_updateGradInput_kernel<scalar_t>
@@ -218,7 +227,8 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         THCTensor_(size)(state, input, 0),
         THCTensor_(size)(state, input, 1),
         n_classes,
-        ignore_index
+        ignore_index,
+        __c10_assert_state
     );
   }
   THCudaCheck(cudaGetLastError());

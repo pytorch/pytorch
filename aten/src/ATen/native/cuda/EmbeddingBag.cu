@@ -2,7 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
-
+#include <ATen/native/cuda/Assert.cuh>
 #include <ATen/AccumulateType.h>
 
 #include <THC/THCDeviceUtils.cuh>
@@ -37,7 +37,8 @@ __global__ void EmbeddingBag_updateOutputKernel(
     int64_t *offset2bag, int64_t numIndices, int64_t numBags,
     int64_t featureSize, int64_t weight_stide0, int64_t weight_stride1,
     int mode, int64_t *bag_size, int64_t *max_indices,
-    scalar_t* per_sample_weights, int64_t per_sample_weights_stride) {
+    scalar_t* per_sample_weights, int64_t per_sample_weights_stride,
+    c10::cuda::CUDAAssert* __c10_assert_state) {
 
   // the strategy here is that each bag x feature is handled by a single thread
 
@@ -54,7 +55,8 @@ __global__ void EmbeddingBag_updateOutputKernel(
       scalar_t *weightFeat = weight + featureDim * weight_stride1;
       int64_t begin = offsets[bag];
       int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
-      assert(end >= begin);
+
+      C10_KERNEL_ASSERT_RETURN(end >= begin);
 
       accscalar_t weightFeatSum = 0;
       scalar_t weightFeatMax;
@@ -270,7 +272,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
   auto offset2bag =
       at::zeros({indices.size(0)}, indices.options()); // offset2bag = [0 0 0 0 0]
 
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  auto stream = at::cuda::getCurrentCUDAStream();
 
   auto output = at::zeros({offsets.size(0), weight.size(1)}, weight.options());
 
@@ -290,14 +292,15 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
 #endif
   int grid = 1024;
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(weight.scalar_type(), "embedding_bag_cuda", [&] {
-    EmbeddingBag_updateOutputKernel<scalar_t><<<grid, block, 0, stream>>>(
+    EmbeddingBag_updateOutputKernel<scalar_t><<<grid, block, 0, stream.stream()>>>(
         indices.data_ptr<int64_t>(), offsets.data_ptr<int64_t>(),
         weight.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
         offset2bag.data_ptr<int64_t>(), numIndices, numBags, featureSize,
         weight.stride(0), weight.stride(1), mode, bag_size.data_ptr<int64_t>(),
         mode == MODE_MAX ? max_indices.data_ptr<int64_t>() : NULL,
         per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
-        per_sample_weights.defined() ? per_sample_weights.stride(0) : 0);
+        per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
+        stream.assert_state());
   });
 
   THCudaCheck(cudaGetLastError());

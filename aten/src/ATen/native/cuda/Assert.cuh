@@ -108,7 +108,7 @@ C10_HOST_DEVICE __noinline__ void assert_fail(
     const char* func,
     const char* format,
     Args... args) {
-  assert(assert_state);
+  assert(assert_state && "Missing C10_PREPARE_KERNEL_ASSERT?");
 #ifdef __CUDA_ARCH__
   if (atomicCAS(const_cast<int32_t*>(&assert_state->error), 0, 1) != 0) {
     return;
@@ -156,7 +156,9 @@ static inline CUDAAssert* prepare_kernel_assert() {
 
   AT_ASSERT(default_stream_state);
 
-  // write default stream's assert to constant memory
+  // Write the assert state pointer of the default stream
+  // of the current device to constant memory location
+  // `default_stream_assert_state`.
   C10_CUDA_CHECK(cudaMemcpyToSymbolAsync(
       default_stream_assert_state,
       &default_stream_state,
