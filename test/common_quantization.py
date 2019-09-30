@@ -15,7 +15,7 @@ import torch.nn.quantized.dynamic as nnqd
 from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
-    default_qat_qconfig, propagate_qconfig_, convert, DEFAULT_DYNAMIC_MODULE_MAPPING
+    propagate_qconfig_, convert, DEFAULT_DYNAMIC_MODULE_MAPPING
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -214,7 +214,7 @@ class AnnotatedTwoLayerLinearModel(torch.nn.Module):
         super(AnnotatedTwoLayerLinearModel, self).__init__()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.fc2 = QuantWrapper(torch.nn.Linear(8, 5).to(dtype=torch.float))
-        self.fc2.qconfig = default_qconfig
+        self.fc2.qconfig = torch.quantization.get_default_qconfig("fbgemm")
 
     def forward(self, x):
         x = self.fc1(x)
@@ -346,7 +346,7 @@ class QuantStubModel(torch.nn.Module):
     """
     def __init__(self):
         super(QuantStubModel, self).__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = torch.quantization.get_default_qconfig("qnnpack")
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
@@ -361,7 +361,7 @@ class ManualLinearQATModel(torch.nn.Module):
     """
     def __init__(self):
         super(ManualLinearQATModel, self).__init__()
-        self.qconfig = default_qat_qconfig
+        self.qconfig = torch.quantization.get_default_qat_qconfig("fbgemm")
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.fc1 = torch.nn.Linear(5, 1).to(dtype=torch.float)
@@ -379,7 +379,7 @@ class ManualConvLinearQATModel(torch.nn.Module):
     """
     def __init__(self):
         super(ManualConvLinearQATModel, self).__init__()
-        self.qconfig = default_qat_qconfig
+        self.qconfig = torch.quantization.get_default_qat_qconfig("qnnpack")
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.conv = torch.nn.Conv2d(3, 1, kernel_size=3).to(dtype=torch.float)
