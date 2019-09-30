@@ -37,6 +37,10 @@ inline Tensor leaky_relu(const Tensor& input, const LeakyReLUOptions& options) {
   }
 }
 
+inline Tensor log_sigmoid(const Tensor& input) {
+  return torch::log_sigmoid(input);
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

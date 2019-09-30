@@ -71,5 +71,17 @@ void LeakyReLUImpl::pretty_print(std::ostream& stream) const {
          << ", inplace=" << options.inplace() << ")";
 }
 
+// ============================================================================
+
+Tensor LogSigmoidImpl::forward(const Tensor& input) {
+  return F::log_sigmoid(input);
+}
+
+void LogSigmoidImpl::reset() {}
+
+void LogSigmoidImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::LogSigmoid()";
+}
+
 } // namespace nn
 } // namespace torch
