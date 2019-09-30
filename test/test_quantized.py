@@ -11,10 +11,9 @@ from hypothesis import strategies as st
 import hypothesis_utils as hu
 from hypothesis_utils import no_deadline
 
-from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC, \
-    TEST_WITH_QNNPACK
+from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
-    enable_mobile_quantized_engine
+    override_quantized_engine
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
@@ -1100,9 +1099,16 @@ class TestDynamicQuantizedLinear(TestCase):
 def test_qlinear_op(self, batch_size, input_channels, output_channels, use_bias,
                     use_relu, use_multi_dim_input, use_channelwise, qengine):
     qlinear_prepack = torch.ops.quantized.linear_prepack
+    decimal_val = 4
     if qengine == 'qnnpack':
         use_channelwise = False
         use_multi_dim_input = False
+        # QNNPACK supports uint8 in the kernels. In the op we shift the int8
+        # weight values to uint8 to be on par with fbgemm. However, this causes
+        # some rounding issues in rare cases. So, we relax the check to allow
+        # off by one results.
+        decimal_val = 0
+
     if use_relu:
         qlinear = torch.ops.quantized.linear_relu
     else:
@@ -1189,14 +1195,7 @@ def test_qlinear_op(self, batch_size, input_channels, output_channels, use_bias,
             Y_q_ref = np.reshape(
                 Y_q_ref, (3, int(batch_size / 3), output_channels))
         # Assert equal
-        if qengine == 'qnnpack':
-            # QNNPACK supports uint8 in the kernels. In the op we shift the int8
-            # weight values to uint8 to be on par with fbgemm. However, this causes
-            # some rounding issues in rare cases. So, we relax the check to allow
-            # off by one results.
-            np.testing.assert_array_almost_equal(Y_q_ref, Y_q.int_repr().numpy(), decimal=0)
-        else:
-            np.testing.assert_equal(Y_q_ref, Y_q.int_repr().numpy())
+        np.testing.assert_array_almost_equal(Y_q_ref, Y_q.int_repr().numpy(), decimal=decimal_val)
     # Test both per-tensor and per-channel quantization
     # Reference quantized result from PyTorch Linear operator
     W_fp32 = W_q.dequantize().to(dtype=torch.float)
@@ -1208,12 +1207,8 @@ def test_qlinear_op(self, batch_size, input_channels, output_channels, use_bias,
     Y_q_ref2 = torch.quantize_per_tensor(
         Y_fp32_ref, Y_scale, Y_zp, torch.quint8)
     # Assert equal
-    if qengine == 'qnnpack':
-        np.testing.assert_array_almost_equal(
-            Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=0)
-    else:
-        np.testing.assert_equal(
-            Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
+    np.testing.assert_array_almost_equal(
+        Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=decimal_val)
 
 """Tests the correctness of the quantized::linear_unpack op."""
 @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,),
@@ -1261,20 +1256,22 @@ class TestQuantizedLinear(unittest.TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
     def test_qlinear(self):
         if 'qnnpack' in torch.backends.quantized.supported_engines:
-            if not IS_WINDOWS and not IS_PPC and not TEST_WITH_UBSAN:
-                with enable_mobile_quantized_engine():
+            if not IS_PPC and not TEST_WITH_UBSAN:
+                with override_quantized_engine('qnnpack'):
                     test_qlinear_op(self, qengine='qnnpack')
         if 'fbgemm' in torch.backends.quantized.supported_engines:
-            test_qlinear_op(self, qengine='fbgemm')
+            with override_quantized_engine('fbgemm'):
+                test_qlinear_op(self, qengine='fbgemm')
 
     """Tests the correctness of the quantized::linear_unpack op."""
     def test_qlinear_unpack(self):
         if 'qnnpack' in torch.backends.quantized.supported_engines:
-            if not IS_WINDOWS and not IS_PPC and not TEST_WITH_UBSAN:
-                with enable_mobile_quantized_engine():
+            if not IS_PPC and not TEST_WITH_UBSAN:
+                with override_quantized_engine('qnnpack'):
                     test_qlinear_unpack_op(self, qengine='qnnpack')
         if 'fbgemm' in torch.backends.quantized.supported_engines:
-            test_qlinear_unpack_op(self, qengine='fbgemm')
+            with override_quantized_engine('fbgemm'):
+                test_qlinear_unpack_op(self, qengine='fbgemm')
 
 
 @given(batch_size=st.integers(1, 3),
@@ -1491,23 +1488,25 @@ class TestQuantizedConv(unittest.TestCase):
     """Tests the correctness of quantized convolution op."""
     def test_qconv(self):
         if 'qnnpack' in torch.backends.quantized.supported_engines:
-            if not IS_WINDOWS and not IS_PPC and not TEST_WITH_UBSAN:
-                with enable_mobile_quantized_engine():
+            if not IS_PPC and not TEST_WITH_UBSAN:
+                with override_quantized_engine('qnnpack'):
                     test_qconv_op(self, qengine='qnnpack')
         if 'fbgemm' in torch.backends.quantized.supported_engines:
-            test_qconv_op(self, qengine='fbgemm')
+            with override_quantized_engine('fbgemm'):
+                test_qconv_op(self, qengine='fbgemm')
 
     """Tests the correctness of the quantized::qconv_unpack op."""
     def test_qconv_unpack(self):
         if 'qnnpack' in torch.backends.quantized.supported_engines:
-            if not IS_WINDOWS and not IS_PPC and not TEST_WITH_UBSAN:
-                with enable_mobile_quantized_engine():
+            if not IS_PPC and not TEST_WITH_UBSAN:
+                with override_quantized_engine('qnnpack'):
                     test_qconv_unpack_op(self, qengine='qnnpack')
         if 'fbgemm' in torch.backends.quantized.supported_engines:
-            test_qconv_unpack_op(self, qengine='fbgemm')
+            with override_quantized_engine('fbgemm'):
+                test_qconv_unpack_op(self, qengine='fbgemm')
 
-@unittest.skipIf(not TEST_WITH_QNNPACK, "This Pytorch Build has not been built with QNNPACK")
-@unittest.skipIf(IS_WINDOWS, "QNNPACK has not been built for Windows")
+@unittest.skipUnless('qnnpack' in torch.backends.quantized.supported_engines,
+                     "This Pytorch Build has not been built with QNNPACK")
 @unittest.skipIf(IS_PPC, "QNNPACK is not currently supported on ppc64le")
 @unittest.skipIf(TEST_WITH_UBSAN,
                  "QNNPACK does not play well with UBSAN at the moment,"
@@ -1519,7 +1518,7 @@ class TestQNNPackOps(TestCase):
                                           zero_point_min=0,
                                           zero_point_max=0)))
     def test_qnnpack_relu(self, X):
-        with enable_mobile_quantized_engine():
+        with override_quantized_engine('qnnpack'):
             X, (scale, zero_point, torch_type) = X
             relu = torch.nn.functional.relu
             X = torch.from_numpy(X)
@@ -1540,7 +1539,7 @@ class TestQNNPackOps(TestCase):
            scale_B=st.sampled_from([0.008, 0.0821, 0.67, 7]),
            scale_C=st.sampled_from([0.003, 0.07821, 0.457, 7.34]),)
     def test_qnnpack_add(self, A, zero_point, scale_A, scale_B, scale_C):
-        with enable_mobile_quantized_engine():
+        with override_quantized_engine('qnnpack'):
             A_temp = A
             A, (scale_a, zero_point_A, torch_type) = A_temp
             B, (scale_b, zero_point_B, torch_type) = A_temp
@@ -1592,7 +1591,7 @@ class TestQNNPackOps(TestCase):
     def test_qnnpack_maxpool2d(self, A, kernel, stride, padding):
         import torch.nn.functional as F
 
-        with enable_mobile_quantized_engine():
+        with override_quantized_engine('qnnpack'):
             A, (scale, zero_point, torch_type) = A
             X = torch.from_numpy(A)
             np_type = np.uint8
