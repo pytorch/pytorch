@@ -327,15 +327,20 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                          message="mulReLU.out failed")
 
-        # Scalar addition
-        mul = torch.ops.quantized.mul_scalar
+        # Scalar multiplication
         for b in B:
             C_ref = qA.dequantize().numpy() * b.item()
-            qC = _quantize(C_ref, scale, zero_point)
-            dqC = _dequantize(qC, scale, zero_point)
-            qC_hat = mul(qA, b.item(), scale, zero_point)
-            dqC_hat = qC_hat.dequantize()
-            self.assertEqual(dqC, dqC_hat)
+            qC_hat = torch.ops.quantized.mul_scalar(qA, b.item())
+
+            self.assertEqual(C_ref, qC_hat.dequantize())
+
+        # Scalar multiplication + relu
+        for b in B:
+            C_ref = qA.dequantize().numpy() * b.item()
+            C_ref[C_ref < 0] = 0
+            qC_hat = torch.ops.quantized.mul_scalar_relu(qA, b.item())
+
+            self.assertEqual(C_ref, qC_hat.dequantize())
 
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_relu_different_qparams(self):
@@ -1851,6 +1856,14 @@ class TestQNNPackOps(TestCase):
 
             np.testing.assert_equal(qC, qC_qnnp.int_repr(),
                                     "Quantized addition failed.")
+
+            Crelu = C.copy()
+            Crelu[C < 0] = 0
+            qCrelu = torch.quantize_per_tensor(torch.from_numpy(Crelu), scale_C,
+                                               zero_point_C, dtype=torch.quint8)
+            qCrelu_hat = torch.ops.quantized.add_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
+            np.testing.assert_equal(qCrelu.int_repr().numpy(), qCrelu_hat.int_repr(),
+                                    "Quantized addition with ReLU failed.")
 
             A = torch.ones((0, 2), dtype=torch.float32)
             qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,

@@ -15,5 +15,9 @@ template struct AdaptiveMaxPoolOptions<1>;
 template struct AdaptiveMaxPoolOptions<2>;
 template struct AdaptiveMaxPoolOptions<3>;
 
+template struct AdaptiveAvgPoolOptions<1>;
+template struct AdaptiveAvgPoolOptions<2>;
+template struct AdaptiveAvgPoolOptions<3>;
+
 } // namespace nn
 } // namespace torch
