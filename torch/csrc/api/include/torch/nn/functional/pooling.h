@@ -50,8 +50,28 @@ inline Tensor max_pool1d(const Tensor& input, const MaxPool1dOptions& options) {
       options.ceil_mode());
 }
 
+inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(const Tensor& input, const MaxPool1dOptions& options) {
+  return torch::max_pool1d_with_indices(
+      input,
+      options.kernel_size(),
+      options.stride(),
+      options.padding(),
+      options.dilation(),
+      options.ceil_mode());
+}
+
 inline Tensor max_pool2d(const Tensor& input, const MaxPool2dOptions& options) {
   return torch::max_pool2d(
+      input,
+      options.kernel_size(),
+      options.stride(),
+      options.padding(),
+      options.dilation(),
+      options.ceil_mode());
+}
+
+inline std::tuple<Tensor, Tensor> max_pool2d_with_indices(const Tensor& input, const MaxPool2dOptions& options) {
+  return torch::max_pool2d_with_indices(
       input,
       options.kernel_size(),
       options.stride(),
@@ -68,6 +88,65 @@ inline Tensor max_pool3d(const Tensor& input, const MaxPool3dOptions& options) {
       options.padding(),
       options.dilation(),
       options.ceil_mode());
+}
+
+inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(const Tensor& input, const MaxPool3dOptions& options) {
+  return torch::max_pool3d_with_indices(
+      input,
+      options.kernel_size(),
+      options.stride(),
+      options.padding(),
+      options.dilation(),
+      options.ceil_mode());
+}
+
+// ============================================================================
+
+inline Tensor adaptive_max_pool1d(const Tensor& input,
+  const AdaptiveMaxPool1dOptions& options) {
+   return std::get<0>(torch::adaptive_max_pool1d(input, options.output_size()));
+}
+
+inline std::tuple<Tensor, Tensor> adaptive_max_pool1d_with_indices(
+  const Tensor& input, const AdaptiveMaxPool1dOptions& options) {
+   return torch::adaptive_max_pool1d(input, options.output_size());
+}
+
+inline Tensor adaptive_max_pool2d(const Tensor& input,
+  const AdaptiveMaxPool2dOptions& options) {
+   return std::get<0>(torch::adaptive_max_pool2d(input, options.output_size()));
+}
+
+inline std::tuple<Tensor, Tensor> adaptive_max_pool2d_with_indices(
+  const Tensor& input, const AdaptiveMaxPool2dOptions& options) {
+   return torch::adaptive_max_pool2d(input, options.output_size());
+}
+
+inline Tensor adaptive_max_pool3d(const Tensor& input,
+  const AdaptiveMaxPool3dOptions& options) {
+   return std::get<0>(torch::adaptive_max_pool3d(input, options.output_size()));
+}
+
+inline std::tuple<Tensor, Tensor> adaptive_max_pool3d_with_indices(
+  const Tensor& input, const AdaptiveMaxPool3dOptions& options) {
+   return torch::adaptive_max_pool3d(input, options.output_size());
+}
+
+// ============================================================================
+
+inline Tensor adaptive_avg_pool1d(const Tensor& input,
+  const AdaptiveAvgPool1dOptions& options) {
+   return torch::adaptive_avg_pool1d(input, options.output_size());
+}
+
+inline Tensor adaptive_avg_pool2d(const Tensor& input,
+  const AdaptiveAvgPool2dOptions& options) {
+   return torch::adaptive_avg_pool2d(input, options.output_size());
+}
+
+inline Tensor adaptive_avg_pool3d(const Tensor& input,
+  const AdaptiveAvgPool3dOptions& options) {
+   return torch::adaptive_avg_pool3d(input, options.output_size());
 }
 
 } // namespace functional

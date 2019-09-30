@@ -402,7 +402,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         output.q_scale(),
         output.q_zero_point(),
         (uint8_t*)output.data_ptr<c10::quint8>(),
-        caffe2::mobile_threadpool());
+        caffe2::mobile_pthreadpool());
 
     TORCH_INTERNAL_ASSERT(
         runStatus == pytorch_qnnp_status_success,
@@ -448,10 +448,10 @@ class QConv2dInt8 final : public c10::OperatorKernel {
           output_zero_point);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::conv ",
         toString(ctx.qEngine()));
-    return at::Tensor();
   }
 };
 
