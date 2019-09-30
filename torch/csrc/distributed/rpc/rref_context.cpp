@@ -156,6 +156,17 @@ RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
     // deleted if the owner does not receive the ACK within the timeout.
     addForkOfOwner(rfd.rrefId_, rfd.forkId_);
   } else {
+    // Note [Useful Phantom Fork ID for User to Owner Call]
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // If the callee of dist.remote or dist.rpc is the owner of this RRef, the
+    // callee will not create a fork using this rfd.forkId_, because the owner
+    // will only keep one `OwnerRRef` instance and will not create any
+    // `UserRRef` instances. However, this rfd.forkId_ is still necessary, as
+    // the caller user needs to keep this `UserRRef` alive until it gets the
+    // ACK from the callee owner. Otherwise, the delete message could arrive
+    // at the owner before this dist.rpc or dist.remote call, which could
+    // potentially trigger the `OwnerRRef` to be deleted before running the
+    // user code.
     if (rref->isPyObj()) {
       addPendingChild(
           rfd.forkId_, std::static_pointer_cast<UserRRef<py::object>>(rref));
@@ -180,6 +191,10 @@ void RRefContext::notifyOwnerAndParentOfFork(
   }
 
   if (rref->isOwner()) {
+    // See Note [Useful Phantom Fork ID for User to Owner Call]
+    // In this case, the owner is the caller, and it does not adds the fork id
+    // into forks_. Because, there will be no real `UserRRef` associated with
+    // this fork ID.
     auto fm = agent_->send(
         agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
     fm->addCallback([](const Message& message) { handleException(message); });
