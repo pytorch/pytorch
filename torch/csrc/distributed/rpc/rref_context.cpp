@@ -74,13 +74,19 @@ std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(
     const ForkId& forkId) {
   TORCH_CHECK(ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
   // RRefContext does not track user RRefs, it will be destructed when there
-  // is no shared_ptrs pointing to it. NB: cannot use make_shared here as the
-  // constructor of UserRRef is private
-  return
-      std::shared_ptr<UserRRef<T>>(new UserRRef<T>(ownerId, rrefId, forkId));
-  //if (forkId.createdOn_ != ownerId) {
-  //  addPendingUser(forkId, userRRef);
-  //}
+  // is no shared_ptrs pointing to it.
+  //
+  // NB: cannot use make_shared here as the constructor of UserRRef is private.
+  // NB: This UserRRef has not been confirmed by the owner yet. The call site
+  // is responsible for adding this UserRRef to pendingUsers_. Currently, there
+  // are two call sites.
+  // (1) The creator user in python_functions.cpp
+  // (2) The callee user in RRefContext::notifyOwnerAndParentOfFork.
+  //
+  // The reason for not adding the pending user here is to put addPendingUser()
+  // close to where the RPC occurs, and it is more clear to pair it with
+  // deletePendingUser() in the response callback at the call site.
+  return std::shared_ptr<UserRRef<T>>(new UserRRef<T>(ownerId, rrefId, forkId));
 }
 
 template std::shared_ptr<UserRRef<IValue>> RRefContext::createUserRRef<IValue>(
@@ -184,7 +190,7 @@ void RRefContext::notifyOwnerAndParentOfFork(
 
   if (rref->isOwner()) {
     // See Note [Useful Phantom Fork ID for User to Owner Call]
-    // In this case, the owner is the caller, and it does not adds the fork id
+    // In this case, the owner is the caller, and it does not add the fork id
     // into forks_. Because, there will be no real `UserRRef` associated with
     // this fork ID.
     auto fm = agent_->send(
@@ -208,8 +214,8 @@ void RRefContext::addPendingChild(
     const ForkId& forkId,
     const std::shared_ptr<RRef>& rref) {
   // see Note [Early Fork Registration]
-  // If the parent is the owner, it should directly adding the child UserRRef
-  // as a fork.
+  // If the parent is the owner, it should directly add the child UserRRef as a
+  // fork.
   TORCH_INTERNAL_ASSERT(!rref->isOwner(),
       "OwnerRRef should not have a pending child.");
   std::lock_guard<std::mutex> lock(mutex_);
