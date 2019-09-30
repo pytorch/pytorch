@@ -7,13 +7,16 @@ import torch.nn._intrinsic as nni
 import torch.nn._intrinsic.quantized as nniq
 import torch.nn._intrinsic.qat as nniqat
 from torch.quantization import \
-    QConfigDynamic, default_weight_observer, get_observer_dict,\
+    QConfig, QConfigDynamic, default_observer, default_weight_observer, get_observer_dict,\
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
     default_dynamic_qconfig, HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver, RecordingObserver, QuantWrapper
 
+from torch.quantization._quantize_script import quantize_script
+
 from common_utils import run_tests
-from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
+from common_quantization import QuantizationTestCase, \
+    AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
     SkipQuantModel, QuantStubModel, \
     ModelForFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
     ModForWrapping, \
@@ -24,6 +27,8 @@ from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
 from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
 
+from jit_utils import _tmp_donotuse_dont_inline_everything
+
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis_utils import no_deadline
@@ -33,12 +38,15 @@ import copy
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
-class PostTrainingQuantTest(QuantizationTestCase):
-    def test_single_layer(self):
+class EagerModePostTrainingQuantTest(QuantizationTestCase):
+    @no_deadline
+    @given(qconfig=st.sampled_from((torch.quantization.default_qconfig, torch.quantization.default_per_channel_qconfig)))
+    def test_single_layer(self, qconfig):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
         to nnq.Linear which is the quantized version of the module
         """
-        model = SingleLayerLinearModel()
+        model = AnnotatedSingleLayerLinearModel()
+        model.qconfig = qconfig
         model = prepare(model)
         # Check if observers and quant/dequant nodes are inserted
         self.checkNoPrepModules(model)
@@ -58,7 +66,8 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API - out of place version
-        base = SingleLayerLinearModel()
+        base = AnnotatedSingleLayerLinearModel()
+        base.qconfig = qconfig
         keys_before = set(list(base.state_dict().keys()))
         model = quantize(base, test_only_eval_fn, self.calib_data)
         checkQuantized(model)
@@ -66,7 +75,8 @@ class PostTrainingQuantTest(QuantizationTestCase):
         self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
 
         # in-place version
-        model = SingleLayerLinearModel()
+        model = AnnotatedSingleLayerLinearModel()
+        model.qconfig = qconfig
         quantize(model, test_only_eval_fn, self.calib_data, inplace=True)
         checkQuantized(model)
 
@@ -268,13 +278,14 @@ class PostTrainingQuantTest(QuantizationTestCase):
         model = quantize(QuantStubModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
-    def test_resnet_base(self):
+    @given(qconfig=st.sampled_from((torch.quantization.default_qconfig, torch.quantization.default_per_channel_qconfig)))
+    def test_resnet_base(self, qconfig):
         r"""Test quantization for bottleneck topology used in resnet/resnext
         and add coverage for conversion of average pool and float functional
         """
         model = ResNetBase().float().eval()
         model = QuantWrapper(model)
-        model.qconfig = default_qconfig
+        model.qconfig = qconfig
         fuse_list = [['module.conv1', 'module.bn1', 'module.relu1']]
         fuse_modules(model, fuse_list)
         model = prepare(model)
@@ -499,6 +510,10 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         model_int8 = quantize_dynamic(model=model, dtype=torch.qint8)
         model_fp16 = quantize_dynamic(model=model, dtype=torch.float16)
+
+        # Smoke test extra reprs
+        self.assertTrue('DynamicQuantizedLSTM' in str(model_int8))
+        self.assertTrue('DynamicQuantizedLSTM' in str(model_fp16))
         cell_int8 = model_int8.lstm
         cell_fp16 = model_fp16.lstm
 
@@ -568,7 +583,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
-class QuantizationAwareTrainingTest(QuantizationTestCase):
+class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
         model = ManualLinearQATModel()
         model = prepare_qat(model)
@@ -622,6 +637,37 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         model = ManualConvLinearQATModel()
         model = quantize_qat(model, test_only_train_fn, self.img_data)
         checkQuantized(model)
+
+
+@unittest.skipUnless(
+    'fbgemm' in torch.backends.quantized.supported_engines,
+    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+    " with instruction set support avx2 or newer.",
+)
+@unittest.skip("temoprarily disable the test - enable after known issues are fixed")
+class GraphModePostTrainingQuantTest(QuantizationTestCase):
+    @_tmp_donotuse_dont_inline_everything
+    def test_single_layer(self):
+        r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
+        to nnq.Linear which is the quantized version of the module
+        """
+        # eager mode
+        model_eager = quantize(AnnotatedSingleLayerLinearModel(), test_only_eval_fn,
+                               self.calib_data)
+
+        qconfig_dict = {
+            '': QConfig(
+                activation=default_observer,
+                weight=default_weight_observer)
+        }
+        model_script = quantize_script(
+            torch.jit.script(SingleLayerLinearModel()),
+            qconfig_dict,
+            test_only_eval_fn,
+            [self.calib_data])
+        result_eager = model_eager(self.calib_data[0][0])
+        result_script = model_script._c._get_method('forward')(self.calib_data[0][0])
+        self.assertEqual(result_eager, result_script)
 
 
 class ScriptabilityTest(QuantizationTestCase):
@@ -899,7 +945,7 @@ class ObserverTest(QuantizationTestCase):
                      " with instruction set support avx2 or newer.")
 class RecordHistogramObserverTest(QuantizationTestCase):
     def test_record_observer(self):
-        model = SingleLayerLinearModel()
+        model = AnnotatedSingleLayerLinearModel()
         model.qconfig = default_debug_qconfig
         model = prepare(model)
         # run the evaluation and dump all tensors
