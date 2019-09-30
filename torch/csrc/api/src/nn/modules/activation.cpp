@@ -54,5 +54,22 @@ void HardtanhImpl::pretty_print(std::ostream& stream) const {
          << ", inplace=" << options.inplace() << ")";
 }
 
+// ============================================================================
+
+LeakyReLUImpl::LeakyReLUImpl(const LeakyReLUOptions& options_)
+    : options(options_) {}
+
+Tensor LeakyReLUImpl::forward(const Tensor& input) {
+  return F::leaky_relu(input, options);
+}
+
+void LeakyReLUImpl::reset() {}
+
+void LeakyReLUImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::LeakyReLU(negative_slope=" << options.negative_slope()
+         << ", inplace=" << options.inplace() << ")";
+}
+
 } // namespace nn
 } // namespace torch
