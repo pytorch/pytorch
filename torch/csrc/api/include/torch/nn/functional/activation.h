@@ -7,9 +7,9 @@ namespace torch {
 namespace nn{
 namespace functional {
 
-inline Tensor elu(const Tensor& input, const ELUOptions& options) {
+inline Tensor elu(Tensor& input, const ELUOptions& options) {
   if (options.inplace()) {
-    return torch::elu_(const_cast<Tensor&>(input), options.alpha());
+    return torch::elu_(input, options.alpha());
   } else {
     return torch::elu(input, options.alpha());
   }
