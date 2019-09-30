@@ -165,7 +165,7 @@ inline std::vector<int64_t> _unpool_output_size(const Tensor& input,
   } else {
     std::vector<int64_t> output_size_;
     if (output_size->size() == kernel_size.size() + 2) {
-      output_size_ = {output_size->begin() + 2, output_size->end()};
+      output_size_ = output_size->slice(2).vec();
     }
     if (output_size_.size() != kernel_size.size()) {
       TORCH_CHECK(false, "output_size should be a sequence containing ",
