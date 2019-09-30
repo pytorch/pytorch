@@ -12,6 +12,7 @@ from .adamw import AdamW  # noqa: F401
 from .sparse_adam import SparseAdam  # noqa: F401
 from .adamax import Adamax  # noqa: F401
 from .asgd import ASGD  # noqa: F401
+from .diffgrad import DiffGrad  # noqa: F401
 from .sgd import SGD  # noqa: F401
 from .rprop import Rprop  # noqa: F401
 from .rmsprop import RMSprop  # noqa: F401
@@ -26,6 +27,7 @@ del adamw
 del sparse_adam
 del adamax
 del asgd
+del diffgrad
 del sgd
 del rprop
 del rmsprop

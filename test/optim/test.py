@@ -19,6 +19,7 @@ algorithms = {
     'adamw': optim.adamw,
     'adamax': optim.adamax,
     'asgd': optim.asgd,
+    'diffgrad': optim.diffgrad,
     'cg': optim.cg,
     'nag': optim.nag,
     'rmsprop': optim.rmsprop,

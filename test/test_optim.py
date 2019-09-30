@@ -435,6 +435,16 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
             optim.ASGD(None, lr=1e-2, weight_decay=-0.5)
 
+    def test_diffgrad(self):
+        self._test_basic_cases(
+            lambda weight, bias: optim.DiffGrad([weight, bias], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.DiffGRad(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+
     def test_rprop(self):
         self._test_basic_cases(
             lambda weight, bias: optim.Rprop([weight, bias], lr=1e-3)

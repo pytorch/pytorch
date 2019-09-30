@@ -119,6 +119,8 @@ Algorithms
     :members:
 .. autoclass:: ASGD
     :members:
+.. autoclass:: DiffGrad
+    :members:
 .. autoclass:: LBFGS
     :members:
 .. autoclass:: RMSprop
