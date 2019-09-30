@@ -653,6 +653,8 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         # eager mode
         annotated_linear_model = AnnotatedSingleLayerLinearModel()
         linear_model = SingleLayerLinearModel()
+        # copy the weight from eager mode so that we can
+        # compare the result of the two quantized models later
         linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
         linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
         model_eager = quantize(annotated_linear_model, test_only_eval_fn,

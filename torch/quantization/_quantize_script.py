@@ -73,5 +73,8 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
     torch._C._jit_pass_fold_convbn(model._c)
     prepare_script(model, scripted_qconfig_dict, True)
     run_fn(model._c._get_method('forward'), *run_args)
+    # The graph is cached by executor and we are not able
+    # to properly mutate types yet, therefore we'll copy here
+    # This will be fixed later
     model = convert_script(model, False)
     return model

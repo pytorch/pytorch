@@ -889,7 +889,9 @@ graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
                    const std::unordered_map<std::string, Value*>& vmap) {
      const auto& match_vmap = match.values_map;
      auto linear_node = match_vmap.at(vmap.at("linear"))->node();
-     if (linear_node->kind() == prim::Constant && linear_node->s(attr::name) == "linear") {
+     auto func = linear_node->output()->type()->expect<FunctionType>()->function();
+     auto func_name = getFuncName(func->qualname());
+     if (linear_node->kind() == prim::Constant && func_name == "linear") {
        return true;
      }
      return false;
