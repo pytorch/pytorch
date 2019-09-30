@@ -1,9 +1,7 @@
 #include <gtest/gtest.h>
 #include <test/cpp/api/support.h>
 
-#include <torch/types.h>
-
-#include <ATen/ATen.h>
+#include <torch/torch.h>
 
 #include <cmath>
 #include <cstddef>
