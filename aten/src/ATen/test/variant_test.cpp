@@ -5,9 +5,15 @@
 namespace testns {
 
 namespace enumtype {
-  struct Enum1 {};
-  struct Enum2 {};
-  struct Enum3 {};
+  // NOTE: We need to provide the default constructor for each struct,
+  // otherwise Clang 3.8 would complain:
+  // ```
+  // error: default initialization of an object of const type 'const enumtype::Enum1'
+  // without a user-provided default constructor
+  // ```
+  struct Enum1 { Enum1() {} };
+  struct Enum2 { Enum2() {} };
+  struct Enum3 { Enum3() {} };
 } // namespace enumtype
 
 const enumtype::Enum1 kEnum1;

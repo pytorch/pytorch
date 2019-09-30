@@ -130,7 +130,19 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
       // tensors to float exponent e.g. tensor([4]).pow(0.5) will be tensor([2])
       const auto exp = exp_scalar.to<double>();
       AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow", [&]() {
-        if (exp == 0.5) {
+        if (exp == 2) {
+          cpu_kernel(iter,
+            [](scalar_t base) -> scalar_t {
+              return base * base;
+            }
+          );
+        } else if (exp == 3) {
+          cpu_kernel(iter,
+            [](scalar_t base) -> scalar_t {
+              return base * base * base;
+            }
+          );
+        } else if (exp == 0.5) {
           cpu_kernel(iter,
             [](scalar_t base) -> scalar_t {
               return std::sqrt(static_cast<long double>(base));
