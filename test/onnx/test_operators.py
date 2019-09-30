@@ -565,12 +565,11 @@ class TestOperators(TestCase):
 
     def test_groupnorm(self):
         x = torch.randn(4, 6, 10, 10, 10, requires_grad=True)
-        self.assertONNX(nn.GroupNorm(3, 6, eps=0.002, affine=False), x)
+        self.assertONNX(nn.GroupNorm(3, 6, eps=0.002), x)
 
     def test_groupnorm_noaffine(self):
-        model = torch.nn.GroupNorm(3, 6, 0.4)
         x = torch.randn(3, 8, 10, 10, requires_grad=True)
-        self.assertONNX(nn.GroupNorm(4, 8, eps=0.002), x)
+        self.assertONNX(nn.GroupNorm(4, 8, eps=0.002, affine=False), x)
 
     def test_batchnorm_noaffine(self):
         x = torch.randn(128, 128, 1, 1, requires_grad=True)
