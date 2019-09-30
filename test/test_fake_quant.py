@@ -129,7 +129,8 @@ class TestFakeQuantizePerTensor(TestCase):
     @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
-                       qparams=hu.qparams(dtypes=torch.quint8)))
+                       qparams=hu.qparams(dtypes=[torch.quint8])),
+           )
     def test_fq_module(self, device, X):
         np.random.seed(NP_RANDOM_SEED)
         X, (scale, zero_point, torch_type) = X
@@ -138,7 +139,7 @@ class TestFakeQuantizePerTensor(TestCase):
 
         X = to_tensor(X, device)
         X.requires_grad_()
-        fq_module = FakeQuantize(default_observer, quant_min, quant_max).to(device)
+        fq_module = torch.quantization.default_fake_quant().to(device)
         Y_prime = fq_module(X)
         assert fq_module.scale is not None
         assert fq_module.zero_point is not None
@@ -254,7 +255,7 @@ class TestFakeQuantizePerChannel(TestCase):
 
         X = to_tensor(X, device)
         X.requires_grad_()
-        fq_module = FakeQuantize(default_per_channel_weight_observer, quant_min, quant_max, ch_axis=axis)
+        fq_module = FakeQuantize(default_per_channel_weight_observer, quant_min, quant_max, ch_axis=axis).to(device)
         Y_prime = fq_module(X)
         assert fq_module.scale is not None
         assert fq_module.zero_point is not None
