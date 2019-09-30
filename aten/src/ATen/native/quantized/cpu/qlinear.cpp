@@ -336,10 +336,10 @@ class QLinearInt8 final : public torch::OperatorKernel {
           input, packed_weight, output_scale, output_zero_point);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::linear ",
         toString(ctx.qEngine()));
-    return at::Tensor();
   }
 };
 
