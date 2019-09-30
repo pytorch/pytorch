@@ -454,7 +454,7 @@ class DummyObserver(torch.nn.Module):
 
 
 class ModelWithFunctionals(torch.nn.Module):
-    def __init__(self, quantized=False):
+    def __init__(self):
         super(ModelWithFunctionals, self).__init__()
         self.mycat = nnq.FloatFunctional()
         self.myadd = nnq.FloatFunctional()
