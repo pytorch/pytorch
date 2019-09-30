@@ -573,6 +573,16 @@ class TestJit(JitTestCase):
         x = torch.rand(3, 4)
         self.assertEqual(scripted(x), foo(x))
 
+    def test_layout(self):
+        @torch.jit.script
+        def check(x, y):
+            return x.layout == y.layout
+
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+
+        self.assertTrue(check(x, y))
+
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
         y = torch.tensor([0], dtype=torch.int64)
