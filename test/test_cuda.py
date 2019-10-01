@@ -1357,7 +1357,6 @@ class TestCuda(TestCase):
             self.assertIs(type(copy), type(original))
             self.assertEqual(copy.get_device(), 0)
 
-    # TODO: Make this test generic after serialization review
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_multigpu_serialization_remap_dict(self):
         x = [torch.randn(4, 4).cuda(0), torch.randn(4, 4).cuda(1)]
