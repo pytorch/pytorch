@@ -313,8 +313,6 @@ def quantize_dynamic(model, qconfig=None, dtype=torch.qint8, mapping=DEFAULT_DYN
     elif isinstance(qconfig, set):
         qconfig = dict(zip(qconfig, itertools.repeat(default_dynamic_qconfig)))
 
-    print(qconfig)
-
     if not inplace:
         model = copy.deepcopy(model)
     model.eval()
