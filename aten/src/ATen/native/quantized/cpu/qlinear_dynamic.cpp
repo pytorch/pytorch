@@ -127,8 +127,8 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     std::vector<int64_t> out_sizes = input.sizes().vec();
     out_sizes.back() = N;
     // Allocate output Tensor and a buffer for fbgemmPacked to use
-    auto output = at::zeros(out_sizes, input.options().dtype(at::kFloat));
-    auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
+    auto output = at::empty(out_sizes, input.options().dtype(at::kFloat));
+    auto buffer = at::empty_like(output, output.options().dtype(at::kInt));
 
     if (pack_ptr.q_scheme == kPerTensorAffine) {
       // Process the per tensor quantization.

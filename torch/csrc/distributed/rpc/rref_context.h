@@ -17,6 +17,7 @@ class RRefContext {
  public:
   static void initInstance(std::shared_ptr<RpcAgent>);
   static std::unique_ptr<RRefContext>& getInstance();
+  static void destroyInstance();
 
   static void handleException(const Message& message);
 
@@ -94,9 +95,6 @@ class RRefContext {
   void addPendingUser(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
   void delPendingUser(const ForkId& forkId);
 
-  // If there is any leak on any RRef, this method will throw an error.
-  void checkRRefLeaks();
-
  private:
   RRefContext(std::shared_ptr<RpcAgent>);
 
@@ -107,6 +105,9 @@ class RRefContext {
       const ForkId& forkId);
 
   void finishForkRequest(const ForkId& forkId, worker_id_t parent);
+
+  // If there is any leak on any RRef, this method will throw an error.
+  void checkRRefLeaks();
 
   static std::unique_ptr<RRefContext> context_;
   static std::atomic<local_id_t> nextLocalId_;

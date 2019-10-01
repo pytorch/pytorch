@@ -23,6 +23,11 @@ std::unique_ptr<RRefContext>& RRefContext::getInstance() {
   return RRefContext::context_;
 }
 
+void RRefContext::destroyInstance() {
+  RRefContext::getInstance()->checkRRefLeaks();
+  RRefContext::context_.reset();
+}
+
 void RRefContext::handleException(const Message& message) {
   if (message.type() == MessageType::EXCEPTION) {
     // TODO: allow users to register an error handler and call it here.

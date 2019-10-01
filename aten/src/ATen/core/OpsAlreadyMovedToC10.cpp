@@ -48,6 +48,7 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::_cudnn_ctc_loss", ""},
         {"aten::_cudnn_rnn_flatten_weight", ""},
         {"aten::_debug_has_internal_overlap", ""},
+        {"aten::_fused_dropout", ""},
         {"aten::_masked_scale", ""},
         {"aten::_sobol_engine_ff_", ""},
         {"aten::_sobol_engine_scramble_", ""},
@@ -94,6 +95,10 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::baddbmm", ""},
         {"aten::baddbmm_", ""},
         {"aten::_baddbmm_mkl_", ""},
+        {"aten::bernoulli", ""},
+        {"aten::bernoulli_", "Tensor"},
+        {"aten::bernoulli_", "float"},
+        {"aten::bernoulli", "p"},
         {"aten::bitwise_not", ""},
         {"aten::bitwise_not_", ""},
         {"aten::logical_not", ""},
@@ -214,7 +219,6 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::fbgemm_linear_fp16_weight", ""},
         {"aten::fbgemm_pack_quantized_matrix", ""},
         {"aten::fbgemm_pack_quantized_matrix", "KN"},
-        {"aten::fbgemm_is_cpu_supported", ""},
         {"aten::log", ""},
         {"aten::log_", ""},
         {"aten::log10", ""},
@@ -305,6 +309,8 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::reshape_as", ""},
         {"aten::round", ""},
         {"aten::round_", ""},
+        {"aten::rrelu", ""},
+        {"aten::rrelu_", ""},
         {"aten::relu", ""},
         {"aten::relu_", ""},
         {"aten::prelu", ""},
@@ -399,7 +405,10 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::_weight_norm_differentiable_backward", ""},
         {"aten::zeros_like", ""},
         {"aten::_standard_gamma_grad", ""},
+        {"aten::_standard_gamma", ""},
         {"aten::_dirichlet_grad", ""},
+        {"aten::_sample_dirichlet", ""},
+        {"aten::poisson", ""},
         {"aten::native_norm", ""},
         {"aten::_sparse_sum", ""},
         {"aten::_sparse_sum", "dim"},
@@ -455,8 +464,8 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::q_per_channel_scales", ""},
         {"aten::q_per_channel_zero_points", ""},
         {"aten::int_repr", ""},
-        {"aten::_per_tensor_affine_qtensor", ""},
-        {"aten::_per_channel_affine_qtensor", ""},
+        {"aten::_make_per_tensor_quantized_tensor", ""},
+        {"aten::_make_per_channel_quantized_tensor", ""},
         {"aten::fake_quantize_per_tensor_affine", ""},
         {"aten::fake_quantize_per_tensor_affine_backward", ""},
         {"aten::to", "other"},
@@ -556,6 +565,15 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::addbmm_", ""},
         {"aten::addbmm", ""},
         {"aten::addcdiv_", ""},
+        {"aten::random_", "from"},
+        {"aten::random_", "to"},
+        {"aten::random_", ""},
+        {"aten::uniform_", ""},
+        {"aten::normal_", ""},
+        {"aten::cauchy_", ""},
+        {"aten::log_normal_", ""},
+        {"aten::exponential_", ""},
+        {"aten::geometric_", ""},
         {"aten::diag", ""},
         {"aten::cross", ""},
         {"aten::triu", ""},
@@ -606,7 +624,9 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::_lu_with_info", ""},
         {"aten::lu_solve", ""},
         {"aten::_lu_solve_helper", ""},
+        {"aten::multinomial", ""},
         {"aten::_multinomial_alias_setup", ""},
+        {"aten::_multinomial_alias_draw", ""},
         {"aten::lgamma", ""},
         {"aten::digamma", ""},
         {"aten::polygamma", ""},
@@ -638,6 +658,9 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::equal", ""},
         {"aten::pow", "Tensor_Tensor"},
         {"aten::pow", "Scalar"},
+        {"aten::normal", "Tensor_float"},
+        {"aten::normal", "float_Tensor"},
+        {"aten::normal", "Tensor_Tensor"},
         {"aten::alias", ""},
         {"aten::_addr", ""},
         {"aten::_addr_", ""},
@@ -675,7 +698,9 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::log_sigmoid", ""},
         {"aten::log_sigmoid_forward", ""},
         {"aten::log_sigmoid_backward", ""},
+        {"aten::rrelu_with_noise", ""},
         {"aten::rrelu_with_noise_backward", ""},
+        {"aten::rrelu_with_noise_", ""},
         {"aten::softplus", ""},
         {"aten::softplus_backward", ""},
         {"aten::softshrink", ""},
@@ -776,7 +801,6 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::_cudnn_rnn", ""},
         {"aten::_cudnn_rnn_backward", ""},
         {"aten::_cudnn_init_dropout_state", ""},
-        {"aten::_fused_dropout", ""},
         {"aten::_sobol_engine_draw", ""},
         {"aten::abs", "out"},
         {"aten::acos", "out"},
@@ -784,7 +808,19 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::addmv", "out"},
         {"aten::addr", "out"},
         {"aten::all", "out"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::all", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::all", "dimname_out"},
+    #endif
         {"aten::any", "out"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::any", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::any", "dimname_out"},
+    #endif
         {"aten::arange", ""},
         {"aten::arange", "start"},
         {"aten::arange", "start_step"},
@@ -798,11 +834,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::batch_norm", ""},
         {"aten::_batch_norm_impl_index", ""},
         {"aten::_batch_norm_impl_index_backward", ""},
-        {"aten::bernoulli", ""},
         {"aten::bernoulli", "out"},
-        {"aten::bernoulli_", "Tensor"},
-        {"aten::bernoulli_", "float"},
-        {"aten::bernoulli", "p"},
         {"aten::bilinear", ""},
         {"aten::binary_cross_entropy_with_logits", ""},
         {"aten::binary_cross_entropy_with_logits_backward", ""},
@@ -845,8 +877,20 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::cudnn_convolution_transpose", ""},
         {"aten::cumsum", ""},
         {"aten::cumsum", "out"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::cumsum", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::cumsum", "dimname_out"},
+    #endif
         {"aten::cumprod", ""},
         {"aten::cumprod", "out"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::cumprod", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::cumprod", "dimname_out"},
+    #endif
         {"aten::div", "out"},
         {"aten::dot", "out"},
         {"aten::embedding_bag", ""},
@@ -861,7 +905,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::new_empty", ""},
         {"aten::new_full", ""},
         {"aten::_empty_affine_quantized", ""},
-        {"aten::_empty_per_channel_affine_quantized_like", ""},
+        {"aten::_empty_per_channel_affine_quantized", ""},
         {"aten::empty", "out"},
         {"aten::empty_like", "dtype"},
         {"aten::empty_strided", ""},
@@ -902,12 +946,24 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::_cufft_set_plan_cache_max_size", ""},
         {"aten::_cufft_clear_plan_cache", ""},
         {"aten::index", "Tensor"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_copy_", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_copy", "dimname"},
+    #endif
         {"aten::index_put_", ""},
         {"aten::index_put", ""},
         {"aten::_index_put_impl_", ""},
         {"aten::instance_norm", ""},
         {"aten::inverse", "out"},
         {"aten::kthvalue", "values"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::kthvalue", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::kthvalue", "dimname_out"},
+    #endif
         {"aten::layer_norm", ""},
         {"aten::native_layer_norm", ""},
         {"aten::native_layer_norm_backward", ""},
@@ -980,6 +1036,12 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::miopen_rnn_backward", ""},
         {"aten::mm", "out"},
         {"aten::mode", "values"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::mode", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::mode", "dimname_out"},
+    #endif
         {"aten::mul", "out"},
         {"aten::mv", "out"},
         {"aten::native_batch_norm", ""},
@@ -1040,8 +1102,6 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::reciprocal", "out"},
         {"aten::neg", "out"},
         {"aten::round", "out"},
-        {"aten::rrelu", ""},
-        {"aten::rrelu_", ""},
         {"aten::rsqrt", "out"},
     #ifdef BUILD_NAMEDTENSOR
         {"aten::select", "Dimname"},
@@ -1055,6 +1115,12 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::softmax", ""},
     #ifdef BUILD_NAMEDTENSOR
         {"aten::softmax", ""},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::squeeze", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::squeeze_", "dimname"},
     #endif
         {"aten::sspaddmm", "out"},
         {"aten::stack", "out"},
@@ -1114,9 +1180,6 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::zeros", ""},
         {"aten::zeros", "out"},
         {"aten::zeros_like", "dtype"},
-        {"aten::_standard_gamma", ""},
-        {"aten::_sample_dirichlet", ""},
-        {"aten::poisson", ""},
         {"aten::_sparse_sum", "dtype"},
         {"aten::_sparse_sum", "dim_dtype"},
         {"aten::norm", "ScalarOpt_dtype"},
@@ -1153,15 +1216,24 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
     #endif
         {"aten::quantize_per_tensor", ""},
         {"aten::quantize_per_channel", ""},
-        {"aten::_dequantize_per_tensor", ""},
         {"aten::q_per_channel_axis", ""},
         {"aten::qscheme", ""},
+        {"aten::fake_quantize_per_channel_affine", ""},
+        {"aten::fake_quantize_per_channel_affine_backward", ""},
         {"aten::to", "dtype_layout"},
         {"aten::to", "device"},
         {"aten::to", "dtype"},
+        {"aten::result_type", "Tensor"},
+        {"aten::result_type", "Scalar"},
+        {"aten::result_type", "Scalar_Tensor"},
+        {"aten::result_type", "Scalar_Scalar"},
+        {"aten::can_cast", ""},
+        {"aten::promote_types", ""},
         {"aten::_thnn_fused_lstm_cell", ""},
         {"aten::_thnn_fused_lstm_cell_backward", ""},
+        {"aten::_thnn_differentiable_lstm_cell_backward", ""},
         {"aten::_thnn_fused_gru_cell", ""},
+        {"aten::_thnn_differentiable_gru_cell_backward", ""},
         {"aten::lstm_cell", ""},
         {"aten::gru_cell", ""},
         {"aten::rnn_tanh_cell", ""},
@@ -1170,16 +1242,31 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::set_", "source_Storage"},
         {"aten::set_", "source_Storage_storage_offset"},
         {"aten::set_quantizer_", ""},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_add", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_fill_", "dimname_Scalar"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_fill_", "dimname_Scalar"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_fill", "dimname_Scalar"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_fill", "dimname_Tensor"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::scatter", "dimname_src"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::scatter", "dimname_value"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::scatter_add", "dimname"},
+    #endif
         {"aten::addbmm", "out"},
-        {"aten::random_", "from"},
-        {"aten::random_", "to"},
-        {"aten::random_", ""},
-        {"aten::uniform_", ""},
-        {"aten::normal_", ""},
-        {"aten::cauchy_", ""},
-        {"aten::log_normal_", ""},
-        {"aten::exponential_", ""},
-        {"aten::geometric_", ""},
         {"aten::diag", "out"},
         {"aten::cross", "out"},
         {"aten::triu", "out"},
@@ -1200,9 +1287,21 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::lt", "Tensor_out"},
         {"aten::take", "out"},
         {"aten::index_select", "out"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_select", "dimname_out"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::index_select", "dimname"},
+    #endif
         {"aten::masked_select", "out"},
         {"aten::nonzero", "out"},
         {"aten::gather", "out"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::gather", "dimname_out"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::gather", "dimname"},
+    #endif
         {"aten::addcmul", "out"},
         {"aten::addcdiv", "out"},
         {"aten::lstsq", "X"},
@@ -1220,8 +1319,6 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::ormqr", "out"},
         {"aten::lu_solve", "out"},
         {"aten::multinomial", "out"},
-        {"aten::multinomial", ""},
-        {"aten::_multinomial_alias_draw", ""},
         {"aten::lgamma", "out"},
         {"aten::digamma", "out"},
         {"aten::polygamma", "out"},
@@ -1238,16 +1335,22 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::min", "out"},
         {"aten::max", "out"},
         {"aten::sort", "values"},
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::sort", "dimname_values"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::sort", "dimname"},
+    #endif
+    #ifdef BUILD_NAMEDTENSOR
+        {"aten::argsort", "dimname"},
+    #endif
         {"aten::topk", "values"},
         {"aten::renorm", "out"},
         {"aten::pow", "Tensor_Tensor_out"},
         {"aten::pow", "Scalar_out"},
         {"aten::normal", "Tensor_float_out"},
-        {"aten::normal", "Tensor_float"},
         {"aten::normal", "float_Tensor_out"},
-        {"aten::normal", "float_Tensor"},
         {"aten::normal", "Tensor_Tensor_out"},
-        {"aten::normal", "Tensor_Tensor"},
         {"aten::normal", "float_float"},
         {"aten::normal", "float_float_out"},
         {"aten::_addr", "out"},
@@ -1300,9 +1403,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::log_sigmoid_forward", "output"},
         {"aten::log_sigmoid_backward", "grad_input"},
         {"aten::rrelu_with_noise", "out"},
-        {"aten::rrelu_with_noise", ""},
         {"aten::rrelu_with_noise_backward", "grad_input"},
-        {"aten::rrelu_with_noise_", ""},
         {"aten::softplus", "out"},
         {"aten::softplus_backward", "grad_input"},
         {"aten::softshrink", "out"},

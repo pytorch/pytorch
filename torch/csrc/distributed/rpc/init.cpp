@@ -107,8 +107,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
     RRefContext::initInstance(std::move(agent));
   });
 
-  module.def("_check_rref_leaks", []() {
-    RRefContext::getInstance()->checkRRefLeaks();
+  module.def("_destroy_rref_context", []() {
+    RRefContext::getInstance()->destroyInstance();
   });
 
   module.def(

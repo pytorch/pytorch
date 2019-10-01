@@ -2,13 +2,14 @@
 
 from . import invoke_rpc_builtin, invoke_rpc_python_udf
 from . import invoke_remote_builtin, invoke_remote_python_udf
-from . import _init_rref_context, _check_rref_leaks
+from . import _init_rref_context, _destroy_rref_context
 from . import ProcessGroupAgent
 from . import WorkerInfo
 from .internal_rpc_utils import serialize, PythonUDF
-from .rpc_backend_handler import is_backend_registered, registered_init_rpc
+from .rpc_backend_registry import is_rpc_backend_registered, init_rpc_backend
 
 import sys
+import warnings
 import torch
 from enum import Enum
 
@@ -36,7 +37,7 @@ def join_rpc():
     if _agent:
         _agent.join()
         _agent = None
-        _check_rref_leaks()
+        _destroy_rref_context()
 
 @_require_initialized
 def sync_rpc():
@@ -77,11 +78,13 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
         # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
         _init_rref_context(_agent)
-    elif is_backend_registered(backend):
-        _agent = registered_init_rpc(backend,
-                                     self_rank=self_rank,
-                                     self_name=self_name,
-                                     init_method=init_method)
+    elif is_rpc_backend_registered(backend):
+        _agent = registered_init_rpc(
+            backend,
+            self_rank=self_rank,
+            self_name=self_name,
+            init_method=init_method
+        )
         _init_rref_context(_agent)
     else:
         raise RuntimeError("Unrecognized RPC backend ", backend)
@@ -145,7 +148,7 @@ def remote(to, func, args=None, kwargs=None):
         >>> x = rref1.to_here() + rref2.to_here()
         >>> dist.join_rpc()
 
-        One worker 1:
+        On worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
         >>> dist.init_rpc("worker1")
@@ -156,15 +159,115 @@ def remote(to, func, args=None, kwargs=None):
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
-    to = _to_worker_info(to)
+    info = _to_worker_info(to)
     if qualified_name is not None:
         return invoke_remote_builtin(
-            _agent, to, qualified_name, *args, **kwargs)
+            _agent, info, qualified_name, *args, **kwargs)
     else:
         rref = invoke_remote_python_udf(
-            _agent, to, serialize(PythonUDF(func, args, kwargs)))
+            _agent, info, serialize(PythonUDF(func, args, kwargs)))
 
         return rref
+
+
+def _invoke_rpc(to, func, args=None, kwargs=None):
+    if not callable(func):
+        raise TypeError("function should be callable.")
+
+    qualified_name = torch.jit._find_builtin(func)
+
+    args = args if args else ()
+    kwargs = kwargs if kwargs else {}
+
+    to = _to_worker_info(to)
+    if qualified_name is not None:
+        fut = invoke_rpc_builtin(
+            _agent, to, qualified_name, *args, **kwargs
+        )
+    else:
+        fut = invoke_rpc_python_udf(
+            _agent, to, serialize(PythonUDF(func, args, kwargs))
+        )
+    return fut
+
+
+@_require_initialized
+def rpc_sync(to, func, args=None, kwargs=None):
+    r"""
+    Make a blocking RPC call to run function ``func`` on worker ``to``. RPC
+    messages are sent and received in parallel to execution of Python code. This
+    method is thread-safe.
+
+    Arguments:
+        to (int or str): id or name of the destination worker.
+        func (callable): any callable function. builtin functions (like
+                         ``torch.add``) can be sent over RPC more efficiently.
+        args (tuple): the argument tuple for the ``func`` invocation.
+        kwargs (dict): is a dictionary of keyword arguments for the ``func``
+                       invocation.
+
+    Returns:
+        Returns the result of running ``func``on ``args`` and ``kwargs``.
+
+    Example::
+        On worker 0:
+        >>> import torch.distributed as dist
+        >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
+        >>> dist.init_model_parallel("worker0")
+        >>> ret = dist.rpc_sync("worker1", torch.add, args=(torch.ones(2), 3))
+        >>> dist.join_rpc()
+
+        On worker 1:
+        >>> import torch.distributed as dist
+        >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
+        >>> dist.init_model_parallel("worker1")
+        >>> dist.join_rpc()
+    """
+    fut = _invoke_rpc(to, func, args, kwargs)
+    return fut.wait()
+
+
+@_require_initialized
+def rpc_async(to, func, args=None, kwargs=None):
+    r"""
+    Make a non-blocking RPC call to run function ``func`` on worker ``to``. RPC
+    messages are sent and received in parallel to execution of Python code. This
+    method is thread-safe. This method will immediately return a
+    torch.distributed.FutureMessage that can be awaited on.
+
+    Arguments:
+        to (int or str): id or name of the destination worker.
+        func (callable): any callable function. builtin functions (like
+                         ``torch.add``) can be sent over RPC more efficiently.
+        args (tuple): the argument tuple for the ``func`` invocation.
+        kwargs (dict): is a dictionary of keyword arguments for the ``func``
+                       invocation.
+
+    Returns:
+        Returns a ``torch.distributed.FutureMessage`` object that can be waited
+        on. When completed, the return value of ``func`` on ``args`` and
+        ``kwargs`` can be retrieved from the ``FutureMessage`` object.
+
+    Example::
+
+        On worker 0:
+        >>> import torch.distributed as dist
+        >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
+        >>> dist.init_model_parallel("worker0")
+        >>> worker1 = dist.get_worker_id("worker1")
+        >>> fut1 = dist.rpc_async(worker1, torch.add, args=(torch.ones(2), 3))
+        >>> fut2 = dist.rpc_async(worker1, min, args=(1, 2))
+        >>> result = fut1.wait() + fut2.wait()
+        >>> dist.join_rpc()
+
+        On worker 1:
+        >>> import torch.distributed as dist
+        >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
+        >>> dist.init_model_parallel("worker1")
+        >>> dist.join_rpc()
+    """
+    fut = _invoke_rpc(to, func, args, kwargs)
+    return fut
 
 
 @_require_initialized
@@ -206,7 +309,7 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         >>> ret = dist.rpc("worker1", torch.add, args=(torch.ones(2), 3))
         >>> dist.join_rpc()
 
-        One worker 1:
+        On worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
         >>> dist.init_model_parallel("worker1")
@@ -224,28 +327,18 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         >>> result = fut1.wait() + fut2.wait()
         >>> dist.join_rpc()
 
-        One worker 1:
+        On worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
         >>> dist.init_model_parallel("worker1")
         >>> dist.join_rpc()
     """
-    if not callable(func):
-        raise TypeError("function should be callable.")
-
-    qualified_name = torch.jit._find_builtin(func)
-
-    args = args if args else ()
-    kwargs = kwargs if kwargs else {}
-
-    to = _to_worker_info(to)
-    if qualified_name is not None:
-        fut = invoke_rpc_builtin(_agent, to, qualified_name, *args, **kwargs)
-    else:
-        fut = invoke_rpc_python_udf(
-            _agent, to, serialize(PythonUDF(func, args, kwargs)))
+    warnings.warn(
+        """dist.rpc is deprecated. Use dist.rpc_async for asynchronous
+    calls or dist.rpc_sync for synchronous calls instead."""
+    )
 
     if async_call:
-        return fut
+        return rpc_async(to, func, args, kwargs)
     else:
-        return fut.wait()
+        return rpc_sync(to, func, args, kwargs)

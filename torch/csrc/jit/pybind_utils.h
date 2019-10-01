@@ -321,14 +321,14 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
 }
 
 inline IValue createGenericDict(
-    py::handle obj,
+    py::dict obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
   c10::impl::GenericDict elems(key_type, value_type);
   elems.reserve(py::len(obj));
-  for (auto key : obj) {
+  for (auto entry : obj) {
     elems.insert(
-        toIValue(key, key_type), toIValue(obj[key], value_type));
+        toIValue(entry.first, key_type), toIValue(entry.second, value_type));
   }
   return IValue(std::move(elems));
 }
@@ -337,7 +337,8 @@ template <class T>
 inline void guardAgainstNamedTensor(const T& var) {
 #ifdef BUILD_NAMEDTENSOR
   TORCH_CHECK(!var.has_names(),
-      "NYI: Named tensors are currently unsupported in TorchScript.");
+      "NYI: Named tensors are currently unsupported in TorchScript. As a  "
+      "workaround please drop names via `tensor = tensor.rename(None)`.");
 #endif
 }
 
@@ -444,7 +445,7 @@ inline IValue toIValue(
     case TypeKind::DictType: {
       const auto& dict_type = type->expect<DictType>();
       return createGenericDict(
-          obj, dict_type->getKeyType(), dict_type->getValueType());
+          py::cast<py::dict>(obj), dict_type->getKeyType(), dict_type->getValueType());
     }
     case TypeKind::OptionalType: {
       // check if it's a none obj since optional accepts NoneType
