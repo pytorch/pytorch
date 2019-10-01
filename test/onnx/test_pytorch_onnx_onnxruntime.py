@@ -493,7 +493,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_groupnorm(self):
         model = torch.nn.GroupNorm(3, 6, 0.002)
-        x = torch.randn(4, 6, 224, 224)
+        x = torch.randn(4, 6, 180, 180, 180)
         self.run_test(model, x)
 
     def test_groupnorm_noaffine(self):

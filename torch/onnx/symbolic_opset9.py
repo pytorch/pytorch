@@ -1964,14 +1964,14 @@ def gelu(g, self):
 def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     if input.isCompleteTensor():
         input_sizes = input.type().sizes()
-        shape = [1, input_sizes[0] * num_groups, input_sizes[1] / num_groups, -1]
+        shape = [0, num_groups, -1]
         input_reshaped = g.op('Reshape', input, g.op('Constant', value_t=torch.LongTensor(shape)))
 
         # Due to shape difference. we need to apply weight and bias after
         # instance norm computation and reshape
-        weight_ = g.op("Constant", value_t=torch.tensor([1.] * input_sizes[0] * num_groups).type(
+        weight_ = g.op("Constant", value_t=torch.tensor([1.] * num_groups).type(
             'torch.' + input.type().scalarType() + 'Tensor'))
-        bias_ = g.op("Constant", value_t=torch.tensor([0.] * input_sizes[0] * num_groups).type(
+        bias_ = g.op("Constant", value_t=torch.tensor([0.] * num_groups).type(
             'torch.' + input.type().scalarType() + 'Tensor'))
 
         norm_reshaped = g.op("InstanceNormalization", input_reshaped, weight_, bias_, epsilon_f=eps)
