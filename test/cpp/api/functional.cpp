@@ -15,7 +15,7 @@ TEST_F(FunctionalTest, MaxPool1d) {
   auto y = F::max_pool1d(x, MaxPool1dOptions(3).stride(2));
 
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1 ,2})));
+  ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1, 2})));
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 }
 
@@ -24,7 +24,7 @@ TEST_F(FunctionalTest, MaxPool2d) {
   auto y = F::max_pool2d(x, MaxPool2dOptions(3).stride(2));
 
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2 ,2})));
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2})));
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
 }
 
@@ -67,7 +67,8 @@ TEST_F(FunctionalTest, AvgPool3d) {
 TEST_F(FunctionalTest, CosineSimilarity) {
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::kFloat);
   auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::kFloat);
-  auto output = F::cosine_similarity(input1, input2, CosineSimilarityOptions().dim(1));
+  auto output =
+      F::cosine_similarity(input1, input2, CosineSimilarityOptions().dim(1));
   auto expected = torch::tensor({0.8078, 0.8721}, torch::kFloat);
   ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
@@ -75,7 +76,8 @@ TEST_F(FunctionalTest, CosineSimilarity) {
 TEST_F(FunctionalTest, PairwiseDistance) {
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::kFloat);
   auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::kFloat);
-  auto output = F::pairwise_distance(input1, input2, PairwiseDistanceOptions(1));
+  auto output =
+      F::pairwise_distance(input1, input2, PairwiseDistanceOptions(1));
   auto expected = torch::tensor({6, 6}, torch::kFloat);
   ASSERT_TRUE(output.allclose(expected));
 }
@@ -157,4 +159,43 @@ TEST_F(FunctionalTest, HingeEmbeddingLoss) {
   auto expected = torch::tensor({10}, torch::kFloat);
 
   ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, OneHot_1) {
+  auto x = torch::arange(0, 5, torch::kLong);
+  auto y = F::one_hot(x % 3);
+  auto expected = torch::tensor(
+      {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}}, torch::kLong);
+
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_TRUE(torch::allclose(y, expected));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({5, 3}));
+}
+
+TEST_F(FunctionalTest, OneHot_2) {
+  auto x = torch::arange(0, 5, torch::kLong);
+  auto y = F::one_hot(x % 3, 5);
+  auto expected = torch::tensor(
+      {{1, 0, 0, 0, 0},
+       {0, 1, 0, 0, 0},
+       {0, 0, 1, 0, 0},
+       {1, 0, 0, 0, 0},
+       {0, 1, 0, 0, 0}},
+      torch::kLong);
+
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_TRUE(torch::allclose(y, expected));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({5, 5}));
+}
+
+TEST_F(FunctionalTest, OneHot_3) {
+  auto x = torch::arange(0, 6, torch::kLong);
+  auto y = F::one_hot(x.view(torch::IntArrayRef({3, 2})) % 3);
+  auto expected = torch::tensor(
+      {{{1, 0, 0}, {0, 1, 0}}, {{0, 0, 1}, {1, 0, 0}}, {{0, 1, 0}, {0, 0, 1}}},
+      torch::kLong);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, expected));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 2, 3}));
 }
