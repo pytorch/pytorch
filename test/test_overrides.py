@@ -1,10 +1,6 @@
 import torch
 import numpy as np
 import unittest
-import pickle
-import inspect
-import sys
-from unittest import mock
 
 from common_utils import TestCase
 
@@ -106,12 +102,12 @@ class SubDiagonalTensor(DiagonalTensor):
             return False
 
 @implements_sub(torch.mean)
-def mean(mat1):
+def mean_sub(mat1):
     "Implementation of torch.mean for SubDiagonalTensor objects"
-    return 10* mat1._i / mat1._N
+    return 10 * mat1._i / mat1._N
 
 @implements_sub(torch.mm)
-def mm(mat1, mat2):
+def mm_sub(mat1, mat2):
     "Implementation of torch.mm for SubDiagonalTensor objects"
     return 1
 
@@ -136,12 +132,12 @@ class TestOverrideSubTensor(TestCase):
         t1 = DiagonalTensor(5, 2)
         t2 = SubDiagonalTensor(5, 2)
         t3 = torch.eye(5) * 2
-        self.assertEqual(torch.mm(t1,t2), 1)
-        self.assertEqual(torch.mm(t2,t1), 1)
-        self.assertEqual(torch.mm(t3,t1), 0)
-        self.assertEqual(torch.mm(t1,t3), 0)
-        self.assertEqual(torch.mm(t3,t2), 1)
-        self.assertEqual(torch.mm(t2,t3), 1)
+        self.assertEqual(torch.mm(t1, t2), 1)
+        self.assertEqual(torch.mm(t2, t1), 1)
+        self.assertEqual(torch.mm(t3, t1), 0)
+        self.assertEqual(torch.mm(t1, t3), 0)
+        self.assertEqual(torch.mm(t3, t2), 1)
+        self.assertEqual(torch.mm(t2, t3), 1)
 
 if __name__ == '__main__':
     unittest.main()

@@ -67,7 +67,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 """)
 
 # Check for __torch_function__ overrides
-PY_VARIABLE_FUNCTION_VARARGS  = CodeTemplate("""\
+PY_VARIABLE_FUNCTION_VARARGS = CodeTemplate("""\
 static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
