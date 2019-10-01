@@ -941,7 +941,7 @@ void FoldPrepackedWeightIntoModule(
     const script::Module& wrapper_module) {
   auto method = module.get_method(method_name);
   auto graph = method.graph();
-  std::string linear_with_quant = R"(
+  std::string linear_prepack = R"(
 graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype):
         %w = prim::GetAttr[name="weight"](%self)
         %b = prim::GetAttr[name="bias"](%self)
@@ -949,7 +949,15 @@ graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype):
         %packed_params = quantized::linear_prepack(%w_quant, %b)
         return (%packed_params))";
 
-  auto patterns = {linear_with_quant};
+  std::string conv2d_prepack = R"(
+graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
+        %w = prim::GetAttr[name="weight"](%self)
+        %b = prim::GetAttr[name="bias"](%self)
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        return (%packed_params))";
+
+  auto patterns = {linear_prepack, conv2d_prepack};
   for (const auto& pattern : patterns) {
     Graph pattern_graph;
     std::unordered_map<std::string, Value*> vmap;
@@ -972,7 +980,7 @@ graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype):
       auto set_weight_bias = wrapper.get_method("set_weight_bias");
       set_weight_bias(std::vector<IValue>{IValue(w_quant), IValue(b)});
       // TODO: we need to make sure this name is unique
-      module.register_module("_packed_linear_weight_bias", wrapper);
+      module.register_module("_packed_weight_bias", wrapper);
 
       // Replace GetAttr on %self with PackedParams module
       auto w_val = match_vmap.at(vmap.at("w"));
@@ -981,9 +989,9 @@ graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype):
       auto packed_params_val = match_vmap.at(vmap.at("packed_params"));
 
       WithInsertPoint ins(packed_params_val->node());
-      // wrapper_module = self._packed_linear_weight_bias
+      // wrapper_module = self._packed_weight_bias
       Value* packed_params_module =
-          graph->insertGetAttr(graph->inputs()[0], "_packed_linear_weight_bias")
+          graph->insertGetAttr(graph->inputs()[0], "_packed_weight_bias")
               ->setType(wrapper.type());
 
       // packed_params = wrapper_module._packed_params
