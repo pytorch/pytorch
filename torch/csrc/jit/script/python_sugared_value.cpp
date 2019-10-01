@@ -481,6 +481,20 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
   return desugarModuleContainer(get_keys, get_values, loc, m);
 }
 
+std::shared_ptr<SugaredValue> PythonClassValue::attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) {
+  // Resolve values from the Python object first (e.g. for static methods on
+  // this type, resolve them as functions)
+  auto py_attr = py::getattr(py_type_, field.c_str(), py::none());
+  if (!py_attr.is_none()) {
+    return toSugaredValue(py_attr, m, loc);
+  }
+
+  return ClassValue::attr(loc, m, field);
+}
+
 void ModuleValue::setAttr(
     const SourceRange& loc,
     Function& m,
@@ -614,7 +628,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto pyCu = get_python_cu();
     auto qualname = c10::QualifiedName(qualifiedName);
     if (auto classType = pyCu->get_class(qualname)) {
-      return std::make_shared<ClassValue>(classType);
+      return std::make_shared<PythonClassValue>(classType, obj);
     } else {
       // If we can't get the source code for the type, it's implemented in C and
       // probably part of the standard library, so give up and leave it as a
@@ -644,7 +658,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
             "Class '",
             qualifiedName,
             "' should have been compiled but was not");
-        return std::make_shared<ClassValue>(newClassType);
+        return std::make_shared<PythonClassValue>(newClassType, obj);
       }
     }
   }

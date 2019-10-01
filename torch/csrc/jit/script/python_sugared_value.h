@@ -271,6 +271,23 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
   py::dict dispatched_fn_;
 };
 
+struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
+  PythonClassValue(ClassTypePtr type, py::object py_type)
+      : ClassValue(std::move(type)), py_type_(std::move(py_type)) {}
+
+  std::string kind() const override {
+    return "Python type";
+  }
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) override;
+
+ private:
+  py::object py_type_;
+};
+
 } // namespace script
 } // namespace jit
 } // namespace torch

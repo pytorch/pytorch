@@ -3526,6 +3526,21 @@ def foo(x):
         x = torch.rand(3, 4)
         self.assertEqual(bar(x), (x * x + 3 * x) * (x * x + 3 * x))
 
+    def test_static_methods(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @staticmethod
+            def my_method(x):
+                return x + 100
+
+            def forward(self, x):
+                # return x + self.my_method(x)
+                return x + M.my_method(x)
+
+        self.checkModule(M(), (torch.ones(2, 2),))
+
     def test_invalid_prefix_annotation(self):
         with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
             with self.capture_stdout() as captured:
