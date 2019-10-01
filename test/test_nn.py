@@ -8631,6 +8631,14 @@ class TestNN(NNTestCase):
         self.assertEqual(F.softmin(x, 1), F.softmax(-x, 1))
         self.assertEqual(F.softmin(x, 0), F.softmax(-x, 0))
 
+    def test_bce_triple_backwards(self):
+        x = torch.rand(10, 4, requires_grad=True)
+        y = torch.rand((10, 4))
+        loss = F.binary_cross_entropy(x, y)
+        loss2 = torch.autograd.grad(loss, x, create_graph=True)
+        loss3 = torch.autograd.grad(loss2, x, create_graph=True)
+        # double backwards function is differentiable
+
     @repeat_test_for_types([torch.float, torch.bfloat16])
     def test_log_softmax(self, dtype=torch.float):
         x_small = torch.ones(1, 2, dtype=dtype)
