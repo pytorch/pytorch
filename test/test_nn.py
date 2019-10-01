@@ -9926,11 +9926,11 @@ class TestNNDeviceType(NNTestCase):
         self._test_gumbel_softmax_grad(device, dtype)
 
     def _test_rnn_retain_variables(self, device, dtype):
-        rnns = [nn.LSTM(100, 200, num_layers=2).to(device, dtype),
-                nn.GRU(100, 200, num_layers=2).to(device, dtype),
-                nn.RNN(100, 200, num_layers=2).to(device, dtype)]
+        rnns = [nn.LSTM(10, 20, num_layers=2).to(device, dtype),
+                nn.GRU(10, 20, num_layers=2).to(device, dtype),
+                nn.RNN(10, 20, num_layers=2).to(device, dtype)]
         for rnn in rnns:
-            input = torch.randn(50, 60, 100, device=device, dtype=dtype, requires_grad=True)
+            input = torch.randn(5, 6, 10, device=device, dtype=dtype, requires_grad=True)
             output = rnn(input)
             output[0].sum().backward(retain_graph=True)
             grads = [input.grad.data.clone()] + [p.grad.data.clone() for p in rnn.parameters()]
