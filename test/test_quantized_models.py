@@ -18,7 +18,7 @@ class ModelNumerics(QuantizationTestCase):
         q_model = torch.quantization.QuantWrapper(my_model)
         q_model.eval()
         q_model.qconfig = torch.quantization.default_qconfig
-        torch.quantization.fuse_modules(q_model.module, [['conv1', 'bn1', 'relu1']])
+        torch.quantization.fuse_modules(q_model.module, [['conv1', 'bn1', 'relu1']], inplace=True)
         torch.quantization.prepare(q_model)
         q_model(calib_data)
         torch.quantization.convert(q_model)
@@ -40,7 +40,7 @@ class ModelNumerics(QuantizationTestCase):
         q_model = torch.quantization.QuantWrapper(my_model)
         q_model.eval()
         q_model.qconfig = torch.quantization.default_per_channel_qconfig
-        torch.quantization.fuse_modules(q_model.module, [['conv1', 'bn1', 'relu1']])
+        torch.quantization.fuse_modules(q_model.module, [['conv1', 'bn1', 'relu1']], inplace=True)
         torch.quantization.prepare(q_model)
         q_model(calib_data)
         torch.quantization.convert(q_model)
@@ -60,7 +60,7 @@ class ModelNumerics(QuantizationTestCase):
         fqModel = torch.quantization.QuantWrapper(myModel)
         fqModel.train()
         fqModel.qconfig = torch.quantization.default_qat_qconfig
-        torch.quantization.fuse_modules(fqModel.module, [['conv1', 'bn1', 'relu1']])
+        torch.quantization.fuse_modules(fqModel.module, [['conv1', 'bn1', 'relu1']], inplace=True)
         torch.quantization.prepare_qat(fqModel)
         fqModel.eval()
         fqModel.apply(torch.quantization.disable_fake_quant)
@@ -94,7 +94,7 @@ class ModelNumerics(QuantizationTestCase):
             fqModel = torch.quantization.QuantWrapper(myModel)
             fqModel.train()
             fqModel.qconfig = qconfig
-            torch.quantization.fuse_modules(fqModel.module, [['conv1', 'bn1', 'relu1']])
+            torch.quantization.fuse_modules(fqModel.module, [['conv1', 'bn1', 'relu1']], inplace=True)
             torch.quantization.prepare_qat(fqModel)
             fqModel.eval()
             fqModel.apply(torch.quantization.disable_fake_quant)
