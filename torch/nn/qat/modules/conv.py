@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from torch.nn import Conv2d as NNConv2d
+from torch.nn._intrinsic import ConvReLU2d
 
 class Conv2d(NNConv2d):
     r"""
@@ -47,7 +48,9 @@ class Conv2d(NNConv2d):
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert mod.qconfig, 'Input float module must have a valid qconfig'
-            qconfig = mod.qconfig
+        if type(mod) == ConvReLU2d:
+            mod = mod[0]
+        qconfig = mod.qconfig
         qat_conv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                        stride=mod.stride, padding=mod.padding, dilation=mod.dilation,
                        groups=mod.groups, bias=mod.bias is not None,
