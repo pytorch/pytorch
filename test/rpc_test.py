@@ -7,7 +7,6 @@ from os import getenv
 
 import torch
 import torch.distributed as dist
-from common_distributed import MultiProcessTestCase
 from common_utils import load_tests
 from torch.distributed.rpc import RpcBackend
 
