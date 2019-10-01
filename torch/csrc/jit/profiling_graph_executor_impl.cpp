@@ -61,6 +61,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
       return *profiling_plan_;
     }
     copy = pr_->graph()->copy();
+
   } else {
     copy = graph->copy();
   }
@@ -70,6 +71,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
     optimized_plan_ = ExecutionPlan(copy);
     return *optimized_plan_;
   }
+
 
   // insert bailouts
   InsertGuards(copy);
@@ -88,9 +90,10 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   // constant fold into ConstantChunk
   CanonicalizeOps(copy);
   EliminateRedundantGuards(copy);
-  InsertBailOuts(copy);
-  // TODO: this runs specializeAutogradZero ??
-  GRAPH_DUMP("After InsertBailOuts: ", copy);
+  if (getProfilingMode()) {
+    InsertBailOuts(copy);
+    GRAPH_DUMP("After InsertBailOuts: ", copy);
+  }
   runRequiredPasses(copy);
   // if (!getProfilingMode()) {
   //   // PropagateInputShapes is likely a no-op since we don't specialize
