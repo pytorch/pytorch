@@ -6,7 +6,7 @@ import itertools
 import functools
 import torch
 from torch import Tensor
-from torch._six import PY2
+from torch._six import PY2, inf
 import torch.nn.functional as F
 from multiprocessing.reduction import ForkingPickler
 import pickle
@@ -1868,6 +1868,8 @@ class TestNamedTensor(TestCase):
             res = torch.isnan(a)
             self.assertEqual(res.names, ['N', 'C'])
             
+            res = torch.isinf(a)
+            self.assertEqual(res.names, ['N', 'C'])
 
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):
