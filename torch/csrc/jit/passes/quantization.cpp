@@ -638,6 +638,19 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
   rewriter.runOnGraph(graph);
 }
 
+c10::optional<IValue> toIntTuple(Value* v) {
+  auto* n = v->node();
+  if (n->kind() == prim::ListConstruct) {
+    auto e0 = toIValue(n->inputs()[0]);
+    auto e1 = toIValue(n->inputs()[1]);
+    if (!e0 || !e1) {
+      return c10::nullopt;
+    }
+    return c10::ivalue::Tuple::create(std::vector<IValue>{e0.value(), e1.value()});
+  }
+  return c10::nullopt;
+}
+
 } // namespace
 
 TORCH_API script::Module InsertObservers(
@@ -938,7 +951,8 @@ void InsertPrepackUnpack(script::Module& module) {
 void FoldPrepackedWeightIntoModule(
     script::Module& module,
     const std::string& method_name,
-    const script::Module& wrapper_module) {
+    const script::Module& linear_params_module,
+    const script::Module& conv_params_module) {
   auto method = module.get_method(method_name);
   auto graph = method.graph();
   std::string linear_prepack = R"(
@@ -957,8 +971,14 @@ graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %
         %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         return (%packed_params))";
 
-  auto patterns = {linear_prepack, conv2d_prepack};
-  for (const auto& pattern : patterns) {
+  // (is_conv, pattern, packed_params_module)
+  auto pattern_and_modules = {std::make_tuple(false, linear_prepack, linear_params_module),
+                              std::make_tuple(true, conv2d_prepack, conv_params_module)};
+  for (const auto& item : pattern_and_modules) {
+    bool is_conv;
+    std::string pattern;
+    script::Module packed_params_module;
+    std::tie(is_conv, pattern, packed_params_module) = item;
     Graph pattern_graph;
     std::unordered_map<std::string, Value*> vmap;
     script::parseIR(pattern, &pattern_graph, vmap);
@@ -976,11 +996,23 @@ graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %
       auto w = module.get_parameter("weight").variable_data();
       auto w_quant = at::quantize_per_tensor(w, w_scale, w_zero_point, w_dtype);
       auto b = module.get_parameter("bias").variable_data();
-      auto wrapper = wrapper_module.clone();
-      auto set_weight_bias = wrapper.get_method("set_weight_bias");
+      auto wrapper_module = packed_params_module.clone();
+      auto set_weight_bias = wrapper_module.get_method("set_weight_bias");
+      if (is_conv) {
+        auto stride = toIntTuple(match_vmap.at(vmap.at("stride")));
+        auto padding = toIntTuple(match_vmap.at(vmap.at("padding")));
+        auto dilation = toIntTuple(match_vmap.at(vmap.at("dilation")));
+        auto groups = toIValue(match_vmap.at(vmap.at("groups")));
+        auto set_conv_params = wrapper_module.get_method("set_conv_params");
+        if (!stride || !padding || !dilation) {
+          TORCH_WARN("non-constant stride/padding/dilation");
+          continue;
+        }
+        set_conv_params(std::vector<IValue>{stride.value(), padding.value(), dilation.value(), groups.value()});
+      }
       set_weight_bias(std::vector<IValue>{IValue(w_quant), IValue(b)});
       // TODO: we need to make sure this name is unique
-      module.register_module("_packed_weight_bias", wrapper);
+      module.register_module("_packed_weight_bias", wrapper_module);
 
       // Replace GetAttr on %self with PackedParams module
       auto w_val = match_vmap.at(vmap.at("w"));
@@ -992,7 +1024,7 @@ graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %
       // wrapper_module = self._packed_weight_bias
       Value* packed_params_module =
           graph->insertGetAttr(graph->inputs()[0], "_packed_weight_bias")
-              ->setType(wrapper.type());
+              ->setType(wrapper_module.type());
 
       // packed_params = wrapper_module._packed_params
       Value* packed_params_from_attr =
@@ -1016,11 +1048,17 @@ graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %
 
 void FoldPrepackedWeightIntoModule(
     script::Module& module,
-    const script::Module& wrapper_module) {
+    const script::Module& linear_params_module,
+    const script::Module& conv_params_module) {
   for (auto& method : module.get_methods()) {
-    FoldPrepackedWeightIntoModule(module, method.name(), wrapper_module);
+    FoldPrepackedWeightIntoModule(module,
+                                  method.name(),
+                                  linear_params_module,
+                                  conv_params_module);
     for (auto m : module.get_modules()) {
-      FoldPrepackedWeightIntoModule(m, wrapper_module);
+      FoldPrepackedWeightIntoModule(m,
+                                    linear_params_module,
+                                    conv_params_module);
     }
   }
 }

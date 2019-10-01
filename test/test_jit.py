@@ -21,7 +21,7 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.optim as optim
 from torch.quantization import QConfig
-from torch.quantization._quantize_script import PackedParams
+from torch.quantization._quantize_script import LinearPackedParams, ConvPackedParams
 
 # Testing utils
 from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
@@ -1408,7 +1408,7 @@ graph(%input, %weight):
             def forward(self, x):
                 xq = torch.quantize_per_tensor(x, 0.2, 2, torch.quint8)
                 wq = torch.quantize_per_tensor(self.weight, 0.2, 2, torch.qint8)
-                stride, padding, dilation, groups = [1, 1], [0, 0], [1, 1], 1
+                stride, padding, dilation, groups = (1, 1), (0, 0), (1, 1), 1
                 packed = torch.ops.quantized.conv_prepack(wq, self.bias, stride, padding, dilation, groups)
                 w_unpacked, b_unpacked = torch.ops.quantized.conv_unpack(packed)
                 r = torch.nn.functional.conv2d(xq.dequantize(), w_unpacked.dequantize(), b_unpacked, stride, padding, dilation, groups)
@@ -1418,12 +1418,14 @@ graph(%input, %weight):
         for M, data in [(QLinear, torch.randn((5, 5), dtype=torch.float)),
                         (QConv, torch.randn((1, 3, 24, 24), dtype=torch.float))]:
             m = torch.jit.script(M())
-            print(get_forward_graph(m._c))
             ref_res = get_forward(m._c)(data)
-            torch._C._jit_pass_fold_prepack(m._c, torch.jit.script(PackedParams())._c)
+            print(get_forward_graph(m._c))
+            torch._C._jit_pass_fold_prepack(m._c,
+                                            torch.jit.script(LinearPackedParams())._c,
+                                            torch.jit.script(ConvPackedParams())._c)
+            print(get_forward_graph(m._c))
             res = get_forward(m._c)(data)
             # check attribute and graph
-            print(m._c._get_modules())
             self.assertTrue(m._c._has_module('_packed_weight_bias'))
             # check values
             original_w = m._c._get_parameter('weight')
