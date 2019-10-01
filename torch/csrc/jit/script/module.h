@@ -42,14 +42,6 @@ using ::c10::QualifiedName;
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
 using ModulePtr = c10::intrusive_ptr<c10::ivalue::Object>;
-// A method in a module, e.g. f in:
-//
-// class M(ScriptModule):
-//   @script_method
-//   def f(self, x):
-//     ...
-// Note: because Method/Module are exposed to python these
-// classes use python method naming conventions
 
 struct Module;
 
@@ -59,6 +51,14 @@ using slot_list = slot_list_impl<Slot>;
 using module_list = slot_list_impl<Module>;
 using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
 
+// A method in a module, e.g. f in:
+//
+// class M(ScriptModule):
+//   @script_method
+//   def f(self, x):
+//     ...
+// Note: because Method/Module are exposed to python these
+// classes use python method naming conventions
 struct TORCH_API Method {
   Method(ModulePtr owner, Function* function);
 
