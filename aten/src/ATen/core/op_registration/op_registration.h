@@ -263,6 +263,34 @@ public:
       );
     }
 
+    template<class FuncType>
+    // enable_if: only enable it if FuncType is actually a function
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> kernel(TensorTypeId dispatch_key, FuncType* kernel_func) && {
+      static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      TORCH_INTERNAL_ASSERT(kernel_func != nullptr, "Kernel function cannot be nullptr");
+
+      return std::move(*this).kernel(
+        std::move(dispatch_key),
+        KernelFunction::makeFromUnboxedRuntimeFunction(kernel_func),
+        // TODO Do schema inference without relying on WrapKernelFunction
+        detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>()()
+      );
+    }
+
+    template<class FuncType>
+    // enable_if: only enable it if FuncType is actually a function
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> catchAllKernel(FuncType* kernel_func) && {
+      static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      TORCH_INTERNAL_ASSERT(kernel_func != nullptr, "Kernel function cannot be nullptr");
+
+      return std::move(*this).kernel(
+        c10::nullopt,
+        KernelFunction::makeFromUnboxedRuntimeFunction(kernel_func),
+        // TODO Do schema inference without relying on WrapKernelFunction
+        detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>()()
+      );
+    }
+
     // TODO Remove impl_unboxedOnlyKernel once all of aten can generate boxed kernels
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
@@ -307,6 +335,58 @@ public:
       }
     }
 
+    // TODO Remove impl_unboxedOnlyC10Kernel once all of aten can generate boxed kernels
+    template<class FuncType, FuncType* kernel_func>
+    // enable_if: only enable it if FuncType is actually a function
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyC10Kernel(TensorTypeId dispatch_key) && {
+      static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
+
+      return std::move(*this).kernel(
+        std::move(dispatch_key),
+        KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
+        // TODO Do schema inference without relying on WrapKernelFunction
+        detail::FunctionSchemaInferer<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>()()
+      );
+    }
+
+    // TODO Remove impl_unboxedOnlyC10CatchAllKernel once all of aten can generate boxed kernels
+    template<class FuncType, FuncType* kernel_func>
+    // enable_if: only enable it if FuncType is actually a function
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyC10CatchAllKernel() && {
+      static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
+
+      return std::move(*this).kernel(
+        c10::nullopt,
+        KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
+        // TODO Do schema inference without relying on WrapKernelFunction
+        detail::FunctionSchemaInferer<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>()()
+      );
+    }
+
+    // TODO Remove impl_unboxedOnlyATenKernel once all of aten can generate boxed kernels
+    template<class FuncType, FuncType* kernel_func>
+    // enable_if: only enable it if FuncType is actually a function
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyATenKernel(TensorTypeId dispatch_key) && {
+      static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
+
+      at::globalATenDispatch().registerOp<FuncType>(dispatch_key, legacyATenSchema_->c_str(), kernel_func);
+      return std::move(*this);
+    }
+
+    // TODO Remove impl_unboxedOnlyATenCatchAllKernel once all of aten can generate boxed kernels
+    template<class FuncType, FuncType* kernel_func>
+    // enable_if: only enable it if FuncType is actually a function
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyATenCatchAllKernel() && {
+      static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
+
+      at::globalATenDispatch().registerOp<FuncType>(TensorTypeId::UndefinedTensorId, legacyATenSchema_->c_str(), kernel_func);
+      return std::move(*this);
+    }
+
     /**
      * Use this to register an operator whose kernel is implemented as a lambda.
      * The kernel is only called for inputs matching the given dispatch key.
@@ -325,7 +405,10 @@ public:
      */
     template<class Lambda>
     // enable_if: only enable it if Lambda is a functor (note: lambdas are functors)
-    guts::enable_if_t<guts::is_functor<guts::decay_t<Lambda>>::value, Options&&> kernel(TensorTypeId dispatch_key, Lambda&& functor) && {
+    guts::enable_if_t<
+        guts::is_functor<guts::decay_t<Lambda>>::value
+        && !std::is_same<typename guts::infer_function_traits_t<guts::decay_t<Lambda>>::func_type, KernelFunction::BoxedKernelFunction>::value,
+        Options&&> kernel(TensorTypeId dispatch_key, Lambda&& functor) && {
       static_assert(!std::is_base_of<OperatorKernel, guts::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
 
       // We don't support stateful lambdas (i.e. lambdas with a capture), because their
@@ -362,7 +445,10 @@ public:
      */
     template<class Lambda>
     // enable_if: only enable it if Lambda is a functor (note: lambdas are functors)
-    guts::enable_if_t<guts::is_functor<guts::decay_t<Lambda>>::value, Options&&> catchAllKernel(Lambda&& lambda) && {
+    guts::enable_if_t<
+        guts::is_functor<guts::decay_t<Lambda>>::value
+        && !std::is_same<typename guts::infer_function_traits_t<guts::decay_t<Lambda>>::func_type, KernelFunction::BoxedKernelFunction>::value,
+        Options&&> catchAllKernel(Lambda&& lambda) && {
       static_assert(!std::is_base_of<OperatorKernel, guts::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
 
       // We don't support stateful lambdas (i.e. lambdas with a capture), because their

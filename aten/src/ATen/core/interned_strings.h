@@ -77,6 +77,7 @@ namespace c10 {
   _(prim, requires_grad)             \
   _(prim, AutogradAdd)               \
   _(prim, GradOf)                    \
+  _(aten, grad)                      \
   _(aten, backward)                  \
   _(prim, Guard)                     \
   _(prim, BailOut)                   \
@@ -183,6 +184,7 @@ namespace c10 {
   _(onnx, Loop)                      \
   _(onnx, If)                        \
   _(onnx, Reshape)                   \
+  _(onnx, Expand)                    \
   _(onnx, Equal)                     \
   _(onnx, Greater)                   \
   _(onnx, Less)                      \

@@ -105,12 +105,12 @@ Tensor refine_names(const Tensor& self, DimnameList names) {
     }
     if (out_name.isWildcard()) {
       TORCH_CHECK(false,
-          "refine_names: cannot coerse Tensor", self_names, " to Tensor", names,
+          "refine_names: cannot coerce Tensor", self_names, " to Tensor", names,
           " because ", self_name, " is more specific than ", out_name, " at index ",
           idx);
     }
     TORCH_CHECK(false,
-        "refine_names: cannot coerse Tensor", self_names, " to Tensor", names,
+        "refine_names: cannot coerce Tensor", self_names, " to Tensor", names,
         " because ", self_name, " is different from ", out_name, " at index ",
         idx);
     TORCH_INTERNAL_ASSERT(false); // done handling errors
@@ -231,6 +231,78 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, DimnameList
 Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
   return native::unflatten(self, dimname_to_position(self, dim), sizes, names);
 }
+
+#ifdef BUILD_NAMEDTENSOR
+// Misc. Dimname overloads that don't have homes. Maybe we should move
+// all of them here or autogenerate them because they look so similar.
+Tensor gather(const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad) {
+  reportNYIDimnameOverload("gather");
+}
+Tensor& gather_out(Tensor& result, const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad) {
+  reportNYIDimnameOverload("gather");
+}
+Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("index_add");
+}
+Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("index_add");
+}
+Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+  return at::index_fill(self, dimname_to_position(self, dim), index, source);
+}
+Tensor& index_fill_(Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+  return self.index_fill_(dimname_to_position(self, dim), index, source);
+}
+Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  return at::index_fill(self, dimname_to_position(self, dim), index, source);
+}
+Tensor& index_fill_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  return self.index_fill_(dimname_to_position(self, dim), index, source);
+}
+Tensor index_copy(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("index_copy");
+}
+Tensor& index_copy_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("index_copy");
+}
+Tensor& index_select_out(Tensor& out, const Tensor& self, Dimname dim, const Tensor& index) {
+  reportNYIDimnameOverload("index_select");
+}
+Tensor index_select(const Tensor& self, Dimname dim, const Tensor& index) {
+  reportNYIDimnameOverload("index_select");
+}
+Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("scatter");
+}
+Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("scatter");
+}
+Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+  reportNYIDimnameOverload("scatter");
+}
+Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+  reportNYIDimnameOverload("scatter");
+}
+Tensor scatter_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("scatter_add");
+}
+Tensor& scatter_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("scatter_add");
+}
+std::tuple<Tensor&, Tensor&> sort_out(Tensor& values, Tensor& indices, const Tensor& self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("sort");
+}
+std::tuple<Tensor, Tensor> sort(const Tensor& self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("sort");
+}
+Tensor& squeeze_(Tensor& self, Dimname dim) {
+  reportNYIDimnameOverload("squeeze");
+}
+Tensor squeeze(const Tensor& self, Dimname dim) {
+  return at::squeeze(self, dimname_to_position(self, dim));
+}
+
+#endif
 
 }}  // namespace at::native
 #endif

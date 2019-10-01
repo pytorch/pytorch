@@ -69,9 +69,9 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     if (qtype == kPerTensorAffine) {
       zero_points[0] = weight.q_zero_point();
     } else if (qtype == kPerChannelAffine) {
-      auto axis = weight.q_per_channel_axis();
+      int64_t axis = weight.q_per_channel_axis();
       TORCH_CHECK(
-          axis.size() == 1 && axis[0] == 0,
+          axis == 0,
           "Only per output channel quantization is supported for the weights");
       zero_points.resize(output_channels, 0);
       for (int i = 0; i < output_channels; ++i) {
@@ -177,7 +177,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     if (bias_in.has_value()) {
       bias_fp32 = bias_in.value();
     } else {
-      bias_fp32 = at::zeros(out_ch, at::kFloat);
+      bias_fp32 = at::zeros(out_ch, weight.options().dtype(at::kFloat));
     }
     TORCH_CHECK(
         !bias_fp32.defined() || (bias_fp32.ndimension() == 1 && bias_fp32.size(0) == out_ch),
@@ -257,10 +257,10 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
           weight, bias, stride, padding, dilation, groups);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::conv_prepack ",
         toString(ctx.qEngine()));
-    return at::Tensor();
   }
 };
 

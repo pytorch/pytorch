@@ -138,6 +138,7 @@ class JitTestCase(TestCase):
                 buffer_copy = buffer.getvalue()
 
                 code_files, debug_files = extract_files(buffer)
+
             except RuntimeError as e:
                 if not self._isHookExceptionOk(e):
                     raise
@@ -578,3 +579,12 @@ def enable_cpu_fuser_if(cond):
                 return fn(*args, **kwargs)
             return wrapper
         return noop_fuser
+
+def get_forward(c):
+    return c._get_method('forward')
+
+def get_forward_graph(c):
+    return c._get_method('forward').graph
+
+def get_module_method(m, module, method):
+    return m._c._get_module(module)._get_method(method)

@@ -121,6 +121,9 @@ public:
   Vec256<double> erfc() const {
     return Vec256<double>(Sleef_erfcd4_u15(values));
   }
+  Vec256<double> erfinv() const {
+    return map(calc_erfinv);
+  }
   Vec256<double> exp() const {
     return Vec256<double>(Sleef_expd4_u10(values));
   }
@@ -140,16 +143,16 @@ public:
     return Vec256<double>(Sleef_log1pd4_u10(values));
   }
   Vec256<double> sin() const {
-    return map(std::sin);
+    return Vec256<double>(Sleef_sind4_u10(values));
   }
   Vec256<double> sinh() const {
-    return map(std::sinh);
+    return Vec256<double>(Sleef_sinhd4_u10(values));
   }
   Vec256<double> cos() const {
-    return map(std::cos);
+    return Vec256<double>(Sleef_cosd4_u10(values));
   }
   Vec256<double> cosh() const {
-    return map(std::cosh);
+    return Vec256<double>(Sleef_coshd4_u10(values));
   }
   Vec256<double> ceil() const {
     return _mm256_ceil_pd(values);
@@ -165,7 +168,7 @@ public:
     return _mm256_round_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   }
   Vec256<double> tan() const {
-    return map(std::tan);
+    return Vec256<double>(Sleef_tand4_u10(values));
   }
   Vec256<double> tanh() const {
     return Vec256<double>(Sleef_tanhd4_u10(values));

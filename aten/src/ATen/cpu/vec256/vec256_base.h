@@ -8,6 +8,7 @@
 
 #include <ATen/Utils.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/Math.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
 #include <c10/util/BFloat16.h>
@@ -176,10 +177,31 @@ public:
     }
     return ret;
   }
+  template <typename other_t = T,
+            typename std::enable_if<!std::is_floating_point<other_t>::value && !at::is_complex_t<other_t>::value, int>::type = 0>
   Vec256<T> abs() const {
-    Vec256<T> ret;
+    // other_t is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<other_t, T>::value, "other_t must be T");
+    return map([](T x) -> T { return x < static_cast<other_t>(0) ? -x : x; });
+  }
+  template <typename float_t = T,
+            typename std::enable_if<std::is_floating_point<float_t>::value, int>::type = 0>
+  Vec256<T> abs() const {
+    // float_t is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<float_t, T>::value, "float_t must be T");
+    // Specifically deal with floating-point because the generic code above won't handle -0.0 (which should result in
+    // 0.0) properly.
+    return map(std::abs);
+  }
+  template <typename complex_t = T,
+            typename std::enable_if<at::is_complex_t<complex_t>::value, int>::type = 0>
+  Vec256<T> abs() const {
+    // complex_t is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<complex_t, T>::value, "complex_t must be T");
+    // Specifically deal with passing values by reference (const T &) function arguments
+    Vec256<complex_t> ret;
     for (int64_t i = 0; i < size(); i++) {
-      ret[i] = static_cast<T>(std::abs(values[i]));
+      ret[i] = static_cast<complex_t>(std::abs(values[i]));
     }
     return ret;
   }
@@ -216,6 +238,9 @@ public:
   }
   Vec256<T> erfc() const {
     return map(std::erfc);
+  }
+  Vec256<T> erfinv() const {
+    return map(calc_erfinv);
   }
   Vec256<T> exp() const {
     return map(std::exp);

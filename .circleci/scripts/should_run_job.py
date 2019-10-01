@@ -22,7 +22,7 @@ default_set = set([
     # Caffe2 CPU
     'caffe2-py2-mkl-ubuntu16.04',
     # Caffe2 CUDA
-    'caffe2-py2-cuda9.1-cudnn7-ubuntu16.04',
+    'caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04',
     # Caffe2 ONNX
     'caffe2-onnx-py2-gcc5-ubuntu16.04',
     'caffe2-onnx-py3.6-clang7-ubuntu16.04',
@@ -59,6 +59,11 @@ default_set = set([
 
     # XLA
     'pytorch-xla-linux-xenial-py3.6-clang7',
+
+    # Named tensor
+    "pytorch-namedtensor-linux-xenial-py3.6-gcc5.4",
+    "pytorch-namedtensor-linux-xenial-py3-clang5-asan",
+    "pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2",
 
     # Other checks
     'pytorch-short-perf-test-gpu',

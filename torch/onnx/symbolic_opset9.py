@@ -198,6 +198,7 @@ def _slice(g, input, axes, starts, ends):
         return input
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
+
 def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
     def symbolic(g, self, dim=None, keepdim=None):
         if dim is None:
@@ -313,6 +314,11 @@ def embedding_bag(g,
 
 
 def size(g, self, dim):
+    if sym_help._maybe_get_const(dim, 'i') < 0:
+        rank = self.type().dim()
+        if rank:
+            dim = sym_help._maybe_get_const(dim, 'i') + rank
+            dim = g.op("Constant", value_t=torch.tensor(dim))
     full_shape = g.op("Shape", self)
     return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
 
@@ -712,24 +718,11 @@ replication_pad3d = replication_pad
 
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, align_corners=None):
+        sym_help._interpolate_warning(interpolate_mode)
         align_corners = sym_help._maybe_get_scalar(align_corners)
         if align_corners:
             return _unimplemented(name, "align_corners == True")
-
-        output_size = sym_help._maybe_get_const(output_size, 'is')
-        if sym_help._is_value(output_size):
-            offset = 2
-            offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
-            dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
-            divisor = sym_help._slice_helper(g, g.op("Shape", input), axes=[0], ends=[dim], starts=[offset])
-            divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
-            scale_dims = g.op("Div", dividend, divisor)
-            scales = g.op("Concat", offsets, scale_dims, axis_i=0)
-        else:
-            scales_constant = [1. if i < 2 else
-                               float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
-                               for i in range(0, dim)]
-            scales = g.op("Constant", value_t=torch.tensor(scales_constant))
+        scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
         return g.op("Upsample", input, scales, mode_s=interpolate_mode)
     return symbolic_fn
 
@@ -737,6 +730,9 @@ def _interpolate(name, dim, interpolate_mode):
 upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
 upsample_nearest2d = _interpolate('upsample_nearest2d', 4, "nearest")
 upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
+upsample_linear1d = _interpolate('upsample_linear1d', 3, "linear")
+upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
+upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
 
 def wrap_logical_op_with_cast_to(to_type):
@@ -985,6 +981,47 @@ def index_put(g, self, indices_list_value, values, accumulate):
     indices_list = sym_help._unpack_list(indices_list_value)
     args = [self] + indices_list + [values, accumulate]
     return g.op("ATen", *args, operator_s='index_put')
+
+
+def index_fill(g, self, dim, index, value):
+    dim_value = sym_help._parse_arg(dim, 'i')
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", self, index, value, dim_i=dim_value, operator_s="index_fill")
+    # 1. reshape index => [1, ..., 1, dim, 1, ..., 1]
+    # 2. expand index => [..., dim, ...], same shape as self except for dim.
+    # 3. expand value as well.
+    # 4. apply onnx::scatter.
+
+    if self.type().dim() is None:
+        return _unimplemented("index_fill", "input rank not accesible")
+    self_dim = self.type().dim()
+    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
+    expanded_index_shape = g.op("Scatter", g.op("Shape", self),
+                                g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index), axis_i=0)
+    expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
+
+    value = sym_help._maybe_get_scalar(value)
+    value = sym_help._if_scalar_type_as(g, value, self)
+    expanded_value = expand(g, value, expanded_index_shape, None)
+
+    return scatter(g, self, dim, expanded_index, expanded_value)
+
+
+def index_copy(g, self, dim, index, source):
+    dim_value = sym_help._parse_arg(dim, 'i')
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", self, index, source, dim_i=dim_value, operator_s="index_copy")
+    # Similar to index_fill, apply reshape + expand to index.
+
+    if self.type().dim() is None:
+        return _unimplemented("index_copy", "input rank not accesible")
+    self_dim = self.type().dim()
+    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
+    expanded_index_shape = g.op("Scatter", g.op("Shape", self),
+                                g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index), axis_i=0)
+    expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
+
+    return scatter(g, self, dim, expanded_index, source)
 
 
 def type_as(g, self, other):
@@ -1332,6 +1369,13 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
                  num_layers, dropout, train, bidirectional, batch_first=None, batch_sizes=None):
+
+    warnings.warn("Exporting a model to ONNX with a batch_size other than 1, " +
+                  "with a variable lenght with " + variant + " can cause an error " +
+                  "when running the ONNX model with a different batch size. " +
+                  "Make sure to save the model with a batch size of 1, " +
+                  "or define the initial states (h0/c0) as inputs of the model. ")
+
     onnxActivations = ['Relu', 'Tanh', 'Sigmoid', 'Affine', 'LeakyRelu', 'ThresholdedRelu',
                        'ScaledTanh', 'HardSigmoid', 'Elu', 'Softsign', 'Softplus']
     variantToOnnxActivationMap = dict(zip([act_fun.lower() for act_fun in onnxActivations], onnxActivations))
@@ -1662,10 +1706,10 @@ def scatter_add(g, self, dim, index, src):
         return _unimplemented("scatter_add", "input size not accessible")
     dtype = self.type().scalarType()
     dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-    dims = self.type().sizes()
-    to_add = torch.zeros(dims)
-    to_add = g.op("Constant", value_t=to_add)
-    to_add = scatter(g, to_add, dim, index, src)
+    dtype = sym_help.scalar_type_to_pytorch_type[dtype]
+    sizes = self.type().sizes()
+    to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=dtype))
+    to_add = sym_help._scatter_helper(g, to_add, dim, index, src)
     return add(g, self, to_add)
 
 
@@ -1680,8 +1724,10 @@ def prim_shape(g, self):
 
 @parse_args('v', 'i', 'v', 'v')
 def gather(g, self, dim, index, sparse_grad=False):
-    # NOTE: Update this workaround if ONNX has native Gather support.
-    #       The current Gather in ONNX is not the same as torch.gather.
+    if sym_help._maybe_get_const(sparse_grad, 'i'):
+        return _unimplemented("gather", "sparse_grad == True")
+    # NOTE: This workaround is needed since GatherElement is only supported
+    #       since opset 11, and Gather in ONNX is not the same as torch.gather.
     dtype = self.type().scalarType()
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
     depth = size(g, self, g.op("Constant", value_t=torch.LongTensor([dim])))
@@ -1904,6 +1950,12 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
 
+def baddbmm(g, self, batch1, batch2, beta, alpha):  
+    dtype = self.type().scalarType()    
+    batch_mul = matmul(g, batch1, batch2)       
+    mul_a = mul(g, batch_mul, g.op("Cast", alpha, to_i=sym_help.cast_pytorch_to_onnx[dtype]))       
+    mul_b = mul(g, self, g.op("Cast", beta, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
+    return add(g, mul_a, mul_b)
 
 def gelu(g, self):
     _sqrt2 = 1.4142135623730951
