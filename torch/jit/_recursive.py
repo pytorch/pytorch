@@ -133,9 +133,9 @@ def get_module_meta(original, level=0):
         added_names.add(name)
 
     # populate overloads
-    # TODO: untangle the relationship between __overloads__ and _overloads
+
     overloads = getattr(original, "__overloads__", {})
-    # update with any annotate overloads
+    # update with any annotated overloads
     # TODO: we do this both in recursive_script and in get_type. This is
     # because overloads are considered part of the type, but also determine
     # which methods to compile.
@@ -165,8 +165,19 @@ def get_module_meta(original, level=0):
 
         item = getattr(original, name)
 
-        if callable(item) and not isinstance(item, torch._C.Function):
-            continue
+        if inspect.isfunction(item) and not inspect.ismethod(item):
+            # This is a Python function attribute. Try to script it.
+            try:
+                item = torch.jit.script(item)
+            except RuntimeError as e:
+                # If we fail to script the function, it isn't a hard error.
+                # Instead, we will add it to the list of attributes we failed
+                # to convert, with the compilation error.
+                hint = ("(This function exists as an attribute on the Python module, "
+                        "but we failed to compile it to a TorchScript function. "
+                        "\nThe error stack is reproduced here:\n{}").format(e)
+                module_meta.add_failed_attribute(name, hint)
+                pass
 
         if name in class_annotations:
             attr_type = torch.jit.annotations.ann_to_type(class_annotations[name])
@@ -175,11 +186,15 @@ def get_module_meta(original, level=0):
         else:
             attr_type = torch._C._jit_try_infer_type(item)
 
-        # TODO save a reason why we can't infer the type
         if attr_type is not None:
             module_meta.add_attribute(name, attr_type, False)
         else:
-            module_meta.add_failed_attribute(name, type(item).__name__)
+            # TODO: could add more detail here. For example, what the user should do
+            # when the pytype is `list` or `NoneType`
+            hint = ("(This attribute exists on the Python module, "
+                    "but we failed to convert Python type: {} "
+                    "to a TorchScript type.)").format(type(item).__name__)
+            module_meta.add_failed_attribute(name, hint)
 
     return module_meta
 

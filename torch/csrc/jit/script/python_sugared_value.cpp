@@ -420,13 +420,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   auto failedAttrIter = moduleMeta_.failedAttributes_.find(field);
   std::string hint;
   if (failedAttrIter != moduleMeta_.failedAttributes_.end()) {
-    // TODO: could add more detail here. For example, what the user should do
-    // when the pytype is `list` or `NoneType`
-    hint = c10::str(
-        "(This attribute exists on the Python module, "
-        "but we failed to convert Python type: '",
-        failedAttrIter->second,
-        "' to a TorchScript type.)");
+    hint = failedAttrIter->second;
   }
 
   throw ErrorReport(loc) << "Module '" << module_.name().name() << "'"
