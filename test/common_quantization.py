@@ -453,30 +453,27 @@ class DummyObserver(torch.nn.Module):
         return x
 
 
-class ModForWrapping(torch.nn.Module):
-    def __init__(self, quantized=False):
-        super(ModForWrapping, self).__init__()
-        self.qconfig = default_qconfig
-        if quantized:
-            self.mycat = nnq.QFunctional()
-            self.myadd = nnq.QFunctional()
-        else:
-            self.mycat = nnq.FloatFunctional()
-            self.myadd = nnq.FloatFunctional()
-            self.mycat.observer = DummyObserver()
-            self.myadd.observer = DummyObserver()
+class ModelWithFunctionals(torch.nn.Module):
+    def __init__(self):
+        super(ModelWithFunctionals, self).__init__()
+        self.mycat = nnq.FloatFunctional()
+        self.myadd = nnq.FloatFunctional()
+        self.myadd_relu = nnq.FloatFunctional()
+        # Tracing doesnt work yet for c10 ops with scalar inputs
+        # https://github.com/pytorch/pytorch/issues/27097
+        # self.my_scalar_add = nnq.FloatFunctional()
+        # self.my_scalar_mul = nnq.FloatFunctional()
 
     def forward(self, x):
         y = self.mycat.cat([x, x, x])
         z = self.myadd.add(y, y)
-        return z
+        w = self.myadd_relu.add_relu(z, z)
+        # Tracing doesnt work yet for c10 ops with scalar inputs
+        # https://github.com/pytorch/pytorch/issues/27097
+        # w = self.my_scalar_add.add_scalar(w, -0.5)
+        # w = self.my_scalar_mul.mul_scalar(w, 0.5)
+        return w
 
-    @classmethod
-    def from_float(cls, mod):
-        new_mod = cls(quantized=True)
-        new_mod.mycat = new_mod.mycat.from_float(mod.mycat)
-        new_mod.myadd = new_mod.myadd.from_float(mod.myadd)
-        return new_mod
 
 class ResNetBase(torch.nn.Module):
     def __init__(self):
