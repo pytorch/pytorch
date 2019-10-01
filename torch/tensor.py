@@ -494,18 +494,110 @@ class Tensor(torch._C._TensorBase):
         return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=1)
 
     def refine_names(self, *names):
+        r"""Refines the dimension names of :attr:`self` according to :attr:`names`.
+
+        Refining is a special case of renaming that "lifts" unnamed dimensions.
+        A ``None`` dim can be refined to have any name; a named dim can only be
+        refined to have the same name.
+
+        As named tensors coexist with unnamed tensors, refining names gives a nice
+        way to write named-tensor-aware code that works with both named and unnamed
+        tensors.
+
+        :attr:`names` may contain up to one Ellipsis (``...``).
+        The Ellipsis is expanded greedily; it is expanded in-place to fill
+        :attr:`names` to the same length as ``self.dim()`` using names from the
+        corresponding indices of ``self.names``.
+
+        Python 2 does not support Ellipsis but one may use a string literal
+        instead (``'...'``).
+
+        Arguments:
+            names (iterable of str): The desired names of the output tensor. May
+                contain up to one Ellipsis.
+
+        Examples::
+
+            >>> imgs = torch.randn(32, 3, 128, 128)
+            >>> named_imgs = imgs.refine_names('N', 'C', 'H', 'W')
+            >>> named_imgs.names
+            ('N', 'C', 'H', 'W')
+
+            >>> tensor = torch.randn(2, 3, 5, 7, 11)
+            >>> tensor = tensor.refine_names('A', ..., 'B', 'C')
+            >>> tensor.names
+            ('A', None, None, 'B', 'C')
+
+        .. warning::
+            The named tensor API is experimental and subject to change.
+
+        """
         names = resolve_ellipsis(names, self.names, 'refine_names')
         return super(Tensor, self).refine_names(names)
 
     def align_to(self, *names):
+        r"""Permutes the dimensions of the :attr:`self` tensor to match the order
+        specified in :attr:`names`, adding size-one dims for any new names.
+
+        All of the dims of :attr:`self` must be named in order to use this method.
+        The resulting tensor is a view on the original tensor.
+
+        All dimension names of :attr:`self` must be present in :attr:`names`.
+        :attr:`names` may contain additional names that are not in ``self.names``;
+        the output tensor has a size-one dimension for each of those new names.
+
+        :attr:`names` may contain up to one Ellipsis (``...``).
+        The Ellipsis is expanded to be equal to all dimension names of :attr:`self`
+        that are not mentioned in :attr:`names`, in the order that they appear
+        in :attr:`self`.
+
+        Python 2 does not support Ellipsis but one may use a string literal
+        instead (``'...'``).
+
+        Arguments:
+            names (iterable of str): The desired dimension ordering of the
+                output tensor. May contain up to one Ellipsis that is expanded
+                to all unmentioned dim names of :attr:`self`.
+
+        Examples::
+
+            >>> tensor = torch.randn(2, 2, 2, 2, 2, 2, 2)
+            >>> named_tensor = tensor.refine_names('A', 'B', 'C', 'D', 'E', 'F')
+
+            # Move the F and E dims to the front while keeping the rest in order
+            >>> named_tensor.align_to('F', 'E', ...)
+
+        .. warning::
+            The named tensor API is experimental and subject to change.
+
+        """
         return super(Tensor, self).align_to(
             resolve_ellipsis(names, self.names, 'align_to', is_positional=False))
 
     def unflatten(self, dim, namedshape):
+        r"""Unflattens the named dimension :attr:`dim`, viewing it in the shape
+        specified by :attr:`namedshape`.
+
+        Arguments:
+            namedshape: (iterable of ``(name, size)`` tuples).
+
+        Examples::
+
+            >>> flat_imgs = torch.rand(32, 3 * 128 * 128, names=('N', 'features'))
+            >>> imgs = flat_imgs.unflatten('features', (('C', 3), ('H', 128), ('W', 128)))
+            >>> imgs.names, images.shape
+            (('N', 'C', 'H', 'W'), torch.Size([32, 3, 128, 128]))
+
+        .. warning::
+            The named tensor API is experimental and subject to change.
+
+        """
         names, sizes = unzip_namedshape(namedshape)
         return super(Tensor, self).unflatten(dim, sizes, names)
 
     def rename_(self, *names, **rename_map):
+        """In-place version of :meth:`~Tensor.rename`."""
+
         # Note [rename_ / rename API]
         # The Python API for these is different from the C++ API. In Python:
         # 1) tensor.rename(*names) takes a vararglist of names
@@ -514,6 +606,39 @@ class Tensor(torch._C._TensorBase):
         return update_names(self, names, rename_map, inplace=True)
 
     def rename(self, *names, **rename_map):
+        """Renames dimension names of :attr:`self`.
+
+        There are two main usages:
+
+        ``self.rename(**rename_map)`` returns a view on tensor that has dims
+        renamed as specified in the mapping :attr:`rename_map`.
+
+        ``self.rename(*names)`` returns a view on tensor, renaming all
+        dimensions positionally using :attr:`names`.
+        Use ``self.rename(None)`` to drop names on a tensor.
+
+        One cannot specify both positional args :attr:`names` and keyword args
+        :attr:`rename_map`.
+
+        Examples::
+
+            >>> imgs = torch.rand(2, 3, 5, 7, names=('N', 'C', 'H', 'W'))
+            >>> renamed_imgs = imgs.rename(N='batch', C='channels')
+            >>> renamed_imgs.names
+            ('batch', 'channels', 'H', 'W')
+
+            >>> renamed_imgs = imgs.rename(None)
+            >>> renamed_imgs.names
+            (None,)
+
+            >>> renamed_imgs = imgs.rename('batch', 'channel', 'height', 'width')
+            >>> renamed_imgs.names
+            ('batch', 'channel', 'height', 'width')
+
+        .. warning::
+            The named tensor API is experimental and subject to change.
+
+        """
         # See Note [rename_ / rename API]
         return update_names(self, names, rename_map, inplace=False)
 
