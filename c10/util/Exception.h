@@ -94,7 +94,7 @@ class C10_API Warning {
   /// generally be called once during initialization or while holding the GIL
   /// for programs that use python.
   static void set_warning_handler(handler_t handler);
-  /// Resets the global warning handler to the default one.
+  /// Gets the global warning handler.
   static handler_t get_warning_handler();
   /// The default warning handler. Prints the message to stderr.
   static void print_warning(
