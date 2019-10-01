@@ -28,7 +28,8 @@ from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
 from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, enable_profiling_mode, do_input_map, \
-    execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything
+    execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
+    get_forward, get_forward_graph, get_module_method
 from common_nn import module_tests, new_module_tests, criterion_tests
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
@@ -254,6 +255,21 @@ class FooToPickle(torch.nn.Module):  # noqa T484
         super(FooToPickle, self).__init__()
         self.bar = torch.jit.ScriptModule()
 
+class Observer(torch.nn.Module):
+    def __init__(self, dtype=torch.quint8):
+        super(Observer, self).__init__()
+        self.dtype = dtype
+
+    def forward(self, x):
+        return x
+
+    @torch.jit.export
+    def calculate_qparams(self):
+        return torch.tensor([2.0]), torch.tensor([3])
+
+class WeightObserver(Observer):
+    def __init__(self):
+        super(WeightObserver, self).__init__(torch.qint8)
 
 class TestJit(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -549,12 +565,23 @@ class TestJit(JitTestCase):
                 x.is_cuda,
                 x.is_mkldnn,
                 x.is_quantized,
-                x.requires_grad
+                x.requires_grad,
+                # x.layout TODO: layout long -> instance conversion
             )
 
         scripted = torch.jit.script(foo)
         x = torch.rand(3, 4)
         self.assertEqual(scripted(x), foo(x))
+
+    def test_layout(self):
+        @torch.jit.script
+        def check(x, y):
+            return x.layout == y.layout
+
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+
+        self.assertTrue(check(x, y))
 
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
@@ -646,8 +673,9 @@ class TestJit(JitTestCase):
         self.checkScript(test_simple_grad_with_grad_outputs, (x, y), inputs_requires_grad=True)
 
     def test_script_backward(self):
-        def checkGradEquals(fn, inputs):
+        def checkBackwardScript(fn, inputs):
             scripted_fn = torch.jit.script(fn)
+            FileCheck().check("torch.autograd.backward").run(scripted_fn.code)
             recording_inputs = do_input_map(lambda t: t.detach().requires_grad_(), inputs)
 
             fn(*inputs)
@@ -677,9 +705,9 @@ class TestJit(JitTestCase):
             torch.autograd.backward((output,), grad_outputs)
 
         inp = torch.randn(2, 2, requires_grad=True)
-        checkGradEquals(test_tensor_backward, (inp,))
-        checkGradEquals(test_torch_autograd_backward, (inp,))
-        checkGradEquals(test_torch_autograd_backward_with_grad_tensors, (inp,))
+        checkBackwardScript(test_tensor_backward, (inp,))
+        checkBackwardScript(test_torch_autograd_backward, (inp,))
+        checkBackwardScript(test_torch_autograd_backward_with_grad_tensors, (inp,))
 
     def test_diff_subgraph_clones_constants(self):
         @torch.jit.script
@@ -893,18 +921,6 @@ graph(%x : Tensor,
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_observers(self):
-        class Observer(torch.nn.Module):
-            def __init__(self):
-                super(Observer, self).__init__()
-                self.dtype = torch.quint8
-
-            def forward(self, x):
-                return x
-
-            @torch.jit.export
-            def calculate_qparams(self):
-                return torch.tensor([2.0]), torch.tensor([3])
-
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -915,9 +931,6 @@ graph(%x : Tensor,
 
         m = torch.jit.script(M())
         observer = torch.jit.script(Observer())
-
-        def get_forward_graph(m):
-            return m._get_method("forward").graph
         torch._C._jit_pass_constant_propagation(get_forward_graph(m._c))
         qconfig_dict = {
             '':
@@ -948,18 +961,6 @@ graph(%x : Tensor,
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_observers_child_qconfig(self):
-        class Observer(torch.nn.Module):
-            def __init__(self):
-                super(Observer, self).__init__()
-                self.dtype = torch.quint8
-
-            def forward(self, x):
-                return x
-
-            @torch.jit.export
-            def calculate_qparams(self):
-                return torch.tensor([2.0]), torch.tensor([3])
-
         class Sub(torch.nn.Module):
             def __init__(self):
                 super(Sub, self).__init__()
@@ -994,9 +995,7 @@ graph(%x : Tensor,
         m = torch.jit.script(M())
         observer = torch.jit.script(Observer())
 
-        def get_forward(c):
-            return c._get_method("forward")
-        torch._C._jit_pass_constant_propagation(get_forward(m._c).graph)
+        torch._C._jit_pass_constant_propagation(get_forward_graph(m._c))
         qconfig = QConfig(
             activation=observer._c,
             weight=observer._c)
@@ -1008,31 +1007,19 @@ graph(%x : Tensor,
                                             qconfig_dict,
                                             True)
         # check m is not observed
-        check_not_observed(get_forward(m._c).graph)
+        check_not_observed(get_forward_graph(m._c))
         # check conv.forward is observed
-        check_not_observed(get_forward(m._c._get_module('conv')).graph)
+        check_not_observed(get_forward_graph(m._c._get_module('conv')))
         # check conv.conv2d_forward is observed
-        check_observed(m._c._get_module('conv')._get_method('conv2d_forward').graph)
+        check_observed(get_module_method(m, 'conv', 'conv2d_forward').graph)
         # check sub is not observed
-        check_not_observed(get_forward(m._c._get_module('sub')).graph)
+        check_not_observed(get_module_method(m, 'sub', 'forward'))
         # check forward of sub.linear is observed
         check_observed(get_forward(m._c._get_module('sub')._get_module('linear')).graph)
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_observers_skip_values(self):
         import torch.nn.functional as F
-
-        class Observer(torch.nn.Module):
-            def __init__(self):
-                super(Observer, self).__init__()
-                self.dtype = torch.quint8
-
-            def forward(self, x):
-                return x
-
-            @torch.jit.export
-            def calculate_qparams(self):
-                return torch.tensor([2.0]), torch.tensor([3])
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -1050,9 +1037,6 @@ graph(%x : Tensor,
 
             def forward(self, x):
                 return self.relu(self.conv(x))
-
-        def get_forward(m):
-            return m._c._get_method("forward")
 
         def test_module(module, relu_call, num_observers):
             m = torch.jit.script(module())
@@ -1074,7 +1058,7 @@ graph(%x : Tensor,
             if num_observers == 1:
                 c = c.check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                      .check_next('prim::CallMethod[name="forward"](%observer_for_')
-            c.run(str(get_forward(m).graph))
+            c.run(str(get_forward_graph(m._c)))
             # TODO: add checks for conv and relu later, graph looks correct but this pr
             # has too many changes already
         test_module(M, 'prim::CallFunction(', 1)
@@ -1082,22 +1066,6 @@ graph(%x : Tensor,
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_observers_weight_dtype(self):
-        class Observer(torch.nn.Module):
-            def __init__(self, dtype=torch.quint8):
-                super(Observer, self).__init__()
-                self.dtype = dtype
-
-            def forward(self, x):
-                return x
-
-            @torch.jit.export
-            def calculate_qparams(self):
-                return torch.tensor([2.0]), torch.tensor([3])
-
-        class WeightObserver(Observer):
-            def __init__(self):
-                super(WeightObserver, self).__init__(torch.qint8)
-
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -1105,9 +1073,6 @@ graph(%x : Tensor,
 
             def forward(self, x):
                 return F.relu(self.conv(x))
-
-        def get_forward(m):
-            return m._c._get_method("forward")
 
         m = torch.jit.script(M())
         observer = torch.jit.script(Observer())
@@ -1124,18 +1089,6 @@ graph(%x : Tensor,
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_quant_dequant(self):
-        class Observer(torch.nn.Module):
-            def __init__(self):
-                super(Observer, self).__init__()
-                self.dtype = torch.quint8
-
-            def forward(self, x):
-                return x
-
-            @torch.jit.export
-            def calculate_qparams(self):
-                return torch.tensor([2.0]), torch.tensor([3])
-
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -1155,26 +1108,41 @@ graph(%x : Tensor,
         torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
         data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
-        def get_forward(m):
-            return m._c._get_method('forward')
-        get_forward(m)(data)
+        get_forward(m._c)(data)
         # right now the result will have extra observer modules
         # will fix later when we figure out how to remove modules
         torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
 
-        get_forward(m)(data)
+        get_forward(m._c)(data)
         FileCheck().check_not("aten::quantize_per_tensor") \
                    .check("prim::CallMethod[name=\"forward\"]") \
                    .check_not("aten::quantize_per_tensor") \
                    .check("return") \
-                   .run(str(get_forward(m).graph))
+                   .run(str(get_forward_graph(m._c)))
         FileCheck().check("aten::quantize_per_tensor") \
                    .check_next("aten::dequantize") \
                    .check("aten::conv2d") \
                    .check("aten::quantize_per_tensor") \
                    .check_next("aten::dequantize") \
                    .check("return") \
-                   .run(str(m._c._get_module('conv')._get_method('conv2d_forward').graph))
+                   .run(str(get_module_method(m, 'conv', 'conv2d_forward').graph))
+
+    @_tmp_donotuse_dont_inline_everything
+    def test_insert_prepack_unpack(self):
+        input_str = """
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype):
+        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK: quantized::linear_prepack
+        # CHECK: quantized::linear_unpack
+        %w_dequant = aten::dequantize(%w_quant)
+        %linear = prim::Constant[name="linear"]()
+        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
+        return (%r)"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_insert_prepack_unpack(graph)
+        FileCheck().run(input_str, graph)
 
     def test_quant_fusion(self):
         input_strs = [
@@ -1199,61 +1167,48 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         return (%r_dequant)""",
             # addmm -> quantized::linear
             """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::dequantize
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        # CHECK: aten::t
-        # CHECK: quantized::linear_prepack
+        %w_dequant_t = aten::t(%w_dequant)
         # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
-        %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
-        # CHECK-NOT: aten::quantize_per_tensor
+        %r = aten::addmm(%b, %a_dequant, %w_dequant_t, %4, %4)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # matmul(with bias) -> quantized::linear
             """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::dequantize
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        # CHECK: aten::t
-        # CHECK: quantized::linear_prepack
+        %w_dequant_t = aten::t(%w_dequant)
         # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
-        %output = aten::matmul(%a_dequant, %w_dequant)
+        %output = aten::matmul(%a_dequant, %w_dequant_t)
         %r = aten::add_(%output, %b, %4)
-        # CHECK-NOT: aten::quantize_per_tensor
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # matmul(without bias) -> quantized::linear
             """
-graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::dequantize
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        # CHECK: aten::t
-        # CHECK: prim::Constant()
-        # CHECK: quantized::linear_prepack
+        %w_dequant_t = aten::t(%w_dequant)
         # CHECK: quantized::linear
         # CHECK-NOT: aten::matmul
-        %r = aten::matmul(%a_dequant, %w_dequant)
-        # CHECK-NOT: aten::quantize_per_tensor
+        %r = aten::matmul(%a_dequant, %w_dequant_t)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)"""
         ]
@@ -1264,9 +1219,6 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
 
     @_tmp_donotuse_dont_inline_everything
     def test_foldbn_trivial(self):
-        def get_forward(m):
-            return m._c._get_method("forward")
-
         # Test trivial case
         class TestModule(torch.nn.Module):
             def __init__(self):
@@ -1288,7 +1240,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
         # CallMethod nodes. One of them should be for conv.forward and the other
         # for bn.forward.
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
-            .run(str(get_forward(scripted).graph))
+            .run(str(get_forward(scripted._c).graph))
 
         # Run FoldConvBatchnorm2d pass.
         torch._C._jit_pass_fold_convbn(scripted._c)
@@ -1296,7 +1248,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
         # Check that after the pass one of the CallMethods is gone (supposedly,
         # the bn.forward).
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
-            .run(str(get_forward(scripted).graph))
+            .run(str(get_forward_graph(scripted._c)))
 
         # Check that the transformation doesn't change numerics
         x = torch.rand(1, 1, 6, 6)
@@ -1304,9 +1256,6 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
 
     @_tmp_donotuse_dont_inline_everything
     def test_foldbn_trivial_nobias(self):
-        def get_forward(m):
-            return m._c._get_method("forward")
-
         # Test trivial case
         class TestModule(torch.nn.Module):
             def __init__(self):
@@ -1328,7 +1277,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
         # CallMethod nodes. One of them should be for conv.forward and the other
         # for bn.forward.
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
-            .run(str(get_forward(scripted).graph))
+            .run(str(get_forward_graph(scripted._c)))
 
         # Run FoldConvBatchnorm2d pass.
         torch._C._jit_pass_fold_convbn(scripted._c)
@@ -1336,7 +1285,7 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
         # Check that after the pass one of the CallMethods is gone (supposedly,
         # the bn.forward).
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
-            .run(str(get_forward(scripted).graph))
+            .run(str(get_forward_graph(scripted._c)))
 
         # Check that the transformation doesn't change numerics
         x = torch.rand(1, 1, 6, 6)
@@ -1344,9 +1293,6 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
 
     @_tmp_donotuse_dont_inline_everything
     def test_foldbn_in_submodule(self):
-        def get_forward(m):
-            return m._c._get_method("forward")
-
         # Test that we find Conv-BN patterns in submodules
         class SubModule(torch.nn.Module):
             def __init__(self):
@@ -1370,12 +1316,12 @@ graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dty
 
         m = torch.jit.script(TestModule())
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
-            .run(str(get_forward(m.sub).graph))
+            .run(str(get_forward_graph(m.sub._c)))
 
         torch._C._jit_pass_fold_convbn(m._c)
 
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
-            .run(str(get_forward(m.sub).graph))
+            .run(str(get_forward_graph(m.sub._c)))
 
     def test_fuse_linear(self):
         input_strs = ["""
@@ -1423,6 +1369,81 @@ graph(%input, %weight):
         FileCheck().check_not('GetAttr[name="weight"]') \
                    .check('GetAttr[name="_quantized_weight"]') \
                    .run(m._c._get_method('forward').graph)
+
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    @_tmp_donotuse_dont_inline_everything
+    def test_fold_prepack(self):
+        # TODO: move to torch/quantization
+        class PackedParams(torch.nn.Module):
+            def __init__(self):
+                super(PackedParams, self).__init__()
+                w = torch.rand((5, 5), dtype=torch.float)
+                wq = torch.quantize_per_tensor(w, 2.0, 0, torch.qint8)
+                self.set_weight_bias(wq, torch.rand(5))
+
+            @torch.jit.export
+            def set_weight_bias(self, weight, bias):
+                # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+                self._packed_params = torch.ops.quantized.linear_prepack(weight, bias)
+
+            @torch.jit.export
+            def _weight_bias(self):
+                return torch.ops.quantized.linear_unpack(self._packed_params)
+
+            def forward(self, x):
+                return x
+
+            @torch.jit.export
+            def __getstate__(self):
+                return self._weight_bias()
+
+            @torch.jit.export
+            def __setstate__(self, state):
+                self.set_weight_bias(state[0], state[1])
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
+                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
+
+            def forward(self, x):
+                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
+                wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
+                packed = torch.ops.quantized.linear_prepack(wq, self.bias)
+                w_unpacked, b_unpacked = torch.ops.quantized.linear_unpack(packed)
+                r = torch.nn.functional.linear(xq.dequantize(), w_unpacked.dequantize(), b_unpacked)
+                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
+                return rq
+
+
+        m = torch.jit.script(M())
+        data = torch.randn((5, 5), dtype=torch.float)
+        ref_res = m._c._get_method('forward')(data)
+        torch._C._jit_pass_fold_prepack(m._c, torch.jit.script(PackedParams())._c)
+        res = m._c._get_method('forward')(data)
+        # check attribute and graph
+        self.assertTrue(m._c._has_module('_packed_linear_weight_bias'))
+        # check values
+        original_w = m._c._get_parameter('weight')
+        ref_w = torch.quantize_per_tensor(original_w, 0.2, 1, torch.qint8).dequantize()
+        ref_b = m._c._get_parameter('bias')
+        w, b = m._c._get_module('_packed_linear_weight_bias')._get_method('_weight_bias')()
+        self.assertEqual(ref_w, w.dequantize())
+        self.assertEqual(ref_b, b)
+        self.assertEqual(ref_res, res)
+
+        # test serialization
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        loaded_mod = torch.jit.load(buffer)
+        loaded_res = loaded_mod._c._get_method('forward')(data)
+        self.assertEqual(ref_res, loaded_res)
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -2040,6 +2061,7 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
     @skipIfRocm
@@ -2049,6 +2071,7 @@ graph(%Ra, %Rb):
         torch._C._jit_run_cpp_tests(run_cuda=False)
         tests_setup.shutdown()
 
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @skipIfRocm
     def test_cpp_cuda(self):
@@ -4351,6 +4374,13 @@ a")
             # type: (int, float) -> float
             return a ** b
 
+        def func4():
+            # type: () -> float
+            return 2 ** -2
+
+        def func5(x, y):
+            return x.item() ** y.item()
+
         a = torch.rand(1, requires_grad=True)
         b = torch.rand(1, requires_grad=True)
         c = torch.rand(1, requires_grad=True)
@@ -4358,6 +4388,15 @@ a")
         self.checkScript(func, (a, b), optimize=True)
         self.checkScript(func2, (a, b, c, d), optimize=True)
         self.checkScript(func3, (4, -0.5), optimize=True)
+        self.checkScript(func4, ())
+
+        inputs = [torch.tensor(2), torch.tensor(-2), torch.tensor(.5), torch.tensor(.2)]
+        for x in inputs:
+            for y in inputs:
+                if x < 0:
+                    continue
+                else:
+                    self.checkScript(func5, (x, y))
 
     @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
     def test_pow_scalar_backward_cuda(self):
@@ -5983,7 +6022,7 @@ a")
         checkMath("isinf", 1, ret_type="bool")
         checkMath("ldexp", 2, is_float=False, ret_type="float", args_type="(float, int)",
                   vals=[(i, j) for i in float_vals for j in range(-10, 10)])
-        checkMath("pow", 2, is_float=False, ret_type="int")
+        checkMath("pow", 2, is_float=False, ret_type="float")
         checkMath("pow", 2, is_float=True, ret_type="float")
         if not PY2:
             checkMathWrap("floor", ret_type="int")
@@ -7210,9 +7249,9 @@ a")
         a = A()
         self.assertEqual(a.with_docstring.__doc__, 'test str')
 
-    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
-                     'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
-                     ' with instruction set support avx2 or newer.')
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
     def test_rnn_cell_quantized(self):
         d_in, d_hid = 2, 2
 
@@ -7304,9 +7343,9 @@ a")
             for out, ref_out in zip(outs, ref_outs):
                 torch.testing.assert_allclose(out, ref_out)
 
-    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
-                     'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
-                     ' with instruction set support avx2 or newer.')
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
     def test_rnn_quantized(self):
         d_in, d_hid = 2, 2
 
@@ -10749,13 +10788,19 @@ a")
         with self.assertRaisesRegex(RuntimeError, "must not be zero"):
             fn()
 
-    def test_for_in_range_no_arg(self):
+    def test_range_args(self):
         with self.assertRaisesRegex(RuntimeError, r'range expected at least 1 arguments, got 0'):
             @torch.jit.script
             def range_no_arg(x):
                 for _ in range():
                     x += 1
                 return x
+        with self.assertRaisesRegex(RuntimeError, r'found float'):
+            @torch.jit.script
+            def range_non_float():
+                for i in range(.5):
+                    print(i)
+
 
     def test_for_in_enumerate(self):
         def fn(x):
@@ -12378,7 +12423,7 @@ a")
 
             traced = torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
 
-    if torch.fbgemm_is_cpu_supported():
+    if 'fbgemm' in torch.backends.quantized.supported_engines:
         def test_quantization_modules(self):
             K1, N1 = 2, 2
 
@@ -15189,7 +15234,7 @@ a")
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "keyword-arg expansion is not supported"):
             torch.jit.script(fn)
 
-    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(), "requires FBGEMM")
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines, "requires FBGEMM")
     def test_erase_class_tensor_shapes(self):
         class Linear(torch.nn.Module):
             def __init__(self, in_features, out_features):
@@ -16064,7 +16109,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
     def test_snli(self):
         self._test_snli(self, device='cpu')
 
-    if torch.fbgemm_is_cpu_supported():
+    if 'fbgemm' in torch.backends.quantized.supported_engines:
         def test_snli_quantized(self):
             self._test_snli(self, device='cpu', quantized=True)
 
@@ -16206,7 +16251,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
     def test_vae(self):
         self._test_vae(self, device='cpu')
 
-    if torch.fbgemm_is_cpu_supported():
+    if 'fbgemm' in torch.backends.quantized.supported_engines:
         def test_vae_quantized(self):
             self._test_vae(self, device='cpu', quantized=True)
 
@@ -19690,7 +19735,7 @@ class TestClassType(JitTestCase):
 
         # TODO - support compiling classes from strings in jit.CompilationUnit
         @torch.jit.script
-        class BinOps(object):
+        class MyClass(object):
             def __init__(self, x):
                 # type: (int) -> None
                 self.x = x
@@ -19709,7 +19754,7 @@ class TestClassType(JitTestCase):
 
             def __pow__(self, other):
                 # type: (int) -> int
-                return self.x ** other
+                return int(self.x ** other)
 
             def __truediv__(self, other):
                 # type: (int) -> float
@@ -19763,49 +19808,57 @@ class TestClassType(JitTestCase):
                 # type: (int, int) -> None
                 self.x = val * idx
 
+            def __call__(self, val):
+                # type: (int) -> int
+                return self.x * val * 3
+
+
         def add():
-            return BinOps(4) + 3
+            return MyClass(4) + 3
         def sub():  # noqa: E306
-            return BinOps(4) - 3
+            return MyClass(4) - 3
         def mul():  # noqa: E306
-            return BinOps(4) * 3
+            return MyClass(4) * 3
         def pow():  # noqa: E306
-            return BinOps(4) ** 3
+            return MyClass(4) ** 3
         def truediv():  # noqa: E306
-            return BinOps(4) / 3
+            return MyClass(4) / 3
         def ne():  # noqa: E306
-            return BinOps(4) != 3
+            return MyClass(4) != 3
         def eq():  # noqa: E306
-            return BinOps(4) == 3
+            return MyClass(4) == 3
         def lt():  # noqa: E306
-            return BinOps(4) < 3
+            return MyClass(4) < 3
         def gt():  # noqa: E306
-            return BinOps(4) > 3
+            return MyClass(4) > 3
         def le():  # noqa: E306
-            return BinOps(4) <= 3
+            return MyClass(4) <= 3
         def ge():  # noqa: E306
-            return BinOps(4) >= 3
+            return MyClass(4) >= 3
         def _and():  # noqa: E306
-            return BinOps(4) & 3
+            return MyClass(4) & 3
         def _or():  # noqa: E306
-            return BinOps(4) | 3
+            return MyClass(4) | 3
         def _xor():  # noqa: E306
-            return BinOps(4) ^ 3
+            return MyClass(4) ^ 3
         def getitem():  # noqa: E306
-            return BinOps(4)[1]
+            return MyClass(4)[1]
         def setitem():  # noqa: E306
-            a = BinOps(4)
+            a = MyClass(4)
             a[1] = 5
             return a.x
+        def call():  # noqa: E306
+            a = MyClass(5)
+            return a(2)
 
-        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem, setitem]
+        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem, setitem, call]
 
         if not PY2:
             ops.append(truediv)
         for func in ops:
             self.checkScript(func, ())
 
-        with self.assertRaisesRegex(RuntimeError, "__add__ method"):
+        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute __add__. Did you forget to initialize it"):
             @torch.jit.script
             def test():
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))

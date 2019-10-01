@@ -219,7 +219,7 @@ if torch.cuda.is_available():
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
 # See note "Generic Device Type Testing."
-def instantiate_device_type_tests(generic_test_class, scope):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -239,6 +239,10 @@ def instantiate_device_type_tests(generic_test_class, scope):
 
     # Creates device-specific test cases
     for base in device_type_test_bases:
+        # Skips bases listed in except_for
+        if except_for is not None and base.device_type in except_for:
+            continue
+
         class_name = generic_test_class.__name__ + base.device_type.upper()
         device_type_test_class = type(class_name, (base, empty_class), {})
 

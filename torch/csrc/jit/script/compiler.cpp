@@ -2960,7 +2960,7 @@ struct to_ir {
         tensor_indices[dims[i]] = expr;
       } else {
         TORCH_INTERNAL_ASSERT(
-            "Trying to process index type that we don't support.");
+            false, "Trying to process index type that we don't support.");
       }
     }
     // at::index takes in a List[Optional[Tensor]] where some dims can be None.
