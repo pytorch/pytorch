@@ -3536,7 +3536,6 @@ def foo(x):
                 return x + 100
 
             def forward(self, x):
-                # return x + self.my_method(x)
                 return x + M.my_method(x)
 
         self.checkModule(M(), (torch.ones(2, 2),))
