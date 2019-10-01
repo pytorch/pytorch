@@ -134,6 +134,16 @@ TEST_F(FunctionalTest, AdaptiveAvgPool3d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 3, 3}));
 }
 
+TEST_F(FunctionalTest, HingeEmbeddingLoss) {
+  auto input = torch::tensor({{2, 22, 4}, {20, 10, 0}}, torch::kFloat);
+  auto target = torch::tensor({{2, 6, 4}, {1, 10, 0}}, torch::kFloat);
+  auto output = F::hinge_embedding_loss(
+      input, target, HingeEmbeddingLossOptions().margin(2));
+  auto expected = torch::tensor({10}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+}
+
 TEST_F(FunctionalTest, MaxUnpool1d) {
   auto x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
