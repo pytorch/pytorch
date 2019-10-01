@@ -106,7 +106,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
         output_scale,
         output_zero_point);
 
-    auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
+    auto buffer = at::empty(out_sizes, output.options().dtype(at::kInt));
 
     int num_tasks = at::get_num_threads();
     at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {

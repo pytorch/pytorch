@@ -207,7 +207,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     // TODO: add MemoryFormat::ChannelsLast here once perf is fixed
     Tensor output = _empty_affine_quantized(
         outShape, device(kCPU).dtype(kQUInt8), output_scale, output_zero_point);
-    auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
+    auto buffer = at::empty(output.sizes(), output.options().dtype(at::kInt));
 
     int num_tasks = at::get_num_threads();
     at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
