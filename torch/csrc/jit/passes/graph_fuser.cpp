@@ -21,6 +21,19 @@ namespace jit {
 
 namespace {
 
+static bool hasMaybeUndefinedInputs(Node* node) {
+
+  auto maybe_undefined = [](Value* v) { 
+    auto tt = v->type()->cast<TensorType>();
+    if (!tt) {
+      return false;
+    }
+    return !tt->undefined().has_value() || *tt->undefined();
+  };
+
+  return std::any_of(node->inputs().begin(), node->inputs().end(), maybe_undefined);
+}
+
 static bool isFusableDevice(Value *v) {
     if (!v->type()->isSubtypeOf(TensorType::get())) {
       return true;
@@ -187,7 +200,7 @@ struct GraphFuser {
   }
 
   bool isFusable(Node* node) {
-    return callback_(node);
+    return callback_(node) && !hasMaybeUndefinedInputs(node);
   }
 
   bool isFusableDevice(Value *v) {
@@ -238,6 +251,11 @@ struct GraphFuser {
         subgraph_arg_limit_) {
       return false;
     }
+
+    if (hasMaybeUndefinedInputs(tensors_node)) {
+      return false;
+    }
+
     if (tensors_node->kind() != prim::ListConstruct)
       return false;
     // NB: Note that technically other uses of the list aren't a big problem for
@@ -372,6 +390,7 @@ struct GraphFuser {
           // so we generally don't allow fusing tensor-scalar operations unless
           // the scalar is constant. In those cases we inline the constants
           // directly in the body of the fused group.
+
           if (input->node()->kind() != prim::Constant) {
             std::cout << " node = " << *input->node() << std::endl;
           }

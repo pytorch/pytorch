@@ -35,7 +35,7 @@ class AutodiffFuser {
         return false;
 
 
-      std::cout << "isFusable lambda = " << *n << std::endl;
+      //std::cout << "isFusable lambda = " << *n << std::endl;
 
       for (auto inp : n->inputs()) {
         if (auto tt = inp->type()->cast<TensorType>()) {
@@ -48,7 +48,7 @@ class AutodiffFuser {
         }
       }
 
-      std::cout << "isBackendFusable = " << isBackendFusable_(n) << std::endl;
+      //std::cout << "isBackendFusable = " << isBackendFusable_(n) << std::endl;
       return isBackendFusable_(n) || n->kind() == prim::DifferentiableGraph;
     }; 
 
@@ -278,7 +278,7 @@ std::vector<Node*> CreateAutodiffSubgraphs(
 std::vector<Node*> CreateAutodiffSubgraphs(const std::shared_ptr<Graph>& graph, 
   std::function<bool(Node*)> isBackendFusable, 
   size_t threshold) {
-  graph->dump();
+  //graph->dump();
   std::vector<Node*> diff_nodes;
   AutodiffFuser af(graph, isBackendFusable, threshold);
   af.run(graph->block(), diff_nodes);

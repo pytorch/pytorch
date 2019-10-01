@@ -905,6 +905,7 @@ bool Node::hasSideEffects() const {
     case prim::CallMethod:
     case prim::BailoutTemplate:
     case prim::profile:
+    case prim::BailOut:
       return true;
   }
 

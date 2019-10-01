@@ -1441,17 +1441,17 @@ new_module_tests = [
         input_fn=lambda: torch.rand(1, 3, 7, 7),
         desc='norm',
     ),
-    dict(
-        module_name='LPPool1d',
-        constructor_args=(1.5, 2),
-        input_fn=lambda: torch.rand(1, 3, 7),
-        desc='norm',
-    ),
-    dict(
-        module_name='LPPool1d',
-        constructor_args=(2, 2, 3),
-        input_size=(1, 3, 7),
-    ),
+    # dict(
+    #     module_name='LPPool1d',
+    #     constructor_args=(1.5, 2),
+    #     input_fn=lambda: torch.rand(1, 3, 7),
+    #     desc='norm',
+    # ),
+    # dict(
+    #     module_name='LPPool1d',
+    #     constructor_args=(2, 2, 3),
+    #     input_size=(1, 3, 7),
+    # ),
     dict(
         module_name='LocalResponseNorm',
         constructor_args=(3, ),

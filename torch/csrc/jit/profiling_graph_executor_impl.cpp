@@ -48,6 +48,11 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
       RemoveExpands(copy);
       CanonicalizeOps(copy);
       EliminateDeadCode(copy);
+      const static auto *ppg = std::getenv("PYTORCH_PRINT_GRAPH");
+      if (ppg) {
+        std::cout << "profiled graph:\n";
+        copy->dump();
+      }
       profiling_plan_ = ExecutionPlan(copy);
       // fall-through
     }
@@ -103,7 +108,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
     //     getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
     auto diff_nodes = CreateAutodiffSubgraphs(
     copy,
-    isFusableDefault,
+    //isFusableDefault,
     getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
     for (Node *dnode : diff_nodes) {
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
