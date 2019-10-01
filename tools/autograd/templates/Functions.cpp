@@ -2344,6 +2344,15 @@ Tensor index_backward(Tensor zeros_like_self, TensorList indices, const Tensor& 
    return at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
 }
 
+Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, const Tensor& raw_grad, bool zero_infinity) {
+  if (zero_infinity) {
+    return at::where(loss.unsqueeze(0).unsqueeze(2) == 0,
+		     at::zeros({0}, raw_grad.options()),
+		     raw_grad * grad_out.unsqueeze(0).unsqueeze(2));
+  } else {
+    return raw_grad * grad_out.unsqueeze(0).unsqueeze(2);
+  }
+}
 
 } // anonymous namespace
 
