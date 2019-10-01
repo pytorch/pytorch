@@ -180,17 +180,17 @@ namespace nn {
     stream << ")";
   }
 
-  EmbeddingBag EmbeddingBag::from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingBagOptions> options, bool freeze) {
-    TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
-    if (options != c10::nullopt) {
-      TORCH_CHECK((*options).num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", (*options).num_embeddings());
-      TORCH_CHECK((*options).embedding_dim() == embeddings.size(1), "Expects options.embeddings_dim to be ", embeddings.size(1) , "but found ", (*options).embedding_dim());
-    } else {
-      options = EmbeddingBagOptions(embeddings.size(0), embeddings.size(1));
-    }
-    EmbeddingBag embeddingbag((*options)._weight(embeddings));
-    embeddingbag->weight.set_requires_grad(!freeze);
-    return embeddingbag;
-  }
+  // EmbeddingBag EmbeddingBag::from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingBagOptions> options, bool freeze) {
+  //   TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
+  //   if (options != c10::nullopt) {
+  //     TORCH_CHECK((*options).num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", (*options).num_embeddings());
+  //     TORCH_CHECK((*options).embedding_dim() == embeddings.size(1), "Expects options.embeddings_dim to be ", embeddings.size(1) , "but found ", (*options).embedding_dim());
+  //   } else {
+  //     options = EmbeddingBagOptions(embeddings.size(0), embeddings.size(1));
+  //   }
+  //   EmbeddingBag embeddingbag((*options)._weight(embeddings));
+  //   embeddingbag->weight.set_requires_grad(!freeze);
+  //   return embeddingbag;
+  // }
 } // namespace nn
 } // namespace torch
