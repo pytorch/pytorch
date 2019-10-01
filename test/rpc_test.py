@@ -90,7 +90,7 @@ def _wrap_with_rpc(test_method):
 
     @functools.wraps(test_method)
     def wrapper(self, *arg, **kwargs):
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
         )
