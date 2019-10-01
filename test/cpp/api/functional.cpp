@@ -89,8 +89,8 @@ TEST_F(FunctionalTest, PDist) {
   }
   {
     auto input = torch::tensor({{1.0, -1.0}, {1.0, 3.0}, {3.0, 3.0}});
-    auto output = F::pdist(input, 1);
-    auto expected = torch::tensor({4.0, 6.0, 2.0});
+    auto output = F::pdist(input, 1.5);
+    auto expected = torch::tensor({4.0, 4.8945, 2.0});
     ASSERT_TRUE(output.allclose(expected));
   }
 }
