@@ -143,6 +143,8 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (THPQScheme_Check(input.ptr())) {
     return InferredType(IntType::get());
+  } else if (THPLayout_Check(input.ptr())) {
+    return InferredType(IntType::get());
   }
 
   // Try container types
@@ -321,14 +323,14 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
 }
 
 inline IValue createGenericDict(
-    py::handle obj,
+    py::dict obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
   c10::impl::GenericDict elems(key_type, value_type);
   elems.reserve(py::len(obj));
-  for (auto key : obj) {
+  for (auto entry : obj) {
     elems.insert(
-        toIValue(key, key_type), toIValue(obj[key], value_type));
+        toIValue(entry.first, key_type), toIValue(entry.second, value_type));
   }
   return IValue(std::move(elems));
 }
@@ -369,6 +371,10 @@ inline IValue toIValue(
       if (THPQScheme_Check(obj.ptr())) {
         auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
         return static_cast<uint8_t>(qscheme->qscheme);
+      }
+      if (THPLayout_Check(obj.ptr())) {
+        auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
+        return static_cast<int8_t>(layout->layout);
       }
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
@@ -445,7 +451,7 @@ inline IValue toIValue(
     case TypeKind::DictType: {
       const auto& dict_type = type->expect<DictType>();
       return createGenericDict(
-          obj, dict_type->getKeyType(), dict_type->getValueType());
+          py::cast<py::dict>(obj), dict_type->getKeyType(), dict_type->getValueType());
     }
     case TypeKind::OptionalType: {
       // check if it's a none obj since optional accepts NoneType
@@ -482,6 +488,10 @@ inline IValue toIValue(
       if (THPQScheme_Check(obj.ptr())) {
         auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
         return static_cast<uint8_t>(qscheme->qscheme);
+      }
+      if (THPLayout_Check(obj.ptr())) {
+        auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
+        return static_cast<int8_t>(layout->layout);
       }
       if (py::isinstance<py::int_>(obj)) {
         return py::cast<int64_t>(obj);
