@@ -1850,7 +1850,24 @@ class TestNamedTensor(TestCase):
             self.assertEqual((a < scalar).names, ['N', 'C'])
             self.assertEqual((a >= scalar).names, ['N', 'C'])
             self.assertEqual((a <= scalar).names, ['N', 'C'])
-                
+            
+            res = torch.empty(3, 3, dtype=torch.bool, device=device)
+            torch.eq(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.ne(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.lt(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.gt(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.le(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.ge(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            
+            res = torch.isnan(a)
+            self.assertEqual(res.names, ['N', 'C'])
+            
 
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):
