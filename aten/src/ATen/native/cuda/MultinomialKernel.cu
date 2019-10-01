@@ -5,6 +5,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/LaunchUtils.h>
+#include <ATen/native/cuda/Assert.cuh>
 #include <ATen/AccumulateType.h>
 
 #include <THC/THCReduceApplyUtils.cuh>
@@ -26,7 +27,9 @@ template <typename scalar_t>
 #ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
 #endif
-__global__ void renormRowsL1(scalar_t* dist, long rows, long cols) {
+__global__ void renormRowsL1(
+    scalar_t* dist, long rows, long cols,
+    c10::cuda::CUDAAssert* __c10_assert_state) {
   extern __shared__  unsigned char my_smem[];
   scalar_t *smem = reinterpret_cast<scalar_t *>(my_smem);
   scalar_t zero = static_cast<scalar_t>(0);
@@ -35,13 +38,13 @@ __global__ void renormRowsL1(scalar_t* dist, long rows, long cols) {
     scalar_t sum = static_cast<scalar_t>(0);
     for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
       val = dist[row * cols + col];
-      assert(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
+      C10_KERNEL_ASSERT_RETURN(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
       sum = sum + val;
     }
 
     sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<scalar_t>(), zero);
     if (threadIdx.x == 0) {
-      assert(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
+      C10_KERNEL_ASSERT_RETURN(!THCNumerics<scalar_t>::lt(sum, zero)); // ! < 0 for NaN handling
       smem[0] = sum;
     }
     __syncthreads();
@@ -68,11 +71,12 @@ void renormRows(Tensor& t) {
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
   dim3 block(cols < maxThreads ? cols : maxThreads);
 
+  C10_PREPARE_KERNEL_ASSERT;
   AT_DISPATCH_FLOATING_TYPES(t.scalar_type(), "renormRows_cuda", [&] {
     renormRowsL1<scalar_t>
         <<<grid, block, block.x * sizeof(scalar_t),
         at::cuda::getCurrentCUDAStream()>>>(t.data_ptr<scalar_t>(),
-            rows, cols);
+            rows, cols, __c10_assert_state);
   });
 }
 
@@ -80,11 +84,12 @@ template <typename scalar_t>
 __device__ int binarySearchForMultinomial(scalar_t* cumdist,
                                           scalar_t* dist,
                                           int size,
-                                          scalar_t val) {
+                                          scalar_t val,
+                                          c10::cuda::CUDAAssert* __c10_assert_state) {
   int start = 0;
   int end = size;
   // cumdist[size - 1] = 0 => all zero prob dist
-  assert(cumdist[size - 1] > static_cast<scalar_t>(0));
+  C10_KERNEL_ASSERT_RETURN_0(cumdist[size - 1] > static_cast<scalar_t>(0));
 
   while (end - start > 0) {
     int mid = start + (end - start) / 2;
@@ -119,7 +124,8 @@ sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
                                  int64_t distributions,
                                  int categories,
                                  scalar_t* normDistPrefixSum,
-                                 scalar_t* normDist) {
+                                 scalar_t* normDist,
+                                 c10::cuda::CUDAAssert* __c10_assert_state) {
   // At the moment, each warp computes one sample value in the binary
   // search due to divergence. It seems possible to compute multiple
   // values and limit divergence though later on.
@@ -149,7 +155,8 @@ sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
             normDistPrefixSum + curDist * categories,
             normDist + curDist * categories,
             categories,
-            r);
+            r,
+            __c10_assert_state);
 
         // Torch indices are 1-based
         dest[curDist * totalSamples + sample] = choice;
@@ -167,7 +174,8 @@ sampleMultinomialWithoutReplacement(std::pair<uint64_t, uint64_t> seeds,
                                     int64_t distributions,
                                     int categories,
                                     scalar_t* origDist,
-                                    scalar_t* normDistPrefixSum) {
+                                    scalar_t* normDistPrefixSum,
+                                    c10::cuda::CUDAAssert* __c10_assert_state) {
   // At the moment, each warp computes one sample value in the binary
   // search due to divergence. It seems possible to compute multiple
   // values and limit divergence though later on.
@@ -196,7 +204,8 @@ sampleMultinomialWithoutReplacement(std::pair<uint64_t, uint64_t> seeds,
           normDistPrefixSum + curDist * categories,
           origDist + curDist * categories,
           categories,
-          r);
+          r,
+          __c10_assert_state);
 
       // Torch indices are 1-based
       dest[curDist * totalSamples + sample] = choice;
@@ -219,7 +228,8 @@ sampleMultinomialOnce(int64_t* dest,
                       scalar_t* sampled,
                       scalar_t* dist,
                       int stride_dist,        // dist->stride(0)
-                      int stride_categories   // dist->stride(1)
+                      int stride_categories,  // dist->stride(1)
+                      c10::cuda::CUDAAssert* __c10_assert_state
 ) {
   extern __shared__  unsigned char my_smem[];
   __shared__ bool found;
@@ -240,9 +250,9 @@ sampleMultinomialOnce(int64_t* dest,
     scalar_t val;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
       val = dist[curDist * stride_dist + cat * stride_categories];
-      assert(val >= zero);
-      assert(!THCNumerics<scalar_t>::isinf(val));
-      assert(!THCNumerics<scalar_t>::isnan(val));
+      C10_KERNEL_ASSERT_SOFT(val >= zero, "invalid multinomial distribution (encountering probability entry < 0)");
+      C10_KERNEL_ASSERT_SOFT(!THCNumerics<scalar_t>::isinf(val), "invalid multinomial distribution (encountering probability entry = infinity)");
+      C10_KERNEL_ASSERT_SOFT(!THCNumerics<scalar_t>::isnan(val), "invalid multinomial distribution (encountering probability entry = NaN)");
       sum = sum + static_cast<accscalar_t>(val);
     }
 
@@ -252,13 +262,17 @@ sampleMultinomialOnce(int64_t* dest,
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
       // Make sure the sum of our distribution didn't overflow
-      assert(!THCNumerics<accscalar_t>::isinf(sum));
-      assert(sum > accZero);
+      C10_KERNEL_ASSERT_SOFT(!THCNumerics<accscalar_t>::isinf(sum));
+      C10_KERNEL_ASSERT_SOFT(sum > accZero);
 
       asmem[0] = sum;
       smem[0] = sampled[curDist];
     }
     __syncthreads();
+
+    if (__c10_assert_state->error) {
+      return;   // leave kernel if assert triggered
+    }
 
     sum = asmem[0];
     scalar_t sample = smem[0];
@@ -360,6 +374,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
 
   result.resize_({numDist, n_sample});
 
+  C10_PREPARE_KERNEL_ASSERT;
   AT_DISPATCH_FLOATING_TYPES(self_v.scalar_type(), "multinomial_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto props = at::cuda::getCurrentDeviceProperties();
@@ -391,7 +406,8 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
                   sampled.data_ptr<scalar_t>(),
                   self_v.data_ptr<scalar_t>(),
                   self_v.stride(0),
-                  self_v.stride(1)
+                  self_v.stride(1),
+                  __c10_assert_state
           );
     } else {
       // Generic, slow implementation with memory allocations
@@ -442,7 +458,8 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
                 result.data_ptr<int64_t>(),
                 numDist, numCategories,
                 prefixSum.data_ptr<scalar_t>(),
-                normDist.data_ptr<scalar_t>());
+                normDist.data_ptr<scalar_t>(),
+                __c10_assert_state);
       } else {
         // Sample without replacement
 
@@ -486,7 +503,8 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
                   result.data_ptr<int64_t>(),
                   numDist, numCategories,
                   origDist.data_ptr<scalar_t>(),
-                  prefixSum.data_ptr<scalar_t>());
+                  prefixSum.data_ptr<scalar_t>(),
+                  __c10_assert_state);
         }
       }
     }
