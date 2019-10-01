@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/Repeat.h>
 
 __global__ static void compute_cuda_kernel(int64_t *repeat_ptr, int64_t *cumsum_ptr, int64_t *result_ptr, int64_t size) {
@@ -17,7 +18,7 @@ __global__ static void compute_cuda_kernel(int64_t *repeat_ptr, int64_t *cumsum_
 static void compute_cuda(int64_t *repeat_ptr, int64_t *cumsum_ptr, int64_t *result_ptr, int64_t size) {
     int64_t block = 512;
     int64_t grid = std::min<int64_t>((size + block - 1) / block, 2048L);
-    compute_cuda_kernel<<<grid, block>>>(repeat_ptr, cumsum_ptr, result_ptr, size);
+    compute_cuda_kernel<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(repeat_ptr, cumsum_ptr, result_ptr, size);
 }
 
 namespace at { namespace native {
