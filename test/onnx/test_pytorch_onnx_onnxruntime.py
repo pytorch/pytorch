@@ -1167,7 +1167,7 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x):
                 return torch.det(x)
 
-        x = torch.randn(2, 3, 5, 5, requires_grad=True)
+        x = torch.randn(2, 3, 5, 5)
         self.run_test(Det(), x)
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
