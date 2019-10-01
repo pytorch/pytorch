@@ -1780,6 +1780,8 @@ class TracedModule(ScriptModule):
         assert(isinstance(orig, torch.nn.Module))
         self.__dict__['_name'] = 'TracedModule[' + type(orig).__name__ + ']'
         self.__dict__['_actual_script_module'] = copy_to_tmp_module(orig)
+        for name in ("_parameters", "_buffers", "_modules"):
+            delattr(self, name)
 
     def forward(self, *args, **kwargs):
         raise RuntimeError('Trace submodules cannot be called.')

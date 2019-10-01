@@ -166,10 +166,18 @@ def get_module_meta(original, level=0):
         item = getattr(original, name)
 
         if inspect.isfunction(item) and not inspect.ismethod(item):
+            cls_attr = getattr(type(original), name, None)
+            if inspect.isfunction(cls_attr):
+                # Skip function attributes that exist on the original class.
+                #
+                # We reach here for things like @staticmethod and @classmethod.
+                # TODO our support for @staticmethod and @classmethod is questionable.
+                continue
+
             # This is a Python function attribute. Try to script it.
             try:
                 item = torch.jit.script(item)
-            except RuntimeError as e:
+            except Exception as e:
                 # If we fail to script the function, it isn't a hard error.
                 # Instead, we will add it to the list of attributes we failed
                 # to convert, with the compilation error.
