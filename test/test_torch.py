@@ -35,7 +35,7 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
 from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
-    dtypes, dtypesIfCUDA, deviceCountAtLeast
+    dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf
 import torch.backends.quantized
 
 
@@ -1393,6 +1393,7 @@ class _TestTorchMixin(object):
     def test_cpow(self):
         self._test_cop(torch.pow, lambda x, y: nan if x < 0 else math.pow(x, y))
 
+    @slowTest
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_einsum(self):
         # test cases taken from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
@@ -1523,6 +1524,7 @@ class _TestTorchMixin(object):
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
                use_integral=use_integral), (0, 2, 1))
 
+    @slowTest
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_sum_dim(self):
         self._test_dim_ops(
@@ -6207,20 +6209,46 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     def test_comparison_ops_must_take_bool_output(self):
         with self.assertRaisesRegex(RuntimeError, 'The output tensor of lt must be a bool'):
-            torch.lt(torch.tensor([True]), torch.tensor([False]), out=torch.empty(1, dtype=torch.uint8))
+            for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne]:
+                op(torch.tensor([True]), torch.tensor([False]), out=torch.empty(1, dtype=torch.uint8))
 
     def test_inplace_comparison_ops_require_inputs_have_same_dtype(self):
         with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
-            torch.tensor([1], dtype=torch.int).lt_(torch.tensor([2], dtype=torch.long))
+            for op in ['lt_', 'le_', 'gt_', 'ge_', 'eq_', 'ne_']:
+                x = torch.tensor([1], dtype=torch.int)
+                y = torch.tensor([2], dtype=torch.long)
+                in_place_method = getattr(x, op)
+                in_place_method(y)
 
     def test_comparison_ops_check_for_scalar_overflow(self):
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             torch.tensor([1 << 5], dtype=torch.uint8) < (1 << 20)
+            (1 << 20) < torch.tensor([1 << 5], dtype=torch.uint8)
+            torch.tensor([1 << 5], dtype=torch.uint8) <= (1 << 20)
+            (1 << 20) <= torch.tensor([1 << 5], dtype=torch.uint8)
+            torch.tensor([1 << 5], dtype=torch.uint8) > (1 << 20)
+            (1 << 20) > torch.tensor([1 << 5], dtype=torch.uint8)
+            torch.tensor([1 << 5], dtype=torch.uint8) >= (1 << 20)
+            (1 << 20) >= torch.tensor([1 << 5], dtype=torch.uint8)
+            torch.tensor([1 << 5], dtype=torch.uint8) == (1 << 20)
+            (1 << 20) == torch.tensor([1 << 5], dtype=torch.uint8)
+            torch.tensor([1 << 5], dtype=torch.uint8) != (1 << 20)
+            (1 << 20) != torch.tensor([1 << 5], dtype=torch.uint8)
 
     def test_comparison_ops_check_for_zerodim_tensor_overflow(self):
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             torch.tensor([1 << 5], dtype=torch.uint8) < torch.tensor(1 << 20, dtype=torch.int32)
             torch.tensor(1 << 40, dtype=torch.int64) < torch.tensor([1 << 30], dtype=torch.int32)
+            torch.tensor([1 << 5], dtype=torch.uint8) <= torch.tensor(1 << 20, dtype=torch.int32)
+            torch.tensor(1 << 40, dtype=torch.int64) <= torch.tensor([1 << 30], dtype=torch.int32)
+            torch.tensor([1 << 5], dtype=torch.uint8) > torch.tensor(1 << 20, dtype=torch.int32)
+            torch.tensor(1 << 40, dtype=torch.int64) > torch.tensor([1 << 30], dtype=torch.int32)
+            torch.tensor([1 << 5], dtype=torch.uint8) >= torch.tensor(1 << 20, dtype=torch.int32)
+            torch.tensor(1 << 40, dtype=torch.int64) >= torch.tensor([1 << 30], dtype=torch.int32)
+            torch.tensor([1 << 5], dtype=torch.uint8) == torch.tensor(1 << 20, dtype=torch.int32)
+            torch.tensor(1 << 40, dtype=torch.int64) == torch.tensor([1 << 30], dtype=torch.int32)
+            torch.tensor([1 << 5], dtype=torch.uint8) != torch.tensor(1 << 20, dtype=torch.int32)
+            torch.tensor(1 << 40, dtype=torch.int64) != torch.tensor([1 << 30], dtype=torch.int32)
 
     def test_bitwise_ops(self):
         x = torch.randn(5, 5).gt(0)
@@ -7532,6 +7560,7 @@ class TestTorchDeviceType(TestCase):
         run_test([10, 20, 30, 5], device)
         run_test([15, 5, 10, 20, 25], device)
 
+    @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_det_logdet_slogdet(self, device):
@@ -7953,6 +7982,7 @@ class TestTorchDeviceType(TestCase):
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
     @slowTest
+    @skipCUDAIf(True, "See issue #26789.")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_cholesky_batched_many_batches(self, device):
@@ -9917,6 +9947,7 @@ class TestTorchDeviceType(TestCase):
             self.assertLessEqual(res.max().item(), 9)
             self.assertGreaterEqual(res.min().item(), -10)
 
+    @slowTest
     def test_triu_tril(self, device):
         def gen_mask(shape, diagonal, device, upper):
             mask = torch.zeros(*shape[-2:]).byte()
@@ -11153,32 +11184,6 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(x.eq(b), torch.tensor([False, True, False, False]))
             self.assertEqual(x.ne(b), torch.tensor([True, False, True, True]))
 
-            with warnings.catch_warnings(record=True) as warningsCount:
-                byteRes = torch.empty_like(x, device=device).byte()
-                boolRes = torch.empty_like(x, device=device).bool()
-
-                torch.le(x, b, out=byteRes)
-                torch.le(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
-
-                torch.ge(x, b, out=byteRes)
-                torch.ge(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
-
-                torch.gt(x, b, out=byteRes)
-                torch.gt(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
-
-                torch.eq(x, b, out=byteRes)
-                torch.eq(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
-
-                torch.ne(x, b, out=byteRes)
-                torch.ne(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
-
-                self.assertEquals(len(warningsCount), 5)
-
         # Bool Tensor
         x = torch.tensor([True, False, True, False], device=device)
         self.assertEqual(x.lt(True), torch.tensor([False, True, False, True]))
@@ -11635,6 +11640,11 @@ class TestTorchDeviceType(TestCase):
                         self.assertEqual(len(t), len(np1))
                         for i in range(len(t)):
                             self.assertEqual(t[i].cpu().numpy(), np1[i])
+
+    def test_nonzero_non_diff(self, device):
+        x = torch.randn(10, requires_grad=True)
+        nz = x.nonzero()
+        self.assertFalse(nz.requires_grad)
 
     def test_pdist_norm(self, device):
         def test_pdist_single(shape, device, p, dtype, trans):
