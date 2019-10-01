@@ -8,10 +8,10 @@ from common_utils import run_tests
 import unittest
 
 @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/27157")
-class DistAutogradWithSpawnTest(MultiProcessTestCase, DistAutogradTest):
+class DistAutogradTestWithSpawn(MultiProcessTestCase, DistAutogradTest):
 
     def setUp(self):
-        super(DistAutogradWithSpawnTest, self).setUp()
+        super(DistAutogradTestWithSpawn, self).setUp()
         self._spawn_processes()
 
 if __name__ == '__main__':

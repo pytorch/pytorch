@@ -6,10 +6,10 @@ from common_distributed import MultiProcessTestCase
 from common_utils import run_tests
 
 
-class DistAutogradWithForkTest(MultiProcessTestCase, DistAutogradTest):
+class DistAutogradTestWithFork(MultiProcessTestCase, DistAutogradTest):
 
     def setUp(self):
-        super(DistAutogradWithForkTest, self).setUp()
+        super(DistAutogradTestWithFork, self).setUp()
         self._fork_processes()
 
 if __name__ == '__main__':
