@@ -7,14 +7,14 @@ from os import getenv
 
 import torch
 import torch.distributed as dist
-from common_utils import load_tests
-from torch.distributed.rpc import RpcBackend
 
 
 if not dist.is_available():
     print("c10d not available, skipping tests")
     sys.exit(0)
 
+from torch.distributed.rpc import RpcBackend
+from common_utils import load_tests
 
 BACKEND = getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP)
 RPC_INIT_URL = getenv("RPC_INIT_URL", "")
