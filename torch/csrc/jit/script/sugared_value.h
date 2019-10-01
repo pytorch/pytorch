@@ -169,8 +169,8 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       size_t n_binders) override;
 
-  // try to create this builtin but if it doesn't exit or the self argument
-  // cannot possibly match, the return nullptr. Use in situations where it is
+  // try to create this builtin but if it doesn't exist or the self argument
+  // cannot possibly match, then return nullptr. Use in situations where it is
   // not clear if it is a valid builtin
   static std::shared_ptr<BuiltinFunction> tryCreate(
       Symbol symbol,
