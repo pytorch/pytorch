@@ -78,6 +78,13 @@ class LinearPackedParams(torch.nn.Module):
     def __setstate__(self, state):
         self.set_weight_bias(state[0], state[1])
 
+
+linear_packed_params = None
+conv_packed_params = None
+if 'fbgemm' in torch.backends.quantized.supported_engines:
+    linear_packed_params = torch.jit.script(LinearPackedParams())._c
+    conv_packed_params = torch.jit.script(ConvPackedParams())._c
+
 def _check_is_script_module(model):
     if not isinstance(model, torch.jit.ScriptModule):
         raise ValueError('input must be a script module, got: ' + str(type(model)))
@@ -92,16 +99,21 @@ def prepare_script(model, qconfig_dict, inplace=False):
                                         True)
     return model
 
+def fold_prepack(model):
+    if linear_packed_params and conv_packed_params:
+        torch._C._jit_pass_fold_prepack(model._c,
+                                        linear_packed_params,
+                                        conv_packed_params)
+
 def convert_script(model, inplace=False):
     _check_is_script_module(model)
     if not inplace:
         model = model.copy()
     torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', True)
     if 'fbgemm' in torch.backends.quantized.supported_engines:
-        _linear_packed_params_scripted = torch.jit.script(LinearPackedParams())._c
-        _conv_packed_params_scripted = torch.jit.script(ConvPackedParams())._c
         torch._C._jit_pass_insert_prepack_unpack(model._c)
-        torch._C._jit_pass_fold_prepack(model._c, _linear_packed_params_scripted, _conv_packed_params_scripted)
+        fold_prepack(model._c)
+
     return model
 
 # TODO: non-scriptable QConfig will be supported later

@@ -21,7 +21,7 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.optim as optim
 from torch.quantization import QConfig
-from torch.quantization._quantize_script import LinearPackedParams, ConvPackedParams
+from torch.quantization._quantize_script import fold_prepack
 
 # Testing utils
 from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
@@ -1415,15 +1415,11 @@ graph(%input, %weight):
                 rq = torch.quantize_per_tensor(r, 0.2, 2, torch.quint8)
                 return rq
 
-        for M, data in [(QLinear, torch.randn((5, 5), dtype=torch.float)),
-                        (QConv, torch.randn((1, 3, 24, 24), dtype=torch.float))]:
+        for M, data in [(QConv, torch.randn((1, 3, 24, 24), dtype=torch.float)),
+                        (QLinear, torch.randn((5, 5), dtype=torch.float))]:
             m = torch.jit.script(M())
             ref_res = get_forward(m._c)(data)
-            print(get_forward_graph(m._c))
-            torch._C._jit_pass_fold_prepack(m._c,
-                                            torch.jit.script(LinearPackedParams())._c,
-                                            torch.jit.script(ConvPackedParams())._c)
-            print(get_forward_graph(m._c))
+            fold_prepack(m)
             res = get_forward(m._c)(data)
             # check attribute and graph
             self.assertTrue(m._c._has_module('_packed_weight_bias'))
