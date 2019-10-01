@@ -70,7 +70,6 @@ if PY36:
 
 WINDOWS_BLACKLIST = [
     'distributed',
-    'rpc',
 ]
 
 ROCM_BLACKLIST = [
