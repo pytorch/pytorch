@@ -909,6 +909,8 @@ class ObserverTest(QuantizationTestCase):
         if qdtype == torch.quint8 and qscheme == torch.per_tensor_symmetric:
             reduce_range = False
         myobs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        # Calculate Qparams should return with a warning for observers with no data
+        qparams = myobs.calculate_qparams()
         x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
         result = myobs(x)
@@ -957,6 +959,8 @@ class ObserverTest(QuantizationTestCase):
         if qdtype == torch.quint8 and qscheme == torch.per_channel_symmetric:
             reduce_range = False
         myobs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
+        # Calculate qparams should work for empty observers
+        qparams = myobs.calculate_qparams()
         x = torch.tensor(
             [
                 [[[1.0, 2.0], [2.0, 2.5]], [[3.0, 4.0], [4.5, 6.0]]],
@@ -1081,6 +1085,8 @@ class RecordHistogramObserverTest(QuantizationTestCase):
            reduce_range=st.booleans())
     def test_histogram_observer(self, qdtype, qscheme, reduce_range):
         myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        # Calculate qparams should work for empty observers
+        qparams = myobs.calculate_qparams()
         x = torch.tensor([2.0, 3.0, 4.0, 5.0])
         y = torch.tensor([5.0, 6.0, 7.0, 8.0])
         myobs(x)
