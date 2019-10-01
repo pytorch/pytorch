@@ -389,10 +389,6 @@ class TestONNXRuntime(unittest.TestCase):
                 return tuple(results)
 
         x = torch.rand(5, 5, 5)
-        t = torch.jit.trace(DynamicSliceExportMod(), x)
-        print("trace")
-        print(t.graph)
-
         self.run_test(DynamicSliceExportMod(), x,
                       dynamic_axes={'input_1': [0, 1, 2],
                       'output_1': [0, 1, 2]})
