@@ -35,7 +35,7 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
 from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
-    dtypes, dtypesIfCUDA, deviceCountAtLeast
+    dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf
 import torch.backends.quantized
 
 
@@ -1393,6 +1393,7 @@ class _TestTorchMixin(object):
     def test_cpow(self):
         self._test_cop(torch.pow, lambda x, y: nan if x < 0 else math.pow(x, y))
 
+    @slowTest
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_einsum(self):
         # test cases taken from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
@@ -1523,6 +1524,7 @@ class _TestTorchMixin(object):
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
                use_integral=use_integral), (0, 2, 1))
 
+    @slowTest
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_sum_dim(self):
         self._test_dim_ops(
@@ -7558,6 +7560,7 @@ class TestTorchDeviceType(TestCase):
         run_test([10, 20, 30, 5], device)
         run_test([15, 5, 10, 20, 25], device)
 
+    @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_det_logdet_slogdet(self, device):
@@ -7979,6 +7982,7 @@ class TestTorchDeviceType(TestCase):
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
     @slowTest
+    @skipCUDAIf(True, "See issue #26789.")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_cholesky_batched_many_batches(self, device):
@@ -9943,6 +9947,7 @@ class TestTorchDeviceType(TestCase):
             self.assertLessEqual(res.max().item(), 9)
             self.assertGreaterEqual(res.min().item(), -10)
 
+    @slowTest
     def test_triu_tril(self, device):
         def gen_mask(shape, diagonal, device, upper):
             mask = torch.zeros(*shape[-2:]).byte()
