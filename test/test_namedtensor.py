@@ -1823,7 +1823,7 @@ class TestNamedTensor(TestCase):
                 torch.dot, device=device,
                 args=(create('C:2'), create('W:2')),
                 expected_names=[])
-    
+
     def test_comparison_ops(self):
         for device in torch.testing.get_all_device_types():
             a = torch.randn(3, 3, names=('N', 'C'), device=device)
@@ -1836,14 +1836,14 @@ class TestNamedTensor(TestCase):
             self.assertEqual((a < b).names, ['N', 'C'])
             self.assertEqual((a >= b).names, ['N', 'C'])
             self.assertEqual((a <= b).names, ['N', 'C'])
-            
+
             self.assertEqual((a == 1).names, ['N', 'C'])
             self.assertEqual((a != 1).names, ['N', 'C'])
             self.assertEqual((a > 1).names, ['N', 'C'])
             self.assertEqual((a < 1).names, ['N', 'C'])
             self.assertEqual((a >= 1).names, ['N', 'C'])
             self.assertEqual((a <= 1).names, ['N', 'C'])
-            
+
             self.assertEqual((a == scalar).names, ['N', 'C'])
             self.assertEqual((a != scalar).names, ['N', 'C'])
             self.assertEqual((a > scalar).names, ['N', 'C'])
