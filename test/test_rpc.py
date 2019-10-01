@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import sys
 import unittest
+from os import getenv
 
 import torch
 import torch.distributed as dist
@@ -13,8 +14,9 @@ from common_utils import load_tests, run_tests
 from os import getenv
 from dist_utils import dist_init
 
-BACKEND = getenv('RPC_BACKEND', RpcBackend.PROCESS_GROUP)
-RPC_INIT_URL = getenv('RPC_INIT_URL', '')
+
+BACKEND = getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP)
+RPC_INIT_URL = getenv("RPC_INIT_URL", "")
 
 # it is used to test python user defined function over rpc
 def my_function(a, b, c):
@@ -27,7 +29,7 @@ def no_result():
 
 
 def nested_rpc(dst):
-    return dist.rpc(dst, torch.add, args=(torch.ones(2, 2), 1))
+    return dist.rpc_sync(dst, torch.add, args=(torch.ones(2, 2), 1))
 
 
 def light_rpc():
@@ -82,10 +84,10 @@ class RpcTest(MultiProcessTestCase):
         n = self.rank + 1
         peer_rank = n % self.world_size
         self_worker_id = dist.get_worker_id()
-        peer_worker_id = dist.get_worker_id('worker{}'.format(peer_rank))
+        peer_worker_id = dist.get_worker_id("worker{}".format(peer_rank))
 
-        self.assertEqual(self_worker_id.name, 'worker{}'.format(self.rank))
-        self.assertEqual(peer_worker_id.name, 'worker{}'.format(peer_rank))
+        self.assertEqual(self_worker_id.name, "worker{}".format(self.rank))
+        self.assertEqual(peer_worker_id.name, "worker{}".format(peer_rank))
 
         with self.assertRaisesRegex(RuntimeError, "Unknown destination worker"):
             unknown_worker_id = dist.get_worker_id("WorkerUnknown")
@@ -93,17 +95,17 @@ class RpcTest(MultiProcessTestCase):
     @dist_init
     def test_self_add(self):
         self_worker_id = dist.get_worker_id()
-        self_worker_name = 'worker{}'.format(self.rank)
+        self_worker_name = "worker{}".format(self.rank)
 
         with self.assertRaisesRegex(
             RuntimeError, "does not support making RPC calls to self"
         ):
-            dist.rpc(self_worker_id, torch.add, args=(torch.ones(2, 2), 1))
+            dist.rpc_sync(self_worker_id, torch.add, args=(torch.ones(2, 2), 1))
 
         with self.assertRaisesRegex(
             RuntimeError, "does not support making RPC calls to self"
         ):
-            dist.rpc(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
+            dist.rpc_sync(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
 
     @unittest.skipIf(
         BACKEND != RpcBackend.PROCESS_GROUP,
@@ -111,13 +113,16 @@ class RpcTest(MultiProcessTestCase):
     )
     def test_duplicate_name(self):
         store = dist.FileStore(self.file.name, self.world_size)
-        dist.init_process_group(backend="gloo", rank=self.rank,
-                                world_size=self.world_size, store=store)
+        dist.init_process_group(
+            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
+        )
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
-            dist.init_model_parallel(self_name="duplicate_name",
-                                     backend=BACKEND,
-                                     self_rank=self.rank,
-                                     init_method=RPC_INIT_URL)
+            dist.init_model_parallel(
+                self_name="duplicate_name",
+                backend=BACKEND,
+                self_rank=self.rank,
+                init_method=RPC_INIT_URL,
+            )
         dist.join_rpc()
 
     def test_reinit(self):
@@ -147,8 +152,9 @@ class RpcTest(MultiProcessTestCase):
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     def test_invalid_names(self):
         store = dist.FileStore(self.file.name, self.world_size)
-        dist.init_process_group(backend="gloo", rank=self.rank,
-                                world_size=self.world_size, store=store)
+        dist.init_process_group(
+            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
+        )
 
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
             dist.init_model_parallel(self_name="abc*")
@@ -162,17 +168,19 @@ class RpcTest(MultiProcessTestCase):
         # If the number in the message does not match, it is likely that the
         # value of MAX_NAME_LEN in RPC WorkerId has changed.
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
-            dist.init_model_parallel(self_name="".join(["a" for _ in range(500)]),
-                                     backend=BACKEND,
-                                     self_rank=self.rank,
-                                     init_method=RPC_INIT_URL)
+            dist.init_model_parallel(
+                self_name="".join(["a" for _ in range(500)]),
+                backend=BACKEND,
+                self_rank=self.rank,
+                init_method=RPC_INIT_URL,
+            )
         dist.join_rpc()
 
     @dist_init
     def test_add(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = dist.rpc(
+        ret = dist.rpc_sync(
             "worker{}".format(dst_rank),
             torch.add,
             args=(torch.ones(n, n), torch.ones(n, n)),
@@ -183,17 +191,18 @@ class RpcTest(MultiProcessTestCase):
     def test_add_with_id(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        workder_id = dist.get_worker_id('worker{}'.format(dst_rank))
+        workder_id = dist.get_worker_id("worker{}".format(dst_rank))
 
-        ret = dist.rpc(workder_id, torch.add,
-                       args=(torch.ones(n, n), torch.ones(n, n)))
+        ret = dist.rpc_sync(
+            workder_id, torch.add, args=(torch.ones(n, n), torch.ones(n, n))
+        )
         self.assertEqual(ret, torch.ones(n, n) * 2)
 
     @dist_init
     def test_scalar_add(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = dist.rpc(
+        ret = dist.rpc_sync(
             "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), n)
         )
         self.assertEqual(ret, (torch.ones(n, n) + n))
@@ -202,11 +211,10 @@ class RpcTest(MultiProcessTestCase):
     def test_async_add(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        fut = dist.rpc(
+        fut = dist.rpc_async(
             "worker{}".format(dst_rank),
             torch.add,
             args=(torch.ones(n, n), torch.ones(n, n)),
-            async_call=True,
         )
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
@@ -216,7 +224,7 @@ class RpcTest(MultiProcessTestCase):
         dst_rank = n % self.world_size
         x = torch.ones(self.world_size, self.world_size)
         x[self.rank][self.rank] = 0
-        ret = dist.rpc("worker{}".format(dst_rank), torch.nonzero, args=(x,))
+        ret = dist.rpc_sync("worker{}".format(dst_rank), torch.nonzero, args=(x,))
         self.assertEqual(ret, x.nonzero())
 
     @dist_init
@@ -224,7 +232,7 @@ class RpcTest(MultiProcessTestCase):
         dst_rank = (self.rank + 1) % self.world_size
         for i in range(20):
             n = i + self.rank + 1
-            ret = dist.rpc(
+            ret = dist.rpc_sync(
                 "worker{}".format(dst_rank),
                 torch.add,
                 args=(torch.ones(n, n), torch.ones(n, n)),
@@ -237,13 +245,13 @@ class RpcTest(MultiProcessTestCase):
         for i in range(20):
             dist.sync_rpc()
             n = i + self.rank + 1
-            ret1 = dist.rpc(
+            ret1 = dist.rpc_sync(
                 "worker{}".format(dst_rank),
                 torch.add,
                 args=(torch.ones(n, n), torch.ones(n, n)),
             )
             dist.sync_rpc()
-            ret2 = dist.rpc(
+            ret2 = dist.rpc_sync(
                 "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 2)
             )
             dist.sync_rpc()
@@ -254,7 +262,7 @@ class RpcTest(MultiProcessTestCase):
     def test_join_rpc(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = dist.rpc(
+        ret = dist.rpc_sync(
             "worker{}".format(dst_rank),
             torch.add,
             args=(torch.ones(n, n), torch.ones(n, n)),
@@ -263,7 +271,7 @@ class RpcTest(MultiProcessTestCase):
         dist.join_rpc()
 
         with self.assertRaisesRegex(RuntimeError, "^RPC has not been initialized"):
-            dist.rpc(
+            dist.rpc_sync(
                 "worker{}".format(dst_rank),
                 torch.add,
                 args=(torch.ones(n, n), torch.ones(n, n)),
@@ -276,14 +284,14 @@ class RpcTest(MultiProcessTestCase):
     def test_py_built_in(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = dist.rpc("worker{}".format(dst_rank), min, args=(n, n + 1, n + 2))
+        ret = dist.rpc_sync("worker{}".format(dst_rank), min, args=(n, n + 1, n + 2))
         self.assertEqual(ret, min(n, n + 1, n + 2))
 
     @dist_init
     def test_py_user_defined(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = dist.rpc(
+        ret = dist.rpc_sync(
             "worker{}".format(dst_rank),
             my_function,
             kwargs={"a": n, "b": n + 1, "c": n + 2},
@@ -294,14 +302,14 @@ class RpcTest(MultiProcessTestCase):
     def test_py_class_constructor(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = dist.rpc("worker{}".format(dst_rank), my_class, args=(n,))
+        ret = dist.rpc_sync("worker{}".format(dst_rank), my_class, args=(n,))
         self.assertEqual(ret.a, n)
 
     @dist_init
     def test_py_class_instance_method(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = dist.rpc(
+        ret = dist.rpc_sync(
             "worker{}".format(dst_rank), my_class(2).my_instance_method, args=(n,)
         )
         self.assertEqual(ret, my_class(2).my_instance_method(n))
@@ -310,7 +318,7 @@ class RpcTest(MultiProcessTestCase):
     def test_py_class_method(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = dist.rpc(
+        ret = dist.rpc_sync(
             "worker{}".format(dst_rank), my_class.my_class_method, args=(n, n + 1)
         )
         self.assertEqual(ret, my_class.my_class_method(n, n + 1))
@@ -319,7 +327,7 @@ class RpcTest(MultiProcessTestCase):
     def test_py_class_static_method(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = dist.rpc(
+        ret = dist.rpc_sync(
             "worker{}".format(dst_rank), my_class.my_static_method, args=(n + 10,)
         )
         self.assertEqual(ret, my_class.my_static_method(n + 10))
@@ -328,15 +336,9 @@ class RpcTest(MultiProcessTestCase):
     def test_py_multi_async_call(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        dst_worker_id = dist.get_worker_id('worker{}'.format(dst_rank))
-        fut1 = dist.rpc(dst_worker_id,
-                        my_class.my_static_method,
-                        args=(n + 10,),
-                        async_call=True)
-        fut2 = dist.rpc(dst_worker_id,
-                        min,
-                        args=(n, n + 1, n + 2),
-                        async_call=True)
+        dst_worker_id = dist.get_worker_id("worker{}".format(dst_rank))
+        fut1 = dist.rpc_async(dst_worker_id, my_class.my_static_method, args=(n + 10,))
+        fut2 = dist.rpc_async(dst_worker_id, min, args=(n, n + 1, n + 2))
         self.assertEqual(fut1.wait(), my_class.my_static_method(n + 10))
         self.assertEqual(fut2.wait(), min(n, n + 1, n + 2))
 
@@ -344,7 +346,7 @@ class RpcTest(MultiProcessTestCase):
     def test_py_no_return_result(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = dist.rpc("worker{}".format(dst_rank), no_result)
+        ret = dist.rpc_sync("worker{}".format(dst_rank), no_result)
         self.assertEqual(ret, no_result())
 
     @dist_init
@@ -352,13 +354,13 @@ class RpcTest(MultiProcessTestCase):
         n = self.rank + 1
         dst_rank = n % self.world_size
         with self.assertRaisesRegex(Exception, "TypeError"):
-            ret = dist.rpc("worker{}".format(dst_rank), no_result, args=(10,))
+            ret = dist.rpc_sync("worker{}".format(dst_rank), no_result, args=(10,))
 
     @dist_init
     def test_py_raise_in_user_func(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        fut = dist.rpc("worker{}".format(dst_rank), raise_func, async_call=True)
+        fut = dist.rpc_async("worker{}".format(dst_rank), raise_func)
         with self.assertRaisesRegex(Exception, "ValueError"):
             fut.wait()
 
@@ -366,7 +368,7 @@ class RpcTest(MultiProcessTestCase):
     def test_nested_rpc(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = dist.rpc(
+        ret = dist.rpc_sync(
             "worker{}".format(dst_rank),
             nested_rpc,
             args=("worker{}".format(self.rank),),
@@ -381,7 +383,7 @@ class RpcTest(MultiProcessTestCase):
         futs = []
         tik = time.time()
         for _ in range(repeat):
-            fut = dist.rpc("worker{}".format(dst_rank), f, args=args, async_call=True)
+            fut = dist.rpc_async("worker{}".format(dst_rank), f, args=args)
             futs.append(fut)
 
         for fut in futs:
@@ -405,8 +407,11 @@ class RpcTest(MultiProcessTestCase):
     def test_builtin_remote_ret(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        rref = dist.remote('worker{}'.format(dst_rank), torch.add,
-                           args=(torch.ones(n, n), torch.ones(n, n)))
+        rref = dist.remote(
+            "worker{}".format(dst_rank),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n)),
+        )
         self.assertEqual(rref.to_here(), torch.ones(n, n) * 2)
 
     @dist_init
@@ -418,16 +423,18 @@ class RpcTest(MultiProcessTestCase):
         expected = []
         for i in range(m):
             n = n + i
-            rrefs.append(dist.remote(
-                'worker{}'.format(dst_rank),
-                torch.add,
-                args=(torch.ones(n, n), torch.ones(n, n))
-            ))
+            rrefs.append(
+                dist.remote(
+                    "worker{}".format(dst_rank),
+                    torch.add,
+                    args=(torch.ones(n, n), torch.ones(n, n)),
+                )
+            )
             expected.append(torch.ones(n, n) * 2)
 
         for i in range(m):
             self.assertEqual(rrefs[i].to_here(), expected[i])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()
