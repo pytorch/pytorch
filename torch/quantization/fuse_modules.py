@@ -136,8 +136,8 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
                          of strings if there is only a single list of modules to fuse.
         inplace: bool specifying if fusion happens in place on the model, by default
                  a new model is returned
-        fuser_func: Function that takes in a list of modules and outputs a list of fused modules.
-                    For example,
+        fuser_func: Function that takes in a list of modules and outputs a list of fused modules
+                    of the same length. For example,
                     fuser_func([convModule, BNModule]) returns the list [ConvBNModule, nn.Identity()]
                     Defaults to torch.quantization.fuse_known_modules
     Returns:
