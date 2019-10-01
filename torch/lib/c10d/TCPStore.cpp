@@ -272,8 +272,10 @@ TCPStore::TCPStore(
     const std::string& masterAddr,
     PortType masterPort,
     int numWorkers,
-    bool isServer)
-    : isServer_(isServer),
+    bool isServer,
+    const std::chrono::milliseconds& timeout)
+    : Store(timeout),
+      isServer_(isServer),
       tcpStoreAddr_(masterAddr),
       tcpStorePort_(masterPort),
       numWorkers_(numWorkers),
@@ -287,7 +289,8 @@ TCPStore::TCPStore(
         new TCPStoreDaemon(masterListenSocket_));
   }
   // Connect to the daemon
-  storeSocket_ = tcputil::connect(tcpStoreAddr_, tcpStorePort_);
+  storeSocket_ = tcputil::connect(
+      tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
 
   waitForWorkers_();
 }

@@ -536,7 +536,6 @@ class TestLRScheduler(TestCase):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
@@ -551,7 +550,6 @@ class TestLRScheduler(TestCase):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
@@ -569,7 +567,6 @@ class TestLRScheduler(TestCase):
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.simplefilter("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
@@ -587,7 +584,6 @@ class TestLRScheduler(TestCase):
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.simplefilter("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
@@ -605,7 +601,6 @@ class TestLRScheduler(TestCase):
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.simplefilter("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
@@ -631,13 +626,11 @@ class TestLRScheduler(TestCase):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
             for _ in range(epochs):
                 self.opt.step()
                 scheduler.step()
@@ -647,13 +640,11 @@ class TestLRScheduler(TestCase):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
             for _ in range(epochs):
                 self.opt.step()
                 scheduler.step()
@@ -663,7 +654,6 @@ class TestLRScheduler(TestCase):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 

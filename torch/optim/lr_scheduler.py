@@ -122,18 +122,27 @@ class _LRScheduler(object):
                               "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
         self._step_count += 1
 
-        self._get_lr_called_within_step = True
-        if epoch is None:
-            self.last_epoch += 1
-            values = self.get_lr()
-        else:
-            warnings.warn(EPOCH_DEPRECATION_WARNING, DeprecationWarning)
-            self.last_epoch = epoch
-            if hasattr(self, "_get_closed_form_lr"):
-                values = self._get_closed_form_lr()
-            else:
+        class _enable_get_lr_call:
+            def __init__(self, o):
+                self.o = o
+            def __enter__(self):
+                self.o._get_lr_called_within_step = True
+                return self
+            def __exit__(self, type, value, traceback):
+                self.o._get_lr_called_within_step = False
+                return self
+
+        with _enable_get_lr_call(self):
+            if epoch is None:
+                self.last_epoch += 1
                 values = self.get_lr()
-        self._get_lr_called_within_step = False
+            else:
+                warnings.warn(EPOCH_DEPRECATION_WARNING, DeprecationWarning)
+                self.last_epoch = epoch
+                if hasattr(self, "_get_closed_form_lr"):
+                    values = self._get_closed_form_lr()
+                else:
+                    values = self.get_lr()
 
         for param_group, lr in zip(self.optimizer.param_groups, values):
             param_group['lr'] = lr
@@ -972,10 +981,19 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
                 self.T_cur = epoch
         self.last_epoch = math.floor(epoch)
 
-        self._get_lr_called_within_step = True
-        for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
-            param_group['lr'] = lr
-        self._get_lr_called_within_step = False
+        class _enable_get_lr_call:
+            def __init__(self, o):
+                self.o = o
+            def __enter__(self):
+                self.o._get_lr_called_within_step = True
+                return self
+            def __exit__(self, type, value, traceback):
+                self.o._get_lr_called_within_step = False
+                return self
+
+        with _enable_get_lr_call(self):
+            for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
+                param_group['lr'] = lr
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 

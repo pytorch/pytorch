@@ -62,10 +62,6 @@ struct MaxPoolOptions {
   /// a parameter that controls the stride of elements in the window
   TORCH_ARG(ExpandingArray<D>, dilation) = 1;
 
-  /// if true, will return the max indices along with the outputs. Useful
-  /// for `MaxUnpool1d` later
-  TORCH_ARG(bool, return_indices) = false;
-
   /// when True, will use `ceil` instead of `floor` to compute the output shape
   TORCH_ARG(bool, ceil_mode) = false;
 };
@@ -78,6 +74,48 @@ using MaxPool2dOptions = MaxPoolOptions<2>;
 
 /// `MaxPoolOptions` specialized for 3-D maxpool.
 using MaxPool3dOptions = MaxPoolOptions<3>;
+
+// ============================================================================
+
+/// Options for a `D`-dimensional adaptive maxpool functional and module.
+template <size_t D>
+struct AdaptiveMaxPoolOptions {
+  AdaptiveMaxPoolOptions(ExpandingArray<D> output_size)
+      : output_size_(output_size) {}
+
+  /// the target output size
+  TORCH_ARG(ExpandingArray<D>, output_size);
+};
+
+/// `AdaptiveMaxPoolOptions` specialized for 1-D maxpool.
+using AdaptiveMaxPool1dOptions = AdaptiveMaxPoolOptions<1>;
+
+/// `AdaptiveMaxPoolOptions` specialized for 2-D adaptive maxpool.
+using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<2>;
+
+/// `AdaptiveMaxPoolOptions` specialized for 3-D adaptive maxpool.
+using AdaptiveMaxPool3dOptions = AdaptiveMaxPoolOptions<3>;
+
+// ============================================================================
+
+/// Options for a `D`-dimensional adaptive avgpool functional and module.
+template <size_t D>
+struct AdaptiveAvgPoolOptions {
+  AdaptiveAvgPoolOptions(ExpandingArray<D> output_size)
+      : output_size_(output_size) {}
+
+  /// the target output size
+  TORCH_ARG(ExpandingArray<D>, output_size);
+};
+
+/// `AdaptiveAvgPoolOptions` specialized for 1-D adaptive avgpool.
+using AdaptiveAvgPool1dOptions = AdaptiveAvgPoolOptions<1>;
+
+/// `AdaptiveAvgPoolOptions` specialized for 2-D adaptive avgpool.
+using AdaptiveAvgPool2dOptions = AdaptiveAvgPoolOptions<2>;
+
+/// `AdaptiveAvgPoolOptions` specialized for 3-D adaptive avgpool.
+using AdaptiveAvgPool3dOptions = AdaptiveAvgPoolOptions<3>;
 
 } // namespace nn
 } // namespace torch

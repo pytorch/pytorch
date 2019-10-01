@@ -379,15 +379,14 @@ struct CAFFE2_API TensorType : public Type {
     return TensorTypePtr(new TensorType(t));
   }
 
-  static TensorTypePtr create(
-      c10::optional<at::ScalarType> scalar_type,
-      c10::optional<Device> device,
-      const VaryingShape& sizes,
-      const VaryingStrides& strides,
-      c10::optional<bool> requires_grad,
-      c10::optional<bool> autograd_zero=c10::nullopt) {
-    return TensorTypePtr(new TensorType(
-        scalar_type, device, sizes, strides, requires_grad));
+  static TensorTypePtr create(c10::optional<at::ScalarType> scalar_type,
+                              c10::optional<Device> device,
+                              const VaryingShape &sizes,
+                              const VaryingStrides &strides,
+                              c10::optional<bool> requires_grad,
+                              c10::optional<bool> undefined = false) {
+    return TensorTypePtr(new TensorType(scalar_type, device, sizes, strides,
+                                        requires_grad, undefined));
   }
 
   static TensorTypePtr create(
@@ -462,8 +461,9 @@ struct CAFFE2_API TensorType : public Type {
 
     auto rt = rhs.expect<TensorType>();
     return scalar_type_ == rt->scalarType() && sizes() == rt->sizes() &&
-        strides() == rt->strides() && device() == rt->device() &&
-        requiresGrad() == rt->requiresGrad() && autogradZero() == rt->autogradZero();
+           strides() == rt->strides() && device() == rt->device() &&
+           requiresGrad() == rt->requiresGrad() &&
+           undefined() == rt->undefined();
   }
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
 
@@ -533,68 +533,59 @@ struct CAFFE2_API TensorType : public Type {
     return cloned;
   }
 
-  TensorTypePtr merge(TensorTypePtr other) const {
-    auto scalar_type = merge_primitive(scalarType(), other->scalarType());
-    auto dev = merge_primitive(device(), other->device());
-    auto sz = sizes().merge(other->sizes());
-    auto srs = strides().merge(other->strides());
-    auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
-    auto zero = merge_primitive(autogradZero(), other->autogradZero());
-    return TensorType::create(scalar_type, dev, sz, srs, gr, zero);
-  }
+  TensorTypePtr merge(TensorTypePtr other) const;
+
   // is all information about the type specified except for autograd?
   // This replaces the notion of a 'CompleteTensorType' that used to exist
-  // in the type-hierarchy. Excluding require_grad and autogradZero allows
+  // in the type-hierarchy. Excluding require_grad and undefined allows
   // this to match the old behavior.
   bool isComplete() const {
     return scalar_type_ && device_ && sizes_.isComplete() && strides_.isComplete();
   }
 
-  TensorTypePtr withAutogradZero() {
+  // this property is used by GuardElimination
+  // please see `checkInputs` for more details
+  bool isSummarized() const {
+    return !(isComplete() && requiresGrad().has_value() &&
+             undefined().has_value());
+  }
+
+  TensorTypePtr withUndefined() {
     auto r = clone();
-    r->autograd_zero_ = true;
+    r->undefined_ = true;
     return r;
   }
 
-  c10::optional<bool> autogradZero() const {
-    return autograd_zero_;
-  }
+  c10::optional<bool> undefined() const { return undefined_; }
 
   static TensorTypePtr get();
 
   static const TypeKind Kind = TypeKind::TensorType;
 
  private:
-  TensorType(const at::Tensor& tensor)
-      : Type(TypeKind::TensorType),
-        scalar_type_(tensor.scalar_type()),
-        device_(tensor.device()),
-        sizes_(tensor.sizes().size()),
-        strides_(tensor.sizes().size()),
-        requires_grad_(tensor.requires_grad()) {
-          if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
-            sizes_ = tensor.sizes().vec();
-            strides_ = tensor.strides().vec();
-          }
+   TensorType(const at::Tensor &tensor)
+       : Type(TypeKind::TensorType), scalar_type_(tensor.scalar_type()),
+         device_(tensor.device()), sizes_(tensor.sizes().size()),
+         strides_(tensor.sizes().size()),
+         requires_grad_(tensor.requires_grad()), undefined_(false) {
+     if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
+       sizes_ = tensor.sizes().vec();
+       strides_ = tensor.strides().vec();
+     }
         }
-  TensorType(
-      c10::optional<at::ScalarType> scalar_type,
-      c10::optional<Device> device,
-      const VaryingShape& sizes,
-      const VaryingStrides& strides,
-      c10::optional<bool> requires_grad,
-      c10::optional<bool> autograd_zero=c10::nullopt)
-      : Type(TypeKind::TensorType),
-        scalar_type_(scalar_type),
-        device_(device),
-        sizes_(sizes),
-        strides_(strides),
-        requires_grad_(requires_grad),
-        autograd_zero_(autograd_zero) {}
+        TensorType(c10::optional<at::ScalarType> scalar_type,
+                   c10::optional<Device> device, const VaryingShape &sizes,
+                   const VaryingStrides &strides,
+                   c10::optional<bool> requires_grad,
+                   c10::optional<bool> undefined = false)
+            : Type(TypeKind::TensorType), scalar_type_(scalar_type),
+              device_(device), sizes_(sizes), strides_(strides),
+              requires_grad_(requires_grad), undefined_(undefined) {}
 
-  TensorTypePtr clone() const {
-    return TensorTypePtr(new TensorType(
-        scalar_type_, device_, sizes_, strides_, requires_grad_, autograd_zero_));
+        TensorTypePtr clone() const {
+          return TensorTypePtr(new TensorType(scalar_type_, device_, sizes_,
+                                              strides_, requires_grad_,
+                                              undefined_));
   }
 
   static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
@@ -614,11 +605,17 @@ struct CAFFE2_API TensorType : public Type {
   VaryingStrides strides_;
   c10::optional<bool> requires_grad_;
   // we exploit the fact certain tensors must be zero in the autograd to
-  // optimize gradient computation. If true, this means that this tensor
-  // must only contain zeros. Normally this will be nullopt, meaning
-  // the tensor may or may not contain only zeros. If false,
-  // this means the tensor must have some non-zero elements.
-  c10::optional<bool> autograd_zero_;
+  // optimize gradient computation. Such zero tensors are currently implemented
+  // with `UndefinedTensorImpl.` They can be handled only by special operators
+  // (e.g. `AutogradAdd`) and their `Tensor::defined()` property returns false.
+  // Normally, `undefined_` is set to false, unless a type was created
+  // with `withUndefined`
+  // This will also mean that `undefined` tensors will fail
+  // `subtypeOf(TensorType::get())` check
+  // undefined_ may become `c10::nullopt` if the tensor was observed to be both
+  // defined and undefined. However, no tensor type starts out with
+  // `undefined_` set to `c10::nullopt`
+  c10::optional<bool> undefined_;
 };
 
 struct ListType;
@@ -1234,6 +1231,12 @@ template <>
 struct getTypePtr_<at::Scalar> final {
   static TypePtr call() {
     return NumberType::get();
+  }
+};
+template <>
+struct getTypePtr_<at::Generator*> final {
+  static TypePtr call() {
+    return OptionalType::create(GeneratorType::get());
   }
 };
 template <>
