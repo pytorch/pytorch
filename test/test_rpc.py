@@ -5,16 +5,17 @@ import sys
 import unittest
 from os import getenv
 
-import torch
-import torch.distributed as dist
-from common_distributed import MultiProcessTestCase
-from common_utils import load_tests, run_tests
-from torch.distributed.rpc import RpcBackend
 
 
 if not dist.is_available():
     print("c10d not available, skipping tests")
     sys.exit(0)
+
+import torch
+import torch.distributed as dist
+from common_distributed import MultiProcessTestCase
+from common_utils import load_tests, run_tests
+from torch.distributed.rpc import RpcBackend
 
 
 BACKEND = getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP)
