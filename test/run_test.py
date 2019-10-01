@@ -28,6 +28,7 @@ TESTS = [
     'cuda_primary_ctx',
     'dataloader',
     'dist_autograd_fork',
+    'dist_autograd_spawn',
     'distributed',
     'distributions',
     'docs_coverage',
@@ -49,7 +50,6 @@ TESTS = [
     'quantized_tensor',
     'quantized_nn_mods',
     'quantizer',
-    'rpc_fork',
     'sparse',
     'torch',
     'type_info',
@@ -66,27 +66,31 @@ TESTS = [
 
 # skip < 3.6 b/c fstrings added in 3.6
 if PY36:
-    TESTS.append('dist_autograd_spawn', 'jit_py3', 'rpc_spawn')
+    TESTS.extend([
+        'jit_py3',
+        'rpc_fork',
+        'rpc_spawn',
+    ])
 
 WINDOWS_BLACKLIST = [
-    'dist_autograd_fork',
-    'dist_autograd_spawn',
     'distributed',
     'rpc_fork',
     'rpc_spawn',
+    'dist_autograd_fork',
+    'dist_autograd_spawn',
 ]
 
 ROCM_BLACKLIST = [
     'c10d',
     'cpp_api_parity',
     'cpp_extensions',
-    'dist_autograd_fork',
-    'dist_autograd_spawn',
     'distributed',
     'multiprocessing',
     'nccl',
     'rpc_fork',
     'rpc_spawn',
+    'dist_autograd_fork',
+    'dist_autograd_spawn',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {}
