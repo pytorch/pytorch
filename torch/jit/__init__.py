@@ -1499,7 +1499,6 @@ if _enabled:
                 self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit, True)
 
             Module._Module__construct(self)
-#            Module.__setattr__(self, "training", True)
 
             self._parameters = OrderedParameterDict(self._c)
             self._buffers = OrderedBufferDict(self._c)
@@ -1528,10 +1527,6 @@ if _enabled:
             for details.
             """
             return self.forward.code
-
-        # @property
-        # def training(self):
-        #     return self._c._get_attribute('training')
 
         def save(self, *args, **kwargs):
             r"""
