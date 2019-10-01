@@ -4,6 +4,12 @@
 #include <cuda_runtime.h>
 #endif
 
+#ifdef _MSC_VER
+#define LSEEK _lseeki64
+#else
+#define LSEEK lseek
+#endif
+
 static PyObject * THPStorage_(size)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
@@ -251,9 +257,9 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
 
   // file is backed by a fd
   const int fd = PyObject_AsFileDescriptor(file);
-  const auto fd_original_pos = lseek(fd, 0, SEEK_CUR);
+  const auto fd_original_pos = LSEEK(fd, 0, SEEK_CUR);
   if (offset != Py_None) {
-    lseek(fd, THPUtils_unpackLong(offset), SEEK_SET);
+    LSEEK(fd, THPUtils_unpackLong(offset), SEEK_SET);
   }
   THPUtils_assert(fd != -1, "_set_from_file couldn't retrieve a file "
       "descriptor from given object");
@@ -265,9 +271,9 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
   // the file descriptor is returned to original position and
   // the file handle at python call-site needs updating to the
   // advanced postion
-  const auto fd_current_pos = lseek(fd, 0, SEEK_CUR);
-  lseek(fd, fd_original_pos, SEEK_SET);
-  const auto seek_return = PyObject_CallMethod(file, "seek", "li", (long)fd_current_pos, 0);
+  const auto fd_current_pos = LSEEK(fd, 0, SEEK_CUR);
+  LSEEK(fd, fd_original_pos, SEEK_SET);
+  const auto seek_return = PyObject_CallMethod(file, "seek", "Li", (long long)fd_current_pos, 0);
   if (seek_return == nullptr) {
       return nullptr;
   }
