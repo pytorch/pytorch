@@ -149,7 +149,7 @@ class MultiProcessTestCase(TestCase):
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retreiving a corresponding test and executing it.
-        getattr(self, self.id().split(".")[2])()
+        getattr(self, self.id().split(".")[-1])()
         sys.exit(0)
 
     def _join_processes(self, fn):
