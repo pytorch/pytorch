@@ -7734,19 +7734,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     def test_warning_catch(self):
         source = '''
-        at::Tensor uncatched(at::Tensor x) {
-            TORCH_WARN("foo");
-            return x.cos();
-        }
-
         // error_type:
         // 0: no error
         // 1: torch::TypeError
         // 2: python_error()
         // 3: py::error_already_set
-        at::Tensor catched(at::Tensor x, int error_type) {
-            HANDLE_TH_ERRORS
-
+        at::Tensor foo(at::Tensor x, int error_type) {
             std::ostringstream err_stream;
             err_stream << "Error with "  << x.type();
 
@@ -7767,41 +7760,64 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 throw py::key_error(err_stream.str());
             }
             return x.cos();
-            END_HANDLE_TH_ERRORS_PYBIND
         }
         '''
+
+        # Ensure double type for hard-coded c name below
+        t = torch.rand(2).double()
+        cpp_tensor_name = "Variable\[CPUDoubleType\]"
+
+        # Without error handling, the warnings cannot be catched
+        # and the Tensor type names are not cleaned
+        warn_mod = cpp_extension.load_inline(name='warn_mod',
+                                             cpp_sources=[source],
+                                             functions=['foo'],
+                                             with_pytorch_error_handling=False)
+
+        with warnings.catch_warnings(record=True) as w:
+            warn_mod.foo(t, 0)
+            self.assertEqual(len(w), 0)
+
+            # pybind translate all our errors to RuntimeError
+            with self.assertRaisesRegex(RuntimeError, cpp_tensor_name):
+                warn_mod.foo(t, 1)
+            self.assertEqual(len(w), 0)
+
+            # pybind does not understand our "python_error"
+            with self.assertRaisesRegex(RuntimeError, "std::exception"):
+                warn_mod.foo(t, 2)
+            self.assertEqual(len(w), 0)
+
+            with self.assertRaisesRegex(KeyError, cpp_tensor_name):
+                warn_mod.foo(t, 3)
+            self.assertEqual(len(w), 0)
 
 
         warn_mod = cpp_extension.load_inline(name='warn_mod',
                                              cpp_sources=[source],
-                                             functions=['uncatched', 'catched'])
+                                             functions=['foo'],
+                                             with_pytorch_error_handling=True)
 
 
-        # Ensure double type for hard-coded c name below
-        t = torch.rand(2).double()
         with warnings.catch_warnings(record=True) as w:
-            # Uncatched should not be detected
-            warn_mod.uncatched(t)
-            self.assertEqual(len(w), 0)
-
             # Catched with no error should be detected
-            warn_mod.catched(t, 0)
+            warn_mod.foo(t, 0)
             self.assertEqual(len(w), 1)
 
             # Catched with cpp error should not be detected
             with self.assertRaisesRegex(TypeError, t.type()):
-                warn_mod.catched(t, 1)
+                warn_mod.foo(t, 1)
             self.assertEqual(len(w), 1)
 
             # Catched with python error should not be detected
             with self.assertRaisesRegex(SystemError, "bad argument to internal function"):
-                warn_mod.catched(t, 2)
+                warn_mod.foo(t, 2)
             self.assertEqual(len(w), 1)
 
             # Catched with pybind error should not be detected
             # Note that there is no type name translation for pybind errors
-            with self.assertRaisesRegex(KeyError, "Variable\[CPUDoubleType\]"):
-                warn_mod.catched(t, 3)
+            with self.assertRaisesRegex(KeyError, cpp_tensor_name):
+                warn_mod.foo(t, 3)
             self.assertEqual(len(w), 1)
 
         # Locally make all warnings fail
@@ -7810,7 +7826,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             warnings.filterwarnings("error")
 
             with self.assertRaisesRegex(UserWarning, t.type()):
-                warn_mod.catched(t, 0)
+                warn_mod.foo(t, 0)
 
 
 # Functions to test negative dimension wrapping

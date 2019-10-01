@@ -672,7 +672,8 @@ def load_inline(name,
                 build_directory=None,
                 verbose=False,
                 with_cuda=None,
-                is_python_module=True):
+                is_python_module=True,
+                with_pytorch_error_handling=True):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 
@@ -719,6 +720,10 @@ def load_inline(name,
             automatically determined based on whether ``cuda_sources`` is
             provided. Set it to `True`` to force CUDA headers
             and libraries to be included.
+        with_pytorch_error_handling: Determines whether pytorch error and
+            warning macros are handled by pytorch instead of pybind. This
+            requires an intermediary function and should be deactivated
+            if this intermediary function cause issues.
 
     Example:
         >>> from torch.utils.cpp_extension import load_inline
@@ -741,11 +746,20 @@ def load_inline(name,
 
     cpp_sources.insert(0, '#include <torch/extension.h>')
 
+    def add_safe_version(function_name):
+        cpp_sources.append('template <typename ...Args>')
+        cpp_sources.append('auto _safe_{0}(Args ...args) -> decltype({0}(args...)) {{'.format(function_name))
+        cpp_sources.append('HANDLE_TH_ERRORS')
+        cpp_sources.append('return {0}(args...);'.format(function_name))
+        cpp_sources.append('END_HANDLE_TH_ERRORS_PYBIND')
+        cpp_sources.append('}')
+
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
     # function names to function docstrings.
     if functions is not None:
-        cpp_sources.append('PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {')
+        module_def = []
+        module_def.append('PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {')
         if isinstance(functions, str):
             functions = [functions]
         if isinstance(functions, list):
@@ -756,9 +770,14 @@ def load_inline(name,
                 "Expected 'functions' to be a list or dict, but was {}".format(
                     type(functions)))
         for function_name, docstring in functions.items():
-            cpp_sources.append('m.def("{0}", &{0}, "{1}");'.format(
-                function_name, docstring))
-        cpp_sources.append('}')
+            if with_pytorch_error_handling:
+                add_safe_version(function_name)
+                module_def.append('m.def("{0}", static_cast<decltype(&{0})>(&_safe_{0}), "{1}");'.format(
+                    function_name, docstring))
+            else:
+                module_def.append('m.def("{0}", {0}, "{1}");'.format(function_name, docstring))
+        module_def.append('}')
+        cpp_sources += module_def
 
     cpp_source_path = os.path.join(build_directory, 'main.cpp')
     with open(cpp_source_path, 'w') as cpp_source_file:
