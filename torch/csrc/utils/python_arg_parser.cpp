@@ -657,14 +657,14 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
 PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
-    PyObject* overloaded_args[32] = {0};
+    PyObject* overloaded_args[32] = {nullptr};
     signature.parse(args, kwargs, parsed_args, overloaded_args, true);
     return PythonArgs(0, traceable, signature, parsed_args, overloaded_args);
   }
 
   int i = 0;
   for (auto& signature : signatures_) {
-    PyObject* overloaded_args[32] = {0};
+    PyObject* overloaded_args[32] = {nullptr};
     if (signature.parse(args, kwargs, parsed_args, overloaded_args, false)) {
       return PythonArgs(i, traceable, signature, parsed_args, overloaded_args);
     }
@@ -686,7 +686,7 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
 
   if (plausible_idxs.size() == 1) {
     auto& signature = signatures_[plausible_idxs[0]];
-    PyObject* overloaded_args[32] = {0};
+    PyObject* overloaded_args[32] = {nullptr};
     signature.parse(args, kwargs, parsed_args, overloaded_args, true);
   }
 
