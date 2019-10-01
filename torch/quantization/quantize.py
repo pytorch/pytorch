@@ -12,7 +12,7 @@ from .default_mappings import (DEFAULT_DYNAMIC_MODULE_MAPPING,
                                DEFAULT_MODULE_MAPPING,
                                DEFAULT_QAT_MODULE_MAPPING,
                                DEFAULT_SKIP_LIST)
-from .stubs import QuantStub, DeQuantStub, QuantWrapper
+from .stubs import DeQuantStub, QuantWrapper
 from .QConfig import default_dynamic_qconfig, float16_dynamic_qconfig
 
 def _propagate_qconfig_helper(module, qconfig_dict, skip_list=DEFAULT_SKIP_LIST,
