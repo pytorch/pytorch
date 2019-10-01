@@ -65,11 +65,18 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
     _check_is_script_module(model)
     if not model._c._has_method('forward'):
         raise ValueError('input script module does not have forward method')
+    assert not inplace, "We don't support inplace right now"
     if not inplace:
         model = model.copy()
     scripted_qconfig_dict = {k: script_qconfig(v) for k, v in qconfig_dict.items()}
     torch._C._jit_pass_fold_convbn(model._c)
     prepare_script(model, scripted_qconfig_dict, True)
     run_fn(model._c._get_method('forward'), *run_args)
-    convert_script(model, True)
+    # When we mutating graph we didn't create a new ClassType
+    # and the graph executor will run an out dated version
+    # of the graph if we do inplace graph mutation, therefore
+    # we copy the model here
+    # [TODO] This will be fixed later when we figure out
+    # how to properly mutate types
+    model = convert_script(model, False)
     return model
