@@ -55,7 +55,7 @@ def _propagate_qconfig_helper(module, qconfig_dict, skip_list=DEFAULT_SKIP_LIST,
         _propagate_qconfig_helper(child, qconfig_dict, skip_list,
                                   module.qconfig, module_prefix)
 
-# TODO(jerryzh): expose white_list
+# TODO(jerryzh): expose skip_list
 def propagate_qconfig_(module, qconfig_dict=None):
     r"""Propagate qconfig through the module hierarchy and assign `qconfig`
     attribute on each leaf module
