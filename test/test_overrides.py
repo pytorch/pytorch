@@ -125,7 +125,7 @@ class TestOverrideSubTensor(TestCase):
     def test_mean(self):
         t1 = SubDiagonalTensor(5, 2)
         t2 = 10 * torch.eye(5) * 2
-        self.assertEqual(t1.tensor()*10, t2)
+        self.assertEqual(t1.tensor() * 10, t2)
         self.assertEqual(torch.mean(t1), torch.mean(t2))
 
     def test_mm(self):
