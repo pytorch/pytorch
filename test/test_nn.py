@@ -8987,7 +8987,7 @@ class TestNNDeviceType(NNTestCase):
             packed = rnn_utils.pack_padded_sequence(
                 padded, lengths, enforce_sorted=enforce_sorted)
             self.assertFalse(packed.is_cuda)
-            packed = packed.cuda()
+            packed = packed.to(device=device)
             self.assertTrue(packed.is_cuda)
             unpacked, _ = rnn_utils.pad_packed_sequence(packed)
             self.assertEqual(unpacked.type(), cuda_type_str)
@@ -9477,7 +9477,6 @@ class TestNNDeviceType(NNTestCase):
                          torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
                          prec=dtype2prec[dtype])
 
-    @dtypes(torch.double)
     def _test_batchnorm_grad(self, device, dtype=torch.double):
         bs, n_feat, size_feat = 4, 5, 6
         input = torch.arange(bs * n_feat * size_feat, device=device,
@@ -9550,15 +9549,15 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_eval(device)
 
-    def _test_batchnorm_simple_average(self, device):
-        module = nn.BatchNorm1d(3, momentum=None).to(device)
-        zeros = torch.zeros(3, device=device)
-        ones = torch.ones(3, device=device)
+    def _test_batchnorm_simple_average(self, device, dtype):
+        module = nn.BatchNorm1d(3, momentum=None).to(dtype=dtype, device=device)
+        zeros = torch.zeros(3, dtype=dtype, device=device)
+        ones = torch.ones(3, dtype=dtype, device=device)
         self.assertEqual(module.running_mean, zeros)
         self.assertEqual(module.running_var, ones)
 
-        data1 = torch.rand(4, 3, device=device)
-        data2 = torch.rand(4, 3, device=device)
+        data1 = torch.rand(4, 3, dtype=dtype, device=device)
+        data2 = torch.rand(4, 3, dtype=dtype, device=device)
 
         # 1st pass
         res1 = module(data1)
@@ -9592,12 +9591,13 @@ class TestNNDeviceType(NNTestCase):
         self.assertAlmostEqual(module.running_mean, (running_mean1 + running_mean2) / 2)
         self.assertAlmostEqual(module.running_var, (running_var1 + running_var2) / 2)
 
-    def test_batchnorm_simple_average(self, device):
-        self._test_batchnorm_simple_average(device)
+    @dtypes(torch.float)
+    def test_batchnorm_simple_average(self, device, dtype):
+        self._test_batchnorm_simple_average(device, dtype)
 
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
-                self._test_batchnorm_simple_average(device)
+                self._test_batchnorm_simple_average(device, dtype)
 
     def _test_maxpool_indices(self, num_dim, adaptive=False, device="cpu", dtype=torch.float):
         def expected_indices(dim):
