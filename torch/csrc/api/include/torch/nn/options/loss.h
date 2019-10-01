@@ -16,5 +16,16 @@ struct TORCH_API L1LossOptions {
   TORCH_ARG(Reduction::Reduction, reduction);
 };
 
+// ============================================================================
+
+/// Options for a Hinge Embedding loss functional and module.
+struct TORCH_API HingeEmbeddingLossOptions {
+  /// Specifies the threshold for which the distance of a negative sample must
+  /// reach in order to incur zero loss. Default: 1
+  TORCH_ARG(double, margin) = 1.0;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+};
+
 } // namespace nn
 } // namespace torch
