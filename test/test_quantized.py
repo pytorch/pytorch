@@ -1267,66 +1267,6 @@ class TestQuantizedLinear(unittest.TestCase):
                 np.testing.assert_equal(
                     W_q.q_zero_point(), W_q_origin.q_zero_point())
 
-@given(X=hu.tensor_conv2d(min_batch=1, max_batch=3,
-                          min_in_channels=1, max_in_channels=7,
-                          min_out_channels=1, max_out_channels=7,
-                          H_range=(6, 12), W_range=(6, 12),
-                          kH_range=(3, 5), kW_range=(3, 5),
-                          max_groups=4,
-                          qparams=[hu.qparams(dtypes=torch.quint8,
-                                              zero_point_min=0,
-                                              zero_point_max=0),
-                                   hu.qparams(dtypes=torch.qint8,
-                                              zero_point_min=0,
-                                              zero_point_max=0),
-                                   hu.qparams(dtypes=torch.qint32,
-                                              zero_point_min=0,
-                                              zero_point_max=0)]),
-       strideH=st.integers(1, 3), strideW=st.integers(1, 3),
-       padH=st.integers(1, 2), padW=st.integers(1, 2),
-       channelwise=st.booleans())
-def test_qconv_unpack_op(self, X, strideH, strideW, padH, padW, channelwise, qengine):
-    (inputs, filters, bias, groups) = X
-    if qengine == 'qnnpack':
-        channelwise = False
-    inputs, (inputs_scale, inputs_zero_point, inputs_qtype) = inputs
-    filters, (filters_scale, filters_zero_point, filters_qtype) = filters
-    bias, (bias_scale, bias_zero_point, bias_qtype) = bias
-    if channelwise:
-        output_channels = filters.shape[0]
-        filters_scale = torch.tensor([filters_scale] * output_channels)
-        filters_zero_point = torch.tensor([filters_zero_point] * output_channels)
-    qconv_prepack = torch.ops.quantized.conv_prepack
-    qconv_unpack = torch.ops.quantized.conv_unpack
-    W = torch.from_numpy(filters).to(torch.float)
-    if channelwise:
-        W_q = torch.quantize_per_channel(W,
-                                         scales=filters_scale,
-                                         zero_points=filters_zero_point,
-                                         axis=0,
-                                         dtype=filters_qtype)
-    else:
-        W_q = torch.quantize_per_tensor(W, scale=filters_scale, zero_point=filters_zero_point, dtype=filters_qtype)
-    # Pack weights using weight packing operator
-    strides = [strideH, strideW]
-    paddings = [padH, padW]
-    dilations = [1, 1]
-    bias = torch.from_numpy(bias).to(torch.float)
-    W_packed = qconv_prepack(W_q, bias, strides, paddings, dilations, groups)
-    # Unpack weights weight unpacking operator (Used for serialization)
-    W_unpacked = qconv_unpack(W_packed)[0]
-    bias = qconv_unpack(W_packed)[1]
-    # Assert equal
-    np.testing.assert_equal(W_q.int_repr().numpy(), W_unpacked.int_repr().numpy())
-    if channelwise:
-        np.testing.assert_array_almost_equal(np.float32(W_q.q_per_channel_scales().numpy()),
-                                             np.float32(W_unpacked.q_per_channel_scales().numpy()),
-                                             decimal=4)
-        np.testing.assert_equal(W_q.q_per_channel_zero_points().numpy(), W_unpacked.q_per_channel_zero_points().numpy())
-    else:
-        np.testing.assert_equal(np.float32(W_q.q_scale()), np.float32(W_unpacked.q_scale()))
-        np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
-
 class TestQuantizedConv(unittest.TestCase):
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),
