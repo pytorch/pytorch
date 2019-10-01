@@ -41,6 +41,16 @@ class AmpScaler(object):
     
         return apply_scale(outputs)
 
+    def _unscale_grads(optimizer, rscale, found_inf, allow_fp16=False)
+        for group in optimizer.param_groups:
+            for param in group["params"]:
+                if param.grad is not None:
+                    if (not allow_fp16) and param.grad.dtype == torch.float16:
+                        raise ValueError("Attempting to unscale FP16 gradients.  If you want to check for "
+                                         "infs/nans without unscaling, use optimizer.check_infs() instead.")
+                    else:
+                        torch._amp_unscale_inf_check_(param.grad, rscale, found_inf)
+
     def unscale(self, optimizer):
         r""" :func:`unscale` divides the optimizer's owned gradients by the current scale value, and checks if
         gradients contain inf/nan.
@@ -54,47 +64,32 @@ class AmpScaler(object):
         without invoking :func:`unscale`.  ``amp_scaler.step(optimizer)`` will realize that :func:`unscale` has not yet
         been called on ``optimizer``, and will internally unscale the gradients before applying them.
 
-        Returns:
-            A flat list of unscaled gradients, ordered as they appear in the param_groups.  If any gradients are None,
-            they will also appear as None at their spot in the output list.
+        Arguments:
+            optimizer (torch.nn.Optimizer):  Optimizer that owns the gradients to be unscaled.
 
         .. note::
             :func:`unscale` does not incur a CPU<->GPU sync.
 
         .. warning::
-            :func:`unscale` should only be called once for each optimizer, after _all_ gradients for that optimizer's
-            upcoming ``step`` have been populated.
+            ``amp_state.unscale(optimizer)`` should only be called after _all_ gradients for ``optimizer``'s
+            upcoming ``amp_state.step(optimizer)`` have been accumulated.
         """
         if not self._enabled:
-            return [p.grad for group in optimizer.param_groups for p in group["params"]]
+            return
 
         optimizer_state = self._per_optimizer_states[id(optimizer)]
 
         if "unscaled" in optimizer_state:
             raise RuntimeError("unscale() has already been called on this optimizer this iteration.")
 
-        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device="cuda")
-
         """ FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64. """
         rscale = self.amp_state.scale.double().reciprocal().float()
+        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device="cuda")
 
-        """ Define a generator that unscales and errors on fp16 in a single O(N) traversal of the gradients. """
-        def iter_params_and_check_fp16():
-            for group in optimizer.param_groups:
-                for param in group["params"]:
-                    if param.grad is not None:
-                        if param.grad.dtype == torch.float16:
-                            raise ValueError("Attempting to unscale FP16 gradients.  If you want to check for infs/nans "
-                                             "without unscaling, use optimizer.check_infs() instead.")
-                        else:
-                            yield torch._amp_unscale_inf_check_(param.grad, rscale, found_inf)
-                    else:
-                        yield param.grad
+        self._unscale_grads(optimizer, rscale, found_inf, allow_fp16=False)
 
         optimizer_state["found_inf"] = found_inf
         optimizer_state["unscaled"] = True
-
-        return list(iter_params_and_check_fp16())
 
     def step(self, optimizer, *args, **kwargs):
         if (not self._enabled):
@@ -129,16 +124,12 @@ class AmpScaler(object):
         Arguments:
             new_scale (float or torch.cuda.FloatTensor, optional, default=None):  New shared scale factor.
 
-        Returns:
-            A one-element ``torch.cuda.FloatTensor`` containing the updated scale value,
-            or ``new_scale`` if scaling is not enabled.
-
         .. warning::
             ``update`` should only be called at the end of the iteration, after ``amp_scaler.step(optimizer)`` has
             been invoked for all optimizers used this iteration.
         """
         if not self._enabled:
-            return new_scale
+            return
 
         if new_scale is not None:
             """ Accept a new user-defined scale. """
@@ -159,8 +150,6 @@ class AmpScaler(object):
 
         """ To prepare for next iteration, clear the data collected from optimizers this iteration. """
         self._per_optimizer_states = defaultdict(dict)
-
-        return self._scale
 
     def get_scale(self):
         r"""
@@ -204,13 +193,10 @@ class AmpScaler(object):
     
     def _check_inf(self, optimizer):
         """ Utility function to check if gradients currently contain inf/nan.  Asynchronous. """
-        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device="cuda")
         dummy_rscale = torch.full((1,), 1.0, dtype=torch.float32, device="cuda")
-    
-        for group in optimizer.param_groups:
-            for param in group["params"]:
-                if param.grad is not None:
-                    torch._amp_unscale_inf_check_(param.grad, dummy_rscale, found_inf)
+        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device="cuda")
+
+        self._unscale_grads(optimizer, dummy_rscale, found_inf, allow_fp16=True)
 
         self._per_optimizer_states[id(optimizer)]["found_inf"] = found_inf
     
