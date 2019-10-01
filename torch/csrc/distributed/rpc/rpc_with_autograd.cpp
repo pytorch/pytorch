@@ -128,9 +128,9 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
 
   std::unique_ptr<RpcCommandBase> wrappedRpc;
   if (originalMessageType == MessageType::MESSAGE_WITH_AUTOGRAD_REQ) {
-    wrappedRpc = std::move(deserializeRequest(wrappedMessage));
+    wrappedRpc = deserializeRequest(wrappedMessage);
   } else {
-    wrappedRpc = std::move(deserializeResponse(wrappedMessage));
+    wrappedRpc = deserializeResponse(wrappedMessage);
   }
 
   return c10::guts::make_unique<RpcWithAutograd>(
