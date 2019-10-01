@@ -19,7 +19,7 @@ from common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
     SkipQuantModel, QuantStubModel, \
     ModelForFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
-    ModForWrapping, \
+    ModelWithFunctionals, \
     test_only_eval_fn, test_only_train_fn, \
     prepare_dynamic, convert_dynamic, SingleLayerLinearDynamicModel, \
     TwoLayerLinearModel, NestedModel, ResNetBase, LSTMDynamicModel
@@ -670,31 +670,36 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         self.assertEqual(result_eager, result_script)
 
 
-class ScriptabilityTest(QuantizationTestCase):
-    def setUp(self):
-        self.model_under_test = ModForWrapping(quantized=False)
-        self.qmodel_under_test = ModForWrapping(quantized=True)
-        self.qmodel_under_test = self.qmodel_under_test.from_float(
-            self.model_under_test)
-        self.x = torch.rand(10)
-        self.qx = torch.quantize_per_tensor(self.x.to(torch.float), scale=1.0,
-                                            zero_point=0, dtype=torch.qint32)
-
-    def test_scriptability_serialization(self):
-        # test serialization of quantized functional modules
-        b = io.BytesIO()
-        torch.save(self.qmodel_under_test, b)
-        b.seek(0)
-        loaded = torch.load(b)
-        self.assertEqual(self.qmodel_under_test.myadd.zero_point, loaded.myadd.zero_point)
-        state_dict = self.qmodel_under_test.state_dict()
-        self.assertTrue('myadd.zero_point' in state_dict.keys(),
-                        'zero point not in state dict for functional modules')
-
+class FunctionalModuleTest(QuantizationTestCase):
+    # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
+    @no_deadline
+    @given(train_mode=st.booleans())
+    def test_functional_module(self, train_mode):
+        model = ModelWithFunctionals()
         x = torch.rand(10, 1, dtype=torch.float)
-        xq = torch.quantize_per_tensor(x, 1.0, 0, torch.qint8)
-        self.checkScriptable(self.qmodel_under_test, [(xq, xq)], check_save_load=True)
-        self.checkScriptable(self.model_under_test, [(xq.dequantize(), xq.dequantize())], check_save_load=True)
+        xq = torch.quantize_per_tensor(x, 0.01, 30, torch.quint8)
+        self.checkScriptable(model, [(x, x)], check_save_load=True)
+        if train_mode:
+            model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+            model = prepare_qat(model)
+        else:
+            model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+            model = prepare(model)
+        # Check if observers and quant/dequant nodes are inserted
+        self.checkNoPrepModules(model)
+        self.checkObservers(model)
+        # Calibrate
+        model(xq.dequantize())
+        model = convert(model)
+
+        def checkQuantized(model):
+            self.checkNoPrepModules(model)
+            self.assertEquals(type(model.myadd), torch.nn.quantized.QFunctional)
+            self.assertEquals(type(model.mycat), torch.nn.quantized.QFunctional)
+            self.assertEquals(type(model.myadd_relu), torch.nn.quantized.QFunctional)
+
+        checkQuantized(model)
+        self.checkScriptable(model, [(xq, xq)], check_save_load=True)
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
