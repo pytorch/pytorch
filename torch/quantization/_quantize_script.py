@@ -30,9 +30,6 @@ class PackedParams(torch.nn.Module):
     def __setstate__(self, state):
         self.set_weight_bias(state[0], state[1])
 
-
-_packed_params_scripted = torch.jit.script(PackedParams())._c
-
 def _check_is_script_module(model):
     if not isinstance(model, torch.jit.ScriptModule):
         raise ValueError('input must be a script module, got: ' + str(type(model)))
@@ -52,8 +49,10 @@ def convert_script(model, inplace=False):
     if not inplace:
         model = model.copy()
     torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', True)
-    torch._C._jit_pass_insert_prepack_unpack(model._c)
-    torch._C._jit_pass_fold_prepack(model._c, _packed_params_scripted)
+    if 'fbgemm' in torch.backends.quantized.supported_engines:
+        _packed_params_scripted = torch.jit.script(PackedParams())._c
+        torch._C._jit_pass_insert_prepack_unpack(model._c)
+        torch._C._jit_pass_fold_prepack(model._c, _packed_params_scripted)
     return model
 
 # TODO: non-scriptable QConfig will be supported later
