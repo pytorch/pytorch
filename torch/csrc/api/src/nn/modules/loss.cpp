@@ -5,8 +5,7 @@ namespace F = torch::nn::functional;
 namespace torch {
 namespace nn {
 
-L1LossImpl::L1LossImpl(const torch::nn::L1LossOptions& options_)
-    : options(options_) {}
+L1LossImpl::L1LossImpl(const L1LossOptions& options_) : options(options_) {}
 
 void L1LossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::L1Loss";
@@ -14,6 +13,46 @@ void L1LossImpl::pretty_print(std::ostream& stream) const {
 
 Tensor L1LossImpl::forward(const Tensor& input, const Tensor& target) {
   return torch::l1_loss(input, target, options.reduction());
+}
+
+// ============================================================================
+
+KLDivLossImpl::KLDivLossImpl(const KLDivLossOptions& options_)
+    : options(options_) {}
+
+void KLDivLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::KLDivLoss";
+}
+
+Tensor KLDivLossImpl::forward(const Tensor& input, const Tensor& target) {
+  return torch::kl_div(input, target, options.reduction());
+}
+
+// ============================================================================
+
+MSELossImpl::MSELossImpl(const MSELossOptions& options_) : options(options_) {}
+
+void MSELossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::MSELoss";
+}
+
+Tensor MSELossImpl::forward(const Tensor& input, const Tensor& target) {
+  return torch::mse_loss(input, target, options.reduction());
+}
+
+// ============================================================================
+
+BCELossImpl::BCELossImpl(const BCELossOptions& options_) : options(options_) {
+  register_parameter("weight", weight);
+}
+
+void BCELossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::BCELoss";
+}
+
+Tensor BCELossImpl::forward(const Tensor& input, const Tensor& target) {
+  return torch::binary_cross_entropy(
+      input, target, weight, options.reduction());
 }
 
 // ============================================================================

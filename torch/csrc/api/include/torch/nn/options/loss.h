@@ -18,6 +18,21 @@ struct TORCH_API L1LossOptions {
 
 // ============================================================================
 
+/// Options for a KLDiv loss module.
+using KLDivLossOptions = L1LossOptions;
+
+// ============================================================================
+
+/// Options for a MSE loss module.
+using MSELossOptions = L1LossOptions;
+
+// ============================================================================
+
+/// Options for a BCE loss module.
+using BCELossOptions = L1LossOptions;
+
+// ============================================================================
+
 /// Options for a Hinge Embedding loss functional and module.
 struct TORCH_API HingeEmbeddingLossOptions {
   /// Specifies the threshold for which the distance of a negative sample must
