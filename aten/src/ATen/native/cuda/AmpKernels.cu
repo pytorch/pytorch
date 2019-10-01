@@ -18,7 +18,7 @@ namespace native {
 //
 // Args:
 // scaled_grad:  An incoming scaled gradient tensor, which may contain infs/nans
-// current_scale:  The scale factor by which scaled_grad is currently multiplied.
+// rscale:  The inverse of the scale factor by which scaled_grad is currently multiplied.
 // found_inf:  A tensor to record whether scaled_grad contained any infs/nans
 //
 // Returns:
@@ -49,7 +49,8 @@ Tensor & _amp_unscale_inf_check_cuda(Tensor & scaled_grad,
           float fval = static_cast<float>(val);
           if(!std::isfinite(fval))
             *found_inf_ptr = 1.f;
-          return static_cast<scalar_t>(fval*(*rscale_ptr));
+          float rscale = *rscale_ptr; // Every thread accesses rscale, but it will hit in cache.
+          return static_cast<scalar_t>(rscale == 1.f ? fval : fval*(*rscale_ptr));
         });
     });
 
@@ -106,4 +107,4 @@ Tensor _amp_update_scale_cuda(const Tensor & current_scale,
   return new_scale;
 }
 
-}}  // namespace at::native
+}} // namespace at::native
