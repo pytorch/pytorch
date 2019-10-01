@@ -4249,6 +4249,36 @@ inline Tensor & Tensor::fmod_(const Tensor & other) const {
         .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
 #endif
 }
+inline Tensor & Tensor::remainder_(Scalar other) const {
+#ifdef USE_STATIC_DISPATCH
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::remainder_(const_cast<Tensor&>(*this), other);
+            break;
+        default:
+            AT_ERROR("remainder_ not implemented for ", at::toString(type_set()));
+    }
+#else
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::remainder_", "Scalar"}).value();
+    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+        .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
+#endif
+}
+inline Tensor & Tensor::remainder_(const Tensor & other) const {
+#ifdef USE_STATIC_DISPATCH
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::remainder_(const_cast<Tensor&>(*this), other);
+            break;
+        default:
+            AT_ERROR("remainder_ not implemented for ", at::toString(type_set()));
+    }
+#else
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::remainder_", "Tensor"}).value();
+    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
+        .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+#endif
+}
 inline Tensor & Tensor::addbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
@@ -5173,36 +5203,6 @@ inline Tensor Tensor::remainder(const Tensor & other) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::remainder", "Tensor"}).value();
     return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
         .callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
-#endif
-}
-inline Tensor & Tensor::remainder_(Scalar other) const {
-#ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::remainder_(const_cast<Tensor&>(*this), other);
-            break;
-        default:
-            AT_ERROR("remainder_ not implemented for ", at::toString(type_set()));
-    }
-#else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::remainder_", "Scalar"}).value();
-    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &, Scalar>(const_cast<Tensor&>(*this), other);
-#endif
-}
-inline Tensor & Tensor::remainder_(const Tensor & other) const {
-#ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::remainder_(const_cast<Tensor&>(*this), other);
-            break;
-        default:
-            AT_ERROR("remainder_ not implemented for ", at::toString(type_set()));
-    }
-#else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::remainder_", "Tensor"}).value();
-    return c10::Dispatcher::singleton().lookup(op, impl::dispatchTypeId(type_set()))
-        .callUnboxed<Tensor &, Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
 #endif
 }
 inline Tensor Tensor::min(const Tensor & other) const {
