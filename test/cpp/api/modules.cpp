@@ -1004,20 +1004,20 @@ TEST_F(ModulesTest, PrettyPrintEmbedding) {
       "torch::nn::Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true)");
 }
 
-TEST_F(ModulesTest, PrettyPrintEmbeddingBag) {
-  ASSERT_EQ(
-      c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2))),
-      "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2)");
-  ASSERT_EQ(
-      c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2))),
-      "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2)");
-  ASSERT_EQ(
-      c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true))),
-      "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true)");
-  ASSERT_EQ(
-      c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode("sum"))),
-      "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true, mode=sum)");
-}
+// TEST_F(ModulesTest, PrettyPrintEmbeddingBag) {
+//   ASSERT_EQ(
+//       c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2))),
+//       "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2)");
+//   ASSERT_EQ(
+//       c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2))),
+//       "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2)");
+//   ASSERT_EQ(
+//       c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true))),
+//       "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true)");
+//   ASSERT_EQ(
+//       c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode("sum"))),
+//       "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true, mode=sum)");
+// }
 
 TEST_F(ModulesTest, PrettyPrintHingeEmbeddingLoss) {
   ASSERT_EQ(

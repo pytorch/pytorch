@@ -86,31 +86,31 @@ public:
     static Embedding from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingOptions> options = c10::nullopt, bool freeze = true);
 };
 
-class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl> {
-  public:
-    EmbeddingBagImpl(int64_t num_embeddings, int64_t embedding_dim)
-      : EmbeddingBagImpl(EmbeddingBagOptions(num_embeddings, embedding_dim)) {}
-    explicit EmbeddingBagImpl(const EmbeddingBagOptions& options_);
+// class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl> {
+//   public:
+//     EmbeddingBagImpl(int64_t num_embeddings, int64_t embedding_dim)
+//       : EmbeddingBagImpl(EmbeddingBagOptions(num_embeddings, embedding_dim)) {}
+//     explicit EmbeddingBagImpl(const EmbeddingBagOptions& options_);
 
-    void reset() override;
+//     void reset() override;
 
-    /// Pretty prints the `EmbeddingBag` module into the given `stream`.
-    void pretty_print(std::ostream& stream) const override;
+//     /// Pretty prints the `EmbeddingBag` module into the given `stream`.
+//     void pretty_print(std::ostream& stream) const override;
 
-    torch::Tensor forward(const Tensor& input, c10::optional<torch::Tensor> offsets = c10::nullopt,
-      c10::optional<torch::Tensor> per_sample_weights = c10::nullopt);
+//     torch::Tensor forward(const Tensor& input, c10::optional<torch::Tensor> offsets = c10::nullopt,
+//       c10::optional<torch::Tensor> per_sample_weights = c10::nullopt);
 
-    /// The `Options` used to configure this `EmbeddingBag` module.
-    EmbeddingBagOptions options;
-    /// The embedding table.
-    Tensor weight;
-};
+//     /// The `Options` used to configure this `EmbeddingBag` module.
+//     EmbeddingBagOptions options;
+//     /// The embedding table.
+//     Tensor weight;
+// };
 
-class TORCH_API EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
-public:
-    using torch::nn::ModuleHolder<EmbeddingBagImpl>::ModuleHolder;
-    // static EmbeddingBag from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingBagOptions> options = c10::nullopt, bool freeze = true);
-};
+// class TORCH_API EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
+// public:
+//     using torch::nn::ModuleHolder<EmbeddingBagImpl>::ModuleHolder;
+//     static EmbeddingBag from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingBagOptions> options = c10::nullopt, bool freeze = true);
+// };
 
 /// A `ModuleHolder` subclass for `EmbeddingImpl`.
 /// See the documentation for `EmbeddingImpl` class to learn what methods it
