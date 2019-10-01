@@ -934,7 +934,18 @@ struct PythonPrintPass {
   }
 
   void printOpName(TaggedStringStream& stmt, Symbol kind) {
-    if (kind.is_aten()) {
+    // Special overriding ops set that requires serializing differently to
+    // preserve the original code semantics.
+    // This will be more properly handled when we have namespace semantics
+    // for serializing the ops, and it right now hard coded these ops to
+    // ensure consistency and not breaking BC in the future.
+    const static std::unordered_map<Symbol, std::string> override_symbols = {
+        {aten::backward, "torch.autograd.backward"},
+        {aten::grad, "torch.autograd.grad"},
+    };
+    if (override_symbols.find(kind) != override_symbols.end()) {
+      stmt << override_symbols.at(kind);
+    } else if (kind.is_aten()) {
       // special case aten -> torch because we want to rename
       // the aten namespace, but this change will take more time
       // doing it here ensures we do not have fix up archives later
