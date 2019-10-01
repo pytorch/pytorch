@@ -161,7 +161,7 @@ class Optimizer(object):
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is not None:
-                    p.grad.detach_()
+                    p.grad = p.grad.detach()
                     p.grad.zero_()
 
     def step(self, closure):
