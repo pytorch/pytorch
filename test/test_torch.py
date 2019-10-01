@@ -12987,8 +12987,58 @@ class TestTorchDeviceType(TestCase):
             run_test(device, False)
 
 
+# Tests that compare a device's computation with the (gold-standard) CPU's.
+class TestDevicePrecision(TestCase):
+    def test_linspace(self, device):
+        a = torch.linspace(0, 10, 10, device=device)
+        b = torch.linspace(0, 10, 10)
+        self.assertEqual(a, b.to(device))
+
+    def test_logspace(self, device):
+        a = torch.logspace(1, 10, 10, device=device)
+        b = torch.logspace(1, 10, 10)
+        self.assertEqual(a, b.to(device))
+
+        # Check non-default base=2
+        a = torch.logspace(1, 10, 10, 2, device=device)
+        b = torch.logspace(1, 10, 10, 2)
+        self.assertEqual(a, b.to(device))
+
+    # Note: ROCm fails when using float tensors
+    def test_polygamma(self, device):
+        cpu_tensor = torch.randn(10, 10, 10)
+        device_tensor = cpu_tensor.to(device)
+        zeros = torch.zeros(10, 10, 10)
+        for n in [0, 1]:
+            cpu_out = cpu_tensor.polygamma(n)
+            device_out = device_tensor.polygamma(n)
+            norm_errors = (device_out - cpu_out.to(device)) / device_out
+            self.assertEqual(norm_errors, zeros)
+
+    # Note: fails when using float tensors
+    def test_digamma(self, device):
+        cpu_tensor = torch.randn(10, 10, 10)
+        device_tensor = cpu_tensor.to(device)
+        zeros = torch.zeros(10, 10, 10)
+        cpu_out = cpu_tensor.digamma()
+        device_out = device_tensor.digamma()
+        norm_errors = (device_out - cpu_out.to(device)) / device_out
+        self.assertEqual(norm_errors, zeros)
+
+        # Tests pole behavior
+        cpu_tensor = torch.tensor([-0.999999994, -1.999999994, -2.0000000111,
+                                   -100.99999994, -1931.99999994, 0.000000111,
+                                   -0.000000111, 0, -1, -2, -931])
+        expected_errors = torch.tensor([0, 0, 0, 0, 0, 0, 0, nan, nan, nan, nan])
+        device_tensor = cpu_tensor.to(device)
+        cpu_out = cpu_tensor.digamma()
+        device_out = device_tensor.digamma()
+        norm_errors = (device_out - cpu_out.to(device)) / device_out
+        self.assertEqual(norm_errors, expected_errors)
+
 add_neg_dim_tests()
 instantiate_device_type_tests(TestTorchDeviceType, globals())
+instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
 
 class TestTorch(TestCase, _TestTorchMixin):
     pass
