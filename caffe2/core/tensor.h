@@ -1,12 +1,13 @@
 #ifndef CAFFE2_CORE_TENSOR_H_
 #define CAFFE2_CORE_TENSOR_H_
 
+#include <c10/macros/Macros.h>
 #include "caffe2/core/storage.h"
 #include "caffe2/core/tensor_impl.h"
 
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
-#if !defined(CAFFE2_IS_XPLAT_BUILD)
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 #include "ATen/core/Tensor.h"
 #endif
 #include <c10/core/TensorOptions.h>
@@ -119,7 +120,7 @@ class CAFFE2_API Tensor final {
    * The tensor will share the same instance (data, strides, sizes, etc) but
    * a different subset of APIs would be available
    */
-#if !defined(CAFFE2_IS_XPLAT_BUILD)
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   explicit Tensor(at::Tensor tensor)
       : impl_(std::move(tensor.impl_)) {
     enforce_invariants();
