@@ -39,6 +39,7 @@ def join_rpc():
         _agent = None
         _destroy_rref_context()
 
+
 @_require_initialized
 def sync_rpc():
     r"""
@@ -164,10 +165,8 @@ def remote(to, func, args=None, kwargs=None):
         return invoke_remote_builtin(
             _agent, info, qualified_name, *args, **kwargs)
     else:
-        rref = invoke_remote_python_udf(
+        return invoke_remote_python_udf(
             _agent, info, serialize(PythonUDF(func, args, kwargs)))
-
-        return rref
 
 
 def _invoke_rpc(to, func, args=None, kwargs=None):

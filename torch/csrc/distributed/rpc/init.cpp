@@ -52,7 +52,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &PyRRef::isOwner)
           .def(
               // not releasing GIL here to avoid context switch on getters
-              "owner", &PyRRef::owner)
+              "owner",
+              &PyRRef::owner)
           .def(
               "to_here",
               &PyRRef::toHere,

@@ -82,8 +82,8 @@ class TORCH_API Message final {
 
   bool isRequest() const;
   bool isResponse() const;
-  // Internal messages does not contain any UDF, and their request/response callbacks
-  // should be idempotent and retryable.
+  // Internal messages does not contain any UDF, and their request/response
+  // callbacks should be idempotent and retryable.
   bool isInternal() const;
   bool isShutdown() const;
 

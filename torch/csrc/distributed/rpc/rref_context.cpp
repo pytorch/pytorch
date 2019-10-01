@@ -41,8 +41,10 @@ RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
     : agent_(std::move(agent)) {}
 
 RRefContext::~RRefContext() {
-  AutoGIL ag;
-  owners_.clear();
+  if (!owners_.empty()) {
+    AutoGIL ag;
+    owners_.clear();
+  }
 }
 
 void RRefContext::checkRRefLeaks() {
@@ -212,7 +214,6 @@ void RRefContext::notifyOwnerAndParentOfFork(
       this->finishForkRequest(forkId, parent);
     });
   }
-
 }
 
 void RRefContext::addPendingChild(
@@ -221,8 +222,8 @@ void RRefContext::addPendingChild(
   // see Note [Early Fork Registration]
   // If the parent is the owner, it should directly add the child UserRRef as a
   // fork.
-  TORCH_INTERNAL_ASSERT(!rref->isOwner(),
-      "OwnerRRef should not have a pending child.");
+  TORCH_INTERNAL_ASSERT(
+      !rref->isOwner(), "OwnerRRef should not have a pending child.");
   std::lock_guard<std::mutex> lock(mutex_);
   TORCH_INTERNAL_ASSERT(
       pendingChildren_.find(forkId) == pendingChildren_.end(),
@@ -242,8 +243,8 @@ void RRefContext::delPendingChild(const ForkId& forkId) {
 void RRefContext::addPendingUser(
     const ForkId& forkId,
     const std::shared_ptr<RRef>& rref) {
-  TORCH_INTERNAL_ASSERT(!rref->isOwner(),
-      "Attempt to add an OwnerRRef as a pending User.");
+  TORCH_INTERNAL_ASSERT(
+      !rref->isOwner(), "Attempt to add an OwnerRRef as a pending User.");
   std::lock_guard<std::mutex> lock(mutex_);
   TORCH_INTERNAL_ASSERT(
       pendingUsers_.find(forkId) == pendingUsers_.end(),

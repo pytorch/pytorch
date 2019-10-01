@@ -50,8 +50,8 @@ py::object PyRRef::toHere() {
           std::static_pointer_cast<OwnerRRef<IValue>>(rref_)->getValue();
 
       {
-        // acquiring GIL as torch::jit::toPyObject creates new py::object without
-        // grabbing the GIL.
+        // acquiring GIL as torch::jit::toPyObject creates new py::object
+        // without grabbing the GIL.
         AutoGIL ag;
         return torch::jit::toPyObject(std::move(value));
       }
@@ -66,8 +66,8 @@ py::object PyRRef::toHere() {
           std::static_pointer_cast<UserRRef<IValue>>(rref_)->toHere();
 
       {
-        // acquiring GIL as torch::jit::toPyObject creates new py::object without
-        // grabbing the GIL.
+        // acquiring GIL as torch::jit::toPyObject creates new py::object
+        // without grabbing the GIL.
         AutoGIL ag;
         return torch::jit::toPyObject(std::move(value));
       }

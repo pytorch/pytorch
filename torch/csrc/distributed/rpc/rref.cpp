@@ -20,7 +20,6 @@ constexpr int PARENT_IDX = 5; // index of parent in the tuple
 // NB: if more fields are added, make sure this field is also bumped
 constexpr int RFD_TUPLE_SIZE = 6; // number of RRefForkData fields in py::tuple
 
-
 } // namespace
 
 std::atomic<local_id_t> RRefContext::nextLocalId_{0};

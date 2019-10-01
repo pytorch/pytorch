@@ -26,7 +26,7 @@ Message createException(const Message& request, const std::exception& e) {
 
 Message processRequestBlocking(Message&& request) {
   if (request.isInternal()) {
-    switch(request.type()) {
+    switch (request.type()) {
       case MessageType::SCRIPT_RREF_FETCH_CALL: {
         ScriptRRefFetchCall srf = ScriptRRefFetchCall::fromMessage(request);
         auto& ctx = RRefContext::getInstance();
