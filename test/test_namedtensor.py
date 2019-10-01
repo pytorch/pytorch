@@ -1850,7 +1850,7 @@ class TestNamedTensor(TestCase):
             self.assertEqual((a < scalar).names, ['N', 'C'])
             self.assertEqual((a >= scalar).names, ['N', 'C'])
             self.assertEqual((a <= scalar).names, ['N', 'C'])
-            
+
             res = torch.empty(3, 3, dtype=torch.bool, device=device)
             torch.eq(a, b, out=res)
             self.assertEqual(res.names, ['N', 'C'])
@@ -1864,10 +1864,10 @@ class TestNamedTensor(TestCase):
             self.assertEqual(res.names, ['N', 'C'])
             torch.ge(a, b, out=res)
             self.assertEqual(res.names, ['N', 'C'])
-            
+
             res = torch.isnan(a)
             self.assertEqual(res.names, ['N', 'C'])
-            
+
             res = torch.isinf(a)
             self.assertEqual(res.names, ['N', 'C'])
 
