@@ -106,6 +106,10 @@ class TORCH_API MaxPool1dImpl : public MaxPoolImpl<1, MaxPool1dImpl> {
  public:
   using MaxPoolImpl<1, MaxPool1dImpl>::MaxPoolImpl;
   Tensor forward(const Tensor& input);
+
+  /// Returns the outputs and the indices of the max values.
+  /// Useful for `torch::nn::MaxUnpool1d` later.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `MaxPool1dImpl`.
@@ -123,6 +127,10 @@ class TORCH_API MaxPool2dImpl : public MaxPoolImpl<2, MaxPool2dImpl> {
  public:
   using MaxPoolImpl<2, MaxPool2dImpl>::MaxPoolImpl;
   Tensor forward(const Tensor& input);
+
+  /// Returns the outputs and the indices of the max values.
+  /// Useful for `torch::nn::MaxUnpool2d` later.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `MaxPool2dImpl`.
@@ -140,6 +148,10 @@ class TORCH_API MaxPool3dImpl : public MaxPoolImpl<3, MaxPool3dImpl> {
  public:
   using MaxPoolImpl<3, MaxPool3dImpl>::MaxPoolImpl;
   Tensor forward(const Tensor& input);
+
+  /// Returns the outputs and the indices of the max values.
+  /// Useful for `torch::nn::MaxUnpool3d` later.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `MaxPool3dImpl`.
@@ -147,6 +159,170 @@ class TORCH_API MaxPool3dImpl : public MaxPoolImpl<3, MaxPool3dImpl> {
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(MaxPool3d);
+
+// ============================================================================
+
+/// Base class for all (dimension-specialized) adaptive maxpool modules.
+template <size_t D, typename Derived>
+class TORCH_API AdaptiveMaxPoolImpl : public torch::nn::Cloneable<Derived> {
+ public:
+  AdaptiveMaxPoolImpl(ExpandingArray<D> output_size)
+      : AdaptiveMaxPoolImpl(AdaptiveMaxPoolOptions<D>(output_size)) {}
+  explicit AdaptiveMaxPoolImpl(const AdaptiveMaxPoolOptions<D>& options_);
+
+  void reset() override;
+
+  /// Pretty prints the `AdaptiveMaxPool{1,2,3}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  AdaptiveMaxPoolOptions<D> options;
+};
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveMaxPool1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies adaptive maxpool over a 1-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.AdaptiveMaxPool1d
+/// to learn about the exact behavior of this module.
+class TORCH_API AdaptiveMaxPool1dImpl :
+  public AdaptiveMaxPoolImpl<1, AdaptiveMaxPool1dImpl> {
+ public:
+  using AdaptiveMaxPoolImpl<1, AdaptiveMaxPool1dImpl>::AdaptiveMaxPoolImpl;
+
+  Tensor forward(const Tensor& input);
+
+  /// Returns the indices along with the outputs.
+  /// Useful to pass to nn.MaxUnpool1d.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
+};
+
+/// A `ModuleHolder` subclass for `AdaptiveMaxPool1dImpl`.
+/// See the documentation for `AdaptiveMaxPool1dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(AdaptiveMaxPool1d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveMaxPool2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies adaptive maxpool over a 2-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.AdaptiveMaxPool2d
+/// to learn about the exact behavior of this module.
+class TORCH_API AdaptiveMaxPool2dImpl :
+  public AdaptiveMaxPoolImpl<2, AdaptiveMaxPool2dImpl> {
+ public:
+  using AdaptiveMaxPoolImpl<2, AdaptiveMaxPool2dImpl>::AdaptiveMaxPoolImpl;
+
+  Tensor forward(const Tensor& input);
+
+  /// Returns the indices along with the outputs.
+  /// Useful to pass to nn.MaxUnpool2d.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
+};
+
+/// A `ModuleHolder` subclass for `AdaptiveMaxPool2dImpl`.
+/// See the documentation for `AdaptiveMaxPool2dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(AdaptiveMaxPool2d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveMaxPool3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies adaptive maxpool over a 3-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.AdaptiveMaxPool3d
+/// to learn about the exact behavior of this module.
+class TORCH_API AdaptiveMaxPool3dImpl :
+  public AdaptiveMaxPoolImpl<3, AdaptiveMaxPool3dImpl> {
+ public:
+  using AdaptiveMaxPoolImpl<3, AdaptiveMaxPool3dImpl>::AdaptiveMaxPoolImpl;
+
+  Tensor forward(const Tensor& input);
+
+  /// Returns the indices along with the outputs.
+  /// Useful to pass to nn.MaxUnpool3d.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
+};
+
+/// A `ModuleHolder` subclass for `AdaptiveMaxPool3dImpl`.
+/// See the documentation for `AdaptiveMaxPool3dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(AdaptiveMaxPool3d);
+
+// ============================================================================
+
+/// Base class for all (dimension-specialized) adaptive avgpool modules.
+template <size_t D, typename Derived>
+class TORCH_API AdaptiveAvgPoolImpl : public torch::nn::Cloneable<Derived> {
+ public:
+  AdaptiveAvgPoolImpl(ExpandingArray<D> output_size)
+      : AdaptiveAvgPoolImpl(AdaptiveAvgPoolOptions<D>(output_size)) {}
+  explicit AdaptiveAvgPoolImpl(const AdaptiveAvgPoolOptions<D>& options_);
+
+  void reset() override;
+
+  /// Pretty prints the `AdaptiveAvgPool{1,2,3}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  AdaptiveAvgPoolOptions<D> options;
+};
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveAvgPool1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies adaptive avgpool over a 1-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.AdaptiveAvgPool1d
+/// to learn about the exact behavior of this module.
+class TORCH_API AdaptiveAvgPool1dImpl :
+  public AdaptiveAvgPoolImpl<1, AdaptiveAvgPool1dImpl> {
+ public:
+  using AdaptiveAvgPoolImpl<1, AdaptiveAvgPool1dImpl>::AdaptiveAvgPoolImpl;
+
+  Tensor forward(const Tensor& input);
+};
+
+/// A `ModuleHolder` subclass for `AdaptiveAvgPool1dImpl`.
+/// See the documentation for `AdaptiveAvgPool1dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(AdaptiveAvgPool1d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveAvgPool2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies adaptive avgpool over a 2-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.AdaptiveAvgPool2d
+/// to learn about the exact behavior of this module.
+class TORCH_API AdaptiveAvgPool2dImpl :
+  public AdaptiveAvgPoolImpl<2, AdaptiveAvgPool2dImpl> {
+ public:
+  using AdaptiveAvgPoolImpl<2, AdaptiveAvgPool2dImpl>::AdaptiveAvgPoolImpl;
+
+  Tensor forward(const Tensor& input);
+};
+
+/// A `ModuleHolder` subclass for `AdaptiveAvgPool2dImpl`.
+/// See the documentation for `AdaptiveAvgPool2dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(AdaptiveAvgPool2d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveAvgPool3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies adaptive avgpool over a 3-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.AdaptiveAvgPool3d
+/// to learn about the exact behavior of this module.
+class TORCH_API AdaptiveAvgPool3dImpl :
+  public AdaptiveAvgPoolImpl<3, AdaptiveAvgPool3dImpl> {
+ public:
+  using AdaptiveAvgPoolImpl<3, AdaptiveAvgPool3dImpl>::AdaptiveAvgPoolImpl;
+
+  Tensor forward(const Tensor& input);
+};
+
+/// A `ModuleHolder` subclass for `AdaptiveAvgPool3dImpl`.
+/// See the documentation for `AdaptiveAvgPool3dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(AdaptiveAvgPool3d);
 
 } // namespace nn
 } // namespace torch

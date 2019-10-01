@@ -31,8 +31,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       }
       out << ")";
     }
-    if (value->autogradZero() && *value->autogradZero()) {
-      out << "[AutogradZero]";
+    if (value->undefined() && *value->undefined()) {
+      out << "[Undefined]";
     }
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
@@ -351,7 +351,9 @@ MatchTypeReturn matchTypeVariables(
       type_env[vt->name()] = actual;
       return MatchTypeReturn::Success();
     } else if (auto unified = unifyTypes(it->second, actual)) {
-      type_env[vt->name()] = *unified;
+      // note: unifyTypes allows subtyping in either direction, so actual
+      // may be a supertype of the current binding. we're not responsible
+      // for reporting the error, only for keeping type_env stable
       return MatchTypeReturn::Success();
     }
     std::stringstream ss;
@@ -511,6 +513,16 @@ VaryingShape VaryingShape::merge(const VaryingShape& other) const {
     dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
   }
   return VaryingShape(std::move(dims));
+}
+
+TensorTypePtr TensorType::merge(TensorTypePtr other) const {
+  auto scalar_type = merge_primitive(scalarType(), other->scalarType());
+  auto dev = merge_primitive(device(), other->device());
+  auto sz = sizes().merge(other->sizes());
+  auto srs = strides().merge(other->strides());
+  auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
+  auto undef = merge_primitive(undefined(), other->undefined());
+  return TensorType::create(scalar_type, dev, sz, srs, gr, undef);
 }
 
 std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {

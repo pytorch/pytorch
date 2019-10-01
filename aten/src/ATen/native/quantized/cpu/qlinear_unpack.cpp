@@ -36,11 +36,11 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
       auto zero_points = from_blob(
           pack_ptr.w_zp.data(), pack_ptr.w_zp.size(), device(kCPU).dtype(kInt));
 
-      weight_origin = _empty_per_channel_affine_quantized_like(
+      weight_origin = _empty_per_channel_affine_quantized(
+          {N, K},
           scales.toType(kDouble),
           zero_points.toType(kLong),
-          {N, K},
-          {0}, // The output channel axis is 0
+          0, // The output channel axis is 0
           device(kCPU).dtype(kQInt8));
     }
 
@@ -78,11 +78,10 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
       return qnnpack_linear_unpack(packed_weight);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::linear_unpack ",
         toString(ctx.qEngine()));
-    return std::tuple<at::Tensor, c10::optional<Tensor>>(
-        at::Tensor(), at::Tensor());
   }
 };
 
