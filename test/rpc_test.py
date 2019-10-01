@@ -7,15 +7,14 @@ from os import getenv
 
 import torch
 import torch.distributed as dist
-from common_distributed import MultiProcessTestCase
-from common_utils import load_tests, run_tests
-from torch.distributed.rpc import RpcBackend
 
 
 if not dist.is_available():
     print("c10d not available, skipping tests")
     sys.exit(0)
 
+from torch.distributed.rpc import RpcBackend
+from common_utils import load_tests
 
 BACKEND = getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP)
 RPC_INIT_URL = getenv("RPC_INIT_URL", "")
@@ -120,7 +119,7 @@ def _wrap_with_rpc(func):
     """
 
     def wrapper(self):
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
         )
@@ -140,7 +139,7 @@ def _wrap_with_rpc(func):
     sys.version_info < (3, 0),
     "Pytorch distributed rpc package " "does not support python2",
 )
-class RpcTest(MultiProcessTestCase):
+class RpcTest(object):
     @property
     def world_size(self):
         return 4
@@ -186,7 +185,7 @@ class RpcTest(MultiProcessTestCase):
         "PROCESS_GROUP rpc backend specific test, skip"
     )
     def test_duplicate_name(self):
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
         )
@@ -200,7 +199,7 @@ class RpcTest(MultiProcessTestCase):
         dist.join_rpc()
 
     def test_reinit(self):
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(backend="gloo", rank=self.rank,
                                 world_size=self.world_size, store=store)
         dist.init_model_parallel(self_name='worker{}'.format(self.rank),
@@ -225,7 +224,7 @@ class RpcTest(MultiProcessTestCase):
 
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     def test_invalid_names(self):
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
         )
@@ -728,7 +727,3 @@ class RpcTest(MultiProcessTestCase):
             args=(rref_a, rref_b)
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
-
-
-if __name__ == "__main__":
-    run_tests()
