@@ -12,7 +12,7 @@ from .default_mappings import (DEFAULT_DYNAMIC_MODULE_MAPPING,
                                DEFAULT_MODULE_MAPPING,
                                DEFAULT_QAT_MODULE_MAPPING,
                                DEFAULT_SKIP_LIST)
-from .stubs import QuantStub, DeQuantStub
+from .stubs import QuantStub, DeQuantStub, QuantWrapper
 from .QConfig import default_dynamic_qconfig, float16_dynamic_qconfig
 
 def _propagate_qconfig_helper(module, qconfig_dict, skip_list=DEFAULT_SKIP_LIST,
@@ -107,30 +107,6 @@ def add_observer_(module):
         # observer and hook will be gone after we swap the module
         module.add_module('observer', module.qconfig.activation())
         module.register_forward_hook(_observer_forward_hook)
-
-class QuantWrapper(nn.Module):
-    r"""A wrapper class that wraps the input module, adds QuantStub and
-    DeQuantStub and surround the call to module with call to quant and dequant
-    modules.
-
-    This is used by the `quantization` utility functions to add the quant and
-    dequant modules, before `convert` function `QuantStub` will just be observer,
-    it observes the input tensor, after `convert`, `QuantStub`
-    will be swapped to `nnq.Quantize` which does actual quantization. Similarly
-    for `DeQuantStub`.
-    """
-    def __init__(self, module):
-        super(QuantWrapper, self).__init__()
-        qconfig = module.qconfig if hasattr(module, 'qconfig') else None
-        self.add_module('quant', QuantStub(qconfig))
-        self.add_module('dequant', DeQuantStub())
-        self.add_module('module', module)
-        self.train(module.training)
-
-    def forward(self, X):
-        X = self.quant(X)
-        X = self.module(X)
-        return self.dequant(X)
 
 def add_quant_dequant(module):
     r"""Wrap the leaf child module in QuantWrapper if it has a valid qconfig
