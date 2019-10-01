@@ -286,8 +286,8 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
         model = ResNetBase().float().eval()
         model = QuantWrapper(model)
         model.qconfig = qconfig
-        fuse_list = [['module.conv1', 'module.bn1', 'module.relu1']]
-        fuse_modules(model, fuse_list)
+        fuse_list = ['module.conv1', 'module.bn1', 'module.relu1']
+        fuse_modules(model, fuse_list, inplace=True)
         model = prepare(model)
         self.checkObservers(model)
         test_only_eval_fn(model, self.img_data)
@@ -702,8 +702,9 @@ class ScriptabilityTest(QuantizationTestCase):
 class FusionTest(QuantizationTestCase):
     def test_fuse_module_train(self):
         model = ModelForFusion(default_qat_qconfig).train()
-        model = fuse_modules(model, [['conv1', 'bn1', 'relu1'],
-                             ['sub1.conv', 'sub1.bn']])
+        # Test step by step fusion
+        model = fuse_modules(model, ['conv1', 'bn1', 'relu1'])
+        model = fuse_modules(model, ['sub1.conv', 'sub1.bn'])
         self.assertEqual(type(model.conv1), nni.ConvBnReLU2d,
                          "Fused Conv + BN + Relu first layer")
         self.assertEqual(type(model.bn1), torch.nn.Identity,

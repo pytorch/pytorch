@@ -4,15 +4,6 @@ import torch
 import copy
 
 import torch.nn._intrinsic.modules.fused as torch_fused
-def fuse_conv_relu(conv, relu):
-    r"""Given the conv and relu modules, fuses them and returns the fused module
-    """
-    return torch.nn._intrinsic.ConvReLU2d(conv, relu)
-
-def fuse_linear_relu(linear, relu):
-    r"""Given the linear and relu modules, fuses them and returns the fused module
-    """
-    return torch.nn._intrinsic.LinearReLU(linear, relu)
 
 def fuse_conv_bn(conv, bn):
     r"""Given the conv and bn modules, fuses them and returns the fused module
@@ -96,8 +87,8 @@ def fuse_known_modules(mod_list):
     OP_LIST_TO_FUSER_METHOD = {
         (torch.nn.Conv2d, torch.nn.BatchNorm2d): fuse_conv_bn,
         (torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU): fuse_conv_bn_relu,
-        (torch.nn.Conv2d, torch.nn.ReLU): fuse_conv_relu,
-        (torch.nn.Linear, torch.nn.ReLU): fuse_linear_relu
+        (torch.nn.Conv2d, torch.nn.ReLU): torch.nn._intrinsic.ConvReLU2d,
+        (torch.nn.Linear, torch.nn.ReLU): torch.nn._intrinsic.LinearReLU
     }
 
     types = tuple(type(m) for m in mod_list)
@@ -126,7 +117,7 @@ def _fuse_modules(model, modules_to_fuse, fuser_func=fuse_known_modules):
     for i, item in enumerate(modules_to_fuse):
         _set_module(model, item, new_mod_list[i])
 
-def fuse_modules(model, modules_to_fuse, inplace=False):
+def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules):
     r"""Fuses a list of modules into a single module
 
     Fuses only the following sequence of modules:
@@ -141,10 +132,14 @@ def fuse_modules(model, modules_to_fuse, inplace=False):
 
     Arguments:
         model: Model containing the modules to be fused
-        modules_to_fuse: list of list of module names to fuse.
+        modules_to_fuse: list of list of module names to fuse. Can also be a list
+                         of strings if there is only a single list of modules to fuse.
         inplace: bool specifying if fusion happens in place on the model, by default
                  a new model is returned
-
+        fuser_func: Function that takes in a list of modules and outputs a list of fused modules.
+                    For example,
+                    fuser_func([convModule, BNModule]) returns the list [ConvBNModule, nn.Identity()]
+                    Defaults to torch.quantization.fuse_known_modules
     Returns:
         model with fused modules. A new copy is created if inplace=True.
 
@@ -156,9 +151,21 @@ def fuse_modules(model, modules_to_fuse, inplace=False):
             >>> fused_m = torch.quantization.fuse_modules(m, modules_to_fuse)
             >>> output = fused_m(input)
 
+            >>> m = myModel()
+            >>> # Alternately provide a single list of modules to fuse
+            >>> modules_to_fuse = ['conv1', 'bn1', 'relu1']
+            >>> fused_m = torch.quantization.fuse_modules(m, modules_to_fuse)
+            >>> output = fused_m(input)
+
     """
     if not inplace:
         model = copy.deepcopy(model)
-    for module_list in modules_to_fuse:
-        _fuse_modules(model, module_list)
+
+    if all(isinstance(module_element, str) for module_element in modules_to_fuse):
+        # Handle case of modules_to_fuse being a list
+        _fuse_modules(model, modules_to_fuse, fuser_func)
+    else:
+        # Handle case of modules_to_fuse being a list of lists
+        for module_list in modules_to_fuse:
+            _fuse_modules(model, module_list, fuser_func)
     return model
