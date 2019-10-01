@@ -311,7 +311,13 @@ def quantize_dynamic(model, qconfig=None, dtype=torch.qint8, mapping=DEFAULT_DYN
             raise ValueError(
                 "Don't know how to quantize with default settings for {}. Provide full qconfig please".format(dtype))
     elif isinstance(qconfig, set):
-        qconfig = dict(zip(qconfig, itertools.repeat(default_dynamic_qconfig)))
+        if dtype is torch.qint8:
+            default_qconfig = default_dynamic_qconfig
+        elif dtype is torch.float16:
+            default_qconfig = float16_dynamic_qconfig
+        else:
+            raise RuntimeError('Unknown dtype specified for quantize_dynamic: ', str(dtype))
+        qconfig = dict(zip(qconfig, itertools.repeat(default_qconfig)))
 
     if not inplace:
         model = copy.deepcopy(model)

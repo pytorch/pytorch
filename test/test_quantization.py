@@ -365,7 +365,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # Test set API
-        model = quantize_dynamic(TwoLayerLinearModel().eval(), set(['fc2']))
+        model = quantize_dynamic(TwoLayerLinearModel().eval(), {'fc2'})
         checkQuantized(model)
 
     def test_nested1(self):
@@ -394,7 +394,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
-        model = quantize_dynamic(NestedModel().eval(), set(['fc3', 'sub2.fc1']))
+        model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2.fc1'})
         checkQuantized(model)
 
     def test_nested2(self):
@@ -425,7 +425,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # Test set API
-        model = quantize_dynamic(NestedModel().eval(), set(['fc3', 'sub2']))
+        model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2'})
         checkQuantized(model)
 
     def test_nested3(self):
@@ -460,7 +460,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # Test set API
-        model = quantize_dynamic(NestedModel().eval(), set(['fc3', 'sub2', 'sub2.fc1']))
+        model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2', 'sub2.fc1'})
         checkQuantized(model)
 
     def test_type_match_rule(self):
