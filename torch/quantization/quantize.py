@@ -290,7 +290,8 @@ def quantize_dynamic(model, qconfig=None, dtype=torch.qint8, mapping=DEFAULT_DYN
               module unless qconfig for the submodules are specified (when the
               submodule already has qconfig attribute). Entries in the dictionary
               need to be QConfigDynamic instances.
-            * A set of types and/or submodule names to apply dynamic quantization to
+            * A set of types and/or submodule names to apply dynamic quantization to,
+              in which case the `dtype` argument is used to specifiy the bit-width
         inplace: carry out model transformations in-place, the original module is mutated
         mapping: maps type of a submodule to a type of corresponding dynamically quantized version
             with which the submodule needs to be replaced
