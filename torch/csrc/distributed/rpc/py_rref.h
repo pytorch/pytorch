@@ -12,7 +12,7 @@ namespace rpc {
 // pickle and unpickle.
 class PyRRef {
  public:
-  PyRRef(std::shared_ptr<RRef> rref);
+  explicit PyRRef(std::shared_ptr<RRef> rref);
 
   bool isOwner() const;
   worker_id_t owner() const;

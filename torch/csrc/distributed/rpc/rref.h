@@ -141,7 +141,7 @@ static_assert(
 //
 // The owner's view on any node (fork) in the tree has three stages:
 //
-//       1) unknown → 2) known → 3) deleted.
+//       1) unknown -> 2) known -> 3) deleted.
 //
 // The owner's view on the entire tree keeps changing. The owner deletes its
 // OwnerRRef instance when it thinks there are no living UserRRefs, i.e., when
@@ -234,7 +234,7 @@ class UserRRef final : public RRef {
  public:
   UserRRef(const UserRRef& other) = delete;
   UserRRef(UserRRef&& other) = delete;
-  UserRRef& operator=(const UserRRef other) = delete;
+  UserRRef& operator=(const UserRRef& other) = delete;
   UserRRef& operator=(UserRRef&& other) = delete;
 
   inline bool isOwner() const override {
@@ -270,7 +270,7 @@ class OwnerRRef final : public RRef {
  public:
   OwnerRRef(const OwnerRRef& other) = delete;
   OwnerRRef(OwnerRRef&& other) = delete;
-  OwnerRRef& operator=(const OwnerRRef other) = delete;
+  OwnerRRef& operator=(const OwnerRRef& other) = delete;
   OwnerRRef& operator=(OwnerRRef&& other) = delete;
 
   inline bool isOwner() const override {

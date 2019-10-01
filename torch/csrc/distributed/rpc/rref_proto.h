@@ -17,6 +17,8 @@ class TORCH_API RRefMessageBase {
   RRefMessageBase(const RRefId& rrefId, MessageType type)
       : rrefId_(rrefId), type_(type) {}
 
+  virtual ~RRefMessageBase() = default;
+
   const RRefId& rrefId();
 
   virtual Message toMessage() const;
@@ -32,9 +34,11 @@ class TORCH_API ForkMessageBase : public RRefMessageBase {
   ForkMessageBase(const RRefId& rrefId, const ForkId& forkId, MessageType type)
       : RRefMessageBase(rrefId, type), forkId_(forkId) {}
 
+  virtual ~ForkMessageBase() = default;
+
   const ForkId& forkId();
 
-  virtual Message toMessage() const;
+  virtual Message toMessage() const override;
   static std::pair<RRefId, ForkId> fromMessage(
       const Message& message,
       MessageType type);
@@ -46,7 +50,7 @@ class TORCH_API ForkMessageBase : public RRefMessageBase {
 // UserRRef uses this message to fetch the remote RRef value from the owner.
 class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
  public:
-  ScriptRRefFetchCall(const RRefId& rrefId)
+  explicit ScriptRRefFetchCall(const RRefId& rrefId)
       : RRefMessageBase(rrefId, MessageType::SCRIPT_RREF_FETCH_CALL) {}
 
   static ScriptRRefFetchCall fromMessage(const Message& message);
@@ -54,7 +58,7 @@ class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
 
 class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
  public:
-  PythonRRefFetchCall(const RRefId& rrefId)
+  explicit PythonRRefFetchCall(const RRefId& rrefId)
       : RRefMessageBase(rrefId, MessageType::PYTHON_RREF_FETCH_CALL) {}
 
   static PythonRRefFetchCall fromMessage(const Message& message);
@@ -63,7 +67,7 @@ class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
 // OwnerRRef uses this message to send the RRef value to a remote UserRRef
 class TORCH_API RRefFetchRet final {
  public:
-  RRefFetchRet(at::IValue value) : value_(std::move(value)) {}
+  explicit RRefFetchRet(at::IValue value) : value_(std::move(value)) {}
 
   const at::IValue& value();
 
@@ -97,7 +101,7 @@ class TORCH_API RemoteRet final : public ForkMessageBase {
 
 class TORCH_API RRefChildAccept final {
  public:
-  RRefChildAccept(const ForkId& forkId) : forkId_(forkId) {}
+  explicit RRefChildAccept(const ForkId& forkId) : forkId_(forkId) {}
 
   const ForkId& forkId() const;
 
