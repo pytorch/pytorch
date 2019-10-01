@@ -1,11 +1,11 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import multiprocessing
 import sys
 import tempfile
 import time
 import unittest
 import logging
+import six
 
 from collections import namedtuple
 from functools import wraps
@@ -14,7 +14,6 @@ import torch
 import torch.distributed as c10d
 
 from common_utils import TestCase
-
 
 TestSkip = namedtuple('TestSkip', 'exit_code, message')
 
@@ -79,7 +78,7 @@ def requires_mpi():
     )
 
 
-TIMEOUT_DEFAULT = 30
+TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {}
 
 
@@ -129,26 +128,51 @@ class MultiProcessTestCase(TestCase):
         super(MultiProcessTestCase, self).setUp()
         self.skip_return_code_checks = []
         self.rank = self.MAIN_PROCESS_RANK
-        self.file = tempfile.NamedTemporaryFile(delete=False)
-        self.processes = [self._spawn_process(rank) for rank in range(int(self.world_size))]
+        self.file_name = tempfile.NamedTemporaryFile(delete=False).name
 
     def tearDown(self):
         super(MultiProcessTestCase, self).tearDown()
         for p in self.processes:
             p.terminate()
 
-    def _spawn_process(self, rank):
-        name = 'process ' + str(rank)
-        process = multiprocessing.Process(target=self._run, name=name, args=(rank,))
-        process.start()
-        return process
+    def _current_test_name(self):
+        # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
+        return self.id().split(".")[-1]
 
-    def _run(self, rank):
+    def _start_processes(self, proc):
+        self.processes = []
+        for rank in range(int(self.world_size)):
+            process = proc(
+                target=self.__class__._run,
+                name='process ' + str(rank),
+                args=(rank, self._current_test_name(), self.file_name))
+            process.start()
+            self.processes.append(process)
+
+    def _fork_processes(self):
+        if six.PY3:
+            proc = torch.multiprocessing.get_context("fork").Process
+        else:
+            proc = torch.multiprocessing.Process
+        self._start_processes(proc)
+
+    def _spawn_processes(self):
+        if six.PY3:
+            proc = torch.multiprocessing.get_context("spawn").Process
+        else:
+            raise RuntimeError("Cannot use spawn start method with Python 2")
+        self._start_processes(proc)
+
+    @classmethod
+    def _run(cls, rank, test_name, file_name):
+        self = cls(test_name)
         self.rank = rank
+        self.file_name = file_name
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retreiving a corresponding test and executing it.
-        getattr(self, self.id().split(".")[2])()
+        getattr(self, test_name)()
+        # exit to avoid run teardown() for fork processes
         sys.exit(0)
 
     def _join_processes(self, fn):

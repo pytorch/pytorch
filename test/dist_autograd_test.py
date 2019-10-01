@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
-from common_distributed import MultiProcessTestCase
 from dist_utils import dist_init
 import six
 import unittest
@@ -19,7 +18,7 @@ def _set_rpc_done(context_id):
 
 @unittest.skipIf(not six.PY3, "Pytorch distributed autograd package "
                  "does not support python2")
-class TestDistAutograd(MultiProcessTestCase):
+class TestDistAutograd(object):
 
     @property
     def world_size(self):
@@ -131,7 +130,3 @@ class TestDistAutograd(MultiProcessTestCase):
                     self.assertEqual(tensors[i], next_funcs[i][0].variable)
                 else:
                     self.assertIsNone(next_funcs[i][0])
-
-
-if __name__ == '__main__':
-    unittest.main()
