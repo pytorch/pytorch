@@ -208,7 +208,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     // TODO: add MemoryFormat::ChannelsLast here once perf is fixed
     Tensor output = _empty_affine_quantized(
         outShape, device(kCPU).dtype(kQUInt8), output_scale, output_zero_point);
-    auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
+    auto buffer = at::empty(output.sizes(), output.options().dtype(at::kInt));
 
     if (pack_ptr.q_scheme == kPerTensorAffine) {
       fbgemm::ReQuantizeOutput<
