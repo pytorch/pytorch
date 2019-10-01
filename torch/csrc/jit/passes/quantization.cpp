@@ -73,11 +73,9 @@ bool nodeQuantizable(Node* n) {
     auto func_node = n->inputs()[0]->node();
     auto func = func_node->output()->type()->expect<FunctionType>()->function();
     auto func_name = getFuncName(func->qualname());
-    if (func_node->kind() == prim::Constant) {
-      is_quantizable |=
-          std::find(call_funcs.begin(), call_funcs.end(), func_name) !=
-          call_funcs.end();
-    }
+    is_quantizable |=
+      std::find(call_funcs.begin(), call_funcs.end(), func_name) !=
+      call_funcs.end();
   }
   return is_quantizable;
 }
@@ -891,7 +889,7 @@ graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
      auto linear_node = match_vmap.at(vmap.at("linear"))->node();
      auto func = linear_node->output()->type()->expect<FunctionType>()->function();
      auto func_name = getFuncName(func->qualname());
-     if (linear_node->kind() == prim::Constant && func_name == "linear") {
+     if (func_name == "linear") {
        return true;
      }
      return false;

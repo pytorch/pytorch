@@ -30,9 +30,6 @@ class PackedParams(torch.nn.Module):
     def __setstate__(self, state):
         self.set_weight_bias(state[0], state[1])
 
-
-_packed_params_scripted = torch.jit.script(PackedParams())._c
-
 def _check_is_script_module(model):
     if not isinstance(model, torch.jit.ScriptModule):
         raise ValueError('input must be a script module, got: ' + str(type(model)))
@@ -52,8 +49,10 @@ def convert_script(model, inplace=False):
     if not inplace:
         model = model.copy()
     torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', True)
-    torch._C._jit_pass_insert_prepack_unpack(model._c)
-    torch._C._jit_pass_fold_prepack(model._c, _packed_params_scripted)
+    if 'fbgemm' in torch.backends.quantized.supported_engines:
+        _packed_params_scripted = torch.jit.script(PackedParams())._c
+        torch._C._jit_pass_insert_prepack_unpack(model._c)
+        torch._C._jit_pass_fold_prepack(model._c, _packed_params_scripted)
     return model
 
 # TODO: non-scriptable QConfig will be supported later
@@ -73,8 +72,11 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
     torch._C._jit_pass_fold_convbn(model._c)
     prepare_script(model, scripted_qconfig_dict, True)
     run_fn(model._c._get_method('forward'), *run_args)
-    # The graph is cached by executor and we are not able
-    # to properly mutate types yet, therefore we'll copy here
-    # This will be fixed later
+    # When we mutating graph we didn't create a new ClassType
+    # and the graph executor will run an out dated version
+    # of the graph if we do inplace graph mutation, therefore
+    # we copy the model here
+    # [TODO] This will be fixed later when we figure out
+    # how to properly mutate types
     model = convert_script(model, False)
     return model
