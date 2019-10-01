@@ -272,6 +272,12 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
     ctx_inputs.insert(ctx_inputs.end(), inputs.begin(), inputs.end());
     return FunctionValue(ret).call(loc, m, ctx_inputs, attributes, n_binders);
   }
+
+  if (auto class_type = getValue()->type()->cast<ClassType>()) {
+    return attr(loc, m, "__call__")
+        ->call(loc, m, inputs, attributes, n_binders);
+  }
+
   return SugaredValue::call(loc, m, inputs, attributes, n_binders);
 }
 
@@ -287,24 +293,6 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
     throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
                            << " object is not iterable";
   }
-}
-
-std::shared_ptr<SugaredValue> callClassMethod(
-    const ClassTypePtr& class_ptr,
-    const std::string& desugared_name,
-    const SourceRange& loc,
-    Function& m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    size_t n_binders) {
-  if (!class_ptr->getMethod(desugared_name)) {
-    throw ErrorReport(loc) << class_ptr->python_str() << " does not define a "
-                           << desugared_name << " method";
-  }
-
-  Value* self = inputs.at(0).value(*m.graph());
-  return MethodValue(self, desugared_name)
-      .call(loc, m, inputs.slice(1), attributes, n_binders);
 }
 
 Value* SimpleValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
@@ -327,7 +315,8 @@ Value* SimpleValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
   } else if (val_type->isSubtypeOf(TensorType::get())) {
     return g.insert(aten::select, {val, 0, idx}, {}, loc);
   } else if (auto class_type = val_type->cast<ClassType>()) {
-    return callClassMethod(class_type, "__getitem__", loc, m, {val, idx}, {}, 1)
+    return attr(loc, m, "__getitem__")
+        ->call(loc, m, {idx}, {}, 1)
         ->asValue(loc, m);
   } else {
     throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
@@ -446,12 +435,14 @@ std::shared_ptr<SugaredValue> MagicMethod::call(
   if (inputs.size() > 0) {
     Value* self = inputs[0].value(*m.graph());
     if (auto class_ptr = self->type()->cast<ClassType>()) {
-      return callClassMethod(
-          class_ptr, desugared_name_, loc, m, inputs, attributes, n_binders);
+      return SimpleValue(self)
+          .attr(loc, m, desugared_name_)
+          ->call(loc, m, inputs.slice(1), attributes, n_binders);
     }
   }
   return base_value_->call(loc, m, inputs, attributes, n_binders);
 }
+
 std::shared_ptr<SugaredValue> ClassValue::call(
     const SourceRange& loc,
     Function& m,

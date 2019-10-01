@@ -4,6 +4,7 @@
 #include <ATen/cuda/Exceptions.h>
 
 #include <ATen/cudnn/cudnn-wrapper.h>
+#include <ATen/cudnn/Utils.h>
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/ATenCUDAGeneral.h>
@@ -190,6 +191,7 @@ struct AT_CUDA_API DropoutDescriptor
     AT_ASSERT(options.device().type() == kCUDA);
     AT_ASSERT(options.dtype() == kByte);
     state = at::empty({static_cast<int64_t>(state_size)}, options);
+    setCuDNNStreamToCurrent();
     AT_CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, dropout, state.data_ptr(), state_size, seed));
   }
 
@@ -200,6 +202,7 @@ struct AT_CUDA_API DropoutDescriptor
     void *state_ptr = state.data_ptr();
     size_t state_size = state.size(0);
     // NB: The seed doesn't actually matter, so we give a dummy value
+    setCuDNNStreamToCurrent();
     AT_CUDNN_CHECK(cudnnRestoreDropoutDescriptor(mut_desc(), handle, dropout, state_ptr, state_size, 0 /* seed */));
   }
 

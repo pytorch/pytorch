@@ -107,8 +107,9 @@ class _ObserverBase(Observer):
                 min_vals[i] <= max_vals[i]
             ), "min {} should be less than max {}".format(min_vals[i], max_vals[i])
 
-        scales = torch.ones(min_vals.size())
-        zero_points = torch.ones(min_vals.size())
+        scales = torch.empty(min_vals.size(), dtype=torch.float32)
+        zero_points = torch.empty(min_vals.size(), dtype=torch.int64)
+
         for i in range(len(scales)):
             qparam = self._calculate_qparams(
                 min_vals[i], max_vals[i]
@@ -342,6 +343,8 @@ class HistogramObserver(_ObserverBase):
 
         norm = 0.0
         dst_bin_width = bin_width * (next_end_bin - next_start_bin + 1) / dst_nbins
+        if dst_bin_width == 0.0:
+            return 0.0
         for src_bin in range(self.bins):
             # distances from the beginning of first dst_bin to the beginning and
             # end of src_bin
