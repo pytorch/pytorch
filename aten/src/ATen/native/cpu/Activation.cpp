@@ -26,14 +26,16 @@ static void threshold_kernel(
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "threshold_cpu", [&] {
     using Vec = Vec256<scalar_t>;
     scalar_t threshold = threshold_scalar.to<scalar_t>();
+    Vec threshold_v = Vec(threshold);
     scalar_t value = value_scalar.to<scalar_t>();
+    Vec value_v = Vec(value);
     cpu_kernel_vec(
         iter,
         [&](scalar_t x, scalar_t other) -> scalar_t {
           return x <= threshold ? value : other;
         },
         [&](Vec x, Vec other) -> Vec {
-          return Vec::blendv(other, Vec(value), x <= Vec(threshold));
+          return Vec::blendv(other, value_v, x <= threshold_v);
         });
   });
 }
