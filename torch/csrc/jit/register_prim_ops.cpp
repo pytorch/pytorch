@@ -264,7 +264,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "prim::BailOut(...) -> Tensor(a)",
-         [](const Node* /* node */) -> Operation {
+         [](const Node * /* node */) -> Operation {
            return [](Stack& /* stack */) {
              AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
              return 0;
@@ -273,7 +273,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "prim::BailoutTemplate() -> int",
-         [](const Node* /* node */) -> Operation {
+         [](const Node * /* node */) -> Operation {
            return [](Stack& stack) {
              // TODO: today, we put a single bailout template at the front to
              // carry the un-optimized graph for bailout nodes to use. Ideally
@@ -625,6 +625,15 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_quantized());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::layout(Tensor a) -> int",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.layout());
            return 0;
          },
          aliasAnalysisFromSchema()),
