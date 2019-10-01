@@ -35,7 +35,7 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
 from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
-    dtypes, dtypesIfCUDA, deviceCountAtLeast
+    dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf
 import torch.backends.quantized
 
 
@@ -1393,6 +1393,7 @@ class _TestTorchMixin(object):
     def test_cpow(self):
         self._test_cop(torch.pow, lambda x, y: nan if x < 0 else math.pow(x, y))
 
+    @slowTest
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_einsum(self):
         # test cases taken from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
@@ -1523,6 +1524,7 @@ class _TestTorchMixin(object):
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
                use_integral=use_integral), (0, 2, 1))
 
+    @slowTest
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_sum_dim(self):
         self._test_dim_ops(
@@ -7558,6 +7560,7 @@ class TestTorchDeviceType(TestCase):
         run_test([10, 20, 30, 5], device)
         run_test([15, 5, 10, 20, 25], device)
 
+    @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_det_logdet_slogdet(self, device):
@@ -7979,6 +7982,7 @@ class TestTorchDeviceType(TestCase):
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
     @slowTest
+    @skipCUDAIf(True, "See issue #26789.")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_cholesky_batched_many_batches(self, device):
@@ -9943,6 +9947,7 @@ class TestTorchDeviceType(TestCase):
             self.assertLessEqual(res.max().item(), 9)
             self.assertGreaterEqual(res.min().item(), -10)
 
+    @slowTest
     def test_triu_tril(self, device):
         def gen_mask(shape, diagonal, device, upper):
             mask = torch.zeros(*shape[-2:]).byte()
@@ -11636,6 +11641,11 @@ class TestTorchDeviceType(TestCase):
                         for i in range(len(t)):
                             self.assertEqual(t[i].cpu().numpy(), np1[i])
 
+    def test_nonzero_non_diff(self, device):
+        x = torch.randn(10, requires_grad=True)
+        nz = x.nonzero()
+        self.assertFalse(nz.requires_grad)
+
     def test_pdist_norm(self, device):
         def test_pdist_single(shape, device, p, dtype, trans):
             x = torch.randn(shape, dtype=dtype, device=device)
@@ -12977,8 +12987,58 @@ class TestTorchDeviceType(TestCase):
             run_test(device, False)
 
 
+# Tests that compare a device's computation with the (gold-standard) CPU's.
+class TestDevicePrecision(TestCase):
+    def test_linspace(self, device):
+        a = torch.linspace(0, 10, 10, device=device)
+        b = torch.linspace(0, 10, 10)
+        self.assertEqual(a, b.to(device))
+
+    def test_logspace(self, device):
+        a = torch.logspace(1, 10, 10, device=device)
+        b = torch.logspace(1, 10, 10)
+        self.assertEqual(a, b.to(device))
+
+        # Check non-default base=2
+        a = torch.logspace(1, 10, 10, 2, device=device)
+        b = torch.logspace(1, 10, 10, 2)
+        self.assertEqual(a, b.to(device))
+
+    # Note: ROCm fails when using float tensors
+    def test_polygamma(self, device):
+        cpu_tensor = torch.randn(10, 10, 10)
+        device_tensor = cpu_tensor.to(device)
+        zeros = torch.zeros(10, 10, 10)
+        for n in [0, 1]:
+            cpu_out = cpu_tensor.polygamma(n)
+            device_out = device_tensor.polygamma(n)
+            norm_errors = (device_out - cpu_out.to(device)) / device_out
+            self.assertEqual(norm_errors, zeros)
+
+    # Note: fails when using float tensors
+    def test_digamma(self, device):
+        cpu_tensor = torch.randn(10, 10, 10)
+        device_tensor = cpu_tensor.to(device)
+        zeros = torch.zeros(10, 10, 10)
+        cpu_out = cpu_tensor.digamma()
+        device_out = device_tensor.digamma()
+        norm_errors = (device_out - cpu_out.to(device)) / device_out
+        self.assertEqual(norm_errors, zeros)
+
+        # Tests pole behavior
+        cpu_tensor = torch.tensor([-0.999999994, -1.999999994, -2.0000000111,
+                                   -100.99999994, -1931.99999994, 0.000000111,
+                                   -0.000000111, 0, -1, -2, -931])
+        expected_errors = torch.tensor([0, 0, 0, 0, 0, 0, 0, nan, nan, nan, nan])
+        device_tensor = cpu_tensor.to(device)
+        cpu_out = cpu_tensor.digamma()
+        device_out = device_tensor.digamma()
+        norm_errors = (device_out - cpu_out.to(device)) / device_out
+        self.assertEqual(norm_errors, expected_errors)
+
 add_neg_dim_tests()
 instantiate_device_type_tests(TestTorchDeviceType, globals())
+instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
 
 class TestTorch(TestCase, _TestTorchMixin):
     pass
