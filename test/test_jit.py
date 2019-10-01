@@ -1415,8 +1415,8 @@ graph(%input, %weight):
                 rq = torch.quantize_per_tensor(r, 0.2, 2, torch.quint8)
                 return rq
 
-        for M, data in [(QConv, torch.randn((1, 3, 24, 24), dtype=torch.float)),
-                        (QLinear, torch.randn((5, 5), dtype=torch.float))]:
+        for M, data in [(QLinear, torch.randn((5, 5), dtype=torch.float)),
+                        (QConv, torch.randn((1, 3, 24, 24), dtype=torch.float))]:
             m = torch.jit.script(M())
             ref_res = get_forward(m._c)(data)
             fold_prepack(m)

@@ -1005,7 +1005,7 @@ graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %
         auto groups = toIValue(match_vmap.at(vmap.at("groups")));
         auto set_conv_params = wrapper_module.get_method("set_conv_params");
         if (!stride || !padding || !dilation) {
-          TORCH_WARN("non-constant stride/padding/dilation");
+          TORCH_WARN("Non-constant stride/padding/dilation");
           continue;
         }
         set_conv_params(std::vector<IValue>{stride.value(), padding.value(), dilation.value(), groups.value()});
