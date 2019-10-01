@@ -28,7 +28,6 @@ TESTS = [
     'cuda_primary_ctx',
     'dataloader',
     'dist_autograd_fork',
-    'dist_autograd_spawn',
     'distributed',
     'distributions',
     'docs_coverage',
@@ -51,7 +50,6 @@ TESTS = [
     'quantized_nn_mods',
     'quantizer',
     'rpc_fork',
-    'rpc_spawn',
     'sparse',
     'torch',
     'type_info',
@@ -69,6 +67,9 @@ TESTS = [
 # skip < 3.6 b/c fstrings added in 3.6
 if PY36:
     TESTS.append('jit_py3')
+    TESTS.append('dist_autograd_spawn')
+    TESTS.append('rpc_spawn')
+
 
 WINDOWS_BLACKLIST = [
     'distributed',
