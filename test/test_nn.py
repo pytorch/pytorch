@@ -37,7 +37,7 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, new_criterion_tests, loss_reference_fns, \
     ctcloss_reference, new_module_tests
 from common_device_type import instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA
+    dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA
 
 from torch.nn import MultiheadAttention
 
@@ -2478,91 +2478,6 @@ class TestNN(NNTestCase):
         expected_output = fc_op(X, W, b)
         torch.testing.assert_allclose(expected_output, actual_output.cpu(), atol=1e-3, rtol=1e-3)
 
-    def _test_gumbel_softmax_st_shapes(self, cuda, dtype, shape, dim, count_expected):
-        logits = torch.randn(shape, dtype=torch.float)
-        logits = logits.to(dtype)
-        if cuda:
-            logits = logits.cuda()
-
-        y_draw = F.gumbel_softmax(logits, hard=True, dim=dim)
-
-        # All values positive
-        self.assertGreaterEqual(y_draw.min(), 0)
-        # Shape unchanged
-        self.assertTrue(y_draw.shape == logits.shape)
-        # One choice per draw
-        self.assertEqual(y_draw.sum(), count_expected, prec=torch.finfo(y_draw.dtype).eps)
-
-    def _test_gumbel_softmax_straight_through(self, cuda, dtype):
-        num_draws = 100
-
-        logits = torch.tensor([[0.2, 0.8, 0.1]])
-        logits = logits.reshape([1, 3])
-        logits = logits.to(dtype).requires_grad_()
-        if cuda:
-            logits = logits.cuda()
-        probs = logits.softmax(dim=-1)
-
-        counts = torch.zeros_like(logits)
-        for _ in range(num_draws):
-            y_draw = F.gumbel_softmax(logits, hard=True)
-            counts = counts + y_draw
-
-        # All values positive
-        self.assertGreaterEqual(y_draw.min(), 0)
-        # Each experiment should result in 1 draw.
-        self.assertEqual(counts.sum(), num_draws, prec=torch.finfo(counts.dtype).eps)
-
-        # check results is asymptotically as expected.
-        expected = probs * num_draws
-        # ~z is approximately N(0,1) for unbiased count
-        z = (counts - expected) / (expected * (1 - probs)).sqrt()
-        # A (lazy) approximate 99% two-sided test:
-        # occurs with prob alpha~>=0.01 if unbiased
-        self.assertLess(z.abs().max().item(), 2.58)
-
-    def _test_gumbel_softmax_grad(self, cuda, dtype):
-        # "hard" and "not hard" should propagate same gradient.
-        device = torch.device("cuda") if cuda else torch.device("cpu")
-        logits_soft = torch.zeros(10, 10, dtype=dtype, device=device, requires_grad=True)
-        logits_hard = torch.zeros(10, 10, dtype=dtype, device=device, requires_grad=True)
-
-        seed = torch.random.get_rng_state()
-        y_soft = F.gumbel_softmax(logits_soft, hard=False)
-        torch.random.set_rng_state(seed)
-        y_hard = F.gumbel_softmax(logits_hard, hard=True)
-
-        y_soft.sum().backward()
-        y_hard.sum().backward()
-
-        # 2eps = 1x addition + 1x subtraction.
-        tol = 2 * torch.finfo(dtype).eps
-        self.assertAlmostEqual(logits_soft.grad, logits_hard.grad, delta=tol)
-
-    @repeat_test_for_types(NO_HALF_TENSORTYPES)
-    def test_gumbel_softmax(self, dtype=torch.float):
-        """
-        NO_HALF_TENSORTYPES because many half-ops doesnt work on cpu.
-        """
-        self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5], dim=0, count_expected=1)
-        self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5], dim=-1, count_expected=1)
-        self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5, 4], dim=1, count_expected=5)
-        self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5, 4, 3], dim=1, count_expected=5 * 3)
-        self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5, 4, 3], dim=-1, count_expected=5 * 4)
-        self._test_gumbel_softmax_straight_through(cuda=False, dtype=dtype)
-        self._test_gumbel_softmax_grad(cuda=False, dtype=dtype)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @repeat_test_for_types(ALL_TENSORTYPES)
-    def test_gumbel_softmax_cuda(self, dtype=torch.float):
-        self._test_gumbel_softmax_st_shapes(cuda=True, dtype=dtype, shape=[5], dim=0, count_expected=1)
-        self._test_gumbel_softmax_st_shapes(cuda=True, dtype=dtype, shape=[5], dim=-1, count_expected=1)
-        self._test_gumbel_softmax_st_shapes(cuda=True, dtype=dtype, shape=[5, 4], dim=1, count_expected=5)
-        self._test_gumbel_softmax_st_shapes(cuda=True, dtype=dtype, shape=[5, 4, 3], dim=1, count_expected=5 * 3)
-        self._test_gumbel_softmax_st_shapes(cuda=True, dtype=dtype, shape=[5, 4, 3], dim=-1, count_expected=5 * 4)
-        self._test_gumbel_softmax_straight_through(cuda=True, dtype=dtype)
-        self._test_gumbel_softmax_grad(cuda=True, dtype=dtype)
-
     def _test_EmbeddingBag_vs_Embedding(self, N, D, B, L, max_norm=None,
                                         mode='mean',
                                         device='cpu',
@@ -2793,18 +2708,6 @@ class TestNN(NNTestCase):
         assert grad.is_contiguous()
 
         y.backward(grad)
-
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    def test_contig_wrong_stride_cudnn(self):
-        # x has to have batch_size 1 to test contiguous checks
-        x = torch.randn(1, 16, 5, 5, device="cuda")
-        stride = list(x.stride())
-        stride[0] = 20
-        # change the stride in dimension 0. the tensor is still contiguous because size[0] is 1
-        x.set_(x.storage(), 0, x.size(), stride)
-        self.assertTrue(x.is_contiguous())
-        F.conv_transpose2d(x, torch.randn(16, 1, 1, 1, device="cuda"))
-        F.conv2d(x, torch.randn(1, 16, 1, 1, device="cuda"))
 
     def test_embedding_bag(self):
         for dtype in [torch.double, torch.float]:
@@ -5023,19 +4926,6 @@ class TestNN(NNTestCase):
 
         self.assertEqual(l, expected)
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 7000), "needs cudnn >= 7.0")
-    def test_CTCLoss_cudnn(self):
-        target_lengths = [30, 25, 20]
-        input_lengths = [50, 50, 50]
-        targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2)
-        res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
-        expected = ctcloss_reference(log_probs, targets.cuda(), input_lengths, target_lengths).float()
-        with torch.backends.cudnn.flags(enabled=False):
-            res2 = torch.nn.functional.ctc_loss(log_probs, targets.cuda().long(), input_lengths, target_lengths)
-        self.assertEqual(res, expected)
-        self.assertEqual(res2, res)
-
     def test_CTCLoss_typechecks(self):
         target_lengths = torch.tensor([30, 25, 20])
         input_lengths = torch.tensor([50, 50, 50])
@@ -6342,32 +6232,6 @@ class TestNN(NNTestCase):
             output2, hidden2 = rnn(input)
             self.assertEqual(output1, output2)
             self.assertEqual(hidden1, hidden2)
-
-    def _test_rnn_retain_variables(self, device="cpu", dtype=torch.double):
-        rnns = [nn.LSTM(10, 20, num_layers=2).to(device, dtype),
-                nn.GRU(10, 20, num_layers=2).to(device, dtype),
-                nn.RNN(10, 20, num_layers=2).to(device, dtype)]
-        for rnn in rnns:
-            input = torch.randn(5, 6, 10, device=device, dtype=dtype, requires_grad=True)
-            output = rnn(input)
-            output[0].sum().backward(retain_graph=True)
-            grads = [input.grad.data.clone()] + [p.grad.data.clone() for p in rnn.parameters()]
-            for _ in range(4):
-                rnn.zero_grad()
-                input.grad.data.zero_()
-                output[0].sum().backward(retain_graph=True)
-                grads2 = [input.grad.data] + [p.grad.data for p in rnn.parameters()]
-                self.assertEqual(grads, grads2)
-
-    def test_rnn_retain_variables(self):
-        self._test_rnn_retain_variables()
-
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    @repeat_test_for_types(ALL_TENSORTYPES)
-    def test_rnn_retain_variables_cuda(self, dtype=torch.float):
-        with torch.backends.cudnn.flags(enabled=False):
-            self._test_rnn_retain_variables("cuda", dtype)
-        self._test_rnn_retain_variables("cuda", dtype)
 
     def _test_RNN_cpu_vs_cudnn(self, dropout):
 
@@ -9993,6 +9857,126 @@ class TestNNDeviceType(NNTestCase):
                 conv1.bias = nn.Parameter(bias_c)
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
+
+    def _test_gumbel_softmax_st_shapes(self, device, dtype, shape, dim, count_expected):
+        logits = torch.randn(shape, dtype=torch.float, device=device)
+        logits = logits.to(dtype)
+
+        y_draw = F.gumbel_softmax(logits, hard=True, dim=dim)
+
+        # All values positive
+        self.assertGreaterEqual(y_draw.min(), 0)
+        # Shape unchanged
+        self.assertTrue(y_draw.shape == logits.shape)
+        # One choice per draw
+        self.assertEqual(y_draw.sum(), count_expected, prec=torch.finfo(y_draw.dtype).eps)
+
+    def _test_gumbel_softmax_straight_through(self, device, dtype):
+        num_draws = 100
+
+        logits = torch.tensor([[0.2, 0.8, 0.1]], device=device)
+        logits = logits.reshape([1, 3])
+        logits = logits.to(dtype).requires_grad_()
+        probs = logits.softmax(dim=-1)
+
+        counts = torch.zeros_like(logits)
+        for _ in range(num_draws):
+            y_draw = F.gumbel_softmax(logits, hard=True)
+            counts = counts + y_draw
+
+        # All values positive
+        self.assertGreaterEqual(y_draw.min(), 0)
+        # Each experiment should result in 1 draw.
+        self.assertEqual(counts.sum(), num_draws, prec=torch.finfo(counts.dtype).eps)
+
+        # check results is asymptotically as expected.
+        expected = probs * num_draws
+        # ~z is approximately N(0,1) for unbiased count
+        z = (counts - expected) / (expected * (1 - probs)).sqrt()
+        # A (lazy) approximate 99% two-sided test:
+        # occurs with prob alpha~>=0.01 if unbiased
+        self.assertLess(z.abs().max().item(), 2.58)
+
+    def _test_gumbel_softmax_grad(self, device, dtype):
+        # "hard" and "not hard" should propagate same gradient.
+        logits_soft = torch.zeros(10, 10, dtype=dtype, device=device, requires_grad=True)
+        logits_hard = torch.zeros(10, 10, dtype=dtype, device=device, requires_grad=True)
+
+        seed = torch.random.get_rng_state()
+        y_soft = F.gumbel_softmax(logits_soft, hard=False)
+        torch.random.set_rng_state(seed)
+        y_hard = F.gumbel_softmax(logits_hard, hard=True)
+
+        y_soft.sum().backward()
+        y_hard.sum().backward()
+
+        # 2eps = 1x addition + 1x subtraction.
+        tol = 2 * torch.finfo(dtype).eps
+        self.assertAlmostEqual(logits_soft.grad, logits_hard.grad, delta=tol)
+
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    def test_gumbel_softmax(self, device, dtype):
+        self._test_gumbel_softmax_st_shapes(device, dtype, shape=[5], dim=0, count_expected=1)
+        self._test_gumbel_softmax_st_shapes(device, dtype, shape=[5], dim=-1, count_expected=1)
+        self._test_gumbel_softmax_st_shapes(device, dtype, shape=[5, 4], dim=1, count_expected=5)
+        self._test_gumbel_softmax_st_shapes(device, dtype, shape=[5, 4, 3], dim=1, count_expected=5 * 3)
+        self._test_gumbel_softmax_st_shapes(device, dtype, shape=[5, 4, 3], dim=-1, count_expected=5 * 4)
+        self._test_gumbel_softmax_straight_through(device, dtype)
+        self._test_gumbel_softmax_grad(device, dtype)
+
+    def _test_rnn_retain_variables(self, device, dtype):
+        rnns = [nn.LSTM(10, 20, num_layers=2).to(device, dtype),
+                nn.GRU(10, 20, num_layers=2).to(device, dtype),
+                nn.RNN(10, 20, num_layers=2).to(device, dtype)]
+        for rnn in rnns:
+            input = torch.randn(5, 6, 10, device=device, dtype=dtype, requires_grad=True)
+            output = rnn(input)
+            output[0].sum().backward(retain_graph=True)
+            grads = [input.grad.data.clone()] + [p.grad.data.clone() for p in rnn.parameters()]
+            for _ in range(4):
+                rnn.zero_grad()
+                input.grad.data.zero_()
+                output[0].sum().backward(retain_graph=True)
+                grads2 = [input.grad.data] + [p.grad.data for p in rnn.parameters()]
+                self.assertEqual(grads, grads2)
+
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.double)
+    def test_rnn_retain_variables(self, device, dtype):
+        self._test_rnn_retain_variables(device, dtype)
+
+        if self.device_type == 'cuda' and self.has_cudnn():
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_rnn_retain_variables(device, dtype)
+
+    @onlyCUDA
+    @skipCUDAIfCudnnVersionLessThan(7000)
+    def test_CTCLoss_cudnn(self, device):
+        target_lengths = [30, 25, 20]
+        input_lengths = [50, 50, 50]
+        targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device=device).log_softmax(2)
+        res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        expected = ctcloss_reference(log_probs, targets.cuda(), input_lengths, target_lengths).float()
+        with torch.backends.cudnn.flags(enabled=False):
+            res2 = torch.nn.functional.ctc_loss(log_probs, targets.cuda().long(), input_lengths, target_lengths)
+        self.assertEqual(res, expected)
+        self.assertEqual(res2, res)
+
+    @onlyCUDA
+    @skipCUDAIfNoCudnn
+    def test_contig_wrong_stride_cudnn(self, device):
+        # x has to have batch_size 1 to test contiguous checks
+        x = torch.randn(1, 16, 5, 5, device=device)
+        stride = list(x.stride())
+        stride[0] = 20
+        # change the stride in dimension 0. the tensor is still contiguous because size[0] is 1
+        x.set_(x.storage(), 0, x.size(), stride)
+        self.assertTrue(x.is_contiguous())
+        F.conv_transpose2d(x, torch.randn(16, 1, 1, 1, device=device))
+        F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
+
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
