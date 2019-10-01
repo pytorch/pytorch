@@ -90,7 +90,7 @@ namespace nn {
       } else {
         options = EmbeddingOptions(embeddings.size(0), embeddings.size(1));
       }
-      Embedding embedding = Embedding((*options)._weight(embeddings));
+      Embedding embedding((*options)._weight(embeddings));
       embedding->weight.set_requires_grad(!freeze);
       return embedding;
     }
@@ -189,7 +189,7 @@ namespace nn {
       } else {
         options = EmbeddingBagOptions(embeddings.size(0), embeddings.size(1));
       }
-      EmbeddingBag embeddingbag = EmbeddingBag((*options)._weight(embeddings));
+      EmbeddingBag embeddingbag((*options)._weight(embeddings));
       embeddingbag->weight.set_requires_grad(!freeze);
       return embeddingbag;
     }
