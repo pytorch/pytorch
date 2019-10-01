@@ -2123,13 +2123,13 @@ class TestCuda(TestCase):
     def test_sum_cpu_gpu_mismatch(self):
         x = torch.randn(20, dtype=torch.float32, device='cuda:0')
         y = torch.randn(1, dtype=torch.float32)
-        with self.assertRaisesRegex(RuntimeError,
-                                    'expected device cpu but got device cuda:0'):
+        with self.assertRaisesRegex(RuntimeError, "output with device cpu "
+                                    "doesn't match the desired device cuda:0"):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
         # makeing sure half to float promotion is also properly working.
         x = x.half()
-        with self.assertRaisesRegex(RuntimeError,
-                                    'expected dtype Float but got dtype Half'):
+        with self.assertRaisesRegex(RuntimeError, "output with device cpu "
+                                    "doesn't match the desired device cuda:0"):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
 
     @skipIfRocm
@@ -2471,52 +2471,6 @@ class TestCuda(TestCase):
         tensor = tensor.unsqueeze(1)
         self.assertEqual(tensor.var(0), 0.03125)
 
-    def test_digamma(self):
-        def test(use_double=False):
-            cpu_tensor = torch.randn(10, 10, 10)
-            gpu_tensor = cpu_tensor.cuda()
-            zeros = torch.zeros(10, 10, 10)
-            if (use_double):
-                cpu_tensor = cpu_tensor.double()
-                gpu_tensor = gpu_tensor.double()
-                zeros = zeros.double()
-            cpu_out = cpu_tensor.digamma()
-            gpu_out = gpu_tensor.digamma()
-            norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
-            self.assertEqual(norm_errors, zeros)
-
-        test(True)
-        test(False)
-
-        # Test float32 behavior near and at poles.
-        cpu_tensor = torch.tensor([-0.999999994, -1.999999994, -2.0000000111,
-                                  -100.99999994, -1931.99999994, 0.000000111,
-                                  -0.000000111, 0, -1, -2, -931])
-        expected_errors = torch.tensor([0, 0, 0, 0, 0, 0, 0, nan, nan, nan, nan])
-        gpu_tensor = cpu_tensor.cuda()
-        cpu_out = cpu_tensor.digamma()
-        gpu_out = gpu_tensor.digamma()
-        norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
-        self.assertEqual(norm_errors, expected_errors)
-
-    def test_polygamma(self):
-        def test(use_double=False):
-            cpu_tensor = torch.randn(10, 10, 10)
-            gpu_tensor = cpu_tensor.cuda()
-            zeros = torch.zeros(10, 10, 10)
-            if (use_double):
-                cpu_tensor = cpu_tensor.double()
-                gpu_tensor = gpu_tensor.double()
-                zeros = zeros.double()
-            for n in [0, 1]:
-                cpu_out = cpu_tensor.polygamma(n)
-                gpu_out = gpu_tensor.polygamma(n)
-                norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
-                self.assertEqual(norm_errors, zeros)
-
-        test(True)
-        test(False)
-
     def test_arange(self):
         for t in ['IntTensor', 'LongTensor', 'FloatTensor', 'DoubleTensor']:
             a = torch.cuda.__dict__[t]()
@@ -2524,21 +2478,6 @@ class TestCuda(TestCase):
             b = torch.__dict__[t]()
             torch.arange(0, 10, out=b)
             self.assertEqual(a, b.cuda())
-
-    def test_linspace(self):
-        a = torch.linspace(0, 10, 10, device='cuda')
-        b = torch.linspace(0, 10, 10)
-        self.assertEqual(a, b.cuda())
-
-    def test_logspace(self):
-        a = torch.logspace(1, 10, 10, device='cuda')
-        b = torch.logspace(1, 10, 10)
-        self.assertEqual(a, b.cuda())
-
-        # Check non-default base=2
-        a = torch.logspace(1, 10, 10, 2, device='cuda')
-        b = torch.logspace(1, 10, 10, 2)
-        self.assertEqual(a, b.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     @skipCUDANonDefaultStreamIf(True)
