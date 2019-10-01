@@ -121,6 +121,19 @@ static void printStrList(
   out << "]";
 }
 
+static void printTypeList(
+    std::ostream& out,
+    const std::vector<TypePtr>& items) {
+  out << "[";
+  int i = 0;
+  for (auto& item : items) {
+    if (i++ > 0)
+      out << ", ";
+    out << *item;
+  }
+  out << "]";
+}
+
 void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
   switch (kindOf(name)) {
     case AttributeKind::f:
@@ -174,6 +187,12 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       break;
     case AttributeKind::gs:
       out << "[<Graphs>]";
+      break;
+    case AttributeKind::ty:
+      out << *ty(name);
+      break;
+    case AttributeKind::tys:
+      printTypeList(out, tys(name));
       break;
   }
 }
