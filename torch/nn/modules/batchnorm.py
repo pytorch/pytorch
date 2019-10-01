@@ -33,18 +33,32 @@ class _BatchNorm(Module):
         if self.track_running_stats:
             self.register_buffer('running_mean', torch.zeros(num_features))
             self.register_buffer('running_var', torch.ones(num_features))
-            self.num_batches_tracked = 0
+            self._num_batches_tracked = 0
         else:
             self.register_parameter('running_mean', None)
             self.register_parameter('running_var', None)
-            self.num_batches_tracked = None
+            self._num_batches_tracked = None
         self.reset_parameters()
+
+    @property
+    def num_batches_tracked(self):
+        if self._num_batches_tracked is not None:
+            return torch.tensor(
+                self._num_batches_tracked,
+                device=self.running_mean.device,
+                dtype=torch.long)
+        else:
+            return None
+
+    @num_batches_tracked.setter
+    def num_batches_tracked(self, value):
+        self._num_batches_tracked = int(value)
 
     def reset_running_stats(self):
         if self.track_running_stats:
             self.running_mean.zero_()
             self.running_var.fill_(1)
-            self.num_batches_tracked = 0
+            self._num_batches_tracked = 0
 
     def reset_parameters(self):
         self.reset_running_stats()
@@ -68,10 +82,10 @@ class _BatchNorm(Module):
 
         if self.training and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
-            if self.num_batches_tracked is not None:
-                self.num_batches_tracked = self.num_batches_tracked + 1
+            if self._num_batches_tracked is not None:
+                self._num_batches_tracked = self._num_batches_tracked + 1
                 if self.momentum is None:  # use cumulative moving average
-                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
+                    exponential_average_factor = 1.0 / float(self._num_batches_tracked)
                 else:  # use exponential moving average
                     exponential_average_factor = self.momentum
 
@@ -85,11 +99,9 @@ class _BatchNorm(Module):
                'track_running_stats={track_running_stats}'.format(**self.__dict__)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        if self.num_batches_tracked is None:
-            destination[prefix + 'num_batches_tracked'] = self.num_batches_tracked
-        else:
+        if self._num_batches_tracked is not None:
             destination[prefix + 'num_batches_tracked'] = torch.tensor(
-                self.num_batches_tracked, device=self.running_mean.device, dtype=torch.long)
+                self._num_batches_tracked, device=self.running_mean.device, dtype=torch.long)
         super(_BatchNorm, self)._save_to_state_dict(
             destination, prefix, keep_vars)
 
@@ -105,17 +117,17 @@ class _BatchNorm(Module):
             if num_batches_tracked_key not in state_dict:
                 if version is not None and version >= 2:
                     missing_keys.append(num_batches_tracked_key)
-                self.num_batches_tracked = 0
+                self._num_batches_tracked = 0
             else:
                 _num_batches_tracked = state_dict[num_batches_tracked_key]
-                self.num_batches_tracked = int(state_dict[num_batches_tracked_key])
+                self._num_batches_tracked = int(_num_batches_tracked)
                 # We need to remove num_batches_tracked from state_dict to avoid
                 # hitting unexpected unexpected_keys later.
                 # Because `num_batches_tracked` is not stored as buffer or
                 # parameter any more
                 state_dict.pop(num_batches_tracked_key)
         else:
-            self.num_batches_tracked = None
+            self._num_batches_tracked = None
 
         super(_BatchNorm, self)._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
@@ -463,9 +475,9 @@ class SyncBatchNorm(_BatchNorm):
             exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
-            self.num_batches_tracked = self.num_batches_tracked + 1
+            self._num_batches_tracked = self._num_batches_tracked + 1
             if self.momentum is None:  # use cumulative moving average
-                exponential_average_factor = 1.0 / self.num_batches_tracked.item()
+                exponential_average_factor = 1.0 / self._num_batches_tracked.item()
             else:  # use exponential moving average
                 exponential_average_factor = self.momentum
 
