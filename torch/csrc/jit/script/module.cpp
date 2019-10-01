@@ -102,12 +102,20 @@ void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
 }
 
 void Module::_save_for_mobile(std::ostream& out, const ExtraFilesMap& extra_files) const {
+#ifndef C10_MOBILE
   ExportModule(*this, out, extra_files, true);
+#else
+  AT_ERROR("Saving module is not supported on mobile.");
+#endif
 }
 
 void Module::_save_for_mobile(const std::string& filename, const ExtraFilesMap& extra_files)
     const {
+#ifndef C10_MOBILE
   ExportModule(*this, filename, extra_files, true);
+#else
+  AT_ERROR("Saving module is not supported on mobile.");
+#endif
 }
 
 void module_state_to(

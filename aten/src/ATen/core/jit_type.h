@@ -1234,6 +1234,12 @@ struct getTypePtr_<at::Scalar> final {
   }
 };
 template <>
+struct getTypePtr_<at::Generator*> final {
+  static TypePtr call() {
+    return OptionalType::create(GeneratorType::get());
+  }
+};
+template <>
 struct getTypePtr_<std::string> final {
   static TypePtr call() {
     return StringType::get();
