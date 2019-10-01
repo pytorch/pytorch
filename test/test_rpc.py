@@ -4,13 +4,14 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import functools
 import sys
 import unittest
+from unittest import mock
 from os import getenv
 
 import torch
 import torch.distributed as dist
 from common_distributed import MultiProcessTestCase
 from common_utils import load_tests, run_tests
-from torch.distributed.rpc import RpcBackend
+from torch.distributed.rpc_api import RpcBackend
 import torch.distributed.rpc_backend_registry as rpc_backend_registry
 
 
