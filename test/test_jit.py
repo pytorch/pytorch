@@ -1128,7 +1128,7 @@ graph(%x : Tensor,
             def forward(self, x):
                 xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
                 wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
-                r = torch.nn.functional.linear(xq.dequantize(), wq.dequantize(),self.bias)
+                r = torch.nn.functional.linear(xq.dequantize(), wq.dequantize(), self.bias)
                 rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
                 return rq
         m = torch.jit.script(M())
@@ -1137,19 +1137,19 @@ graph(%x : Tensor,
                    .check("quantized::linear_unpack") \
                    .run(get_forward_graph(m._c))
 
-        conv2d_input_str = """
+        conv_input_str = """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
         %a_dequant = aten::dequantize(%a_quant)
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK: quantized::conv2d_prepack
-        # CHECK: quantized::conv2d_unpack
+        # CHECK: quantized::conv_prepack
+        # CHECK: quantized::conv_unpack
         %w_dequant = aten::dequantize(%w_quant)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         return (%r)"""
-        graph = parse_ir(conv2d_input_str)
+        graph = parse_ir(conv_input_str)
         torch._C._jit_pass_insert_prepack_unpack(graph)
-        FileCheck().run(conv2d_input_str, graph)
+        FileCheck().run(conv_input_str, graph)
 
     def test_quant_fusion(self):
         input_strs = [
@@ -19714,7 +19714,7 @@ class TestClassType(JitTestCase):
 
         # TODO - support compiling classes from strings in jit.CompilationUnit
         @torch.jit.script
-        class BinOps(object):
+        class MyClass(object):
             def __init__(self, x):
                 # type: (int) -> None
                 self.x = x
@@ -19787,49 +19787,57 @@ class TestClassType(JitTestCase):
                 # type: (int, int) -> None
                 self.x = val * idx
 
+            def __call__(self, val):
+                # type: (int) -> int
+                return self.x * val * 3
+
+
         def add():
-            return BinOps(4) + 3
+            return MyClass(4) + 3
         def sub():  # noqa: E306
-            return BinOps(4) - 3
+            return MyClass(4) - 3
         def mul():  # noqa: E306
-            return BinOps(4) * 3
+            return MyClass(4) * 3
         def pow():  # noqa: E306
-            return BinOps(4) ** 3
+            return MyClass(4) ** 3
         def truediv():  # noqa: E306
-            return BinOps(4) / 3
+            return MyClass(4) / 3
         def ne():  # noqa: E306
-            return BinOps(4) != 3
+            return MyClass(4) != 3
         def eq():  # noqa: E306
-            return BinOps(4) == 3
+            return MyClass(4) == 3
         def lt():  # noqa: E306
-            return BinOps(4) < 3
+            return MyClass(4) < 3
         def gt():  # noqa: E306
-            return BinOps(4) > 3
+            return MyClass(4) > 3
         def le():  # noqa: E306
-            return BinOps(4) <= 3
+            return MyClass(4) <= 3
         def ge():  # noqa: E306
-            return BinOps(4) >= 3
+            return MyClass(4) >= 3
         def _and():  # noqa: E306
-            return BinOps(4) & 3
+            return MyClass(4) & 3
         def _or():  # noqa: E306
-            return BinOps(4) | 3
+            return MyClass(4) | 3
         def _xor():  # noqa: E306
-            return BinOps(4) ^ 3
+            return MyClass(4) ^ 3
         def getitem():  # noqa: E306
-            return BinOps(4)[1]
+            return MyClass(4)[1]
         def setitem():  # noqa: E306
-            a = BinOps(4)
+            a = MyClass(4)
             a[1] = 5
             return a.x
+        def call():  # noqa: E306
+            a = MyClass(5)
+            return a(2)
 
-        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem, setitem]
+        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem, setitem, call]
 
         if not PY2:
             ops.append(truediv)
         for func in ops:
             self.checkScript(func, ())
 
-        with self.assertRaisesRegex(RuntimeError, "__add__ method"):
+        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute __add__. Did you forget to initialize it"):
             @torch.jit.script
             def test():
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
