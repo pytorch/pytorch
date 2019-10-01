@@ -194,6 +194,7 @@ namespace c10 {
   _(onnx, ConstantOfShape)           \
   _(onnx, Cast)                      \
   _(onnx, Mod)                       \
+  _(onnx, Range)                     \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \

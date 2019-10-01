@@ -117,3 +117,38 @@ def unique_dim(g, self, dim, sorted, return_inverse, return_counts):
 
 def round(g, self):
     return g.op("Round", self)
+
+
+def arange(g, *args):
+    def _get_arange_dtype(dtype):
+        dtype = sym_help._maybe_get_const(dtype, 'i')
+        if sym_help._is_value(dtype):
+            dtype = 4  # default to int64
+        return dtype
+
+    if len(args) == 5:
+        # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
+        dtype = _get_arange_dtype(args[1])
+        start_default = g.op("Constant", value_t=torch.tensor(0))
+        delta_default = g.op("Constant", value_t=torch.tensor(1, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+        arange_tensor = g.op("Range", start_default, args[0], delta_default)
+    elif len(args) == 6:
+        # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
+        dtype = _get_arange_dtype(args[2])
+        delta_default = g.op("Constant", value_t=torch.tensor(1, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+        arange_tensor = g.op("Range", args[0], args[1], delta_default)
+    elif len(args) == 7:
+        # aten::arange(Scalar start, Scalar end, Scalar step, ScalarType dtype, Layout, Device, bool pin_memory)
+        dtype = _get_arange_dtype(args[3])
+        step = g.op("Cast", args[2], to_i=sym_help.scalar_type_to_onnx[dtype])
+        arange_tensor = g.op("Range", args[0], args[1], step)
+    else:
+        raise NotImplementedError("Unknown aten::arange signature taking " + str(len(args)) + " arguments.")
+    return g.op("Cast", arange_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
+
+
+@parse_args('v', 'i')
+def _dim_arange(g, like, dim):
+    like_shape = g.op('Shape', like)
+    stop = g.op("Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
+    return arange(g, stop, 4, None, None, None)
