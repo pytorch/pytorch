@@ -625,6 +625,15 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::layout(Tensor a) -> int",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.layout());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "aten::cpu(Tensor(a) self) -> Tensor(a|b)",
          [](Stack& stack) {
            at::Tensor a;
