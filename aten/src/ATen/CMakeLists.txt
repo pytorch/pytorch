@@ -460,7 +460,9 @@ FOREACH(HEADER ${generated_h} ${cuda_generated_h})
   INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
 ENDFOREACH()
 
+message("AT_INSTALL_INCLUDE_DIR ${AT_INSTALL_INCLUDE_DIR}/ATen/core")
 FOREACH(HEADER ${core_generated_h})
+  message("core header install: ${HEADER}")
   INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/core)
 ENDFOREACH()
 
