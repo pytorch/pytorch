@@ -785,7 +785,7 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x: torch.round(x), x, opset_version=11)
 
     def test_det(self):
-        x = torch.randn(2, 3, 5, 5, requires_grad=True)
+        x = torch.randn(2, 3, 5, 5)
         self.assertONNX(lambda x: torch.det(x), x, opset_version=11)
 
 
