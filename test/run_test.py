@@ -72,6 +72,10 @@ if PY36:
 
 WINDOWS_BLACKLIST = [
     'distributed',
+    'rpc_fork',
+    'rpc_spawn',
+    'dist_autograd_fork',
+    'dist_autograd_spawn',
 ]
 
 ROCM_BLACKLIST = [
@@ -81,6 +85,10 @@ ROCM_BLACKLIST = [
     'distributed',
     'multiprocessing',
     'nccl',
+    'rpc_fork',
+    'rpc_spawn',
+    'dist_autograd_fork',
+    'dist_autograd_spawn',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {}
