@@ -67,9 +67,9 @@ void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::Compi
       TORCH_CHECK(ins_item.size() == 3,
                   "There should be three parts in an instruction.");
       OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
-      int N = ins_item[1].toInt();
-      int X = ins_item[2].toInt();
-      function->append_instruction(op_code, N, X);
+      int X = ins_item[1].toInt();
+      int N = ins_item[2].toInt();
+      function->append_instruction(op_code, X, N);
     }
 
     for (const auto& op : ops_list) {
@@ -79,6 +79,9 @@ void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::Compi
       function->append_operator(op_item[0].toString()->string(),
                            op_item[1].toString()->string());
     }
+
+    // vararg operators are stored in a separate table.
+    function->build_vararg_operator_table();
 
     auto named_consts = comps[2].toTuple()->elements();
     auto consts_name = named_consts[0].toString()->string();

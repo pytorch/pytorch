@@ -669,7 +669,14 @@ class ScriptModuleSerializer {
       const auto& func = method.function();
       torch::jit::Code code(func.graph());
       // Make a copy of opnames. Some of them may be changed for mobile later.
-      std::vector<c10::OperatorName> opnames = code.opname_table();
+      std::vector<c10::OperatorName> opnames;
+      for (size_t i = 0; i < code.instructions().size(); ++i) {
+        Instruction ins = code.instructions()[i];
+        if (ins.op == OP) {
+          auto node = code.instructions_source()[i];
+          opnames.emplace_back(node->schema().operator_name());
+        }
+      }
 
       // instructions
       std::vector<IValue> inss;

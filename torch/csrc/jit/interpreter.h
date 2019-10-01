@@ -46,7 +46,6 @@ struct TORCH_API Code {
   const std::vector<c10::IValue>& constant_table() const;
   const std::vector<Instruction>& instructions() const;
   const std::vector<Node*>& instructions_source() const;
-  const std::vector<c10::OperatorName>& opname_table() const;
   size_t register_size() const;
 
  private:

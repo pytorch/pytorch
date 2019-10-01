@@ -5,6 +5,7 @@
 namespace torch{
 namespace jit{
 char const * toString(OpCode op);
+std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
 InterpreterState::InterpreterState(std::shared_ptr<Code> code) : code_(code) {
   registers_.resize(code_->register_size_);
@@ -24,15 +25,15 @@ void listConstruct(Stack& stack, int num_inputs) {
 bool InterpreterState::run(Stack& stack) {
   size_t pc = 0;
   while (true) {
-    //    std::cout << "RUNNING " << pc << " " << instructions_[pc];
-    //    std::cout << std::endl;
-    //    for (auto val : stack) {
-    //      if (val.isTensor()) {
-    //        std::cout << val.toTensor().sizes() << std::endl;
-    //      } else {
-    //        std::cout << val << std::endl;
-    //      }
-    //    }
+//    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
+//    std::cout << std::endl;
+//    for (auto val : stack) {
+//      if (val.isTensor()) {
+//        std::cout << val.toTensor().sizes() << std::endl;
+//      } else {
+//        std::cout << val << std::endl;
+//      }
+//    }
     Instruction inst = code_->instructions_[pc];
     switch (inst.op) {
       case OP: {
@@ -40,27 +41,7 @@ bool InterpreterState::run(Stack& stack) {
         ++pc;
       } break;
       case OPN: {
-        auto opname = code_->op_names_[inst.X];
-        if (opname.name == "prim::ListConstruct") {
-          if (opname.overload_name == "int") {
-            listConstruct<int64_t>(stack, inst.N);
-          } else if (opname.overload_name == "float") {
-            listConstruct<double>(stack, inst.N);
-          } else if (opname.overload_name == "bool") {
-            listConstruct<bool>(stack, inst.N);
-          } else if (opname.overload_name == "tensor") {
-            const size_t stack_size = stack.size();
-            c10::List<at::Tensor> vals;
-            vals.reserve(inst.N);
-            for (size_t i = stack_size - inst.N; i < stack_size; ++i) {
-              vals.emplace_back(std::move(stack[i]).toTensor());
-            }
-            drop(stack, inst.N);
-            push(stack, std::move(vals));
-          } else {
-            AT_ERROR("Type of ListConstruct is not supported.");
-          }
-        }
+        code_->vararg_operators_[inst.X](inst.N, stack);
         ++pc;
       } break;
       case LOAD:

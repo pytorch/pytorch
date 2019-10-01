@@ -339,8 +339,6 @@ struct CodeImpl {
 
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
-  // opname_table_ has the same order as operator_table_.
-  std::vector<c10::OperatorName> opname_table_;
   std::vector<Function*> function_table_;
   std::vector<TypePtr> type_table_;
   int register_size_ = 0;
@@ -402,10 +400,6 @@ struct CodeImpl {
 
   const std::vector<Node*>& instructions_source() const {
     return instructions_source_;
-  }
-
-  const std::vector<c10::OperatorName>& opname_table() const {
-    return opname_table_;
   }
 
   void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
@@ -495,7 +489,6 @@ struct CodeImpl {
     emitLoadInputs(node->inputs());
     insertInstruction(OP, operator_table_.size());
     operator_table_.emplace_back(getOperation(node));
-    opname_table_.emplace_back(node->schema().operator_name());
   }
 
   void emitWait(Node* node) {
@@ -1141,10 +1134,6 @@ const std::vector<Instruction>& Code::instructions() const {
 
 const std::vector<Node*>& Code::instructions_source() const {
   return pImpl->instructions_source();
-}
-
-const std::vector<c10::OperatorName>& Code::opname_table() const {
-  return pImpl->opname_table();
 }
 
 size_t Code::register_size() const {
