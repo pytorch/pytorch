@@ -800,6 +800,19 @@ TEST_F(ModulesTest, L1Loss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, HingeEmbeddingLoss) {
+  HingeEmbeddingLoss loss(HingeEmbeddingLossOptions().margin(2));
+  auto input = torch::tensor({{2, 22, 4}, {20, 10, 0}}, torch::requires_grad());
+  auto target = torch::tensor({{2, 6, 4}, {1, 10, 0}}, torch::kFloat);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({10}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
@@ -968,6 +981,12 @@ TEST_F(ModulesTest, PrettyPrintEmbedding) {
   ASSERT_EQ(
       c10::str(Embedding(10, 2)),
       "torch::nn::Embedding(count=10, dimension=2)");
+}
+
+TEST_F(ModulesTest, PrettyPrintHingeEmbeddingLoss) {
+  ASSERT_EQ(
+      c10::str(HingeEmbeddingLoss(HingeEmbeddingLossOptions().margin(4))),
+      "torch::nn::HingeEmbeddingLoss(margin=4)");
 }
 
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
