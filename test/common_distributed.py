@@ -64,6 +64,18 @@ def requires_gloo():
         "c10d was not compiled with the Gloo backend",
     )
 
+def requires_nccl_version(version, msg):
+    if not c10d.is_nccl_available():
+        return unittest.skip(
+            "c10d was not compiled with the NCCL backend",
+        )
+    else:
+        return unittest.skipIf(torch.cuda.nccl.version() < version,
+            "Requires NCCL version greater than or equal to: {}, found: {}, reason: {}".format(
+                version,
+                torch.cuda.nccl.version(), msg
+            ),
+        )
 
 def requires_nccl():
     return unittest.skipUnless(

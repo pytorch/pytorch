@@ -1,3 +1,19 @@
+if(USE_C10D_NCCL)
+  if (MSVC)
+    set(LIBSHM_SUBDIR libshm_windows)
+  else()
+    set(LIBSHM_SUBDIR libshm)
+  endif()
+
+  set(LIBSHM_SRCDIR ${TORCH_SRC_DIR}/lib/${LIBSHM_SUBDIR})
+
+  add_library(nccl_utils SHARED ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
+  target_link_libraries(nccl_utils __caffe2_nccl shm)
+  target_include_directories(nccl_utils PUBLIC
+      ${CMAKE_BINARY_DIR}/caffe2/aten/src ${CMAKE_BINARY_DIR}/nccl/include
+      ${LIBSHM_SRCDIR})
+endif()
+
 if(USE_CUDA)
   cuda_add_library(c10d_cuda_test CUDATest.cu)
   target_link_libraries(c10d_cuda_test c10d)
@@ -23,7 +39,8 @@ if(USE_CUDA)
   endif()
   if(USE_C10D_NCCL)
     c10d_add_test(ProcessGroupNCCLTest.cpp c10d c10d_cuda_test)
-    c10d_add_test(ProcessGroupNCCLErrorsTest.cpp c10d c10d_cuda_test gtest_main)
+    c10d_add_test(ProcessGroupNCCLErrorsTest.cpp nccl_utils c10d c10d_cuda_test
+        gtest_main)
   endif()
 else()
   if(USE_C10D_GLOO)
