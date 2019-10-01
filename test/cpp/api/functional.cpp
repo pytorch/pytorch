@@ -80,6 +80,21 @@ TEST_F(FunctionalTest, PairwiseDistance) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+TEST_F(FunctionalTest, PDist) {
+  {
+    auto input = torch::tensor({{-1.0, -5.0, -1.0}, {2.0, 4.0, 6.0}});
+    auto output = F::pdist(input);
+    auto expected = torch::tensor({11.7898});
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    auto input = torch::tensor({{1.0, -1.0}, {1.0, 3.0}, {3.0, 3.0}});
+    auto output = F::pdist(input, 1.5);
+    auto expected = torch::tensor({4.0, 4.8945, 2.0});
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
 TEST_F(FunctionalTest, AdaptiveMaxPool1d) {
   auto x = torch::ones({1, 1, 5});
   auto y = F::adaptive_max_pool1d(x, AdaptiveMaxPool1dOptions(3));
@@ -142,4 +157,30 @@ TEST_F(FunctionalTest, HingeEmbeddingLoss) {
   auto expected = torch::tensor({10}, torch::kFloat);
 
   ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, MaxUnpool1d) {
+  auto x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
+  auto y = F::max_unpool1d(x, indices, MaxUnpool1dOptions(3));
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 9}));
+
+  x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
+  y = F::max_unpool1d(x, indices, MaxUnpool1dOptions(3), c10::IntArrayRef({1, 1, 9}));
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 9}));
+
+  x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
+  y = F::max_unpool1d(x, indices, MaxUnpool1dOptions(3).stride(2).padding(1));
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor({{{0, 2, 0, 4, 5}}}, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 5}));
 }
