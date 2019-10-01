@@ -28,8 +28,7 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerId& dst,
-    const std::string& pickledPythonUDF,
-    std::vector<torch::Tensor>& tensors);
+    const std::string& pickledPythonUDF);
 
 std::shared_ptr<RRef> pyRemoteBuiltin(
     RpcAgent& agent,
