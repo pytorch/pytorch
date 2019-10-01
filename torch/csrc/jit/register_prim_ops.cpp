@@ -264,7 +264,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "prim::BailOut(...) -> Tensor(a)",
-         [](const Node* /* node */) -> Operation {
+         [](const Node * /* node */) -> Operation {
            return [](Stack& /* stack */) {
              AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
              return 0;
@@ -273,7 +273,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "prim::BailoutTemplate() -> int",
-         [](const Node* /* node */) -> Operation {
+         [](const Node * /* node */) -> Operation {
            return [](Stack& stack) {
              // TODO: today, we put a single bailout template at the front to
              // carry the un-optimized graph for bailout nodes to use. Ideally
@@ -625,6 +625,15 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_quantized());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::layout(Tensor a) -> int",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.layout());
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -2529,9 +2538,9 @@ RegisterOperators reg2({
     // https://github.com/pytorch/pytorch/issues/24856
     // behavior have been fixed
     Operator(
-      "aten::append(str[](a!) self, str? el) -> str[](a!)",
-      listAppend<std::string>,
-      aliasAnalysisFromSchema()),
+        "aten::append(str[](a!) self, str? el) -> str[](a!)",
+        listAppend<std::string>,
+        aliasAnalysisFromSchema()),
 
 #undef CREATE_IMMUTABLE_LIST_OPS
 #undef CREATE_MUTABLE_LIST_OPS
@@ -2755,7 +2764,23 @@ RegisterOperators reg2({
 
     DEFINE_BINARY_OP(aten::add, a + b),
     DEFINE_BINARY_OP(aten::sub, a - b),
-    DEFINE_BINARY_OP(aten::mul, a * b),
+    DEFINE_BINARY_OP(aten::mul, a* b),
+
+    // int ** int produces a float, because negative exponents produce float
+    // results
+    DEFINE_GENERIC_OP(
+        aten::pow,
+        static_cast<double>(pow(a, b)),
+        static_cast<double>(pow(a, b)),
+        float,
+        float),
+    DEFINE_INT_FLOAT_OP(aten::pow, pow(a, b), float),
+    DEFINE_SCALAR_BINARY_OP(
+        aten::pow,
+        static_cast<double>(pow(a, b)),
+        static_cast<double>(pow(a, b)),
+        float),
+
     DEFINE_BINARY_OP(aten::pow, pow(a, b)),
     // min and max are in prim:: because there is a difference between
     // the python builtin 'min' and 'torch.min'
@@ -2960,7 +2985,7 @@ RegisterOperators reg2({
     DEFINE_COMPARISON_OP(aten::gt, a > b),
     DEFINE_COMPARISON_OP(aten::le, a <= b),
     DEFINE_COMPARISON_OP(aten::ge, a >= b),
-    DEFINE_BOOL_OP(aten::__and__, a && b),
+    DEFINE_BOOL_OP(aten::__and__, a&& b),
     DEFINE_BOOL_OP(aten::__or__, a || b),
     DEFINE_BOOL_OP(aten::__xor__, a != b),
 
