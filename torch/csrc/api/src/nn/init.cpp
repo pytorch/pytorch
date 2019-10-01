@@ -55,11 +55,11 @@ double calculate_kaiming_std(
 
 double calculate_gain(Nonlinearity nonlinearity, double param) {
   if (nonlinearity == Nonlinearity::Tanh) {
-    return 5.0 / 3.0;
+    return 5.0 / 3.0; // NOLINT(cppcoreguidelines-avoid-magic-numbers)
   } else if (nonlinearity == Nonlinearity::ReLU) {
-    return std::sqrt(2.0);
+    return std::sqrt(2.0); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
   } else if (nonlinearity == Nonlinearity::LeakyReLU) {
-    return std::sqrt(2.0 / (1 + pow(param, 2)));
+    return std::sqrt(2.0 / (1 + pow(param, 2))); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
   }
 
   return 1.0;
