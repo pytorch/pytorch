@@ -13123,7 +13123,7 @@ class TestDevicePrecision(TestCase):
         do_test('cpu', devices[0])
         do_test(devices[0], 'cpu')
 
-        if len(devices) > 0:
+        if len(devices) > 1:
             do_test(devices[0], devices[1])
 
     @dtypes(torch.float, torch.double)
