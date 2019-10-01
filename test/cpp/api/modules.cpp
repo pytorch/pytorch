@@ -800,12 +800,12 @@ TEST_F(ModulesTest, L1Loss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
-TEST_F(ModulesTest, from_pretrained_Embedding) {
-  auto weight = torch::tensor({{1., 2.3, 3.}, {4., 5.1, 6.3}});
-  Embedding embedding = torch::nn::Embedding::from_pretrained(weight);
-  auto input = torch::tensor({1}, torch::kLong);
-  ASSERT_TRUE(torch::allclose(embedding(input), torch::tensor({4.0000, 5.1000, 6.3000})));
-}
+// TEST_F(ModulesTest, from_pretrained_Embedding) {
+//   auto weight = torch::tensor({{1., 2.3, 3.}, {4., 5.1, 6.3}});
+//   Embedding embedding = torch::nn::Embedding::from_pretrained(weight);
+//   auto input = torch::tensor({1}, torch::kLong);
+//   ASSERT_TRUE(torch::allclose(embedding(input), torch::tensor({4.0000, 5.1000, 6.3000})));
+// }
 
 // TEST_F(ModulesTest, from_pretrained_EmbeddingBag) {
 //   auto weight = torch::tensor({{1., 2.3, 3.}, {4., 5.1, 6.3}});

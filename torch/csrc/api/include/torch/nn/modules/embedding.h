@@ -83,7 +83,7 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
 class TORCH_API Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
 public:
     using torch::nn::ModuleHolder<EmbeddingImpl>::ModuleHolder;
-    static Embedding from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingOptions> options = c10::nullopt, bool freeze = true);
+    // static Embedding from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingOptions> options = c10::nullopt, bool freeze = true);
 };
 
 // class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl> {
