@@ -80,6 +80,21 @@ TEST_F(FunctionalTest, PairwiseDistance) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+TEST_F(FunctionalTest, PDist) {
+  {
+    auto input = torch::tensor({{-1.0, -5.0, -1.0}, {2.0, 4.0, 6.0}});
+    auto output = F::pdist(input);
+    auto expected = torch::tensor({11.7898});
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    auto input = torch::tensor({{1.0, -1.0}, {1.0, 3.0}, {3.0, 3.0}});
+    auto output = F::pdist(input, 1.5);
+    auto expected = torch::tensor({4.0, 4.8945, 2.0});
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
 TEST_F(FunctionalTest, AdaptiveMaxPool1d) {
   auto x = torch::ones({1, 1, 5});
   auto y = F::adaptive_max_pool1d(x, AdaptiveMaxPool1dOptions(3));
@@ -132,4 +147,14 @@ TEST_F(FunctionalTest, AdaptiveAvgPool3d) {
   ASSERT_EQ(y.ndimension(), 4);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 3, 3, 3})));
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 3, 3}));
+}
+
+TEST_F(FunctionalTest, HingeEmbeddingLoss) {
+  auto input = torch::tensor({{2, 22, 4}, {20, 10, 0}}, torch::kFloat);
+  auto target = torch::tensor({{2, 6, 4}, {1, 10, 0}}, torch::kFloat);
+  auto output = F::hinge_embedding_loss(
+      input, target, HingeEmbeddingLossOptions().margin(2));
+  auto expected = torch::tensor({10}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
 }
