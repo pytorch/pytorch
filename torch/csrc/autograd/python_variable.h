@@ -6,6 +6,7 @@
 
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/THP_export.h>
+#include <torch/csrc/utils/python_strings.h>
 
 // Python object that backs torch.autograd.Variable
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -74,7 +75,7 @@ static PyObject * PyObject_FastGetAttrString(PyObject *obj, char *name)
     }
     /* Attribute referenced by (PyObject *)name */
     else if (tp->tp_getattro != NULL) {
-        PyObject *w = PyUnicode_InternFromString(name);
+        PyObject *w = THPUtils_internString(name);
         if (w == NULL) {
             return (PyObject *)NULL;
         }
@@ -90,38 +91,39 @@ static PyObject * PyObject_FastGetAttrString(PyObject *obj, char *name)
 // Makes sure that we don't check for __torch_function__ on basic Python types
 static bool _is_basic_python_type(PyTypeObject *tp)
 {
-    return (
-        /* Basic number types */
-        tp == &PyBool_Type ||
+  return (
+    /* Basic number types */
+    tp == &PyBool_Type ||
 
-        tp == &PyLong_Type ||
-        tp == &PyFloat_Type ||
-        tp == &PyComplex_Type ||
+    tp == &PyLong_Type ||
+    tp == &PyFloat_Type ||
+    tp == &PyComplex_Type ||
 
-        /* Basic sequence types */
-        tp == &PyList_Type ||
-        tp == &PyTuple_Type ||
-        tp == &PyDict_Type ||
-        tp == &PySet_Type ||
-        tp == &PyFrozenSet_Type ||
-        tp == &PyUnicode_Type ||
-        tp == &PyBytes_Type ||
-/*#if !defined(NPY_PY3K)
-        tp == &PyString_Type ||
-#endif  DISCUSS*/
+    /* Basic sequence types */
+    tp == &PyList_Type ||
+    tp == &PyTuple_Type ||
+    tp == &PyDict_Type ||
+    tp == &PySet_Type ||
+    tp == &PyFrozenSet_Type ||
+    tp == &PyUnicode_Type ||
+    tp == &PyBytes_Type ||
 
-        /* other builtins */
-        tp == &PySlice_Type ||
-        tp == Py_TYPE(Py_None) ||
-        tp == Py_TYPE(Py_Ellipsis) ||
-        tp == Py_TYPE(Py_NotImplemented) ||
+#if PY_MAJOR_VERSION == 2
+    tp == &PyString_Type ||
+#endif
 
-        PyModule_Check(tp) ||
-        /* TODO: ndarray, but we can't see PyArray_Type here */
+    /* other builtins */
+    tp == &PySlice_Type ||
+    tp == Py_TYPE(Py_None) ||
+    tp == Py_TYPE(Py_Ellipsis) ||
+    tp == Py_TYPE(Py_NotImplemented) ||
 
-        /* sentinel to swallow trailing || */
-        false
-    );
+    PyModule_Check(tp) ||
+    /* TODO: ndarray, but we can't see PyArray_Type here */
+
+    /* sentinel to swallow trailing || */
+    false
+  );
 }
 
 /*
