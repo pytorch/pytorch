@@ -467,6 +467,89 @@ TEST_F(ModulesTest, AdaptiveMaxPool3dReturnIndices) {
   ASSERT_EQ(indices.sizes(), torch::IntArrayRef({1, 3, 3, 3}));
 }
 
+TEST_F(ModulesTest, AdaptiveAvgPool1d) {
+  AdaptiveAvgPool1d model(3);
+  auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor({{{1.5, 3.0, 4.5}}}, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 3}));
+}
+
+TEST_F(ModulesTest, AdaptiveAvgPool2dEven) {
+  AdaptiveAvgPool2d model(3);
+  auto x = torch::arange(0, 50);
+  x.resize_({2, 5, 5}).set_requires_grad(true);
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor({
+    {{ 3.0,  4.5,  6.0},
+     {10.5, 12.0, 13.5},
+     {18.0, 19.5, 21.0}},
+    {{28.0, 29.5, 31.0},
+     {35.5, 37.0, 38.5},
+     {43.0, 44.5, 46.0}},
+  }, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 3}));
+}
+
+TEST_F(ModulesTest, AdaptiveAvgPool2dUneven) {
+  AdaptiveAvgPool2d model(AdaptiveAvgPool2dOptions({3, 2}));
+  auto x = torch::arange(0, 40);
+  x.resize_({2, 5, 4}).set_requires_grad(true);
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor({
+    {{2.5, 4.5},
+     {8.5, 10.5},
+     {14.5, 16.5}},
+    {{22.5, 24.5},
+     {28.5, 30.5},
+     {34.5, 36.5}},
+  }, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 2}));
+}
+
+TEST_F(ModulesTest, AdaptiveAvgPool3d) {
+  AdaptiveAvgPool3d model(3);
+  auto x = torch::arange(0, 64);
+  x.resize_({1, 4, 4, 4}).set_requires_grad(true);
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor({
+    {{10.5, 11.5, 12.5},
+     {14.5, 15.5, 16.5},
+     {18.5, 19.5, 20.5}},
+    {{26.5, 27.5, 28.5},
+     {30.5, 31.5, 32.5},
+     {34.5, 35.5, 36.5}},
+    {{42.5, 43.5, 44.5},
+     {46.5, 47.5, 48.5},
+     {50.5, 51.5, 52.5}},
+  }, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 3, 3, 3}));
+}
+
 TEST_F(ModulesTest, Linear) {
   Linear model(5, 2);
   auto x = torch::randn({10, 5}, torch::requires_grad());
@@ -717,6 +800,19 @@ TEST_F(ModulesTest, L1Loss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, HingeEmbeddingLoss) {
+  HingeEmbeddingLoss loss(HingeEmbeddingLossOptions().margin(2));
+  auto input = torch::tensor({{2, 22, 4}, {20, 10, 0}}, torch::requires_grad());
+  auto target = torch::tensor({{2, 6, 4}, {1, 10, 0}}, torch::kFloat);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({10}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
@@ -843,6 +939,26 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
       "torch::nn::AdaptiveMaxPool3d(output_size=[5, 6, 7])");
 }
 
+TEST_F(ModulesTest, PrettyPrintAdaptiveAvgPool) {
+  ASSERT_EQ(
+      c10::str(AdaptiveAvgPool1d(5)),
+      "torch::nn::AdaptiveAvgPool1d(output_size=5)");
+
+  ASSERT_EQ(
+      c10::str(AdaptiveAvgPool2d(5)),
+      "torch::nn::AdaptiveAvgPool2d(output_size=[5, 5])");
+  ASSERT_EQ(
+      c10::str(AdaptiveAvgPool2d(torch::IntArrayRef{5, 6})),
+      "torch::nn::AdaptiveAvgPool2d(output_size=[5, 6])");
+
+  ASSERT_EQ(
+      c10::str(AdaptiveAvgPool3d(5)),
+      "torch::nn::AdaptiveAvgPool3d(output_size=[5, 5, 5])");
+  ASSERT_EQ(
+      c10::str(AdaptiveAvgPool3d(torch::IntArrayRef{5, 6, 7})),
+      "torch::nn::AdaptiveAvgPool3d(output_size=[5, 6, 7])");
+}
+
 TEST_F(ModulesTest, PrettyPrintDropout) {
   ASSERT_EQ(c10::str(Dropout(0.5)), "torch::nn::Dropout(rate=0.5)");
   ASSERT_EQ(
@@ -865,6 +981,12 @@ TEST_F(ModulesTest, PrettyPrintEmbedding) {
   ASSERT_EQ(
       c10::str(Embedding(10, 2)),
       "torch::nn::Embedding(count=10, dimension=2)");
+}
+
+TEST_F(ModulesTest, PrettyPrintHingeEmbeddingLoss) {
+  ASSERT_EQ(
+      c10::str(HingeEmbeddingLoss(HingeEmbeddingLossOptions().margin(4))),
+      "torch::nn::HingeEmbeddingLoss(margin=4)");
 }
 
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
