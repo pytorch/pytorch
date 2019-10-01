@@ -724,6 +724,9 @@ class TestCase(expecttest.TestCase):
                     if (a.device.type == 'cpu' and (a.dtype == torch.float16 or a.dtype == torch.bfloat16)):
                         # CPU half and bfloat16 tensors don't have the methods we need below
                         a = a.to(torch.float32)
+                    if (a.device.type == 'cuda' and a.dtype == torch.bfloat16):
+                        # CUDA bfloat16 tensors don't have the methods we need below
+                        a = a.to(torch.float32)
                     b = b.to(a)
 
                     if (a.dtype == torch.bool) != (b.dtype == torch.bool):
