@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import sys
 import unittest
+from os import getenv
 
 import torch
 import torch.distributed as dist
@@ -15,7 +16,6 @@ if not dist.is_available():
 from torch.distributed.rpc import RpcBackend
 from common_distributed import MultiProcessTestCase
 from common_utils import load_tests, run_tests
-from os import getenv
 
 
 BACKEND = getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP)
