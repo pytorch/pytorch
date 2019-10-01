@@ -322,7 +322,7 @@ def iterate_types():
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    core_files = ['TensorBody.h', 'TensorMethods.h']
+    core_files = ['TensorBody.h', 'TensorMethods.h', 'OpsAlreadyMovedToC10.cpp']
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeDefault.cpp', 'TypeDefault.h',
