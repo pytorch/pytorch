@@ -102,11 +102,11 @@ static void launch_kernel(int64_t N, const func_t& f) {
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template <typename traits, typename func_t, typename index_t, size_t... I>
+template <typename traits, typename func_t, typename index_t, size_t... INDEX>
 C10_HOST_DEVICE typename traits::result_type
 invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i,
-            c10::guts::index_sequence<I...>) {
-  return f(*(typename traits::template arg<I>::type*)(data[I] + i * strides[I])...);
+            c10::guts::index_sequence<INDEX...>) {
+  return f(*(typename traits::template arg<INDEX>::type*)(data[INDEX] + i * strides[INDEX])...);
 }
 
 template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
