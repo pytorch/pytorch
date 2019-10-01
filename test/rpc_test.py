@@ -14,9 +14,7 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.distributed.rpc import RpcBackend
-from common_distributed import MultiProcessTestCase
-from common_utils import load_tests, run_tests
-
+from common_utils import load_tests
 
 BACKEND = getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP)
 RPC_INIT_URL = getenv("RPC_INIT_URL", "")
@@ -82,7 +80,7 @@ def _wrap_with_rpc(func):
     """
 
     def wrapper(self):
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
         )
@@ -102,7 +100,7 @@ def _wrap_with_rpc(func):
     sys.version_info < (3, 0),
     "Pytorch distributed rpc package " "does not support python2",
 )
-class RpcTest(MultiProcessTestCase):
+class RpcTest(object):
     @property
     def world_size(self):
         return 4
@@ -140,7 +138,7 @@ class RpcTest(MultiProcessTestCase):
         "PROCESS_GROUP rpc backend specific test, skip"
     )
     def test_duplicate_name(self):
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
         )
@@ -154,7 +152,7 @@ class RpcTest(MultiProcessTestCase):
         dist.join_rpc()
 
     def test_reinit(self):
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(backend="gloo", rank=self.rank,
                                 world_size=self.world_size, store=store)
         dist.init_model_parallel(self_name='worker{}'.format(self.rank),
@@ -179,7 +177,7 @@ class RpcTest(MultiProcessTestCase):
 
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     def test_invalid_names(self):
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
         )
@@ -462,7 +460,3 @@ class RpcTest(MultiProcessTestCase):
 
         for i in range(m):
             self.assertEqual(rrefs[i].to_here(), expected[i])
-
-
-if __name__ == "__main__":
-    run_tests()
