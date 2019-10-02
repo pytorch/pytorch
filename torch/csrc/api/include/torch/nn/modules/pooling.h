@@ -379,5 +379,23 @@ class TORCH_API MaxUnpool2dImpl : public MaxUnpoolImpl<2, MaxUnpool2dImpl> {
 /// module storage semantics.
 TORCH_MODULE(MaxUnpool2d);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MaxUnpool3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies maxunpool over a 3-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.MaxUnpool3d to learn
+/// about the exact behavior of this module.
+class TORCH_API MaxUnpool3dImpl : public MaxUnpoolImpl<3, MaxUnpool3dImpl> {
+ public:
+  using MaxUnpoolImpl<3, MaxUnpool3dImpl>::MaxUnpoolImpl;
+  Tensor forward(const Tensor& input, const Tensor& indices,
+                 const c10::optional<IntArrayRef>& output_size = c10::nullopt);
+};
+
+/// A `ModuleHolder` subclass for `MaxUnpool3dImpl`.
+/// See the documentation for `MaxUnpool3dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(MaxUnpool3d);
+
 } // namespace nn
 } // namespace torch

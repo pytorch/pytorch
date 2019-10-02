@@ -188,8 +188,14 @@ Tensor MaxUnpool2dImpl::forward(const Tensor& input, const Tensor& indices,
   return F::max_unpool2d(input, indices, options, output_size);
 }
 
+Tensor MaxUnpool3dImpl::forward(const Tensor& input, const Tensor& indices,
+    const c10::optional<IntArrayRef>& output_size) {
+  return F::max_unpool3d(input, indices, options, output_size);
+}
+
 template class MaxUnpoolImpl<1, MaxUnpool1dImpl>;
 template class MaxUnpoolImpl<2, MaxUnpool2dImpl>;
+template class MaxUnpoolImpl<3, MaxUnpool3dImpl>;
 
 } // namespace nn
 } // namespace torch
