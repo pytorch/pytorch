@@ -15,8 +15,7 @@ from .default_mappings import (DEFAULT_DYNAMIC_MODULE_MAPPING,
 from .stubs import DeQuantStub, QuantWrapper
 from .QConfig import default_dynamic_qconfig, float16_dynamic_qconfig
 
-def _propagate_qconfig_helper(module, qconfig_dict,
-                              white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST,
+def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
                               qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig_`
 
@@ -34,8 +33,10 @@ def _propagate_qconfig_helper(module, qconfig_dict,
     Return:
         None, module is modified inplace with qconfig attached
     """
-
     # TODO: Add test
+    if white_list is None:
+        white_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
+
     module_qconfig = qconfig_dict.get(type(module), qconfig_parent)
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
     module_qconfig = getattr(module, 'qconfig', module_qconfig)
@@ -150,7 +151,7 @@ def prepare(model, qconfig_dict=None, inplace=False):
     add_observer_(model)
     return model
 
-def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING, inplace=False):
+def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     r"""Converts a float model to quantized model.
 
     First it will prepare the model for calibration or training, then it calls
@@ -169,7 +170,8 @@ def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING, inplace=Fa
     Return:
         Quantized model.
     """
-
+    if mapping is None:
+        mapping = DEFAULT_MODULE_MAPPING
     if not inplace:
         model = copy.deepcopy(model)
     model.eval()
@@ -179,7 +181,7 @@ def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING, inplace=Fa
     return model
 
 def quantize_dynamic(model, qconfig_dict=None, dtype=torch.qint8,
-                     mapping=DEFAULT_DYNAMIC_MODULE_MAPPING, inplace=False):
+                     mapping=None, inplace=False):
     r"""Converts a float model to dynamic (i.e. weights-only) quantized model.
 
     Replaces specified modules with dynamic weight-only quantized versions and output the quantized model.
@@ -216,7 +218,8 @@ def quantize_dynamic(model, qconfig_dict=None, dtype=torch.qint8,
         else:
             raise ValueError(
                 "Don't know how to quantize with default settings for {}. Provide full qconfig please".format(dtype))
-
+    if mapping is None:
+        mapping = DEFAULT_DYNAMIC_MODULE_MAPPING
     if not inplace:
         model = copy.deepcopy(model)
     model.eval()
@@ -249,7 +252,7 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
     convert(model, inplace=True)
     return model
 
-def convert(module, mapping=DEFAULT_MODULE_MAPPING, inplace=False):
+def convert(module, mapping=None, inplace=False):
     r"""Converts the float module with observers (where we can get quantization
     parameters) to a quantized module.
     Args:
@@ -258,6 +261,8 @@ def convert(module, mapping=DEFAULT_MODULE_MAPPING, inplace=False):
            module type, can be overwrritten to allow swapping user defined Modules
         inplace: carry out model transformations in-place, the original module is mutated
     """
+    if mapping is None:
+        mapping = DEFAULT_MODULE_MAPPING
     if not inplace:
         module = copy.deepcopy(module)
     reassign = {}
