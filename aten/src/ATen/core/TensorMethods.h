@@ -1925,6 +1925,9 @@ inline Tensor Tensor::mul(const Tensor & other) const {
         case Backend::CPU:
             return CPUType::mul(const_cast<Tensor&>(*this), other);
             break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::mul(const_cast<Tensor&>(*this), other);
+            break;
         case Backend::SparseCPU:
             return SparseCPUType::mul(const_cast<Tensor&>(*this), other);
             break;
@@ -1959,7 +1962,16 @@ inline Tensor & Tensor::mul_(const Tensor & other) const {
 inline Tensor Tensor::mul(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::mul(const_cast<Tensor&>(*this), other);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::mul(const_cast<Tensor&>(*this), other);
+            break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::mul(const_cast<Tensor&>(*this), other);
+            break;
+        default:
+            AT_ERROR("mul not implemented for ", at::toString(type_set()));
+    }
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::mul", "Scalar"}).value();
     return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor &, Scalar>(
@@ -1974,6 +1986,22 @@ inline Tensor & Tensor::mul_(Scalar other) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::mul_", "Scalar"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, Scalar>(
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), other);
+#endif
+}
+inline Tensor Tensor::mul_relu(const Tensor & other) const {
+#ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::mul_relu(const_cast<Tensor&>(*this), other);
+            break;
+        default:
+            AT_ERROR("mul_relu not implemented for ", at::toString(type_set()));
+    }
+#else
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::mul_relu", "Tensor"}).value();
+    return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor &, const Tensor &>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this, other)), const_cast<Tensor&>(*this), other);
 #endif
 }
 inline Tensor Tensor::mv(const Tensor & vec) const {

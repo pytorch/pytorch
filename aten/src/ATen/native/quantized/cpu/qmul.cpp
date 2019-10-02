@@ -173,27 +173,48 @@ static auto registry =
             "-> Tensor out",
             c10::RegisterOperators::options()
                 .kernel<QMulOut</*ReLUFused=*/true>>(
-                    TensorTypeId::QuantizedCPUTensorId))
-
-        .op("quantized::mul_scalar(Tensor qa, Scalar b)"
-            "-> Tensor qc",
-            c10::RegisterOperators::options()
-                .kernel<QMulScalar</*ReLUFused=*/false>>(
-                    TensorTypeId::QuantizedCPUTensorId))
-        .op("quantized::mul_scalar_relu(Tensor qa, Scalar b)"
-            "-> Tensor qc",
-            c10::RegisterOperators::options()
-                .kernel<QMulScalar</*ReLUFused=*/true>>(
-                    TensorTypeId::QuantizedCPUTensorId))
-        .op("quantized::mul_scalar_out(Tensor qa, Scalar b, Tensor out)"
-            "-> Tensor out",
-            c10::RegisterOperators::options()
-                .kernel<QMulScalarOut</*ReLUFused=*/false>>(
-                    TensorTypeId::QuantizedCPUTensorId))
-        .op("quantized::mul_scalar_relu_out(Tensor qa, Scalar b, Tensor out)"
-            "-> Tensor out",
-            c10::RegisterOperators::options()
-                .kernel<QMulScalarOut</*ReLUFused=*/true>>(
                     TensorTypeId::QuantizedCPUTensorId));
 }  // namespace
+
+constexpr const char *kTensorTensorError = "torch.add is not supported when adding two"
+" quantized tensors. Please use torch.nn.quantized.modules.FloatFunctional";
+
+// ATen bindings for mul
+
+Tensor & quantized_mul_out(Tensor & out, const Tensor & self, const Tensor & other) {
+  TORCH_CHECK(other.sizes().size() == 0, kTensorTensorError);
+  _mul_scalar_out(out, self, other.item());
+  return out;
+}
+
+Tensor quantized_mul(const Tensor & self, Scalar other) {
+  Tensor retval = at::empty_like(self);
+  _mul_scalar_out(retval, self, other);
+  return retval;
+}
+
+Tensor quantized_mul(const Tensor & self, const Tensor & other) {
+  TORCH_CHECK(other.sizes().size() == 0, kTensorTensorError);
+  return quantized_mul(self, other.item());
+}
+
+// ATen bindings for MulReLU
+
+Tensor & quantized_mul_relu_out(Tensor & out, const Tensor & self, const Tensor & other) {
+  TORCH_CHECK(other.sizes().size() == 0, kTensorTensorError);
+  _mul_scalar_out</*ReLUFused=*/true>(out, self, other.item());
+  return out;
+}
+
+Tensor quantized_mul_relu(const Tensor & self, Scalar other) {
+  Tensor retval = at::empty_like(self);
+  _mul_scalar_out</*ReLUFused=*/true>(retval, self, other);
+  return retval;
+}
+
+Tensor quantized_mul_relu(const Tensor & self, const Tensor & other) {
+  TORCH_CHECK(other.sizes().size() == 0, kTensorTensorError);
+  return quantized_mul_relu(self, other.item());
+}
+
 }}  // namespace at::native

@@ -148,7 +148,7 @@ class QFunctional(torch.nn.Module):
     r"""Operation equivalent to ``torch.ops.quantized.mul(Tensor, float)``"""
     def mul_scalar(self, x, y):
         # type: (Tensor, float) -> Tensor
-        return ops.quantized.mul_scalar(x, y)
+        return x * y
 
     r"""Operation equivalent to ``torch.ops.quantized.cat``"""
     def cat(self, x, dim=0):

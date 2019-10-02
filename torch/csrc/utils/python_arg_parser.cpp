@@ -73,7 +73,7 @@ static bool should_allow_numbers_as_tensors(const std::string& name) {
   static std::unordered_set<std::string> allowed = {
     "add", "add_", "add_out", "add_relu",
     "div", "div_", "div_out",
-    "mul", "mul_", "mul_out",
+    "mul", "mul_", "mul_out", "mul_relu",
     "sub", "sub_", "sub_out",
   };
   return allowed.find(name) != allowed.end();
