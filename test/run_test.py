@@ -16,6 +16,7 @@ import torch._six
 from torch.utils import cpp_extension
 from common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
+PY33 = sys.version_info >= (3, 3)
 PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
@@ -64,12 +65,17 @@ TESTS = [
     'function_schema',
 ]
 
+# skip < 3.3 because mock is added in 3.3 and is used in rpc_fork and rpc_spawn
+if PY33:
+    TESTS.extend([
+        'rpc_fork',
+        'rpc_spawn',
+    ])
+
 # skip < 3.6 b/c fstrings added in 3.6
 if PY36:
     TESTS.extend([
         'jit_py3',
-        'rpc_fork',
-        'rpc_spawn',
     ])
 
 WINDOWS_BLACKLIST = [

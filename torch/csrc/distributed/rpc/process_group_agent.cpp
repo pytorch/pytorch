@@ -157,6 +157,12 @@ void ProcessGroupAgent::join() {
       SendWork(workerIds_[dst], Message({}, {}, MessageType::SHUTDOWN)));
   threadPool_.waitWorkComplete();
   listenerThread_.join();
+  // explicitly clean up python objects in PythonRpcHandler before destructing
+  // ProcessGroupAgent. Otherwise, in Python 3.5, when python program exits,
+  // the python objects in PythonRpcHandler could be cleaned up before
+  // destructing ProcessGroupAgent, then ProcessGroupAgent destructor will
+  // dec_ref deallocated python objects and crash.
+  PythonRpcHandler::getInstance().cleanUp();
 }
 
 void ProcessGroupAgent::sync() {

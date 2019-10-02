@@ -23,6 +23,14 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // Returned python UDF result is pickled binary string, so run python
   // function to unpickle the python UDF result and return py::object to user
   py::object loadPythonUDFResult(const Message& message);
+  // Provide an interface to explicitly dec_ref runUDFFunction_ and
+  // loadResultFunction_ before destructing PythonRpcHandler
+  // In python 3.5, somehow when python program exits, before destructing
+  // PythonRpcHandler, the python objects are cleaned up, then PythonRpcHandler
+  // destructor will try to dec_ref deallocated objects and thus crashed
+  // The solution is to explicitly clean up the python objects in
+  // RpcAgent.join() before exiting program
+  void cleanUp();
 
  private:
   PythonRpcHandler();
