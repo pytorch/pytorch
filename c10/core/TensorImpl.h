@@ -9,6 +9,7 @@
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/TensorTypeSet.h>
+#include <c10/core/impl/LocalTensorTypeSet.h>
 #include <c10/core/CopyBytes.h>
 
 #include <c10/util/Exception.h>
@@ -136,11 +137,6 @@ struct C10_API AutogradMetaInterface {
   virtual at::Tensor& grad() = 0;
   virtual const at::Tensor& grad() const = 0;
   virtual ~AutogradMetaInterface();
-};
-
-struct C10_API NonVariableTypeMode {
-  static bool is_enabled();
-  static void set_enabled(bool enabled);
 };
 
 struct C10_API NamedTensorMetaInterface {
@@ -808,7 +804,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
    */
   bool is_variable() const {
-    return autograd_meta_ != nullptr && !at::NonVariableTypeMode::is_enabled();
+    return autograd_meta_ != nullptr && !impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
   }
 
   /**

@@ -41,25 +41,10 @@ static int64_t override_call_count = 0;
 
 // Mode implementation
 
-template <bool enabled>
-struct SetGenericMode {
-  bool mode_;
-  SetGenericMode()
-    : mode_(c10::impl::TESTING_ONLY_tls_generic_mode_is_enabled()) {
-    c10::impl::TESTING_ONLY_tls_generic_mode_set_enabled(enabled);
-  }
-  ~SetGenericMode() {
-    c10::impl::TESTING_ONLY_tls_generic_mode_set_enabled(mode_);
-  }
-};
-
-using EnableGenericMode = SetGenericMode<true>;
-using DisableGenericMode = SetGenericMode<false>;
-
 void generic_mode_fallback(const char* schema_str, torch::jit::Stack* stack) {
   override_call_count++;
   auto operation = getOperator(schema_str)->getOperation();
-  DisableGenericMode guard;
+  c10::impl::ExcludeTensorTypeIdGuard(TensorTypeId::TESTING_ONLY_GenericModeTensorId);
   auto offset = operation(*stack);
   TORCH_INTERNAL_ASSERT(offset == 0);
 }
@@ -144,7 +129,7 @@ class Environment : public ::testing::Environment {
 // basic functionality works.
 
 TEST(BoxedFallbackTest, TestBoxedFallbackWithMode) {
-  EnableGenericMode guard;
+  c10::impl::IncludeTensorTypeIdGuard(TensorTypeId::TESTING_ONLY_GenericModeTensorId);
 
   override_call_count = 0;
   Tensor a = ones({5, 5}, kDouble);
