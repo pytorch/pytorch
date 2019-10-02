@@ -136,6 +136,8 @@ jobs:
             set -ex
             nvidia-smi
             choco install miniconda3
-            export PATH="C:\tools\miniconda3\Scripts:C:\tools\miniconda3:C:\Program Files\NVIDIA Corporation\NVSMI":$PATH
+            export PATH="C:\tools\miniconda3\Scripts":$PATH
+            export PATH="C:\tools\miniconda3":$PATH
+            export PATH="C:\Program Files\NVIDIA Corporation\NVSMI":$PATH
             python --version
             conda install -yq -c pytorch pytorch
