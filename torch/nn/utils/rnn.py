@@ -144,12 +144,16 @@ class PackedSequence(PackedSequence_):
         # Why not convert `batch_sizes`?
         # See NOTE [ device and dtype of a PackedSequence ]
         data = self.data.to(*args, **kwargs)
-        sorted_indices = bind(self.sorted_indices, lambda t: t.to(*args, **kwargs))
-        unsorted_indices = bind(self.unsorted_indices, lambda t: t.to(*args, **kwargs))
-
         if data is self.data:
             return self
         else:
+            # Indices are always long tensors, so don't forward requests
+            # to change the dtype
+            args = [arg for arg in args if not isinstance(arg, torch.dtype)]
+            del kwargs['dtype']
+
+            sorted_indices = bind(self.sorted_indices, lambda t: t.to(*args, **kwargs))
+            unsorted_indices = bind(self.unsorted_indices, lambda t: t.to(*args, **kwargs))
             return type(self)(data, self.batch_sizes, sorted_indices, unsorted_indices)
 
     @property
