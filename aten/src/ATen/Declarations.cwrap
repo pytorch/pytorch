@@ -179,6 +179,8 @@
   cpu_bfloat16: True
   variants:
     - function
+  backends:
+      - CUDA
   return: argument 0
   scalar_check: false
   arguments:

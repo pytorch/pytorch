@@ -4697,16 +4697,10 @@
   supports_named_tensor: True
 
 - func: nonzero.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_nonzero_out
-    CUDA: legacy::cuda::_th_nonzero_out
 
 - func: nonzero(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_nonzero
-    CUDA: legacy::cuda::_th_nonzero
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
   use_c10_dispatcher: unboxed_only
