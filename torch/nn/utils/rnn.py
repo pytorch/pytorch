@@ -103,31 +103,31 @@ class PackedSequence(PackedSequence_):
         return self.to(*args, device='cuda', **kwargs)
 
     def cpu(self, *args, **kwargs):
-        return self.to(*args, device='cuda', **kwargs)
+        return self.to(*args, device='cpu', **kwargs)
 
     def double(self):
-        return self.to(*args, dtype=torch.double, **kwargs)
+        return self.to(dtype=torch.double)
 
     def float(self):
-        return self.to(*args, dtype=torch.float, **kwargs)
+        return self.to(dtype=torch.float)
 
     def half(self):
-        return self.to(*args, dtype=torch.half, **kwargs)
+        return self.to(dtype=torch.half)
 
     def long(self):
-        return self.to(*args, dtype=torch.long, **kwargs)
+        return self.to(dtype=torch.long)
 
     def int(self):
-        return self.to(*args, dtype=torch.int, **kwargs)
+        return self.to(dtype=torch.int)
 
     def short(self):
-        return self.to(*args, dtype=torch.short, **kwargs)
+        return self.to(dtype=torch.short)
 
     def char(self):
-        return self.to(*args, dtype=torch.int8, **kwargs)
+        return self.to(dtype=torch.int8)
 
     def byte(self):
-        return self.to(*args, dtype=torch.uint8, **kwargs)
+        return self.to(dtype=torch.uint8)
 
     def to(self, *args, **kwargs):
         r"""Performs dtype and/or device conversion on `self.data`.
