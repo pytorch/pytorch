@@ -41,8 +41,13 @@ class TORCH_API DistAutogradContext {
   DistAutogradContext(DistAutogradContext&&) = delete;
   DistAutogradContext& operator=(DistAutogradContext&&) = delete;
 
+  // records the workerID of a node that we sent an RPC to.
+  // workerIDs are added here when we attach a send function to this autograd
+  // context
   void addKnownWorkerId(const rpc::worker_id_t workerId);
 
+  // Retrieves a set containing the known workerIds for this context
+  // These are the different workers that this context has sent RPCs to.
   std::unordered_set<rpc::worker_id_t> getKnownWorkerIds() const;
 
  private:
