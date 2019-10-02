@@ -5,9 +5,13 @@
 Named Tensors
 =============
 
-Named tensors aim to make tensors easier to use by providing named dimensions,
-annotations that can be used to refer to a tensor dimension. Names prevent incorrect
-usage of some APIs and make it nicer to manipulate dimensions.
+Named Tensors aim to make tensors easier to use by allowing users to associate
+explicit names with tensor dimensions. In most cases, operations that take
+dimension parameters will accept dimension names, avoiding the need to track
+dimensions by index. In addition, named tensors use names to automatically
+check that APIs are being used correctly at runtime, providing extra safety.
+Names can also be used to rearrange dimensions and to align tensors by their
+dimension names.
 
 .. warning::
     The named tensor API is experimental and subject to change.
@@ -55,9 +59,9 @@ tensors do not require all dimensions to be named.
 Name propagation semantics
 --------------------------
 
-Named tensors use names to check that some APIs are being used correctly and
-propagate names in a process called *name inference*.
-Name inference is a two-step process:
+Named tensors use names to automatically check that APIs are being called
+correctly at runtime. This occurs in a process called *named inference*.
+More formally, name inference consists of the following two steps:
 
 - Check names: an operator may check that certain dimensions must match.
 - Propagate names: name inference computes and propagates names to output tensors.

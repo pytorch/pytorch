@@ -3,21 +3,25 @@
 .. _name_inference_reference-doc:
 
 Named Tensors operator coverage
-==============================
+===============================
 
-.. warning::
-    The named tensor API is experimental and subject to change.
+Please read :ref:`_named_tensors-doc` first for an introduction to named tensors.
 
-Named tensors use names to check that some APIs are being used correctly and
-propagate names in a process called name inference.
-Name inference works as the following:
+This document is a reference for *name inference*, a process for how named tensors
+use names to automatically check that APIs are being called correctly at runtime and
+for how operators propagate names from input tensors to outputs.
 
-- Check names: an operator may check that certain dimensions must match.
+More formally, name inference consists of the following two steps:
+
+- Check names: an operator may check that certain dimensions names must match.
 - Propagate names: name inference computes and propagates names to output tensors.
 
 Below is a list of all operations that are supported with named tensors
-and their name inference rules. If an operation is not here then it is probably not
-supported but one can try to run the operation and see what happens.
+and their associated name inference rules. If an operation is not here then it
+is probably not supported but one can try to run the operation and see what happens.
+
+.. warning::
+    The named tensor API is experimental and subject to change.
 
 .. csv-table:: Supported Operations
    :header: API, Name inference rule
