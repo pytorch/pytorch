@@ -197,6 +197,8 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::sendImpl(
       futures_[requestId] = future;
     }
     message.setId(requestId);
+  } else {
+    future->markCompleted();
   }
 
   // NB: cannot directly pass ``to`` to the ``SendWork``, because it might no
@@ -252,27 +254,31 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
             pendingSend->wait();
           }
         } catch (std::exception& e) {
-          auto msgId = work.message_.id();
-          auto future = futures_[msgId];
-          const char* err = e.what();
-          std::vector<char> payload(err, err + strlen(err));
-          auto exceptionMsg = Message(
-              std::move(payload),
-              std::vector<torch::Tensor>(),
-              MessageType::EXCEPTION,
-              msgId);
-          future->markCompleted(exceptionMsg);
+          if (work.message_.requiresResponse()) {
+            auto msgId = work.message_.id();
+            auto future = futures_[msgId];
+            const char* err = e.what();
+            std::vector<char> payload(err, err + strlen(err));
+            auto exceptionMsg = Message(
+                std::move(payload),
+                std::vector<torch::Tensor>(),
+                MessageType::EXCEPTION,
+                msgId);
+            future->markCompleted(exceptionMsg);
+          }
         } catch (...) {
-          auto msgId = work.message_.id();
-          auto future = futures_[msgId];
-          const char* err = "Unknown exception occured";
-          std::vector<char> payload(err, err + strlen(err));
-          auto exceptionMsg = Message(
-              std::move(payload),
-              std::vector<torch::Tensor>(),
-              MessageType::EXCEPTION,
-              msgId);
-          future->markCompleted(exceptionMsg);
+          if (work.message_.requiresResponse()) {
+            auto msgId = work.message_.id();
+            auto future = futures_[msgId];
+            const char* err = "Unknown exception occured";
+            std::vector<char> payload(err, err + strlen(err));
+            auto exceptionMsg = Message(
+                std::move(payload),
+                std::vector<torch::Tensor>(),
+                MessageType::EXCEPTION,
+                msgId);
+            future->markCompleted(exceptionMsg);
+          }
         }
       },
       std::move(work)));
