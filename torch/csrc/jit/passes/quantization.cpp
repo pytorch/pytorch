@@ -339,36 +339,35 @@ void InsertObserversHelper::insertObservers(
             bias_values_.emplace(v);
           }
         }
-        if (v->node()->kind() == prim::CallMethod) {
-          // If we find a call to a method of a child module,
-          // we'll recursively insert observers for the forward function to
-          // the child module.
-          auto module_instance = v->node()->inputs()[0];
-          auto module_method_name = v->node()->s(attr::name);
-          // TODO: looks like this block is not related to v? maybe we should
-          // move this outside
-          script::Module callee_module;
-          if (module_instance->node()->kind() == prim::GetAttr) {
-            auto child_module_name = module_instance->node()->s(attr::name);
-            auto child_module = module.find_module(child_module_name);
-            TORCH_INTERNAL_ASSERT(
-                child_module,
-                "Child module " + child_module_name + " does not exist");
-            callee_module = child_module.value();
-          } else {
-            TORCH_INTERNAL_ASSERT(
-                module_instance == graph->inputs()[0],
-                "We only support call method either on %self"
-                "or child instance in insert_observers_pass right now");
-            callee_module = module;
-          }
-          auto method_graph =
-              callee_module.get_method(module_method_name).graph();
-          propagateValues(v->node(), method_graph);
-          // Recursively insert observer for the forward function of child
-          // module
-          insertObservers(callee_module, module_method_name);
+      }
+
+      if (n->kind() == prim::CallMethod) {
+        // If we find a call to a method of a child module,
+        // we'll recursively insert observers for the forward function to
+        // the child module.
+        auto module_instance = n->inputs()[0];
+        auto module_method_name = n->s(attr::name);
+        script::Module callee_module;
+        if (module_instance->node()->kind() == prim::GetAttr) {
+          auto child_module_name = module_instance->node()->s(attr::name);
+          auto child_module = module.find_module(child_module_name);
+          TORCH_INTERNAL_ASSERT(
+              child_module,
+              "Child module " + child_module_name + " does not exist");
+          callee_module = child_module.value();
+        } else {
+          TORCH_INTERNAL_ASSERT(
+              module_instance == graph->inputs()[0],
+              "We only support call method either on %self"
+              "or child instance in insert_observers_pass right now");
+          callee_module = module;
         }
+        auto method_graph =
+            callee_module.get_method(module_method_name).graph();
+        propagateValues(n, method_graph);
+        // Recursively insert observer for the forward function of child
+        // module
+        insertObservers(callee_module, module_method_name);
       }
 
       for (Block* subblock : n->blocks()) {
