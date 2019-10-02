@@ -604,9 +604,6 @@ jobs:
     steps:
     - attach_workspace:
         at: ~/workspace
-    - should_run_job
-    - checkout
-    - run_brew_for_ios_build
     - run:
         name: Build
         contxt: org-member
@@ -615,9 +612,6 @@ jobs:
           script="/Users/distiller/project/.circleci/scripts/binary_ios_build.sh"
           cat "$script"
           source "$script"
-    - persist_to_workspace:
-        root: /Users/distiller/workspace/
-        paths: ios
   
   binary_ios_upload: 
     <<: *pytorch_ios_params
