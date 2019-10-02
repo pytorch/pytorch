@@ -1935,6 +1935,7 @@
     SparseCPU: mul_sparse
     SparseCUDA: mul_sparse
     MkldnnCPU: mkldnn_mul
+    QuantizedCPU: quantized_mul
   supports_named_tensor: True
 
 - func: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -1955,16 +1956,32 @@
     SparseCPU: mul_out_sparse_cpu
     SparseCUDA: mul_out_sparse_cuda
     MkldnnCPU: mkldnn_mul_out
+    QuantizedCPU: quantized_mul_out
   supports_named_tensor: True
 
   # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: mul.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU: mul
+    CUDA: mul
+    QuantizedCPU: quantized_mul
 
 - func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
+
+- func: mul_relu.Tensor(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    QuantizedCPU: quantized_mul_relu
+
+
+- func: mul_relu.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    QuantizedCPU: quantized_mul_relu_out
 
 - func: mv(Tensor self, Tensor vec) -> Tensor
   use_c10_dispatcher: full

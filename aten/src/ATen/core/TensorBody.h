@@ -611,6 +611,7 @@ class CAFFE2_API Tensor {
   Tensor & mul_(const Tensor & other) const;
   Tensor mul(Scalar other) const;
   Tensor & mul_(Scalar other) const;
+  Tensor mul_relu(const Tensor & other) const;
   Tensor mv(const Tensor & vec) const;
   Tensor mvlgamma(int64_t p) const;
   Tensor & mvlgamma_(int64_t p) const;

@@ -268,6 +268,7 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::mul_", "Tensor"},
         {"aten::mul", "Scalar"},
         {"aten::mul_", "Scalar"},
+        {"aten::mul_relu", "Tensor"},
         {"aten::mv", ""},
         {"aten::mvlgamma", ""},
         {"aten::mvlgamma_", ""},
@@ -1045,6 +1046,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::mode", "dimname_out"},
     #endif
         {"aten::mul", "out"},
+        {"aten::mul_relu", "out"},
         {"aten::mv", "out"},
         {"aten::native_batch_norm", ""},
         {"aten::batch_norm_elemt", ""},
