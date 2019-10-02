@@ -5195,13 +5195,13 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(x[idx] >= y[idx], ge[idx] == 1)
 
     def test_comparison_ops_must_take_bool_output(self):
-        with self.assertRaisesRegex(RuntimeError, 'The output tensor of lt must be a bool'):
-            for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne]:
+        with self.assertRaisesRegex(RuntimeError, 'The output tensor of a comparison or logical op must be a bool'):
+            for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne, torch.logical_xor]:
                 op(torch.tensor([True]), torch.tensor([False]), out=torch.empty(1, dtype=torch.uint8))
 
     def test_inplace_comparison_ops_require_inputs_have_same_dtype(self):
         with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
-            for op in ['lt_', 'le_', 'gt_', 'ge_', 'eq_', 'ne_']:
+            for op in ['lt_', 'le_', 'gt_', 'ge_', 'eq_', 'ne_', 'logical_xor_']:
                 x = torch.tensor([1], dtype=torch.int)
                 y = torch.tensor([2], dtype=torch.long)
                 in_place_method = getattr(x, op)
@@ -6207,24 +6207,30 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(expected_res, a)
 
     def test_logical_xor(self, device):
-        for dtype in (torch.bool,):  # Will add more dtypes in the future
+        for dtype in torch.testing.get_all_dtypes():
             expected_res = torch.tensor([0, 0, 1, 1], dtype=dtype, device=device)
             a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
-            b = torch.tensor([1, 0, 0, 10], dtype=dtype, device=device)
-            # new tensor
-            self.assertEqual(expected_res, a.logical_xor(b))
-            # out
-            c = torch.empty(0, dtype=dtype, device=device)
-            torch.logical_xor(a, b, out=c)
-            self.assertEqual(expected_res, c)
-            # out is not bool
-            c = torch.empty(0, dtype=torch.uint8, device=device)
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"The output tensor of logical_xor must be a bool tensor\."):
+            for other_dtype in torch.testing.get_all_dtypes():
+                # Skip bfloat16 on CUDA
+                if device != 'cpu' and torch.bfloat16 in (dtype, other_dtype):
+                    continue
+                # TODO Remove this skipping after bfloat16 can be handled nicely with other dtypes.
+                # Skip only if either dtype or other_dtype is bfloat16.
+                if (dtype == torch.bfloat16) != (other_dtype == torch.bfloat16):
+                    continue
+                b = torch.tensor([1, 0, 0, 10], dtype=other_dtype, device=device)
+                # new tensor
+                self.assertEqual(expected_res.bool(), a.logical_xor(b))
+                # out
+                c = torch.empty(0, dtype=torch.bool, device=device)
                 torch.logical_xor(a, b, out=c)
-            # in-place
-            a.logical_xor_(b)
-            self.assertEqual(expected_res, a)
+                self.assertEqual(expected_res.bool(), c.bool())
+
+            # in-place (skip bfloat16 on CUDA)
+            if device == 'cpu' or dtype != torch.bfloat16:
+                b = torch.tensor([1, 0, 0, 10], dtype=dtype, device=device)
+                a.logical_xor_(b)
+                self.assertEqual(expected_res, a)
 
     def test_isinf(self, device):
         t1 = torch.Tensor([1, inf, 2, -inf, nan]).to(device)

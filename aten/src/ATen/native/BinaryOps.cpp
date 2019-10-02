@@ -200,27 +200,6 @@ Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
   return native::rsub(self, wrapped_scalar_tensor(other), alpha);
 }
 
-Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.scalar_type() == kBool && other.scalar_type() == kBool,
-              "logical_xor currently only supports bool tensors.");
-  TORCH_CHECK(result.scalar_type() == kBool,
-              "The output tensor of logical_xor must be a bool tensor.");
-  auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_internal_overlap=*/true);
-  logical_xor_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor logical_xor(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty({0}, self.options());
-  at::logical_xor_out(result, self, other);
-  return result;
-}
-
-Tensor& logical_xor_(Tensor& self, const Tensor& other) {
-  return native::logical_xor_out(self, self, other);
-}
-
 template <typename Stub>
 static inline Tensor& comparison_op_impl_out(Tensor& result, const Tensor& self, const Tensor& other, Stub& stub) {
   auto iter = TensorIterator::comparison_op(result, self, other,
@@ -232,7 +211,7 @@ static inline Tensor& comparison_op_impl_out(Tensor& result, const Tensor& self,
 template <typename Stub>
 Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& other, Stub& stub) {
   TORCH_CHECK(result.scalar_type() == kBool,
-              "The output tensor of lt must be a bool, but was ", result.scalar_type());
+              "The output tensor of a comparison or logical op must be a bool, but was ", result.scalar_type());
   // Validate that is possible to convert zero-dim tensor's dtype to other dtype without overflow
   if (self.scalar_type() != other.scalar_type()) {
     if (self.dim() != 0 && other.dim() == 0) {
@@ -319,6 +298,13 @@ Tensor& ne_(Tensor& self, const Tensor& other) { return comparison_op_(self, oth
 Tensor& ne_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, ne_stub); }
 Tensor ne(const Tensor& self, Scalar other) { return comparison_op(self, other, ne_stub); }
 Tensor& ne_(Tensor& self, Scalar other) { return comparison_op_(self, other, ne_stub); }
+
+Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, logical_xor_stub); }
+Tensor logical_xor(const Tensor& self, const Tensor& other) { return comparison_op(self, other, logical_xor_stub); }
+Tensor& logical_xor_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, logical_xor_stub); }
+Tensor& logical_xor_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, logical_xor_stub); }
+Tensor logical_xor(const Tensor& self, Scalar other) { return comparison_op(self, other, logical_xor_stub); }
+Tensor& logical_xor_(Tensor& self, Scalar other) { return comparison_op_(self, other, logical_xor_stub); }
 
 }
 }  // namespace at
