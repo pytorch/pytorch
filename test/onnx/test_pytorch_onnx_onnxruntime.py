@@ -958,6 +958,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(10, (1, 2, 3, 4))
         self.run_test(FlattenModel(), x)
 
+    def test_unbind(self):
+        class UnbindModel(torch.nn.Module):
+            def forward(self, input):
+                return input.unbind()
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel(), x)
+
+        class UnbindModel2(torch.nn.Module):
+            def forward(self, input):
+                _, out, _, _ = input.unbind(1)
+                return out
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel2(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_factories(self):
         class TensorFactory(torch.nn.Module):

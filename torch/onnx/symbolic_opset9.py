@@ -392,6 +392,13 @@ def split_with_sizes(g, self, split_sizes, dim):
     return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=1)
 
 
+@parse_args('v', 'i')
+def unbind(g, self, dim=0):
+    # NOTE: This node is handled in onnx peephole pass.
+    return g.op("aten::unbind", self, axis_i=dim)
+    # return split(g, self, g.op("Constant", value_t=torch.LongTensor([1])), dim)
+
+
 @parse_args('v', 'i', 'v')
 def select(g, self, dim, index):
     if dim > 1:

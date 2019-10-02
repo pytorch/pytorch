@@ -606,6 +606,34 @@ static void fuseSplitListUnpack(Block* b) {
   }
 }
 
+static void fuseUnbindListUnpack(Block *b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      fuseUnbindListUnpack(child_block);
+    }
+    if (it->kind() == prim::ListUnpack &&
+        it->input()->node()->kind() == aten::unbind) {
+      Node* orig_unbind_node = it->input()->node();
+      auto dim = orig_unbind_node->i(attr::axis);
+
+      Node* split_node =
+          b->owningGraph()->create(onnx::Split, {orig_unbind_node->input()}, it->outputs().size());
+      split_node->i_(attr::axis, dim);
+      split_node->insertAfter(*it);
+      for (size_t i = 0; i < split_node->outputs().size(); ++i) {
+        Node* unsqueeze_node =  b->owningGraph()->create(onnx::Squeeze, {split_node->output(i)});
+        unsqueeze_node->is_(attr::axes, {dim});
+        unsqueeze_node->output()->copyMetadata(it->output(i));
+        it->output(i)->replaceAllUsesWith(unsqueeze_node->output());
+        unsqueeze_node->insertAfter(split_node);
+      }
+      it->removeAllInputs();
+      orig_unbind_node->destroy();
+      it.destroyCurrent();
+    }
+  }
+}
+
 void removeMaxPoolUnusedOutput(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     auto n = *it;
@@ -657,6 +685,7 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version, bool
   speculateOps(graph->block());
   eraseListConstruct(graph->block());
   fuseSplitListUnpack(graph->block());
+  fuseUnbindListUnpack(graph->block());
   removeMaxPoolUnusedOutput(graph->block());
 }
 
