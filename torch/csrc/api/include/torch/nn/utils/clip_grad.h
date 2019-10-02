@@ -1,5 +1,4 @@
 #pragma once
-#include <torch/expanding_array.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
