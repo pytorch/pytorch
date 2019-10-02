@@ -1155,21 +1155,17 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         input_strs = [
             # aten::conv2d --> quantized::conv2d
             """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype,
+%r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::dequantize
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        %w_quant : Tensor, %b : Tensor? = quantized::conv_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        # CHECK: quantized::conv_prepack
         # CHECK: quantized::conv2d
         # CHECK-NOT: aten::conv2d
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %c, %d, %e, %f)
-        # CHECK-NOT: aten::quantize_per_tensor
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # addmm -> quantized::linear
