@@ -45,7 +45,17 @@ parser.add_argument(
     action='store_true',
     help='reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly')
 options = parser.parse_args()
-core_install_dir = os.path.join(options.install_dir, 'core') if options.install_dir is not None else None
+# NB: It is mandatory to NOT use os.path.join here, as the install directory
+# will eventually be ingested by cmake, which does not respect Windows style
+# path slashes.  If you switch this to use os.path.join, you'll get an error
+# like:
+#
+#   Syntax error in cmake code when parsing string
+#
+#     C:/Jenkins/workspace/pytorch-builds/pytorch-win-ws2016-cuda9-cudnn7-py3-build/build/aten/src/ATen\core/TensorMethods.h
+#
+#   Invalid character escape '\c'.
+core_install_dir = options.install_dir + '/core' if options.install_dir is not None else None
 if options.install_dir is not None and not os.path.exists(options.install_dir):
     os.makedirs(options.install_dir)
 if core_install_dir is not None and not os.path.exists(core_install_dir):
