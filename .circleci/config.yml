@@ -286,6 +286,13 @@ binary_mac_params: &binary_mac_params
 ##############################################################################
 # Job specs
 ##############################################################################
+executors:
+  windows-gpu-prototype:
+    machine:
+      resource_class: windows.gpu.small.prototype
+      image: windows-server-2019-nvidia:201908-28
+      shell: bash.exe
+
 jobs:
   pytorch_linux_build:
     <<: *pytorch_params
@@ -403,6 +410,19 @@ jobs:
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${NAMED_FLAG}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+  pytorch_windows_build:
+    executor: windows-gpu-prototype
+    environment:
+      BUILD_ENVIRONMENT: "pytorch-win-ws2016-cuda9-cudnn7-py3"
+    steps:
+      - checkout
+      - run:
+          name: Build
+          no_output_timeout: "90m"
+          command: |
+            set -ex
+            echo "Hello world!"
   caffe2_linux_build:
     <<: *caffe2_params
     machine:
@@ -2141,6 +2161,10 @@ workflows:
       # pytorch-ci-hud to adjust the list of whitelisted builds
       # at https://github.com/ezyang/pytorch-ci-hud/blob/master/src/BuildHistoryDisplay.js
 
+      - pytorch_windows_build:
+          name: pytorch_win_ws2016_cuda9_cudnn7_py3
+          requires:
+            - setup
       - binary_linux_build:
           name: binary_linux_manywheel_2_7mu_cpu_devtoolset7_build
           build_environment: "manywheel 2.7mu cpu devtoolset7"

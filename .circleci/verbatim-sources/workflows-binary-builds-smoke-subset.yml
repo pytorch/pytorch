@@ -5,6 +5,10 @@
       # pytorch-ci-hud to adjust the list of whitelisted builds
       # at https://github.com/ezyang/pytorch-ci-hud/blob/master/src/BuildHistoryDisplay.js
 
+      - pytorch_windows_build:
+          name: pytorch_win_ws2016_cuda9_cudnn7_py3
+          requires:
+            - setup
       - binary_linux_build:
           name: binary_linux_manywheel_2_7mu_cpu_devtoolset7_build
           build_environment: "manywheel 2.7mu cpu devtoolset7"

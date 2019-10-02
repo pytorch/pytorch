@@ -1,3 +1,10 @@
+executors:
+  windows-gpu-prototype:
+    machine:
+      resource_class: windows.gpu.small.prototype
+      image: windows-server-2019-nvidia:201908-28
+      shell: bash.exe
+
 jobs:
   pytorch_linux_build:
     <<: *pytorch_params
@@ -115,3 +122,16 @@ jobs:
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${NAMED_FLAG}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+  pytorch_windows_build:
+    executor: windows-gpu-prototype
+    environment:
+      BUILD_ENVIRONMENT: "pytorch-win-ws2016-cuda9-cudnn7-py3"
+    steps:
+      - checkout
+      - run:
+          name: Build
+          no_output_timeout: "90m"
+          command: |
+            set -ex
+            echo "Hello world!"
