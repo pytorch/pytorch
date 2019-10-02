@@ -217,10 +217,22 @@ void max2_kernel(TensorIterator& iter) {
       [](bool a, bool b) -> bool {
         return a || b;
       });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "max2_cpu", [&]() {
+  } else if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "max2_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::maximum(a, b); });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "max2_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          if (std::isnan(a) || std::isnan(b)) {
+            return std::nan("");
+          } else {
+            return std::max(a, b);
+          }
+        },
         [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::maximum(a, b); });
     });
   }
@@ -230,12 +242,24 @@ void min2_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter,
       [](bool a, bool b) -> bool {
-        return a || b;
+        return a && b;
       });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "min2_cpu", [&]() {
+  } else if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "min2_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::minimum(a, b); });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "min2_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          if (std::isnan(a) || std::isnan(b)) {
+            return std::nan("");
+          } else {
+            return std::min(a, b);
+          }
+        },
         [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::minimum(a, b); });
     });
   }

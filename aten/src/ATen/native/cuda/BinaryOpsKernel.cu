@@ -177,10 +177,22 @@ void max2_kernel_cuda(TensorIterator& iter) {
     gpu_kernel(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
       return a || b;
     });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "max2_cuda", [&]() {
+  } else if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "max2_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return ::max(a, b);
+      });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "max2_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        if (::isnan(a)) {
+          return a;
+        } else if (::isnan(b)) {
+          return b;
+        } else {
+          return ::max(a, b);
+        }
       });
     });
   }
@@ -189,12 +201,24 @@ void max2_kernel_cuda(TensorIterator& iter) {
 void min2_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     gpu_kernel(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
-      return a || b;
+      return a && b;
     });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "min2_cuda", [&]() {
+  } else if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "min2_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return ::min(a, b);
+      });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "min2_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        if (::isnan(a)) {
+          return a;
+        } else if (::isnan(b)) {
+          return b;
+        } else {
+          return ::min(a, b);
+        }
       });
     });
   }
