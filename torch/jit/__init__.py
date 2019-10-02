@@ -68,6 +68,11 @@ Future = torch._C.Future
 _fork = torch._C.fork
 _wait = torch._C.wait
 
+if _enabled:
+    Attribute = collections.namedtuple('Attribute', ['value', 'type'])
+else:
+    def Attribute(value, type):
+        return value
 
 @contextlib.contextmanager
 def scope(scope_name):
@@ -1517,6 +1522,16 @@ if _enabled:
 
         def __setattr__(self, attr, value):
             if "_actual_script_module" not in self.__dict__:
+                # Unwrap torch.jit.Attribute into a regular setattr + recording
+                # the provided type in __annotations__.
+                #
+                # This ensures that if we use the attr again in `__init__`, it
+                # will look like the actual value, not an instance of Attribute.
+                if isinstance(value, Attribute):
+                    if not hasattr(self, "__annotations__"):
+                        self.__annotations__ = {}
+                    self.__annotations__[attr] = value.type
+                    value = value.value
                 return super(ScriptModule, self).__setattr__(attr, value)
             setattr(self._actual_script_module, attr, value)
 
@@ -2145,13 +2160,6 @@ class _disable_tracing(object):
 def annotate(the_type, the_value):
     # noop in python
     return the_value
-
-
-if _enabled:
-    Attribute = collections.namedtuple('Attribute', ['value', 'type'])
-else:
-    def Attribute(value, type):
-        return value
 
 last_executed_optimized_graph = torch._C._last_executed_optimized_graph
 

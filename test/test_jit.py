@@ -3385,6 +3385,35 @@ class TestFrontend(JitTestCase):
 
 
 class TestScript(JitTestCase):
+    def test_not_initialized_err(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                self.foo = torch.rand(2, 3)
+        with self.assertRaises(RuntimeError):
+            M()
+
+    def test_attribute_in_init(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.foo = torch.jit.Attribute(0.1, float)
+                # we should be able to use self.foo as a float here
+                assert 0.0 < self.foo
+        M()
+
+    def test_scriptable_fn_as_attr(self):
+        class M(torch.nn.Module):
+            def __init__(self, fn):
+                super(M, self).__init__()
+                self.fn = fn
+
+            def forward(self, x):
+                return self.fn(x)
+
+        m = M(F.sigmoid)
+        inp = torch.rand(2, 3)
+        self.checkModule(m, (inp, ))
+
     def test_sequence_parsing(self):
         tests = [
             ("return [x, x,]", True),
@@ -9583,7 +9612,6 @@ a")
                              padding=1, bias=False)
 
         class BasicBlock(torch.jit.ScriptModule):
-            expansion = 1
             __constants__ = ['downsample']
 
             def __init__(self, inplanes, planes, stride=1, downsample=None):
@@ -9620,6 +9648,7 @@ a")
 
             def __init__(self, block, layers, num_classes=1000):
                 super(ResNet, self).__init__()
+                self.expansion = 1
                 self.inplanes = 64
                 self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
                                        bias=False)
@@ -9631,7 +9660,7 @@ a")
                 self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
                 self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
                 self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-                self.fc = nn.Linear(512 * block.expansion, num_classes)
+                self.fc = nn.Linear(512 * self.expansion, num_classes)
 
                 for m in self.modules():
                     if isinstance(m, nn.Conv2d):
@@ -9642,15 +9671,15 @@ a")
 
             def _make_layer(self, block, planes, blocks, stride=1):
                 downsample = None
-                if stride != 1 or self.inplanes != planes * block.expansion:
+                if stride != 1 or self.inplanes != planes * self.expansion:
                     downsample = nn.Sequential(
-                        conv1x1(self.inplanes, planes * block.expansion, stride),
-                        nn.BatchNorm2d(planes * block.expansion),
+                        conv1x1(self.inplanes, planes * self.expansion, stride),
+                        nn.BatchNorm2d(planes * self.expansion),
                     )
 
                 layers = []
                 layers.append(block(self.inplanes, planes, stride, downsample))
-                self.inplanes = planes * block.expansion
+                self.inplanes = planes * self.expansion
                 for _ in range(1, blocks):
                     layers.append(block(self.inplanes, planes))
 

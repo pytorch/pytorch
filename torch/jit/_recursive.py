@@ -145,9 +145,10 @@ def get_module_meta(original, level=0):
 
     class_annotations = getattr(original, '__annotations__', {})
 
-    # __dict__ because we only want to pick up attributes on this module
-    # instance, not the class itself.
-    for name, item in original.__dict__.items():
+    # TODO: once properties are fixed, we should use __dict__ here because we
+    # only want to pick up attributes on this module instance, not the class
+    # itself.
+    for name in dir(original):
         if name in blacklist:
             # Python objects have lots of random attributes attached to them;
             # PyTorch adds a few more. Prevent these from getting compiled.
@@ -157,6 +158,11 @@ def get_module_meta(original, level=0):
             # Don't re-add anything we already added
             continue
 
+        if not hasattr(original, name):
+            # TODO we can clean this up when we switch to __dict__ (see above)
+            continue
+
+        item = getattr(original, name)
         # if isinstance(getattr(type(original), name, None), property):
         #     # Avoid adding @property methods as attributes
         #     continue
@@ -277,6 +283,7 @@ def compile_unbound_method(cpp_mod, module_meta, fn):
 #    directly to just compile the exports.
 def create_script_module(original_module, stubs, fresh_type=False):
     assert isinstance(original_module, torch.nn.Module)
+    check_module_initialized(original_module)
 
     module_meta, module_type = get_type(original_module)
     if fresh_type:
@@ -398,6 +405,11 @@ def make_stubs_for_overloads(overload_info):
             overload_stubs.append(ScriptMethodStub(_rcb, new_ast, overload_fn))
     return overload_stubs
 
+def check_module_initialized(mod):
+    if not hasattr(mod, '_parameters'):
+        raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
+                           .format(type(mod).__name__))
+
 def recursive_script(mod, exclude_methods=()):
     """
     Makes a ScriptModule from an nn.Module.
@@ -413,9 +425,7 @@ def recursive_script(mod, exclude_methods=()):
         # Create constant versions for the iterable modules
         return create_constant_iterable_module(mod)
 
-    if not hasattr(mod, '_parameters'):
-        raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
-                           .format(type(mod).__name__))
+    check_module_initialized(mod)
 
     methods = []
     if hasattr(mod, 'forward'):
