@@ -46,9 +46,6 @@ def _propagate_qconfig_helper(module, qconfig_dict,
         module_prefix = prefix + '.' + name if prefix else name
         _propagate_qconfig_helper(child, qconfig_dict, white_list,
                                   module_qconfig, module_prefix)
-    # if not hasattr(module, 'qconfig'):
-    #     module.qconfig = None
-
 
 # TODO(jerryzh): expose white_list
 def propagate_qconfig_(module, qconfig_dict=None):
