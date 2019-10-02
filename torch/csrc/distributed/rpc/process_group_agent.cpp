@@ -53,6 +53,23 @@ Message deserialize(MessageType type, std::istream& is) {
 
 } // namespace
 
+//////////////////////////  MessageCounter  /////////////////////////////////
+
+ProcessGroupAgent::MessageCounter::MessageCounter(int worldSize)
+    : counters_(worldSize) {}
+
+void ProcessGroupAgent::MessageCounter::increment(int dst) {
+  std::lock_guard<std::mutex> guard(mutex_);
+  ++counters_[dst];
+}
+
+std::vector<int64_t> ProcessGroupAgent::MessageCounter::snapshot() {
+  std::lock_guard<std::mutex> guard(mutex_);
+  return counters_;
+}
+
+////////////////////////  ProcessGroupAgent  /////////////////////////////////
+
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerId_.name_;
   const auto worldSize = pg_->getSize();
@@ -92,6 +109,8 @@ ProcessGroupAgent::ProcessGroupAgent(
           WorkerId(std::move(workerName), pg->getRank()),
           processRequestBlocking),
       pg_(std::move(pg)),
+      sendCounts_(pg_->getSize()),
+      recvCounts_(pg_->getSize()),
       nextId_(0),
       sendMutexes_(pg_->getSize()),
       threadPool_(numSendRecvThreads) {
@@ -159,17 +178,67 @@ void ProcessGroupAgent::join() {
   listenerThread_.join();
 }
 
+bool ProcessGroupAgent::hasPendingMessage() {
+  const auto worldSize = pg_->getSize();
+  std::vector<int64_t> snapshot;
+  snapshot.reserve(2 * worldSize);
+  auto recvSnapshot = recvCounts_.snapshot();
+  auto sendSnapshot = sendCounts_.snapshot();
+  snapshot.insert(
+      snapshot.end(),
+      std::make_move_iterator(recvSnapshot.begin()),
+      std::make_move_iterator(recvSnapshot.end()));
+  snapshot.insert(
+      snapshot.end(),
+      std::make_move_iterator(sendSnapshot.begin()),
+      std::make_move_iterator(sendSnapshot.end()));
+
+  std::vector<torch::Tensor> inputSnapshot = {
+      torch::from_blob(snapshot.data(), {2, worldSize}, {torch::kInt64})};
+
+  // allgather both send and recv messages in one shot
+  std::vector<std::vector<torch::Tensor>> outputSnapshots(1);
+
+  for (int i = 0; i < worldSize; ++i) {
+    outputSnapshots[0].emplace_back(
+        torch::zeros({2, worldSize}, {torch::kInt64}));
+  }
+
+  pg_->allgather(outputSnapshots, inputSnapshot)->wait();
+
+  // loop through all send/recv pairs to make sure that all sent messages are
+  // processed.
+  const auto& peerCounts = outputSnapshots[0];
+  for (int from = 0; from < worldSize; ++from) {
+    for (int to = 0; to < worldSize; ++to) {
+      // peerCounts[x][0] is recv counts, and peerCounts[x][1] is send counts
+
+      const auto& sentCnt = peerCounts[from][1][to].data_ptr<int64_t>()[0];
+      const auto& recvCnt = peerCounts[to][0][from].data_ptr<int64_t>()[0];
+      // NB: we cannot throw an error when sentCnt < recvCnt here. Because, send
+      // and recv counts on different workers are read in a distributed manner.
+      // It is possible that the sender reads its send count before sending, but
+      // the receive reads its recv count after receiving. Hence, both > and <
+      // are valid states.
+      if (sentCnt != recvCnt) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 void ProcessGroupAgent::sync() {
-  // Block until all processes wants to sync. This is necessary before acquiring
-  // the lock below, because other processes might not enter sync() until it
-  // gets some response from this RpcAgent.
+  // Block until all processes wants to sync.
   pg_->barrier()->wait();
-  // Wait until the all send works are done.
-  // NB: There might be additional send works inserted while waiting.
-  threadPool_.waitWorkComplete();
-  // Use another barrier in case different RpcAgent handles different amounts of
-  // workloads.
-  pg_->barrier()->wait();
+  // block until all peers agree that all sent messages have been processed.
+  do {
+    // Finish all send/recv tasks in the thread pool
+    threadPool_.waitWorkComplete();
+    // As there could be nested RPC calls, or response callback could also
+    // trigger more messages to be sent, we need to wait for the thread pool
+    // again.
+  } while (hasPendingMessage());
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::sendImpl(
@@ -228,22 +297,30 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
         // the lock
         std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
         const auto& dst = work.to_.id_;
+
         if (work.message_.isShutdown()) {
           pendingSends.reserve(1);
-          std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
-          pendingSends.emplace_back(
-              pg_->send(preamble, dst, dst /* channelTag */));
+          {
+            std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
+            pendingSends.emplace_back(
+                pg_->send(preamble, dst, dst /* channelTag */));
+          }
         } else {
           std::vector<torch::Tensor> payload = {torch::from_blob(
               (void*)serializedPayload.c_str(),
               serializedPayload.length(),
               {torch::kChar})};
           pendingSends.reserve(2);
-          std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
-          pendingSends.emplace_back(
-              pg_->send(preamble, dst, dst /* channelTag */));
-          pendingSends.emplace_back(
-              pg_->send(payload, dst, dst /* channelTag */));
+
+          sendCounts_.increment(dst);
+
+          {
+            std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
+            pendingSends.emplace_back(
+                pg_->send(preamble, dst, dst /* channelTag */));
+            pendingSends.emplace_back(
+                pg_->send(payload, dst, dst /* channelTag */));
+          }
         }
         for (auto& pendingSend : pendingSends) {
           pendingSend->wait();
@@ -276,6 +353,8 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
           // TODO: pass the error back to the caller instead of crashing here.
           AT_ERROR("unrecognized message type ", message.type());
         }
+
+        recvCounts_.increment(work.from_.id_);
       },
       std::move(work)));
 }
