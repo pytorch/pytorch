@@ -60,17 +60,9 @@ graph {
     }
   }
   node {
+    input: "input"
     output: "6"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        dims: 4
-        data_type: 7
-        raw_data: "\003\000\000\000\000\000\000\000\010\000\000\000\000\000\000\000\n\000\000\000\000\000\000\000\n\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
+    op_type: "Shape"
   }
   node {
     input: "5"
@@ -110,8 +102,7 @@ graph {
     op_type: "Unsqueeze"
     attribute {
       name: "axes"
-      ints: 1
-      ints: 2
+      ints: 0
       type: INTS
     }
   }
@@ -127,8 +118,7 @@ graph {
     op_type: "Unsqueeze"
     attribute {
       name: "axes"
-      ints: 1
-      ints: 2
+      ints: 0
       type: INTS
     }
   }
