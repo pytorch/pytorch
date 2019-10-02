@@ -184,6 +184,9 @@ class CUDATestBase(DeviceTypeTestBase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
+    def has_cudnn(self):
+        return not self.no_cudnn
+
     @classmethod
     def get_primary_device(cls):
         return cls.primary_device
@@ -202,8 +205,12 @@ class CUDATestBase(DeviceTypeTestBase):
     @classmethod
     def setUpClass(cls):
         # has_magma shows up after cuda is initialized
-        torch.ones(1).cuda()
+        t = torch.ones(1).cuda()
         cls.no_magma = not torch.cuda.has_magma
+
+        # Determines if cuDNN is available and its version
+        cls.no_cudnn = not (TEST_WITH_ROCM or torch.backends.cudnn.is_acceptable(t))
+        cls.cudnn_version = None if cls.no_cudnn else torch.backends.cudnn.version()
 
         # Acquires the current device as the primary (test) device
         cls.primary_device = 'cuda:{0}'.format(torch.cuda.current_device())
@@ -219,7 +226,7 @@ if torch.cuda.is_available():
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
 # See note "Generic Device Type Testing."
-def instantiate_device_type_tests(generic_test_class, scope):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -239,6 +246,10 @@ def instantiate_device_type_tests(generic_test_class, scope):
 
     # Creates device-specific test cases
     for base in device_type_test_bases:
+        # Skips bases listed in except_for
+        if except_for is not None and base.device_type in except_for:
+            continue
+
         class_name = generic_test_class.__name__ + base.device_type.upper()
         device_type_test_class = type(class_name, (base, empty_class), {})
 
@@ -419,3 +430,27 @@ def skipCUDAIfNoMagma(fn):
 # Skips a test on CUDA when using ROCm.
 def skipCUDAIfRocm(fn):
     return skipCUDAIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")(fn)
+
+
+# Skips a test on CUDA if cuDNN is unavailable or its version is lower than requested.
+def skipCUDAIfCudnnVersionLessThan(version=0):
+
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, device, *args, **kwargs):
+            if self.device_type == 'cuda':
+                if self.no_cudnn:
+                    reason = "cuDNN not available"
+                    raise unittest.SkipTest(reason)
+                if self.cudnn_version < version:
+                    reason = "cuDNN version {0} is available but {1} required".format(self.cudnn_version, version)
+                    raise unittest.SkipTest(reason)
+
+            return fn(self, device, *args, **kwargs)
+
+        return wrap_fn
+    return dec_fn
+
+
+def skipCUDAIfNoCudnn(fn):
+    return skipCUDAIfCudnnVersionLessThan(0)(fn)
