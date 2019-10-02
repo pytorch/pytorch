@@ -126,8 +126,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
       "invoke_rpc_python_udf",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
-         const std::string& pickledPythonUDF) {
-        return pyRpcPythonUdf(agent, dst, pickledPythonUDF);
+         const std::string& pickledPythonUDF,
+         std::vector<torch::Tensor>& tensors) {
+        return pyRpcPythonUdf(agent, dst, pickledPythonUDF, tensors);
       });
 
   module.def(
@@ -144,8 +145,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
       "invoke_remote_python_udf",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
-         const std::string& pickledPythonUDF) {
-        return pyRemotePythonUdf(agent, dst, pickledPythonUDF);
+         const std::string& pickledPythonUDF,
+         std::vector<torch::Tensor>& tensors) {
+        return pyRemotePythonUdf(agent, dst, pickledPythonUDF, tensors);
       });
 
   Py_RETURN_TRUE;

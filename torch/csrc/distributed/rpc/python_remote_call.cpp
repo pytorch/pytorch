@@ -6,16 +6,15 @@ namespace distributed {
 namespace rpc {
 
 PythonRemoteCall::PythonRemoteCall(
-    std::string pickledPythonUDF,
+    SerializedPyObj&& serializedPyObj,
     at::IValue retRRefId,
     at::IValue retForkId)
-    : pickledPythonUDF_(std::move(pickledPythonUDF)),
+    : serializedPyObj_(std::move(serializedPyObj)),
       retRRefId_(std::move(retRRefId)),
       retForkId_(std::move(retForkId)) {}
 
 Message PythonRemoteCall::toMessage() const {
-  std::vector<IValue> ivalues;
-  ivalues.emplace_back(pickledPythonUDF_);
+  std::vector<IValue> ivalues = serializedPyObj_.toIValues();
   ivalues.emplace_back(retRRefId_);
   ivalues.emplace_back(retForkId_);
 
@@ -42,10 +41,10 @@ PythonRemoteCall PythonRemoteCall::fromMessage(const Message& message) {
   values.pop_back();
   auto retRRefId = std::move(values.back());
   values.pop_back();
-  auto& pickledPythonUDF = values.back().toStringRef();
+  auto serializedPyObj = SerializedPyObj::fromIValues(std::move(values));
 
   return PythonRemoteCall(
-      pickledPythonUDF, std::move(retRRefId), std::move(retForkId));
+      std::move(serializedPyObj), std::move(retRRefId), std::move(retForkId));
 }
 
 } // namespace rpc

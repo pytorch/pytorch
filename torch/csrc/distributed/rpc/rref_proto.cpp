@@ -87,13 +87,12 @@ PythonRRefFetchCall PythonRRefFetchCall::fromMessage(const Message& message) {
       message, MessageType::PYTHON_RREF_FETCH_CALL)));
 }
 
-const at::IValue& RRefFetchRet::value() {
-  return value_;
+const std::vector<at::IValue>& RRefFetchRet::values() {
+  return values_;
 }
 
 Message RRefFetchRet::toMessage() const {
-  std::vector<at::IValue> ivalues;
-  ivalues.emplace_back(value_);
+  std::vector<at::IValue> ivalues = values_;
   std::vector<torch::Tensor> tensor_table;
   auto payload =
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
@@ -110,8 +109,7 @@ RRefFetchRet RRefFetchRet::fromMessage(const Message& message) {
       jit::unpickle(payload, payload_size, nullptr, &message.tensors());
   auto values = value.toTuple()->elements();
 
-  TORCH_INTERNAL_ASSERT(values.size() == 1, "Expect 1 IValue from message.");
-  return RRefFetchRet(values.front());
+  return RRefFetchRet(std::move(values));
 }
 
 RRefUserDelete RRefUserDelete::fromMessage(const Message& message) {

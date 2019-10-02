@@ -8,6 +8,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+
 // Singleton class provides interface to execute python UDF remote call
 // and deserialize the returned results by running python function
 // in internal_rpc_utilities.
@@ -18,16 +19,18 @@ class PYBIND11_EXPORT PythonRpcHandler {
  public:
   static PythonRpcHandler& getInstance();
   // Execute python UDF, result is pickled to binary string
-  std::vector<char> generatePythonUDFResult(const Message& request);
+  std::vector<char> generatePythonUDFResult(
+      const Message& request,
+      std::vector<torch::Tensor>& tensorTable);
   // Returned python UDF result is pickled binary string, so run python
   // function to unpickle the python UDF result and return py::object to user
   py::object loadPythonUDFResult(const Message& message);
   // Run a pickled Python UDF and return the result py::object
-  py::object runPythonUDF(const std::string& pickledPythonUDF);
+  py::object runPythonUDF(const SerializedPyObj& serializedObj);
   // Serialized a py::object into a string
-  std::string serialize(const py::object& obj);
+  SerializedPyObj serialize(const py::object& obj);
   // Deserialize a string into a py::object
-  py::object deserialize(const std::string& serializedObj);
+  py::object deserialize(SerializedPyObj serializedObj);
 
  private:
   PythonRpcHandler();

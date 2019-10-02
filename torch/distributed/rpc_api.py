@@ -5,9 +5,10 @@ from . import invoke_remote_builtin, invoke_remote_python_udf
 from . import _init_rref_context, _destroy_rref_context
 from . import ProcessGroupAgent
 from . import WorkerInfo
-from .internal_rpc_utils import serialize, PythonUDF
+from .internal_rpc_utils import _internal_rpc_pickler, PythonUDF
 from .rpc_backend_registry import is_rpc_backend_registered, init_rpc_backend
 
+import functools
 import sys
 import warnings
 import torch
@@ -18,6 +19,7 @@ _agent = None
 
 
 def _require_initialized(func):
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         if _agent is None:
             raise RuntimeError("RPC has not been initialized. "
@@ -165,8 +167,10 @@ def remote(to, func, args=None, kwargs=None):
         return invoke_remote_builtin(
             _agent, info, qualified_name, *args, **kwargs)
     else:
+        (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
+            PythonUDF(func, args, kwargs))
         return invoke_remote_python_udf(
-            _agent, info, serialize(PythonUDF(func, args, kwargs)))
+            _agent, info, pickled_python_udf, tensors)
 
 
 def _invoke_rpc(to, func, args=None, kwargs=None):
@@ -178,15 +182,16 @@ def _invoke_rpc(to, func, args=None, kwargs=None):
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
-    to = _to_worker_info(to)
+    info = _to_worker_info(to)
     if qualified_name is not None:
         fut = invoke_rpc_builtin(
-            _agent, to, qualified_name, *args, **kwargs
+            _agent, info, qualified_name, *args, **kwargs
         )
     else:
+        (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
+            PythonUDF(func, args, kwargs))
         fut = invoke_rpc_python_udf(
-            _agent, to, serialize(PythonUDF(func, args, kwargs))
-        )
+            _agent, info, pickled_python_udf, tensors)
     return fut
 
 

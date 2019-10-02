@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/pickler.h>
 #include <vector>
 
@@ -11,12 +12,12 @@ namespace rpc {
 class TORCH_API PythonRemoteCall final {
  public:
   PythonRemoteCall(
-      std::string pickledPythonUDF,
+      SerializedPyObj&& serializedPyObj,
       at::IValue retRRefId,
       at::IValue retForkId);
 
-  inline const std::string& udf() const {
-    return pickledPythonUDF_;
+  inline const SerializedPyObj& serializedPyObj() const {
+    return serializedPyObj_;
   }
 
   inline const at::IValue& retRRefId() const {
@@ -31,7 +32,7 @@ class TORCH_API PythonRemoteCall final {
   static PythonRemoteCall fromMessage(const Message& message);
 
  private:
-  const std::string pickledPythonUDF_;
+  const SerializedPyObj serializedPyObj_;
   const at::IValue retRRefId_;
   const at::IValue retForkId_;
 };

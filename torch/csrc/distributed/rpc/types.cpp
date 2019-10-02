@@ -13,6 +13,8 @@ static_assert(
         std::numeric_limits<int64_t>::max(),
     "The max value of worker_id_t must be within the range of int64_t");
 
+///////////////////////////  GloballyUniqueId   ///////////////////////////
+
 GloballyUniqueId::GloballyUniqueId(worker_id_t createdOn, local_id_t localId)
     : createdOn_(createdOn), localId_(localId) {}
 
@@ -55,6 +57,29 @@ GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
 std::ostream& operator<<(std::ostream& os, GloballyUniqueId const& globalId) {
   return os << "GloballyUniqueId(" << globalId.createdOn_ << ", "
             << globalId.localId_ << ")";
+}
+
+///////////////////////////  SerializedPyObj   ///////////////////////////
+
+
+std::vector<at::IValue> SerializedPyObj::toIValues() const {
+  std::vector<at::IValue> ivalues;
+  for (auto& tensor: tensors_) {
+    ivalues.emplace_back(tensor);
+  }
+  ivalues.emplace_back(payload_);
+  return ivalues;
+}
+
+
+SerializedPyObj SerializedPyObj::fromIValues(std::vector<at::IValue> values) {
+  std::string payload = values.back().toStringRef();
+  values.pop_back();
+  std::vector<at::Tensor> tensors;
+  for (auto& value: values) {
+    tensors.emplace_back(value.toTensor());
+  }
+  return SerializedPyObj(std::move(payload), std::move(tensors));
 }
 
 } // namespace rpc

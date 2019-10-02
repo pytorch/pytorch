@@ -33,7 +33,7 @@ Message processRequestBlocking(Message&& request) {
         // TODO: make this asynchronous
         std::shared_ptr<OwnerRRef<IValue>> rref =
             ctx->getOrCreateOwnerRRef<IValue>(srf.rrefId());
-        return RRefFetchRet(rref->getValue()).toMessage();
+        return RRefFetchRet({rref->getValue()}).toMessage();
       }
       case MessageType::PYTHON_RREF_FETCH_CALL: {
         PythonRRefFetchCall prf = PythonRRefFetchCall::fromMessage(request);
@@ -41,9 +41,9 @@ Message processRequestBlocking(Message&& request) {
         // TODO: make this asynchronous
         std::shared_ptr<OwnerRRef<py::object>> rref =
             ctx->getOrCreateOwnerRRef<py::object>(prf.rrefId());
-        return RRefFetchRet(
-                   PythonRpcHandler::getInstance().serialize(rref->getValue()))
-            .toMessage();
+        SerializedPyObj result =
+            PythonRpcHandler::getInstance().serialize(rref->getValue());
+        return RRefFetchRet(result.toIValues()).toMessage();
       }
       case MessageType::RREF_USER_DELETE: {
         RRefUserDelete rud = RRefUserDelete::fromMessage(request);
@@ -86,12 +86,14 @@ Message processRequestBlocking(Message&& request) {
           return ScriptRet(std::move(stack.front())).toMessage();
         }
         case MessageType::PYTHON_CALL: {
-          auto payload =
-              PythonRpcHandler::getInstance().generatePythonUDFResult(request);
+          std::vector<torch::Tensor> tensorTable;
+          auto payload = PythonRpcHandler::getInstance().generatePythonUDFResult(
+              request, tensorTable);
           return Message(
               std::move(payload),
-              std::vector<torch::Tensor>(),
-              MessageType::PYTHON_RET);
+              std::move(tensorTable),
+              MessageType::PYTHON_RET,
+              request.id());
         }
         case MessageType::SCRIPT_REMOTE_CALL: {
           ScriptRemoteCall src = ScriptRemoteCall::fromMessage(request);
@@ -123,7 +125,8 @@ Message processRequestBlocking(Message&& request) {
 
           auto ownerRRef = ctx->getOrCreateOwnerRRef<py::object>(rrefId);
           ownerRRef->setValue(
-              PythonRpcHandler::getInstance().runPythonUDF(prc.udf()));
+              PythonRpcHandler::getInstance().runPythonUDF(
+                  prc.serializedPyObj()));
           ctx->addForkOfOwner(rrefId, forkId);
           return RemoteRet(rrefId, forkId).toMessage();
         }

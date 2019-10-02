@@ -130,20 +130,20 @@ PyRRef pyRemoteBuiltin(
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerInfo& dst,
-    const std::string& pickledPythonUDF) {
+    const std::string& pickledPythonUDF,
+    std::vector<torch::Tensor>& tensors) {
   std::vector<char> data(pickledPythonUDF.begin(), pickledPythonUDF.end());
-  std::vector<torch::Tensor> tensor_table;
 
   return agent.send(
       dst,
-      Message(
-          std::move(data), std::move(tensor_table), MessageType::PYTHON_CALL));
+      Message(std::move(data), std::move(tensors), MessageType::PYTHON_CALL));
 }
 
 PyRRef pyRemotePythonUdf(
     RpcAgent& agent,
     const WorkerInfo& dst,
-    const std::string& pickledPythonUDF) {
+    const std::string& pickledPythonUDF,
+    std::vector<torch::Tensor>& tensors) {
   auto& ctx = RRefContext::getInstance();
   // TODO: support creaing RRefs on a local object.
   TORCH_INTERNAL_ASSERT(
@@ -153,7 +153,7 @@ PyRRef pyRemotePythonUdf(
   auto fm = agent.send(
       dst,
       PythonRemoteCall(
-          pickledPythonUDF,
+          SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors)),
           userRRef->rrefId().toIValue(),
           userRRef->forkId().toIValue())
           .toMessage());

@@ -67,15 +67,16 @@ class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
 // OwnerRRef uses this message to send the RRef value to a remote UserRRef
 class TORCH_API RRefFetchRet final {
  public:
-  explicit RRefFetchRet(at::IValue value) : value_(std::move(value)) {}
+  explicit RRefFetchRet(std::vector<at::IValue> values)
+      : values_(std::move(values)) {}
 
-  const at::IValue& value();
+  const std::vector<at::IValue>& values();
 
   Message toMessage() const;
   static RRefFetchRet fromMessage(const Message& message);
 
  private:
-  at::IValue value_;
+  std::vector<at::IValue> values_;
 };
 
 // UserRRef (regardless it's the creator or not) uses this message to notiify
