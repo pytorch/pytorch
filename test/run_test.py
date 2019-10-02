@@ -49,7 +49,6 @@ TESTS = [
     'quantized_tensor',
     'quantized_nn_mods',
     'quantizer',
-    'rpc_fork',
     'sparse',
     'torch',
     'type_info',
@@ -67,9 +66,11 @@ TESTS = [
 # skip < 3.6 b/c fstrings added in 3.6 for jit_py3
 # skip < 3.6 for rpc_spawn and dist_autograd_spawn temporarily because
 # they segmentfault on python 3.5 right now, still debugging
+# skip < 3.6 for rpc_fork as it imports mock that is only available in 3.6
 if PY36:
     TESTS.extend([
         'jit_py3',
+        'rpc_fork',
         'rpc_spawn',
         'dist_autograd_spawn',
     ])
