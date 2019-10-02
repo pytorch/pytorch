@@ -227,6 +227,8 @@
     steps:
     - attach_workspace:
         at: ~/workspace
+    - should_run_job
+    - checkout
     - run:
         name: Build
         contxt: org-member
