@@ -6,6 +6,7 @@ import torch.jit
 import torch.nn.functional as F
 from torch.nn.modules.utils import _pair
 
+from hypothesis import settings, HealthCheck
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
@@ -1520,6 +1521,7 @@ class TestQNNPackOps(TestCase):
             self.assertEqual(qY, qY_hat)
 
     """Tests the correctness of the quantized::add (qnnpack) op."""
+    @settings(suppress_health_check=(HealthCheck.filter_too_much,))
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams(dtypes=torch.quint8)),
            zero_point=st.sampled_from([0, 2, 5, 15, 127]),
