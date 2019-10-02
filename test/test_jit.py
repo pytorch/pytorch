@@ -1148,6 +1148,20 @@ graph(%x : Tensor,
                    .check("quantized::linear_unpack") \
                    .run(get_forward_graph(m._c))
 
+        conv_input_str = """
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
+        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK: quantized::conv_prepack
+        # CHECK: quantized::conv_unpack
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        return (%r)"""
+        graph = parse_ir(conv_input_str)
+        torch._C._jit_pass_insert_prepack_unpack(graph)
+        FileCheck().run(conv_input_str, graph)
+
     def test_quant_fusion(self):
         input_strs = [
             # aten::conv2d --> quantized::conv2d
