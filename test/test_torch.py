@@ -13453,13 +13453,14 @@ def generate_op_tests():
         caller(*test)
 
 
-add_neg_dim_tests()
-generate_op_tests()
-instantiate_device_type_tests(TestTorchDeviceType, globals())
-instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
-
 class TestTorch(TestCase, _TestTorchMixin):
     pass
 
+
 if __name__ == '__main__':
+    add_neg_dim_tests()
+    generate_op_tests()
+    instantiate_device_type_tests(TestTorchDeviceType, globals())
+    instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
+
     run_tests()
