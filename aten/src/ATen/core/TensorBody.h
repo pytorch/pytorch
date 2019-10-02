@@ -432,6 +432,7 @@ class CAFFE2_API Tensor {
   Tensor & add_(const Tensor & other, Scalar alpha=1) const;
   Tensor add(Scalar other, Scalar alpha=1) const;
   Tensor & add_(Scalar other, Scalar alpha=1) const;
+  Tensor add_relu(const Tensor & other) const;
   Tensor addmv(const Tensor & mat, const Tensor & vec, Scalar beta=1, Scalar alpha=1) const;
   Tensor & addmv_(const Tensor & mat, const Tensor & vec, Scalar beta=1, Scalar alpha=1) const;
   Tensor addr(const Tensor & vec1, const Tensor & vec2, Scalar beta=1, Scalar alpha=1) const;

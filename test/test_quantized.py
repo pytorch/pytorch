@@ -145,8 +145,6 @@ class TestQuantizedOps(TestCase):
            b=st.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
     def test_qadd_scalar_relu(self, A, b):
         import copy
-        add_scalar = torch.ops.quantized.add_scalar
-        add_scalar_relu = torch.ops.quantized.add_scalar_relu
 
         A, (scale, zero_point, dtype) = A
         A = A.astype(np.float32)
@@ -156,9 +154,9 @@ class TestQuantizedOps(TestCase):
         C_relu = copy.deepcopy(C)
         C_relu[C_relu < 0] = 0
 
-        C_hat = add_scalar(qA, b)
+        C_hat = qA + b
         C_ref = torch.quantize_per_tensor(C, C_hat.q_scale(), C_hat.q_zero_point(), dtype)
-        C_relu_hat = add_scalar_relu(qA, b)
+        C_relu_hat = torch.add_relu(qA, b)
         C_relu_ref = torch.quantize_per_tensor(
             C_relu, C_relu_hat.q_scale(), C_relu_hat.q_zero_point(), dtype)
 

@@ -250,6 +250,9 @@ inline Tensor Tensor::add(const Tensor & other, Scalar alpha) const {
         case Backend::CPU:
             return CPUType::add(const_cast<Tensor&>(*this), other, alpha);
             break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::add(const_cast<Tensor&>(*this), other, alpha);
+            break;
         case Backend::SparseCPU:
             return SparseCPUType::add(const_cast<Tensor&>(*this), other, alpha);
             break;
@@ -288,6 +291,9 @@ inline Tensor Tensor::add(Scalar other, Scalar alpha) const {
         case Backend::CPU:
             return CPUType::add(const_cast<Tensor&>(*this), other, alpha);
             break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::add(const_cast<Tensor&>(*this), other, alpha);
+            break;
         default:
             AT_ERROR("add not implemented for ", at::toString(type_set()));
     }
@@ -311,6 +317,22 @@ inline Tensor & Tensor::add_(Scalar other, Scalar alpha) const {
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::add_", "Scalar"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, Scalar, Scalar>(
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this), other, alpha);
+#endif
+}
+inline Tensor Tensor::add_relu(const Tensor & other) const {
+#ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::add_relu(const_cast<Tensor&>(*this), other);
+            break;
+        default:
+            AT_ERROR("add_relu not implemented for ", at::toString(type_set()));
+    }
+#else
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::add_relu", "Tensor"}).value();
+    return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor &, const Tensor &>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this, other)), const_cast<Tensor&>(*this), other);
 #endif
 }
 inline Tensor Tensor::addmv(const Tensor & mat, const Tensor & vec, Scalar beta, Scalar alpha) const {

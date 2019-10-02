@@ -256,20 +256,53 @@ static auto registry = c10::RegisterOperators()
 .op("quantized::add_relu_out(Tensor qa, Tensor qb, Tensor out)"
      "-> Tensor out",
     c10::RegisterOperators::options()
-      .kernel<QAddOut</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId))
-.op("quantized::add_scalar(Tensor qa, Scalar b) -> Tensor qc",
-    c10::RegisterOperators::options()
-      .kernel<QAddScalar</*ReLUFused=*/false>>(TensorTypeId::QuantizedCPUTensorId))
-.op("quantized::add_scalar_relu(Tensor qa, Scalar b) -> Tensor qc",
-    c10::RegisterOperators::options()
-      .kernel<QAddScalar</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId))
-.op("quantized::add_scalar_out(Tensor qa, Scalar b, Tensor out)"
-     "-> Tensor out",
-    c10::RegisterOperators::options()
-      .kernel<QAddScalarOut</*ReLUFused=*/false>>(TensorTypeId::QuantizedCPUTensorId))
-.op("quantized::add_scalar_relu_out(Tensor qa, Scalar b, Tensor out)"
-     "-> Tensor out",
-    c10::RegisterOperators::options()
-      .kernel<QAddScalarOut</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId));
+      .kernel<QAddOut</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId));
+
 }  // namespace
+
+constexpr const char *kTensorTensorError = "torch.add is not supported when adding two"
+" quantized tensors. Please use torch.nn.quantized.modules.FloatFunctional";
+constexpr const char *kAlphaError = "The alpha parameter with values != 1.0 is currently"
+" not supported with quantized tensors";
+
+// ATen bindings for add
+
+Tensor & quantized_add_out(Tensor & out, const Tensor & self, const Tensor & other, Scalar alpha) {
+  TORCH_CHECK(other.sizes().size() == 0, kTensorTensorError);
+  TORCH_CHECK(alpha.toFloat() == 1.0, kAlphaError);
+  _add_scalar_out(out, self, other.item());
+  return out;
+}
+
+Tensor quantized_add(const Tensor & self, Scalar other, Scalar alpha) {
+  Tensor retval = at::empty_like(self);
+  TORCH_CHECK(alpha.toFloat() == 1.0, kAlphaError);
+  _add_scalar_out(retval, self, other);
+  return retval;
+}
+
+Tensor quantized_add(const Tensor & self, const Tensor & other, Scalar alpha) {
+  TORCH_CHECK(other.sizes().size() == 0, kTensorTensorError);
+  return quantized_add(self, other.item(), alpha);
+}
+
+// ATen bindings for AddReLU
+
+Tensor & quantized_add_relu_out(Tensor & out, const Tensor & self, const Tensor & other) {
+  TORCH_CHECK(other.sizes().size() == 0, kTensorTensorError);
+  _add_scalar_out</*ReLUFused=*/true>(out, self, other.item());
+  return out;
+}
+
+Tensor quantized_add_relu(const Tensor & self, Scalar other) {
+  Tensor retval = at::empty_like(self);
+  _add_scalar_out</*ReLUFused=*/true>(retval, self, other);
+  return retval;
+}
+
+Tensor quantized_add_relu(const Tensor & self, const Tensor & other) {
+  TORCH_CHECK(other.sizes().size() == 0, kTensorTensorError);
+  return quantized_add_relu(self, other.item());
+}
+
 }}  // namespace at::native
