@@ -17,6 +17,23 @@ inline Tensor hinge_embedding_loss(
       options.reduction());
 }
 
+inline Tensor triplet_margin_loss(
+    const Tensor& anchor,
+    const Tensor& positive,
+    const Tensor& negative,
+    const TripletMarginLossOptions& options) {
+  return torch::triplet_margin_loss(
+      anchor,
+      positive,
+      negative,
+      options.margin(),
+      options.p(),
+      options.eps(),
+      options.swap(),
+      options.reduction());
+}
+
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

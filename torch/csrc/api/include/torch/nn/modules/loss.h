@@ -61,5 +61,40 @@ struct TORCH_API HingeEmbeddingLossImpl : Module {
 /// PyTorch's module storage semantics.
 TORCH_MODULE(HingeEmbeddingLoss);
 
+// ============================================================================
+
+/// Creates a criterion that measures the triplet loss given an input
+/// tensors :math:`x1`, :math:`x2`, :math:`x3` and a margin with a value greater 
+/// than :math:`0`. This is used for measuring a relative similarity between
+/// samples. A triplet is composed by `a`, `p` and `n` (i.e., `anchor`, 
+/// `positive examples` and `negative examples` respectively). The
+/// shapes of all input tensors should be :math:`(N, D)`
+struct TORCH_API TripletMarginLossImpl : Module {
+  explicit TripletMarginLossImpl(
+      const TripletMarginLossOptions& options_ = {});
+
+  /// Pretty prints the `TripletMarginLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(
+      const Tensor& anchor,
+      const Tensor& positive,
+      const Tensor& negative);
+
+
+  /// The options with which this `Module` was constructed.
+  TripletMarginLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `TripletMarginLoss`.
+/// See the documentation for `TripletMarginLossImpl` class to learn what
+/// methods it provides, or the documentation for `ModuleHolder` to learn about
+/// PyTorch's module storage semantics.
+TORCH_MODULE(TripletMarginLoss);
+
+
+
+
+
 } // namespace nn
 } // namespace torch
