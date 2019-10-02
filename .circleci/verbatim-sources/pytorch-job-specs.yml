@@ -138,5 +138,7 @@ jobs:
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
             set -x
+
+            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
             .jenkins/pytorch/win-build.sh
 
