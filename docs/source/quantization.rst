@@ -73,7 +73,7 @@ Utility Functions
 .. autofunction:: swap_module
 .. autofunction:: get_observer_dict
 
-torch.nn._instrinsic.qat.modules
+torch.nn.instrinsic.qat.modules
 ================================
 .. automodule:: torch.nn._intrinsic.qat.modules
 
@@ -97,7 +97,7 @@ LinearReLU
 .. autoclass:: LinearReLU
     :members:
 
-torch.nn._intrinsic.quantized.modules
+torch.nn.intrinsic.quantized.modules
 ======================================
 .. automodule:: torch.nn._intrinsic.quantized.modules
 
