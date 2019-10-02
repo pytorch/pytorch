@@ -100,90 +100,34 @@ class PackedSequence(PackedSequence_):
                           bind(self.unsorted_indices, lambda t: t.pin_memory()))
 
     def cuda(self, *args, **kwargs):
-        """Returns a GPU copy if `self.data` not already on the GPU"""
-        if self.is_cuda:
-            return self
-        else:
-            # Why not convert `batch_sizes`?
-            # See NOTE [ device and dtype of a PackedSequence ]
-            return type(self)(self.data.cuda(*args, **kwargs), self.batch_sizes,
-                              bind(self.sorted_indices, lambda t: t.cuda(*args, **kwargs)),
-                              bind(self.unsorted_indices, lambda t: t.cuda(*args, **kwargs)))
+        return self.to(*args, device='cuda', **kwargs)
 
-    def cpu(self):
-        """Returns a CPU copy if `self.data` not already on the CPU"""
-        if self.is_cuda:
-            # Why not convert `batch_sizes`?
-            # See NOTE [ device and dtype of a PackedSequence ]
-            return type(self)(self.data.cpu(), self.batch_sizes,
-                              bind(self.sorted_indices, lambda t: t.cpu()),
-                              bind(self.unsorted_indices, lambda t: t.cpu()))
-        else:
-            return self
+    def cpu(self, *args, **kwargs):
+        return self.to(*args, device='cuda', **kwargs)
 
     def double(self):
-        r"""Returns copy with `self.data` cast to double type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.double(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(*args, dtype=torch.double, **kwargs)
 
     def float(self):
-        r"""Returns copy with `self.data` cast to float type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.float(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(*args, dtype=torch.float, **kwargs)
 
     def half(self):
-        r"""Returns copy with `self.data` cast to half type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.half(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(*args, dtype=torch.half, **kwargs)
 
     def long(self):
-        r"""Returns copy with `self.data` cast to long type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.long(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(*args, dtype=torch.long, **kwargs)
 
     def int(self):
-        r"""Returns copy with `self.data` cast to int type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.int(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(*args, dtype=torch.int, **kwargs)
 
     def short(self):
-        r"""Returns copy with `self.data` cast to short type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.short(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(*args, dtype=torch.short, **kwargs)
 
     def char(self):
-        r"""Returns copy with `self.data` cast to char type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.char(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(*args, dtype=torch.int8, **kwargs)
 
     def byte(self):
-        r"""Returns copy with `self.data` cast to byte type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.byte(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(*args, dtype=torch.uint8, **kwargs)
 
     def to(self, *args, **kwargs):
         r"""Performs dtype and/or device conversion on `self.data`.
