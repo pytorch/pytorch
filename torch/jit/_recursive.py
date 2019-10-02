@@ -144,7 +144,10 @@ def get_module_meta(original, level=0):
         module_meta.add_overload(name, overloaded_names)
 
     class_annotations = getattr(original, '__annotations__', {})
-    for name in dir(original):
+
+    # __dict__ because we only want to pick up attributes on this module
+    # instance, not the class itself.
+    for name, item in original.__dict__.items():
         if name in blacklist:
             # Python objects have lots of random attributes attached to them;
             # PyTorch adds a few more. Prevent these from getting compiled.
@@ -154,16 +157,9 @@ def get_module_meta(original, level=0):
             # Don't re-add anything we already added
             continue
 
-        if not hasattr(original, name):
-            # This can happen because we delete ScriptMethodStubs
-            # TODO clean this up if possible
-            continue
-
         # if isinstance(getattr(type(original), name, None), property):
         #     # Avoid adding @property methods as attributes
         #     continue
-
-        item = getattr(original, name)
 
         if inspect.isfunction(item) and not inspect.ismethod(item):
             cls_attr = getattr(type(original), name, None)
