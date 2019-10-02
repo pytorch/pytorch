@@ -11,7 +11,7 @@ namespace c10d {
 class Store {
  public:
   static constexpr std::chrono::milliseconds kDefaultTimeout =
-      std::chrono::seconds(300);
+      std::chrono::seconds(1800); // make timing consistent with python code
   static constexpr std::chrono::milliseconds kNoTimeout =
       std::chrono::milliseconds::zero();
 
