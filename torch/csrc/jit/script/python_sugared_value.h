@@ -214,7 +214,6 @@ struct VISIBILITY_HIDDEN ConcreteModuleType {
   void addAttribute(std::string name, TypePtr type, bool isParameter) {
     TORCH_INTERNAL_ASSERT(type);
     if (auto functionType = type->cast<FunctionType>()) {
-      // TODO
       functionAttributes_.emplace(std::move(name), std::move(functionType));
       return;
     }

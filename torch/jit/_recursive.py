@@ -377,7 +377,13 @@ def check_module_initialized(mod):
         raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
                            .format(type(mod).__name__))
 
-def recursive_script(mod, exclude_methods=()):
+def make_stub_from_method(mod, method):
+    func = get_function_from_type(type(mod), method)
+    if isinstance(func, ScriptMethodStub):
+        return func
+    return make_stub(func)
+
+def recursive_script(mod):
     """
     Makes a ScriptModule from an nn.Module.
 
@@ -409,7 +415,6 @@ def recursive_script(mod, exclude_methods=()):
             exported.append(name)
 
     methods = methods + exported
-    methods = [name for name in methods if name not in exclude_methods]
 
     overload_name_mappings = dict(getattr(mod, "__overloads__", {}))
     overload_info = get_overload_annotations(mod)
@@ -421,12 +426,6 @@ def recursive_script(mod, exclude_methods=()):
     # we shouldn't directly compile overloaded methods, just its overloads
     def ignore_overloaded(method_name):
         return method_name not in overload_name_mappings
-
-    def make_stub_from_method(method):
-        func = get_function_from_type(type(mod), method)
-        if isinstance(func, ScriptMethodStub):
-            return func
-        return make_stub(func)
 
     filtered_methods = filter(ignore_overloaded, methods)
 
@@ -440,7 +439,9 @@ def recursive_script(mod, exclude_methods=()):
         uniqued_methods.append(name)
         uniquer.add(name)
 
-    stubs = list(map(make_stub_from_method, uniqued_methods))
+    stubs = []
+    for method in uniqued_methods:
+        stubs.append(make_stub_from_method(mod, method))
     return create_script_module(mod, overload_stubs + stubs)
 
 def try_compile_fn(fn, loc):

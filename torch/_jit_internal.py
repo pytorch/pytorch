@@ -81,8 +81,6 @@ def createResolutionCallbackFromClosure(fn):
     Create a resolutionCallback by introspecting the function instead of
     looking up the stack for the enclosing scope
     """
-    if hasattr(fn, "_torchscript_rcb"):
-        return fn._torchscript_rcb
     closure = get_closure(fn)
 
     def env(key):

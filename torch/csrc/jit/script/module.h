@@ -137,6 +137,7 @@ struct TORCH_API Module {
   }
 
   IValue forward(std::vector<IValue> inputs) {
+    TORCH_CHECK(!isInitializing_);
     return get_method("forward")(std::move(inputs));
   }
 
@@ -372,11 +373,8 @@ struct TORCH_API Module {
   }
 
  private:
-  // We need a way to represent a module in the following state:
-  //   The type is fully initialized, but the module state is not.
-  // In particular, slot resolution doesn't work in this case.
-  //
-  // TODO: figure out a better way
+  // This is true while recursive scripting is building up a module from an
+  // already-provided type.
   bool isInitializing_ = false;
 
   Module clone_impl(std::unordered_map<TypePtr, TypePtr>& type_remap) const;

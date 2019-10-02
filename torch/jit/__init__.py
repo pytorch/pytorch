@@ -703,11 +703,20 @@ def make_tuple(example_inputs):
     return example_inputs
 
 
-def make_module(mod, _module_class, _compilation_unit, exclude_methods=()):
+def make_module(mod, _module_class, _compilation_unit):
     if isinstance(mod, ScriptModule):
         return mod
     elif torch._jit_internal.module_has_exports(mod):
-        return torch.jit._recursive.recursive_script(mod, exclude_methods)
+        exported = []
+        for name in dir(mod):
+            item = getattr(mod, name, None)
+            if torch._jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
+                exported.append(name)
+        stubs = []
+        for method in exported:
+            stubs.append(torch.jit._recursive.make_stub_from_method(mod, method))
+
+        return torch.jit._recursive.create_script_module(mod, stubs, fresh_type=True)
     else:
         if _module_class is None:
             _module_class = TopLevelTracedModule
@@ -993,17 +1002,12 @@ def trace_module(mod,
         raise AttributeError("expected a dictionary of (method_name, input) pairs")
 
 
-    module = make_module(mod, _module_class, _compilation_unit, tuple(inputs.keys()))
+    module = make_module(mod, _module_class, _compilation_unit)
 
     for method_name, example_inputs in inputs.items():
         # this is needed since Module.__call__ sets up some extra tracing
         func = mod if method_name == "forward" else getattr(mod, method_name)
         example_inputs = make_tuple(example_inputs)
-        if module._c._has_method(method_name):
-            # TODO TestScript.test_trace_export_fns. Creates a ScriptModule in
-            # make_module that shares types.
-            # doing continue here breaks check_trace, since we are using the same trace twice.
-            continue
         module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
         check_trace_method = module._c._get_method(method_name)
 
@@ -1272,7 +1276,6 @@ def interface(obj):
 def script_method(fn):
     if not _enabled:
         return fn
-
     # NOTE: we need to traverse two frames here because the meta-class frame
     # for ScriptModule will be present, as opposed to invoking @script on a
     # a function or invoking define() on a CompilationUnit.
@@ -1335,7 +1338,7 @@ class OrderedDictWrapper(object):
 
 
 class OrderedModuleDict(OrderedDictWrapper):
-    def __init__(self, module, python_dict=None):  # TODO only none for BC with old way
+    def __init__(self, module, python_dict):  # TODO only none for BC with old way
         super(OrderedModuleDict, self).__init__(module)
         # contains _both_ script modules and non-script python-only modules
 
@@ -1344,9 +1347,7 @@ class OrderedModuleDict(OrderedDictWrapper):
         # C++ script::Module class will not hold references to them,
         # to ensure that you always get the same python value here
         # we store it in the python dict as well
-        self._python_modules = OrderedDict()
-        if python_dict is not None:
-            self._python_modules = python_dict
+        self._python_modules = python_dict
 
     def items(self):
         r = self._python_modules.items()
@@ -1358,13 +1359,6 @@ class OrderedModuleDict(OrderedDictWrapper):
     def __setitem__(self, k, v):
         raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
                            "tried to replace existing module '{}': {}".format(k, v))
-        # if k in self._python_modules:
-        #     raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
-        #                        "tried to replace existing module '{}': {}".format(k, v))
-        # if isinstance(v, ScriptModule):
-        #     self.module._register_module(k, v._c)
-
-        # self._python_modules[k] = v
 
     def __getitem__(self, k):
         return self._python_modules[k]
@@ -1586,13 +1580,9 @@ if _enabled:
             self._c = cpp_module
             super(RecursiveScriptModule, self).__init__()
 
-        # TODO: it's really error-prone to leave ScriptModule in an unfrozen way
-        # We should error a lot louder if we try to use (i.e. call forward
-        # on) a non-finalized ScriptModule
         def _finalize(self):
             self._parameters = OrderedParameterDict(self._c)
             self._buffers = OrderedBufferDict(self._c)
-            # TODO the way that OrderedModuleDict is implemented seems fishy
             self._modules = OrderedModuleDict(self._c, self._modules)
             self._c._finalize()
             self._initializing = False
@@ -1748,39 +1738,6 @@ else:
             super(ScriptModule, self).__init__()
 
 
-
-def copy_to_tmp_module(orig):
-    assert(isinstance(orig, torch.nn.Module))
-    id_set = set()
-    tmp_module = Module()
-
-    def check_unique(param):
-        if param in id_set:
-            raise ValueError("TracedModules don't support parameter sharing between modules")
-        id_set.add(param)
-
-    tmp_module.training = orig.training
-
-    for name, param in orig._parameters.items():
-        if param is not None:
-            tmp_module._parameters[name] = param
-            check_unique(param)
-    for name, buf in orig._buffers.items():
-        if buf is not None:
-            tmp_module._buffers[name] = buf
-            check_unique(buf)
-
-    if orig._backward_hooks:
-        raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(orig))
-
-    for name, submodule in orig._modules.items():
-        tmp_module._modules[name] = make_module(submodule, TracedModule, _compilation_unit=None)
-
-    # TODO: this way of doing it means we lose name information on the class,
-    # since the qualname is basically "nn.Module"
-    return torch.jit._recursive.create_script_module(tmp_module, (), fresh_type=True)
-
-
 class TracedModule(ScriptModule):
     _disable_script_meta = True
 
@@ -1788,8 +1745,40 @@ class TracedModule(ScriptModule):
         # XXX: orig can be a nn.Module or a function!
         super(TracedModule, self).__init__()
         assert(isinstance(orig, torch.nn.Module))
+
+        # Copy a subset of `orig` to a temporary nn.Module.
+        # This is a way to customize what will actually get compiled by create_script_module
+        id_set = set()
+        tmp_module = Module()
+
+        def check_unique(param):
+            if param in id_set:
+                raise ValueError("TracedModules don't support parameter sharing between modules")
+            id_set.add(param)
+
+        tmp_module.training = orig.training
+
+        for name, param in orig._parameters.items():
+            if param is not None:
+                tmp_module._parameters[name] = param
+                check_unique(param)
+        for name, buf in orig._buffers.items():
+            if buf is not None:
+                tmp_module._buffers[name] = buf
+                check_unique(buf)
+
+        if orig._backward_hooks:
+            raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(orig))
+
+        for name, submodule in orig._modules.items():
+            tmp_module._modules[name] = make_module(submodule, TracedModule, _compilation_unit=None)
+
+        # TODO: this way of doing it means we lose name information on the class,
+        # since the qualname is basically "nn.Module"
+        script_module = torch.jit._recursive.create_script_module(tmp_module, (), fresh_type=True)
+
         self.__dict__['_name'] = 'TracedModule[' + type(orig).__name__ + ']'
-        self.__dict__['_actual_script_module'] = copy_to_tmp_module(orig)
+        self.__dict__['_actual_script_module'] = script_module
         for name in ("_parameters", "_buffers", "_modules"):
             delattr(self, name)
 
@@ -1809,10 +1798,6 @@ class TracedModule(ScriptModule):
     def _get_name(self):
         return self._name
 
-    # def __setattr__(self, attr, value):
-    #     if not self.__frozen or hasattr(self, attr):
-    #         return super(TracedModule, self).__setattr__(attr, value)
-    #     raise RuntimeError("Cannot set new properties on a traced module.")
 
 if _enabled:
     class TopLevelTracedModule(TracedModule):

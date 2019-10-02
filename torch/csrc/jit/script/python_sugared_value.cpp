@@ -288,6 +288,47 @@ Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
 
+std::vector<std::shared_ptr<SugaredValue>> ModuleValue::desugarModuleContainer(
+    bool get_keys,
+    bool get_values,
+    const SourceRange& loc,
+    Function& m) {
+  // the submodules in the module list may be a mix of python objects
+  // and script Modules. If we need to load a Module, we need its field
+  // name so we can emit 'self.field_name'.
+  std::unordered_map<at::ivalue::Object*, std::string> obj_to_field;
+  for (Slot s : module_.get_module_slots()) {
+    obj_to_field[s.value().toObject().get()] = s.name();
+  }
+
+  std::vector<std::shared_ptr<SugaredValue>> result;
+  for (auto sub_module : module_.get_modules()) {
+    const auto& name = obj_to_field.at(sub_module.module_object().get());
+    auto name_v =
+        std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
+    Value* module_v = m.graph()->insertGetAttr(self_, name);
+    auto mod_v = std::make_shared<ModuleValue>(
+        module_v,
+        sub_module,
+        *concreteType_.findSubmoduleConcreteType(name));
+
+    if (get_keys && get_values) {
+      std::vector<std::shared_ptr<SugaredValue>> tup;
+      tup.push_back(name_v);
+      tup.push_back(mod_v);
+      result.push_back(
+          std::make_shared<ConstantTupleValue>(ConstantTupleValue(tup)));
+    } else if (get_keys) {
+      result.push_back(name_v);
+    } else if (get_values) {
+      result.push_back(mod_v);
+    } else {
+      TORCH_INTERNAL_ASSERT(false);
+    }
+  }
+  return result;
+}
+
 // This method controls how we desugar attribute lookups on ScriptModules.
 std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
@@ -451,47 +492,6 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
   const bool get_keys = is_mod_dict;
   const bool get_values = !is_mod_dict;
   return desugarModuleContainer(get_keys, get_values, loc, m);
-}
-
-std::vector<std::shared_ptr<SugaredValue>> ModuleValue::desugarModuleContainer(
-    bool get_keys,
-    bool get_values,
-    const SourceRange& loc,
-    Function& m) {
-  // the submodules in the module list may be a mix of python objects
-  // and script Modules. If we need to load a Module, we need its field
-  // name so we can emit 'self.field_name'.
-  std::unordered_map<at::ivalue::Object*, std::string> obj_to_field;
-  for (Slot s : module_.get_module_slots()) {
-    obj_to_field[s.value().toObject().get()] = s.name();
-  }
-
-  std::vector<std::shared_ptr<SugaredValue>> result;
-  for (auto sub_module : module_.get_modules()) {
-    const auto& name = obj_to_field.at(sub_module.module_object().get());
-    auto name_v =
-        std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
-    Value* module_v = m.graph()->insertGetAttr(self_, name);
-    auto mod_v = std::make_shared<ModuleValue>(
-        module_v,
-        sub_module,
-        *concreteType_.findSubmoduleConcreteType(name));
-
-    if (get_keys && get_values) {
-      std::vector<std::shared_ptr<SugaredValue>> tup;
-      tup.push_back(name_v);
-      tup.push_back(mod_v);
-      result.push_back(
-          std::make_shared<ConstantTupleValue>(ConstantTupleValue(tup)));
-    } else if (get_keys) {
-      result.push_back(name_v);
-    } else if (get_values) {
-      result.push_back(mod_v);
-    } else {
-      TORCH_INTERNAL_ASSERT(false);
-    }
-  }
-  return result;
 }
 
 void ModuleValue::setAttr(
