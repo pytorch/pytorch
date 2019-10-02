@@ -98,7 +98,7 @@ class RpcAgent {
  protected:
   const WorkerId workerId_;
   const std::string workerName_;
-  std::unique_ptr<RequestCallback> cb_;
+  const std::unique_ptr<RequestCallback> cb_;
 };
 
 } // namespace rpc

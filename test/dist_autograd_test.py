@@ -1,37 +1,12 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import sys
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
-from common_distributed import MultiProcessTestCase
-from functools import wraps
+from dist_utils import dist_init
 import six
 import unittest
 import torch
 import time
-
-if not dist.is_available():
-    print("c10d not available, skipping tests")
-    sys.exit(0)
-
-def dist_init(func):
-    """
-    We use this decorator for setting up and tearing down state since
-    MultiProcessTestCase runs each `test*` method in a separate process and
-    each process just runs the `test*` method without actually calling
-    'setUp' and 'tearDown' methods of unittest.
-    """
-    @wraps(func)
-    def wrapper(self):
-        self.worker_id = self.rank
-        store = dist.FileStore(self.file.name, self.world_size)
-        dist.init_process_group(backend='gloo', rank=self.rank,
-                                world_size=self.world_size, store=store)
-        dist.init_model_parallel('worker%d' % self.rank)
-        func(self)
-        dist.join_rpc()
-
-    return wrapper
 
 prev_rank_rpc_done = False
 prev_rank_context_id = 0
@@ -43,7 +18,7 @@ def _set_rpc_done(context_id):
 
 @unittest.skipIf(not six.PY3, "Pytorch distributed autograd package "
                  "does not support python2")
-class TestDistAutograd(MultiProcessTestCase):
+class TestDistAutograd(object):
 
     @property
     def world_size(self):
@@ -73,10 +48,8 @@ class TestDistAutograd(MultiProcessTestCase):
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
-            ret = dist.rpc('worker{}'.format(dst_rank), torch.add,
-                           args=(t1, t2))
-            # Notify the next rank that we're done with the RPC.
-            dist.rpc('worker{}'.format(dst_rank), _set_rpc_done, args=(context_id,))
+            ret = dist.rpc_sync('worker{}'.format(dst_rank), torch.add, args=(t1, t2))
+            dist.rpc_sync('worker{}'.format(dst_rank), _set_rpc_done, args=(context_id,))
 
             # Get send function.
             ctx = dist_autograd._current_context()
@@ -145,8 +118,7 @@ class TestDistAutograd(MultiProcessTestCase):
             tensors = []
             for i in range(num_tensors):
                 tensors.append(torch.ones(3, 3, requires_grad=(i % 2 == 0)))
-            ret = dist.rpc('worker{}'.format(dst_rank), torch.stack,
-                           args=(tensors,))
+            ret = dist.rpc_sync('worker{}'.format(dst_rank), torch.stack, args=(tensors,))
             self.assertEqual(torch.stack(tensors), ret)
 
             # Verify appropriate tensors have been attached the autograd graph.
@@ -158,7 +130,3 @@ class TestDistAutograd(MultiProcessTestCase):
                     self.assertEqual(tensors[i], next_funcs[i][0].variable)
                 else:
                     self.assertIsNone(next_funcs[i][0])
-
-
-if __name__ == '__main__':
-    unittest.main()
