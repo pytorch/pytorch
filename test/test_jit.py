@@ -3988,7 +3988,7 @@ def foo(xyz):
 
         _, lineno = inspect.getsourcelines(FooTest2)
 
-        with self.assertRaisesRegex(torch._C.JITException, 'test_jit.py:{}'.format(lineno + 3)):
+        with self.assertRaisesRegex(torch.jit.Error, 'test_jit.py:{}'.format(lineno + 3)):
             ft = FooTest2()
             loaded = self.getExportImportCopy(ft)
             loaded()
@@ -6778,11 +6778,12 @@ a")
             test(inp, typ, type_hint)
 
         # test optional isinstance check
-        with self.assertRaisesRegex(RuntimeError, "Optional isinstance check is not supported"):
-            @torch.jit.script
-            def opt_func(x):
-                # type: (Optional[int]) -> bool
-                return isinstance(x, int)
+        @torch.jit.script
+        def opt_func(x):
+            # type: (Optional[int]) -> bool
+            return isinstance(x, int)
+        self.assertTrue(opt_func(3))
+        self.assertFalse(opt_func(None))
 
     def test_dropout_eval(self):
         class ScriptedConv2d(torch.jit.ScriptModule):
@@ -14027,6 +14028,21 @@ a")
         out = test_non_primitive_types(_MyNamedTuple(value=torch.tensor(5.0)))
         self.assertEqual(out, torch.tensor(6.0))
 
+    def test_isinstance_dynamic(self):
+        @torch.jit.script
+        def foo(a):
+            # type: (Optional[List[int]]) -> int
+            b = 0
+            if isinstance(a, (int, (float,), list, str)):
+                b += 1
+            if isinstance(a, (int, str)):
+                b += 1
+            if isinstance(a, List[int]):
+                b += 1
+            return b
+        self.assertEqual(foo([3, 4]), 2)
+        self.assertEqual(foo(None), 0)
+
     def test_function_overloads(self):
         # TODO: pyflakes currently does not compose @overload annotation with other
         # decorators. This is fixed on master but not on version 2.1.1.
@@ -14606,7 +14622,7 @@ a")
         buffer.seek(0)
         loaded = torch.jit.load(buffer)
 
-        with self.assertRaisesRegex(torch._C.JITException, "annotated to be ignored and cannot be run"):
+        with self.assertRaisesRegex(torch.jit.Error, "annotated to be ignored and cannot be run"):
             loaded(torch.tensor(.5), True)
 
     def test_module_error(self):
