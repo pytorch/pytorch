@@ -1513,7 +1513,6 @@ if _enabled:
                 self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit, True)
 
             Module._Module__construct(self)
-            # super(ScriptModule, self).__init__()
 
             self._parameters = OrderedParameterDict(self._c)
             self._buffers = OrderedBufferDict(self._c)
@@ -1588,8 +1587,7 @@ if _enabled:
                                            .format(attr, value.type, type(value.value)))
                     return
                 if self._c._has_attribute(attr):
-                    attr_type = self._c._get_attribute_type(attr)
-                    self._c._register_attribute(attr, attr_type, value)
+                    self._c._set_attribute(attr, value)
                 return super(ScriptModule, self).__setattr__(attr, value)
 
             if hasattr(self, attr):

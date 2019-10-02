@@ -114,7 +114,7 @@ struct TORCH_API Module {
       std::shared_ptr<CompilationUnit> cu,
       bool shouldMangle = false);
   // module_value_ null and will be lazily initialized if is needed
-Module() {};
+  Module() {}
   Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
   ~Module() {}
 
