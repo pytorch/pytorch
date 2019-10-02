@@ -1824,6 +1824,53 @@ class TestNamedTensor(TestCase):
                 args=(create('C:2'), create('W:2')),
                 expected_names=[])
 
+    def test_comparison_ops(self):
+        for device in torch.testing.get_all_device_types():
+            a = torch.randn(3, 3, names=('N', 'C'), device=device)
+            b = torch.randn(3, 3, names=('N', 'C'), device=device)
+            scalar = torch.randn([], device=device)
+
+            self.assertEqual((a == b).names, ['N', 'C'])
+            self.assertEqual((a != b).names, ['N', 'C'])
+            self.assertEqual((a > b).names, ['N', 'C'])
+            self.assertEqual((a < b).names, ['N', 'C'])
+            self.assertEqual((a >= b).names, ['N', 'C'])
+            self.assertEqual((a <= b).names, ['N', 'C'])
+
+            self.assertEqual((a == 1).names, ['N', 'C'])
+            self.assertEqual((a != 1).names, ['N', 'C'])
+            self.assertEqual((a > 1).names, ['N', 'C'])
+            self.assertEqual((a < 1).names, ['N', 'C'])
+            self.assertEqual((a >= 1).names, ['N', 'C'])
+            self.assertEqual((a <= 1).names, ['N', 'C'])
+
+            self.assertEqual((a == scalar).names, ['N', 'C'])
+            self.assertEqual((a != scalar).names, ['N', 'C'])
+            self.assertEqual((a > scalar).names, ['N', 'C'])
+            self.assertEqual((a < scalar).names, ['N', 'C'])
+            self.assertEqual((a >= scalar).names, ['N', 'C'])
+            self.assertEqual((a <= scalar).names, ['N', 'C'])
+
+            res = torch.empty(3, 3, dtype=torch.bool, device=device)
+            torch.eq(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.ne(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.lt(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.gt(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.le(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.ge(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+
+            res = torch.isnan(a)
+            self.assertEqual(res.names, ['N', 'C'])
+
+            res = torch.isinf(a)
+            self.assertEqual(res.names, ['N', 'C'])
+
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):
     if attr.startswith('test_'):
