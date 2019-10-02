@@ -1047,7 +1047,7 @@ TEST_F(ModulesTest, Hardshrink) {
 TEST_F(ModulesTest, Hardtanh) {
   const auto size = 3;
   for (const auto min_val : {-4.2, -1.0, -0.42, 0.0}) {
-    for (const auto max_val : {0.0, 0.42, 1.0, 4.2}) {
+    for (const auto max_val : {0.42, 1.0, 4.2}) {
       Hardtanh model {HardtanhOptions().min_val(min_val).max_val(max_val)};
       auto x = torch::linspace(-10.0, 10.0, size * size * size);
       x.resize_({size, size, size}).set_requires_grad(true);
@@ -1065,6 +1065,13 @@ TEST_F(ModulesTest, Hardtanh) {
       ASSERT_TRUE(torch::allclose(y, y_exp));
     }
   }
+}
+
+TEST_F(ModulesTest, HardtanhMinValGEMaxVal) {
+  ASSERT_THROWS_WITH(Hardtanh{HardtanhOptions().min_val(0.42).max_val(0.42)},
+                     "max_val must be greater than min_val");
+  ASSERT_THROWS_WITH(Hardtanh{HardtanhOptions().min_val(0.42).max_val(-0.42)},
+                     "max_val must be greater than min_val");
 }
 
 TEST_F(ModulesTest, LeakyReLU) {

@@ -41,7 +41,10 @@ void HardshrinkImpl::pretty_print(std::ostream& stream) const {
 // ============================================================================
 
 HardtanhImpl::HardtanhImpl(const HardtanhOptions& options_)
-    : options(options_) {}
+    : options(options_) {
+  TORCH_CHECK(options.max_val() > options.min_val(),
+              "max_val must be greater than min_val");
+}
 
 Tensor HardtanhImpl::forward(Tensor& input) {
   return F::hardtanh(input, options);
