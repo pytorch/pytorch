@@ -17909,7 +17909,6 @@ class TestAsync(JitTestCase):
             torch.jit.load(buffer, _extra_files=extra_files)
 
 
-@unittest.skip("TODO [module dedupe] Need to fix this before landing!")
 class TestDataParallel(JitTestCase):
     class Mpy(torch.nn.Module):
         def __init__(self):
@@ -17974,13 +17973,6 @@ class TestDataParallel(JitTestCase):
                 self.assertEqual(b.get_device(), i)
             replica_input = input.cuda(i)
             self.assertEqual(replica(replica_input).data, expected_output)
-
-    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
-    def test_python_submodule_exception(self):
-        module = self.Msm1(self.Mpy()).cuda()
-        msg = "Cannot replicate.*"
-        with self.assertRaisesRegex(Exception, msg):
-            dp.replicate(module, {0, 1})
 
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
     def test_python_submodule_script(self):
@@ -19275,10 +19267,10 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_schema_human_readable(self):
-        """ 
+        """
         Make sure that the schema is human readable, ie the mode parameter should read "nearest" instead of being displayed in octal
-        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None, 
-        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor): 
+        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None,
+        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor):
         Expected a value of type 'Optional[int]' for argument 'size' but instead found type 'Tensor'.
         """
         with self.assertRaisesRegex(RuntimeError, "nearest"):
