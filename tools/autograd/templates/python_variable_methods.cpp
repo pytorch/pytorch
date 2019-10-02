@@ -410,51 +410,131 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_to_type(PyObject* self, ScalarType scalarType) {
+static PyObject * THPVariable_to_type(PyObject* self, ScalarType scalarType, c10::optional<c10::MemoryFormat> optional_memory_format) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  // Setting to MemoryFormat::Contiguous now, will change to accept memory_format in next PR
-  return THPVariable_Wrap(dispatch_to(self_, scalarType, false, false, MemoryFormat::Contiguous));
+  return THPVariable_Wrap(dispatch_to(self_, scalarType, false, false, optional_memory_format));
   END_HANDLE_TH_ERRORS
 }
-static PyObject * THPVariable_byte(PyObject* self, PyObject* args) {
-  return THPVariable_to_type(self, ScalarType::Byte);
+
+static PyObject * THPVariable_to_type_byte(PyObject* self, PyObject* args, PyObject* kwargs)  {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "byte(*, MemoryFormat? memory_format=None)"
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto opt_memory_format = r.memoryformatOptional(0);
+  return THPVariable_to_type(self, ScalarType::Byte, opt_memory_format);
+  END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_char(PyObject* self, PyObject* args) {
-  return THPVariable_to_type(self, ScalarType::Char);
+static PyObject * THPVariable_to_type_char(PyObject* self, PyObject* args, PyObject* kwargs)  {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "char(*, MemoryFormat? memory_format=None)"
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto opt_memory_format = r.memoryformatOptional(0);
+  return THPVariable_to_type(self, ScalarType::Char, opt_memory_format);
+  END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_double(PyObject* self, PyObject* args) {
-  return THPVariable_to_type(self, ScalarType::Double);
+static PyObject * THPVariable_to_type_double(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "double(*, MemoryFormat? memory_format=None)"
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto opt_memory_format = r.memoryformatOptional(0);
+  return THPVariable_to_type(self, ScalarType::Double, opt_memory_format);
+  END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_float(PyObject* self, PyObject* args) {
-  return THPVariable_to_type(self, ScalarType::Float);
+static PyObject * THPVariable_to_type_float(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "float(*, MemoryFormat? memory_format=None)"
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto opt_memory_format = r.memoryformatOptional(0);
+  return THPVariable_to_type(self, ScalarType::Float, opt_memory_format);
+  END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_half(PyObject* self, PyObject* args) {
-  return THPVariable_to_type(self, ScalarType::Half);
+static PyObject * THPVariable_to_type_half(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "half(*, MemoryFormat? memory_format=None)"
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto opt_memory_format = r.memoryformatOptional(0);
+  return THPVariable_to_type(self, ScalarType::Half, opt_memory_format);
+  END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_int(PyObject* self, PyObject* args) {
-  return THPVariable_to_type(self, ScalarType::Int);
+static PyObject * THPVariable_to_type_int(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "int(*, MemoryFormat? memory_format=None)"
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto opt_memory_format = r.memoryformatOptional(0);
+  return THPVariable_to_type(self, ScalarType::Int, opt_memory_format);
+  END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_long(PyObject* self, PyObject* args) {
-  return THPVariable_to_type(self, ScalarType::Long);
+static PyObject * THPVariable_to_type_long(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "long(*, MemoryFormat? memory_format=None)"
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto opt_memory_format = r.memoryformatOptional(0);
+  return THPVariable_to_type(self, ScalarType::Long, opt_memory_format);
+  END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_short(PyObject* self, PyObject* args) {
-  return THPVariable_to_type(self, ScalarType::Short);
+static PyObject * THPVariable_to_type_short(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "short(*, MemoryFormat? memory_format=None)"
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto opt_memory_format = r.memoryformatOptional(0);
+  return THPVariable_to_type(self, ScalarType::Short, opt_memory_format);
+  END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_bool(PyObject* self, PyObject* args) {
-  return THPVariable_to_type(self, ScalarType::Bool);
+static PyObject * THPVariable_to_type_bool(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "bool(*, MemoryFormat? memory_format=None)"
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto opt_memory_format = r.memoryformatOptional(0);
+  return THPVariable_to_type(self, ScalarType::Bool, opt_memory_format);
+  END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_bfloat16(PyObject* self, PyObject* args) {
-  return THPVariable_to_type(self, ScalarType::BFloat16);
+static PyObject * THPVariable_to_type_bfloat16(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "bfloat16(*, MemoryFormat? memory_format=None)"
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto opt_memory_format = r.memoryformatOptional(0);
+  return THPVariable_to_type(self, ScalarType::BFloat16, opt_memory_format);
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
@@ -770,9 +850,9 @@ PyMethodDef variable_methods[] = {
   {"__matmul__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_matmul>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"_is_view", (PyCFunction)THPVariable__is_view, METH_NOARGS, NULL},
   {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
-  {"bfloat16", (PyCFunction)THPVariable_bfloat16, METH_NOARGS, NULL},
-  {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
-  {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
+  {"bfloat16", (PyCFunction)(void(*)(void))THPVariable_to_type_bfloat16, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"byte", (PyCFunction)(void(*)(void))THPVariable_to_type_byte, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"char", (PyCFunction)(void(*)(void))THPVariable_to_type_char, METH_VARARGS | METH_KEYWORDS, NULL},
   {"contiguous", (PyCFunction)(void(*)(void))THPVariable_contiguous, METH_VARARGS | METH_KEYWORDS, NULL},
   {"copy_", (PyCFunction)(void(*)(void))THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"cpu", (PyCFunction)(void(*)(void))THPVariable_cpu, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -782,16 +862,16 @@ PyMethodDef variable_methods[] = {
 #ifdef BUILD_NAMEDTENSOR
   {"has_names", (PyCFunction)THPVariable_has_names, METH_NOARGS, NULL},
 #endif
-  {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
+  {"double", (PyCFunction)(void(*)(void))THPVariable_to_type_double, METH_VARARGS | METH_KEYWORDS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
-  {"float", (PyCFunction)THPVariable_float, METH_NOARGS, NULL},
+  {"float", (PyCFunction)(void(*)(void))THPVariable_to_type_float, METH_VARARGS | METH_KEYWORDS, NULL},
   {"get_device", (PyCFunction)THPVariable_get_device, METH_NOARGS, NULL},
-  {"bool", (PyCFunction)THPVariable_bool, METH_NOARGS, NULL},
-  {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
-  {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
+  {"bool", (PyCFunction)(void(*)(void))THPVariable_to_type_bool, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"half", (PyCFunction)(void(*)(void))THPVariable_to_type_half, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"int", (PyCFunction)(void(*)(void))THPVariable_to_type_int, METH_VARARGS | METH_KEYWORDS, NULL},
   {"is_contiguous", (PyCFunction)(void(*)(void))THPVariable_is_contiguous, METH_VARARGS | METH_KEYWORDS, NULL},
   {"item", (PyCFunction)THPVariable_item, METH_NOARGS, NULL},
-  {"long", (PyCFunction)THPVariable_long, METH_NOARGS, NULL},
+  {"long", (PyCFunction)(void(*)(void))THPVariable_to_type_long, METH_VARARGS | METH_KEYWORDS, NULL},
   {"map_", (PyCFunction)(void(*)(void))THPVariable_map_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"map2_", (PyCFunction)(void(*)(void))THPVariable_map2_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"ndimension", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
@@ -804,7 +884,7 @@ PyMethodDef variable_methods[] = {
   {"numpy", (PyCFunction)THPVariable_numpy, METH_NOARGS, NULL},
   {"record_stream", (PyCFunction)THPVariable_record_stream, METH_O, NULL},
   {"requires_grad_", (PyCFunction)(void(*)(void))THPVariable_requires_grad_, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"short", (PyCFunction)THPVariable_short, METH_NOARGS, NULL},
+  {"short", (PyCFunction)(void(*)(void))THPVariable_to_type_short, METH_VARARGS | METH_KEYWORDS, NULL},
   {"size", (PyCFunction)(void(*)(void))THPVariable_size, METH_VARARGS | METH_KEYWORDS, NULL},
   {"storage", (PyCFunction)THPVariable_storage, METH_NOARGS, NULL},
   {"storage_offset", (PyCFunction)THPVariable_storage_offset, METH_NOARGS, NULL},
