@@ -394,9 +394,9 @@ def split_with_sizes(g, self, split_sizes, dim):
 
 @parse_args('v', 'i')
 def unbind(g, self, dim=0):
-    # NOTE: This node is handled in onnx peephole pass.
+    # NOTE: This conversion of this node is handled in onnx peephole pass.
+    # Due to that an additional Squeeze node needs to be inserted for each output from unbind.
     return g.op("aten::unbind", self, axis_i=dim)
-    # return split(g, self, g.op("Constant", value_t=torch.LongTensor([1])), dim)
 
 
 @parse_args('v', 'i', 'v')

@@ -606,6 +606,21 @@ static void fuseSplitListUnpack(Block* b) {
   }
 }
 
+// Unbind is being converted to ONNX as Split + Squeeze.
+// Example IR
+// graph(%0 : Float(3, 4, 5)):
+//   %7 : Long() = prim::Constant[value={0}]()
+//   %3 : Tensor[] = aten::unbind(%0, %7)
+//   %4 : Float(4, 5), %5 : Float(4, 5), %6 : Float(4, 5) = prim::ListUnpack(%3)
+//   return (%4, %5, %6)
+//
+// Translates to ONNX:
+// graph(%0 : Float(3, 4, 5)):
+//   %1 : Tensor, %2 : Tensor, %3 : Tensor = onnx::Split[axis=0](%0)
+//   %4 : Float(4, 5) = onnx::Squeeze[axes=[0]](%3)
+//   %5 : Float(4, 5) = onnx::Squeeze[axes=[0]](%2)
+//   %6 : Float(4, 5) = onnx::Squeeze[axes=[0]](%1)
+//   return (%6, %5, %4)
 static void fuseUnbindListUnpack(Block *b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
