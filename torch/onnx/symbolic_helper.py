@@ -227,14 +227,6 @@ def _scatter_helper(g, self, dim, index, src):
         from torch.onnx.symbolic_opset11 import scatter
     return scatter(g, self, dim, index, src)
 
-
-def _get_size_if_complete(input, op):
-    if input.isCompleteTensor():
-        return input.type().sizes()
-    else:
-        warnings.warn("ONNX export failed on " + op + ". Unknown input size for incomplete tensor.")
-        return -1
-
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
