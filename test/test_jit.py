@@ -3442,6 +3442,27 @@ def foo(x):
         mod = torch.jit.script(MyMod())
         FileCheck().check_dag("NamedTuple").check_dag("Exception").run(mod.forward.graph)
 
+    def test_eval_python(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.my = 2
+
+            def forward(self, x):
+                return self.training
+
+        m = torch.jit.script(M())
+
+        self.assertTrue(m(torch.ones(2, 2)))
+        self.assertTrue(m.training)
+        self.assertTrue(m._c._get_attribute('training'))
+
+        m.eval()
+
+        self.assertFalse(m.training)
+        self.assertFalse(m._c._get_attribute('training'))
+        self.assertFalse(m(torch.ones(2, 2)))
+
     def test_inherit_method(self):
         class A(torch.jit.ScriptModule):
             def __init__(self):
@@ -19265,10 +19286,10 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_schema_human_readable(self):
-        """ 
+        """
         Make sure that the schema is human readable, ie the mode parameter should read "nearest" instead of being displayed in octal
-        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None, 
-        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor): 
+        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None,
+        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor):
         Expected a value of type 'Optional[int]' for argument 'size' but instead found type 'Tensor'.
         """
         with self.assertRaisesRegex(RuntimeError, "nearest"):
