@@ -137,7 +137,7 @@ class QFunctional(torch.nn.Module):
     r"""Operation equivalent to ``torch.ops.quantized.add(Tensor, float)``"""
     def add_scalar(self, x, y):
         # type: (Tensor, float) -> Tensor
-        return ops.quantized.add_scalar(x, y)
+        return x + y
 
     r"""Operation equivalent to ``torch.ops.quantized.mul(Tensor, Tensor)``"""
     def mul(self, x, y):

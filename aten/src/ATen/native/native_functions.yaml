@@ -234,6 +234,7 @@
     SparseCPU: add_sparse
     SparseCUDA: add_sparse
     MkldnnCPU: mkldnn_add
+    QuantizedCPU: quantized_add
   supports_named_tensor: True
 
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
@@ -254,6 +255,7 @@
     SparseCPU: add_out_sparse_cpu
     SparseCUDA: add_out_sparse_cuda
     MkldnnCPU: mkldnn_add_out
+    QuantizedCPU: quantized_add_out
   supports_named_tensor: True
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
@@ -261,11 +263,28 @@
   use_c10_dispatcher: full
   variants: function, method
   supports_named_tensor: True
+  dispatch:
+    CPU: add
+    CUDA: add
+    QuantizedCPU: quantized_add
 
 - func: add_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
   supports_named_tensor: True
+  dispatch:
+    CPU: add_
+    CUDA: add_
+
+- func: add_relu.Tensor(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    QuantizedCPU: quantized_add_relu
+
+- func: add_relu.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    QuantizedCPU: quantized_add_relu_out
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
