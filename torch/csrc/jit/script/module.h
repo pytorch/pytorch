@@ -116,8 +116,12 @@ struct TORCH_API Module {
   // module_value_ null and will be lazily initialized if is needed
 Module() : Module(nullptr) {};
   Module(ModulePtr module_value) : module_value_(std::move(module_value)) {
-    register_attribute("training", BoolType::get(), true);
-  }
+    bool training = true;
+    if (module_value_ && module_value_->type()->hasAttribute("training")) {
+      training = module_value_->getAttr("training").toBool();
+    }
+    register_attribute("training", BoolType::get(), training);
+   }
   ~Module() {}
 
   const c10::QualifiedName& name() const {
