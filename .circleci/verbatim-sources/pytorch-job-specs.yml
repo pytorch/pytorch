@@ -138,6 +138,6 @@ jobs:
             export PATH="C:\tools\miniconda3\Scripts":$PATH
             export PATH="C:\tools\miniconda3":$PATH
             export PATH="C:\Program Files\NVIDIA Corporation\NVSMI":$PATH
-            nvidia-smi
-            python --version
-            conda install -yq -c pytorch pytorch
+            ls
+            .jenkins/pytorch/win-build.sh
+
