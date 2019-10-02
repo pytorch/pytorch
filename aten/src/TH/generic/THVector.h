@@ -49,12 +49,7 @@ TH_API void THVector_(atan)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(tanh)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(pow)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptrdiff_t n);
 TH_API void THVector_(sqrt)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(rsqrt)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(ceil)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(floor)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(round)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(abs)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(trunc)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(frac)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(cinv)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 
