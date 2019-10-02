@@ -63,7 +63,7 @@ inline void Tensor::backward(const Tensor & gradient, bool keep_graph, bool crea
     at::AutoNonVariableTypeMode _var_guard(true);
      TypeDefault::backward(const_cast<Tensor&>(*this), gradient, keep_graph, create_graph);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> void");
+    static auto table = globalATenDispatch().getOpTable("aten::backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()");
     return table->callUnboxed<void, const Tensor &, const Tensor &, bool, bool>(const_cast<Tensor&>(*this), gradient, keep_graph, create_graph);
 #endif
 }
@@ -72,8 +72,9 @@ inline void Tensor::set_data(const Tensor & new_data) const {
     at::AutoNonVariableTypeMode _var_guard(true);
      TypeDefault::set_data(const_cast<Tensor&>(*this), new_data);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::set_data(Tensor(a!) self, Tensor new_data) -> void");
-    return table->callUnboxed<void, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), new_data);
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::set_data", ""}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<void, const Tensor &, const Tensor &>(
+        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this, new_data)), const_cast<Tensor&>(*this), new_data);
 #endif
 }
 inline Tensor Tensor::data() const {

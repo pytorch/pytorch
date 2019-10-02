@@ -1,6 +1,8 @@
 # HEY! Trying to understand what this file does?  Read
 # "what has to be done to add a Operation ..." first!
 
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import re
 from code_template import CodeTemplate
 
@@ -887,7 +889,10 @@ def create_generic(top_env, declarations):
 
     def format_return_type(return_types):
         # type: (List[ReturnType]) -> str
-        if len(return_types) == 1:
+        len_return_types = len(return_types)
+        if len_return_types == 0:
+            return "void"
+        if len_return_types == 1:
             return return_types[0]['type']
         return "std::tuple<{}>".format(','.join(r['type'] for r in return_types))
 
@@ -1116,9 +1121,6 @@ def create_generic(top_env, declarations):
             if isinstance(t_raw, string_type):
                 t = t_raw
                 name = None
-            elif t_raw is None:
-                t = 'void'
-                name = None
             else:
                 t = t_raw['type']
                 name = t_raw['name']
@@ -1149,7 +1151,6 @@ def create_generic(top_env, declarations):
         assert option['python_module'] == '' or option['python_module'] == 'nn', \
             "Found python_module of {} for decl {}, but only \'\' string or \'nn\' are supported".format(
                 option['python_module'], option['name'])
-
         formals = native_get_formals(option)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]

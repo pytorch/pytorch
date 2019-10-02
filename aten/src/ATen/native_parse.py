@@ -310,7 +310,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
 
     # TODO: Explicit checking for void is a hack and should disappear after a more
     # functionally complete implementation of Tensor aliases.
-    if declaration['inplace'] and len(func_return) > 0 and func_return[0]['type'] != "void":
+    if declaration['inplace'] and len(func_return) > 0:
         found_self = False
         for arg_idx, argument in enumerate(arguments):
             if argument['name'] == "self":
@@ -331,12 +331,15 @@ def parse_arguments(args, func_variants, declaration, func_return):
 
 def parse_return_arguments(return_decl, inplace, func_decl):
     arguments = []
+    if return_decl == '()':
+        return arguments
+
     # TODO: Use a real parser here; this will get bamboozled
     # by signatures that contain things like std::array<bool, 2> (note the space)
     if return_decl[0] == '(' and return_decl[-1] == ')':
         return_decl = return_decl[1:-1]
-    multiple_args = len(return_decl.split(', ')) > 1
 
+    multiple_args = len(return_decl.split(', ')) > 1
     for arg_idx, arg in enumerate(return_decl.split(', ')):
         t, name, default, nullable, size, annotation = type_argument_translations(arg)
         # name of arguments and name of return sometimes have collision

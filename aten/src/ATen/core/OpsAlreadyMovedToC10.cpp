@@ -38,6 +38,7 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::_cast_Long", ""},
         {"aten::_cast_Short", ""},
         {"aten::_cast_Half", ""},
+        {"aten::set_data", ""},
         {"aten::data", ""},
     #ifdef BUILD_NAMEDTENSOR
         {"aten::align_as", ""},
@@ -196,6 +197,8 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::_fft_with_size", ""},
         {"aten::_cufft_get_plan_cache_size", ""},
         {"aten::_cufft_get_plan_cache_max_size", ""},
+        {"aten::_cufft_set_plan_cache_max_size", ""},
+        {"aten::_cufft_clear_plan_cache", ""},
         {"aten::index_copy_", ""},
         {"aten::index_copy", ""},
         {"aten::inverse", ""},
@@ -776,7 +779,6 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
 bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
   static std::unordered_set<std::pair<const char*, const char*>, OpNameHash, OpNameEquals> ops {
         {"aten::backward", ""},
-        {"aten::set_data", ""},
         {"aten::is_leaf", ""},
         {"aten::output_nr", ""},
         {"aten::_version", ""},
@@ -943,8 +945,6 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
         {"aten::hamming_window", "periodic_alpha_beta"},
         {"aten::ger", "out"},
         {"aten::group_norm", ""},
-        {"aten::_cufft_set_plan_cache_max_size", ""},
-        {"aten::_cufft_clear_plan_cache", ""},
         {"aten::index", "Tensor"},
     #ifdef BUILD_NAMEDTENSOR
         {"aten::index_copy_", "dimname"},
