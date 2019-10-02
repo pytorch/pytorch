@@ -472,6 +472,11 @@ TupleType::TupleType(
       std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
         return v->hasFreeVariables();
       });
+  if (schema_) {
+    for (const Argument& arg : schema_->arguments()) {
+      checkNoAny(*this, "attribute", arg.name(), arg.type());
+    }
+  }
 }
 
 bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
@@ -606,5 +611,35 @@ InterfaceType::InterfaceType(QualifiedName name)
       methods_(std::make_shared<std::vector<FunctionSchema>>()) {}
 
 InterfaceType::~InterfaceType() = default;
+
+
+static bool containsAny(const TypePtr& type) {
+  std::vector<TypePtr> to_scan = { type };
+  while (!to_scan.empty()) {
+    TypePtr typ = to_scan.back();
+    to_scan.pop_back();
+    if (typ->kind() == AnyType::Kind) {
+      return true;
+    }
+    for (const TypePtr& sub : typ->containedTypes()) {
+      to_scan.emplace_back(sub);
+    }
+  }
+  return false;
+}
+
+void checkNoAny(const Type& base, const char* what, const std::string& attrname, const TypePtr& attrtype) {
+  TORCH_CHECK(
+      !containsAny(attrtype),
+      "attempting to add ",
+      what,
+      " '",
+      attrname,
+      "' of type ",
+      attrtype->python_str(),
+      " to '",
+      base.python_str(),
+      "' but it contains an Any type. Any types cannot be members of modules, classes, or named tuples.");
+}
 
 } // namespace c10
