@@ -72,6 +72,13 @@ class FakeQuantize(Module):
     def disable_fake_quant(self):
         return self.enable_fake_quant(False)
 
+    def enable_observer(self, enabled=True):
+        self.observer_enabled = enabled
+        return self
+
+    def disable_observer(self):
+        return self.enable_observer(False)
+
     def calculate_qparams(self):
         return self.observer.calculate_qparams()
 
@@ -144,4 +151,4 @@ def disable_observer(mod):
 
 def enable_observer(mod):
     if type(mod) == FakeQuantize:
-        mod.disable_observer()
+        mod.enable_observer()
