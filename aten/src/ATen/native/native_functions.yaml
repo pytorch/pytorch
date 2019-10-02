@@ -3404,8 +3404,13 @@
   requires_tensor: True
 
 
+- func: to_custom(Tensor self, str type) -> Tensor
+  variants: method
+
+- func: from_custom(Tensor self) -> Tensor
+  variants: method
+
 - func: to_dense(Tensor self) -> Tensor
-  use_c10_dispatcher: full
   variants: method
   dispatch:
     SparseCPU: sparse_to_dense
@@ -3414,7 +3419,6 @@
   requires_tensor: True
 
 - func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
-  use_c10_dispatcher: full
 
 - func: sparse_dim(Tensor self) -> int
   use_c10_dispatcher: full

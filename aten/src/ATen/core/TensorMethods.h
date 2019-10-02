@@ -2985,6 +2985,22 @@ inline Tensor Tensor::sparse_mask(const Tensor & mask) const {
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this, mask)), const_cast<Tensor&>(*this), mask);
 #endif
 }
+inline Tensor Tensor::to_custom(std::string type) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::to_custom(const_cast<Tensor&>(*this), type);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::to_custom(Tensor self, str type) -> Tensor");
+    return table->callUnboxed<Tensor, const Tensor &, std::string>(const_cast<Tensor&>(*this), type);
+#endif
+}
+inline Tensor Tensor::from_custom() const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::from_custom(const_cast<Tensor&>(*this));
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::from_custom(Tensor self) -> Tensor");
+    return table->callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+#endif
+}
 inline Tensor Tensor::to_dense() const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
@@ -2995,9 +3011,8 @@ inline Tensor Tensor::to_dense() const {
             AT_ERROR("to_dense not implemented for ", at::toString(type_set()));
     }
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::to_dense", ""}).value();
-    return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor &>(
-        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this));
+    static auto table = globalATenDispatch().getOpTable("aten::to_dense(Tensor self) -> Tensor");
+    return table->callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
 inline int64_t Tensor::sparse_dim() const {
