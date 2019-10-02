@@ -134,7 +134,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
         output_scale,
         output_zero_point);
 
-    auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
+    auto buffer = at::empty(out_sizes, output.options().dtype(at::kInt));
 
     if (pack_ptr.q_scheme == kPerTensorAffine) {
       // Process the per tensor quantization.
@@ -308,7 +308,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
         packB->getPackedWeights(),
         (uint8_t*)output.data_ptr<c10::quint8>(),
         rows_w /* output_stride */,
-        caffe2::mobile_threadpool() /* threadpool */);
+        caffe2::mobile_pthreadpool() /* threadpool */);
 
     TORCH_INTERNAL_ASSERT(
         runStatus == pytorch_qnnp_status_success,
@@ -336,10 +336,10 @@ class QLinearInt8 final : public torch::OperatorKernel {
           input, packed_weight, output_scale, output_zero_point);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::linear ",
         toString(ctx.qEngine()));
-    return at::Tensor();
   }
 };
 

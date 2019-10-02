@@ -156,6 +156,12 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
     "torch/csrc/jit/function.cpp",
+    "torch/csrc/jit/update_graph_executor_opt.cpp",
+    "torch/csrc/jit/mobile/function.cpp",
+    "torch/csrc/jit/mobile/import.cpp",
+    "torch/csrc/jit/mobile/module.cpp",
+    "torch/csrc/jit/mobile/register_mobile_ops.cpp",
+    "torch/csrc/jit/mobile/interpreter.cpp",
 ]
 
 libtorch_cuda_sources = [
@@ -188,6 +194,7 @@ def add_torch_libs():
         "torch/csrc/api/src/serialize.cpp",
         "torch/csrc/api/src/nn/init.cpp",
         "torch/csrc/api/src/nn/module.cpp",
+        "torch/csrc/api/src/nn/modules/activation.cpp",
         "torch/csrc/api/src/nn/modules/batchnorm.cpp",
         "torch/csrc/api/src/nn/modules/conv.cpp",
         "torch/csrc/api/src/nn/modules/dropout.cpp",
@@ -200,6 +207,7 @@ def add_torch_libs():
         "torch/csrc/api/src/nn/modules/rnn.cpp",
         "torch/csrc/api/src/nn/modules/container/functional.cpp",
         "torch/csrc/api/src/nn/modules/container/named_any.cpp",
+        "torch/csrc/api/src/nn/options/activation.cpp",
         "torch/csrc/api/src/nn/options/batchnorm.cpp",
         "torch/csrc/api/src/nn/options/conv.cpp",
         "torch/csrc/api/src/nn/options/dropout.cpp",

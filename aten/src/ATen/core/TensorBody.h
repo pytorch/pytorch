@@ -14,7 +14,6 @@
 #include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/EnableNamedTensor.h>
@@ -808,6 +807,12 @@ class CAFFE2_API Tensor {
   Tensor index_fill(int64_t dim, const Tensor & index, Scalar value) const;
   Tensor & index_fill_(int64_t dim, const Tensor & index, const Tensor & value) const;
   Tensor index_fill(int64_t dim, const Tensor & index, const Tensor & value) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & index_fill_(Dimname dim, const Tensor & index, Scalar value) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & index_fill_(Dimname dim, const Tensor & index, const Tensor & value) const;
+  #endif
   #ifdef BUILD_NAMEDTENSOR
   Tensor index_fill(Dimname dim, const Tensor & index, Scalar value) const;
   #endif

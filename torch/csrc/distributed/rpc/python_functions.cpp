@@ -53,7 +53,12 @@ py::object toPyObj(const Message& message) {
       ScriptRet ret = ScriptRet::fromMessage(message);
       Stack stack;
       stack.push_back(ret.value());
-      return torch::jit::createPyObjectForStack(std::move(stack));
+      {
+        AutoGIL ag;
+        // The createPyObjectForStack does not acquire GIL, but creating a new
+        // py::object requires GIL.
+        return torch::jit::createPyObjectForStack(std::move(stack));
+      }
     }
     case MessageType::PYTHON_RET: {
       return PythonRpcHandler::getInstance().loadPythonUDFResult(message);
@@ -104,14 +109,13 @@ std::shared_ptr<RRef> pyRemoteBuiltin(
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerId& dst,
-    const std::string& pickledPythonUDF) {
+    const std::string& pickledPythonUDF,
+    std::vector<torch::Tensor>& tensors) {
   std::vector<char> data(pickledPythonUDF.begin(), pickledPythonUDF.end());
-  std::vector<torch::Tensor> tensor_table;
 
   return agent.send(
       dst,
-      Message(
-          std::move(data), std::move(tensor_table), MessageType::PYTHON_CALL));
+      Message(std::move(data), std::move(tensors), MessageType::PYTHON_CALL));
 }
 
 } // namespace rpc

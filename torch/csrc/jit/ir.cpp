@@ -121,6 +121,19 @@ static void printStrList(
   out << "]";
 }
 
+static void printTypeList(
+    std::ostream& out,
+    const std::vector<TypePtr>& items) {
+  out << "[";
+  int i = 0;
+  for (auto& item : items) {
+    if (i++ > 0)
+      out << ", ";
+    out << *item;
+  }
+  out << "]";
+}
+
 void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
   switch (kindOf(name)) {
     case AttributeKind::f:
@@ -174,6 +187,12 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       break;
     case AttributeKind::gs:
       out << "[<Graphs>]";
+      break;
+    case AttributeKind::ty:
+      out << *ty(name);
+      break;
+    case AttributeKind::tys:
+      printTypeList(out, tys(name));
       break;
   }
 }
@@ -1495,6 +1514,25 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
   auto n = create(prim::Load, {}, /*num_outputs*/ 1);
   n->s_(attr::name, name);
   n->output()->setType(type);
+  return n;
+}
+
+Node* Graph::createIsInstance(
+    Value* v,
+    at::ArrayRef<TypePtr> types,
+    bool is_list,
+    bool is_tuple) {
+  auto n = create(prim::isinstance, {v}, /*num_outputs*/ 1);
+  std::vector<std::string> kinds;
+  if (is_list) {
+    kinds.push_back("list");
+  }
+  if (is_tuple) {
+    kinds.push_back("tuple");
+  }
+  n->ss_(attr::kinds, std::move(kinds));
+  n->tys_(attr::types, types.vec());
+  n->output()->setType(BoolType::get());
   return n;
 }
 

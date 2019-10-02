@@ -53,7 +53,7 @@ void propagate_names(TensorImpl* result, std::vector<Dimname>&& names, bool vali
 void propagate_names(TensorImpl* result, optional<std::vector<Dimname>>&& maybe_names, bool validate_names);
 
 // Propagates all names from src to result.
-void propagate_names(Tensor& result, const Tensor& src);
+CAFFE2_API void propagate_names(Tensor& result, const Tensor& src);
 void propagate_names(TensorImpl* result, /*const */TensorImpl* src);
 
 // Propagates all names except for those at the excluded_idxs.
@@ -61,9 +61,6 @@ void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef exclu
 
 // Used for reduction ops that have a `keepdim` arg.
 void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs, bool keepdim);
-
-// Tensor::copy_ name inference rule.
-void propagate_names_for_copy(Tensor& result, const Tensor& src);
 
 // result = m1 @ m2 + bias
 void propagate_names_for_addmm(
@@ -105,6 +102,8 @@ optional<std::vector<Dimname>> compute_bmm_outnames(
     Tensor& result,
     const Tensor& self,
     const Tensor& other);
+
+optional<std::vector<Dimname>> compute_squeeze_outnames(const Tensor& tensor);
 
 } // namespace namedinference
 
