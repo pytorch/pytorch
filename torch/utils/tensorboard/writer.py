@@ -579,7 +579,7 @@ class SummaryWriter(object):
             dataformats (string): Image data format specification of the form
               NCHW, NHWC, CHW, HWC, HW, WH, etc.
         Shape:
-            img_tensor: Default is :math:`(3, H, W)`. It can be specified with ``dataformats`` agrument.
+            img_tensor: Default is :math:`(3, H, W)`. It can be specified with ``dataformats`` argument.
             e.g. CHW or HWC
 
             box_tensor: (torch.Tensor, numpy.array, or string/blobname): NX4,  where N is the number of
