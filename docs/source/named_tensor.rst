@@ -23,6 +23,7 @@ Factory functions now take a new names argument that represents a name for each 
     tensor([[0., 0., 0.],
             [0., 0., 0.]], names=('N', 'C'))
 
+Named dimensions, like regular Tensor dimensions, are ordered.
 The following factory functions support named tensors:
 
 - :func:`torch.empty`
@@ -37,6 +38,7 @@ Named dimensions
 
 See :attr:`~Tensor.names` for restrictions on tensor names. The most important
 restriction is that tensors may not have two named dimensions with the same name.
+
 Use :attr:`~Tensor.names` to access the dimension names of a tensor and
 :meth:`~Tensor.rename` to rename named dimensions.
 
@@ -55,7 +57,7 @@ Name propagation semantics
 
 Named tensors use names to check that some APIs are being used correctly and
 propagate names in a process called *name inference*.
-Name inference works as the following:
+Name inference is a two-step process:
 
 - Check names: an operator may check that certain dimensions must match.
 - Propagate names: name inference computes and propagates names to output tensors.
