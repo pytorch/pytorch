@@ -5,7 +5,7 @@
 Named Tensors operator coverage
 ===============================
 
-Please read :ref:`_named_tensors-doc` first for an introduction to named tensors.
+Please read :ref:`named_tensors-doc` first for an introduction to named tensors.
 
 This document is a reference for *name inference*, a process for how named tensors
 use names to automatically check that APIs are being called correctly at runtime and
@@ -27,201 +27,199 @@ is probably not supported but one can try to run the operation and see what happ
    :header: API, Name inference rule
    :widths: 20, 20
 
-   :meth:`Tensor.abs`, :func:`torch.abs`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.abs_`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.acos`, :func:`torch.acos`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.acos_`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.add`, :func:`torch.add`	:ref:`unifies_names_from_inputs-doc`
-   :meth:`Tensor.add_`	:ref:`unifies_names_from_inputs-doc`
-   :meth:`Tensor.addmm`, :func:`torch.addmm`	:ref:`contracts_away_dims-doc`
-   :meth:`Tensor.addmm_`	:ref:`contracts_away_dims-doc`
-   :meth:`Tensor.addmv`, :func:`torch.addmv`	:ref:`contracts_away_dims-doc`
-   :meth:`Tensor.addmv_`	:ref:`contracts_away_dims-doc`
-   :meth:`Tensor.align_as`	See documentation
-   :meth:`Tensor.align_to`, :func:`torch.align_to`	See documentation
-   :meth:`Tensor.all`, :func:`torch.all`	None
-   :meth:`Tensor.any`, :func:`torch.any`	None
-   :meth:`Tensor.asin`, :func:`torch.asin`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.asin_`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.atan`, :func:`torch.atan`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.atan2`, :func:`torch.atan2`	:ref:`unifies_names_from_inputs-doc`
-   :meth:`Tensor.atan2_`	:ref:`unifies_names_from_inputs-doc`
-   :meth:`Tensor.atan_`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.bernoulli`, :func:`torch.bernoulli`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.bernoulli_`	None
-   :meth:`Tensor.bfloat16`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.bitwise_not`, :func:`torch.bitwise_not`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.bitwise_not_`	None
-   :meth:`Tensor.bmm`, :func:`torch.bmm`	:ref:`contracts_away_dims-doc`
-   :meth:`Tensor.bool`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.byte`	:ref:`keeps_input_names-doc`
-   :func:`torch.cat`	:ref:`unifies_names_from_inputs-doc`
-   :meth:`Tensor.cauchy_`	None
-   :meth:`Tensor.ceil`, :func:`torch.ceil`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.ceil_`	None
-   :meth:`Tensor.char`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.chunk`, :func:`torch.chunk`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.clamp`, :func:`torch.clamp`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.clamp_`	None
-   :meth:`Tensor.copy_`	:ref:`out_function_semantics-doc`
-   :meth:`Tensor.cos`, :func:`torch.cos`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.cos_`	None
-   :meth:`Tensor.cosh`, :func:`torch.cosh`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.cosh_`	None
-   :meth:`Tensor.cpu`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.cuda`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.cumprod`, :func:`torch.cumprod`	:ref:`removes_dimensions-doc`
-   :meth:`Tensor.cumsum`, :func:`torch.cumsum`	:ref:`removes_dimensions-doc`
-   :meth:`Tensor.data_ptr`	None
-   :meth:`Tensor.detach`, :func:`torch.detach`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.detach_`	None
-   :attr:`Tensor.device`, :func:`torch.device`	None
-   :meth:`Tensor.digamma`, :func:`torch.digamma`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.digamma_`	None
-   :meth:`Tensor.dim`	None
-   :meth:`Tensor.div`, :func:`torch.div`	:ref:`unifies_names_from_inputs-doc`
-   :meth:`Tensor.div_`	:ref:`unifies_names_from_inputs-doc`
-   :meth:`Tensor.dot`, :func:`torch.dot`	None
-   :meth:`Tensor.double`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.element_size`	None
-   :func:`torch.empty`	:ref:`factory-doc`
-   :func:`torch.empty_like`	:ref:`factory-doc`
-   :meth:`Tensor.erf`, :func:`torch.erf`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.erf_`	None
-   :meth:`Tensor.erfc`, :func:`torch.erfc`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.erfc_`	None
-   :meth:`Tensor.erfinv`, :func:`torch.erfinv`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.erfinv_`	None
-   :meth:`Tensor.exp`, :func:`torch.exp`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.exp_`	None
-   :meth:`Tensor.expand`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.expm1`, :func:`torch.expm1`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.expm1_`	None
-   :meth:`Tensor.exponential_`	None
-   :meth:`Tensor.fill_`	None
-   :meth:`Tensor.flatten`, :func:`torch.flatten`	See documentation
-   :meth:`Tensor.float`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.floor`, :func:`torch.floor`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.floor_`	None
-   :meth:`Tensor.frac`, :func:`torch.frac`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.frac_`	None
-   :meth:`Tensor.get_device`, :func:`torch.get_device`	None
-   :attr:`Tensor.grad`	None
-   :meth:`Tensor.half`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.has_names`	See documentation
-   :meth:`Tensor.index_fill`, :func:`torch.index_fill`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.index_fill_`	None
-   :meth:`Tensor.int`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.is_contiguous`	None
-   :attr:`Tensor.is_cuda`	None
-   :meth:`Tensor.is_floating_point`, :func:`torch.is_floating_point`	None
-   :attr:`Tensor.is_leaf`	None
-   :meth:`Tensor.is_pinned`	None
-   :meth:`Tensor.is_shared`	None
-   :meth:`Tensor.is_signed`, :func:`torch.is_signed`	None
-   :attr:`Tensor.is_sparse`	None
-   :func:`torch.is_tensor`	None
-   :meth:`Tensor.item`	None
-   :meth:`Tensor.kthvalue`, :func:`torch.kthvalue`	:ref:`removes_dimensions-doc`
-   :meth:`Tensor.log`, :func:`torch.log`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.log10`, :func:`torch.log10`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.log10_`	None
-   :meth:`Tensor.log1p`, :func:`torch.log1p`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.log1p_`	None
-   :meth:`Tensor.log2`, :func:`torch.log2`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.log2_`	None
-   :meth:`Tensor.log_`	None
-   :meth:`Tensor.log_normal_`	None
-   :meth:`Tensor.logical_not`, :func:`torch.logical_not`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.logical_not_`	None
-   :meth:`Tensor.logsumexp`, :func:`torch.logsumexp`	:ref:`removes_dimensions-doc`
-   :meth:`Tensor.long`	:ref:`keeps_input_names-doc`
-   :func:`torch.manual_seed`	None
-   :meth:`Tensor.masked_fill`, :func:`torch.masked_fill`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.masked_fill_`	None
-   :meth:`Tensor.masked_select`, :func:`torch.masked_select`	Aligns mask up to input and then unifies_names_from_input_tensors
-   :meth:`Tensor.matmul`, :func:`torch.matmul`	:ref:`contracts_away_dims-doc`
-   :meth:`Tensor.mean`, :func:`torch.mean`	:ref:`removes_dimensions-doc`
-   :meth:`Tensor.median`, :func:`torch.median`	:ref:`removes_dimensions-doc`
-   :meth:`Tensor.mm`, :func:`torch.mm`	:ref:`contracts_away_dims-doc`
-   :meth:`Tensor.mode`, :func:`torch.mode`	:ref:`removes_dimensions-doc`
-   :meth:`Tensor.mul`, :func:`torch.mul`	:ref:`unifies_names_from_inputs-doc`
-   :meth:`Tensor.mul_`	:ref:`unifies_names_from_inputs-doc`
-   :meth:`Tensor.mv`, :func:`torch.mv`	:ref:`contracts_away_dims-doc`
-   :attr:`Tensor.names`	See documentation
-   :meth:`Tensor.narrow`, :func:`torch.narrow`	:ref:`keeps_input_names-doc`
-   :attr:`Tensor.ndim`	None
-   :meth:`Tensor.ndimension`	None
-   :meth:`Tensor.neg`, :func:`torch.neg`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.neg_`	None
-   :func:`torch.normal`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.normal_`	None
-   :meth:`Tensor.numel`, :func:`torch.numel`	None
-   :func:`torch.ones`	:ref:`factory-doc`
-   :meth:`Tensor.pow`, :func:`torch.pow`	:ref:`unifies_names_from_inputs-doc`
-   :meth:`Tensor.pow_`	None
-   :meth:`Tensor.prod`, :func:`torch.prod`	:ref:`removes_dimensions-doc`
-   :func:`torch.rand`	:ref:`factory-doc`
-   :func:`torch.rand`	:ref:`factory-doc`
-   :func:`torch.randn`	:ref:`factory-doc`
-   :func:`torch.randn`	:ref:`factory-doc`
-   :meth:`Tensor.random_`	None
-   :meth:`Tensor.reciprocal`, :func:`torch.reciprocal`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.reciprocal_`	None
-   :meth:`Tensor.refine_names`	See documentation
-   :meth:`Tensor.register_hook`	None
-   :meth:`Tensor.rename`	See documentation
-   :meth:`Tensor.rename_`	See documentation
-   :attr:`Tensor.requires_grad`	None
-   :meth:`Tensor.requires_grad_`	None
-   :meth:`Tensor.resize_`	Only allow resizes that do not change shape
-   :meth:`Tensor.resize_as_`	Only allow resizes that do not change shape
-   :meth:`Tensor.round`, :func:`torch.round`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.round_`	None
-   :meth:`Tensor.rsqrt`, :func:`torch.rsqrt`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.rsqrt_`	None
-   :meth:`Tensor.select`, :func:`torch.select`	:ref:`removes_dimensions-doc`
-   :meth:`Tensor.short`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.sigmoid`, :func:`torch.sigmoid`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.sigmoid_`	None
-   :meth:`Tensor.sign`, :func:`torch.sign`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.sign_`	None
-   :meth:`Tensor.sin`, :func:`torch.sin`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.sin_`	None
-   :meth:`Tensor.sinh`, :func:`torch.sinh`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.sinh_`	None
-   :meth:`Tensor.size`	None
-   :meth:`Tensor.split`, :func:`torch.split`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.sqrt`, :func:`torch.sqrt`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.sqrt_`	None
-   :meth:`Tensor.squeeze`, :func:`torch.squeeze`	:ref:`removes_dimensions-doc`
-   :meth:`Tensor.std`, :func:`torch.std`	:ref:`removes_dimensions-doc`
-   :func:`torch.std_mean`	:ref:`removes_dimensions-doc`
-   :meth:`Tensor.stride`	None
-   :meth:`Tensor.sub`, :func:`torch.sub`	:ref:`unifies_names_from_inputs-doc`
-   :meth:`Tensor.sub_`	:ref:`unifies_names_from_inputs-doc`
-   :meth:`Tensor.sum`, :func:`torch.sum`	:ref:`removes_dimensions-doc`
-   :meth:`Tensor.tan`, :func:`torch.tan`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.tan_`	None
-   :meth:`Tensor.tanh`, :func:`torch.tanh`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.tanh_`	None
-   :func:`torch.tensor`	:ref:`factory-doc`
-   :meth:`Tensor.to`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.topk`, :func:`torch.topk`	:ref:`removes_dimensions-doc`
-   :meth:`Tensor.transpose`, :func:`torch.transpose`	:ref:`permutes_dimensions-doc`
-   :meth:`Tensor.trunc`, :func:`torch.trunc`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.trunc_`	None
-   :meth:`Tensor.type`	None
-   :meth:`Tensor.type_as`	:ref:`keeps_input_names-doc`
-   :meth:`Tensor.unbind`, :func:`torch.unbind`	:ref:`removes_dimensions-doc`
-   :meth:`Tensor.unflatten`	See documentation
-   :meth:`Tensor.uniform_`	None
-   :meth:`Tensor.var`, :func:`torch.var`	:ref:`removes_dimensions-doc`
-   :func:`torch.var_mean`	:ref:`removes_dimensions-doc`
-   :meth:`Tensor.zero_`	
-   :meth:`Tensor.zero_`	None
-   :func:`torch.zeros`	:ref:`factory-doc`
-
+   ":meth:`Tensor.abs`, :func:`torch.abs`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.abs_`,:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.acos`, :func:`torch.acos`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.acos_`,:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.add`, :func:`torch.add`",:ref:`unifies_names_from_inputs-doc`
+   :meth:`Tensor.add_`,:ref:`unifies_names_from_inputs-doc`
+   ":meth:`Tensor.addmm`, :func:`torch.addmm`",:ref:`contracts_away_dims-doc`
+   :meth:`Tensor.addmm_`,:ref:`contracts_away_dims-doc`
+   ":meth:`Tensor.addmv`, :func:`torch.addmv`",:ref:`contracts_away_dims-doc`
+   :meth:`Tensor.addmv_`,:ref:`contracts_away_dims-doc`
+   :meth:`Tensor.align_as`,See documentation
+   ":meth:`Tensor.align_to`, :func:`torch.align_to`",See documentation
+   ":meth:`Tensor.all`, :func:`torch.all`",None
+   ":meth:`Tensor.any`, :func:`torch.any`",None
+   ":meth:`Tensor.asin`, :func:`torch.asin`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.asin_`,:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.atan`, :func:`torch.atan`",:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.atan2`, :func:`torch.atan2`",:ref:`unifies_names_from_inputs-doc`
+   :meth:`Tensor.atan2_`,:ref:`unifies_names_from_inputs-doc`
+   :meth:`Tensor.atan_`,:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.bernoulli`, :func:`torch.bernoulli`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.bernoulli_`,None
+   :meth:`Tensor.bfloat16`,:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.bitwise_not`, :func:`torch.bitwise_not`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.bitwise_not_`,None
+   ":meth:`Tensor.bmm`, :func:`torch.bmm`",:ref:`contracts_away_dims-doc`
+   :meth:`Tensor.bool`,:ref:`keeps_input_names-doc`
+   :meth:`Tensor.byte`,:ref:`keeps_input_names-doc`
+   :func:`torch.cat`,:ref:`unifies_names_from_inputs-doc`
+   :meth:`Tensor.cauchy_`,None
+   ":meth:`Tensor.ceil`, :func:`torch.ceil`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.ceil_`,None
+   :meth:`Tensor.char`,:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.chunk`, :func:`torch.chunk`",:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.clamp`, :func:`torch.clamp`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.clamp_`,None
+   :meth:`Tensor.copy_`,:ref:`out_function_semantics-doc`
+   ":meth:`Tensor.cos`, :func:`torch.cos`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.cos_`,None
+   ":meth:`Tensor.cosh`, :func:`torch.cosh`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.cosh_`,None
+   :meth:`Tensor.cpu`,:ref:`keeps_input_names-doc`
+   :meth:`Tensor.cuda`,:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.cumprod`, :func:`torch.cumprod`",:ref:`removes_dimensions-doc`
+   ":meth:`Tensor.cumsum`, :func:`torch.cumsum`",:ref:`removes_dimensions-doc`
+   :meth:`Tensor.data_ptr`,None
+   ":meth:`Tensor.detach`, :func:`torch.detach`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.detach_`,None
+   ":attr:`Tensor.device`, :func:`torch.device`",None
+   ":meth:`Tensor.digamma`, :func:`torch.digamma`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.digamma_`,None
+   :meth:`Tensor.dim`,None
+   ":meth:`Tensor.div`, :func:`torch.div`",:ref:`unifies_names_from_inputs-doc`
+   :meth:`Tensor.div_`,:ref:`unifies_names_from_inputs-doc`
+   ":meth:`Tensor.dot`, :func:`torch.dot`",None
+   :meth:`Tensor.double`,:ref:`keeps_input_names-doc`
+   :meth:`Tensor.element_size`,None
+   :func:`torch.empty`,:ref:`factory-doc`
+   :func:`torch.empty_like`,:ref:`factory-doc`
+   ":meth:`Tensor.erf`, :func:`torch.erf`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.erf_`,None
+   ":meth:`Tensor.erfc`, :func:`torch.erfc`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.erfc_`,None
+   ":meth:`Tensor.erfinv`, :func:`torch.erfinv`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.erfinv_`,None
+   ":meth:`Tensor.exp`, :func:`torch.exp`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.exp_`,None
+   :meth:`Tensor.expand`,:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.expm1`, :func:`torch.expm1`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.expm1_`,None
+   :meth:`Tensor.exponential_`,None
+   :meth:`Tensor.fill_`,None
+   ":meth:`Tensor.flatten`, :func:`torch.flatten`",See documentation
+   :meth:`Tensor.float`,:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.floor`, :func:`torch.floor`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.floor_`,None
+   ":meth:`Tensor.frac`, :func:`torch.frac`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.frac_`,None
+   ":meth:`Tensor.get_device`, :func:`torch.get_device`",None
+   :attr:`Tensor.grad`,None
+   :meth:`Tensor.half`,:ref:`keeps_input_names-doc`
+   :meth:`Tensor.has_names`,See documentation
+   ":meth:`Tensor.index_fill`, :func:`torch.index_fill`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.index_fill_`,None
+   :meth:`Tensor.int`,:ref:`keeps_input_names-doc`
+   :meth:`Tensor.is_contiguous`,None
+   :attr:`Tensor.is_cuda`,None
+   ":meth:`Tensor.is_floating_point`, :func:`torch.is_floating_point`",None
+   :attr:`Tensor.is_leaf`,None
+   :meth:`Tensor.is_pinned`,None
+   :meth:`Tensor.is_shared`,None
+   ":meth:`Tensor.is_signed`, :func:`torch.is_signed`",None
+   :attr:`Tensor.is_sparse`,None
+   :func:`torch.is_tensor`,None
+   :meth:`Tensor.item`,None
+   ":meth:`Tensor.kthvalue`, :func:`torch.kthvalue`",:ref:`removes_dimensions-doc`
+   ":meth:`Tensor.log`, :func:`torch.log`",:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.log10`, :func:`torch.log10`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.log10_`,None
+   ":meth:`Tensor.log1p`, :func:`torch.log1p`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.log1p_`,None
+   ":meth:`Tensor.log2`, :func:`torch.log2`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.log2_`,None
+   :meth:`Tensor.log_`,None
+   :meth:`Tensor.log_normal_`,None
+   ":meth:`Tensor.logical_not`, :func:`torch.logical_not`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.logical_not_`,None
+   ":meth:`Tensor.logsumexp`, :func:`torch.logsumexp`",:ref:`removes_dimensions-doc`
+   :meth:`Tensor.long`,:ref:`keeps_input_names-doc`
+   :func:`torch.manual_seed`,None
+   ":meth:`Tensor.masked_fill`, :func:`torch.masked_fill`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.masked_fill_`,None
+   ":meth:`Tensor.masked_select`, :func:`torch.masked_select`",Aligns mask up to input and then unifies_names_from_input_tensors
+   ":meth:`Tensor.matmul`, :func:`torch.matmul`",:ref:`contracts_away_dims-doc`
+   ":meth:`Tensor.mean`, :func:`torch.mean`",:ref:`removes_dimensions-doc`
+   ":meth:`Tensor.median`, :func:`torch.median`",:ref:`removes_dimensions-doc`
+   ":meth:`Tensor.mm`, :func:`torch.mm`",:ref:`contracts_away_dims-doc`
+   ":meth:`Tensor.mode`, :func:`torch.mode`",:ref:`removes_dimensions-doc`
+   ":meth:`Tensor.mul`, :func:`torch.mul`",:ref:`unifies_names_from_inputs-doc`
+   :meth:`Tensor.mul_`,:ref:`unifies_names_from_inputs-doc`
+   ":meth:`Tensor.mv`, :func:`torch.mv`",:ref:`contracts_away_dims-doc`
+   :attr:`Tensor.names`,See documentation
+   ":meth:`Tensor.narrow`, :func:`torch.narrow`",:ref:`keeps_input_names-doc`
+   :attr:`Tensor.ndim`,None
+   :meth:`Tensor.ndimension`,None
+   ":meth:`Tensor.neg`, :func:`torch.neg`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.neg_`,None
+   :func:`torch.normal`,:ref:`keeps_input_names-doc`
+   :meth:`Tensor.normal_`,None
+   ":meth:`Tensor.numel`, :func:`torch.numel`",None
+   :func:`torch.ones`,:ref:`factory-doc`
+   ":meth:`Tensor.pow`, :func:`torch.pow`",:ref:`unifies_names_from_inputs-doc`
+   :meth:`Tensor.pow_`,None
+   ":meth:`Tensor.prod`, :func:`torch.prod`",:ref:`removes_dimensions-doc`
+   :func:`torch.rand`,:ref:`factory-doc`
+   :func:`torch.rand`,:ref:`factory-doc`
+   :func:`torch.randn`,:ref:`factory-doc`
+   :func:`torch.randn`,:ref:`factory-doc`
+   :meth:`Tensor.random_`,None
+   ":meth:`Tensor.reciprocal`, :func:`torch.reciprocal`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.reciprocal_`,None
+   :meth:`Tensor.refine_names`,See documentation
+   :meth:`Tensor.register_hook`,None
+   :meth:`Tensor.rename`,See documentation
+   :meth:`Tensor.rename_`,See documentation
+   :attr:`Tensor.requires_grad`,None
+   :meth:`Tensor.requires_grad_`,None
+   :meth:`Tensor.resize_`,Only allow resizes that do not change shape
+   :meth:`Tensor.resize_as_`,Only allow resizes that do not change shape
+   ":meth:`Tensor.round`, :func:`torch.round`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.round_`,None
+   ":meth:`Tensor.rsqrt`, :func:`torch.rsqrt`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.rsqrt_`,None
+   ":meth:`Tensor.select`, :func:`torch.select`",:ref:`removes_dimensions-doc`
+   :meth:`Tensor.short`,:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.sigmoid`, :func:`torch.sigmoid`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.sigmoid_`,None
+   ":meth:`Tensor.sign`, :func:`torch.sign`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.sign_`,None
+   ":meth:`Tensor.sin`, :func:`torch.sin`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.sin_`,None
+   ":meth:`Tensor.sinh`, :func:`torch.sinh`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.sinh_`,None
+   :meth:`Tensor.size`,None
+   ":meth:`Tensor.split`, :func:`torch.split`",:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.sqrt`, :func:`torch.sqrt`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.sqrt_`,None
+   ":meth:`Tensor.squeeze`, :func:`torch.squeeze`",:ref:`removes_dimensions-doc`
+   ":meth:`Tensor.std`, :func:`torch.std`",:ref:`removes_dimensions-doc`
+   :func:`torch.std_mean`,:ref:`removes_dimensions-doc`
+   :meth:`Tensor.stride`,None
+   ":meth:`Tensor.sub`, :func:`torch.sub`",:ref:`unifies_names_from_inputs-doc`
+   :meth:`Tensor.sub_`,:ref:`unifies_names_from_inputs-doc`
+   ":meth:`Tensor.sum`, :func:`torch.sum`",:ref:`removes_dimensions-doc`
+   ":meth:`Tensor.tan`, :func:`torch.tan`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.tan_`,None
+   ":meth:`Tensor.tanh`, :func:`torch.tanh`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.tanh_`,None
+   :func:`torch.tensor`,:ref:`factory-doc`
+   :meth:`Tensor.to`,:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.topk`, :func:`torch.topk`",:ref:`removes_dimensions-doc`
+   ":meth:`Tensor.transpose`, :func:`torch.transpose`",:ref:`permutes_dimensions-doc`
+   ":meth:`Tensor.trunc`, :func:`torch.trunc`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.trunc_`,None
+   :meth:`Tensor.type`,None
+   :meth:`Tensor.type_as`,:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.unbind`, :func:`torch.unbind`",:ref:`removes_dimensions-doc`
+   :meth:`Tensor.unflatten`,See documentation
+   :meth:`Tensor.uniform_`,None
+   ":meth:`Tensor.var`, :func:`torch.var`",:ref:`removes_dimensions-doc`
+   :func:`torch.var_mean`,:ref:`removes_dimensions-doc`
+   :meth:`Tensor.zero_`,None
+   :func:`torch.zeros`,:ref:`factory-doc`
 
 .. _keeps_input_names-doc:
 

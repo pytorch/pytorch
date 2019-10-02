@@ -241,7 +241,7 @@ modules with named tensor inputs:
 - NN module forward passes have code that don't support named tensors and will
   error out appropriately.
 
-Because gradients are currently unnamed (:ref:`_named_tensors_autograd-doc`),
+Because gradients are currently unnamed (:ref:`named_tensors_autograd-doc`),
 optimizers may work but are untested.
 
 We also do not support the following subsystems, though some may work:
