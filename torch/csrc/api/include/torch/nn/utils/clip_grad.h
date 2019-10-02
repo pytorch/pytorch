@@ -1,6 +1,5 @@
 #pragma once
 #include <torch/expanding_array.h>
-#include <torch/nn/cloneable.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
