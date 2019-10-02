@@ -123,11 +123,14 @@ class _LRScheduler(object):
         self._step_count += 1
 
         class _enable_get_lr_call:
+
             def __init__(self, o):
                 self.o = o
+
             def __enter__(self):
                 self.o._get_lr_called_within_step = True
                 return self
+
             def __exit__(self, type, value, traceback):
                 self.o._get_lr_called_within_step = False
                 return self
@@ -982,11 +985,14 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self.last_epoch = math.floor(epoch)
 
         class _enable_get_lr_call:
+
             def __init__(self, o):
                 self.o = o
+
             def __enter__(self):
                 self.o._get_lr_called_within_step = True
                 return self
+
             def __exit__(self, type, value, traceback):
                 self.o._get_lr_called_within_step = False
                 return self
