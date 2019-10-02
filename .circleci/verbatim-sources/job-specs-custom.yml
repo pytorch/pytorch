@@ -1,7 +1,7 @@
   pytorch_short_perf_test_gpu:
     environment:
       BUILD_ENVIRONMENT: pytorch-short-perf-test-gpu
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:339"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -37,7 +37,7 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-python-doc-push
       # TODO: stop hardcoding this
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:339"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
@@ -82,7 +82,7 @@
   pytorch_cpp_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-cpp-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:339"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
@@ -238,7 +238,7 @@
   pytorch_android_gradle_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:339"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:347"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
@@ -324,7 +324,7 @@
   pytorch_android_publish_snapshot:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-publish-snapshot
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:339"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:347"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
@@ -360,7 +360,7 @@
   pytorch_android_gradle_build-x86_32:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-only-x86_32
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:339"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:347"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:

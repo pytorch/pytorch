@@ -20,14 +20,14 @@ EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options) : options(options) {
 
 void EmbeddingImpl::reset() {
   weight = register_parameter(
-      "weight", torch::empty({options.count_, options.dimension_}));
+      "weight", torch::empty({options.count(), options.dimension()}));
   NoGradGuard guard;
   weight.normal_(0, 1);
 }
 
 void EmbeddingImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::Embedding(count=" << options.count_
-         << ", dimension=" << options.dimension_ << ")";
+  stream << "torch::nn::Embedding(count=" << options.count()
+         << ", dimension=" << options.dimension() << ")";
 }
 
 Tensor EmbeddingImpl::forward(const Tensor& input) {

@@ -5,21 +5,8 @@ set -eu -o pipefail
 export ANDROID_NDK_HOME=/opt/ndk
 export ANDROID_HOME=/opt/android/sdk
 
-export GRADLE_VERSION_FOR_PUBLISH=4.10.3
-
-echo "GRADLE_VERSION:${GRADLE_VERSION_FOR_PUBLISH}"
-_gradle_home=/opt/gradle
-sudo mkdir -p $_gradle_home
-
-wget --no-verbose --output-document=/tmp/gradle.zip \
-"https://services.gradle.org/distributions/gradle-${GRADLE_VERSION_FOR_PUBLISH}-bin.zip"
-
-sudo unzip -q /tmp/gradle.zip -d $_gradle_home
-rm /tmp/gradle.zip
-
-sudo chmod -R 777 $_gradle_home
-
-export GRADLE_HOME=/opt/gradle/gradle-$GRADLE_VERSION_FOR_PUBLISH
+export GRADLE_VERSION=4.10.3
+export GRADLE_HOME=/opt/gradle/gradle-$GRADLE_VERSION
 export GRADLE_PATH=$GRADLE_HOME/bin/gradle
 
 echo "BUILD_ENVIRONMENT:$BUILD_ENVIRONMENT"

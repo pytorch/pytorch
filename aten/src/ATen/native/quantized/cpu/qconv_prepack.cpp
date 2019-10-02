@@ -39,11 +39,10 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         "Specify top/left padding only. \
       bottom/right padding assumed to be equal to top/left");
     TORCH_CHECK(dilation.size() == 2, "2D convolution only");
-    // weights in KRS(C/G) format
     int output_channels = weight.size(0);
-    int kernel_h = weight.size(1);
-    int kernel_w = weight.size(2);
-    int input_channels_per_group = weight.size(3);
+    int input_channels_per_group = weight.size(1);
+    int kernel_h = weight.size(2);
+    int kernel_w = weight.size(3);
 
     // mini-batch doesn't have any impact on how we pack weights
     // so we pass it as 1
@@ -63,16 +62,23 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
          static_cast<int>(padding[1])},
         {static_cast<int>(dilation[0]), static_cast<int>(dilation[1])});
 
-    auto weight_contig = weight.contiguous();
+    // FBGEMM expects weights to be in channels last
+    auto weight_contig = weight.contiguous(MemoryFormat::ChannelsLast);
     const auto qtype = weight.qscheme();
     std::vector<int32_t> zero_points(1, 0);
     if (qtype == kPerTensorAffine) {
       zero_points[0] = weight.q_zero_point();
     } else if (qtype == kPerChannelAffine) {
+      int64_t axis = weight.q_per_channel_axis();
+      TORCH_CHECK(
+          axis == 0,
+          "Only per output channel quantization is supported for the weights");
       zero_points.resize(output_channels, 0);
       for (int i = 0; i < output_channels; ++i) {
         zero_points[i] = weight.q_per_channel_zero_points()[i].item<int32_t>();
       }
+    } else {
+      TORCH_CHECK(false, "Unsupported qscheme: ", toString(qtype));
     }
 
     const int8_t* weight_ptr_int8 =
@@ -160,26 +166,26 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 
     initQNNPACK();
 
-    // QNNPACK expects weights to be of the format {out_c, kH, kW, in_c/groups}
+    // QNNPACK expects weights to be of the format {out_c, kH, kW, in_c/groups},
+    // but PyTorch lays them out as {out_c, in_c/groups, kH, kW}
     const size_t out_ch = weight.size(0);
-    const uint32_t kernel_h = weight.size(1);
-    const uint32_t kernel_w = weight.size(2);
-    const size_t in_ch = weight.size(3) * groups;
+    const size_t in_ch = weight.size(1) * groups;
+    const uint32_t kernel_h = weight.size(2);
+    const uint32_t kernel_w = weight.size(3);
 
-    Tensor bias;
+    Tensor bias_fp32;
     if (bias_in.has_value()) {
-      bias = bias_in.value();
+      bias_fp32 = bias_in.value();
     } else {
-      bias = at::empty(out_ch, at::kFloat);
-      bias = at::quantize_linear(bias, 1.0, 0, kQInt32);
+      bias_fp32 = at::zeros(out_ch, weight.options().dtype(at::kFloat));
     }
     TORCH_CHECK(
-        !bias.defined() || (bias.ndimension() == 1 && bias.size(0) == out_ch),
+        !bias_fp32.defined() || (bias_fp32.ndimension() == 1 && bias_fp32.size(0) == out_ch),
         "quantized::conv_prepack (qnnpack): expected bias to be 1-dimensional with ",
         out_ch,
         " elements",
         ", but got bias of size ",
-        bias.sizes(),
+        bias_fp32.sizes(),
         " instead");
 
     uint32_t stride_h = stride[0];
@@ -202,19 +208,31 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         std::numeric_limits<uint8_t>::min(),
         std::numeric_limits<uint8_t>::max());
 
-    auto weight_contig = weight.contiguous();
-    auto bias_contig = bias.contiguous();
-    auto wt_ptr =
-        guts::make_unique<PackedConvWeightsQnnp>(PackedConvWeightsQnnp{
-            guts::make_unique<qnnpack::PrePackConvWeights>(
-                conv_p,
-                (uint8_t*)weight_contig.data_ptr<c10::quint8>(),
-                (int32_t*)bias_contig.data_ptr<c10::qint32>()),
-            weight_contig,
-            bias_contig,
-            {kernel_h, kernel_w},
-            weight.q_scale(),
-            weight.q_zero_point()});
+    auto weight_contig = weight.contiguous(MemoryFormat::ChannelsLast);
+    auto weight_zp = weight.q_zero_point() + 128;
+
+    int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
+    Tensor qnnp_weight = at::_empty_affine_quantized(
+        weight_contig.sizes(),
+        at::device(kCPU).dtype(kQUInt8),
+        weight.q_scale(),
+        weight_zp);
+    auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
+    for (int i = 0; i < weight_contig.numel(); ++i) {
+      qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
+    }
+    // We set the pre-packed conv weights to nullptr below as we call pre-pack
+    // during the first invocation of operator run. Refer to qconv.cpp for more
+    // details. TODO Update to actually call pre-pack here once bias is removed
+    // from pre-packing step.
+    auto wt_ptr = guts::make_unique<PackedConvWeightsQnnp>(
+        PackedConvWeightsQnnp{nullptr, /* PrePackConvWeights */
+                              weight_contig, /* int8_t weight */
+                              bias_fp32.contiguous(), /* fp32 bias */
+                              c10::nullopt, /* input_scale */
+                              {kernel_h, kernel_w},
+                              weight.q_scale(),
+                              weight_zp});
 
     return cpp_custom_type_hack::create(std::move(wt_ptr), weight.options());
   }
@@ -228,21 +246,21 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
       int64_t groups) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
-    if (ctx.preferredQuantizedEngine() == at::QEngine::FBGEMM) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return fbgemm_conv_prepack(
           weight, bias, stride, padding, dilation, groups);
     }
 #endif
 #ifdef USE_PYTORCH_QNNPACK
-    if (ctx.preferredQuantizedEngine() == at::QEngine::QNNPACK) {
+    if (ctx.qEngine() == at::QEngine::QNNPACK) {
       return qnnpack_conv_prepack(
           weight, bias, stride, padding, dilation, groups);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::conv_prepack ",
-        toString(ctx.preferredQuantizedEngine()));
-    return at::Tensor();
+        toString(ctx.qEngine()));
   }
 };
 

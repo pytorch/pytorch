@@ -4,6 +4,7 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 #include <cmath>
 
 namespace at {
@@ -12,9 +13,9 @@ namespace {
 
 SmallVector<int64_t, 4> convOutputShape(
     int N, // mini-batch
+    int K, // output channels
     int H, // input height
     int W, // input width
-    int K, // output channels
     const std::vector<int64_t>& kernel,
     const torch::List<int64_t>& stride,
     const torch::List<int64_t>& padding,
@@ -28,6 +29,7 @@ SmallVector<int64_t, 4> convOutputShape(
       (W + 2 * padding[1] - dilation[1] * (kernel[1] - 1) - 1) / stride[1] + 1);
   out_shape.push_back(H_out);
   out_shape.push_back(W_out);
+  // TODO: reorder it to NCHW order once the memory format regression is fixed
   out_shape.push_back(K);
 
   return out_shape;
@@ -91,18 +93,30 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       int64_t groups,
       double output_scale,
       int64_t output_zero_point) {
+    // Quantized kernels are all written with NHWC (channels last) layout in
+    // mind. Ideally, we'd be compatible with conv2d behavior and preserve the
+    // inputs layout as is (doing necessary upconversions).
+    //
+    // However, to be more robust, for now we just force output layout to always
+    // be NHWC (channels last), thus opportunistically improving perf.
+    //
+    // This might change when full memory format support lands
+    // See https://github.com/pytorch/pytorch/issues/23403
     TORCH_CHECK(
         fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
     conv_checks(
         act.ndimension(), stride.size(), padding.size(), dilation.size());
 
-    // inputs are in NHWC format
     int N = act.size(0);
-    int H = act.size(1);
-    int W = act.size(2);
-    int C = act.size(3);
+    int C = act.size(1);
+    int H = act.size(2);
+    int W = act.size(3);
 
-    Tensor act_contig = act.contiguous();
+    // FBGEMM requires NHWC
+    // TODO: change it to contiguous(MemoryFormat::ChannelsLast) once a perf
+    // regression of it is fixed. Today it's equivalent because `act` sizes
+    // are not used below
+    Tensor act_contig = act.permute({0, 2, 3, 1}).contiguous();
     const uint8_t* act_ptr =
         reinterpret_cast<uint8_t*>(act_contig.data_ptr<c10::quint8>());
 
@@ -124,7 +138,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     TORCH_CHECK(C == (packB->inputChannels()),
         "[QConv2D] Given groups=", groups, ", weight of size ",
         K, ", ",  kernel_h, ", ", kernel_w, ", ", packB->inputChannels(),
-        ", expected input (NHWC) ", N, ", ", H, ", ", W, ", ", C,
+        ", expected input (NCHW) ", N, ", ", C, ", ", H, ", ", W,
         " to have ", (packB->inputChannels() * groups),
         " channels, but got ", C, " channels instead");
     // clang-format on
@@ -181,16 +195,20 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       TORCH_CHECK(false, "[QConv2D] Unknown quantization scheme");
     }
 
-    auto outShape =
-        convOutputShape(N, H, W, K, kernel, stride, padding, dilation);
+    // TODO: change the following to NCHW sizes once perf is fixed
+    SmallVector<int64_t, 4> outShape{
+        N, conv_p.OUT_DIM[0], conv_p.OUT_DIM[1], K};
     TORCH_CHECK(
         std::all_of(
             outShape.begin(), outShape.end(), [](int64_t i) { return i > 0; }),
         "[QConv2D] each dimension of output tensor should be greater than 0")
 
+    // Force output format to be NHWC
+    // TODO: consider preserving input format
+    // TODO: add MemoryFormat::ChannelsLast here once perf is fixed
     Tensor output = _empty_affine_quantized(
         outShape, device(kCPU).dtype(kQUInt8), output_scale, output_zero_point);
-    auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
+    auto buffer = at::empty(output.sizes(), output.options().dtype(at::kInt));
 
     if (pack_ptr.q_scheme == kPerTensorAffine) {
       fbgemm::ReQuantizeOutput<
@@ -248,7 +266,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
           1 /* num_threads */);
     }
 
-    return output;
+    // TODO: remove permute once MemoryLayout is added above
+    return output.permute({0, 3, 1, 2});
   }
 #endif
 #ifdef USE_PYTORCH_QNNPACK
@@ -267,20 +286,25 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     PackedConvWeightsQnnp& pack_ptr =
         cpp_custom_type_hack::cast<PackedConvWeightsQnnp>(packed_weight);
     auto packB = pack_ptr.w.get();
-    auto& kernel = pack_ptr.kernel;
+    auto kernel = pack_ptr.kernel;
     auto kernel_zp = pack_ptr.w_zp;
     auto kernel_scale = pack_ptr.w_scale;
 
     const uint32_t kernel_h = kernel[0];
     const uint32_t kernel_w = kernel[1];
-    const auto out_ch = packB->getOutputChannels();
-    // inputs are in NHWC format
-    Tensor input_contig = act.contiguous();
-    int N = input_contig.size(0);
-    int H = input_contig.size(1);
-    int W = input_contig.size(2);
-    int in_ch = input_contig.size(3);
+    // TODO Can be replaced with packB->getOutputChannels() when update pre-pack
+    // to actually do the packing.
+    const auto out_ch = pack_ptr.bias.size(0);
+    // inputs are in semantic NCHW format
+    int N = act.size(0);
+    int in_ch = act.size(1);
+    int H = act.size(2);
+    int W = act.size(3);
     int K = out_ch; // output channels
+    // TODO: change it to contiguous(MemoryFormat::ChannelsLast) once a perf
+    // regression of it is fixed. Today it's equivalent because `act` sizes
+    // are not used below
+    Tensor input_contig = act.permute({0, 2, 3, 1}).contiguous();
 
     uint32_t stride_h = stride[0];
     uint32_t stride_w = stride[1];
@@ -310,8 +334,45 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         output_min,
         output_max);
 
+    // TODO: change convOutputShape to return NCHW sizes once perf is fixed
+    // Force output format to be NHWC
+    // TODO: consider preserving input format
+    // TODO: add MemoryFormat::ChannelsLast here once perf is fixed
+    auto input_scale = input_contig.q_scale();
+
+    // Re-quantizing the bias based on input scale and weight scale.
+    if (!pack_ptr.input_scale.has_value() ||
+        pack_ptr.input_scale.value() != input_scale) {
+      // Get the original weight and adjust it to uint8 from int8
+      auto weight_contig =
+          pack_ptr.orig_weight.contiguous(MemoryFormat::ChannelsLast);
+      auto bias_fp32 = pack_ptr.bias;
+      int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
+      Tensor qnnp_weight = at::_empty_affine_quantized(
+          weight_contig.sizes(),
+          at::device(kCPU).dtype(kQUInt8),
+          kernel_scale,
+          kernel_zp,
+          MemoryFormat::ChannelsLast);
+      auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
+      for (int i = 0; i < weight_contig.numel(); ++i) {
+        qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
+      }
+      // Original bias was float, so we requantize it here.
+      auto bias = at::quantize_per_tensor(
+          bias_fp32, kernel_scale * input_scale, 0, kQInt32);
+      // Update the input scale to not pack again.
+      pack_ptr.input_scale = input_scale;
+      pack_ptr.w.reset();
+      pack_ptr.w = guts::make_unique<qnnpack::PrePackConvWeights>(
+          conv_p,
+          (uint8_t*)qnnp_w_data,
+          (int32_t*)bias.data_ptr<c10::qint32>());
+      packB = pack_ptr.w.get();
+    }
+    TORCH_INTERNAL_ASSERT(packB != nullptr, "Packed Weights are NULL");
     auto outShape =
-        convOutputShape(N, H, W, K, kernel, stride, padding, dilation);
+        convOutputShape(N, K, H, W, kernel, stride, padding, dilation);
     TORCH_CHECK(
         std::all_of(
             outShape.begin(), outShape.end(), [](int64_t i) { return i > 0; }),
@@ -341,13 +402,14 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         output.q_scale(),
         output.q_zero_point(),
         (uint8_t*)output.data_ptr<c10::quint8>(),
-        nullptr);
+        caffe2::mobile_pthreadpool());
 
     TORCH_INTERNAL_ASSERT(
         runStatus == pytorch_qnnp_status_success,
         "failed to run quantized::conv2d (qnnpack) operator");
 
-    return output;
+    // TODO: remove permute once MemoryLayout is added above
+    return output.permute({0, 3, 1, 2});
   }
 #endif
   Tensor operator()(
@@ -361,7 +423,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       int64_t output_zero_point) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
-    if (ctx.preferredQuantizedEngine() == at::QEngine::FBGEMM) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return fbgemm_conv(
           act,
           packed_weight,
@@ -374,7 +436,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     }
 #endif
 #ifdef USE_PYTORCH_QNNPACK
-    if (ctx.preferredQuantizedEngine() == at::QEngine::QNNPACK) {
+    if (ctx.qEngine() == at::QEngine::QNNPACK) {
       return qnnpack_conv(
           act,
           packed_weight,
@@ -386,10 +448,10 @@ class QConv2dInt8 final : public c10::OperatorKernel {
           output_zero_point);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::conv ",
-        toString(ctx.preferredQuantizedEngine()));
-    return at::Tensor();
+        toString(ctx.qEngine()));
   }
 };
 

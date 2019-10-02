@@ -73,7 +73,7 @@ class C10_API Scalar {
 
   // also support scalar.to<int64_t>();
   template <typename T>
-  T to();
+  T to() const;
 
 #undef DEFINE_ACCESSOR
   bool isFloatingPoint() const {
@@ -129,13 +129,13 @@ class C10_API Scalar {
 
 // define the scalar.to<int64_t>() specializations
 template <typename T>
-inline T Scalar::to() {
+inline T Scalar::to() const {
   throw std::runtime_error("to() cast to unexpected type.");
 }
 
 #define DEFINE_TO(T, name)    \
   template <>                 \
-  inline T Scalar::to<T>() {  \
+  inline T Scalar::to<T>() const {  \
     return to##name();        \
   }
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO)
