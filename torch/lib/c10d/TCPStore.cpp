@@ -285,20 +285,21 @@ TCPStore::TCPStore(
     std::cout << "rank 0 constructor " << std::endl;
     // Opening up the listening socket
     std::tie(masterListenSocket_, std::ignore) = tcputil::listen(masterPort);
-    std::cout << "return from listen" << std::endl;
+    std::cout << "rank 0 return from listen" << std::endl;
     // Now start the daemon
     tcpStoreDaemon_ = std::unique_ptr<TCPStoreDaemon>(
         new TCPStoreDaemon(masterListenSocket_));
-    std::cout << "daemon started" << std::endl;
+    std::cout << "rank 0 daemon started" << std::endl;
   }
   // Connect to the daemon
-  std::cout << "connecting to daemon" << std::endl;
+  auto rank_str = isServer_ ? "rank 0" : "rank non_zero";
+  std::cout << rank_str <<  " connecting to daemon" << std::endl;
   storeSocket_ = tcputil::connect(
-      tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-  std::cout << "connected to daemon" << std::endl;
+      tcpStoreAddr_, 1, /* wait= */ true, timeout_);
+  std::cout << rank_str <<  " connected to daemon" << std::endl;
 
   waitForWorkers_();
-  std::cout << "Constructor complete" << std::endl;
+  std::cout << rank_str << " Constructor complete" << std::endl;
 }
 
 TCPStore::~TCPStore() {
