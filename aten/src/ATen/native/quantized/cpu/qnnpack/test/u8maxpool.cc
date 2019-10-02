@@ -20,7 +20,7 @@ TEST(U8MAXPOOL_SUB16__NEON, kc_lt_16_mx1_pool) {
   for (size_t kc = 1; kc < 16; kc++) {
     for (size_t ks = 2; ks < 16; ks++) {
       MaxPoolMicrokernelTester().kr(16).kh(ks).kw(1).kc(kc).test(
-          u8maxpool_ukernel_sub16__neon);
+          pytorch_u8maxpool_ukernel_sub16__neon);
     }
   }
 }
@@ -30,7 +30,7 @@ TEST(U8MAXPOOL_SUB16__NEON, kc_lt_16_mx1_pool_with_qmin) {
   for (size_t kc = 1; kc < 16; kc++) {
     for (size_t ks = 2; ks < 16; ks++) {
       MaxPoolMicrokernelTester().kr(16).kh(ks).kw(1).kc(kc).qmin(192).test(
-          u8maxpool_ukernel_sub16__neon);
+          pytorch_u8maxpool_ukernel_sub16__neon);
     }
   }
 }
@@ -40,7 +40,7 @@ TEST(U8MAXPOOL_SUB16__NEON, kc_lt_16_mx1_pool_with_qmax) {
   for (size_t kc = 1; kc < 16; kc++) {
     for (size_t ks = 2; ks < 16; ks++) {
       MaxPoolMicrokernelTester().kr(16).kh(ks).kw(1).kc(kc).qmax(192).test(
-          u8maxpool_ukernel_sub16__neon);
+          pytorch_u8maxpool_ukernel_sub16__neon);
     }
   }
 }
@@ -50,7 +50,7 @@ TEST(U8MAXPOOL_SUB16__NEON, kc_lt_16_1xm_pool) {
   for (size_t kc = 1; kc < 16; kc++) {
     for (size_t ks = 2; ks < 16; ks++) {
       MaxPoolMicrokernelTester().kr(16).kh(1).kw(ks).kc(kc).test(
-          u8maxpool_ukernel_sub16__neon);
+          pytorch_u8maxpool_ukernel_sub16__neon);
     }
   }
 }
@@ -60,7 +60,7 @@ TEST(U8MAXPOOL_SUB16__NEON, kc_lt_16_1xm_pool_with_qmin) {
   for (size_t kc = 1; kc < 16; kc++) {
     for (size_t ks = 2; ks < 16; ks++) {
       MaxPoolMicrokernelTester().kr(16).kh(1).kw(ks).kc(kc).qmin(192).test(
-          u8maxpool_ukernel_sub16__neon);
+          pytorch_u8maxpool_ukernel_sub16__neon);
     }
   }
 }
@@ -70,7 +70,7 @@ TEST(U8MAXPOOL_SUB16__NEON, kc_lt_16_1xm_pool_with_qmax) {
   for (size_t kc = 1; kc < 16; kc++) {
     for (size_t ks = 2; ks < 16; ks++) {
       MaxPoolMicrokernelTester().kr(16).kh(1).kw(ks).kc(kc).qmax(192).test(
-          u8maxpool_ukernel_sub16__neon);
+          pytorch_u8maxpool_ukernel_sub16__neon);
     }
   }
 }
@@ -87,7 +87,7 @@ TEST(U8MAXPOOL_SUB16__NEON, kc_lt_16_small_n) {
             .kw(ks)
             .kc(kc)
             .iterations(3)
-            .test(u8maxpool_ukernel_sub16__neon);
+            .test(pytorch_u8maxpool_ukernel_sub16__neon);
       }
     }
   }
@@ -106,7 +106,7 @@ TEST(U8MAXPOOL_SUB16__NEON, kc_lt_16_small_n_with_x_stride) {
             .kc(kc)
             .xStride(17)
             .iterations(3)
-            .test(u8maxpool_ukernel_sub16__neon);
+            .test(pytorch_u8maxpool_ukernel_sub16__neon);
       }
     }
   }
@@ -126,7 +126,7 @@ TEST(U8MAXPOOL_SUB16__NEON, kc_lt_16_small_n_with_s) {
               .kc(kc)
               .s(s)
               .iterations(1)
-              .test(u8maxpool_ukernel_sub16__neon);
+              .test(pytorch_u8maxpool_ukernel_sub16__neon);
         }
       }
     }
@@ -146,7 +146,7 @@ TEST(U8MAXPOOL_SUB16__NEON, kc_lt_16_small_n_with_qmin) {
             .kc(kc)
             .qmin(192)
             .iterations(3)
-            .test(u8maxpool_ukernel_sub16__neon);
+            .test(pytorch_u8maxpool_ukernel_sub16__neon);
       }
     }
   }
@@ -165,7 +165,7 @@ TEST(U8MAXPOOL_SUB16__NEON, kc_lt_16_small_n_with_qmax) {
             .kc(kc)
             .qmax(192)
             .iterations(3)
-            .test(u8maxpool_ukernel_sub16__neon);
+            .test(pytorch_u8maxpool_ukernel_sub16__neon);
       }
     }
   }
@@ -177,7 +177,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_eq_16_unipass_fulltile) {
   for (size_t kh = 1; kh <= tester.mr(); kh++) {
     for (size_t kw = 1; kw <= tester.mr(); kw++) {
       if (kh * kw == tester.mr()) {
-        tester.kh(kh).kw(kw).test(u8maxpool_ukernel_16x9p8q__neon);
+        tester.kh(kh).kw(kw).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
       }
     }
   }
@@ -189,7 +189,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_eq_16_unipass_fulltile_with_qmin) {
   for (size_t kh = 1; kh <= tester.mr(); kh++) {
     for (size_t kw = 1; kw <= tester.mr(); kw++) {
       if (kh * kw == tester.mr()) {
-        tester.kh(kh).kw(kw).qmin(192).test(u8maxpool_ukernel_16x9p8q__neon);
+        tester.kh(kh).kw(kw).qmin(192).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
       }
     }
   }
@@ -201,7 +201,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_eq_16_unipass_fulltile_with_qmax) {
   for (size_t kh = 1; kh <= tester.mr(); kh++) {
     for (size_t kw = 1; kw <= tester.mr(); kw++) {
       if (kh * kw == tester.mr()) {
-        tester.kh(kh).kw(kw).qmax(192).test(u8maxpool_ukernel_16x9p8q__neon);
+        tester.kh(kh).kw(kw).qmax(192).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
       }
     }
   }
@@ -211,8 +211,8 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_eq_16_unipass_subtile) {
   TEST_REQUIRES_ARM_NEON;
   auto tester = MaxPoolMicrokernelTester().kr(16).mr(9).kc(16);
   for (size_t ks = 2; ks < tester.mr(); ks++) {
-    tester.kh(ks).kw(1).test(u8maxpool_ukernel_16x9p8q__neon);
-    tester.kh(1).kw(ks).test(u8maxpool_ukernel_16x9p8q__neon);
+    tester.kh(ks).kw(1).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
+    tester.kh(1).kw(ks).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
   }
 }
 
@@ -223,7 +223,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_div_16_unipass_fulltile) {
     for (size_t kw = 1; kw <= tester.mr(); kw++) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
-          tester.kh(kh).kw(kw).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
+          tester.kh(kh).kw(kw).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -238,7 +238,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_div_16_unipass_fulltile_with_qmin) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
           tester.kh(kh).kw(kw).kc(kc).qmin(192).test(
-              u8maxpool_ukernel_16x9p8q__neon);
+              pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -253,7 +253,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_div_16_unipass_fulltile_with_qmax) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
           tester.kh(kh).kw(kw).kc(kc).qmax(192).test(
-              u8maxpool_ukernel_16x9p8q__neon);
+              pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -268,7 +268,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_div_16_unipass_fulltile_with_x_stride) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
           tester.kh(kh).kw(kw).kc(kc).xStride(257).test(
-              u8maxpool_ukernel_16x9p8q__neon);
+              pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -280,8 +280,8 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_div_16_unipass_subtile) {
   auto tester = MaxPoolMicrokernelTester().kr(16).mr(9).iterations(3);
   for (size_t ks = 2; ks < tester.mr(); ks++) {
     for (size_t kc = 16; kc < 256; kc += 48) {
-      tester.kh(ks).kw(1).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
-      tester.kh(1).kw(ks).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
+      tester.kh(ks).kw(1).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
+      tester.kh(1).kw(ks).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
     }
   }
 }
@@ -293,7 +293,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_gt_16_unipass_fulltile) {
     for (size_t kw = 1; kw <= tester.mr(); kw++) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 17; kc < 32; kc++) {
-          tester.kh(kh).kw(kw).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
+          tester.kh(kh).kw(kw).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -308,7 +308,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_gt_16_unipass_fulltile_with_qmin) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 17; kc < 32; kc++) {
           tester.kh(kh).kw(kw).kc(kc).qmin(192).test(
-              u8maxpool_ukernel_16x9p8q__neon);
+              pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -323,7 +323,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_gt_16_unipass_fulltile_with_qmax) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 17; kc < 32; kc++) {
           tester.kh(kh).kw(kw).kc(kc).qmax(192).test(
-              u8maxpool_ukernel_16x9p8q__neon);
+              pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -338,7 +338,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_gt_16_unipass_fulltile_with_x_stride) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 17; kc < 32; kc++) {
           tester.kh(kh).kw(kw).kc(kc).xStride(257).test(
-              u8maxpool_ukernel_16x9p8q__neon);
+              pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -350,8 +350,8 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_gt_16_unipass_subtile) {
   auto tester = MaxPoolMicrokernelTester().kr(16).mr(9).iterations(3);
   for (size_t ks = 2; ks < tester.mr(); ks++) {
     for (size_t kc = 17; kc < 32; kc++) {
-      tester.kh(ks).kw(1).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
-      tester.kh(1).kw(ks).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
+      tester.kh(ks).kw(1).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
+      tester.kh(1).kw(ks).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
     }
   }
 }
@@ -362,7 +362,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_eq_16_twopass_fulltile) {
   for (size_t kh = 1; kh <= tester.mr() + tester.qr(); kh++) {
     for (size_t kw = 1; kw <= tester.mr() + tester.qr(); kw++) {
       if (kh * kw == tester.mr() + tester.qr()) {
-        tester.kh(kh).kw(kw).test(u8maxpool_ukernel_16x9p8q__neon);
+        tester.kh(kh).kw(kw).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
       }
     }
   }
@@ -374,7 +374,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_eq_16_twopass_fulltile_with_qmin) {
   for (size_t kh = 1; kh <= tester.mr() + tester.qr(); kh++) {
     for (size_t kw = 1; kw <= tester.mr() + tester.qr(); kw++) {
       if (kh * kw == tester.mr() + tester.qr()) {
-        tester.kh(kh).kw(kw).qmin(192).test(u8maxpool_ukernel_16x9p8q__neon);
+        tester.kh(kh).kw(kw).qmin(192).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
       }
     }
   }
@@ -386,7 +386,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_eq_16_twopass_fulltile_with_qmax) {
   for (size_t kh = 1; kh <= tester.mr() + tester.qr(); kh++) {
     for (size_t kw = 1; kw <= tester.mr() + tester.qr(); kw++) {
       if (kh * kw == tester.mr() + tester.qr()) {
-        tester.kh(kh).kw(kw).qmax(192).test(u8maxpool_ukernel_16x9p8q__neon);
+        tester.kh(kh).kw(kw).qmax(192).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
       }
     }
   }
@@ -396,8 +396,8 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_eq_16_twopass_subtile) {
   TEST_REQUIRES_ARM_NEON;
   auto tester = MaxPoolMicrokernelTester().kr(16).mr(9).qr(8).kc(16);
   for (size_t ks = tester.mr() + 1; ks < tester.mr() + tester.qr(); ks++) {
-    tester.kh(ks).kw(1).test(u8maxpool_ukernel_16x9p8q__neon);
-    tester.kh(1).kw(ks).test(u8maxpool_ukernel_16x9p8q__neon);
+    tester.kh(ks).kw(1).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
+    tester.kh(1).kw(ks).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
   }
 }
 
@@ -408,7 +408,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_div_16_twopass_fulltile) {
     for (size_t kw = 1; kw <= tester.mr() + tester.qr(); kw++) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
-          tester.kh(kh).kw(kw).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
+          tester.kh(kh).kw(kw).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -423,7 +423,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_div_16_twopass_fulltile_with_qmin) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
           tester.kh(kh).kw(kw).kc(kc).qmin(192).test(
-              u8maxpool_ukernel_16x9p8q__neon);
+              pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -438,7 +438,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_div_16_twopass_fulltile_with_qmax) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
           tester.kh(kh).kw(kw).kc(kc).qmax(192).test(
-              u8maxpool_ukernel_16x9p8q__neon);
+              pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -453,7 +453,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_div_16_twopass_fulltile_with_x_stride) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
           tester.kh(kh).kw(kw).kc(kc).xStride(257).test(
-              u8maxpool_ukernel_16x9p8q__neon);
+              pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -465,8 +465,8 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_div_16_twopass_subtile) {
   auto tester = MaxPoolMicrokernelTester().kr(16).mr(9).qr(8).iterations(3);
   for (size_t ks = tester.mr() + 1; ks < tester.mr() + tester.qr(); ks++) {
     for (size_t kc = 16; kc < 256; kc += 48) {
-      tester.kh(ks).kw(1).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
-      tester.kh(1).kw(ks).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
+      tester.kh(ks).kw(1).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
+      tester.kh(1).kw(ks).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
     }
   }
 }
@@ -478,7 +478,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_gt_16_twopass_fulltile) {
     for (size_t kw = 1; kw <= tester.mr() + tester.qr(); kw++) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 17; kc < 32; kc++) {
-          tester.kh(kh).kw(kw).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
+          tester.kh(kh).kw(kw).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -493,7 +493,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_gt_16_twopass_fulltile_with_qmin) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 17; kc < 32; kc++) {
           tester.kh(kh).kw(kw).kc(kc).qmin(192).test(
-              u8maxpool_ukernel_16x9p8q__neon);
+              pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -508,7 +508,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_gt_16_twopass_fulltile_with_qmax) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 17; kc < 32; kc++) {
           tester.kh(kh).kw(kw).kc(kc).qmax(192).test(
-              u8maxpool_ukernel_16x9p8q__neon);
+              pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -523,7 +523,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_gt_16_twopass_fulltile_with_x_stride) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 17; kc < 32; kc++) {
           tester.kh(kh).kw(kw).kc(kc).xStride(257).test(
-              u8maxpool_ukernel_16x9p8q__neon);
+              pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -535,8 +535,8 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_gt_16_twopass_subtile) {
   auto tester = MaxPoolMicrokernelTester().kr(16).mr(9).qr(8).iterations(3);
   for (size_t ks = tester.mr() + 1; ks < tester.mr() + tester.qr(); ks++) {
     for (size_t kc = 17; kc < 32; kc++) {
-      tester.kh(ks).kw(1).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
-      tester.kh(1).kw(ks).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
+      tester.kh(ks).kw(1).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
+      tester.kh(1).kw(ks).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
     }
   }
 }
@@ -547,8 +547,8 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_eq_16_multipass) {
   for (size_t ks = tester.mr() + tester.qr() + 1;
        ks < tester.mr() + 3 * tester.qr();
        ks += 3) {
-    tester.kh(ks).kw(1).test(u8maxpool_ukernel_16x9p8q__neon);
-    tester.kh(1).kw(ks).test(u8maxpool_ukernel_16x9p8q__neon);
+    tester.kh(ks).kw(1).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
+    tester.kh(1).kw(ks).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
   }
 }
 
@@ -558,8 +558,8 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_eq_16_multipass_with_qmin) {
   for (size_t ks = tester.mr() + tester.qr() + 1;
        ks < tester.mr() + 3 * tester.qr();
        ks += 3) {
-    tester.kh(ks).kw(1).qmin(192).test(u8maxpool_ukernel_16x9p8q__neon);
-    tester.kh(1).kw(ks).qmin(192).test(u8maxpool_ukernel_16x9p8q__neon);
+    tester.kh(ks).kw(1).qmin(192).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
+    tester.kh(1).kw(ks).qmin(192).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
   }
 }
 
@@ -569,8 +569,8 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_eq_16_multipass_with_qmax) {
   for (size_t ks = tester.mr() + tester.qr() + 1;
        ks < tester.mr() + 3 * tester.qr();
        ks += 3) {
-    tester.kh(ks).kw(1).qmax(192).test(u8maxpool_ukernel_16x9p8q__neon);
-    tester.kh(1).kw(ks).qmax(192).test(u8maxpool_ukernel_16x9p8q__neon);
+    tester.kh(ks).kw(1).qmax(192).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
+    tester.kh(1).kw(ks).qmax(192).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
   }
 }
 
@@ -581,8 +581,8 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_div_16_multipass) {
        ks < tester.mr() + 3 * tester.qr();
        ks += 3) {
     for (size_t kc = 16; kc < 256; kc += 48) {
-      tester.kh(ks).kw(1).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
-      tester.kh(1).kw(ks).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
+      tester.kh(ks).kw(1).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
+      tester.kh(1).kw(ks).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
     }
   }
 }
@@ -595,9 +595,9 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_div_16_multipass_with_qmin) {
        ks += 3) {
     for (size_t kc = 16; kc < 256; kc += 48) {
       tester.kh(ks).kw(1).kc(kc).qmin(192).test(
-          u8maxpool_ukernel_16x9p8q__neon);
+          pytorch_u8maxpool_ukernel_16x9p8q__neon);
       tester.kh(1).kw(ks).kc(kc).qmin(192).test(
-          u8maxpool_ukernel_16x9p8q__neon);
+          pytorch_u8maxpool_ukernel_16x9p8q__neon);
     }
   }
 }
@@ -610,9 +610,9 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_div_16_multipass_with_qmax) {
        ks += 3) {
     for (size_t kc = 16; kc < 256; kc += 48) {
       tester.kh(ks).kw(1).kc(kc).qmax(192).test(
-          u8maxpool_ukernel_16x9p8q__neon);
+          pytorch_u8maxpool_ukernel_16x9p8q__neon);
       tester.kh(1).kw(ks).kc(kc).qmax(192).test(
-          u8maxpool_ukernel_16x9p8q__neon);
+          pytorch_u8maxpool_ukernel_16x9p8q__neon);
     }
   }
 }
@@ -625,9 +625,9 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_div_16_multipass_with_x_stride) {
        ks += 3) {
     for (size_t kc = 16; kc < 256; kc += 48) {
       tester.kh(ks).kw(1).kc(kc).xStride(257).test(
-          u8maxpool_ukernel_16x9p8q__neon);
+          pytorch_u8maxpool_ukernel_16x9p8q__neon);
       tester.kh(1).kw(ks).kc(kc).xStride(257).test(
-          u8maxpool_ukernel_16x9p8q__neon);
+          pytorch_u8maxpool_ukernel_16x9p8q__neon);
     }
   }
 }
@@ -639,8 +639,8 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_gt_16_multipass) {
        ks < tester.mr() + 3 * tester.qr();
        ks += 3) {
     for (size_t kc = 17; kc < 32; kc++) {
-      tester.kh(ks).kw(1).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
-      tester.kh(1).kw(ks).kc(kc).test(u8maxpool_ukernel_16x9p8q__neon);
+      tester.kh(ks).kw(1).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
+      tester.kh(1).kw(ks).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
     }
   }
 }
@@ -653,9 +653,9 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_gt_16_multipass_with_qmin) {
        ks += 3) {
     for (size_t kc = 17; kc < 32; kc++) {
       tester.kh(ks).kw(1).kc(kc).qmin(192).test(
-          u8maxpool_ukernel_16x9p8q__neon);
+          pytorch_u8maxpool_ukernel_16x9p8q__neon);
       tester.kh(1).kw(ks).kc(kc).qmin(192).test(
-          u8maxpool_ukernel_16x9p8q__neon);
+          pytorch_u8maxpool_ukernel_16x9p8q__neon);
     }
   }
 }
@@ -668,9 +668,9 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_gt_16_multipass_with_qmax) {
        ks += 3) {
     for (size_t kc = 17; kc < 32; kc++) {
       tester.kh(ks).kw(1).kc(kc).qmax(192).test(
-          u8maxpool_ukernel_16x9p8q__neon);
+          pytorch_u8maxpool_ukernel_16x9p8q__neon);
       tester.kh(1).kw(ks).kc(kc).qmax(192).test(
-          u8maxpool_ukernel_16x9p8q__neon);
+          pytorch_u8maxpool_ukernel_16x9p8q__neon);
     }
   }
 }
@@ -683,9 +683,9 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, kc_gt_16_multipass_with_x_stride) {
        ks += 3) {
     for (size_t kc = 17; kc < 32; kc++) {
       tester.kh(ks).kw(1).kc(kc).xStride(257).test(
-          u8maxpool_ukernel_16x9p8q__neon);
+          pytorch_u8maxpool_ukernel_16x9p8q__neon);
       tester.kh(1).kw(ks).kc(kc).xStride(257).test(
-          u8maxpool_ukernel_16x9p8q__neon);
+          pytorch_u8maxpool_ukernel_16x9p8q__neon);
     }
   }
 }
@@ -704,7 +704,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, small_n) {
             .kw(ks)
             .kc(kc)
             .iterations(3)
-            .test(u8maxpool_ukernel_16x9p8q__neon);
+            .test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
       }
     }
   }
@@ -725,7 +725,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, small_n_with_x_stride) {
             .kc(kc)
             .xStride(101)
             .iterations(1)
-            .test(u8maxpool_ukernel_16x9p8q__neon);
+            .test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
       }
     }
   }
@@ -746,7 +746,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, small_n_with_y_stride) {
             .kc(kc)
             .yStride(103)
             .iterations(1)
-            .test(u8maxpool_ukernel_16x9p8q__neon);
+            .test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
       }
     }
   }
@@ -768,7 +768,7 @@ TEST(U8MAXPOOL_16x9P8Q__NEON, small_n_with_s) {
               .kc(kc)
               .s(s)
               .iterations(1)
-              .test(u8maxpool_ukernel_16x9p8q__neon);
+              .test(pytorch_u8maxpool_ukernel_16x9p8q__neon);
         }
       }
     }
@@ -782,7 +782,7 @@ TEST(U8MAXPOOL_SUB16__SSE2, kc_lt_16_mx1_pool) {
   for (size_t kc = 1; kc < 16; kc++) {
     for (size_t ks = 2; ks < 16; ks++) {
       MaxPoolMicrokernelTester().kr(16).kh(ks).kw(1).kc(kc).test(
-          u8maxpool_ukernel_sub16__sse2);
+          pytorch_u8maxpool_ukernel_sub16__sse2);
     }
   }
 }
@@ -792,7 +792,7 @@ TEST(U8MAXPOOL_SUB16__SSE2, kc_lt_16_mx1_pool_with_qmin) {
   for (size_t kc = 1; kc < 16; kc++) {
     for (size_t ks = 2; ks < 16; ks++) {
       MaxPoolMicrokernelTester().kr(16).kh(ks).kw(1).kc(kc).qmin(192).test(
-          u8maxpool_ukernel_sub16__sse2);
+          pytorch_u8maxpool_ukernel_sub16__sse2);
     }
   }
 }
@@ -802,7 +802,7 @@ TEST(U8MAXPOOL_SUB16__SSE2, kc_lt_16_mx1_pool_with_qmax) {
   for (size_t kc = 1; kc < 16; kc++) {
     for (size_t ks = 2; ks < 16; ks++) {
       MaxPoolMicrokernelTester().kr(16).kh(ks).kw(1).kc(kc).qmax(192).test(
-          u8maxpool_ukernel_sub16__sse2);
+          pytorch_u8maxpool_ukernel_sub16__sse2);
     }
   }
 }
@@ -812,7 +812,7 @@ TEST(U8MAXPOOL_SUB16__SSE2, kc_lt_16_1xm_pool) {
   for (size_t kc = 1; kc < 16; kc++) {
     for (size_t ks = 2; ks < 16; ks++) {
       MaxPoolMicrokernelTester().kr(16).kh(1).kw(ks).kc(kc).test(
-          u8maxpool_ukernel_sub16__sse2);
+          pytorch_u8maxpool_ukernel_sub16__sse2);
     }
   }
 }
@@ -822,7 +822,7 @@ TEST(U8MAXPOOL_SUB16__SSE2, kc_lt_16_1xm_pool_with_qmin) {
   for (size_t kc = 1; kc < 16; kc++) {
     for (size_t ks = 2; ks < 16; ks++) {
       MaxPoolMicrokernelTester().kr(16).kh(1).kw(ks).kc(kc).qmin(192).test(
-          u8maxpool_ukernel_sub16__sse2);
+          pytorch_u8maxpool_ukernel_sub16__sse2);
     }
   }
 }
@@ -832,7 +832,7 @@ TEST(U8MAXPOOL_SUB16__SSE2, kc_lt_16_1xm_pool_with_qmax) {
   for (size_t kc = 1; kc < 16; kc++) {
     for (size_t ks = 2; ks < 16; ks++) {
       MaxPoolMicrokernelTester().kr(16).kh(1).kw(ks).kc(kc).qmax(192).test(
-          u8maxpool_ukernel_sub16__sse2);
+          pytorch_u8maxpool_ukernel_sub16__sse2);
     }
   }
 }
@@ -849,7 +849,7 @@ TEST(U8MAXPOOL_SUB16__SSE2, kc_lt_16_small_n) {
             .kw(ks)
             .kc(kc)
             .iterations(3)
-            .test(u8maxpool_ukernel_sub16__sse2);
+            .test(pytorch_u8maxpool_ukernel_sub16__sse2);
       }
     }
   }
@@ -868,7 +868,7 @@ TEST(U8MAXPOOL_SUB16__SSE2, kc_lt_16_small_n_with_x_stride) {
             .kc(kc)
             .xStride(17)
             .iterations(3)
-            .test(u8maxpool_ukernel_sub16__sse2);
+            .test(pytorch_u8maxpool_ukernel_sub16__sse2);
       }
     }
   }
@@ -888,7 +888,7 @@ TEST(U8MAXPOOL_SUB16__SSE2, kc_lt_16_small_n_with_s) {
               .kc(kc)
               .s(s)
               .iterations(1)
-              .test(u8maxpool_ukernel_sub16__sse2);
+              .test(pytorch_u8maxpool_ukernel_sub16__sse2);
         }
       }
     }
@@ -908,7 +908,7 @@ TEST(U8MAXPOOL_SUB16__SSE2, kc_lt_16_small_n_with_qmin) {
             .kc(kc)
             .qmin(192)
             .iterations(3)
-            .test(u8maxpool_ukernel_sub16__sse2);
+            .test(pytorch_u8maxpool_ukernel_sub16__sse2);
       }
     }
   }
@@ -927,7 +927,7 @@ TEST(U8MAXPOOL_SUB16__SSE2, kc_lt_16_small_n_with_qmax) {
             .kc(kc)
             .qmax(192)
             .iterations(3)
-            .test(u8maxpool_ukernel_sub16__sse2);
+            .test(pytorch_u8maxpool_ukernel_sub16__sse2);
       }
     }
   }
@@ -939,7 +939,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_eq_16_unipass_fulltile) {
   for (size_t kh = 1; kh <= tester.mr(); kh++) {
     for (size_t kw = 1; kw <= tester.mr(); kw++) {
       if (kh * kw == tester.mr()) {
-        tester.kh(kh).kw(kw).test(u8maxpool_ukernel_16x9p8q__sse2);
+        tester.kh(kh).kw(kw).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
       }
     }
   }
@@ -951,7 +951,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_eq_16_unipass_fulltile_with_qmin) {
   for (size_t kh = 1; kh <= tester.mr(); kh++) {
     for (size_t kw = 1; kw <= tester.mr(); kw++) {
       if (kh * kw == tester.mr()) {
-        tester.kh(kh).kw(kw).qmin(192).test(u8maxpool_ukernel_16x9p8q__sse2);
+        tester.kh(kh).kw(kw).qmin(192).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
       }
     }
   }
@@ -963,7 +963,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_eq_16_unipass_fulltile_with_qmax) {
   for (size_t kh = 1; kh <= tester.mr(); kh++) {
     for (size_t kw = 1; kw <= tester.mr(); kw++) {
       if (kh * kw == tester.mr()) {
-        tester.kh(kh).kw(kw).qmax(192).test(u8maxpool_ukernel_16x9p8q__sse2);
+        tester.kh(kh).kw(kw).qmax(192).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
       }
     }
   }
@@ -973,8 +973,8 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_eq_16_unipass_subtile) {
   TEST_REQUIRES_X86_SSE2;
   auto tester = MaxPoolMicrokernelTester().kr(16).mr(9).kc(16);
   for (size_t ks = 2; ks < tester.mr(); ks++) {
-    tester.kh(ks).kw(1).test(u8maxpool_ukernel_16x9p8q__sse2);
-    tester.kh(1).kw(ks).test(u8maxpool_ukernel_16x9p8q__sse2);
+    tester.kh(ks).kw(1).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
+    tester.kh(1).kw(ks).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
   }
 }
 
@@ -985,7 +985,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_div_16_unipass_fulltile) {
     for (size_t kw = 1; kw <= tester.mr(); kw++) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
-          tester.kh(kh).kw(kw).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
+          tester.kh(kh).kw(kw).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1000,7 +1000,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_div_16_unipass_fulltile_with_qmin) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
           tester.kh(kh).kw(kw).kc(kc).qmin(192).test(
-              u8maxpool_ukernel_16x9p8q__sse2);
+              pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1015,7 +1015,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_div_16_unipass_fulltile_with_qmax) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
           tester.kh(kh).kw(kw).kc(kc).qmax(192).test(
-              u8maxpool_ukernel_16x9p8q__sse2);
+              pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1030,7 +1030,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_div_16_unipass_fulltile_with_x_stride) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
           tester.kh(kh).kw(kw).kc(kc).xStride(257).test(
-              u8maxpool_ukernel_16x9p8q__sse2);
+              pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1042,8 +1042,8 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_div_16_unipass_subtile) {
   auto tester = MaxPoolMicrokernelTester().kr(16).mr(9).iterations(3);
   for (size_t ks = 2; ks < tester.mr(); ks++) {
     for (size_t kc = 16; kc < 256; kc += 48) {
-      tester.kh(ks).kw(1).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
-      tester.kh(1).kw(ks).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
+      tester.kh(ks).kw(1).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
+      tester.kh(1).kw(ks).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
     }
   }
 }
@@ -1055,7 +1055,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_gt_16_unipass_fulltile) {
     for (size_t kw = 1; kw <= tester.mr(); kw++) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 17; kc < 32; kc++) {
-          tester.kh(kh).kw(kw).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
+          tester.kh(kh).kw(kw).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1070,7 +1070,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_gt_16_unipass_fulltile_with_qmin) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 17; kc < 32; kc++) {
           tester.kh(kh).kw(kw).kc(kc).qmin(192).test(
-              u8maxpool_ukernel_16x9p8q__sse2);
+              pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1085,7 +1085,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_gt_16_unipass_fulltile_with_qmax) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 17; kc < 32; kc++) {
           tester.kh(kh).kw(kw).kc(kc).qmax(192).test(
-              u8maxpool_ukernel_16x9p8q__sse2);
+              pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1100,7 +1100,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_gt_16_unipass_fulltile_with_x_stride) {
       if (kh * kw == tester.mr()) {
         for (size_t kc = 17; kc < 32; kc++) {
           tester.kh(kh).kw(kw).kc(kc).xStride(257).test(
-              u8maxpool_ukernel_16x9p8q__sse2);
+              pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1112,8 +1112,8 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_gt_16_unipass_subtile) {
   auto tester = MaxPoolMicrokernelTester().kr(16).mr(9).iterations(3);
   for (size_t ks = 2; ks < tester.mr(); ks++) {
     for (size_t kc = 17; kc < 32; kc++) {
-      tester.kh(ks).kw(1).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
-      tester.kh(1).kw(ks).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
+      tester.kh(ks).kw(1).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
+      tester.kh(1).kw(ks).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
     }
   }
 }
@@ -1124,7 +1124,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_eq_16_twopass_fulltile) {
   for (size_t kh = 1; kh <= tester.mr() + tester.qr(); kh++) {
     for (size_t kw = 1; kw <= tester.mr() + tester.qr(); kw++) {
       if (kh * kw == tester.mr() + tester.qr()) {
-        tester.kh(kh).kw(kw).test(u8maxpool_ukernel_16x9p8q__sse2);
+        tester.kh(kh).kw(kw).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
       }
     }
   }
@@ -1136,7 +1136,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_eq_16_twopass_fulltile_with_qmin) {
   for (size_t kh = 1; kh <= tester.mr() + tester.qr(); kh++) {
     for (size_t kw = 1; kw <= tester.mr() + tester.qr(); kw++) {
       if (kh * kw == tester.mr() + tester.qr()) {
-        tester.kh(kh).kw(kw).qmin(192).test(u8maxpool_ukernel_16x9p8q__sse2);
+        tester.kh(kh).kw(kw).qmin(192).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
       }
     }
   }
@@ -1148,7 +1148,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_eq_16_twopass_fulltile_with_qmax) {
   for (size_t kh = 1; kh <= tester.mr() + tester.qr(); kh++) {
     for (size_t kw = 1; kw <= tester.mr() + tester.qr(); kw++) {
       if (kh * kw == tester.mr() + tester.qr()) {
-        tester.kh(kh).kw(kw).qmax(192).test(u8maxpool_ukernel_16x9p8q__sse2);
+        tester.kh(kh).kw(kw).qmax(192).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
       }
     }
   }
@@ -1158,8 +1158,8 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_eq_16_twopass_subtile) {
   TEST_REQUIRES_X86_SSE2;
   auto tester = MaxPoolMicrokernelTester().kr(16).mr(9).qr(8).kc(16);
   for (size_t ks = tester.mr() + 1; ks < tester.mr() + tester.qr(); ks++) {
-    tester.kh(ks).kw(1).test(u8maxpool_ukernel_16x9p8q__sse2);
-    tester.kh(1).kw(ks).test(u8maxpool_ukernel_16x9p8q__sse2);
+    tester.kh(ks).kw(1).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
+    tester.kh(1).kw(ks).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
   }
 }
 
@@ -1170,7 +1170,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_div_16_twopass_fulltile) {
     for (size_t kw = 1; kw <= tester.mr() + tester.qr(); kw++) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
-          tester.kh(kh).kw(kw).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
+          tester.kh(kh).kw(kw).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1185,7 +1185,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_div_16_twopass_fulltile_with_qmin) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
           tester.kh(kh).kw(kw).kc(kc).qmin(192).test(
-              u8maxpool_ukernel_16x9p8q__sse2);
+              pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1200,7 +1200,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_div_16_twopass_fulltile_with_qmax) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
           tester.kh(kh).kw(kw).kc(kc).qmax(192).test(
-              u8maxpool_ukernel_16x9p8q__sse2);
+              pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1215,7 +1215,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_div_16_twopass_fulltile_with_x_stride) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 16; kc < 256; kc += 48) {
           tester.kh(kh).kw(kw).kc(kc).xStride(257).test(
-              u8maxpool_ukernel_16x9p8q__sse2);
+              pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1227,8 +1227,8 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_div_16_twopass_subtile) {
   auto tester = MaxPoolMicrokernelTester().kr(16).mr(9).qr(8).iterations(3);
   for (size_t ks = tester.mr() + 1; ks < tester.mr() + tester.qr(); ks++) {
     for (size_t kc = 16; kc < 256; kc += 48) {
-      tester.kh(ks).kw(1).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
-      tester.kh(1).kw(ks).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
+      tester.kh(ks).kw(1).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
+      tester.kh(1).kw(ks).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
     }
   }
 }
@@ -1240,7 +1240,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_gt_16_twopass_fulltile) {
     for (size_t kw = 1; kw <= tester.mr() + tester.qr(); kw++) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 17; kc < 32; kc++) {
-          tester.kh(kh).kw(kw).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
+          tester.kh(kh).kw(kw).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1255,7 +1255,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_gt_16_twopass_fulltile_with_qmin) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 17; kc < 32; kc++) {
           tester.kh(kh).kw(kw).kc(kc).qmin(192).test(
-              u8maxpool_ukernel_16x9p8q__sse2);
+              pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1270,7 +1270,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_gt_16_twopass_fulltile_with_qmax) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 17; kc < 32; kc++) {
           tester.kh(kh).kw(kw).kc(kc).qmax(192).test(
-              u8maxpool_ukernel_16x9p8q__sse2);
+              pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1285,7 +1285,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_gt_16_twopass_fulltile_with_x_stride) {
       if (kh * kw == tester.mr() + tester.qr()) {
         for (size_t kc = 17; kc < 32; kc++) {
           tester.kh(kh).kw(kw).kc(kc).xStride(257).test(
-              u8maxpool_ukernel_16x9p8q__sse2);
+              pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }
@@ -1297,8 +1297,8 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_gt_16_twopass_subtile) {
   auto tester = MaxPoolMicrokernelTester().kr(16).mr(9).qr(8).iterations(3);
   for (size_t ks = tester.mr() + 1; ks < tester.mr() + tester.qr(); ks++) {
     for (size_t kc = 17; kc < 32; kc++) {
-      tester.kh(ks).kw(1).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
-      tester.kh(1).kw(ks).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
+      tester.kh(ks).kw(1).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
+      tester.kh(1).kw(ks).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
     }
   }
 }
@@ -1309,8 +1309,8 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_eq_16_multipass) {
   for (size_t ks = tester.mr() + tester.qr() + 1;
        ks < tester.mr() + 3 * tester.qr();
        ks += 3) {
-    tester.kh(ks).kw(1).test(u8maxpool_ukernel_16x9p8q__sse2);
-    tester.kh(1).kw(ks).test(u8maxpool_ukernel_16x9p8q__sse2);
+    tester.kh(ks).kw(1).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
+    tester.kh(1).kw(ks).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
   }
 }
 
@@ -1320,8 +1320,8 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_eq_16_multipass_with_qmin) {
   for (size_t ks = tester.mr() + tester.qr() + 1;
        ks < tester.mr() + 3 * tester.qr();
        ks += 3) {
-    tester.kh(ks).kw(1).qmin(192).test(u8maxpool_ukernel_16x9p8q__sse2);
-    tester.kh(1).kw(ks).qmin(192).test(u8maxpool_ukernel_16x9p8q__sse2);
+    tester.kh(ks).kw(1).qmin(192).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
+    tester.kh(1).kw(ks).qmin(192).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
   }
 }
 
@@ -1331,8 +1331,8 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_eq_16_multipass_with_qmax) {
   for (size_t ks = tester.mr() + tester.qr() + 1;
        ks < tester.mr() + 3 * tester.qr();
        ks += 3) {
-    tester.kh(ks).kw(1).qmax(192).test(u8maxpool_ukernel_16x9p8q__sse2);
-    tester.kh(1).kw(ks).qmax(192).test(u8maxpool_ukernel_16x9p8q__sse2);
+    tester.kh(ks).kw(1).qmax(192).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
+    tester.kh(1).kw(ks).qmax(192).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
   }
 }
 
@@ -1343,8 +1343,8 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_div_16_multipass) {
        ks < tester.mr() + 3 * tester.qr();
        ks += 3) {
     for (size_t kc = 16; kc < 256; kc += 48) {
-      tester.kh(ks).kw(1).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
-      tester.kh(1).kw(ks).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
+      tester.kh(ks).kw(1).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
+      tester.kh(1).kw(ks).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
     }
   }
 }
@@ -1357,9 +1357,9 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_div_16_multipass_with_qmin) {
        ks += 3) {
     for (size_t kc = 16; kc < 256; kc += 48) {
       tester.kh(ks).kw(1).kc(kc).qmin(192).test(
-          u8maxpool_ukernel_16x9p8q__sse2);
+          pytorch_u8maxpool_ukernel_16x9p8q__sse2);
       tester.kh(1).kw(ks).kc(kc).qmin(192).test(
-          u8maxpool_ukernel_16x9p8q__sse2);
+          pytorch_u8maxpool_ukernel_16x9p8q__sse2);
     }
   }
 }
@@ -1372,9 +1372,9 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_div_16_multipass_with_qmax) {
        ks += 3) {
     for (size_t kc = 16; kc < 256; kc += 48) {
       tester.kh(ks).kw(1).kc(kc).qmax(192).test(
-          u8maxpool_ukernel_16x9p8q__sse2);
+          pytorch_u8maxpool_ukernel_16x9p8q__sse2);
       tester.kh(1).kw(ks).kc(kc).qmax(192).test(
-          u8maxpool_ukernel_16x9p8q__sse2);
+          pytorch_u8maxpool_ukernel_16x9p8q__sse2);
     }
   }
 }
@@ -1387,9 +1387,9 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_div_16_multipass_with_x_stride) {
        ks += 3) {
     for (size_t kc = 16; kc < 256; kc += 48) {
       tester.kh(ks).kw(1).kc(kc).xStride(257).test(
-          u8maxpool_ukernel_16x9p8q__sse2);
+          pytorch_u8maxpool_ukernel_16x9p8q__sse2);
       tester.kh(1).kw(ks).kc(kc).xStride(257).test(
-          u8maxpool_ukernel_16x9p8q__sse2);
+          pytorch_u8maxpool_ukernel_16x9p8q__sse2);
     }
   }
 }
@@ -1401,8 +1401,8 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_gt_16_multipass) {
        ks < tester.mr() + 3 * tester.qr();
        ks += 3) {
     for (size_t kc = 17; kc < 32; kc++) {
-      tester.kh(ks).kw(1).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
-      tester.kh(1).kw(ks).kc(kc).test(u8maxpool_ukernel_16x9p8q__sse2);
+      tester.kh(ks).kw(1).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
+      tester.kh(1).kw(ks).kc(kc).test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
     }
   }
 }
@@ -1415,9 +1415,9 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_gt_16_multipass_with_qmin) {
        ks += 3) {
     for (size_t kc = 17; kc < 32; kc++) {
       tester.kh(ks).kw(1).kc(kc).qmin(192).test(
-          u8maxpool_ukernel_16x9p8q__sse2);
+          pytorch_u8maxpool_ukernel_16x9p8q__sse2);
       tester.kh(1).kw(ks).kc(kc).qmin(192).test(
-          u8maxpool_ukernel_16x9p8q__sse2);
+          pytorch_u8maxpool_ukernel_16x9p8q__sse2);
     }
   }
 }
@@ -1430,9 +1430,9 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_gt_16_multipass_with_qmax) {
        ks += 3) {
     for (size_t kc = 17; kc < 32; kc++) {
       tester.kh(ks).kw(1).kc(kc).qmax(192).test(
-          u8maxpool_ukernel_16x9p8q__sse2);
+          pytorch_u8maxpool_ukernel_16x9p8q__sse2);
       tester.kh(1).kw(ks).kc(kc).qmax(192).test(
-          u8maxpool_ukernel_16x9p8q__sse2);
+          pytorch_u8maxpool_ukernel_16x9p8q__sse2);
     }
   }
 }
@@ -1445,9 +1445,9 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, kc_gt_16_multipass_with_x_stride) {
        ks += 3) {
     for (size_t kc = 17; kc < 32; kc++) {
       tester.kh(ks).kw(1).kc(kc).xStride(257).test(
-          u8maxpool_ukernel_16x9p8q__sse2);
+          pytorch_u8maxpool_ukernel_16x9p8q__sse2);
       tester.kh(1).kw(ks).kc(kc).xStride(257).test(
-          u8maxpool_ukernel_16x9p8q__sse2);
+          pytorch_u8maxpool_ukernel_16x9p8q__sse2);
     }
   }
 }
@@ -1466,7 +1466,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, small_n) {
             .kw(ks)
             .kc(kc)
             .iterations(3)
-            .test(u8maxpool_ukernel_16x9p8q__sse2);
+            .test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
       }
     }
   }
@@ -1487,7 +1487,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, small_n_with_x_stride) {
             .kc(kc)
             .xStride(101)
             .iterations(1)
-            .test(u8maxpool_ukernel_16x9p8q__sse2);
+            .test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
       }
     }
   }
@@ -1508,7 +1508,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, small_n_with_y_stride) {
             .kc(kc)
             .yStride(103)
             .iterations(1)
-            .test(u8maxpool_ukernel_16x9p8q__sse2);
+            .test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
       }
     }
   }
@@ -1530,7 +1530,7 @@ TEST(U8MAXPOOL_16x9P8Q__SSE2, small_n_with_s) {
               .kc(kc)
               .s(s)
               .iterations(1)
-              .test(u8maxpool_ukernel_16x9p8q__sse2);
+              .test(pytorch_u8maxpool_ukernel_16x9p8q__sse2);
         }
       }
     }

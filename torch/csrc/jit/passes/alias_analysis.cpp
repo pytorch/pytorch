@@ -15,15 +15,13 @@ namespace jit {
 // introduce more granularity here (e.g. List[int] will never alias
 // List[float]).
 c10::optional<TypeKind> AliasDb::getMutableTypeKind(const TypePtr& type) {
-  if (type->isSubtypeOf(TensorType::get())) {
-    return TypeKind::TensorType;
-  }
 
   switch (type->kind()) {
     case TypeKind::ListType:
     case TypeKind::TupleType:
     case TypeKind::DictType:
     case TypeKind::ClassType:
+    case TypeKind::TensorType:
       return type->kind();
     case TypeKind::OptionalType:
       return getMutableTypeKind(type->cast<OptionalType>()->getElementType());
@@ -361,6 +359,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeConservative(node);
     case prim::Print:
     case prim::Uninitialized:
+    case prim::isinstance:
       // These ops do nothing
       return;
     default:
@@ -1248,6 +1247,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::CallFunction,
       prim::CallMethod,
       aten::wait,
+      prim::isinstance,
   };
 
   // Operators that should not be used by alias analysis

@@ -25,7 +25,7 @@ c10::OperatorOptions aliasAnalysisIsSpecialCase() {
 // code.
 RegisterOperators reg_fused_operators({Operator(
     prim::FusedConcat,
-    [](const Node* node) {
+    [](const Node* node) -> Operation {
       int64_t dim = node->i(attr::dim);
       int64_t num_inputs = node->inputs().size();
       return [dim, num_inputs](Stack& stack) {

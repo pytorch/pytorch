@@ -10,6 +10,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/Dimname.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 namespace c10 {
 struct Storage;
@@ -29,8 +30,8 @@ struct Quantizer;
 // to frontend
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
-struct TORCH_API TypeDefault {
+namespace TypeDefault {
   ${type_method_declarations}
-};
+}  // namespace TypeDefault
 
 } // namespace at

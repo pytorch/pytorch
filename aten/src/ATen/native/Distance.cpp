@@ -79,6 +79,7 @@ Tensor _cdist_backward(const Tensor& grad, const Tensor& x1, const Tensor& x2, c
   TORCH_CHECK(x1.is_contiguous(), "_cdist_backward requires X1 to be contiguous");
   TORCH_CHECK(x2.is_contiguous(), "_cdist_backward requires X2 to be contiguous");
   TORCH_CHECK(cdist.is_contiguous(), "_cdist_backward requires dist to be contiguous");
+  TORCH_CHECK(grad.is_contiguous(), "_cdist_backward requires grad to be contiguous");
   int64_t n = x1.size(-2);
   int64_t m = x1.size(-1);
   auto device1 = x1.type().device_type();
