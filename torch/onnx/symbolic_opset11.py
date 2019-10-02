@@ -48,7 +48,8 @@ def _interpolate(name, dim, interpolate_mode):
         align_corners = sym_help._maybe_get_scalar(align_corners)
         output_size = sym_help._maybe_get_const(output_size, 'is')
         if sym_help._is_value(output_size):
-            offsets = g.op("Constant", value_t=torch.ones(offset, dtype=torch.int64))
+            offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.int64))
+            output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
             output_size = g.op("Concat", offsets, output_size, axis_i=0)
         else:
             output_size = [1 if i < 2 else output_size[-(dim - i)] for i in range(0, dim)]
