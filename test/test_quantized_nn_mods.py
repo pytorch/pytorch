@@ -244,8 +244,13 @@ class ModuleAPITest(QuantizationTestCase):
         zero_point = 3
         if use_fused:
             qlinear = nnq_fused.LinearReLU(in_features, out_features)
+
+            # Test repr
+            self.assertTrue('QuantizedLinearReLU' in str(qlinear))
         else:
             qlinear = nnq.Linear(in_features, out_features)
+
+            self.assertTrue('QuantizedLinear' in str(qlinear))
 
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
@@ -470,6 +475,8 @@ class ModuleAPITest(QuantizationTestCase):
                                                 groups=g,
                                                 bias=use_bias,
                                                 padding_mode='zeros')
+
+            self.assertTrue('QuantizedConvReLU2d' in str(loaded_conv_under_test))
         else:
             loaded_conv_under_test = Conv2d(in_channels=iC,
                                             out_channels=oC,
@@ -480,6 +487,9 @@ class ModuleAPITest(QuantizationTestCase):
                                             groups=g,
                                             bias=use_bias,
                                             padding_mode='zeros')
+
+            self.assertTrue('QuantizedConv2d' in str(loaded_conv_under_test))
+
         loaded_conv_under_test.load_state_dict(loaded_dict)
         self.assertEqual(loaded_conv_under_test._weight_bias(), conv_under_test._weight_bias())
         if use_bias:

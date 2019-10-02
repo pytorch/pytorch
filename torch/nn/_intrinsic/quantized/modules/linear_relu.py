@@ -32,6 +32,9 @@ class LinearReLU(nnq.Linear):
             int(self.zero_point))
         return Y_q
 
+    def _get_name(self):
+        return 'QuantizedLinearReLU'
+
     @classmethod
     def from_float(cls, mod):
         return super(LinearReLU, cls).from_float(mod)
