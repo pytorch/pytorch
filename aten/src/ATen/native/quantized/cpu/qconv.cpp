@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/SmallVector.h>
+#include <ATen/Parallel.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
@@ -153,8 +154,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         {pad_l, pad_t, pad_l, pad_t},
         {static_cast<int>(dilation[0]), static_cast<int>(dilation[1])});
 
-    fbgemm::DoNothing<> NoOpObj{};
-
     float act_scale = act.q_scale();
     int32_t act_zero_point = act.q_zero_point();
 
@@ -210,61 +209,67 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         outShape, device(kCPU).dtype(kQUInt8), output_scale, output_zero_point);
     auto buffer = at::empty(output.sizes(), output.options().dtype(at::kInt));
 
-    if (pack_ptr.q_scheme == kPerTensorAffine) {
-      fbgemm::ReQuantizeOutput<
-          ReluFused,
-          fbgemm::QuantizationGranularity::TENSOR,
-          float>
-          outputProcObj(
-              NoOpObj,
-              output_multiplier_float.data(),
-              output_zero_point,
-              act_zero_point,
-              pack_ptr.w_zp.data(),
-              nullptr, /* row offset buffer */
-              col_offsets.data(),
-              bias_ptr,
-              K,
-              groups,
-              act_times_w_scale.data());
-      fbgemm::fbgemmConv(
-          conv_p,
-          act_ptr,
-          *packB,
-          reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
-          buffer.data_ptr<int32_t>(),
-          outputProcObj,
-          0 /* thread_id*/,
-          1 /* num_threads */);
+    int num_tasks = at::get_num_threads();
+    at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+      fbgemm::DoNothing<> NoOpObj{};
+      for (int task_id = begin; task_id < end; ++task_id) {
+        if (pack_ptr.q_scheme == kPerTensorAffine) {
+          fbgemm::ReQuantizeOutput<
+              ReluFused,
+              fbgemm::QuantizationGranularity::TENSOR,
+              float>
+              outputProcObj(
+                  NoOpObj,
+                  output_multiplier_float.data(),
+                  output_zero_point,
+                  act_zero_point,
+                  pack_ptr.w_zp.data(),
+                  nullptr, /* row offset buffer */
+                  col_offsets.data(),
+                  bias_ptr,
+                  K,
+                  groups,
+                  act_times_w_scale.data());
+          fbgemm::fbgemmConv(
+              conv_p,
+              act_ptr,
+              *packB,
+              reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+              buffer.data_ptr<int32_t>(),
+              outputProcObj,
+              task_id /* thread_id*/,
+              num_tasks /* num_threads */);
 
-    } else if (pack_ptr.q_scheme == kPerChannelAffine) {
-      fbgemm::ReQuantizeOutput<
-          ReluFused,
-          fbgemm::QuantizationGranularity::OUT_CHANNEL,
-          float>
-          outputProcObj(
-              NoOpObj,
-              output_multiplier_float.data(),
-              output_zero_point,
-              act_zero_point,
-              pack_ptr.w_zp.data(),
-              nullptr, /* row offset buffer */
-              col_offsets.data(),
-              bias_ptr,
-              K,
-              groups,
-              act_times_w_scale.data());
+        } else if (pack_ptr.q_scheme == kPerChannelAffine) {
+          fbgemm::ReQuantizeOutput<
+              ReluFused,
+              fbgemm::QuantizationGranularity::OUT_CHANNEL,
+              float>
+              outputProcObj(
+                  NoOpObj,
+                  output_multiplier_float.data(),
+                  output_zero_point,
+                  act_zero_point,
+                  pack_ptr.w_zp.data(),
+                  nullptr, /* row offset buffer */
+                  col_offsets.data(),
+                  bias_ptr,
+                  K,
+                  groups,
+                  act_times_w_scale.data());
 
-      fbgemm::fbgemmConv(
-          conv_p,
-          act_ptr,
-          *packB,
-          reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
-          buffer.data_ptr<int32_t>(),
-          outputProcObj,
-          0 /* thread_id*/,
-          1 /* num_threads */);
-    }
+          fbgemm::fbgemmConv(
+              conv_p,
+              act_ptr,
+              *packB,
+              reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+              buffer.data_ptr<int32_t>(),
+              outputProcObj,
+              task_id /* thread_id*/,
+              num_tasks /* num_threads */);
+        }
+      }
+    });
 
     // TODO: remove permute once MemoryLayout is added above
     return output.permute({0, 3, 1, 2});
