@@ -196,6 +196,16 @@ inline Tensor max_unpool1d(const Tensor& input, const Tensor& indices,
                              output_size_).squeeze(3);
 }
 
+inline Tensor max_unpool2d(const Tensor& input, const Tensor& indices,
+  const MaxUnpool2dOptions& options,
+  const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
+  auto output_size_ = _unpool_output_size(input, options.kernel_size(),
+                                          options.stride(), options.padding(),
+                                          output_size);
+
+  return torch::max_unpool2d(input, indices, output_size_);
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch
