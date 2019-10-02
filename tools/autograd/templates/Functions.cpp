@@ -906,6 +906,7 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
   auto eps = 1e-12;
   auto inp_pl_eps = input + eps;
   auto one_m_inp_pl_eps = 1 - input + eps;
+  // gradient wrt input
   auto gI = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
   gI *= (grad * grad_output);
 
@@ -922,6 +923,7 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
 
 Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, const Tensor& weight, int64_t reduction) {
   auto eps = 1e-12;
+  // gradient wrt grad_output
   auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
   ggO *= grad;
 
