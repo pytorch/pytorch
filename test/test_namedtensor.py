@@ -1341,7 +1341,7 @@ class TestNamedTensor(TestCase):
         self.assertEqual(output.shape, [3, 5, 1, 2])
 
         # All input dimensions must be named
-        with self.assertRaisesRegex(RuntimeError, "All input dims must be named"):
+        with self.assertRaisesRegex(RuntimeError, "All input dims must be named. Found unnamed dim at index 0"):
             create('None:2,C:3').align_to('N', 'C')
 
         # not enough names
