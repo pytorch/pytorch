@@ -21,6 +21,7 @@ template struct AdaptiveAvgPoolOptions<3>;
 
 template struct MaxUnpoolOptions<1>;
 template struct MaxUnpoolOptions<2>;
+template struct MaxUnpoolOptions<3>;
 
 } // namespace nn
 } // namespace torch
