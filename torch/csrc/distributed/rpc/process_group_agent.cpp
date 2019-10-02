@@ -154,9 +154,11 @@ void ProcessGroupAgent::join() {
   sync();
   int dst = (pg_->getRank() + 1) % pg_->getSize();
   auto future = std::make_shared<FutureMessage>();
-  enqueueSend(
-      SendWork(workerIds_[dst], Message({}, {}, MessageType::SHUTDOWN)),
-      future);
+  auto shutdownMsgId = nextId();
+  futures_[shutdownMsgId] = future;
+  enqueueSend(SendWork(
+      workerIds_[dst], Message({}, {}, MessageType::SHUTDOWN, shutdownMsgId)));
+
   threadPool_.waitWorkComplete();
   listenerThread_.join();
 }
@@ -206,13 +208,11 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::sendImpl(
   // will not keep the Python reference alive even if it originally comes from
   // the C++ land. Hence, we have to explicitly use the ``workerId`` in the C++
   // land.
-  enqueueSend(SendWork(workerIds_[to.id_], std::move(message)), future);
+  enqueueSend(SendWork(workerIds_[to.id_], std::move(message)));
   return future;
 }
 
-void ProcessGroupAgent::enqueueSend(
-    SendWork work,
-    std::shared_ptr<FutureMessage> future) {
+void ProcessGroupAgent::enqueueSend(SendWork work) {
   // NB: this can be changed to use a native move capture when moved to C++14
   threadPool_.run(std::bind(
       [&](const SendWork& work) {
@@ -251,9 +251,28 @@ void ProcessGroupAgent::enqueueSend(
           for (auto& pendingSend : pendingSends) {
             pendingSend->wait();
           }
-          future->markCompleted();
+        } catch (std::exception& e) {
+          auto msgId = work.message_.id();
+          auto future = futures_[msgId];
+          const char* err = e.what();
+          std::vector<char> payload(err, err + strlen(err));
+          auto exceptionMsg = Message(
+              std::move(payload),
+              std::vector<torch::Tensor>(),
+              MessageType::EXCEPTION,
+              msgId);
+          future->markCompleted(exceptionMsg);
         } catch (...) {
-          future->markCompleted(Message({}, {}, MessageType::EXCEPTION));
+          auto msgId = work.message_.id();
+          auto future = futures_[msgId];
+          const char* err = "Unknown exception occured";
+          std::vector<char> payload(err, err + strlen(err));
+          auto exceptionMsg = Message(
+              std::move(payload),
+              std::vector<torch::Tensor>(),
+              MessageType::EXCEPTION,
+              msgId);
+          future->markCompleted(exceptionMsg);
         }
       },
       std::move(work)));

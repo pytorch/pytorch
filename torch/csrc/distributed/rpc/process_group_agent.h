@@ -59,7 +59,7 @@ class ProcessGroupAgent : public RpcAgent {
  private:
   void collectNames();
   // put SendWork into a queue and notify the worker thread
-  void enqueueSend(SendWork work, std::shared_ptr<FutureMessage> future);
+  void enqueueSend(SendWork work);
   // put RecvWork into a queue and notify the worker thread
   void enqueueRecv(RecvWork work);
   // receiving messages
