@@ -21,6 +21,7 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.optim as optim
 from torch.quantization import QConfig
+from torch.quantization._quantize_script import PackedParams
 
 # Testing utils
 from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
@@ -1129,20 +1130,23 @@ graph(%x : Tensor,
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_prepack_unpack(self):
-        input_str = """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype):
-        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        %a_dequant = aten::dequantize(%a_quant)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK: quantized::linear_prepack
-        # CHECK: quantized::linear_unpack
-        %w_dequant = aten::dequantize(%w_quant)
-        %linear = prim::Constant[name="linear"]()
-        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
-        return (%r)"""
-        graph = parse_ir(input_str)
-        torch._C._jit_pass_insert_prepack_unpack(graph)
-        FileCheck().run(input_str, graph)
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
+                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
+
+            def forward(self, x):
+                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
+                wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
+                r = torch.nn.functional.linear(xq.dequantize(), wq.dequantize(), self.bias)
+                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
+                return rq
+        m = torch.jit.script(M())
+        torch._C._jit_pass_insert_prepack_unpack(m._c)
+        FileCheck().check("quantized::linear_prepack") \
+                   .check("quantized::linear_unpack") \
+                   .run(get_forward_graph(m._c))
 
     def test_quant_fusion(self):
         input_strs = [
@@ -1377,34 +1381,6 @@ graph(%input, %weight):
     )
     @_tmp_donotuse_dont_inline_everything
     def test_fold_prepack(self):
-        # TODO: move to torch/quantization
-        class PackedParams(torch.nn.Module):
-            def __init__(self):
-                super(PackedParams, self).__init__()
-                w = torch.rand((5, 5), dtype=torch.float)
-                wq = torch.quantize_per_tensor(w, 2.0, 0, torch.qint8)
-                self.set_weight_bias(wq, torch.rand(5))
-
-            @torch.jit.export
-            def set_weight_bias(self, weight, bias):
-                # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-                self._packed_params = torch.ops.quantized.linear_prepack(weight, bias)
-
-            @torch.jit.export
-            def _weight_bias(self):
-                return torch.ops.quantized.linear_unpack(self._packed_params)
-
-            def forward(self, x):
-                return x
-
-            @torch.jit.export
-            def __getstate__(self):
-                return self._weight_bias()
-
-            @torch.jit.export
-            def __setstate__(self, state):
-                self.set_weight_bias(state[0], state[1])
-
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -6802,11 +6778,12 @@ a")
             test(inp, typ, type_hint)
 
         # test optional isinstance check
-        with self.assertRaisesRegex(RuntimeError, "Optional isinstance check is not supported"):
-            @torch.jit.script
-            def opt_func(x):
-                # type: (Optional[int]) -> bool
-                return isinstance(x, int)
+        @torch.jit.script
+        def opt_func(x):
+            # type: (Optional[int]) -> bool
+            return isinstance(x, int)
+        self.assertTrue(opt_func(3))
+        self.assertFalse(opt_func(None))
 
     def test_dropout_eval(self):
         class ScriptedConv2d(torch.jit.ScriptModule):
@@ -14051,6 +14028,21 @@ a")
         out = test_non_primitive_types(_MyNamedTuple(value=torch.tensor(5.0)))
         self.assertEqual(out, torch.tensor(6.0))
 
+    def test_isinstance_dynamic(self):
+        @torch.jit.script
+        def foo(a):
+            # type: (Optional[List[int]]) -> int
+            b = 0
+            if isinstance(a, (int, (float,), list, str)):
+                b += 1
+            if isinstance(a, (int, str)):
+                b += 1
+            if isinstance(a, List[int]):
+                b += 1
+            return b
+        self.assertEqual(foo([3, 4]), 2)
+        self.assertEqual(foo(None), 0)
+
     def test_function_overloads(self):
         # TODO: pyflakes currently does not compose @overload annotation with other
         # decorators. This is fixed on master but not on version 2.1.1.
@@ -19257,6 +19249,18 @@ class TestClassType(JitTestCase):
 
                 def set_non_initialized(self, y):
                     self.bar = y  # can't assign to non-initialized attr
+
+    def test_schema_human_readable(self):
+        """ 
+        Make sure that the schema is human readable, ie the mode parameter should read "nearest" instead of being displayed in octal
+        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None, 
+        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor): 
+        Expected a value of type 'Optional[int]' for argument 'size' but instead found type 'Tensor'.
+        """
+        with self.assertRaisesRegex(RuntimeError, "nearest"):
+            @torch.jit.script
+            def FooTest(x):
+                return torch.nn.functional.interpolate(x, 'bad')
 
     def test_type_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "Expected a value of type \'bool"):
