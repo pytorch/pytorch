@@ -6,7 +6,7 @@
 namespace at { namespace native {
 
 void nonzero_kernel_impl(Tensor& subscript, const Tensor& self) {
-  legacy::cuda::_th_nonzero_kernel_out(subscript, self);
+  legacy::cuda::_th_nonzero_out(subscript, self);
 }
 
 REGISTER_DISPATCH(nonzero_stub, &nonzero_kernel_impl);
