@@ -167,15 +167,18 @@ TEST_F(FunctionalTest, MaxUnpool1d) {
   auto y = F::max_unpool1d(x, indices, MaxUnpool1dOptions(3));
 
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_TRUE(torch::allclose(y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
+  ASSERT_TRUE(torch::allclose(
+      y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 9}));
 
   x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
-  y = F::max_unpool1d(x, indices, MaxUnpool1dOptions(3), c10::IntArrayRef({1, 1, 9}));
+  y = F::max_unpool1d(
+      x, indices, MaxUnpool1dOptions(3), c10::IntArrayRef({1, 1, 9}));
 
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_TRUE(torch::allclose(y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
+  ASSERT_TRUE(torch::allclose(
+      y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 9}));
 
   x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
@@ -183,45 +186,50 @@ TEST_F(FunctionalTest, MaxUnpool1d) {
   y = F::max_unpool1d(x, indices, MaxUnpool1dOptions(3).stride(2).padding(1));
 
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_TRUE(torch::allclose(y, torch::tensor({{{0, 2, 0, 4, 5}}}, torch::kFloat)));
+  ASSERT_TRUE(
+      torch::allclose(y, torch::tensor({{{0, 2, 0, 4, 5}}}, torch::kFloat)));
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 5}));
 }
 
-TEST_F(FunctionalTest, OneHot_1) {
-  auto x = torch::arange(0, 5, torch::kLong);
-  auto y = F::one_hot(x % 3);
-  auto expected = torch::tensor(
-      {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}}, torch::kLong);
+TEST_F(FunctionalTest, OneHot) {
+  { // Test #1
+    auto x = torch::arange(0, 5, torch::kLong);
+    auto y = F::one_hot(x % 3);
+    auto expected = torch::tensor(
+        {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}}, torch::kLong);
 
-  ASSERT_EQ(y.ndimension(), 2);
-  ASSERT_TRUE(torch::allclose(y, expected));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({5, 3}));
-}
+    ASSERT_EQ(y.ndimension(), 2);
+    ASSERT_TRUE(torch::allclose(y, expected));
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({5, 3}));
+  }
 
-TEST_F(FunctionalTest, OneHot_2) {
-  auto x = torch::arange(0, 5, torch::kLong);
-  auto y = F::one_hot(x % 3, 5);
-  auto expected = torch::tensor(
-      {{1, 0, 0, 0, 0},
-       {0, 1, 0, 0, 0},
-       {0, 0, 1, 0, 0},
-       {1, 0, 0, 0, 0},
-       {0, 1, 0, 0, 0}},
-      torch::kLong);
+  { // Test #2
+    auto x = torch::arange(0, 5, torch::kLong);
+    auto y = F::one_hot(x % 3, 5);
+    auto expected = torch::tensor(
+        {{1, 0, 0, 0, 0},
+         {0, 1, 0, 0, 0},
+         {0, 0, 1, 0, 0},
+         {1, 0, 0, 0, 0},
+         {0, 1, 0, 0, 0}},
+        torch::kLong);
 
-  ASSERT_EQ(y.ndimension(), 2);
-  ASSERT_TRUE(torch::allclose(y, expected));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({5, 5}));
-}
+    ASSERT_EQ(y.ndimension(), 2);
+    ASSERT_TRUE(torch::allclose(y, expected));
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({5, 5}));
+  }
 
-TEST_F(FunctionalTest, OneHot_3) {
-  auto x = torch::arange(0, 6, torch::kLong);
-  auto y = F::one_hot(x.view(torch::IntArrayRef({3, 2})) % 3);
-  auto expected = torch::tensor(
-      {{{1, 0, 0}, {0, 1, 0}}, {{0, 0, 1}, {1, 0, 0}}, {{0, 1, 0}, {0, 0, 1}}},
-      torch::kLong);
+  { // Test #3
+    auto x = torch::arange(0, 6, torch::kLong);
+    auto y = F::one_hot(x.view(torch::IntArrayRef({3, 2})) % 3);
+    auto expected = torch::tensor(
+        {{{1, 0, 0}, {0, 1, 0}},
+         {{0, 0, 1}, {1, 0, 0}},
+         {{0, 1, 0}, {0, 0, 1}}},
+        torch::kLong);
 
-  ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_TRUE(torch::allclose(y, expected));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 2, 3}));
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_TRUE(torch::allclose(y, expected));
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 2, 3}));
+  }
 }
