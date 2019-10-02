@@ -21,7 +21,6 @@ from torch.distributed.rpc_api import RpcBackend
 
 
 BACKEND = getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP)
-RPC_INIT_URL = getenv("RPC_INIT_URL", "")
 
 
 def stub_init_rpc_backend_handler(self_rank, self_name, init_method):
@@ -91,15 +90,20 @@ def _wrap_with_rpc(test_method):
     @functools.wraps(test_method)
     def wrapper(self, *arg, **kwargs):
         store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
+        self.init_method = (
+            "file://{file_name}?rank={rank}&world_size={world_size}"
+        ).format(
+            file_name=self.file_name, rank=self.rank, world_size=self.world_size
         )
+
+        dist.init_process_group(backend="gloo", init_method=self.init_method)
         dist.init_model_parallel(
             self_name="worker%d" % self.rank,
             backend=BACKEND,
             self_rank=self.rank,
-            init_method=RPC_INIT_URL,
+            init_method=self.init_method
         )
+
         test_method(self, *arg, **kwargs)
         dist.join_rpc()
 
@@ -160,6 +164,8 @@ class RpcTest(object):
     )
     def test_duplicate_name(self):
         store = dist.FileStore(self.file_name, self.world_size)
+        init_method = ""
+
         dist.init_process_group(
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
         )
@@ -168,42 +174,38 @@ class RpcTest(object):
                 self_name="duplicate_name",
                 backend=BACKEND,
                 self_rank=self.rank,
-                init_method=RPC_INIT_URL,
+                init_method=init_method,
             )
         dist.join_rpc()
 
+    @_wrap_with_rpc
     def test_reinit(self):
-        store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
-        )
-        dist.init_model_parallel(
-            self_name="worker{}".format(self.rank),
-            backend=BACKEND,
-            self_rank=self.rank,
-            init_method=RPC_INIT_URL,
-        )
+        # dist.init_model_parallel(...) called in `@_wrap_with_rpc` first.
         with self.assertRaisesRegex(RuntimeError, "is already initialized"):
             dist.init_model_parallel(
                 self_name="worker{}".format(self.rank),
                 backend=BACKEND,
                 self_rank=self.rank,
-                init_method=RPC_INIT_URL,
+                init_method=self.init_method,
             )
         dist.join_rpc()
 
     def test_init_invalid_backend(self):
+        init_method = ""
+
         with self.assertRaisesRegex(RuntimeError, "Unrecognized RPC backend"):
             dist.init_model_parallel(
                 self_name="worker{}".format(self.rank),
                 backend="invalid",
                 self_rank=self.rank,
-                init_method=RPC_INIT_URL,
+                init_method=init_method,
             )
 
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     def test_invalid_names(self):
         store = dist.FileStore(self.file_name, self.world_size)
+        init_method = ""
+
         dist.init_process_group(
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
         )
@@ -224,7 +226,7 @@ class RpcTest(object):
                 self_name="".join(["a" for _ in range(500)]),
                 backend=BACKEND,
                 self_rank=self.rank,
-                init_method=RPC_INIT_URL,
+                init_method=init_method,
             )
         dist.join_rpc()
 
