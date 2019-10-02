@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/variable.h>
 
+#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
@@ -70,17 +71,7 @@ void Variable::backward(
     const Tensor& gradient,
     bool keep_graph,
     bool create_graph) const {
-  auto autograd_meta = get_autograd_meta();
-  std::vector<Edge> edges;
-  edges.emplace_back(autograd_meta->grad_fn_, autograd_meta->output_nr_);
-
-  std::vector<Variable> inputs;
-  Tensor gradient_ = gradient;
-  if (!gradient.defined()) {
-    gradient_ = at::ones_like(*this);
-  }
-  inputs.push_back(std::move(as_variable_ref(gradient_)));
-  Engine::get_default_engine().execute(edges, inputs, keep_graph, create_graph);
+  torch::autograd::backward({*this}, {gradient}, keep_graph, create_graph);
 }
 
 void Variable::set_data(const at::Tensor &new_data) const {

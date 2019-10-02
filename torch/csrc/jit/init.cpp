@@ -31,6 +31,7 @@
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
+#include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -108,7 +109,13 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
-      .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
+      .def(
+          "_jit_pass_onnx_peephole",
+          [](std::shared_ptr<Graph>& graph,
+             int opset_version,
+             bool fixed_batch_size) {
+            return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
+          })
       .def(
           "_jit_pass_onnx_cast_all_constant_to_floating",
           CastAllConstantToFloating)
@@ -124,6 +131,7 @@ void initJITBindings(PyObject* module) {
             return paramsDict;
           },
           pybind11::return_value_policy::move)
+      .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -146,35 +154,47 @@ void initJITBindings(PyObject* module) {
             return EliminateCommonSubexpression(g); // overload resolution
           })
       .def(
-          "_jit_pass_propagate_qinfo",
-          [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
-      .def(
           "_jit_pass_insert_observers",
           [](script::Module& module,
              const std::string& method_name,
-             const py::dict& qconfig_dict) {
+             const py::dict& qconfig_dict,
+             bool inplace) {
             auto dict = py::cast<std::unordered_map<
                 std::string,
                 std::tuple<script::Module, script::Module>>>(qconfig_dict);
-            return InsertObservers(module, method_name, dict);
-          })
+            return InsertObservers(module, method_name, dict, inplace);
+          },
+          py::arg("module"),
+          py::arg("method_name"),
+          py::arg("qconfig_dict"),
+          py::arg("inplace") = false)
       .def(
           "_jit_pass_insert_quant_dequant",
-          [](script::Module& module, const std::string& method_name) {
-            return InsertQuantDeQuant(module, method_name);
-          })
+          [](script::Module& module,
+             const std::string& method_name,
+             bool inplace) {
+            return InsertQuantDeQuant(module, method_name, inplace);
+          },
+          py::arg("module"),
+          py::arg("method_name"),
+          py::arg("inplace") = false)
+      .def(
+          "_jit_pass_insert_prepack_unpack",
+          [](std::shared_ptr<Graph>& g) { return InsertPrepackUnpack(g); })
+      .def(
+          "_jit_pass_insert_prepack_unpack",
+          [](script::Module& module) { return InsertPrepackUnpack(module); })
       .def(
           "_jit_pass_quant_fusion",
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
       .def("_jit_pass_fuse_linear", &FuseLinear)
-      .def("_jit_pass_fold_quantize",
-           [](script::Module& module, const std::string& method_name) {
-             FoldQuantizeCallIntoBuffer(module, method_name);
-           })
       .def(
-          "_jit_pass_quantlint",
-          [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
+          "_jit_pass_fold_quantize",
+          [](script::Module& module, const std::string& method_name) {
+            FoldQuantizeCallIntoBuffer(module, method_name);
+          })
+      .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const script::Module& m) { return PatternBasedRewrite(m); })
@@ -503,7 +523,6 @@ void initJITBindings(PyObject* module) {
 
       Value* node_output;
       py::object py_func_output;
-      auto retval = c10::make_intrusive<c10::ivalue::Future>();
       // Insert new trace ops into the fork op's sub-block
       WithInsertPoint guard(body_block);
       IValue output_ivalue;
@@ -526,6 +545,9 @@ void initJITBindings(PyObject* module) {
         torch::jit::script::lambdaLiftFork(fork_node);
       }
 
+      auto retval =
+          c10::make_intrusive<c10::ivalue::Future>(output_ivalue.type());
+
       // Record the ivalue in the tracer
       jit::tracer::setValueTrace(retval, node_output);
 
@@ -534,8 +556,9 @@ void initJITBindings(PyObject* module) {
 
       return PythonFutureWrapper(retval);
     } else {
-      auto retval = c10::make_intrusive<c10::ivalue::Future>();
-      retval->markCompleted(toIValue(f(*args_tup)));
+      auto result = toIValue(f(*args_tup));
+      auto retval = c10::make_intrusive<c10::ivalue::Future>(result.type());
+      retval->markCompleted(std::move(result));
       return PythonFutureWrapper(retval);
     }
   });

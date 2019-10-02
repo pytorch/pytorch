@@ -22,10 +22,10 @@ workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 class DNNLowPBatchMatMulOpTest(hu.HypothesisTestCase):
     # correctness test with no quantization error in inputs
     @given(
-        m=st.integers(4, 32),
+        m=st.integers(0, 32),
         n=st.integers(4, 32),
         k=st.integers(4, 32),
-        batch_size=st.integers(1, 4),
+        batch_size=st.integers(0, 4),
         **hu.gcs_cpu_only
     )
     def test_dnnlowp_batch_matmul_int(self, m, n, k, batch_size, gc, dc):
@@ -36,15 +36,17 @@ class DNNLowPBatchMatMulOpTest(hu.HypothesisTestCase):
         A = A.astype(np.float32)
         # input channels 0 and 1 are all A_min to avoid overflow from vpmaddubsw
         # when multiplied with B_min and B_max
-        A[0, :, 0] = A_min
-        A[0, 0, 1] = A_max
+        if batch_size > 0 and m > 0:
+            A[0, :, 0] = A_min
+            A[0, 0, 1] = A_max
 
         B_min = -100
         B_max = B_min + 255
         B = np.round(np.random.rand(batch_size, n, k) * 255 + B_min)
         B = B.astype(np.float32)
-        B[0, 0, 0] = B_min
-        B[0, 1, 0] = B_max
+        if batch_size > 0:
+            B[0, 0, 0] = B_min
+            B[0, 1, 0] = B_max
 
         for i in range(batch_size):
             avoid_vpmaddubsw_overflow_fc(
@@ -111,7 +113,7 @@ class DNNLowPBatchMatMulOpTest(hu.HypothesisTestCase):
 
     # correctness test with no quantization error in inputs
     @given(
-        m=st.integers(4, 32),
+        m=st.integers(0, 32),
         n=st.integers(4, 32),
         k=st.integers(4, 32),
         C_1=st.integers(0, 3),  # number of batch dims
@@ -142,7 +144,8 @@ class DNNLowPBatchMatMulOpTest(hu.HypothesisTestCase):
                 # input channels 0 and 1 are all A_min to avoid overflow from vpmaddubsw
                 # when multiplied with B_min and B_max
                 A[index][:, 0] = A_min
-                A[index][0, 1] = A_max
+                if m != 0:
+                    A[index][0, 1] = A_max
 
             i = 0
             for index in np.ndindex(batch_dims_B):

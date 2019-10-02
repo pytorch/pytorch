@@ -18,7 +18,7 @@ if ! [ -e "$SCRIPT_DIR/COMMIT_MSG" ]; then
   exit 1
 fi
 if [ -n "${CIRCLE_PULL_REQUEST:-}" ]; then
-  if [[ $CIRCLE_BRANCH != "ci-all/"* ]]; then
+  if [[ $CIRCLE_BRANCH != "ci-all/"* ]] && [[ $CIRCLE_BRANCH != "nightly" ]] &&  [[ $CIRCLE_BRANCH != "postnightly" ]] ; then
     # Don't swallow "script doesn't exist
     [ -e "$SCRIPT_DIR/should_run_job.py"  ]
     if ! python "$SCRIPT_DIR/should_run_job.py" "${BUILD_ENVIRONMENT:-}" < "$SCRIPT_DIR/COMMIT_MSG" ; then

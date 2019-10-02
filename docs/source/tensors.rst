@@ -266,7 +266,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: gather
    .. automethod:: ge
    .. automethod:: ge_
-   .. automethod:: gels
    .. automethod:: geometric_
    .. automethod:: geqrf
    .. automethod:: ger
@@ -374,6 +373,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: q_zero_point
    .. automethod:: q_per_channel_scales
    .. automethod:: q_per_channel_zero_points
+   .. automethod:: q_per_channel_axis
    .. automethod:: random_
    .. automethod:: reciprocal
    .. automethod:: reciprocal_

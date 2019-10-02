@@ -98,15 +98,15 @@ static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *Tensor_dtype(PyTensorType* self) {
+PyObject *Tensor_dtype(PyTensorType* self, void *unused) {
   return torch::autograd::utils::wrap(self->dtype);
 }
 
-PyObject *Tensor_layout(PyTensorType* self) {
+PyObject *Tensor_layout(PyTensorType* self, void *unused) {
   return torch::autograd::utils::wrap(self->layout);
 }
 
-PyObject *Tensor_is_cuda(PyTensorType* self) {
+PyObject *Tensor_is_cuda(PyTensorType* self, void *unused) {
   if (self->is_cuda) {
     Py_RETURN_TRUE;
   } else {
@@ -114,7 +114,7 @@ PyObject *Tensor_is_cuda(PyTensorType* self) {
   }
 }
 
-PyObject *Tensor_is_sparse(PyTensorType *self) {
+PyObject *Tensor_is_sparse(PyTensorType *self, void *unused) {
   if (self->layout->layout == at::Layout::Strided) {
     Py_RETURN_FALSE;
   } else {
