@@ -507,7 +507,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
     kwargs['library_dirs'] = library_dirs
 
     libraries = kwargs.get('libraries', [])
-    libraries.append('cudart')
+    if not HIP_COMP:
+        libraries.append('cudart')
     libraries.append('c10')
     libraries.append('c10_cuda')
     libraries.append('torch')
