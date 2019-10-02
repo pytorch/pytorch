@@ -1479,15 +1479,15 @@ class ScriptMeta(type):
 
                 # now delete the Python attributes that shadow the ScriptModule ones
                 # TODO how to make this robust over time? Maybe just blank out __dict__
-                module_meta = self._actual_script_module._module_meta
-                for name in module_meta.get_attributes():
+                concrete_type = self._actual_script_module._concrete_type
+                for name in concrete_type.get_attributes():
                     if hasattr(cls, name) and isinstance(getattr(cls, name), property):
                         # TODO giant hack. Right now we are encoding properties
                         # as attributes (this is what recursive script does
                         # today, but it is wrong)
                         continue
                     delattr(self, name)
-                for name in module_meta.get_module_names():
+                for name in concrete_type.get_module_names():
                     delattr(self, name)
                 for name in ("_parameters", "_buffers", "_modules"):
                     delattr(self, name)
@@ -1533,15 +1533,22 @@ if _enabled:
                     self.__annotations__[attr] = value.type
                     value = value.value
                 return super(ScriptModule, self).__setattr__(attr, value)
+
             setattr(self._actual_script_module, attr, value)
 
-        def lazy_define(self, src):
+        def define(self, src):
             """
-            TODO doc, can maybe rename define()
+            TODO doc
             """
             if "_actual_script_module" in self.__dict__:
-                raise RuntimeError("Tried to call 'lazy_define' on a frozen ScriptModule. "
-                                   "Did you mean 'define()'?")
+                # If we have completed initialization, just defer to the
+                # backing RecursiveScriptModule to eagerly compile the provided
+                # source.
+                return self._actual_script_module.define(src)
+
+            # Otherwise, we are still in the object's __init__.
+            # In that case, add `src` as a stub to be compiled.
+            #
             # We use frames_up=1 to get to the proper surrounding scope. The stack
             # will look like:
             # 0. createResolutionCallback
@@ -1556,10 +1563,9 @@ if _enabled:
 
 
     class RecursiveScriptModule(ScriptModule):
-        # TODO: RecursiveScriptModule inherits from ScriptModule for the sole
+        # XXX: RecursiveScriptModule inherits from ScriptModule for the sole
         # reason that it retains the existing isinstance(ScriptModule)
-        # behavior. Is this a good enough reason to leave it like this? It
-        # makes the inheritance relationship super confusing.
+        # behavior.
         r"""
         The core data structure in TorchScript is the ``ScriptModule``. It is an
         analogue of torch's ``nn.Module`` and represents an entire model as a tree of
@@ -1576,7 +1582,7 @@ if _enabled:
         _disable_script_meta = True
 
         def __init__(self, cpp_module):
-            self.__dict__['_type_frozen'] = False
+            self.__dict__['_initializing'] = True
             self._c = cpp_module
             super(RecursiveScriptModule, self).__init__()
 
@@ -1589,7 +1595,7 @@ if _enabled:
             # TODO the way that OrderedModuleDict is implemented seems fishy
             self._modules = OrderedModuleDict(self._c, self._modules)
             self._c._finalize()
-            self._type_frozen = True
+            self._initializing = False
 
         @property
         def graph(self):
@@ -1634,14 +1640,6 @@ if _enabled:
                 return ''
             return self._c.name
 
-        # TODO: We don't actually need to do this anymore, because
-        # _recurisve_script takes care of re-assigning the scripted
-        # forward() so that it takes precedence.
-        # In order to delete this safely, we need to have `self.define()`
-        # do the same reassignment, so that doing self.define(my_forward)
-        # will also work.
-        forward = _CachedForward()
-
         def define(self, src):
             # We use frames_up=1 to get to the proper surrounding scope. The stack
             # will look like:
@@ -1652,17 +1650,14 @@ if _enabled:
             # createResolutionCallback internally adds 1 to get us to our frame, then
             # we add 1 to get to the proper surrounding scope.
             rcb = _jit_internal.createResolutionCallback(frames_up=1)
-            self._c._define(self._module_meta, src, rcb)
+            self._c._define(self._concrete_type, src, rcb)
 
         def __getattr__(self, attr):
-            if '_type_frozen' not in self.__dict__:
+            if '_initializing' not in self.__dict__:
                 raise RuntimeError("ScriptModule has not been initialized, did you forget to call super's init?")
 
-            if not self._type_frozen:
+            if self._initializing:
                 return super(RecursiveScriptModule, self).__getattr__(attr)
-
-            if '_c' not in self.__dict__:
-                raise RuntimeError("Foo")
 
             if self._c._has_attribute(attr):
                 return self._c._get_attribute(attr)
@@ -1678,7 +1673,7 @@ if _enabled:
             return super(RecursiveScriptModule, self).__getattr__(attr)
 
         def __setattr__(self, attr, value):
-            if not self._type_frozen:
+            if self._initializing:
                 return super(RecursiveScriptModule, self).__setattr__(attr, value)
 
             if self._c._has_attribute(attr):
@@ -1711,7 +1706,7 @@ if _enabled:
     for name, item in RecursiveScriptModule.__dict__.items():
         if not callable(item) and not isinstance(item, property):
             continue
-        if name.startswith('__'):
+        if name.startswith('__') or hasattr(ScriptModule, name):
             continue
         # We can copy over the implementation wholesale because besides the
         # `super()` thing above, ScriptModule behaves exactly like
@@ -1911,7 +1906,7 @@ class _ConstSequential(_ConstModuleList):
         # because, in optimized runtime environments where only .pyc files
         # are shipped, we cant retrieve the source code.
         # TODO: find a workaround for this and remove this hack
-        self.lazy_define("""
+        self.define("""
         def forward(self, input):
             for m in self:
                 input = m(input)

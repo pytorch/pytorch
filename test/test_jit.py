@@ -7512,7 +7512,7 @@ a")
                 self.weight = nn.Parameter(torch.randn(2, 3))
                 self.bias = nn.Parameter(torch.randn(2))
                 # test defining a method from a string
-                self.lazy_define("""
+                self.define("""
                     def hi(self, a):
                         return self.weight.mm(a)
                 """)
@@ -8728,7 +8728,7 @@ a")
                                          (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)))
                 self.g = torch.jit.trace(TestScript.StarTestReturnThree(), torch.ones(4, 3))
 
-                self.lazy_define('''
+                self.define('''
             def forward(self, rep):
                 tup = self.g(rep)
                 return self.m(*tup)
@@ -8752,7 +8752,7 @@ a")
             def __init__(self):
                 super(M2, self).__init__()
                 self.g = torch.jit.trace(TestScript.StarTestSumAndReturnThree(), torch.ones(4, 3))
-                self.lazy_define('''
+                self.define('''
             def forward(self, rep):
                 head, *tail = self.g(rep)
                 return head
@@ -8769,7 +8769,7 @@ a")
                     TestScript.StarTestSumAndReturnThree(),
                     (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)),
                     _force_outplace=True)
-                self.lazy_define('''
+                self.define('''
             def forward(self, rep):
                 *head, tail = self.g(rep, rep, rep)
                 return tail
@@ -8786,7 +8786,7 @@ a")
                     TestScript.StarTestSumAndReturnThree(),
                     (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)),
                     _force_outplace=False)
-                self.lazy_define('''
+                self.define('''
             def forward(self, rep):
                 *head, tail = self.g(rep, rep, rep)
                 return tail
@@ -8809,7 +8809,7 @@ a")
                     def myfunc():
                         return torch.zeros(1, 2, 3), torch.zeros(1, 2, 3)
 
-                    self.lazy_define('''
+                    self.define('''
                 def forward(self, rep):
                     a, *b = myfunc()
                     return a
@@ -8824,7 +8824,7 @@ a")
                 def __init__(self):
                     super(M2, self).__init__()
 
-                    self.lazy_define('''
+                    self.define('''
                 def forward(self, rep):
                     a, *b = torch.neg(rep)
                     return a
@@ -9545,7 +9545,7 @@ a")
                 self.sub = M1()
                 self.weight = nn.Parameter(torch.randn(2, 3))
                 self.bias = nn.Parameter(torch.randn(2))
-                self.lazy_define("""
+                self.define("""
                     def hi(self, a):
                         return self.weight.mm(a)
                 """)
@@ -19273,6 +19273,18 @@ class TestClassType(JitTestCase):
 
                 def set_non_initialized(self, y):
                     self.bar = y  # can't assign to non-initialized attr
+
+    def test_schema_human_readable(self):
+        """ 
+        Make sure that the schema is human readable, ie the mode parameter should read "nearest" instead of being displayed in octal
+        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None, 
+        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor): 
+        Expected a value of type 'Optional[int]' for argument 'size' but instead found type 'Tensor'.
+        """
+        with self.assertRaisesRegex(RuntimeError, "nearest"):
+            @torch.jit.script
+            def FooTest(x):
+                return torch.nn.functional.interpolate(x, 'bad')
 
     def test_type_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "Expected a value of type \'bool"):

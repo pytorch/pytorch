@@ -299,12 +299,13 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   if (auto kind = module_.kind_of(field)) {
     if (kind == EntityType::MODULE) {
       // ...if it's a submodule, return it as a new ModuleValue.
-      const auto submoduleMeta = moduleMeta_.findModuleMeta(field);
-      TORCH_INTERNAL_ASSERT(submoduleMeta);
+      const auto submoduleConcreteType =
+          concreteType_.findSubmoduleConcreteType(field);
+      TORCH_INTERNAL_ASSERT(submoduleConcreteType);
       return std::make_shared<ModuleValue>(
           m.graph()->insertGetAttr(self_, field),
           module_.get_module(field),
-          *submoduleMeta);
+          *submoduleConcreteType);
     } else {
       // ...otherwise, methods, parameters, attributes, and buffers are all
       // first class so they get returned as SimpleValues
@@ -313,7 +314,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   }
 
   // 2. Check if it's a user-provided constant property.
-  if (auto constant = moduleMeta_.findConstant(field)) {
+  if (auto constant = concreteType_.findConstant(field)) {
     // If it is, just insert the constant and return a SimpleValue for it.
     return toSugaredValue(*constant, m, loc, true);
   }
@@ -321,8 +322,9 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // 3. Special case: for module dicts we manually desugar items(), keys(),
   // values() calls into the appropriate method.
   // TODO: can these not be represented as first class methods?
-  const auto is_mod_dict_py = py::module::import("torch.jit._recursive")
-                                  .attr("is_module_dict")(moduleMeta_.pyClass_);
+  const auto is_mod_dict_py =
+      py::module::import("torch.jit._recursive")
+          .attr("is_module_dict")(concreteType_.pyClass_);
   const bool is_mod_dict = py::cast<bool>(is_mod_dict_py);
   if (is_mod_dict) {
     if (field == "items" || field == "keys" || field == "values") {
@@ -342,14 +344,14 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   }
 
   // 4. Check if this is the name of an overloaded method.
-  const auto overloadsIt = moduleMeta_.overloads_.find(field);
-  if (overloadsIt != moduleMeta_.overloads_.end()) {
+  const auto overloadsIt = concreteType_.overloads_.find(field);
+  if (overloadsIt != concreteType_.overloads_.end()) {
     return std::make_shared<OverloadedMethodValue>(self_, overloadsIt->second);
   }
 
   // 5. Check if it's a function attribute.
-  const auto functionAttrIt = moduleMeta_.functionAttributes_.find(field);
-  if (functionAttrIt != moduleMeta_.functionAttributes_.end()) {
+  const auto functionAttrIt = concreteType_.functionAttributes_.find(field);
+  if (functionAttrIt != concreteType_.functionAttributes_.end()) {
     return std::make_shared<FunctionValue>(functionAttrIt->second->function());
   }
 
@@ -357,7 +359,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // ScriptModule was derived from. The only class properties we handle are
   // methods.
   py::object unboundMethod = py::getattr(
-      moduleMeta_.pyClass_,
+      concreteType_.pyClass_,
       field.c_str(),
       pybind11::cast<pybind11::none>(Py_None));
   if (py::isinstance<py::function>(unboundMethod)) {
@@ -372,10 +374,11 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       // Create a generated ScriptModule type with module_ set as cpp_module
       auto boundMethod = py::module::import("torch.jit._recursive")
                              .attr("bind_to_dummy_module")(
-                                 moduleMeta_, unboundMethod, module_);
+                                 concreteType_, unboundMethod, module_);
       TORCH_CHECK(py::isinstance<py::function>(boundMethod));
       // TODO: try to reduce our reliance on frame-based rcb
-      auto rcb = py::module::import("torch.jit").attr("_gen_rcb")(boundMethod, 0);
+      auto rcb =
+          py::module::import("torch.jit").attr("_gen_rcb")(boundMethod, 0);
       return std::make_shared<PythonValue>(boundMethod, rcb);
     }
 
@@ -391,9 +394,10 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       // right order
       auto unboundParamNamesMethod =
           py::getattr(unboundMethod, "_parameter_names_fn");
-      auto boundMethod = py::module::import("torch.jit._recursive")
-                             .attr("bind_to_dummy_module")(
-                                 moduleMeta_, unboundParamNamesMethod, module_);
+      auto boundMethod =
+          py::module::import("torch.jit._recursive")
+              .attr("bind_to_dummy_module")(
+                  concreteType_, unboundParamNamesMethod, module_);
       auto param_names = boundMethod();
 
       Graph& g = *m.graph();
@@ -411,15 +415,15 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     // step 1). Just compile it.
     auto stub = py::module::import("torch.jit._recursive")
                     .attr("compile_unbound_method")(
-                        module_, moduleMeta_, unboundMethod);
+                        module_, concreteType_, unboundMethod);
     TORCH_INTERNAL_ASSERT(!stub.is_none());
     return SimpleValue(self_).attr(loc, m, field);
   }
 
   // We've exhausted all possibilities. Bailout with a hint to the user.
-  auto failedAttrIter = moduleMeta_.failedAttributes_.find(field);
+  auto failedAttrIter = concreteType_.failedAttributes_.find(field);
   std::string hint;
-  if (failedAttrIter != moduleMeta_.failedAttributes_.end()) {
+  if (failedAttrIter != concreteType_.failedAttributes_.end()) {
     hint = failedAttrIter->second;
   }
 
@@ -432,9 +436,9 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
     Function& m,
     const c10::optional<size_t>& size_hint) {
   const auto is_mod_dict_py = py::module::import("torch.jit._recursive")
-                                  .attr("is_module_dict")(moduleMeta_.pyClass_);
+                                  .attr("is_module_dict")(concreteType_.pyClass_);
   const auto is_mod_list_py = py::module::import("torch.jit._recursive")
-                                  .attr("is_module_list")(moduleMeta_.pyClass_);
+                                  .attr("is_module_list")(concreteType_.pyClass_);
 
   const bool is_mod_dict = py::cast<bool>(is_mod_dict_py);
   const bool is_mod_list = py::cast<bool>(is_mod_list_py);
@@ -471,7 +475,7 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::desugarModuleContainer(
     auto mod_v = std::make_shared<ModuleValue>(
         module_v,
         sub_module,
-        *moduleMeta_.findModuleMeta(name));
+        *concreteType_.findSubmoduleConcreteType(name));
 
     if (get_keys && get_values) {
       std::vector<std::shared_ptr<SugaredValue>> tup;

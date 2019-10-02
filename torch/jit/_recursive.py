@@ -16,19 +16,12 @@ ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callb
 
 # TODO: there should be a more principled way of doing this.
 blacklist = [
-    "__weakref__",
-    "__constants__",
-    "__overloads__",
-    "__module__",
     "_version",
     "_parameters",
     "_buffers",
     "_modules",
     "dump_patches",
-    "__doc__",
-    "_type_frozen",
-    "_defines",
-    "_TracedModule__frozen",  # todo remove
+    "_initializing",
 ]
 
 # base types that can be constants
@@ -57,24 +50,15 @@ def _get_valid_constant(attr, v):
         """.format(type(v).__name__, attr, constants)))
 
 
-def get_module_meta(original, level=0):
-    # def printt(*args):
-    #     print("\t" * level, *args)
-    # Object + class -> class metadata
-    # Metadata is the key for the class uniqueness.
-    #   Constants as pyvalues
-    #   Types of all the attributes
-    # If we can't script the type, store the reason why and methods will let it work.
-    # If present already, just construct that class type and install the data
+def get_concrete_type(original):
+    """
+    Build a ConcreteModuleType from an nn.Module
+    """
+    assert isinstance(original, torch.nn.Module)
+    concrete_type = torch._C.ConcreteModuleType()
+    concrete_type.add_pyclass(type(original))
 
-    # build type metatdata
-    # it's a map of attr name => ...
-    #     - for constants: pyvalue
-    #     - for attributes: type
     added_names = set()
-    module_meta = torch._C.ModuleMetadata()
-    module_meta.add_pyclass(type(original))
-
     for name, item in original._parameters.items():
         if item is None:
             # TODO special case: parameters can be None. The JIT assumes
@@ -85,12 +69,12 @@ def get_module_meta(original, level=0):
             continue
         assert isinstance(item, torch.Tensor)
         attr_type = torch._C._jit_try_infer_type(item)
-        module_meta.add_attribute(name, attr_type, True)
+        concrete_type.add_attribute(name, attr_type, True)
         added_names.add(name)
 
     for name, item in original._modules.items():
-        sub_module_meta, type_ = get_type(item, level + 1)
-        module_meta.add_module(name, type_, sub_module_meta)
+        sub_concrete_type, type_ = get_type(item)
+        concrete_type.add_module(name, type_, sub_concrete_type)
         added_names.add(name)
 
     for name, item in original._buffers.items():
@@ -103,11 +87,10 @@ def get_module_meta(original, level=0):
             continue
         assert isinstance(item, torch.Tensor)
         attr_type = torch._C._jit_try_infer_type(item)
-        module_meta.add_attribute(name, attr_type, False)
+        concrete_type.add_attribute(name, attr_type, False)
         added_names.add(name)
 
     # populate constants_set
-    # TODO: untangle the relationship between __constants__ and _constant_set
     constants_set = getattr(original, "__constants__", set())
 
     # Constants annotated via `Final[T]` rather than being added to `__constants__`
@@ -129,19 +112,15 @@ def get_module_meta(original, level=0):
                           "Consider removing it.".format(name))
             continue
         value = getattr(original, name)
-        module_meta.add_constant(name, _get_valid_constant(name, value))
+        concrete_type.add_constant(name, _get_valid_constant(name, value))
         added_names.add(name)
 
     # populate overloads
-
     overloads = getattr(original, "__overloads__", {})
     # update with any annotated overloads
-    # TODO: we do this both in recursive_script and in get_type. This is
-    # because overloads are considered part of the type, but also determine
-    # which methods to compile.
     overloads.update(get_overload_name_mapping(get_overload_annotations(original)))
     for name, overloaded_names in overloads.items():
-        module_meta.add_overload(name, overloaded_names)
+        concrete_type.add_overload(name, overloaded_names)
 
     class_annotations = getattr(original, '__annotations__', {})
 
@@ -149,7 +128,7 @@ def get_module_meta(original, level=0):
     # only want to pick up attributes on this module instance, not the class
     # itself.
     for name in dir(original):
-        if name in blacklist:
+        if name in blacklist or name.startswith("__"):
             # Python objects have lots of random attributes attached to them;
             # PyTorch adds a few more. Prevent these from getting compiled.
             continue
@@ -171,9 +150,7 @@ def get_module_meta(original, level=0):
             cls_attr = getattr(type(original), name, None)
             if inspect.isfunction(cls_attr):
                 # Skip function attributes that exist on the original class.
-                #
-                # We reach here for things like @staticmethod and @classmethod.
-                # TODO our support for @staticmethod and @classmethod is questionable.
+                # TODO we can clean this up when we switch to __dict__ (see above)
                 continue
 
             # This is a Python function attribute. Try to script it.
@@ -186,7 +163,7 @@ def get_module_meta(original, level=0):
                 hint = ("(This function exists as an attribute on the Python module, "
                         "but we failed to compile it to a TorchScript function. "
                         "\nThe error stack is reproduced here:\n{}").format(e)
-                module_meta.add_failed_attribute(name, hint)
+                concrete_type.add_failed_attribute(name, hint)
                 pass
 
         if name in class_annotations:
@@ -197,84 +174,74 @@ def get_module_meta(original, level=0):
             attr_type = torch._C._jit_try_infer_type(item)
 
         if attr_type is not None:
-            module_meta.add_attribute(name, attr_type, False)
+            concrete_type.add_attribute(name, attr_type, False)
         else:
             # TODO: could add more detail here. For example, what the user should do
             # when the pytype is `list` or `NoneType`
             hint = ("(This attribute exists on the Python module, "
                     "but we failed to convert Python type: {} "
                     "to a TorchScript type.)").format(type(item).__name__)
-            module_meta.add_failed_attribute(name, hint)
+            concrete_type.add_failed_attribute(name, hint)
 
-    return module_meta
+    return concrete_type
 
 
-class ModuleMetaStore(object):
+class ConcreteTypeStore(object):
     def __init__(self):
-        # pytype => List[(ModuleMetadata, TypePtr)]
-        self.type_meta_for_type = {}
+        # Python module type => List[(ConcreteModuleType, TypePtr)]
+        self.type_map = {}
         # TypePtr methods have been compiled
         self.methods_compiled = set()
 
-    def find_type(self, original_type, module_meta):
-        known_types = self.type_meta_for_type.get(original_type, [])
-        for known_module_meta, type_ in known_types:
-            if module_meta.equals(known_module_meta):
+    def find_type(self, original_type, concrete_type):
+        known_types = self.type_map.get(original_type, [])
+        for known_concrete_type, type_ in known_types:
+            if concrete_type.equals(known_concrete_type):
                 return type_
         return None
 
-    def create_new_type(self, original_type, module_meta):
+    def create_new_type(self, original_type, concrete_type):
         qualified_name = torch.jit._qualified_name(original_type)
-        type_ = torch._C._get_fresh_type(qualified_name, module_meta)
-        if original_type not in self.type_meta_for_type:
-            self.type_meta_for_type[original_type] = []
+        type_ = torch._C._make_jit_type_from_concrete_type(qualified_name, concrete_type)
+        if original_type not in self.type_map:
+            self.type_map[original_type] = []
 
-        self.type_meta_for_type[original_type].append((module_meta, type_))
+        self.type_map[original_type].append((concrete_type, type_))
         return type_
 
-module_meta_store = ModuleMetaStore()
+concrete_type_store = ConcreteTypeStore()
 
-def get_type(original, level=0):
-    # def printt(*args):
-    #     print("\t" * level, *args)
-    # printt("============================")
-    # printt("CALLING GET TYPE ON,", type(original).__name__)
+def get_type(original):
     assert isinstance(original, Module)
-    if isinstance(original, torch.jit.RecursiveScriptModule) and original._type_frozen:
-        # printt("ALREADY A SCRIPT MOD")
-        # printt("============================")
-        return original._module_meta, original._c._type()
+    if isinstance(original, torch.jit.RecursiveScriptModule) and not original._initializing:
+        return original._concrete_type, original._c._type()
 
-    module_meta = get_module_meta(original, level)
-    maybe_type = module_meta_store.find_type(type(original), module_meta)
+    concrete_type = get_concrete_type(original)
+    maybe_type = concrete_type_store.find_type(type(original), concrete_type)
     if maybe_type is not None:
-        # printt("HIT", type(original).__name__)
         type_ = maybe_type
     else:
-        # printt("MISS", type(original).__name__)
-        type_ = module_meta_store.create_new_type(type(original), module_meta)
+        type_ = concrete_type_store.create_new_type(type(original), concrete_type)
 
-    # module_meta.dump()
-    # printt("======================")
-    return module_meta, type_
+    return concrete_type, type_
 
-def create_methods_from_stubs(cpp_mod, module_meta, stubs):
+def create_methods_from_stubs(cpp_mod, concrete_type, stubs):
     defs = [m.def_ for m in stubs]
     rcbs = [m.resolution_callback for m in stubs]
     defaults = [get_default_args(m.original_method) for m in stubs]
-    cpp_mod._create_methods(module_meta, defs, rcbs, defaults)
+    cpp_mod._create_methods(concrete_type, defs, rcbs, defaults)
 
-def compile_unbound_method(cpp_mod, module_meta, fn):
+def compile_unbound_method(cpp_mod, concrete_type, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
     stub = make_stub(fn)
     with torch.jit._disable_emit_hooks():
         # We don't want to call the hooks here since the graph that is calling
         # this function is not yet complete
-        create_methods_from_stubs(cpp_mod, module_meta, (stub,))
+        create_methods_from_stubs(cpp_mod, concrete_type, (stub,))
     return stub
 
-# This is called in the following ways:
+# TODO redoc This is called in the following ways:
 # 1. From recursive script. py_module is an nn.Module
 # 2. From ScriptMeta2. py_module is a ScriptModule
 # 3. From tracing, in the construction of a traced module. py_module is a
@@ -285,7 +252,7 @@ def create_script_module(original_module, stubs, fresh_type=False):
     assert isinstance(original_module, torch.nn.Module)
     check_module_initialized(original_module)
 
-    module_meta, module_type = get_type(original_module)
+    concrete_type, module_type = get_type(original_module)
     if fresh_type:
         cpp_mod = torch._C.ScriptModule(torch._jit_internal._qualified_name(type(original_module)), torch.jit._python_cu, True)
         module_type = cpp_mod._type()
@@ -294,7 +261,7 @@ def create_script_module(original_module, stubs, fresh_type=False):
     script_module = torch.jit.RecursiveScriptModule(cpp_mod)
 
     # Add attributes/parameters
-    for name, (attr_type, is_param) in module_meta.get_attributes().items():
+    for name, (attr_type, is_param) in concrete_type.get_attributes().items():
         orig_value = getattr(original_module, name)
 
         if is_param:
@@ -305,7 +272,7 @@ def create_script_module(original_module, stubs, fresh_type=False):
             cpp_mod._register_attribute(name, attr_type, orig_value)
 
     # Add modules, recursively scripting them.
-    for name in module_meta.get_module_names():
+    for name in concrete_type.get_module_names():
         orig_value = getattr(original_module, name)
         assert isinstance(orig_value, Module)
         scripted = recursive_script(orig_value)
@@ -324,22 +291,21 @@ def create_script_module(original_module, stubs, fresh_type=False):
         if _jit_internal.is_ignored_fn(item) or hasattr(item, "_parameter_names_fn"):
             setattr(script_module, name, item)
 
-    script_module._module_meta = module_meta
+    script_module._concrete_type = concrete_type
     # finalize here so that everything is correctly available when we are compiling
     # TODO: seem finnicky
     script_module._finalize()
 
     # Compile methods if necessary
-    if module_type not in module_meta_store.methods_compiled:
-        create_methods_from_stubs(cpp_mod, module_meta, stubs)
-        module_meta_store.methods_compiled.add(module_type)
+    if module_type not in concrete_type_store.methods_compiled:
+        create_methods_from_stubs(cpp_mod, concrete_type, stubs)
+        concrete_type_store.methods_compiled.add(module_type)
 
     # Make the compiled methods available to the Python ScriptModule class.
     for stub in stubs:
         if stub.original_method is None:
-            # define()'d methods don't have an original_method, so we don't #
-            # need to do any Python stuff--we'll just look it up on the cpp_mod
-            # directly
+            # define()'d methods don't have an Python original_method, so we
+            # don't need to do any Python re-wrapping stuff
             continue
 
         name = stub.original_method.__name__
@@ -348,6 +314,7 @@ def create_script_module(original_module, stubs, fresh_type=False):
             # mangle the name of the function.
             continue
         script_method = cpp_mod._get_method(name)
+
         # Wrap the original to propagate docstrings and such.
         # TODO: we don't currently do this functions that are recursively
         # compiled, we should.
@@ -538,16 +505,16 @@ def is_module_list(cls):
     return issubclass(cls, torch.jit._ConstModuleList) or issubclass(cls, torch.nn.ModuleList) \
         or issubclass(cls, torch.nn.Sequential)
 
-def bind_to_dummy_module(module_meta, unbound_method, cpp_mod):
+def bind_to_dummy_module(concrete_type, unbound_method, cpp_mod):
     """
     Create a dummy ScriptModule object for `unbound_method` to bind to.
     This ScriptModule object should behave "as if" it was the actual
     ScriptModule object holding `cpp_mod`, but since we constructed it only
-    from information in `module_meta` we can be sure that there is no dynamic
+    from information in `concrete_type` we can be sure that there is no dynamic
     shenanigans that would ruin our type sharing.
     """
     script_module = torch.jit.RecursiveScriptModule(cpp_mod)
-    orig_class = module_meta.py_class
+    orig_class = concrete_type.py_class
 
     # Copy @ignored/@unused methods from the original module to the new one.
     # This ensures they are available during compilation.
@@ -556,7 +523,7 @@ def bind_to_dummy_module(module_meta, unbound_method, cpp_mod):
         if _jit_internal.is_ignored_fn(item) or hasattr(item, "_parameter_names_fn"):
             setattr(script_module, name, item)
 
-    for name, value in module_meta.get_constants().items():
+    for name, value in concrete_type.get_constants().items():
         setattr(script_module, name, value)
 
     script_module._finalize()

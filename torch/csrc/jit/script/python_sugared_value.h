@@ -194,7 +194,7 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
 };
 
 // This holds all relevant Python state that ModuleValue needs. I
-struct VISIBILITY_HIDDEN ModuleMetadata {
+struct VISIBILITY_HIDDEN ConcreteModuleType {
   void addPyClass(py::object pyClass) {
     pyClass_ = std::move(pyClass);
   }
@@ -226,7 +226,7 @@ struct VISIBILITY_HIDDEN ModuleMetadata {
   void addModule(
       std::string name,
       TypePtr type,
-      std::shared_ptr<ModuleMetadata> meta) {
+      std::shared_ptr<ConcreteModuleType> meta) {
     TORCH_INTERNAL_ASSERT(type);
     modules_.emplace_back(
         ModuleInfo{std::move(name), std::move(type), std::move(meta)});
@@ -239,16 +239,16 @@ struct VISIBILITY_HIDDEN ModuleMetadata {
   }
 
   // This determines whether two modules can share a type. The container structs
-  // used by ModuleMeta have been defined such that operator== implements a
+  // used by ConcreteModuleType have been defined such that operator== implements a
   // meaningful comparison in that context.
-  friend bool operator==(const ModuleMetadata& lhs, const ModuleMetadata& rhs) {
+  friend bool operator==(const ConcreteModuleType& lhs, const ConcreteModuleType& rhs) {
     return lhs.pyClass_.is(rhs.pyClass_) && lhs.constants_ == rhs.constants_ &&
         lhs.attributes_ == rhs.attributes_ && lhs.modules_ == rhs.modules_ &&
         lhs.overloads_ == rhs.overloads_ &&
         lhs.functionAttributes_ == rhs.functionAttributes_;
   }
 
-  std::shared_ptr<ModuleMetadata> findModuleMeta(const std::string& name) {
+  std::shared_ptr<ConcreteModuleType> findSubmoduleConcreteType(const std::string& name) {
     const auto it = std::find_if(
         modules_.cbegin(), modules_.cend(), [&](const ModuleInfo& info) {
           return info.name == name;
@@ -289,7 +289,7 @@ struct VISIBILITY_HIDDEN ModuleMetadata {
   struct ModuleInfo {
     std::string name;
     TypePtr type;
-    std::shared_ptr<ModuleMetadata> meta;
+    std::shared_ptr<ConcreteModuleType> meta;
     friend bool operator==(const ModuleInfo& lhs, const ModuleInfo& rhs) {
       return *(lhs.type) == *(rhs.type) && lhs.name == rhs.name;
     }
@@ -308,13 +308,10 @@ struct VISIBILITY_HIDDEN ModuleMetadata {
 };
 
 struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
-  ModuleValue(
-      Value* self,
-      Module module,
-      ModuleMetadata moduleMeta)
+  ModuleValue(Value* self, Module module, ConcreteModuleType concreteType)
       : self_(self),
         module_(std::move(module)),
-        moduleMeta_(std::move(moduleMeta)) {}
+        concreteType_(std::move(concreteType)) {}
 
   std::string kind() const override {
     return "module";
@@ -358,7 +355,7 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       Function& m);
   Value* self_;
   Module module_;
-  ModuleMetadata moduleMeta_;
+  ConcreteModuleType concreteType_;
 };
 
 struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {

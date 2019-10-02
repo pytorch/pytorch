@@ -45,7 +45,7 @@ def do_input_map(fn, input):
 
 def clear_class_registry():
     torch._C._jit_clear_class_registry()
-    torch.jit._recursive.module_meta_store = torch.jit._recursive.ModuleMetaStore()
+    torch.jit._recursive.concrete_type_store = torch.jit._recursive.ConcreteTypeStore()
 
 
 class JitTestCase(TestCase):
