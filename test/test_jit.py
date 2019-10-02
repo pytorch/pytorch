@@ -6,7 +6,7 @@ from torch import Tensor
 from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
 from torch._six import inf, PY2, PY37, StringIO
 from torch.autograd import Variable, Function
-from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
+from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.jit.frontend import NotSupportedError
 from torch.onnx import OperatorExportTypes
 from torch.testing import FileCheck
@@ -6801,6 +6801,13 @@ a")
         self.assertEqual(any_refinement(3, 4), 7)
         self.assertEqual(any_refinement(3, "hi"), 0)
 
+    def test_any_in_class_fails(self):
+        with self.assertRaisesRegex(RuntimeError, "contains an Any"):
+            @torch.jit.script
+            class Foo:
+                def __init__(self, a):
+                    # type: (Tuple[int,Any]) -> None
+                    self.a = a
 
     def test_isinstance(self):
         # test isinstance operator for static type checking
