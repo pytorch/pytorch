@@ -194,6 +194,7 @@ def add_torch_libs():
         "torch/csrc/api/src/serialize.cpp",
         "torch/csrc/api/src/nn/init.cpp",
         "torch/csrc/api/src/nn/module.cpp",
+        "torch/csrc/api/src/nn/modules/activation.cpp",
         "torch/csrc/api/src/nn/modules/batchnorm.cpp",
         "torch/csrc/api/src/nn/modules/conv.cpp",
         "torch/csrc/api/src/nn/modules/dropout.cpp",

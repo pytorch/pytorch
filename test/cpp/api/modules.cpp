@@ -1005,6 +1005,26 @@ TEST_F(ModulesTest, PairwiseDistance) {
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
 }
 
+TEST_F(ModulesTest, ELU) {
+  const auto size = 3;
+  for (const auto alpha : {0.0, 0.42, 1.0, 4.2, 42.42}) {
+    ELU model {ELUOptions().alpha(alpha)};
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size}).set_requires_grad(true);
+    auto y = model(x);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(s.ndimension(), 0);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    auto y_exp = torch::max(torch::zeros_like(x), x) +
+                 torch::min(torch::zeros_like(x), alpha * (torch::exp(x) - 1.0));
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1226,4 +1246,10 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
       "    (table): torch::nn::Embedding(count=10, dimension=2)\n"
       "  )\n"
       ")");
+}
+
+TEST_F(ModulesTest, PrettyPrintELU) {
+  ASSERT_EQ(c10::str(ELU()), "torch::nn::ELU(alpha=1)");
+  ASSERT_EQ(c10::str(ELU(ELUOptions().alpha(42.42).inplace(true))),
+            "torch::nn::ELU(alpha=42.42, inplace=true)");
 }
