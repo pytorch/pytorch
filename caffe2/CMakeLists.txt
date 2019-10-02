@@ -368,6 +368,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pass_manager.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pickler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/unpickler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/import_source.cpp
     ${TORCH_SRC_DIR}/csrc/jit/import.cpp
@@ -386,6 +387,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/symbolic_script.cpp
     ${TORCH_SRC_DIR}/csrc/jit/profiling_record.cpp
     ${TORCH_SRC_DIR}/csrc/jit/profiling_graph_executor_impl.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/update_graph_executor_opt.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/bailout_graph.cpp
@@ -459,6 +461,17 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
     )
 
+  if (NOT INTERN_BUILD_MOBILE)
+    set (MOBILE_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_ops.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
+        )
+    list (APPEND TORCH_SRCS ${MOBILE_SRCS})
+  endif()
+
   if (NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
@@ -479,11 +492,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/export.cpp
       ${TORCH_SRC_DIR}/csrc/jit/import_legacy.cpp
       ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
     )
-    if (NOT WIN32)
-      list(APPEND TORCH_SRCS
-        ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp)
-    endif()
   endif()
 
   if (USE_CUDA)
@@ -502,6 +512,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if (USE_ROCM)
     list(APPEND Caffe2_HIP_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
     )
@@ -523,21 +534,30 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/random.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/sequential.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/stream.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/serialize.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
-      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/avgpool.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/dropout.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/distance.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/embedding.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/fold.cpp
-      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/loss.cpp
-      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/maxpool.cpp
-      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/named_any.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/functional.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/named_any.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/activation.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/batchnorm.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/conv.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/dropout.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/linear.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/pooling.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
@@ -891,7 +911,12 @@ target_compile_definitions(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 #  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
 #  TBB - using TBB for intra- and native thread pool for inter-op parallelism
-set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+  set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
+else()
+  set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+endif()
+
 message(STATUS "Using ATen parallel backend: ${ATEN_THREADING}")
 if ("${ATEN_THREADING}" STREQUAL "OMP")
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_OPENMP=1")

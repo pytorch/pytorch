@@ -56,8 +56,9 @@ TEST(NoGradTest, SetsGradModeCorrectly) {
   auto y = model->forward(x);
   torch::Tensor s = y.sum();
 
-  s.backward();
-  ASSERT_FALSE(model->weight.grad().defined());
+  // Mimicking python API behavior:
+  ASSERT_THROWS_WITH(s.backward(),
+    "element 0 of tensors does not require grad and does not have a grad_fn")
 }
 
 struct AutogradTest : torch::test::SeedingFixture {
@@ -70,7 +71,7 @@ struct AutogradTest : torch::test::SeedingFixture {
 };
 
 TEST_F(AutogradTest, CanTakeDerivatives) {
-  z.backward();
+  z.backward(torch::ones_like(z));
   ASSERT_TRUE(x.grad().allclose(y));
 }
 

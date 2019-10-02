@@ -31,8 +31,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       }
       out << ")";
     }
-    if (value->autogradZero() && *value->autogradZero()) {
-      out << "[AutogradZero]";
+    if (value->undefined() && *value->undefined()) {
+      out << "[Undefined]";
     }
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
@@ -63,6 +63,11 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
      out << t.str();
   }
   return out;
+}
+
+AnyTypePtr AnyType::get() {
+  static auto value = AnyType::create();
+  return value;
 }
 
 TensorTypePtr TensorType::get() {
@@ -319,51 +324,72 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   return c10::nullopt;
 }
 
-MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
-  if(!formal->hasFreeVariables()) {
+c10::optional<TypePtr> unifyTypeList(at::ArrayRef<TypePtr> elements) {
+  if (elements.size() == 0) {
+    return c10::nullopt;
+  }
+
+  c10::optional<TypePtr> ret_type = elements[0];
+  for (size_t i = 1; i < elements.size() && ret_type; ++i) {
+    ret_type = unifyTypes(*ret_type, elements[i]);
+  }
+
+  return ret_type;
+}
+
+MatchTypeReturn matchTypeVariables(
+    TypePtr formal,
+    TypePtr actual,
+    TypeEnv& type_env) {
+  if (!formal->hasFreeVariables()) {
     return MatchTypeReturn::Success();
   }
 
-  if(auto vt = formal->cast<VarType>()) {
+  if (auto vt = formal->cast<VarType>()) {
     auto it = type_env.find(vt->name());
-    if(it == type_env.end()) {
+    if (it == type_env.end()) {
       type_env[vt->name()] = actual;
       return MatchTypeReturn::Success();
-    } else if(auto unified = unifyTypes(it->second, actual)) {
-      type_env[vt->name()] = *unified;
+    } else if (auto unified = unifyTypes(it->second, actual)) {
+      // note: unifyTypes allows subtyping in either direction, so actual
+      // may be a supertype of the current binding. we're not responsible
+      // for reporting the error, only for keeping type_env stable
       return MatchTypeReturn::Success();
     }
     std::stringstream ss;
-    ss << "Type variable '" << vt->name() << "' previously matched to type " <<
-      it->second->python_str() << " is matched to type " << actual->python_str();
+    ss << "Type variable '" << vt->name() << "' previously matched to type "
+       << it->second->python_str() << " is matched to type "
+       << actual->python_str();
     return ss.str();
-  } else if(auto lt_formal = formal->cast<ListType>()) {
-    if(auto lt_actual = actual->cast<ListType>()) {
+  } else if (auto lt_formal = formal->cast<ListType>()) {
+    if (auto lt_actual = actual->cast<ListType>()) {
       const auto innerMatch = matchTypeVariables(
-          lt_formal->getElementType(),
-          lt_actual->getElementType(),
-          type_env);
+          lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
         // propagate the errMsg onward
         return innerMatch;
       }
       return MatchTypeReturn::Success();
-    } else {
-      std::stringstream ss;
-      ss << "Cannot match " << lt_formal->python_str() << " to "
-         << actual->python_str();
-      return ss.str();
+    } else if (auto tup_type = actual->cast<TupleType>()) {
+      auto maybe_tuple_unified = unifyTypeList(tup_type->elements());
+      if (maybe_tuple_unified) {
+        return matchTypeVariables(
+            lt_formal->getElementType(), *maybe_tuple_unified, type_env);
+      }
     }
-  } else if(auto tp_formal = formal->cast<TupleType>()) {
-    if(auto tp_actual = actual->cast<TupleType>()) {
-      if(tp_formal->elements().size() != tp_actual->elements().size()) {
+
+    std::stringstream ss;
+    ss << "Cannot match " << lt_formal->python_str() << " to "
+       << actual->python_str();
+    return ss.str();
+  } else if (auto tp_formal = formal->cast<TupleType>()) {
+    if (auto tp_actual = actual->cast<TupleType>()) {
+      if (tp_formal->elements().size() != tp_actual->elements().size()) {
         return MatchTypeReturn("Cannot match tuples of mismatched size");
       }
-      for(size_t i = 0; i < tp_formal->elements().size(); ++i) {
+      for (size_t i = 0; i < tp_formal->elements().size(); ++i) {
         const auto result = matchTypeVariables(
-            tp_formal->elements()[i],
-            tp_actual->elements()[i],
-            type_env);
+            tp_formal->elements()[i], tp_actual->elements()[i], type_env);
         if (!result.success()) {
           return result;
         }
@@ -401,26 +427,20 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       // unknown type).
       return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
     }
-    // note: if actual was non here we potentially did not fill in the type variables
-    // contained in the formal. It is still a valid match because None matches Optional[T]
-    // later error checking on tryEvalTypeVariables will report the problem if we never match
-    // variables in type T
+    // note: if actual was non here we potentially did not fill in the type
+    // variables contained in the formal. It is still a valid match because None
+    // matches Optional[T] later error checking on tryEvalTypeVariables will
+    // report the problem if we never match variables in type T
     return MatchTypeReturn::Success();
   } else if (auto dict_formal = formal->cast<DictType>()) {
     if (auto dict_actual = actual->cast<DictType>()) {
       auto key_match = matchTypeVariables(
-        dict_formal->getKeyType(),
-        dict_actual->getKeyType(),
-        type_env
-      );
+          dict_formal->getKeyType(), dict_actual->getKeyType(), type_env);
       if (!key_match.success()) {
         return key_match;
       }
       auto value_match = matchTypeVariables(
-        dict_formal->getValueType(),
-        dict_actual->getValueType(),
-        type_env
-      );
+          dict_formal->getValueType(), dict_actual->getValueType(), type_env);
       if (!value_match.success()) {
         return value_match;
       }
@@ -471,7 +491,7 @@ const char * typeKindToString(TypeKind kind) {
 }
 
 bool Type::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
-  if (*this == *rhs) {
+  if (rhs->kind() == TypeKind::AnyType || *this == *rhs) {
     return true;
   }
   if(auto rhs_ = rhs->cast<OptionalType>()) {
@@ -493,6 +513,16 @@ VaryingShape VaryingShape::merge(const VaryingShape& other) const {
     dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
   }
   return VaryingShape(std::move(dims));
+}
+
+TensorTypePtr TensorType::merge(TensorTypePtr other) const {
+  auto scalar_type = merge_primitive(scalarType(), other->scalarType());
+  auto dev = merge_primitive(device(), other->device());
+  auto sz = sizes().merge(other->sizes());
+  auto srs = strides().merge(other->strides());
+  auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
+  auto undef = merge_primitive(undefined(), other->undefined());
+  return TensorType::create(scalar_type, dev, sz, srs, gr, undef);
 }
 
 std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {

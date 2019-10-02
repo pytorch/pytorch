@@ -1,11 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <torch/detail/static.h>
-#include <torch/nn/module.h>
-#include <torch/nn/modules/any.h>
-#include <torch/nn/modules/linear.h>
-
 #include <torch/csrc/utils/variadic.h>
+#include <torch/torch.h>
 
 #include <string>
 #include <vector>

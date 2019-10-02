@@ -5,6 +5,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/any.cpp
   ${TORCH_API_TEST_DIR}/dataloader.cpp
   ${TORCH_API_TEST_DIR}/expanding-array.cpp
+  ${TORCH_API_TEST_DIR}/functional.cpp
   ${TORCH_API_TEST_DIR}/integration.cpp
   ${TORCH_API_TEST_DIR}/init.cpp
   ${TORCH_API_TEST_DIR}/jit.cpp

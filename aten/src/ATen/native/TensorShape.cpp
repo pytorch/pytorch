@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <vector>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 namespace native {
@@ -347,7 +348,12 @@ Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef s
 
 Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
-  auto result = detail::make_tensor<QTensorImpl>(Storage(self.storage()), self.type_set(), get_qtensorimpl(self)->quantizer());
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+  TORCH_CHECK(
+      quantizer->qscheme() == QScheme::PER_TENSOR_AFFINE,
+      "Setting strides is possible only on uniformly quantized tensor");
+  auto result = detail::make_tensor<QTensorImpl>(
+      Storage(self.storage()), self.type_set(), quantizer);
   setStrided(result, size, stride, storage_offset);
   return result;
 }
@@ -920,7 +926,12 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  return self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_squeeze_outnames(self);
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
 
 Tensor squeeze(const Tensor& self, int64_t dim) {
@@ -931,7 +942,11 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
     return self.as_strided(self.sizes(), self.strides());
   }
   auto g = inferSqueezeGeometry(self, dim);
-  return self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_except(result, self, {dim});
+#endif
+  return result;
 }
 
 Tensor & squeeze_(Tensor& self) {

@@ -25,7 +25,7 @@ Tensor& pow_out(Tensor& result, const Tensor& base, Scalar exp) {
   if (exp.toDouble() == 0.0) {
     result.resize_as_(base).fill_(1);
   } else if (exp.toDouble() == 1.0) {
-    result.copy_(base);
+    result.resize_as_(base).copy_(base);
   } else {
     auto iter = TensorIterator::unary_op(result, base,
                                          /*check_mem_overlap=*/true);
@@ -52,7 +52,7 @@ Tensor& pow_(Tensor& base, Scalar alpha) {
 }
 
 Tensor pow(const Tensor& base, const Tensor& exp) {
-  Tensor result = at::empty_like(base);
+  Tensor result = at::empty({0}, base.options());
   return native::pow_out(result, base, exp);
 }
 
