@@ -904,15 +904,13 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
 
 Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Tensor & grad, const Tensor & input, const Tensor & target, const Tensor& weight, int64_t reduction) {
   auto eps = 1e-12;
-  auto input_plus_eps = input + eps;
-  auto one_minus_input_plus_eps = 1 - input_plus_eps;
-  auto denom = input_plus_eps.pow(2) * one_minus_input_plus_eps.pow(2);
-  auto num = input * input - 2 * input * target + target;
+  auto inp_pl_eps = input + eps;
+  auto one_m_inp_pl_eps = 1 - input + eps;
+  auto output = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
+  output *= (grad * grad_output);
 
-  auto output = num / denom;
-  output.mul_(grad).mul_(grad_output);
   if (weight.defined()) {
-    output.mul_(weight);
+    output *= weight;
   }
   if (reduction == Reduction::Mean) {
     return output / input.numel();
@@ -925,10 +923,10 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
 Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, const Tensor& weight, int64_t reduction) {
   auto eps = 1e-12;
   auto output = (input - target) / ((input + eps) * (1 - input + eps));
-  output.mul_(grad);
+  output *= grad;
 
   if (weight.defined()) {
-    output.mul_(weight);
+    output *= weight;
   }
   if (reduction == Reduction::Mean) {
     return output / input.numel();
