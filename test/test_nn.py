@@ -8987,7 +8987,7 @@ class TestNNDeviceType(NNTestCase):
             packed = rnn_utils.pack_padded_sequence(
                 padded, lengths, enforce_sorted=enforce_sorted)
             self.assertFalse(packed.is_cuda)
-            packed = packed.to(device=device)
+            packed = packed.to(device)
             self.assertTrue(packed.is_cuda)
             unpacked, _ = rnn_utils.pad_packed_sequence(packed)
             self.assertEqual(unpacked.type(), cuda_type_str)

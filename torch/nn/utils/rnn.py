@@ -200,17 +200,13 @@ class PackedSequence(PackedSequence_):
         # Why not convert `batch_sizes`?
         # See NOTE [ device and dtype of a PackedSequence ]
         data = self.data.to(*args, **kwargs)
-        sorted_indices = self.sorted_indices
-        unsorted_indices = self.unsorted_indices
-        device_kw = 'device'
-        if device_kw in kwargs:
-            sorted_indices = bind(sorted_indices, lambda t: t.to(kwargs[device_kw]))
-            unsorted_indices = bind(unsorted_indices, lambda t: t.to(kwargs[device_kw]))
+        sorted_indices = bind(self.sorted_indices, lambda t: t.to(*args, **kwargs))
+        unsorted_indices = bind(self.unsorted_indices, lambda t: t.to(*args, **kwargs))
+
         if data is self.data:
             return self
         else:
-            return type(self)(data, self.batch_sizes,
-                              sorted_indices, unsorted_indices)
+            return type(self)(data, self.batch_sizes, sorted_indices, unsorted_indices)
 
     @property
     def is_cuda(self):
