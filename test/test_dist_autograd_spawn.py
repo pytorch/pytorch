@@ -7,7 +7,7 @@ from common_utils import TEST_WITH_ASAN, run_tests
 
 import unittest
 
-@unittest.skip(TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues")
+@unittest.skipIf(TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues")
 class TestDistAutogradWithSpawn(MultiProcessTestCase, TestDistAutograd):
 
     def setUp(self):
