@@ -33,7 +33,7 @@ static ModulePtr create_module_object(
 }
 
 Module::Module(c10::QualifiedName class_name)
-    : Module(create_module_object(
+    : module_value_(create_module_object(
           std::move(class_name),
           std::make_shared<CompilationUnit>())) {}
 
@@ -41,7 +41,7 @@ Module::Module(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,
     bool shouldMangle)
-    : Module(create_module_object(
+    : module_value_(create_module_object(
           std::move(class_name),
           std::move(cu),
           shouldMangle)) {}
@@ -358,7 +358,7 @@ void Module::train(bool on) {
   if (auto slot = find_attribute("training")) {
     slot->setValue(on);
   } else {
-    AT_ERROR("'training' attribute not found");
+    TORCH_INTERNAL_ASSERT("'training' attribute not found");
   }
 }
 
