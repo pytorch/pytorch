@@ -352,6 +352,7 @@ static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
 {
    HANDLE_TH_ERRORS
    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+   // Setting to MemoryFormat::Contiguous now, will change to accept memory_format in next PR
    return THPVariable_Wrap(dispatch_to(self_, at::Device(at::DeviceType::CPU), false, false, MemoryFormat::Contiguous));
    END_HANDLE_TH_ERRORS
 }
@@ -399,6 +400,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto device = r.isNone(0) ? at::Device(at::DeviceType::CUDA) : r.device(0);
   TORCH_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
   torch::utils::cuda_lazy_init();
+  // Setting to MemoryFormat::Contiguous now, will change to accept memory_format in next PR
   return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false, MemoryFormat::Contiguous));
   END_HANDLE_TH_ERRORS
 }
@@ -406,6 +408,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
 static PyObject * THPVariable_to_type(PyObject* self, ScalarType scalarType) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  // Setting to MemoryFormat::Contiguous now, will change to accept memory_format in next PR
   return THPVariable_Wrap(dispatch_to(self_, scalarType, false, false, MemoryFormat::Contiguous));
   END_HANDLE_TH_ERRORS
 }
