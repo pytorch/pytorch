@@ -764,9 +764,7 @@ struct PythonPrintPass {
       registerClassDependencies(containedType);
     }
   }
-
-  void printNode(Node* node, bool print_const) {
-    WithSourceRange guard(&source_range_stack_, node);
+  void scanTypeDependencies(Node* node) {
     // Check for class dependencies. If this node inputs or outputs a class
     // type, we need to add it to our table of dependencies.
     for (const auto input : node->inputs()) {
@@ -775,7 +773,26 @@ struct PythonPrintPass {
     for (const auto output : node->outputs()) {
       registerClassDependencies(output->type());
     }
+    for (const auto& name : node->attributeNames()) {
+      switch (node->kindOf(name)) {
+        case AttributeKind::ty:
+          registerClassDependencies(node->ty(name));
+          break;
+        case AttributeKind::tys:
+          for (const TypePtr& t : node->tys(name)) {
+            registerClassDependencies(t);
+          }
+          break;
+        default:
+          // noop
+          break;
+      }
+    }
+  }
 
+  void printNode(Node* node, bool print_const) {
+    WithSourceRange guard(&source_range_stack_, node);
+    scanTypeDependencies(node);
     if (!print_const && node->kind() == prim::Constant)
       return;
     splitLongInlines(node->inputs());
@@ -934,7 +951,18 @@ struct PythonPrintPass {
   }
 
   void printOpName(TaggedStringStream& stmt, Symbol kind) {
-    if (kind.is_aten()) {
+    // Special overriding ops set that requires serializing differently to
+    // preserve the original code semantics.
+    // This will be more properly handled when we have namespace semantics
+    // for serializing the ops, and it right now hard coded these ops to
+    // ensure consistency and not breaking BC in the future.
+    const static std::unordered_map<Symbol, std::string> override_symbols = {
+        {aten::backward, "torch.autograd.backward"},
+        {aten::grad, "torch.autograd.grad"},
+    };
+    if (override_symbols.find(kind) != override_symbols.end()) {
+      stmt << override_symbols.at(kind);
+    } else if (kind.is_aten()) {
       // special case aten -> torch because we want to rename
       // the aten namespace, but this change will take more time
       // doing it here ensures we do not have fix up archives later
@@ -1116,6 +1144,36 @@ struct PythonPrintPass {
                << useOf(node->input()) << ")";
         } else {
           stmt << useOf(node->input());
+        }
+        stmt << ")";
+      } break;
+      case prim::isinstance: {
+        stmt << "isinstance(" << useOf(node->input()) << ", ";
+        const auto& types = node->tys(attr::types);
+        const auto& kinds = node->ss(attr::kinds);
+        if (types.size() == 1 && kinds.size() == 0) {
+          stmt << types.at(0)->python_str();
+        } else if (kinds.size() == 1 && types.size() == 0) {
+          stmt << kinds.at(0);
+        } else {
+          // check multiple things, e.g. (str, list, int)
+          stmt << "(";
+          bool first = true;
+          for (const TypePtr& typ : types) {
+            if (!first) {
+              stmt << ", ";
+            }
+            stmt << typ->python_str();
+            first = false;
+          }
+          for (const std::string& kind : kinds) {
+            if (!first) {
+              stmt << ", ";
+            }
+            stmt << kind;
+            first = false;
+          }
+          stmt << ")";
         }
         stmt << ")";
       } break;
@@ -1486,6 +1544,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::GetAttr,
       prim::SetAttr,
       prim::CallFunction,
+      prim::isinstance,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your
