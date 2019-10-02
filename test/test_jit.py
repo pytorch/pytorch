@@ -62,6 +62,7 @@ import types
 import unittest
 import warnings
 import zipfile
+import re
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -3547,6 +3548,38 @@ def foo(x):
                 def invalid_prefix_annotation3(a):
                     #     type: (Int) -> Int
                     return a + 2
+
+    def test_unmatched_type_annotation(self):
+        message1 = re.escape("Number of type annotations (2) did not match the number of function parameters (1):")
+        message2 = re.escape("""
+            def invalid(a):
+            ~~~~~~~~~~~~~ <--- HERE
+                # type: (Int, Int) -> Int
+                return a + 2
+        """.strip())
+        with self.assertRaisesRegex(RuntimeError, message1):
+            @torch.jit.script
+            def invalid(a):
+                # type: (Int, Int) -> Int
+                return a + 2
+
+        with self.assertRaisesRegex(RuntimeError, message2):
+            @torch.jit.script
+            def invalid(a):
+                # type: (Int, Int) -> Int
+                return a + 2
+
+        with self.assertRaisesRegex(RuntimeError, message1):
+            def invalid(a):
+                # type: (Int, Int) -> Int
+                return a + 2
+            torch.jit.script(invalid)
+
+        with self.assertRaisesRegex(RuntimeError, message2):
+            def invalid(a):
+                # type: (Int, Int) -> Int
+                return a + 2
+            torch.jit.script(invalid)
 
     def test_is_optional(self):
         ann = Union[List[int], List[float]]

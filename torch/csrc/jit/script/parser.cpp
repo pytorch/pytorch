@@ -19,7 +19,7 @@ Decl mergeTypesFromTypeComment(
     expected_num_annotations -= 1;
   }
   if (expected_num_annotations != type_annotation_decl.params().size()) {
-    throw ErrorReport(type_annotation_decl.range())
+    throw ErrorReport(decl.range())
         << "Number of type annotations ("
         << type_annotation_decl.params().size()
         << ") did not match the number of "
@@ -650,7 +650,7 @@ struct ParserImpl {
         paramlist.range(), List<Param>(paramlist), return_annotation);
   }
 
-TreeRef parseClass() {
+  TreeRef parseClass() {
     L.expect(TK_CLASS_DEF);
     const auto name = parseIdent();
     Maybe<Expr> superclass = Maybe<Expr>::create(name.range());
