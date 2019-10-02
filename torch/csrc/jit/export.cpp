@@ -560,11 +560,14 @@ class ScriptModuleSerializer {
  private:
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
+    // Vector to capture the run-time class types during pickling the IValues
+    std::vector<c10::ClassTypePtr> memorizedClassTypes;
     Pickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
         },
-        nullptr);
+        nullptr,
+        &memorizedClassTypes);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();
@@ -577,9 +580,9 @@ class ScriptModuleSerializer {
     std::stringstream fname;
     fname << archive_name << ".pkl";
     writer_.writeRecord(fname.str(), data.data(), data.size());
-    // write all the captured run-time class types during pickling the IValues
-    for (const c10::ClassTypePtr& wroteType :
-         data_pickle.memorizedClassTypes()) {
+
+    // serialize all the captured run-time class types
+    for (const c10::ClassTypePtr& wroteType : memorizedClassTypes) {
       convertNamedType(wroteType);
     }
   }
