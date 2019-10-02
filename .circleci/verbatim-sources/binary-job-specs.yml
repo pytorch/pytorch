@@ -229,6 +229,7 @@
         at: ~/workspace
     - should_run_job
     - checkout
+    - run_brew_for_ios_build
     - run:
         name: Build
         contxt: org-member

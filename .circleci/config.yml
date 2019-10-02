@@ -606,6 +606,7 @@ jobs:
         at: ~/workspace
     - should_run_job
     - checkout
+    - run_brew_for_ios_build
     - run:
         name: Build
         contxt: org-member
@@ -812,6 +813,7 @@ workflows:
             - setup
       - binary_ios_upload:
           build_environment: "libtorch-ios-10.2.1-nightly-binary-build-upload"
+          context: org-member
           requires:
             - setup
             - pytorch_ios_10_2_1_nightly_x86_64_build
