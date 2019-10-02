@@ -5,6 +5,7 @@ from typing import NamedTuple, List, Optional
 import unittest
 import sys
 import torch
+import torch.nn as nn
 
 class TestScriptPy3(JitTestCase):
     def test_joined_str(self):
@@ -225,6 +226,45 @@ class TestScriptPy3(JitTestCase):
                 x = 5
                 if True:
                     x : Optional[int] = 7
+
+    def test_interface_module_swap(self):
+        @torch.jit.interface
+        class ModuleInterface(object):
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                pass
+
+        class OrigModule(nn.Module):
+            def __init__(self):
+                super(OrigModule, self).__init__()
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                return input
+
+        class NewModule(nn.Module):
+            def __init__(self):
+                super(NewModule, self).__init__()
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                return input + 1
+
+        class TestModule(nn.Module):
+            proxy_mod : ModuleInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigModule()
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                return self.proxy_mod.forward(input)
+
+        scripted_mod = torch.jit.script(TestModule())
+        scripted_mod.proxy_mod = torch.jit.script(NewModule())
+
+
 
 
 if __name__ == '__main__':

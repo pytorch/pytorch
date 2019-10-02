@@ -13,33 +13,26 @@ def copy_to_script_module(original, stubs):
     of an nn.Module into itself.
     """
     qualified_name = torch.jit._qualified_name(type(original))
+    print(qualified_name)
     script_module = torch.jit.ScriptModule(_qualified_name=qualified_name)
 
     constants_set = set(getattr(original, "__constants__", []))
     script_module.__dict__["_constants_set"] = {}
+    type_annotations = getattr(original, '__annotations__', {})
 
-
-    # Copy Parameters and Modules
+    # Copy Parameters and Buffers
     for name in dir(original):
         item = getattr(original, name)
-        if item is None and name in original._parameters:
-            # XXX: treat None value simply as module attributes instead of adding them to the parameter list
-            # TODO: need to handle this more generally when non-tensor attributes added to module
-            object.__setattr__(script_module, name, item)
-        elif item is script_module:
-            continue
-        elif isinstance(item, (Parameter, Module, torch.jit.Attribute)):
-            setattr(script_module, name, item)
-
-    # Copy buffers
-    for name in original._buffers:
-        if original._buffers[name] is None:
-            object.__setattr__(script_module, name, None)
-        else:
-            script_module.register_buffer(name, original._buffers[name])
+        if name in original._parameters or name in original._buffers:
+            if item is None:
+                # XXX: treat None value simply as module attributes instead of adding them to the parameter list
+                # TODO: need to handle this more generally when non-tensor attributes added to module
+                object.__setattr__(script_module, name, None)
+            else:
+                setattr(script_module, name, item)
 
     # Constants annotated via `Final[T]` rather than being added to `__constants__`
-    for name, ann in getattr(original, '__annotations__', {}).items():
+    for name, ann in type_annotations.items():
         if torch._jit_internal.is_final(ann):
             constants_set.add(name)
 
@@ -54,9 +47,7 @@ def copy_to_script_module(original, stubs):
             if not hasattr(script_module, name):
                 setattr(script_module, name, getattr(original, name))
 
-    # Copy annotations, pull types from `__annotations__` or try to infer
-    # the type if possible
-    class_annotations = getattr(original, '__annotations__', {})
+    # Register attributes and modules
     for name in dir(original):
         if name in ("training", "__dict__"):
             # TODO: removing this skip should let us remove the code to add training as an
@@ -65,20 +56,25 @@ def copy_to_script_module(original, stubs):
         if hasattr(script_module, name):
             # Don't re-copy properties
             continue
-        item = getattr(original, name)
-        if name in class_annotations:
-            the_type = torch.jit.annotations.ann_to_type(class_annotations[name])
-        else:
-            the_type = torch._C._jit_try_infer_type(item)
 
-        if the_type is not None:
+        item = getattr(original, name)
+        the_type = try_resolve_type(type_annotations, name, item)
+        if item is script_module:
+            continue
+        elif the_type is not None:
+            if isinstance(item, Module):
+                item = recursive_script(item)
+                print(type(item))
+            # try to register as attribute for known types
             try:
                 script_module._c._register_attribute(name, the_type, item)
             except RuntimeError as e:
                 msg = "When compiling {}, could not register attribute {} of " \
-                      "type {} with value {}\nOriginal error: {}" \
-                      .format(type(original), name, the_type, item, str(e))
+                        "type {} with value {}\nOriginal error: {}" \
+                        .format(type(original), name, the_type, item, str(e))
                 raise RuntimeError(msg)
+        elif isinstance(item, Module):
+            setattr(script_module, name, item)
 
     # Copy overloads
     script_module.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
@@ -101,6 +97,17 @@ def copy_to_script_module(original, stubs):
         setattr(script_module, method_name, script_module._c._get_method(method_name))
 
     return script_module
+
+
+def try_resolve_type(type_annotations, name, item):
+    # pull types from `__annotations__` or try to infer
+    # the type if possible
+    if name in type_annotations:
+        the_type = torch.jit.annotations.ann_to_type(type_annotations[name])
+    else:
+        the_type = torch._C._jit_try_infer_type(item)
+
+    return the_type
 
 
 def recursive_script(mod, exclude_methods=()):

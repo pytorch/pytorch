@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/script/module_python.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/auto_gil.h>
@@ -486,18 +487,23 @@ inline IValue toIValue(
       // to found the compiled TorchScript class, check if it conform
       // with the interface or not, and then create a ivalue::Object
       // from that class type.
-      py::str qualified_name = py::module::import("torch.jit")
-                                   .attr("_qualified_name")(obj.get_type());
-      auto pyCu = get_python_cu();
-      const auto classType =
-          pyCu->get_class(c10::QualifiedName(qualified_name));
-      if (!classType) {
-        throw std::runtime_error(c10::str(
-            "Assigning the object ",
-            py::str(obj),
-            " to an interface fails because the value is not "
-            "a TorchScript compatible type, did you forget to",
-            "turn it into a user defined TorchScript class?"));
+      c10::ClassTypePtr classType = nullptr;
+      if (auto mod = script::as_module(py::cast<py::object>(obj))) {
+        classType = mod.value().type();
+      } else {
+        py::str qualified_name = py::module::import("torch.jit")
+                                    .attr("_qualified_name")(obj.get_type());
+        auto pyCu = get_python_cu();
+        classType =
+            pyCu->get_class(c10::QualifiedName(qualified_name));
+        if (!classType) {
+          throw std::runtime_error(c10::str(
+              "Assigning the object ",
+              py::str(obj),
+              " to an interface fails because the value is not "
+              "a TorchScript compatible type, did you forget to",
+              "turn it into a user defined TorchScript class?"));
+        }
       }
       std::stringstream why_not;
       if (!classType->isSubtypeOfExt(interfaceType, &why_not)) {
