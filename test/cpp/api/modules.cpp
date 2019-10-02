@@ -1025,6 +1025,25 @@ TEST_F(ModulesTest, ELU) {
   }
 }
 
+TEST_F(ModulesTest, Hardshrink) {
+  const auto size = 3;
+  for (const auto lambda : {-4.2, -1.0, -0.42, 0.0, 0.42, 1.0, 4.2, 42.42}) {
+    Hardshrink model {HardshrinkOptions().lambda(lambda)};
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size}).set_requires_grad(true);
+    auto y = model(x);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(s.ndimension(), 0);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    auto y_exp = (x.abs() > lambda) * x;
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1252,4 +1271,10 @@ TEST_F(ModulesTest, PrettyPrintELU) {
   ASSERT_EQ(c10::str(ELU()), "torch::nn::ELU(alpha=1)");
   ASSERT_EQ(c10::str(ELU(ELUOptions().alpha(42.42).inplace(true))),
             "torch::nn::ELU(alpha=42.42, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintHardshrink) {
+  ASSERT_EQ(c10::str(Hardshrink()), "torch::nn::Hardshrink(0.5)");
+  ASSERT_EQ(c10::str(Hardshrink(HardshrinkOptions().lambda(42.42))),
+            "torch::nn::Hardshrink(42.42)");
 }

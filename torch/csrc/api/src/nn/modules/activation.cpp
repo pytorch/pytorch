@@ -22,5 +22,21 @@ void ELUImpl::pretty_print(std::ostream& stream) const {
   stream << ")";
 }
 
+// ============================================================================
+
+HardshrinkImpl::HardshrinkImpl(const HardshrinkOptions& options_)
+    : options(options_) {}
+
+Tensor HardshrinkImpl::forward(const Tensor& input) {
+  return F::hardshrink(input, options);
+}
+
+void HardshrinkImpl::reset() {}
+
+void HardshrinkImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::Hardshrink(" << options.lambda() << ")";
+}
+
 } // namespace nn
 } // namespace torch
