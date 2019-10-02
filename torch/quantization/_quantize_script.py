@@ -7,15 +7,15 @@ class ConvPackedParams(torch.nn.Module):
     def __init__(self):
         super(ConvPackedParams, self).__init__()
         wq = torch._empty_affine_quantized([1, 1, 1, 1], scale=1.0, zero_point=0, dtype=torch.qint8)
-        self.stride = (1, 1)
-        self.padding = (0, 0)
-        self.dilation = (1, 1)
+        self.stride = [1, 1]
+        self.padding = [0, 0]
+        self.dilation = [1, 1]
         self.groups = 1
         self.set_weight_bias(wq, None)
 
     @torch.jit.export
     def set_conv_params(self, stride, padding, dilation, groups):
-        # type: (Tuple[int, int], Tuple[int, int], Tuple[int, int], int) -> None
+        # type: (List[int], List[int], List[int], int) -> None
         self.stride = stride
         self.padding = padding
         self.dilation = dilation

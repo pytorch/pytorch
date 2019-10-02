@@ -638,15 +638,18 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
   rewriter.runOnGraph(graph);
 }
 
-c10::optional<IValue> toIntTuple(Value* v) {
+c10::optional<IValue> toIntList(Value* v) {
   auto* n = v->node();
-  if (n->kind() == prim::ListConstruct) {
+  if (n->kind() == prim::Constant) {
+    return toIValue(v);
+  } else if (n->kind() == prim::ListConstruct) {
     auto e0 = toIValue(n->inputs()[0]);
     auto e1 = toIValue(n->inputs()[1]);
     if (!e0 || !e1) {
       return c10::nullopt;
     }
-    return c10::ivalue::Tuple::create(std::vector<IValue>{e0.value(), e1.value()});
+    c10::List<int64_t> a = c10::List<int64_t>({e0.value().toInt(), e1.value().toInt()});
+    return IValue(a);
   }
   return c10::nullopt;
 }
@@ -956,17 +959,13 @@ void FoldPrepackedWeightIntoModule(
   auto method = module.get_method(method_name);
   auto graph = method.graph();
   std::string linear_prepack = R"(
-graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype):
-        %w = prim::GetAttr[name="weight"](%self)
-        %b = prim::GetAttr[name="bias"](%self)
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
         %packed_params = quantized::linear_prepack(%w_quant, %b)
         return (%packed_params))";
 
   std::string conv2d_prepack = R"(
-graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
-        %w = prim::GetAttr[name="weight"](%self)
-        %b = prim::GetAttr[name="bias"](%self)
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
         %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         return (%packed_params))";
@@ -995,13 +994,16 @@ graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %
           toIValue(match_vmap.at(vmap.at("w_dtype"))).value().toScalarType();
       auto w = module.get_parameter("weight").variable_data();
       auto w_quant = at::quantize_per_tensor(w, w_scale, w_zero_point, w_dtype);
-      auto b = module.get_parameter("bias").variable_data();
+      c10::optional<at::Tensor> b = c10::nullopt;
+      if (module.find_parameter("bias")) {
+        b = module.get_parameter("bias").variable_data();
+      }
       auto wrapper_module = packed_params_module.clone();
       auto set_weight_bias = wrapper_module.get_method("set_weight_bias");
       if (is_conv) {
-        auto stride = toIntTuple(match_vmap.at(vmap.at("stride")));
-        auto padding = toIntTuple(match_vmap.at(vmap.at("padding")));
-        auto dilation = toIntTuple(match_vmap.at(vmap.at("dilation")));
+        auto stride = toIntList(match_vmap.at(vmap.at("stride")));
+        auto padding = toIntList(match_vmap.at(vmap.at("padding")));
+        auto dilation = toIntList(match_vmap.at(vmap.at("dilation")));
         auto groups = toIValue(match_vmap.at(vmap.at("groups")));
         auto set_conv_params = wrapper_module.get_method("set_conv_params");
         if (!stride || !padding || !dilation) {
@@ -1032,8 +1034,8 @@ graph(%self, %a_dequant, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %
       packed_params_val->replaceAllUsesWith(packed_params_from_attr);
 
       // Delete nodes
-      std::vector<Node*> nodes_to_delete = {w_val->node(),
-                                            b_val->node(),
+      std::vector<Node*> nodes_to_delete = {//w_val->node(),
+                                            //b_val->node(),
                                             w_quant_val->node(),
                                             packed_params_val->node()};
       for (auto n : nodes_to_delete) {
