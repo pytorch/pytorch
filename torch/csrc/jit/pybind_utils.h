@@ -143,6 +143,8 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (THPQScheme_Check(input.ptr())) {
     return InferredType(IntType::get());
+  } else if (THPLayout_Check(input.ptr())) {
+    return InferredType(IntType::get());
   }
 
   // Try container types
@@ -337,7 +339,8 @@ template <class T>
 inline void guardAgainstNamedTensor(const T& var) {
 #ifdef BUILD_NAMEDTENSOR
   TORCH_CHECK(!var.has_names(),
-      "NYI: Named tensors are currently unsupported in TorchScript.");
+      "NYI: Named tensors are currently unsupported in TorchScript. As a  "
+      "workaround please drop names via `tensor = tensor.rename(None)`.");
 #endif
 }
 
@@ -368,6 +371,10 @@ inline IValue toIValue(
       if (THPQScheme_Check(obj.ptr())) {
         auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
         return static_cast<uint8_t>(qscheme->qscheme);
+      }
+      if (THPLayout_Check(obj.ptr())) {
+        auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
+        return static_cast<int8_t>(layout->layout);
       }
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
@@ -481,6 +488,10 @@ inline IValue toIValue(
       if (THPQScheme_Check(obj.ptr())) {
         auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
         return static_cast<uint8_t>(qscheme->qscheme);
+      }
+      if (THPLayout_Check(obj.ptr())) {
+        auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
+        return static_cast<int8_t>(layout->layout);
       }
       if (py::isinstance<py::int_>(obj)) {
         return py::cast<int64_t>(obj);

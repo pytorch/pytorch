@@ -231,8 +231,16 @@ struct CanEmitInline {
     scanBlock(graph->block());
   }
   bool canInline(Value* v) {
-    return v->node()->kind() != prim::Param && v->uses().size() == 1 &&
-        v->node()->outputs().size() == 1;
+    return v->node()->kind() != prim::Param &&
+           // without this a BailOut may float downstream past some later
+           // BailOut
+           // and receive a higher jf_index. Then a GUARD instruction
+           // we generated for the floated BailOut will get popped up from the
+           // instruction stack
+           // by the later BailOut in createBailoutBlock and its jf_index
+           // will become invalid.
+           v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
+           v->node()->outputs().size() == 1;
   }
 
   Node* previousNonConstant(Node* n) {
@@ -596,7 +604,8 @@ struct CodeImpl {
     TORCH_INTERNAL_ASSERT(bailout_index >= 0);
 
     auto build_bailout_graph = [bailout_index,
-                                unoptimized_graph](Function& func) {
+                                unoptimized_graph](Function &func) {
+
       BuildBailOutGraphFrom(bailout_index, unoptimized_graph, func.graph());
     };
 
@@ -1010,7 +1019,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case TAIL_CALL: {
             af.functions[inst.X]->ensure_defined();
-            const Code& code =
+            const Code &code =
                 af.functions[inst.X]->get_executor().getPlanFor(stack).code;
             size_t num_inputs = code.num_inputs();
             size_t base_pointer = frames.back().base_pointer;

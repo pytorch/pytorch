@@ -226,7 +226,6 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  std::stringstream err;
   std::vector<NamedValue> new_inputs = inputs.vec();
   new_inputs.insert(new_inputs.begin(), module_);
 
@@ -245,7 +244,7 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
           c10::nullopt,
           new_inputs,
           attributes,
-          &err,
+          &failure_messages,
           allow_conversions);
       if (match) {
         return MethodValue(module_, method_name)
@@ -550,6 +549,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
       const auto v = static_cast<uint8_t>(qscheme->qscheme);
       return toSimple(g.insertConstant(v, loc));
+    } else if (THPLayout_Check(obj.ptr())) {
+      auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
+      const auto l = static_cast<int8_t>(layout->layout);
+      return toSimple(g.insertConstant(l, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       return std::make_shared<ConstantPythonTupleValue>(obj);
     }

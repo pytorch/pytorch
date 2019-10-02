@@ -1,8 +1,9 @@
 #pragma once
 
-#include <ATen/core/blob.h>
-#include <c10/util/intrusive_ptr.h>
 #include <ATen/core/TensorBody.h>
+#include <ATen/core/blob.h>
+#include <c10/util/C++17.h>
+#include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
@@ -172,6 +173,16 @@ struct CAFFE2_API IValue final {
 
   // Tuple
   IValue(c10::intrusive_ptr<ivalue::Tuple> v);
+
+  template <
+      typename... Args,
+      c10::guts::enable_if_t<
+          !c10::guts::disjunction<
+              std::is_lvalue_reference<Args>...,
+              c10::guts::negation<std::is_constructible<IValue, Args>>...>::
+              value,
+          std::nullptr_t> = nullptr>
+  IValue(const std::tuple<Args...>& t);
   bool isTuple() const { return Tag::Tuple == tag; }
   c10::intrusive_ptr<ivalue::Tuple> toTuple() &&;
   c10::intrusive_ptr<ivalue::Tuple> toTuple() const &;
@@ -186,9 +197,6 @@ struct CAFFE2_API IValue final {
     AT_ASSERT(isDouble());
     return payload.as_double;
   }
-
-  IValue(ScalarType t):
-  IValue(static_cast<std::underlying_type<ScalarType>::type>(t)) {}
 
   // Future
   IValue(c10::intrusive_ptr<ivalue::Future> v);
@@ -366,16 +374,22 @@ struct CAFFE2_API IValue final {
   }
 
   // ScalarType
+  IValue(ScalarType t)
+  : IValue(static_cast<std::underlying_type<ScalarType>::type>(t)) {}
   at::ScalarType toScalarType() const {
     return static_cast<at::ScalarType>(toInt());
   }
 
   // Layout
+  IValue(Layout l)
+  : IValue(static_cast<std::underlying_type<Layout>::type>(l)) {}
   at::Layout toLayout() const {
     return static_cast<at::Layout>(toInt());
   }
 
   // MemoryFormat
+  IValue(MemoryFormat m)
+  : IValue(static_cast<std::underlying_type<MemoryFormat>::type>(m)) {}
   at::MemoryFormat toMemoryFormat() const {
     return static_cast<at::MemoryFormat>(toInt());
   }
