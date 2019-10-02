@@ -47,6 +47,20 @@ public class Module {
     return mNativePeer.runMethod(methodName, inputs);
   }
 
+  /**
+   * Explicitly destructs native part. Current instance can not be used after this call. This
+   * method may be called multiple times safely. As fbjni library destructs native part
+   * automatically when current instance will be
+   * collected by Java GC, the instance will not leak if this method is not called,
+   * but timing of deletion and the thread will be at the whim of the Java GC.
+   * If you want to control the thread and timing of the destructor, you should call this method
+   * explicitly.
+   * {@link com.facebook.jni.HybridData#resetNative}
+   */
+  public void destroy() {
+    mNativePeer.mHybridData.resetNative();
+  }
+
   private static class NativePeer {
     static {
       System.loadLibrary("pytorch");
