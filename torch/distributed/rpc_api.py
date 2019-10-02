@@ -7,6 +7,7 @@ from . import WorkerId
 from .rpc_backend_registry import is_rpc_backend_registered, init_rpc_backend
 from .internal_rpc_utils import _internal_rpc_pickler, PythonUDF
 
+import functools
 import sys
 import warnings
 import torch
@@ -17,6 +18,7 @@ _agent = None
 
 
 def _require_initialized(func):
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         if _agent is None:
             raise RuntimeError("RPC has not been initialized. "

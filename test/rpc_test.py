@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import functools
 import sys
 import unittest
 from os import getenv
+from unittest import mock
 
 import torch
 import torch.distributed as dist
+import torch.distributed.rpc_backend_registry as rpc_backend_registry
 from collections import namedtuple
 from torch.distributed.internal_rpc_utils import _internal_rpc_pickler, PythonUDF
 
@@ -15,13 +18,19 @@ if not dist.is_available():
     print("c10d not available, skipping tests")
     sys.exit(0)
 
-from torch.distributed.rpc import RpcBackend
 from common_utils import load_tests
+from torch.distributed.rpc_api import RpcBackend
+
 
 BACKEND = getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP)
 RPC_INIT_URL = getenv("RPC_INIT_URL", "")
 
 
+def stub_init_rpc_backend_handler(self_rank, self_name, init_method):
+    return mock.Mock()  # RpcAgent.
+
+
+# it is used to test python user defined function over rpc
 # classes and functions are used to test python user defined class and
 # methods over rpc
 TensorClass = namedtuple("TensorClass", ["tensors"])
@@ -62,8 +71,10 @@ class MyClass:
     def my_static_method(f):
         return f > 10
 
+
 def run_nested_pickle(pickle_cls_instance, tensor):
     return pickle_cls_instance.t + tensor
+
 
 def build_complex_tensors():
     a = torch.ones(3, 3)
@@ -120,7 +131,7 @@ def raise_func():
 load_tests = load_tests
 
 
-def _wrap_with_rpc(func):
+def _wrap_with_rpc(test_method):
     """
         We use this decorator for setting up and tearing down state since
         MultiProcessTestCase runs each `test*` method in a separate process and
@@ -128,7 +139,8 @@ def _wrap_with_rpc(func):
         'setUp' and 'tearDown' methods of unittest.
     """
 
-    def wrapper(self):
+    @functools.wraps(test_method)
+    def wrapper(self, *arg, **kwargs):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
@@ -139,7 +151,7 @@ def _wrap_with_rpc(func):
             self_rank=self.rank,
             init_method=RPC_INIT_URL,
         )
-        func(self)
+        test_method(self, *arg, **kwargs)
         dist.join_rpc()
 
     return wrapper
@@ -182,9 +194,20 @@ class RpcTest(object):
         ):
             dist.rpc_sync(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
 
+    @mock.patch.object(torch.distributed.autograd, "_init")
+    @mock.patch.object(torch.distributed.rpc_api, "init_rref_context")
+    def test_register_rpc_backend_and_init_rpc_backend(
+        self, mock_init_rref_context, mock_dist_autograd_init
+    ):
+        backend_name = "stub_backend"
+        rpc_backend_registry.register_rpc_backend(
+            backend_name, stub_init_rpc_backend_handler
+        )
+        dist.init_model_parallel(self_name="worker1", backend=backend_name, self_rank=1)
+
     @unittest.skipIf(
         BACKEND != RpcBackend.PROCESS_GROUP,
-        "PROCESS_GROUP rpc backend specific test, skip"
+        "PROCESS_GROUP rpc backend specific test, skip",
     )
     def test_duplicate_name(self):
         store = dist.FileStore(self.file_name, self.world_size)
@@ -202,27 +225,32 @@ class RpcTest(object):
 
     def test_reinit(self):
         store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(backend="gloo", rank=self.rank,
-                                world_size=self.world_size, store=store)
-        dist.init_model_parallel(self_name='worker{}'.format(self.rank),
-                                 backend=BACKEND,
-                                 self_rank=self.rank,
-                                 init_method=RPC_INIT_URL)
-        with self.assertRaisesRegex(RuntimeError,
-                                    "is already initialized"):
-            dist.init_model_parallel(self_name='worker{}'.format(self.rank),
-                                     backend=BACKEND,
-                                     self_rank=self.rank,
-                                     init_method=RPC_INIT_URL)
+        dist.init_process_group(
+            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
+        )
+        dist.init_model_parallel(
+            self_name="worker{}".format(self.rank),
+            backend=BACKEND,
+            self_rank=self.rank,
+            init_method=RPC_INIT_URL,
+        )
+        with self.assertRaisesRegex(RuntimeError, "is already initialized"):
+            dist.init_model_parallel(
+                self_name="worker{}".format(self.rank),
+                backend=BACKEND,
+                self_rank=self.rank,
+                init_method=RPC_INIT_URL,
+            )
         dist.join_rpc()
 
     def test_init_invalid_backend(self):
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Unrecognized RPC backend"):
-            dist.init_model_parallel(self_name='worker{}'.format(self.rank),
-                                     backend="invalid",
-                                     self_rank=self.rank,
-                                     init_method=RPC_INIT_URL)
+        with self.assertRaisesRegex(RuntimeError, "Unrecognized RPC backend"):
+            dist.init_model_parallel(
+                self_name="worker{}".format(self.rank),
+                backend="invalid",
+                self_rank=self.rank,
+                init_method=RPC_INIT_URL,
+            )
 
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     def test_invalid_names(self):
