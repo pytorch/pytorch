@@ -88,7 +88,7 @@ TEST_F(DistAutogradTest, TestWorkerIdsRecorded) {
   auto in2 = torch::ones({3, 3}, options);
 
   autogradContainer_->newContext();
-  DistAutogradContext& autogradContextNoGrad =
+  DistAutogradContext& autogradContext =
       autogradContainer_->currentContext();
   std::vector<torch::Tensor> tensors = {in1, in2};
 
@@ -96,8 +96,8 @@ TEST_F(DistAutogradTest, TestWorkerIdsRecorded) {
   // worker id
   worker_id_t dst_no_grad = 1;
   addSendRpcBackward(
-      autogradContextNoGrad, AutogradMetadata(1, 1), tensors, dst_no_grad);
-  auto knownWorkerIds = autogradContextNoGrad.getKnownWorkerIds();
+      autogradContext, AutogradMetadata(1, 1), tensors, dst_no_grad);
+  auto knownWorkerIds = autogradContext.getKnownWorkerIds();
   ASSERT_TRUE(knownWorkerIds.find(dst_no_grad) == knownWorkerIds.end());
 
   // when the tensors do require grad, we will attach the send function. Make
@@ -105,13 +105,11 @@ TEST_F(DistAutogradTest, TestWorkerIdsRecorded) {
 
   in1.set_requires_grad(true);
   in2.set_requires_grad(true);
-  autogradContainer_->newContext();
-  DistAutogradContext& autogradContextWithGrad =
       autogradContainer_->currentContext();
   worker_id_t dst_grad = 2;
   addSendRpcBackward(
-      autogradContextWithGrad, AutogradMetadata(1, 1), tensors, dst_grad);
-  knownWorkerIds = autogradContextWithGrad.getKnownWorkerIds();
+      autogradContext, AutogradMetadata(1, 1), tensors, dst_grad);
+  knownWorkerIds = autogradContext.getKnownWorkerIds();
   ASSERT_EQ(knownWorkerIds.size(), 1);
   ASSERT_TRUE(knownWorkerIds.find(dst_grad) != knownWorkerIds.end());
 }
