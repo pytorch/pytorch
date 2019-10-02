@@ -15,6 +15,11 @@ inline Tensor elu(Tensor& input, const ELUOptions& options) {
   }
 }
 
+inline Tensor hardshrink(const Tensor& input,
+                         const HardshrinkOptions& options) {
+  return torch::hardshrink(input, options.lambda());
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch
