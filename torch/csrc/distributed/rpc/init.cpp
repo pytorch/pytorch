@@ -101,8 +101,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
       "invoke_rpc_python_udf",
       [](RpcAgent& agent,
          const WorkerId& dst,
-         const std::string& pickledPythonUDF) {
-        return pyRpcPythonUdf(agent, dst, pickledPythonUDF);
+         const std::string& pickledPythonUDF,
+         std::vector<torch::Tensor>& tensors) {
+        return pyRpcPythonUdf(agent, dst, pickledPythonUDF, tensors);
       });
 
   module.def(

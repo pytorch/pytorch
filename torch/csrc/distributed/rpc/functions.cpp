@@ -50,11 +50,12 @@ Message processRequestBlocking(Message&& request) {
     }
     case MessageType::PYTHON_CALL: {
       try {
-        auto payload =
-            PythonRpcHandler::getInstance().generatePythonUDFResult(request);
+        std::vector<torch::Tensor> tensorTable;
+        auto payload = PythonRpcHandler::getInstance().generatePythonUDFResult(
+            request, tensorTable);
         return Message(
             std::move(payload),
-            std::vector<torch::Tensor>(),
+            std::move(tensorTable),
             MessageType::PYTHON_RET,
             request.id());
       } catch (std::exception& e) {
