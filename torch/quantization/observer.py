@@ -535,7 +535,7 @@ class HistogramObserver(_ObserverBase):
         return x
 
     def calculate_qparams(self):
-        if self.histogram is None:
+        if self.min_val is None or self.max_val is None:
             warnings.warn(
                 "must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point "
