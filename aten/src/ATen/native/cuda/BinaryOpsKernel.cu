@@ -172,6 +172,34 @@ void ne_kernel_cuda(TensorIterator& iter) {
   }
 }
 
+void max2_kernel_cuda(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    gpu_kernel(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
+      return a || b;
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "max2_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        return ::max(a, b);
+      });
+    });
+  }
+}
+
+void min2_kernel_cuda(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    gpu_kernel(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
+      return a || b;
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "min2_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        return ::min(a, b);
+      });
+    });
+  }
+}
+
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
 REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
@@ -184,5 +212,7 @@ REGISTER_DISPATCH(gt_stub, &gt_kernel_cuda);
 REGISTER_DISPATCH(ge_stub, &ge_kernel_cuda);
 REGISTER_DISPATCH(eq_stub, &eq_kernel_cuda);
 REGISTER_DISPATCH(ne_stub, &ne_kernel_cuda);
+REGISTER_DISPATCH(max2_stub, &max2_kernel_cuda);
+REGISTER_DISPATCH(min2_stub, &min2_kernel_cuda);
 
 }} // namespace at::native

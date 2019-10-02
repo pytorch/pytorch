@@ -21,6 +21,8 @@ DEFINE_DISPATCH(gt_stub);
 DEFINE_DISPATCH(ge_stub);
 DEFINE_DISPATCH(eq_stub);
 DEFINE_DISPATCH(ne_stub);
+DEFINE_DISPATCH(max2_stub);
+DEFINE_DISPATCH(min2_stub);
 
 static constexpr char alpha_mismatch_err[] =
   "For integral input tensors, argument alpha must not be a floating point number.";
@@ -319,6 +321,36 @@ Tensor& ne_(Tensor& self, const Tensor& other) { return comparison_op_(self, oth
 Tensor& ne_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, ne_stub); }
 Tensor ne(const Tensor& self, Scalar other) { return comparison_op(self, other, ne_stub); }
 Tensor& ne_(Tensor& self, Scalar other) { return comparison_op_(self, other, ne_stub); }
+
+Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+                                        /*check_mem_overlap=*/true);
+  max2_stub(iter.device_type(), iter);
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
+  return result;
+}
+
+Tensor max(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty(0, self.options());
+  return at::max_out(result, self, other);
+}
+
+Tensor& max_(Tensor& self, const Tensor& other) { return at::max_out(self, self, other); }
+
+Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+                                        /*check_mem_overlap=*/true);
+  min2_stub(iter.device_type(), iter);
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
+  return result;
+}
+
+Tensor min(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty(0, self.options());
+  return at::min_out(result, self, other);
+}
+
+Tensor& min_(Tensor& self, const Tensor& other) { return at::min_out(self, self, other); }
 
 }
 }  // namespace at
