@@ -228,7 +228,7 @@ void max2_kernel(TensorIterator& iter) {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
           if (std::isnan(a) || std::isnan(b)) {
-            return std::nan("");
+            return std::numeric_limits<scalar_t>::quiet_NaN();
           } else {
             return std::max(a, b);
           }
@@ -255,7 +255,7 @@ void min2_kernel(TensorIterator& iter) {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
           if (std::isnan(a) || std::isnan(b)) {
-            return std::nan("");
+            return std::numeric_limits<scalar_t>::quiet_NaN();
           } else {
             return std::min(a, b);
           }

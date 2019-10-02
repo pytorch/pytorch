@@ -184,6 +184,7 @@ def _try_get_scalar_type(*args):
             pass
     return None
 
+
 def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if _export_onnx_opset_version <= 9:
         from torch.onnx.symbolic_opset9 import _slice
@@ -191,6 +192,40 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
     else:
         from torch.onnx.symbolic_opset10 import _slice
         return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
+
+
+def _sort_helper(g, input, dim, decending=True, out=None):
+    if out is not None:
+        _unimplemented("Sort", "Out parameter is not supported")
+    shape_ = g.op("Shape", input)
+    axis = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
+    start = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int64))
+    end = g.op("Constant", value_t=torch.tensor(dim + 1, dtype=torch.int64))
+    slice_ = _slice_helper(g, shape_, axes=axis, starts=start, ends=end, steps=None, dynamic_slice=True)
+    if _export_onnx_opset_version <= 10:
+        if not decending:
+            _unimplemented("Sort", "Ascending is not supported")
+        return g.op("TopK", input, slice_, axis_i=dim, outputs=2)
+    else:
+        return g.op("TopK", input, slice_, axis_i=dim, largest_i=decending, outputs=2)
+
+
+def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
+    if out is not None:
+        _unimplemented("TopK", "Out parameter is not supported")
+    if _export_onnx_opset_version <= 10:
+        if not largest:
+            _unimplemented("TopK", "Ascending is not supported")
+            return g.op("TopK", input, k_i=k, axis_i=dim, outputs=2)
+        k = _maybe_get_const(k, 'i')
+        if not _is_value(k):
+            k = g.op("Constant", value_t=torch.tensor(k, dtype=torch.int64))
+        from torch.onnx.symbolic_opset9 import unsqueeze
+        k = unsqueeze(g, k, 0)
+        return g.op("TopK", input, k, axis_i=dim, outputs=2)
+    else:
+        return g.op("TopK", input, k, axis_i=dim, largest_i=largest, sorted_i=sorted, outputs=2)
+
 
 def _interpolate_warning(interpolate_mode):
     onnx_op = "onnx:Resize" if _export_onnx_opset_version >= 10 else "onnx:Upsample"
