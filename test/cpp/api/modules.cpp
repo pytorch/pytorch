@@ -550,6 +550,49 @@ TEST_F(ModulesTest, AdaptiveAvgPool3d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 3, 3, 3}));
 }
 
+TEST_F(ModulesTest, MaxUnpool1d) {
+  auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
+  auto x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  auto model = MaxUnpool1d{3};
+  auto y = model->forward(x, indices);
+
+  ASSERT_EQ(y.dim(), 3);
+  ASSERT_TRUE(torch::allclose(y,
+    torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 9}));
+
+  indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
+  x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  model = MaxUnpool1d{MaxUnpool1dOptions(3).stride(2).padding(1)};
+  y = model->forward(x, indices, c10::IntArrayRef({1, 1, 5}));
+
+  ASSERT_EQ(y.dim(), 3);
+  ASSERT_TRUE(torch::allclose(y,
+    torch::tensor({{{0, 2, 0, 4, 5}}}, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 5}));
+}
+
+TEST_F(ModulesTest, MaxPool1d_MaxUnpool1d) {
+  MaxPool1d pool {MaxPool1dOptions(2).stride(2)};
+  MaxUnpool1d unpool {MaxUnpool1dOptions(2).stride(2)};
+  auto input = torch::tensor({{{1, 2, 3, 4, 5, 6, 7, 8}}}, torch::kFloat);
+  torch::Tensor output, indices;
+  std::tie(output, indices) = pool->forward_with_indices(input);
+  ASSERT_TRUE(torch::allclose(
+    unpool(output, indices),
+    torch::tensor({{{0, 2, 0, 4, 0, 6, 0, 8}}} , torch::kFloat)));
+
+  // Example showcasing the use of output_size
+  input = torch::tensor({{{1, 2, 3, 4, 5, 6, 7, 8, 9}}}, torch::kFloat);
+  std::tie(output, indices) = pool->forward_with_indices(input);
+  ASSERT_TRUE(torch::allclose(
+    unpool(output, indices, input.sizes()),
+    torch::tensor({{{0, 2, 0, 4, 0, 6, 0, 8, 0}}} , torch::kFloat)));
+  ASSERT_TRUE(torch::allclose(
+    unpool(output, indices),
+    torch::tensor({{{0, 2, 0, 4, 0, 6, 0, 8}}} , torch::kFloat)));
+}
+
 TEST_F(ModulesTest, Linear) {
   Linear model(5, 2);
   auto x = torch::randn({10, 5}, torch::requires_grad());
@@ -800,6 +843,19 @@ TEST_F(ModulesTest, L1Loss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, HingeEmbeddingLoss) {
+  HingeEmbeddingLoss loss(HingeEmbeddingLossOptions().margin(2));
+  auto input = torch::tensor({{2, 22, 4}, {20, 10, 0}}, torch::requires_grad());
+  auto target = torch::tensor({{2, 6, 4}, {1, 10, 0}}, torch::kFloat);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({10}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
@@ -946,6 +1002,15 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveAvgPool) {
       "torch::nn::AdaptiveAvgPool3d(output_size=[5, 6, 7])");
 }
 
+TEST_F(ModulesTest, PrettyPrintMaxUnpool) {
+  ASSERT_EQ(
+      c10::str(MaxUnpool1d(5)),
+      "torch::nn::MaxUnpool1d(kernel_size=5, stride=5, padding=0)");
+  ASSERT_EQ(
+      c10::str(MaxUnpool1d(MaxUnpool1dOptions(5).stride(3).padding(1))),
+      "torch::nn::MaxUnpool1d(kernel_size=5, stride=3, padding=1)");
+}
+
 TEST_F(ModulesTest, PrettyPrintDropout) {
   ASSERT_EQ(c10::str(Dropout(0.5)), "torch::nn::Dropout(rate=0.5)");
   ASSERT_EQ(
@@ -968,6 +1033,12 @@ TEST_F(ModulesTest, PrettyPrintEmbedding) {
   ASSERT_EQ(
       c10::str(Embedding(10, 2)),
       "torch::nn::Embedding(count=10, dimension=2)");
+}
+
+TEST_F(ModulesTest, PrettyPrintHingeEmbeddingLoss) {
+  ASSERT_EQ(
+      c10::str(HingeEmbeddingLoss(HingeEmbeddingLossOptions().margin(4))),
+      "torch::nn::HingeEmbeddingLoss(margin=4)");
 }
 
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
