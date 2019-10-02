@@ -2026,6 +2026,7 @@ graph(%Ra, %Rb):
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @skipIfRocm
     def test_cpp_cuda(self):
+        print("Testing cuda")
         from cpp.jit import tests_setup
         tests_setup.setup()
         torch._C._jit_run_cpp_tests(run_cuda=True)

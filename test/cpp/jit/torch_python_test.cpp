@@ -1,5 +1,6 @@
 #include <test/cpp/jit/tests.h>
 #include <c10/util/Exception.h>
+#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -14,6 +15,7 @@ TORCH_API void runJITCPPTests(bool runCuda) {
   // TH_FORALL_TESTS(JIT_TEST)
   if (runCuda) {
     // TH_FORALL_TESTS_CUDA(JIT_TEST)
+    std::cout << "Testing CUDA...\n";
     testCUDASerializationInterop();
   }
 
@@ -22,7 +24,7 @@ TORCH_API void runJITCPPTests(bool runCuda) {
   // and python test runners), but is instead invoked manually by the
   // torch_python_test.cpp
   // testEvalModeForLoadedModule();
-  testSerializationInterop();
+  // testSerializationInterop();
 }
 #undef JIT_TEST
 #endif

@@ -1035,15 +1035,34 @@ PickleOpCode Unpickler::readInstruction() {
 
       bool read_tensors_later = read_record_ == nullptr;
 
+      if (device.type() != at::DeviceType::CUDA  &&
+          device.type() != at::DeviceType::CPU) {
+        AT_ERROR(
+            "Supported devices include CPU and CUDA, however got ",
+            at::DeviceTypeName(device.type(), false));
+      }
+
       at::Storage storage;
+      at::TensorOptions options;
       if (read_tensors_later) {
-        storage = at::Storage(
-            at::CPU(type).typeMeta(),
-            numel,
-            /*allocator=*/at::GetCPUAllocator(),
-            // /*allocator=*/at::GetCPUAllocator(device.type()),
-            /*resizable=*/false);
+        if (device.type() == at::DeviceType::CUDA) {
+          options = at::CUDA(type).options();
+          storage = at::Storage(
+              at::CUDA(type).typeMeta(),
+              numel,
+              /*allocator=*/at::GetAllocator(device.type()),
+              /*resizable=*/false);
+        } else {
+          options = at::CPU(type).options();
+          storage = at::Storage(
+              at::CPU(type).typeMeta(),
+              numel,
+              /*allocator=*/at::getCPUAllocator(),
+              // /*allocator=*  /at::GetAllocator(device.type()),
+              /*resizable=*/false);
+        }
       } else {
+        options = at::CPU(type).options();
         at::DataPtr storage_ptr = read_record_(key);
         storage = at::Storage(
             at::CPU(type).typeMeta(),
@@ -1053,7 +1072,6 @@ PickleOpCode Unpickler::readInstruction() {
             /*resizable=*/false); // NB: we didn't set any allocator for the
                                   // tensor
       }
-      auto options = at::CPU(type).options();
       at::Tensor tensor;
       if (options.backend() == c10::Backend::QuantizedCPU) {
         tensor = at::_empty_affine_quantized({}, options, 0, 0)
@@ -1064,14 +1082,10 @@ PickleOpCode Unpickler::readInstruction() {
 
       if (device.type() == at::DeviceType::CUDA) {
         tensor = tensor.to(device, tensor.scalar_type());
-      } else if (device.type() != at::DeviceType::CPU) {
-        AT_ERROR(
-            "supported devices include CPU and CUDA, however got ",
-            at::DeviceTypeName(device.type(), false));
       }
       if (read_tensors_later) {
         // Save a pointer to the storage so we can fill it in later
-        uninitialized_storages_[key] = &tensor.storage();
+        uninitialized_storages_[key] = std::make_pair(type, &tensor.storage());
       }
       stack_.emplace_back(std::move(tensor));
     } break;

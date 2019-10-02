@@ -1,7 +1,10 @@
 #include <ATen/core/ivalue.h>
+#include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/pickler.h>
+
+#include <torch/cuda.h>
 
 namespace torch {
 namespace jit {
@@ -125,25 +128,62 @@ IValue pickle_load(const std::function<bool(char*, size_t)>& reader) {
   // Get all the storages encountered by the unpickler
   const auto& uninitialized_storages = data_pickle.uninitializedStorages();
 
-  for (const std::string& key : storage_keys.to<c10::List<std::string>>()) {
+  for (const auto& key : storage_keys.toGenericListRef()) {
     // Read each storage in order and set it from the file
     // Each storage is saved as [8 byte numel, binary data]
-    auto item = uninitialized_storages.find(key);
+    auto item = uninitialized_storages.find(key.toStringRef());
     TORCH_INTERNAL_ASSERT(item != uninitialized_storages.end());
-    const auto* storage_ptr = item->second;
+    const auto* storage_ptr = item->second.second;
+    auto type = item->second.first;
 
     int64_t numel;
     reader(reinterpret_cast<char*>(&numel), sizeof(numel));
-    TORCH_CHECK(
-        storage_ptr->numel() == numel,
-        "Expected ",
-        storage_ptr->numel(),
-        " elements but found ",
-        numel);
+    // TORCH_CHECK(
+    //     storage_ptr->numel() == numel,
+    //     "Expected ",
+    //     storage_ptr->numel(),
+    //     " elements but found ",
+    //     numel);
 
     size_t size = storage_ptr->numel() * storage_ptr->elementSize();
     char* dest = reinterpret_cast<char*>(storage_ptr->data());
-    reader(dest, size);
+
+    if (storage_ptr->device_type() == at::DeviceType::CUDA) {
+      // std::cout << "Cuda bad!\n";
+      std::vector<char> data;
+      data.resize(size);
+      // reader(data.data(), size);
+
+      auto dest_data_ptr = storage_ptr->allocator()->allocate(storage_ptr->numel());
+
+      // reader(reinterpret_cast<char*>(dest_data_ptr.get()), size);
+
+
+      // auto type = storage_ptr->device();
+      auto options = at::CPU(type).options();
+      auto storage = at::Storage(
+          at::CPU(type).typeMeta(),
+          storage_ptr->numel(),
+          /*allocator=*/at::getCPUAllocator(),
+          /*resizable=*/false);
+      reader(reinterpret_cast<char*>(storage.data()), size);
+      at::Tensor tensor = at::empty({0}, options).set_(storage);
+      tensor = tensor.to(storage_ptr->device(), tensor.scalar_type());
+
+      // reader(dest, size);
+      // at::DataPtr data_ptr(data.data(), storage_ptr->device());
+      // storage_ptr->set_data_ptr(tensor.storage().data_ptr());
+      std::cout << "I loaded\n";
+      std::cout << tensor << "\n";
+      // *storage_ptr->unsafeGetStorageImpl() = tensor.storage().unsafeReleaseStorageImpl();
+      // storage_ptr->set_data_ptr(std::move(dest_data_ptr));
+
+      // cudaMemcpy(dest, data.data(), size, cudaMemcpyHostToDevice);
+    } else {
+      reader(dest, size);
+    }
+    // cudaMemcpy(storage_ptr->data(), data, size, );
+    // if (THCudaCheck(cudaMemcpy(THWStorage_(data)(LIBRARY_STATE storage), data, size * sizeof(scalar_t), cudaMemcpyHostToDevice));)
   }
 
   return data;

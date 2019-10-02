@@ -257,7 +257,7 @@ class Unpickler {
 
   IValue parse_ivalue();
 
-  const std::unordered_map<std::string, const at::Storage*>&
+  const std::unordered_map<std::string, std::pair<at::ScalarType, const at::Storage*>>&
   uninitializedStorages() {
     return uninitialized_storages_;
   }
@@ -292,7 +292,7 @@ class Unpickler {
 
   // If there is no `read_record_`, storages get put here so they can be filled
   // in later
-  std::unordered_map<std::string, const at::Storage*> uninitialized_storages_;
+  std::unordered_map<std::string, std::pair<at::ScalarType, const at::Storage*>> uninitialized_storages_;
 
   // globals are represented on the stack as IValue integer indices
   // into this list
