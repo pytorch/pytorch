@@ -14,6 +14,7 @@ from torch.serialization import validate_cuda_device
 from torch._six import PY2, PY37, with_metaclass, string_classes
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
+from torch.utils import set_module
 
 import collections
 import contextlib
@@ -65,6 +66,7 @@ _jit_script_class_compile = torch._C._jit_script_class_compile
 _python_cu = torch._C.CompilationUnit()
 
 Future = torch._C.Future
+set_module(Future, "torch.jit")
 _fork = torch._C.fork
 _wait = torch._C.wait
 
@@ -2058,6 +2060,10 @@ def _check_directly_compile_overloaded(obj):
 
 # torch.jit.Error
 Error = torch._C.JITException
+set_module(Error, "torch.jit")
+# This is not perfect but works in common cases
+Error.__name__ = "Error"
+Error.__qualname__ = "Error"
 
 def _get_named_tuple_properties(obj):
     assert issubclass(obj, tuple) and hasattr(obj, '_fields')
@@ -2107,6 +2113,7 @@ def _graph_for(self, *args, **kwargs):
 torch._C.ScriptMethod.graph_for = _graph_for
 torch._C.ScriptFunction.graph_for = _graph_for
 ScriptFunction = torch._C.ScriptFunction
+set_module(ScriptFunction, "torch.jit")
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
