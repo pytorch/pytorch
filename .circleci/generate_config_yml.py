@@ -10,9 +10,9 @@ import sys
 import shutil
 from collections import namedtuple, OrderedDict
 
-import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
-import cimodel.data.binary_build_definitions as binary_build_definitions
-import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
+# import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
+# import cimodel.data.binary_build_definitions as binary_build_definitions
+# import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
 import cimodel.lib.miniutils as miniutils
 import cimodel.lib.miniyaml as miniyaml
 

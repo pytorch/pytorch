@@ -615,6 +615,9 @@ jobs:
           script="/Users/distiller/project/.circleci/scripts/binary_ios_build.sh"
           cat "$script"
           source "$script"
+    - persist_to_workspace:
+        root: /Users/distiller/workspace/
+        paths: ios
   
   binary_ios_upload: 
     <<: *pytorch_ios_params
