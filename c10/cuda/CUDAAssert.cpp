@@ -36,7 +36,7 @@ static std::string formatAssertOutput(const char* format, char* data) {
   std::stringstream ss;
 
   const char* p = std::strchr(format, '%');
-  while (*p != '\0') {
+  while (p != nullptr) {
     ss << std::string(format, p - format);
 
     // handle the format specifier
