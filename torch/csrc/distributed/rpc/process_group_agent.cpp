@@ -178,7 +178,7 @@ void ProcessGroupAgent::join() {
   listenerThread_.join();
 }
 
-bool ProcessGroupAgent::checkNoPendingMessage() {
+bool ProcessGroupAgent::hasPendingMessage() {
   const auto worldSize = pg_->getSize();
   std::vector<int64_t> snapshot;
   snapshot.reserve(2 * worldSize);
@@ -218,14 +218,14 @@ bool ProcessGroupAgent::checkNoPendingMessage() {
       // NB: we cannot throw an error when sentCnt < recvCnt here. Because, send
       // and recv counts on different workers are read in a distributed manner.
       // It is possible that the sender reads its send count before sending, but
-      // the receive reads its recv count after receiving. Hence, it is valid to
-      // have sendCnt < recv Cnt.
+      // the receive reads its recv count after receiving. Hence, both > and <
+      // are valid states.
       if (sentCnt != recvCnt) {
-        return false;
+        return true;
       }
     }
   }
-  return true;
+  return false;
 }
 
 void ProcessGroupAgent::sync() {
@@ -238,7 +238,7 @@ void ProcessGroupAgent::sync() {
     // As there could be nested RPC calls, or response callback could also
     // trigger more messages to be sent, we need to wait for the thread pool
     // again.
-  } while (!checkNoPendingMessage());
+  } while (hasPendingMessage());
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::sendImpl(

@@ -94,10 +94,10 @@ class ProcessGroupAgent : public RpcAgent {
   // incremented whenever a message is sent, and the receive message counter is
   // only incremented when a message has been processed. During termination, all
   // ProcessGroupAgent instances run an allgather to collect counters from all
-  // peers, which means that all agents will have a consistent will on the
+  // peers, which means that all agents will have a consistent view on the
   // message count snapshot. They would only terminate if all sent/received
   // message counters match.
-  bool checkNoPendingMessage();
+  bool hasPendingMessage();
 
   int64_t nextId() {
     return nextId_++;
