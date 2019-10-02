@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 import torch.nn as nn
-import torch.nn._intrinsic
+import torch.nn.intrinsic
 import torch.nn.qat as nnqat
 import torch.nn.functional as F
 from torch.nn import init
@@ -28,7 +28,7 @@ class ConvBn2d(nn.Conv2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = torch.nn._intrinsic.ConvBn2d
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvBn2d
 
     def __init__(self,
                  # Conv2d args
@@ -192,7 +192,7 @@ class ConvBnReLU2d(ConvBn2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = torch.nn._intrinsic.ConvBnReLU2d
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvBnReLU2d
 
     def __init__(self,
                  # Conv2d args
@@ -236,7 +236,7 @@ class ConvReLU2d(nnqat.Conv2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = torch.nn._intrinsic.ConvReLU2d
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
