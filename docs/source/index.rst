@@ -26,7 +26,7 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 
 .. toctree::
    :maxdepth: 1
-   :caption: Package Reference
+   :caption: Python API
 
    torch
    tensors
@@ -62,6 +62,23 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    :caption: torchvision Reference
 
    torchvision/index
+   
+.. toctree::
+:maxdepth: 1
+:caption: torchaudio Reference
+* `torchaudio <https://pytorch.org/audio>`_
+
+.. toctree::
+:maxdepth: 1
+:caption: torchtext Reference
+
+* `torchtext <https://pytorch.org/text>`_
+
+.. toctree::
+:maxdepth: 1
+:caption: Other Languages
+
+* `C++ API <https://pytorch.org/cppdocs/>`_
 
 
 Indices and tables
