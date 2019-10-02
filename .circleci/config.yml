@@ -422,11 +422,10 @@ jobs:
           no_output_timeout: "90m"
           command: |
             set -ex
-            choco install miniconda3
-            export PATH="C:\tools\miniconda3\Scripts":$PATH
-            export PATH="C:\tools\miniconda3":$PATH
-            export PATH="C:\Program Files\NVIDIA Corporation\NVSMI":$PATH
-            ls
+            set +x
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            set -x
             .jenkins/pytorch/win-build.sh
 
   caffe2_linux_build:
