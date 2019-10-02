@@ -140,7 +140,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
     perm[i] = i;
   }
   // Sort by strides, leaving 0 and 1 sized dims at the end of the array
-  std::sort(perm.begin(), perm.end(), [&](int a, int b) {
+  std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
       if (sizes_[a] < 2) {
         return false;
       }
