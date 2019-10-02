@@ -14,6 +14,7 @@
           requires: 
             - setup
       - binary_ios_upload:
+          name: pytorch_ios_binary_upload
           build_environment: "libtorch-ios-10.2.1-nightly-binary-build-upload"
           context: org-member
           requires:
