@@ -140,6 +140,11 @@ def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, bac
     tensor._backward_hooks = backward_hooks
     return tensor
 
+def _rebuild_xla_tensor(data, dtype, device, requires_grad):
+    tensor = torch.from_numpy(data).to(dtype=dtype, device=device)
+    tensor.requires_grad = requires_grad
+    return tensor
+
 def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, requires_grad, backward_hooks):
     qscheme = quantizer_params[0]
     if qscheme == torch.per_tensor_affine:
