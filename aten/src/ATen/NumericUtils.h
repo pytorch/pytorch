@@ -8,6 +8,7 @@
 #include <complex>
 #include <type_traits>
 #include <c10/util/BFloat16.h>
+#include <c10/util/Complex.h>
 #include <c10/macros/Macros.h>
 
 namespace at {
@@ -15,9 +16,6 @@ namespace at {
 // std::isnan isn't performant to use on integral types; it will
 // (uselessly) convert to floating point and then do the test.
 // This function is.
-
-template <typename T> struct is_complex_t                  : public std::false_type {};
-template <typename T> struct is_complex_t<std::complex<T>> : public std::true_type {};
 
 template <typename T,
           typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
@@ -36,7 +34,7 @@ inline C10_HOST_DEVICE bool _isnan(T val) {
 }
 
 template <typename T,
-          typename std::enable_if<is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<std::is_complex_t<T>::value, int>::type = 0>
 inline bool _isnan(T val) {
   return std::isnan(std::real(val)) || std::isnan(std::imag(val));
 }

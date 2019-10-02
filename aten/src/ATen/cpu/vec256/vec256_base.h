@@ -178,7 +178,7 @@ public:
     return ret;
   }
   template <typename other_t = T,
-            typename std::enable_if<!std::is_floating_point<other_t>::value && !at::is_complex_t<other_t>::value, int>::type = 0>
+            typename std::enable_if<!std::is_floating_point<other_t>::value && !std::is_complex_t<other_t>::value, int>::type = 0>
   Vec256<T> abs() const {
     // other_t is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t, T>::value, "other_t must be T");
@@ -194,7 +194,7 @@ public:
     return map(std::abs);
   }
   template <typename complex_t = T,
-            typename std::enable_if<at::is_complex_t<complex_t>::value, int>::type = 0>
+            typename std::enable_if<std::is_complex_t<complex_t>::value, int>::type = 0>
   Vec256<T> abs() const {
     // complex_t is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t, T>::value, "complex_t must be T");
@@ -385,7 +385,7 @@ template <class T> Vec256<T> inline operator||(
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
 template <class T,
-          typename std::enable_if<!at::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<!std::is_complex_t<T>::value, int>::type = 0>
 Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -401,7 +401,7 @@ Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
 }
 
 template <class T,
-          typename std::enable_if<at::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<std::is_complex_t<T>::value, int>::type = 0>
 Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -428,7 +428,7 @@ inline T maximum(const T& a, const T& b) {
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <class T,
-          typename std::enable_if<!at::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<!std::is_complex_t<T>::value, int>::type = 0>
 Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -444,7 +444,7 @@ Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
 }
 
 template <class T,
-          typename std::enable_if<at::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<std::is_complex_t<T>::value, int>::type = 0>
 Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -470,7 +470,7 @@ inline T minimum(const T& a, const T& b) {
 
 // To save BC, it will not propagate NaN based on IEEE 754 201X
 template <class T,
-          typename std::enable_if<!at::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<!std::is_complex_t<T>::value, int>::type = 0>
 Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -480,7 +480,7 @@ Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec25
 }
 
 template <class T,
-          typename std::enable_if<at::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<std::is_complex_t<T>::value, int>::type = 0>
 Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -490,7 +490,7 @@ Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec25
 }
 
 template <class T,
-          typename std::enable_if<!at::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<!std::is_complex_t<T>::value, int>::type = 0>
 Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -500,7 +500,7 @@ Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
 }
 
 template <class T,
-          typename std::enable_if<at::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<std::is_complex_t<T>::value, int>::type = 0>
 Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -510,7 +510,7 @@ Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
 }
 
 template <class T,
-          typename std::enable_if<!at::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<!std::is_complex_t<T>::value, int>::type = 0>
 Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -520,7 +520,7 @@ Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
 }
 
 template <class T,
-          typename std::enable_if<at::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<std::is_complex_t<T>::value, int>::type = 0>
 Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {

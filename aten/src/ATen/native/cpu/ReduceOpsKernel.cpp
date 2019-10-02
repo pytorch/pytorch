@@ -86,7 +86,6 @@ static void norm_kernel_tensor_iterator_impl(
     });
   } else if (val == INFINITY) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
-      using value_t = ztype<scalar_t>::value_t;
       binary_kernel_reduce(
         iter,
         AbsMaxOps<scalar_t>(),
@@ -95,11 +94,10 @@ static void norm_kernel_tensor_iterator_impl(
     });
   } else if (val == -INFINITY) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
-      using value_t = ztype<scalar_t>::value_t;
       binary_kernel_reduce(
         iter,
         AbsMinOps<scalar_t>(),
-        scalar_t(std::numeric_limits<value_t>::max())
+        scalar_t(std::numeric_limits<scalar_t>::max())
       );
     });
   } else {
