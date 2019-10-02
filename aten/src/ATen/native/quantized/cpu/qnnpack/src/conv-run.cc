@@ -32,7 +32,7 @@ struct q8gemm_xzp_context {
   size_t batch_size;
   size_t a_sum_stride;
   union pytorch_qnnp_q31_requantization_params requantization_params;
-  const q8gemm_xzp_ukernel_function ukernel;
+  const pytorch_q8gemm_xzp_ukernel_function ukernel;
 };
 static void compute_q8gemm_xzp(
     const struct q8gemm_xzp_context context[1],
@@ -83,7 +83,7 @@ struct q8gemm_context {
   uint8_t* c;
   size_t c_stride;
   union pytorch_qnnp_conv_quantization_params quantization_params;
-  const q8gemm_ukernel_function ukernel;
+  const pytorch_q8gemm_ukernel_function ukernel;
 };
 static void compute_q8gemm(
     const struct q8gemm_context context[1],
@@ -132,7 +132,7 @@ struct q8conv_context {
   uint8_t* c;
   size_t c_stride;
   union pytorch_qnnp_conv_quantization_params quantization_params;
-  const q8conv_ukernel_function ukernel;
+  const pytorch_q8conv_ukernel_function ukernel;
 };
 static void compute_q8conv(
     const struct q8conv_context context[1],
@@ -180,7 +180,7 @@ struct q8sum_rows_context {
   const int32_t multiplier;
   int32_t* a_sum;
   size_t a_sum_stride;
-  const q8sum_rows_ukernel_function ukernel;
+  const pytorch_q8sum_rows_ukernel_function ukernel;
 };
 static void compute_sum_rows(
     const struct q8sum_rows_context context[1],
@@ -222,8 +222,8 @@ struct q8dwconv_context {
   size_t output_row_stride;
   size_t output_col_increment;
   union pytorch_qnnp_conv_quantization_params quantization_params;
-  const q8dwconv_up_ukernel_function unipass_ukernel;
-  const q8dwconv_mp_ukernel_function multipass_ukernel;
+  const pytorch_q8dwconv_up_ukernel_function unipass_ukernel;
+  const pytorch_q8dwconv_mp_ukernel_function multipass_ukernel;
 };
 static void compute_dwconv_unipass(
     const struct q8dwconv_context context[1],

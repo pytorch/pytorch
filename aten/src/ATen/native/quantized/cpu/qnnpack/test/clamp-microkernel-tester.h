@@ -67,7 +67,7 @@ class ClampMicrokernelTester {
     return this->iterations_;
   }
 
-  void test(u8clamp_ukernel_function u8clamp) const {
+  void test(pytorch_u8clamp_ukernel_function u8clamp) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);

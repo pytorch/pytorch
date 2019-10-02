@@ -11,7 +11,7 @@
 #include <qnnpack/q8gemm.h>
 #include <requantization/runtime-sse2.h>
 
-static inline __m128i sse_reduce4_i32(
+static inline __m128i pytorch_sse_reduce4_i32(
     __m128i x,
     __m128i y,
     __m128i z,
@@ -38,7 +38,7 @@ static inline __m128i sse_reduce4_i32(
 #endif
 }
 
-void q8gemm_ukernel_2x4c8__sse2(
+void pytorch_q8gemm_ukernel_2x4c8__sse2(
     size_t mr,
     size_t nr,
     size_t k,
@@ -161,8 +161,8 @@ void q8gemm_ukernel_2x4c8__sse2(
     vacc13 = _mm_add_epi32(vacc13, _mm_madd_epi16(vxa1, vxb3));
   }
 
-  __m128i vacc0x0123 = sse_reduce4_i32(vacc00, vacc01, vacc02, vacc03);
-  __m128i vacc1x0123 = sse_reduce4_i32(vacc10, vacc11, vacc12, vacc13);
+  __m128i vacc0x0123 = pytorch_sse_reduce4_i32(vacc00, vacc01, vacc02, vacc03);
+  __m128i vacc1x0123 = pytorch_sse_reduce4_i32(vacc10, vacc11, vacc12, vacc13);
 
   const __m128i vmultiplier =
       _mm_load_si128((const __m128i*)quantization_params->sse2.multiplier);
