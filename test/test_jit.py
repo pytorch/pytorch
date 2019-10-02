@@ -19250,6 +19250,18 @@ class TestClassType(JitTestCase):
                 def set_non_initialized(self, y):
                     self.bar = y  # can't assign to non-initialized attr
 
+    def test_schema_human_readable(self):
+        """ 
+        Make sure that the schema is human readable, ie the mode parameter should read "nearest" instead of being displayed in octal
+        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None, 
+        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor): 
+        Expected a value of type 'Optional[int]' for argument 'size' but instead found type 'Tensor'.
+        """
+        with self.assertRaisesRegex(RuntimeError, "nearest"):
+            @torch.jit.script
+            def FooTest(x):
+                return torch.nn.functional.interpolate(x, 'bad')
+
     def test_type_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "Expected a value of type \'bool"):
             @torch.jit.script  # noqa: B903
