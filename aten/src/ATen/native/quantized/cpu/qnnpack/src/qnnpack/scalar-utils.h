@@ -61,7 +61,7 @@ inline static int64_t asr_s64(int64_t x, uint32_t n) {
 #endif
 }
 
-inline static uint8_t scalar_requantize_precise(
+inline static uint8_t pytorch_scalar_requantize_precise(
     int32_t value,
     float scale,
     uint8_t zero_point,

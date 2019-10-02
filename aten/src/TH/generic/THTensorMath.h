@@ -151,13 +151,10 @@ TH_API void THTensor_(abs)(THTensor *r_, THTensor *t);
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
 TH_API void THTensor_(sigmoid)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(log)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(lgamma)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(log10)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(log1p)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(log2)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(exp)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(expm1)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(cos)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(acos)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(cosh)(THTensor *r_, THTensor *t);
@@ -177,8 +174,8 @@ TH_API void THTensor_(round)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(trunc)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(frac)(THTensor *r_, THTensor *t);
 
-TH_API void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim);
-TH_API void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim);
+TH_API void THTensor_(std_single)(THTensor *r_, THTensor *t, int dimension, bool unbiased, int keepdim);
+TH_API void THTensor_(var_single)(THTensor *r_, THTensor *t, int dimension, bool unbiased, int keepdim);
 TH_API void THTensor_(norm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, int keepdim);
 TH_API void THTensor_(renorm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, scalar_t maxnorm);
 TH_API accreal THTensor_(dist)(THTensor *a, THTensor *b, scalar_t value);
@@ -186,8 +183,8 @@ TH_API void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, sc
 TH_API void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue);
 
 TH_API accreal THTensor_(meanall)(THTensor *self);
-TH_API accreal THTensor_(varall)(THTensor *self, int biased);
-TH_API accreal THTensor_(stdall)(THTensor *self, int biased);
+TH_API accreal THTensor_(var_all)(THTensor *self, bool unbiased);
+TH_API accreal THTensor_(std_all)(THTensor *self, bool unbiased);
 TH_API accreal THTensor_(normall)(THTensor *t, scalar_t value);
 #endif
 #endif

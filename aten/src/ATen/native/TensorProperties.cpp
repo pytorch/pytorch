@@ -3,6 +3,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/Config.h>
 namespace at {

@@ -15,13 +15,20 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/core/ATenDispatch.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
+namespace TypeDefault {
 
 ${type_method_definitions}
 
+}  // namespace TypeDefault
+
 #ifndef USE_STATIC_DISPATCH
-static auto registerer = torch::RegisterOperators()
+namespace {
+auto registerer = torch::RegisterOperators()
   ${function_registrations};
-#endif
 }
+#endif
+
+}  // namespace at

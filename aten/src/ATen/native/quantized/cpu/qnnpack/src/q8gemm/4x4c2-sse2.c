@@ -11,7 +11,7 @@
 #include <qnnpack/q8gemm.h>
 #include <requantization/runtime-sse2.h>
 
-void q8gemm_ukernel_4x4c2__sse2(
+void pytorch_q8gemm_ukernel_4x4c2__sse2(
     size_t mr,
     size_t nr,
     size_t k,

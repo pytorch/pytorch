@@ -219,9 +219,13 @@ class HillLearningRate : public LearningRateFunctor<T> {
 template <typename T>
 class CompositeLearningRateItem {
  public:
-  CompositeLearningRateItem(int64_t num_iter, LearningRateFunctor<T>* policy)
-      : num_iter_(num_iter), policy_(policy) {}
+  CompositeLearningRateItem(
+      int64_t num_iter,
+      float lr_scale,
+      LearningRateFunctor<T>* policy)
+      : num_iter_(num_iter), lr_scale_(lr_scale), policy_(policy) {}
   int64_t num_iter_;
+  float lr_scale_;
   LearningRateFunctor<T>* policy_;
 };
 
@@ -236,6 +240,7 @@ class CompositeLearningRate : public LearningRateFunctor<T> {
     for (auto it = sub_policies.begin(); it != sub_policies.end(); ++it) {
       DCHECK_GT(it->num_iter_, 0);
       sub_policies_[num_iter_start].reset(it->policy_);
+      sub_policy_lr_scales_[num_iter_start] = it->lr_scale_;
       num_iter_start += it->num_iter_;
     }
   }
@@ -243,11 +248,15 @@ class CompositeLearningRate : public LearningRateFunctor<T> {
     auto sub_policy = sub_policies_.upper_bound(iter);
     DCHECK(sub_policy != sub_policies_.begin());
     --sub_policy;
-    return (*sub_policy->second)(iter);
+    auto sub_policy_lr_scale = sub_policy_lr_scales_.upper_bound(iter);
+    DCHECK(sub_policy_lr_scale != sub_policy_lr_scales_.begin());
+    --sub_policy_lr_scale;
+    return ((*sub_policy->second)(iter)) * (sub_policy_lr_scale->second);
   }
 
  private:
   std::map<int64_t, std::unique_ptr<LearningRateFunctor<T>>> sub_policies_;
+  std::map<int64_t, float> sub_policy_lr_scales_;
 };
 
 // Cyclical: return a learning rate with period 2 * stepsize and

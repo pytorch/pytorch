@@ -98,7 +98,7 @@ static PyObject *THPModule_setWorkerSignalHandlers(PyObject *module, PyObject *a
 
 static std::map<int64_t, std::set<pid_t>> worker_pids = {};
 
-static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
+static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *noargs) {
   HANDLE_TH_ERRORS
   int error;
   std::set<pid_t> *pid_set;
