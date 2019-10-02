@@ -22,6 +22,7 @@ import itertools
 import sys
 import builtins
 import types
+import inspect
 
 
 PY2 = sys.version_info[0] == 2
@@ -163,7 +164,8 @@ def istuple(obj):
 
 def bind_method(fn, obj, obj_type):
     if PY2:
-        fn = fn.__func__
+        if inspect.ismethod(fn):
+            fn = fn.__func__
         return types.MethodType(fn, obj, obj_type)
     else:
         return types.MethodType(fn, obj)
