@@ -1397,6 +1397,7 @@ class TestNamedTensor(TestCase):
         self.assertEqual(output.names, ['N', 'H', 'W', 'C'])
         self.assertEqual(output.shape, [3, 5, 1, 2])
 
+    @unittest.skip("Not implemented yet")
     def test_align_tensors_two_inputs(self):
         def _test(tensor_namedshape, align_names, expected_sizes, expected_error):
             tensor_names, tensor_sizes = tensor_namedshape
@@ -1507,6 +1508,7 @@ class TestNamedTensor(TestCase):
         for test in tests:
             _test(*test)
 
+    @unittest.skip("Not implemented yet")
     def test_align_tensors(self):
         def reference_fn(*tensors):
             longest_names = tensors[0].names
