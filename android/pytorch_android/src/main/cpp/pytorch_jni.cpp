@@ -192,16 +192,17 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
   constexpr static int kTypeCodeBool = 3;
   constexpr static int kTypeCodeLong = 4;
   constexpr static int kTypeCodeDouble = 5;
-  constexpr static int kTypeCodeTuple = 6;
+  constexpr static int kTypeCodeString = 6;
 
-  constexpr static int kTypeCodeBoolList = 7;
-  constexpr static int kTypeCodeLongList = 8;
-  constexpr static int kTypeCodeDoubleList = 9;
-  constexpr static int kTypeCodeTensorList = 10;
-  constexpr static int kTypeCodeList = 11;
+  constexpr static int kTypeCodeTuple = 7;
+  constexpr static int kTypeCodeBoolList = 8;
+  constexpr static int kTypeCodeLongList = 9;
+  constexpr static int kTypeCodeDoubleList = 10;
+  constexpr static int kTypeCodeTensorList = 11;
+  constexpr static int kTypeCodeList = 12;
 
-  constexpr static int kTypeCodeDictStringKey = 12;
-  constexpr static int kTypeCodeDictLongKey = 13;
+  constexpr static int kTypeCodeDictStringKey = 13;
+  constexpr static int kTypeCodeDictLongKey = 14;
 
   static facebook::jni::local_ref<JIValue> newJIValueFromAtIValue(
       const at::IValue& ivalue) {
@@ -237,6 +238,15 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
               ->getStaticMethod<facebook::jni::local_ref<JIValue>(jdouble)>(
                   "double64");
       return jMethodDouble(JIValue::javaClassStatic(), ivalue.toDouble());
+    } else if (ivalue.isString()) {
+      static auto jMethodString =
+          JIValue::javaClassStatic()
+              ->getStaticMethod<facebook::jni::local_ref<JIValue>(
+                  facebook::jni::alias_ref<
+                      facebook::jni::JString::javaobject>)>("string");
+      return jMethodString(
+          JIValue::javaClassStatic(),
+          facebook::jni::make_jstring(ivalue.toStringRef()));
     } else if (ivalue.isTuple()) {
       auto elementsVec = ivalue.toTuple()->elements();
       static auto jMethodTupleArr =
@@ -324,7 +334,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       return jMethodListArr(JIValue::javaClassStatic(), jArray);
     } else if (ivalue.isGenericDict()) {
       auto dict = ivalue.toGenericDict();
-      const auto keyType = dict._keyType();
+      const auto keyType = dict.keyType();
 
       if (!keyType) {
         facebook::jni::throwNewJavaException(
@@ -332,7 +342,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
             "Unknown IValue-Dict key type");
       }
 
-      const auto keyTypeKind = keyType.value()->kind();
+      const auto keyTypeKind = keyType->kind();
       if (c10::TypeKind::StringType == keyTypeKind) {
         static auto jMethodDictStringKey =
             JIValue::javaClassStatic()
@@ -411,6 +421,10 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       static const auto jMethodGetDouble =
           JIValue::javaClassStatic()->getMethod<jdouble()>("getDouble");
       return at::IValue{jMethodGetDouble(jivalue)};
+    } else if (JIValue::kTypeCodeString == typeCode) {
+      static const auto jMethodGetString =
+          JIValue::javaClassStatic()->getMethod<jstring()>("getString");
+      return at::IValue{jMethodGetString(jivalue)->toStdString()};
     } else if (JIValue::kTypeCodeTuple == typeCode) {
       static const auto jMethodGetTuple =
           JIValue::javaClassStatic()
@@ -421,17 +435,12 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
 
       std::vector<at::IValue> elements;
       elements.reserve(n);
-      std::vector<c10::TypePtr> types;
-      types.reserve(n);
       for (auto i = 0; i < n; ++i) {
         auto jivalue_element = jarray->getElement(i);
         auto element = JIValue::JIValueToAtIValue(jivalue_element);
-        c10::TypePtr typePtr = c10::attemptToRecoverType(element);
         elements.push_back(std::move(element));
-        types.push_back(std::move(typePtr));
       }
-      return c10::ivalue::Tuple::create(
-          std::move(elements), c10::TupleType::create(std::move(types)));
+      return c10::ivalue::Tuple::create(std::move(elements));
     } else if (JIValue::kTypeCodeBoolList == typeCode) {
       static const auto jMethodGetBoolList =
           JIValue::javaClassStatic()->getMethod<jbooleanArray()>("getBoolList");
@@ -573,8 +582,15 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     return makeCxxInstance(modelPath);
   }
 
-  PytorchJni(facebook::jni::alias_ref<jstring> modelPath)
-      : module_(torch::jit::load(std::move(modelPath->toStdString()))) {}
+  PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
+    auto qengines = at::globalContext().supportedQEngines();
+    if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
+        qengines.end()) {
+      at::globalContext().setQEngine(at::QEngine::QNNPACK);
+    }
+    module_ = torch::jit::load(std::move(modelPath->toStdString()));
+    module_.eval();
+  }
 
   static void registerNatives() {
     registerHybrid({
@@ -595,7 +611,11 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
       inputs.push_back(std::move(atIValue));
     }
-    auto output = module_.forward(std::move(inputs));
+    auto output = [&]() {
+      torch::autograd::AutoGradMode guard(false);
+      at::AutoNonVariableTypeMode non_var_type_mode(true);
+      return module_.forward(std::move(inputs));
+    }();
     return JIValue::newJIValueFromAtIValue(output);
   }
 
@@ -614,7 +634,11 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
       inputs.push_back(std::move(atIValue));
     }
     if (auto method = module_.find_method(methodName)) {
-      auto output = (*method)(std::move(inputs));
+      auto output = [&]() {
+        torch::autograd::AutoGradMode guard(false);
+        at::AutoNonVariableTypeMode non_var_type_mode(true);
+        return (*method)(std::move(inputs));
+      }();
       return JIValue::newJIValueFromAtIValue(output);
     }
 

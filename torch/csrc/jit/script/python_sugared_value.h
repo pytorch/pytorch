@@ -30,7 +30,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 c10::optional<StrongFunctionPtr> as_function(const py::object& obj);
 
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
-  PythonValue(py::object the_self) : self(std::move(the_self)) {}
+  PythonValue(py::object the_self, c10::optional<py::object> rcb = c10::nullopt)
+      : self(std::move(the_self)), rcb(std::move(rcb)) {}
 
   FunctionSchema getSchema(
       const size_t n_args,
@@ -63,6 +64,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   void checkForAddToConstantsError(std::stringstream& ss);
 
   py::object self;
+  c10::optional<py::object> rcb;
 };
 
 struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {

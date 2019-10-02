@@ -537,6 +537,32 @@ class TestLRScheduler(TestCase):
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
 
+    def test_no_cyclic_references(self):
+        import gc
+        param = Variable(torch.Tensor(10), requires_grad=True)
+        optim = SGD([param], lr=0.5)
+        scheduler = LambdaLR(optim, lambda epoch: 1.0)
+        del scheduler
+
+        # Prior to Python 3.7, local variables in a function will be referred by the current frame.
+        import sys
+        if sys.version_info < (3, 7):
+            import inspect
+            referrers = gc.get_referrers(optim)
+            self.assertTrue(
+                len(referrers) == 1 and referrers[0] is inspect.currentframe(),
+                "Optimizer should contain no cyclic references (except current frame)")
+            del referrers
+        else:
+            self.assertTrue(
+                len(gc.get_referrers(optim)) == 0,
+                "Optimizer should contain no cyclic references")
+
+        gc.collect()
+        del optim
+        self.assertEqual(
+            gc.collect(), 0, "Optimizer should be garbage-collected on __del__")
+
     def test_old_pattern_warning(self):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:

@@ -103,6 +103,114 @@ void logical_xor_kernel(TensorIterator& iter) {
     });
 }
 
+void lt_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "lt_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> bool {
+         return a < b;
+       });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "lt_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> scalar_t {
+         return a < b;
+       });
+    });
+  }
+}
+
+void le_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "le_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> bool {
+         return a <= b;
+       });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "le_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> scalar_t {
+         return a <= b;
+       });
+    });
+  }
+}
+
+void gt_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "gt_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> bool {
+         return a > b;
+       });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "gt_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> scalar_t {
+         return a > b;
+       });
+    });
+  }
+}
+
+void ge_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "ge_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> bool {
+         return a >= b;
+       });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "ge_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> scalar_t {
+         return a >= b;
+       });
+    });
+  }
+}
+
+void eq_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "eq_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> bool {
+         return a == b;
+       });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "eq_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> scalar_t {
+         return a == b;
+       });
+    });
+  }
+}
+
+void ne_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "ne_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> bool {
+         return a != b;
+       });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "ne_cpu", [&]() {
+      cpu_kernel(iter,
+       [=](scalar_t a, scalar_t b) -> scalar_t {
+         return a != b;
+       });
+    });
+  }
+  }
+
 } // anonymous namespace
 
 
@@ -112,5 +220,11 @@ REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
+REGISTER_DISPATCH(lt_stub, &lt_kernel);
+REGISTER_DISPATCH(le_stub, &le_kernel);
+REGISTER_DISPATCH(gt_stub, &gt_kernel);
+REGISTER_DISPATCH(ge_stub, &ge_kernel);
+REGISTER_DISPATCH(eq_stub, &eq_kernel);
+REGISTER_DISPATCH(ne_stub, &ne_kernel);
 
 }} // namespace at::native
