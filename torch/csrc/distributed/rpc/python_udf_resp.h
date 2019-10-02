@@ -9,7 +9,9 @@ namespace rpc {
 // RPC call representing the response of a Python UDF over RPC.
 class TORCH_API PythonUDFResp final : public RpcCommandBase {
  public:
-  explicit PythonUDFResp(std::vector<char> pickledPayload);
+  explicit PythonUDFResp(
+      std::vector<char> pickledPayload,
+      std::vector<torch::Tensor> tensors);
 
   Message toMessage() && override;
 
@@ -17,8 +19,11 @@ class TORCH_API PythonUDFResp final : public RpcCommandBase {
 
   const std::vector<char>& pickledPayload() const;
 
+  const std::vector<torch::Tensor>& tensors() const;
+
  private:
   std::vector<char> pickledPayload_;
+  std::vector<torch::Tensor> tensors_;
 };
 
 } // namespace rpc

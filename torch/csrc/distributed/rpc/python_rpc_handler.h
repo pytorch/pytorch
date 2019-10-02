@@ -18,10 +18,14 @@ class PYBIND11_EXPORT PythonRpcHandler {
   static PythonRpcHandler& getInstance();
   // Execute python UDF, result is pickled to binary string
   std::vector<char> generatePythonUDFResult(
-      const std::vector<char>& pickledPayload);
+      const std::vector<char>& pickledPayload,
+      const std::vector<torch::Tensor>& requestTensorTable,
+      std::vector<torch::Tensor>& responseTensorTable);
   // Returned python UDF result is pickled binary string, so run python
   // function to unpickle the python UDF result and return py::object to user
-  py::object loadPythonUDFResult(const std::vector<char>& pickledPayload);
+  py::object loadPythonUDFResult(
+      const std::vector<char>& pickledPayload,
+      const std::vector<torch::Tensor>& tensorTable);
 
  private:
   PythonRpcHandler();
