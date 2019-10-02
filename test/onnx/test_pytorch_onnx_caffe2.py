@@ -1473,11 +1473,13 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(16, 3, 256, 256)
         self.run_model_test(ReduceSumMultipleAxes(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfEmbed
     def test_group_norm(self):
         c = torch.randn(BATCH_SIZE, 6, 224, 224)
         model = nn.GroupNorm(3, 6, eps=0.0002)
         self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
 
+    @skipIfEmbed
     def test_group_norm_noaffine(self):
         c = torch.randn(BATCH_SIZE, 6, 224, 224)
         model = nn.GroupNorm(3, 6, eps=0.0002, affine=False)
