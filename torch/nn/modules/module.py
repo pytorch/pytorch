@@ -1063,7 +1063,6 @@ class Module(object):
         Returns:
             Module: self
         """
-        print("setting train")
         self.training = mode
         for module in self.children():
             module.train(mode)
@@ -1082,7 +1081,6 @@ class Module(object):
         Returns:
             Module: self
         """
-        print("notr aing")
         return self.train(False)
 
     def requires_grad_(self, requires_grad=True):

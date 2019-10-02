@@ -1481,7 +1481,6 @@ if _enabled:
     # which always throws an exception.
     class _CachedForward(object):
         def __get__(self, obj, cls):
-            print("GETTING forward")
             return self.__getattr__('forward')
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):
@@ -1588,7 +1587,6 @@ if _enabled:
                                            .format(attr, value.type, type(value.value)))
                     return
                 if self._c._has_attribute(attr):
-                    print("setting", attr, value)
                     attr_type = self._c._get_attribute_type(attr)
                     self._c._register_attribute(attr, attr_type, value)
                 return super(ScriptModule, self).__setattr__(attr, value)
