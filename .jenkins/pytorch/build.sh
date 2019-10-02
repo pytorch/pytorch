@@ -168,6 +168,9 @@ else
   python setup.py install
 fi
 
+# TODO: I'm not sure why, but somehow we lose verbose commands
+set -x
+
 if which sccache > /dev/null; then
   echo 'PyTorch Build Statistics'
   sccache --show-stats
@@ -205,18 +208,19 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   pushd ../cpp-build/caffe2
   WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
   popd
-
-  # Build custom operator tests.
-  CUSTOM_OP_BUILD="$PWD/../custom-op-build"
-  CUSTOM_OP_TEST="$PWD/test/custom_operator"
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  mkdir "$CUSTOM_OP_BUILD"
-  pushd "$CUSTOM_OP_BUILD"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake "$CUSTOM_OP_TEST"
-  make VERBOSE=1
-  popd
-  assert_git_not_dirty
 fi
+
+# Build custom operator tests.
+CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+CUSTOM_OP_TEST="$PWD/test/custom_operator"
+python --version
+SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+mkdir "$CUSTOM_OP_BUILD"
+pushd "$CUSTOM_OP_BUILD"
+cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+make VERBOSE=1
+popd
+assert_git_not_dirty
 
 # Test XLA build
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
