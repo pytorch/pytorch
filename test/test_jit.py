@@ -1422,19 +1422,23 @@ graph(%input, %weight):
                 rq = torch.quantize_per_tensor(r, 0.2, 2, torch.quint8)
                 return rq
 
-        for M, data in [(QLinear, torch.randn((5, 5), dtype=torch.float)),
-                        (QConv, torch.randn((1, 3, 24, 24), dtype=torch.float))]:
+        for name, M, data in [('linear', QLinear, torch.randn((5, 5), dtype=torch.float)),
+                              ('conv', QConv, torch.randn((1, 3, 24, 24), dtype=torch.float))]:
             m = torch.jit.script(M())
             ref_res = get_forward(m._c)(data)
             fold_prepack(m)
             res = get_forward(m._c)(data)
             # check attribute and graph
-            self.assertTrue(m._c._has_module('_packed_weight_bias'))
+            packed_module_list = [x for x, _ in m._c._get_modules()
+                                  if x.startswith('_' + name + '_packed_params_module')]
+            assert len(packed_module_list) == 1, \
+                'Expected to have one packed_params_module'
+            packed_module_name = packed_module_list[0]
             # check values
             original_w = m._c._get_parameter('weight')
             ref_w = torch.quantize_per_tensor(original_w, 0.2, 1, torch.qint8).dequantize()
             ref_b = m._c._get_parameter('bias')
-            w, b = m._c._get_module('_packed_weight_bias')._get_method('_weight_bias')()
+            w, b = m._c._get_module(packed_module_name)._get_method('_weight_bias')()
             self.assertEqual(ref_w, w.dequantize())
             self.assertEqual(ref_b, b)
             self.assertEqual(ref_res, res)

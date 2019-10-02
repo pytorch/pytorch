@@ -1017,17 +1017,25 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
             stride.value(), padding.value(), dilation.value(), groups.value()});
       }
       set_weight_bias(std::vector<IValue>{IValue(w_quant), IValue(b)});
-      // TODO: we need to make sure this name is unique
-      module.register_module("_packed_weight_bias", wrapper_module);
-
-      // Replace GetAttr on %self with PackedParams module
+      std::string module_name_prefix;
+      if (is_conv) {
+        module_name_prefix = "_conv_packed_params_module_for_";
+      } else {
+        module_name_prefix = "_linear_packed_params_module_for_";
+      }
       auto w_quant_val = match_vmap.at(vmap.at("w_quant"));
-      auto packed_params_val = match_vmap.at(vmap.at("packed_params"));
+      // unique name for the module based on %w_quant
+      auto module_name =
+          module_name_prefix + std::to_string(w_quant_val->unique());
+      module.register_module(module_name, wrapper_module);
 
+      // Add GetAttr of the packed module
+      auto packed_params_val = match_vmap.at(vmap.at("packed_params"));
       WithInsertPoint ins(packed_params_val->node());
-      // wrapper_module = self._packed_weight_bias
+      // wrapper_module =
+      // self.{_conv,_linear}_packed_params_module_for_{unique_id}
       Value* packed_params_module =
-          graph->insertGetAttr(graph->inputs()[0], "_packed_weight_bias")
+          graph->insertGetAttr(graph->inputs()[0], module_name)
               ->setType(wrapper_module.type());
 
       // packed_params = wrapper_module._packed_params
