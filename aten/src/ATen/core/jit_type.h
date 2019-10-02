@@ -1500,11 +1500,39 @@ struct CAFFE2_API ClassType : public NamedType {
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
   static const TypeKind Kind = TypeKind::ClassType;
 
+  void register_attribute(
+      const std::string& name,
+      const TypePtr type,
+      bool is_param = false) {
+    set_or_add_slot(name, type, is_param);
+  }
+
+  void register_module(const std::string& name, ClassTypePtr module_type) {
+    set_or_add_slot(name, module_type, false);
+  }
+
  private:
   ClassType(
       c10::optional<QualifiedName> name,
       std::weak_ptr<CompilationUnit> cu,
       bool is_module);
+
+  void set_or_add_slot(
+      const std::string& name,
+      const TypePtr& slot_type,
+      bool is_param) {
+    auto slot = findAttributeSlot(name);
+    if (!slot) {
+      slot = addAttribute(name, slot_type, is_param);
+    } else {
+      TORCH_CHECK(
+          is_param == is_parameter(*slot),
+          "Parameter field mismatch for the field '",
+          name);
+    }
+    TypePtr atype = getAttribute(*slot);
+    TORCH_CHECK(slot_type->isSubtypeOf(atype));
+  }
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module
