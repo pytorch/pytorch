@@ -71,7 +71,7 @@ void renormRows(Tensor& t) {
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
   dim3 block(cols < maxThreads ? cols : maxThreads);
 
-  C10_PREPARE_KERNEL_ASSERT;
+  C10_PREPARE_KERNEL_ASSERT2;
   AT_DISPATCH_FLOATING_TYPES(t.scalar_type(), "renormRows_cuda", [&] {
     renormRowsL1<scalar_t>
         <<<grid, block, block.x * sizeof(scalar_t),
@@ -374,7 +374,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
 
   result.resize_({numDist, n_sample});
 
-  C10_PREPARE_KERNEL_ASSERT;
+  C10_PREPARE_KERNEL_ASSERT2;
   AT_DISPATCH_FLOATING_TYPES(self_v.scalar_type(), "multinomial_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto props = at::cuda::getCurrentDeviceProperties();

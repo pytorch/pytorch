@@ -170,12 +170,20 @@ static inline CUDAAssert* prepare_kernel_assert() {
   return current_stream.assert_state();
 }
 
+inline CUDAAssert* prepare_kernel_assert2() {
+  auto current_stream = getCurrentCUDAStream();
+  return current_stream.assert_state();
+}
+
 } // namespace assert
 } // namespace native
 } // namespace at
 
 #define C10_PREPARE_KERNEL_ASSERT \
   auto __c10_assert_state = at::native::assert::prepare_kernel_assert();
+
+#define C10_PREPARE_KERNEL_ASSERT2 \
+  auto __c10_assert_state = at::native::assert::prepare_kernel_assert2();
 
 #define C10_KERNEL_ASSERT(exp, ...)                        \
   do {                                                     \
