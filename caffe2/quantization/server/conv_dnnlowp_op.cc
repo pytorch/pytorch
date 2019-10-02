@@ -255,11 +255,13 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
             this->template Input<int8::Int8TensorCPU>(BIAS).scale;
         bias_qparams.zero_point =
             this->template Input<int8::Int8TensorCPU>(BIAS).zero_point;
-        CAFFE_ENFORCE_LE(
-            std::abs(
-                bias_qparams.scale -
-                in_qparams_[INPUT].scale * FilterQuantizationParams(0).scale),
-            1e-4);
+        if (InputTensorCPU_(INPUT).dim32(0) > 0) {
+          CAFFE_ENFORCE_LE(
+              std::abs(
+                  bias_qparams.scale -
+                  in_qparams_[INPUT].scale * FilterQuantizationParams(0).scale),
+              1e-4);
+        }
         CAFFE_ENFORCE_EQ(bias_qparams.zero_point, 0);
         b_quantized_data_ = bias.template data<int32_t>();
       } else {
@@ -1118,6 +1120,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
   const int M = filter.dim32(0);
   const int kernel_dim = KernelDim_();
   const int Y_HxW = this->GetDimsSize(*Y);
+  const int X_HxW = this->GetDimsSize(X);
 
   if (N == 0) {
     LOG(WARNING) << "The batch size is 0 in ConvNHWCCore_ function!";
@@ -1125,18 +1128,25 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
 
   if (FLAGS_caffe2_dnnlowp_dump_tensors) {
     // Dump input activation
+    std::string input_name = this->debug_def().input(INPUT);
+    std::string input_filename = input_name;
+    while (input_filename.find('/') != std::string::npos) {
+      input_filename.replace(input_filename.find('/'), 1, "_");
+    }
     StoreMatrixInMatrixMarketFormat(
-        N * Y_HxW * group_,
+        N * X_HxW * C / kernel_dim,
         kernel_dim,
         col_buffer_data,
-        this->debug_def().input(INPUT));
+        input_filename);
 
     // Dump weight
+    std::string weight_name = this->debug_def().input(FILTER);
+    std::string weight_filename = weight_name;
+    while (weight_filename.find('/') != std::string::npos) {
+      weight_filename.replace(weight_name.find('/'), 1, "_");
+    }
     StoreMatrixInMatrixMarketFormat(
-        group_ * M,
-        kernel_dim,
-        W_quantized_.data(),
-        this->debug_def().input(FILTER));
+        M, kernel_dim, W_quantized_.data(), weight_filename);
   }
 
   using namespace fbgemm;
@@ -1173,6 +1183,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             column_offsets_->empty() ? nullptr : column_offsets_->data(),
             b_quantized_data_,
             ReluFused,
+            nullptr, /*act_times_w_scale*/
             dnnlowp_get_thread_num(),
             dnnlowp_get_num_threads());
       } else {
@@ -1198,6 +1209,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             column_offsets_->empty() ? nullptr : column_offsets_->data(),
             b_quantized_data_,
             ReluFused,
+            1.0f, /*act_times_w_scale*/
             dnnlowp_get_thread_num(),
             dnnlowp_get_num_threads());
       }
@@ -1215,7 +1227,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
 #endif
     {
       if (quantize_groupwise_) {
-        depthwise_3x3_per_channel_quantization_pad_1(
+        depthwise_2d_per_channel_quantization_same_pad(
             N,
             H,
             W,
@@ -1235,10 +1247,11 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             column_offsets_->empty() ? nullptr : column_offsets_->data(),
             b_quantized_data_,
             ReluFused,
+            nullptr, /*act_times_w_scale*/
             dnnlowp_get_thread_num(),
             dnnlowp_get_num_threads());
       } else {
-        depthwise_3x3_pad_1(
+        depthwise_2d_same_pad(
             N,
             H,
             W,
@@ -1258,6 +1271,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             column_offsets_->empty() ? nullptr : column_offsets_->data(),
             b_quantized_data_,
             ReluFused,
+            1.0f, /*act_times_w_scale*/
             dnnlowp_get_thread_num(),
             dnnlowp_get_num_threads());
       }

@@ -138,22 +138,23 @@ test_torchvision() {
 }
 
 test_libtorch() {
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
     python test/cpp/jit/tests_setup.py setup
-    CPP_BUILD="$PWD/../cpp-build"
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      "$CPP_BUILD"/caffe2/build/bin/test_jit
+      build/bin/test_jit
     else
-      "$CPP_BUILD"/caffe2/build/bin/test_jit "[cpu]"
+      build/bin/test_jit "[cpu]"
     fi
     python test/cpp/jit/tests_setup.py shutdown
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/build/bin/test_api
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
     assert_git_not_dirty
+  fi
 }
 
 test_custom_script_ops() {
-  if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing custom script operators"
     CUSTOM_OP_BUILD="$PWD/../custom-op-build"
     pushd test/custom_operator
@@ -213,24 +214,20 @@ elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   test_torchvision
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
-  test_libtorch
+  # TODO: run some C++ tests
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
   test_torchvision
   test_python_nn
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   test_python_all_except_nn
   test_aten
-  if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
-    test_libtorch
-  fi
+  test_libtorch
   test_custom_script_ops
 else
   test_torchvision
   test_python_nn
   test_python_all_except_nn
   test_aten
-  if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
-    test_libtorch
-  fi
+  test_libtorch
   test_custom_script_ops
 fi
