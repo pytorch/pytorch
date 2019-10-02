@@ -3109,15 +3109,13 @@ class CommTest(MultiProcessTestCase):
         c10d.distributed_c10d.init_process_group(
             backend=dist.Backend.NCCL, store=store, world_size=2, rank=self.rank,
             timeout=timedelta(seconds=timeout))
-        pg = c10d.distributed_c10d._get_default_group()
-        pg.allreduce(torch.rand(10).cuda(self.rank)).wait()
+        c10d.distributed_c10d.all_reduce(torch.rand(10).cuda(self.rank))
 
         if self.rank == 0:
             # This should timeout in about 1 second.
             start = time.time()
-            work = pg.allreduce(torch.rand(10).cuda(self.rank))
             with self.assertRaises(RuntimeError):
-                work.wait()
+                c10d.distributed_c10d.all_reduce(torch.rand(10).cuda(self.rank))
 
             total_time = time.time() - start
 
