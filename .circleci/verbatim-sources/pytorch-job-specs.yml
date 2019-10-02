@@ -16,7 +16,7 @@ jobs:
           set -e
           # Pull Docker image and run build
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
-          docker pull ${DOCKER_IMAGE} >/dev/null
+          time docker pull ${DOCKER_IMAGE} >/dev/null
           export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
           # TODO We may want to move the rebase logic to a separate step after checkout
@@ -75,7 +75,7 @@ jobs:
               export COMMIT_DOCKER_IMAGE=$output_image
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
-            docker push ${COMMIT_DOCKER_IMAGE}
+            time docker push ${COMMIT_DOCKER_IMAGE}
           fi
 
   pytorch_linux_test:
@@ -103,7 +103,7 @@ jobs:
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
             export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
