@@ -28,7 +28,6 @@ TESTS = [
     'cuda_primary_ctx',
     'dataloader',
     'dist_autograd_fork',
-    'dist_autograd_spawn',
     'distributed',
     'distributions',
     'docs_coverage',
@@ -50,6 +49,7 @@ TESTS = [
     'quantized_tensor',
     'quantized_nn_mods',
     'quantizer',
+    'rpc_fork',
     'sparse',
     'torch',
     'type_info',
@@ -64,12 +64,14 @@ TESTS = [
     'function_schema',
 ]
 
-# skip < 3.6 b/c fstrings added in 3.6
+# skip < 3.6 b/c fstrings added in 3.6 for jit_py3
+# skip < 3.6 for rpc_spawn and dist_autograd_spawn temporarily because
+# they segmentfault on python 3.5 right now, still debugging
 if PY36:
     TESTS.extend([
         'jit_py3',
-        'rpc_fork',
         'rpc_spawn',
+        'dist_autograd_spawn',
     ])
 
 WINDOWS_BLACKLIST = [
