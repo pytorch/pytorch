@@ -261,11 +261,17 @@
   use_c10_dispatcher: full
   variants: function, method
   supports_named_tensor: True
+  dispatch:
+    CPU: add
+    CUDA: add
 
 - func: add_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
   supports_named_tensor: True
+  dispatch:
+    CPU: add_
+    CUDA: add_
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
