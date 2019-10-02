@@ -135,7 +135,7 @@ Explicit alignment by names
 ---------------------------
 
 Use :meth:`~Tensor.align_as` or :meth:`~Tensor.align_to` to align tensor dimensions
-by name before performing operations.
+by name to a specified ordering before performing operations.
 
 ::
 
