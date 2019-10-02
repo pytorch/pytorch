@@ -1458,6 +1458,28 @@ struct CAFFE2_API ClassType : public NamedType {
       TypePtr type,
       bool is_parameter = false);
 
+  // Add attribute \p NAME if it doesn't exist or verify that it has a
+  // compatible type otherwise.
+  size_t addOrCheckAttribute(
+      const std::string& name,
+      TypePtr ty,
+      bool is_parameter = false) {
+    auto slot_idx = findAttributeSlot(name);
+    if (!slot_idx) {
+      return addAttribute(name, ty, is_parameter);
+    }
+
+    TORCH_CHECK(
+        is_parameter == this->is_parameter(*slot_idx),
+        "Parameter field mismatch for the field '",
+        name,
+        "'");
+    TypePtr atype = getAttribute(*slot_idx);
+    TORCH_CHECK(ty->isSubtypeOf(atype));
+    return *slot_idx;
+  }
+
+
   at::ArrayRef<std::string> attributeNames() const {
     return attributeNames_;
   }
@@ -1500,39 +1522,11 @@ struct CAFFE2_API ClassType : public NamedType {
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
   static const TypeKind Kind = TypeKind::ClassType;
 
-  void register_attribute(
-      const std::string& name,
-      const TypePtr type,
-      bool is_param = false) {
-    set_or_add_slot(name, type, is_param);
-  }
-
-  void register_module(const std::string& name, ClassTypePtr module_type) {
-    set_or_add_slot(name, module_type, false);
-  }
-
  private:
   ClassType(
       c10::optional<QualifiedName> name,
       std::weak_ptr<CompilationUnit> cu,
       bool is_module);
-
-  void set_or_add_slot(
-      const std::string& name,
-      const TypePtr& slot_type,
-      bool is_param) {
-    auto slot = findAttributeSlot(name);
-    if (!slot) {
-      slot = addAttribute(name, slot_type, is_param);
-    } else {
-      TORCH_CHECK(
-          is_param == is_parameter(*slot),
-          "Parameter field mismatch for the field '",
-          name);
-    }
-    TypePtr atype = getAttribute(*slot);
-    TORCH_CHECK(slot_type->isSubtypeOf(atype));
-  }
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module
