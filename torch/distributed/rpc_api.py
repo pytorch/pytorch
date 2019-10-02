@@ -4,9 +4,10 @@ from . import invoke_rpc_builtin, invoke_rpc_python_udf, invoke_remote_builtin
 from . import init_rref_context
 from . import ProcessGroupAgent
 from . import WorkerId
-from .internal_rpc_utils import serialize, PythonUDF
 from .rpc_backend_registry import is_rpc_backend_registered, init_rpc_backend
+from .internal_rpc_utils import _internal_rpc_pickler, PythonUDF
 
+import functools
 import sys
 import warnings
 import torch
@@ -17,6 +18,7 @@ _agent = None
 
 
 def _require_initialized(func):
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         if _agent is None:
             raise RuntimeError("RPC has not been initialized. "
@@ -175,9 +177,10 @@ def _invoke_rpc(to, func, args=None, kwargs=None):
             _agent, _to_worker_id(to), qualified_name, *args, **kwargs
         )
     else:
+        (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
+            PythonUDF(func, args, kwargs))
         fut = invoke_rpc_python_udf(
-            _agent, _to_worker_id(to), serialize(PythonUDF(func, args, kwargs))
-        )
+            _agent, _to_worker_id(to), pickled_python_udf, tensors)
     return fut
 
 
