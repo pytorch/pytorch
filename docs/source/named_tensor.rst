@@ -27,7 +27,9 @@ Factory functions now take a new names argument that represents a name for each 
     tensor([[0., 0., 0.],
             [0., 0., 0.]], names=('N', 'C'))
 
-Named dimensions, like regular Tensor dimensions, are ordered.
+Named dimensions, like regular Tensor dimensions, are ordered and inherently positional.
+``tensor.names[i]`` is the name of dimension ``i`` of ``tensor``.
+
 The following factory functions support named tensors:
 
 - :func:`torch.empty`
