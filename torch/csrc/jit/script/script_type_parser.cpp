@@ -19,6 +19,7 @@ const std::unordered_map<std::string, TypePtr>& ident_to_type_lut() {
       // parsing serialized methods that use implicit converions to Scalar
       {"number", NumberType::get()},
       {"None", NoneType::get()},
+      {"Any", AnyType::get()},
   };
   return map;
 }
@@ -281,17 +282,6 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
       if (auto maybe_broad_list = parseBroadcastList(type_expr)) {
         type = maybe_broad_list->first;
         N = maybe_broad_list->second;
-      } else if (
-          type_expr.kind() == TK_VAR && Var(type_expr).name().name() == "Any") {
-        // Any type can only appear as an argument. More specifically Any should
-        // never appear in a named type like a class, namedtuple or interface.
-        // If it does, then dynamic type information will be lost in the
-        // Pickler, leading to hard-to-track-down bugs that will only occur
-        // after saving or loading a model. This is because we rely on the
-        // static types in named types to reconstruct type tags of loaded
-        // values. Lifting this restriction requires solving the serialization
-        // problem first.
-        type = AnyType::get();
       } else {
         type = parseTypeFromExpr(decl_arg.type().get());
       }
