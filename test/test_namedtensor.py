@@ -6,7 +6,7 @@ import itertools
 import functools
 import torch
 from torch import Tensor
-from torch._six import PY2, inf
+from torch._six import PY2
 import torch.nn.functional as F
 from multiprocessing.reduction import ForkingPickler
 import pickle
