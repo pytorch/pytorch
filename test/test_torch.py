@@ -13315,22 +13315,11 @@ class TestDevicePrecision(TestCase):
         self.assertEqual(output, expected)
 
 
-# Fixtures and functions to generate op-level comparison tests
+# Below are fixtures and functions that generate tensor op comparison tests
 # These tests run a single op on both a CPU and device tensor and compare the
-# the results.
+# the results. In-place variants of the ops can also be run.
 
-# Each tests is defined in op_tests as a tuple of:
-# - op name (string)
-# - (sub)test name (string)
-# - tensor constructor, takes dtype and device and constructs the tensor to run the op on
-# - arg constructor, takes dtype and device and constructs op arguments
-# - torch.half precision (=1e-5)
-# - precision (=1e-5), precision to use for all other dtypes
-# - make_inplace_variant (=True), if true the inplace version of the op (op_) is also tested
-# - dtype_list (=_types), a list of torch dtypes to test the op(s) with
-# - decorators (=[]), a list of decorators to apply to the test
-
-# All documented dtypes except torch.bool
+# Lists of dtypes to instantiate tensor op test variants.
 _types = [
     torch.half, torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long,
@@ -13353,6 +13342,7 @@ _signed_types_no_half = [
 
 _unsigned_types = [torch.uint8]
 
+# Helper functions for producing tensors and scalars to use in tensor op tests.
 _S = 10
 _M = 50
 _G = 275000000
@@ -13421,18 +13411,28 @@ def _new_t(shape):
         return _make_tensor(shape, dtype, device)
     return tmp
 
+def _small_3d_positive(dtype, device):
+    min_val = 1e-3 if dtype in [torch.float, torch.double] else 2
+    return _make_tensor((_S, _S, _S), dtype=dtype, device=device).clamp(min_val, 120)
+
 def _number(floating, integer, dtype):
     if dtype in [torch.half, torch.float, torch.double]:
         return floating
     return integer
 
-def _small_3d_positive(dtype, device):
-    min_val = 1e-3 if dtype in [torch.float, torch.double] else 2
-    return _make_tensor((_S, _S, _S), dtype=dtype, device=device).clamp(min_val, 120)
-
 # TODO: random functions, cat, gather, scatter, index*, masked*,
 #       resize, resizeAs, storage_offset, storage, stride, unfold
-op_tests = [
+# Each tests is defined in tensor_op_tests as a tuple of:
+# - op name (string)
+# - (sub)test name (string)
+# - tensor constructor, takes dtype and device and constructs the tensor to run the op on
+# - arg constructor, takes dtype and device and constructs op arguments
+# - torch.half precision (=1e-5)
+# - precision (=1e-5), precision to use for all other dtypes
+# - make_inplace_variant (=True), if true the inplace version of the op (op_) is also tested
+# - dtype_list (=_types), a list of torch dtypes to test the op(s) with
+# - decorators (=[]), a list of decorators to apply to the test
+tensor_op_tests = [
     ('add', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-2),
     ('add', 'tensor', _small_3d, lambda t, d: [_small_3d_positive(t, d)], 1e-2),
     ('sub', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-2),
@@ -13524,7 +13524,7 @@ op_tests = [
     ('mean', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types, False),
     ('mean', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, _float_types, False),
     ('mean', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, _float_types, False),
-    # # Double here because otherwise the CPU result will be
+    # # Double here because otherwise the CPU result will be wrong otherwise
     ('mean', '64bit_indexing', _giant_1d_ones, lambda t, d: [], 1e-3, 1e-5, [torch.double], False, [slowTest]),
     ('mode', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
     ('mode', 'dim', _small_3d, lambda t, d: [1], 1e-5, 1e-5, _types, False),
@@ -13662,7 +13662,9 @@ op_tests = [
     ('digamma', 'op', _small_3d, lambda t, d: [], 1e-5, 1e0, _float_types_no_half),
 ]
 
-def generate_test_function(op_str,
+# Creates and decorates a generic test and adds it to the class.
+def generate_test_function(cls,
+                           op_str,
                            subtest_str,
                            tensor_ctor,
                            arg_ctor,
@@ -13671,20 +13673,20 @@ def generate_test_function(op_str,
                            dtype_list,
                            decorators):
     def fn(self, device, dtype):
+        # Generates the CPU inputs
+        # Note: CPU tensors are never torch.half
         cpu_tensor = tensor_ctor(dtype, 'cpu')
         cpu_args = arg_ctor(dtype, 'cpu')
 
+        # Converts CPU tensors to device tensors
         device_tensor = cpu_tensor.to(dtype=dtype, device=device)
         device_args = [arg.to(device=device) if torch.is_tensor(arg) else arg for arg in cpu_args]
 
+        # Converts float device tensors to half when the dtype is half
         if dtype == torch.half:
             device_args = [arg.to(dtype=dtype) if (torch.is_tensor(arg) and arg.dtype == torch.float) else arg for arg in device_args]
 
-
-        # if dtype == torch.half:
-        #     cpu_tensor = cpu_tensor.to(dtype=torch.float)
-        #     cpu_args = [arg.to(dtype=torch.float) if (torch.is_tensor(arg) and arg.dtype == torch.half) else arg for arg in cpu_args]
-
+        # Runs the tensor op on CPU and device
         cpu_result = getattr(cpu_tensor, op_str)(*cpu_args)
         device_result = getattr(device_tensor, op_str)(*device_args)
 
@@ -13695,18 +13697,19 @@ def generate_test_function(op_str,
         self.assertEqual(cpu_result, device_result, prec=precision)
 
     test_name = "test_" + op_str + subtest_str
-    assert not hasattr(TestDevicePrecision, test_name), "{0} already in TestDevicePrecision".format(test_name)
+    assert not hasattr(cls, test_name), "{0} already in TestDevicePrecision".format(test_name)
 
     decorators = decorators + [dtypes(*dtype_list)]
     for dec in decorators:
         fn = dec(fn)
 
-    setattr(TestDevicePrecision, test_name, fn)
+    setattr(cls, test_name, fn)
 
+# Instantiates variants of tensor_op_tests and adds them to the given class.
+def generate_tensor_op_tests(cls):
 
-def generate_op_tests():
-
-    def caller(op_str,
+    def caller(cls,
+               op_str,
                subtest_str,
                tensor_ctor,
                arg_ctor,
@@ -13718,25 +13721,33 @@ def generate_op_tests():
         if subtest_str:
             subtest_str = '_' + subtest_str
 
-        generate_test_function(op_str, subtest_str, tensor_ctor, arg_ctor, half_precision, float_precision, dtype_list, decorators)
+        generate_test_function(cls, op_str, subtest_str, tensor_ctor, arg_ctor, half_precision, float_precision, dtype_list, decorators)
 
         if make_inplace_variant:
             op_str = op_str + '_'
             subtest_str = 'inplace' + subtest_str
-            generate_test_function(op_str, subtest_str, tensor_ctor, arg_ctor, half_precision, float_precision, dtype_list, decorators)
+            generate_test_function(cls, op_str, subtest_str, tensor_ctor, arg_ctor, half_precision, float_precision, dtype_list, decorators)
 
-    for test in op_tests:
-        caller(*test)
+    for test in tensor_op_tests:
+        caller(cls, *test)
+
+
+class TestTensorDeviceOps(TestCase):
+    pass
 
 
 class TestTorch(TestCase, _TestTorchMixin):
     pass
 
 
-if __name__ == '__main__':
-    add_neg_dim_tests()
-    generate_op_tests()
-    instantiate_device_type_tests(TestTorchDeviceType, globals())
-    instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
+# Generates tests
+# Note: test generation must be done at file scope, not within main, or
+# pytest will fail.
+add_neg_dim_tests()
+generate_tensor_op_tests(TestTensorDeviceOps)
+instantiate_device_type_tests(TestTorchDeviceType, globals())
+instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
+instantiate_device_type_tests(TestTensorDeviceOps, globals(), except_for='cpu')
 
+if __name__ == '__main__':
     run_tests()
