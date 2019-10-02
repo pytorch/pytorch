@@ -13,8 +13,9 @@ from torch.onnx.symbolic_helper import _black_list_in_opset
 # This file exports ONNX ops for opset 11
 
 black_listed_operators = [
-    "eq", "ne", "sort", "topk", "hardtanh"
+    "eq", "ne", "hardtanh"
 ]
+
 
 for black_listed_op in black_listed_operators:
     vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
@@ -114,6 +115,16 @@ def _unique2(g, self, sorted, return_inverse, return_counts):
 def unique_dim(g, self, dim, sorted, return_inverse, return_counts):
     u, indices, inverse_indices, counts = g.op("Unique", self, axis_i=dim, sorted_i=sorted, outputs=4)
     return u, inverse_indices, counts
+
+
+@parse_args('v', 'v', 'i', 'i', 'i', 'none')
+def topk(g, self, k, dim, largest, sorted, out=None):
+    return sym_help._topk_helper(g, self, k, dim, largest=largest, sorted=sorted, out=out)
+
+
+@parse_args('v', 'i', 'i', 'none')
+def sort(g, self, dim, decending, out=None):
+    return sym_help._sort_helper(g, self, dim, decending=decending, out=out)
 
 
 def round(g, self):
