@@ -1085,8 +1085,9 @@ graph(%x : Tensor,
                 weight=weight_observer._c)
         }
         torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
-        assert m._c._get_module('conv')._get_module('observer_for_input.1')._get_attribute('dtype') != \
-            m._c._get_module('conv')._get_module('observer_for_weight.1')._get_attribute('dtype')
+        dtypes = set([obs._get_attribute('dtype') for x, obs in m._c._get_module('conv')._get_modules()
+                  if x.startswith('observer_for_')])
+        assert len(dtypes) == 2, 'Expected to have 2 different types of dtype'
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_quant_dequant(self):

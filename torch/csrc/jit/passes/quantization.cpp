@@ -18,6 +18,19 @@ namespace torch {
 namespace jit {
 namespace {
 
+// Unique ID generator for child module names
+class UniqueId {
+ private:
+  static unsigned long unique_id_;
+
+ public:
+  unsigned long getUniqueId() {
+    return unique_id_++;
+  }
+};
+
+unsigned long UniqueId::unique_id_ = 0;
+
 void fillQConfigMap(
     const script::Module& module,
     const QConfigDict& qconfig_dict,
@@ -144,6 +157,8 @@ class InsertObserversHelper {
   // Values that are the output of GetAttr[name="bias"] and they
   // will be propagated through the function call hierarchy
   std::unordered_set<Value*> bias_values_;
+  // Unique id generator for observer module
+  UniqueId uid_;
 };
 
 // Clone observer module and add it to the original module,
@@ -164,8 +179,12 @@ Node* InsertObserversHelper::insertObserverFor(
   } else {
     observer_module = std::get<0>(qconfig);
   }
-  std::string observer_name = "observer_for_" + v->debugName();
   script::Module observer = observer_module.clone();
+  std::string observer_name =
+      "observer_for_" + std::to_string(uid_.getUniqueId());
+  while (module.find_module(observer_name)) {
+    observer_name = "observer_for_" + std::to_string(uid_.getUniqueId());
+  }
   module.register_module(observer_name, observer);
   // Get handle of observer module
   Node* observer_instance = g->create(c10::prim::GetAttr);
@@ -957,7 +976,8 @@ void FoldPrepackedWeightIntoModule(
     script::Module& module,
     const std::string& method_name,
     const script::Module& linear_params_module,
-    const script::Module& conv_params_module) {
+    const script::Module& conv_params_module,
+    UniqueId& uid) {
   auto method = module.get_method(method_name);
   auto graph = method.graph();
   std::string linear_prepack = R"(
@@ -1025,8 +1045,10 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
       }
       auto w_quant_val = match_vmap.at(vmap.at("w_quant"));
       // unique name for the module based on %w_quant
-      auto module_name =
-          module_name_prefix + std::to_string(w_quant_val->unique());
+      auto module_name = module_name_prefix + std::to_string(uid.getUniqueId());
+      while (module.find_module(module_name)) {
+        module_name_prefix + std::to_string(uid.getUniqueId());
+      }
       module.register_module(module_name, wrapper_module);
 
       // Add GetAttr of the packed module
@@ -1060,9 +1082,10 @@ void FoldPrepackedWeightIntoModule(
     script::Module& module,
     const script::Module& linear_params_module,
     const script::Module& conv_params_module) {
+  UniqueId uid;
   for (auto& method : module.get_methods()) {
     FoldPrepackedWeightIntoModule(
-        module, method.name(), linear_params_module, conv_params_module);
+        module, method.name(), linear_params_module, conv_params_module, uid);
     for (auto m : module.get_modules()) {
       FoldPrepackedWeightIntoModule(
           m, linear_params_module, conv_params_module);
