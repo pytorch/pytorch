@@ -80,6 +80,21 @@ TEST_F(FunctionalTest, PairwiseDistance) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+TEST_F(FunctionalTest, PDist) {
+  {
+    auto input = torch::tensor({{-1.0, -5.0, -1.0}, {2.0, 4.0, 6.0}});
+    auto output = F::pdist(input);
+    auto expected = torch::tensor({11.7898});
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    auto input = torch::tensor({{1.0, -1.0}, {1.0, 3.0}, {3.0, 3.0}});
+    auto output = F::pdist(input, 1.5);
+    auto expected = torch::tensor({4.0, 4.8945, 2.0});
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
 TEST_F(FunctionalTest, AdaptiveMaxPool1d) {
   auto x = torch::ones({1, 1, 5});
   auto y = F::adaptive_max_pool1d(x, AdaptiveMaxPool1dOptions(3));
