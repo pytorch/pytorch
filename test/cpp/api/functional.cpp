@@ -184,3 +184,35 @@ TEST_F(FunctionalTest, MaxUnpool1d) {
   ASSERT_TRUE(torch::allclose(y, torch::tensor({{{0, 2, 0, 4, 5}}}, torch::kFloat)));
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 5}));
 }
+
+TEST_F(FunctionalTest, MaxUnpool2d) {
+  auto indices = torch::tensor({
+  {{{ 6,  8,  9},
+    {16, 18, 19},
+    {21, 23, 24}}},
+  {{{ 6,  8,  9},
+    {16, 18, 19},
+    {21, 23, 24}}}}, torch::kLong);
+  auto x = torch::tensor({
+  {{{ 6,  8,  9},
+    {16, 18, 19},
+    {21, 23, 24}}},
+  {{{31, 33, 34},
+    {41, 43, 44},
+    {46, 48, 49}}}}, torch::requires_grad());
+  auto y = F::max_unpool2d(x, indices, MaxUnpool2dOptions(3).stride(2).padding(1));
+
+  ASSERT_EQ(y.dim(), 4);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor(
+   {{{{ 0,  0,  0,  0,  0},
+      { 0,  6,  0,  8,  9},
+      { 0,  0,  0,  0,  0},
+      { 0, 16,  0, 18, 19},
+      { 0, 21,  0, 23, 24}}},
+    {{{ 0,  0,  0,  0,  0},
+      { 0, 31,  0, 33, 34},
+      { 0,  0,  0,  0,  0},
+      { 0, 41,  0, 43, 44},
+      { 0, 46,  0, 48, 49}}}} , torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 1, 5, 5}));
+}

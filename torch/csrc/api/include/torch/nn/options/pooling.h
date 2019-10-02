@@ -138,5 +138,8 @@ struct MaxUnpoolOptions {
 /// `MaxUnpoolOptions` specialized for 1-D maxunpool.
 using MaxUnpool1dOptions = MaxUnpoolOptions<1>;
 
+/// `MaxUnpoolOptions` specialized for 2-D maxunpool.
+using MaxUnpool2dOptions = MaxUnpoolOptions<2>;
+
 } // namespace nn
 } // namespace torch
