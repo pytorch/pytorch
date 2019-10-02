@@ -193,8 +193,8 @@ bool ProcessGroupAgent::hasPendingMessage() {
       std::make_move_iterator(sendSnapshot.begin()),
       std::make_move_iterator(sendSnapshot.end()));
 
-  std::vector<torch::Tensor> inputSnapshot =
-      {torch::from_blob(snapshot.data(), {2, worldSize}, {torch::kInt64})};
+  std::vector<torch::Tensor> inputSnapshot = {
+      torch::from_blob(snapshot.data(), {2, worldSize}, {torch::kInt64})};
 
   // allgather both send and recv messages in one shot
   std::vector<std::vector<torch::Tensor>> outputSnapshots(1);

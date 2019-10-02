@@ -57,12 +57,12 @@ class ProcessGroupAgent : public RpcAgent {
       override;
 
  private:
-
   class MessageCounter {
    public:
-    MessageCounter(int worldSize);
+    explicit MessageCounter(int worldSize);
     void increment(int dst);
     std::vector<int64_t> snapshot();
+
    private:
     std::vector<int64_t> counters_;
     std::mutex mutex_;
@@ -113,7 +113,6 @@ class ProcessGroupAgent : public RpcAgent {
   // termination and only exit when all sent messages are processed.
   MessageCounter sendCounts_;
   MessageCounter recvCounts_;
-
 
   std::atomic<int64_t> nextId_;
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe

@@ -114,7 +114,7 @@ def multi_layer_nested_async_rpc(dst, world_size, ttl):
     # this method returns immediately without blocking the callee, but will
     # generate additional requests.
     if ttl > 0:
-        current_dst = 'worker{}'.format(dst)
+        current_dst = "worker{}".format(dst)
         next_dst = (dst + 1) % world_size
         dist.rpc(
             current_dst,
