@@ -3552,34 +3552,40 @@ def foo(x):
     def test_unmatched_type_annotation(self):
         message1 = re.escape("Number of type annotations (2) did not match the number of function parameters (1):")
         message2 = re.escape("""
-            def invalid(a):
-            ~~~~~~~~~~~~~ <--- HERE
+            def invalid2(a):
+            ~~~~~~~~~~~~~~ <--- HERE
+                # type: (Int, Int) -> Int
+                return a + 2
+        """.strip())
+        message3 = re.escape("""
+            def invalid4(a):
+            ~~~~~~~~~~~~~~ <--- HERE
                 # type: (Int, Int) -> Int
                 return a + 2
         """.strip())
         with self.assertRaisesRegex(RuntimeError, message1):
             @torch.jit.script
-            def invalid(a):
+            def invalid1(a):
                 # type: (Int, Int) -> Int
                 return a + 2
 
         with self.assertRaisesRegex(RuntimeError, message2):
             @torch.jit.script
-            def invalid(a):
+            def invalid2(a):
                 # type: (Int, Int) -> Int
                 return a + 2
 
         with self.assertRaisesRegex(RuntimeError, message1):
-            def invalid(a):
+            def invalid3(a):
                 # type: (Int, Int) -> Int
                 return a + 2
-            torch.jit.script(invalid)
+            torch.jit.script(invalid3)
 
-        with self.assertRaisesRegex(RuntimeError, message2):
-            def invalid(a):
+        with self.assertRaisesRegex(RuntimeError, message3):
+            def invalid4(a):
                 # type: (Int, Int) -> Int
                 return a + 2
-            torch.jit.script(invalid)
+            torch.jit.script(invalid4)
 
     def test_is_optional(self):
         ann = Union[List[int], List[float]]
