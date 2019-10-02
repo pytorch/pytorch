@@ -539,8 +539,8 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self, const std::string& name, py::object value) {
             auto attr = self.find_attribute(name);
             TORCH_CHECK(attr, "Could not find attribute '", name, "'");
-            auto ivalue = toIValue(value, attr->type());
-            attr->setValue(ivalue);
+            auto ivalue = toIValue(value, self.type()->getAttribute(*attr));
+            self.module_object()->setSlot(*attr, ivalue);
           })
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)

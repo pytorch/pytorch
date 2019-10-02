@@ -352,7 +352,7 @@ void Module::train(bool on) {
     submod.train(on);
   }
   if (auto slot = find_attribute("training")) {
-    slot->setValue(on);
+    module_object()->setSlot(*slot, on);
   } else {
     register_attribute("training", BoolType::get(), on);
   }
@@ -408,6 +408,49 @@ Module Slot::to_module() const {
 
 module_list Module::get_modules() const {
   return module_list(*this, EntityType::MODULE);
+}
+
+c10::optional<size_t> Module::find_parameter(const std::string& name) const {
+  auto slot_idx = type()->findAttributeSlot(name);
+  if (slot_idx && type()->is_parameter(*slot_idx)) {
+    return *slot_idx;
+  }
+  return c10::nullopt;
+}
+
+c10::optional<size_t> Module::find_attribute(const std::string& name) const {
+  auto slot_idx = type()->findAttributeSlot(name);
+  if (slot_idx && !type()->is_parameter(*slot_idx) &&
+      !type()->is_module(*slot_idx)) {
+    return *slot_idx;
+  }
+  return c10::nullopt;
+}
+
+c10::optional<size_t> Module::find_buffer(const std::string& name) const {
+  auto slot_idx = find_attribute(name);
+  if (slot_idx &&
+      type()->getAttribute(*slot_idx)->isSubtypeOf(TensorType::get())) {
+    return *slot_idx;
+  }
+  return c10::nullopt;
+}
+
+c10::optional<Module> Module::find_module(const std::string& name) const {
+  auto slot_idx = type()->findAttributeSlot(name);
+  if (slot_idx && type()->is_module(*slot_idx)) {
+    return Module(module_object()->getAttr(name).toObject());
+  }
+  return c10::nullopt;
+}
+
+c10::optional<Method> Module::find_method(const std::string& basename) const {
+  for (Function* fn : type()->methods()) {
+    if (fn->name() == basename) {
+      return Method(module_object(), fn);
+    }
+  }
+  return c10::nullopt;
 }
 
 void Module::apply(const std::function<void(Module&)>& fn) {

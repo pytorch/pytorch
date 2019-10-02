@@ -343,12 +343,11 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // it adds a buffer 'training' to the model if one doesn't exist
   // and then loads that parameter, casting it to bool
   if (field == "training") {
-    c10::optional<Slot> v = module_.find_attribute(field);
+    auto v = module_.find_attribute(field);
     if (!v) {
       bool training = py::cast<bool>(py::getattr(py_module_, "training"));
       module_.register_attribute(
           "training", BoolType::get(), std::move(training));
-      v = module_.find_attribute(field);
     }
     Value* the_bool = m.graph()->insertGetAttr(self_, "training");
     return std::make_shared<SimpleValue>(the_bool);
@@ -359,7 +358,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         m.graph()->insertGetAttr(self_, field),
         *v,
         py_module_.attr(field.c_str()));
-  } else if (auto kind = module_.kind_of(field)) {
+  } else if (
+      module_.find_method(field) || module_.type()->findAttributeSlot(field)) {
     // methods, parameters, attributes, and buffers are all first class
     return SimpleValue(self_).attr(loc, m, field);
   }

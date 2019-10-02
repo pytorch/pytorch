@@ -1513,6 +1513,12 @@ struct CAFFE2_API ClassType : public NamedType {
   bool is_module() const {
     return bool(parameterSlots_);
   }
+  bool is_module(size_t slot) const {
+    if (auto cls = getAttribute(slot)->cast<at::ClassType>()) {
+      return cls->is_module();
+    }
+    return false;
+  }
   bool is_parameter(size_t slot) const {
     TORCH_INTERNAL_ASSERT(
         is_module(), "asking for parameterSlots of non-Module");

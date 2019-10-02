@@ -168,16 +168,15 @@ struct TORCH_API Module {
   }
 
   void set_parameter(const std::string& name, at::Tensor v) {
-    get_slot(name, EntityType::PARAMETER).setValue(v);
+    module_object()->setAttr(name, v);
   }
 
   autograd::Variable get_parameter(const std::string& name) const {
-    return autograd::as_variable_ref(
-        get_slot(name, EntityType::PARAMETER).value().toTensor());
+    return autograd::as_variable_ref(module_object()->getAttr(name).toTensor());
   }
 
   IValue get_attribute(const std::string& name) const {
-    return get_slot(name, EntityType::ATTRIBUTE).value();
+    return module_object()->getAttr(name);
   }
 
   autograd::Variable get_buffer(const std::string& name) const {
@@ -194,7 +193,7 @@ struct TORCH_API Module {
   }
 
   Module get_module(const std::string& name) const {
-    auto obj = get_slot(name, EntityType::MODULE).value().toObject();
+    auto obj = module_object()->getAttr(name).toObject();
     return Module(obj);
   }
 
@@ -217,34 +216,12 @@ struct TORCH_API Module {
         });
   }
 
-  c10::optional<Slot> find_parameter(const std::string& name) const {
-    return find_slot(name, EntityType::PARAMETER);
-  }
-  c10::optional<Slot> find_attribute(const std::string& name) {
-    return find_slot(name, EntityType::ATTRIBUTE);
-  }
-  c10::optional<Slot> find_buffer(const std::string& name) {
-    auto iv = find_attribute(name);
-    if (iv && iv->type()->isSubtypeOf(TensorType::get())) {
-      return iv;
-    }
-    return c10::nullopt;
-  }
-  c10::optional<Module> find_module(const std::string& name) const {
-    if (auto slot = find_slot(name, EntityType::MODULE)) {
-      return Module(slot->value().toObject());
-    }
-    return c10::nullopt;
-  }
-  c10::optional<Method> find_method(const std::string& basename) const {
-    for (Function* fn : type()->methods()) {
-      if (fn->name() == basename) {
-        return Method(module_object(), fn);
-      }
+  c10::optional<size_t> find_parameter(const std::string& name) const;
+  c10::optional<size_t> find_attribute(const std::string& name) const;
+  c10::optional<size_t> find_buffer(const std::string& name) const;
+  c10::optional<Module> find_module(const std::string& name) const;
+  c10::optional<Method> find_method(const std::string& basename) const;
 
-    }
-    return c10::nullopt;
-  }
   void apply(const std::function<void(Module&)>& fn);
 
   /// Enables "training" mode.
@@ -257,7 +234,7 @@ struct TORCH_API Module {
   /// True if the module is in training mode.
   bool is_training() {
     if (auto p = find_attribute("training")) {
-      return p->value().toBool();
+      return module_object()->getSlot(*p).toBool();
     }
     // We are in training mode by default
     return true;
@@ -326,16 +303,6 @@ struct TORCH_API Module {
 
   void clone_method(const Module& orig, const std::string& name);
 
-  at::optional<EntityType> kind_of(const std::string& name) const {
-    if (find_method(name)) {
-      return EntityType::METHOD;
-    }
-    if (auto offset = type()->findAttributeSlot(name)) {
-      return get_slot(*offset).entity_type();
-    }
-    return c10::nullopt;
-  }
-
   ModulePtr module_object() const;
 
   ClassTypePtr type() const {
@@ -381,46 +348,6 @@ struct TORCH_API Module {
 
   c10::QualifiedName getNameForMethod(std::string basename) const {
     return QualifiedName(name(), basename);
-  }
-  static const char* toString(EntityType t) {
-    switch (t) {
-      case EntityType::MODULE:
-        return "module";
-      case EntityType::PARAMETER:
-        return "parameter";
-      case EntityType::ATTRIBUTE:
-        return "attribute";
-      case EntityType::METHOD:
-        return "method";
-    }
-    return nullptr;
-  }
-
-  Slot get_slot(const std::string& name, EntityType etype) const {
-    size_t slot_idx = type()->getAttributeSlot(name);
-    Slot slot = get_slot(slot_idx);
-    TORCH_CHECK(
-        etype == slot.entity_type(),
-        "The field '",
-        type()->getAttributeName(slot_idx),
-        "' is a ",
-        toString(slot.entity_type()),
-        " but this call is"
-        " trying to use it as a ",
-        toString(etype));
-    return slot;
-  }
-  c10::optional<Slot> find_slot(const std::string& name, EntityType etype)
-      const {
-    auto slot = type()->findAttributeSlot(name);
-    if (!slot) {
-      return c10::nullopt;
-    }
-    Slot r = get_slot(*slot);
-    if (r.entity_type() != etype) {
-      return c10::nullopt;
-    }
-    return r;
   }
 
   void to_impl(
