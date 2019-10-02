@@ -782,6 +782,19 @@ private:
   c10::optional<QualifiedName> name_;
 };
 
+// Any should never appear in a named type like a class, namedtuple or
+// interface. If it does, then dynamic type information will be lost in the
+// Pickler, leading to hard-to-track-down bugs that will only occur
+// after saving or loading a model. This is because we rely on the
+// static types in named types to reconstruct type tags of loaded
+// values. Lifting this restriction requires solving the serialization
+// problem first.
+CAFFE2_API void checkNoAny(
+    const Type& base,
+    const char* what,
+    const std::string& attrname,
+    const TypePtr& attrtype);
+
 struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
