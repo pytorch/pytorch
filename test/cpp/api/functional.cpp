@@ -158,3 +158,99 @@ TEST_F(FunctionalTest, HingeEmbeddingLoss) {
 
   ASSERT_TRUE(output.allclose(expected));
 }
+
+TEST_F(FunctionalTest, MaxUnpool1d) {
+  auto x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
+  auto y = F::max_unpool1d(x, indices, MaxUnpool1dOptions(3));
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 9}));
+
+  x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
+  y = F::max_unpool1d(x, indices, MaxUnpool1dOptions(3), c10::IntArrayRef({1, 1, 9}));
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 9}));
+
+  x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
+  y = F::max_unpool1d(x, indices, MaxUnpool1dOptions(3).stride(2).padding(1));
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor({{{0, 2, 0, 4, 5}}}, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 5}));
+}
+
+TEST_F(FunctionalTest, MaxUnpool2d) {
+  auto indices = torch::tensor({
+  {{{ 6,  8,  9},
+    {16, 18, 19},
+    {21, 23, 24}}},
+  {{{ 6,  8,  9},
+    {16, 18, 19},
+    {21, 23, 24}}}}, torch::kLong);
+  auto x = torch::tensor({
+  {{{ 6,  8,  9},
+    {16, 18, 19},
+    {21, 23, 24}}},
+  {{{31, 33, 34},
+    {41, 43, 44},
+    {46, 48, 49}}}}, torch::requires_grad());
+  auto y = F::max_unpool2d(x, indices, MaxUnpool2dOptions(3).stride(2).padding(1));
+
+  ASSERT_EQ(y.dim(), 4);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor(
+   {{{{ 0,  0,  0,  0,  0},
+      { 0,  6,  0,  8,  9},
+      { 0,  0,  0,  0,  0},
+      { 0, 16,  0, 18, 19},
+      { 0, 21,  0, 23, 24}}},
+    {{{ 0,  0,  0,  0,  0},
+      { 0, 31,  0, 33, 34},
+      { 0,  0,  0,  0,  0},
+      { 0, 41,  0, 43, 44},
+      { 0, 46,  0, 48, 49}}}} , torch::kFloat)));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 1, 5, 5}));
+}
+
+TEST_F(FunctionalTest, ELU) {
+  const auto size = 3;
+  for (const auto inplace : {false, true}) {
+    for (const auto alpha : {0.0, 0.42, 1.0, 4.2, 42.42}) {
+      auto x = torch::linspace(-10.0, 10.0, size * size * size);
+      x.resize_({size, size, size});
+      auto y_exp = torch::max(torch::zeros_like(x), x) +
+                torch::min(torch::zeros_like(x), alpha * (torch::exp(x) - 1.0));
+      auto y = F::elu(x, ELUOptions().alpha(alpha).inplace(inplace));
+
+      ASSERT_EQ(y.ndimension(), 3);
+      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      ASSERT_TRUE(torch::allclose(y, y_exp));
+      if (inplace) {
+        ASSERT_TRUE(torch::allclose(x, y_exp));
+      }
+    }
+  }
+}
+
+TEST_F(FunctionalTest, Hardshrink) {
+  const auto size = 3;
+  for (const auto lambda : {-4.2, -1.0, -0.42, 0.0, 0.42, 1.0, 4.2, 42.42}) {
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size}).set_requires_grad(true);
+    auto y = F::hardshrink(x, HardshrinkOptions().lambda(lambda));
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(s.ndimension(), 0);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    auto y_exp = (x.abs() > lambda) * x;
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
