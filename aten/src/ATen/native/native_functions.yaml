@@ -3108,8 +3108,7 @@
 - func: nuclear_norm.dim_out(Tensor self, int[2] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
 
-- func: clone(Tensor self) -> Tensor
-  use_c10_dispatcher: full
+- func: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   variants: function, method
   dispatch:
     CPU: clone
