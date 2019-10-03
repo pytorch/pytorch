@@ -57,6 +57,17 @@ class ProcessGroupAgent : public RpcAgent {
       override;
 
  private:
+  class MessageCounter {
+   public:
+    explicit MessageCounter(int worldSize);
+    void increment(int dst);
+    std::vector<int64_t> snapshot();
+
+   private:
+    std::vector<int64_t> counters_;
+    std::mutex mutex_;
+  };
+
   void collectNames();
   // put SendWork into a queue and notify the worker thread
   void enqueueSend(SendWork work);
@@ -64,6 +75,29 @@ class ProcessGroupAgent : public RpcAgent {
   void enqueueRecv(RecvWork work);
   // receiving messages
   void listenLoop();
+
+  // Note [Termination Detection]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  //
+  // RpcAgent implementations must properly detect termination. Otherwise, it
+  // would result in message loss, RRef leak, or process hang. It is not
+  // sufficient to just wait for the thread pool to finish processing all tasks
+  // after all processes hit the join function. There could be nested rpc/remote
+  // calls, meaning that an empty task queue in the thread pool does not mean
+  // there will be no tasks added in the future. Moreover, in the listenLoop,
+  // there is a period of time when the message has been received but not yet
+  // inserted into the thread pool, which also suggests that the empty task
+  // queue is not a good indicator for termination.
+  //
+  // To detect termination, each ProcessGroupAgent maintains a sent message
+  // counter and a received message counter. The sent message counter is
+  // incremented whenever a message is sent, and the receive message counter is
+  // only incremented when a message has been processed. During termination, all
+  // ProcessGroupAgent instances run an allgather to collect counters from all
+  // peers, which means that all agents will have a consistent view on the
+  // message count snapshot. They would only terminate if all sent/received
+  // message counters match.
+  bool hasPendingMessage();
 
   int64_t nextId() {
     return nextId_++;
@@ -73,6 +107,13 @@ class ProcessGroupAgent : public RpcAgent {
   // worker name -> rank
   std::unordered_map<std::string, int> nameMap_;
   std::vector<WorkerId> workerIds_;
+  // record the number of messages sent to and received from each peer. The recv
+  // counter is only marked after the message is processed. Join uses allgather
+  // to collect all counts from all peers, uses these counters to detect global
+  // termination and only exit when all sent messages are processed.
+  MessageCounter sendCounts_;
+  MessageCounter recvCounts_;
+
   std::atomic<int64_t> nextId_;
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.

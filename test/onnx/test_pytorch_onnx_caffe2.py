@@ -1502,10 +1502,24 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 return input.scatter(1, indices, values)
 
         input = torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
-        indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
+        indices = torch.tensor([[1, 0], [0, 2], [0, 1]], dtype=torch.int64)
         values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
         self.run_model_test(ScatterModel(), train=False, input=(input, indices, values),
                             batch_size=BATCH_SIZE, use_gpu=False)
+
+        input = torch.zeros(3, 4, 5, 6)
+        indices = torch.tensor([[1, 0], [0, 2], [0, 1]], dtype=torch.int64)
+        indices = indices.view(3, 2, 1, 1).expand(3, 2, 5, 6)
+        values = torch.arange(3 * 2 * 5 * 6, dtype=torch.float32).view(3, 2, 5, 6)
+        self.run_model_test(ScatterModel(), train=False, input=(input, indices, values),
+                            batch_size=BATCH_SIZE, use_gpu=False)
+
+        input = torch.zeros(3, 4, 2)
+        indices = torch.tensor([[[1, 0], [0, 2]], [[1, 1], [0, 1]], [[2, 1], [2, 2]]])
+        values = torch.arange(3 * 2 * 2, dtype=torch.float32).view(3, 2, 2)
+        self.run_model_test(ScatterModel(), train=False, input=(input, indices, values),
+                            batch_size=BATCH_SIZE, use_gpu=False)
+
 
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):
@@ -1973,6 +1987,15 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         self.run_model_test(ArangeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_size(self):
+        class SizeModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.arange(input.size(0)), torch.arange(input.size(-1))
+
+        x = torch.randn(5, 3, 2)
+        self.run_model_test(SizeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
     def test_log2(self):
         class Log2Model(torch.nn.Module):
             def forward(self, input):
@@ -2194,6 +2217,15 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_model_test(MaskedFillModel2(), input=(x, ), train=False, batch_size=BATCH_SIZE)
 
+    def test_baddbmm(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input, batch1, batch2):
+                return torch.baddbmm(input, batch1, batch2, alpha=torch.tensor(5), beta=3.5)
+        x = torch.randn(10, 3, 5)
+        batch1 = torch.randn(10, 3, 4)
+        batch2 = torch.randn(10, 4, 5)
+        self.run_model_test(MyModule(), input=(x, batch1, batch2), train=False, batch_size=BATCH_SIZE)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_gelu(self):
         class GeluModel(torch.nn.Module):
@@ -2205,6 +2237,27 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         outputs = model(inputs)
         self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
                             example_outputs=(outputs,))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_index_fill(self):
+        class IndexFillModel(torch.nn.Module):
+            def forward(self, input):
+                index = torch.tensor([2, 0])
+                return input.index_fill(2, index, -1)
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_model_test(IndexFillModel(), input=(x, ), train=False, batch_size=BATCH_SIZE)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_index_copy(self):
+        class IndexCopyModel(torch.nn.Module):
+            def forward(self, input):
+                index = torch.tensor([2, 0])
+                source = torch.ones(3, 2, 5)
+                return input.index_copy(1, index, source)
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_model_test(IndexCopyModel(), input=(x, ), train=False, batch_size=BATCH_SIZE)
 
 # a bit of metaprogramming to set up all the rnn tests
 

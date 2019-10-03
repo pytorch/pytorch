@@ -10,21 +10,39 @@ from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
 # [WRITING TESTS]
 #
 # Write your test class as usual except:
-#   (1) Each test method should have one of two signatures:
+#   (1) Each test method should have one of four signatures:
 #
 #           (1a) testX(self, device)
 #
-#           (1b) @dtypes(<list of dtypes>)
+#           (1b) @deviceCountAtLeast(<minimum number of devices to run test with>)
+#                testX(self, devices)
+#
+#           (1c) @dtypes(<list of dtypes>)
 #                testX(self, device, dtype)
 #
-#       Note in the latter case the dtypes decorator with a nonempty list of
-#       valid dtypes is not optional.
+#           (1d) @deviceCountAtLeast(<minimum number of devices to run test with>)
+#                @dtypes(<list of dtypes>)
+#                testX(self, devices, dtype)
 #
-#       When the test is called it will be given a device, like 'cpu' or
-#       'cuda,' and a dtype from the list specified in @dtypes. If
-#       device-specific dtypes are specified using @dtypesIfCPU or
-#       @dtypesIfCUDA then those devices will only see the dtypes specified
-#       for them.
+#
+#       Note that the decorators are required for signatures (1b), (1c) and
+#       (1d).
+#
+#       When a test like (1a) is called it will be given a device string,
+#       like 'cpu' or 'cuda:0.'
+#
+#       Tests like (1b) are called with a list of device strings, like
+#       ['cuda:0', 'cuda:1']. The first device string will be the
+#       primary device. These tests will be skipped if the device type
+#       has fewer available devices than the argument to @deviceCountAtLeast.
+#
+#       Tests like (1c) are called with a device string and a torch.dtype from
+#       the list of dtypes specified in the @dtypes decorator. Device-specific
+#       dtype overrides can be specified using @dtypesIfCPU and @dtypesIfCUDA.
+#
+#       Tests like (1d) take a devices argument like (1b) and a dtype
+#       argument from (1c).
+#
 #   (2) Prefer using test decorators defined in this file to others.
 #       For example, using the @skipIfNoLapack decorator instead of the
 #       @skipCPUIfNoLapack will cause the test to not run on CUDA if
@@ -103,7 +121,22 @@ device_type_test_bases = []
 
 
 class DeviceTypeTestBase(TestCase):
-    device_type = "generic_device_type"
+    device_type = 'generic_device_type'
+
+    # Returns a string representing the device that single device tests should use.
+    # Note: single device tests use this device exclusively.
+    @classmethod
+    def get_primary_device(cls):
+        return cls.device_type
+
+    # Returns a list of strings representing all available devices of this
+    # device type. The primary device must be the first string in the list
+    # and the list must contain no duplicates.
+    # Note: UNSTABLE API. Will be replaced once PyTorch has a device generic
+    #   mechanism of acquiring all available devices.
+    @classmethod
+    def get_all_devices(cls):
+        return [cls.get_primary_device()]
 
     # Returns the dtypes the test has requested.
     # Prefers device-specific dtype specifications over generic ones.
@@ -124,7 +157,8 @@ class DeviceTypeTestBase(TestCase):
 
             @wraps(test)
             def instantiated_test(self, test=test):
-                return test(self, cls.device_type)
+                device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
+                return test(self, device_arg)
 
             setattr(cls, test_name, instantiated_test)
         else:  # Test has dtype variants
@@ -135,25 +169,51 @@ class DeviceTypeTestBase(TestCase):
 
                 @wraps(test)
                 def instantiated_test(self, test=test, dtype=dtype):
-                    return test(self, cls.device_type, dtype)
+                    device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
+                    return test(self, device_arg, dtype)
 
                 setattr(cls, dtype_test_name, instantiated_test)
 
 
 class CPUTestBase(DeviceTypeTestBase):
-    device_type = "cpu"
+    device_type = 'cpu'
 
 
 class CUDATestBase(DeviceTypeTestBase):
-    device_type = "cuda"
+    device_type = 'cuda'
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+
+    def has_cudnn(self):
+        return not self.no_cudnn
+
+    @classmethod
+    def get_primary_device(cls):
+        return cls.primary_device
+
+    @classmethod
+    def get_all_devices(cls):
+        primary_device_idx = int(cls.get_primary_device().split(':')[1])
+        num_devices = torch.cuda.device_count()
+
+        devices = [cls.get_primary_device()]
+        cuda_str = 'cuda:{0}'
+        non_primary_devices = [cuda_str.format(idx) for idx in range(num_devices) if idx != primary_device_idx]
+        devices.extend(non_primary_devices)
+        return devices
 
     @classmethod
     def setUpClass(cls):
         # has_magma shows up after cuda is initialized
-        torch.ones(1).cuda()
+        t = torch.ones(1).cuda()
         cls.no_magma = not torch.cuda.has_magma
+
+        # Determines if cuDNN is available and its version
+        cls.no_cudnn = not (TEST_WITH_ROCM or torch.backends.cudnn.is_acceptable(t))
+        cls.cudnn_version = None if cls.no_cudnn else torch.backends.cudnn.version()
+
+        # Acquires the current device as the primary (test) device
+        cls.primary_device = 'cuda:{0}'.format(torch.cuda.current_device())
 
 
 # Adds available device-type-specific test base classes
@@ -166,7 +226,7 @@ if torch.cuda.is_available():
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
 # See note "Generic Device Type Testing."
-def instantiate_device_type_tests(generic_test_class, scope):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -186,6 +246,10 @@ def instantiate_device_type_tests(generic_test_class, scope):
 
     # Creates device-specific test cases
     for base in device_type_test_bases:
+        # Skips bases listed in except_for
+        if except_for is not None and base.device_type in except_for:
+            continue
+
         class_name = generic_test_class.__name__ + base.device_type.upper()
         device_type_test_class = type(class_name, (base, empty_class), {})
 
@@ -278,6 +342,30 @@ class onlyOn(object):
         return only_fn
 
 
+# Decorator that provides all available devices of the device type to the test
+# as a list of strings instead of providing a single device string.
+# Skips the test if the number of available devices of the variant's device
+# type is less than the 'num_required_devices' arg.
+class deviceCountAtLeast(object):
+
+    def __init__(self, num_required_devices):
+        self.num_required_devices = num_required_devices
+
+    def __call__(self, fn):
+        assert not hasattr(fn, 'num_required_devices'), "deviceCountAtLeast redefinition for {0}".format(fn.__name__)
+        fn.num_required_devices = self.num_required_devices
+
+        @wraps(fn)
+        def multi_fn(slf, devices, *args, **kwargs):
+            if len(devices) < self.num_required_devices:
+                reason = "fewer than {0} devices detected".format(self.num_required_devices)
+                raise unittest.SkipTest(reason)
+
+            return fn(slf, devices, *args, **kwargs)
+
+        return multi_fn
+
+
 # Decorator that instantiates a variant of the test for each given dtype.
 # Notes:
 #   (1) Tests that accept the dtype argument MUST use this decorator.
@@ -342,3 +430,27 @@ def skipCUDAIfNoMagma(fn):
 # Skips a test on CUDA when using ROCm.
 def skipCUDAIfRocm(fn):
     return skipCUDAIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")(fn)
+
+
+# Skips a test on CUDA if cuDNN is unavailable or its version is lower than requested.
+def skipCUDAIfCudnnVersionLessThan(version=0):
+
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, device, *args, **kwargs):
+            if self.device_type == 'cuda':
+                if self.no_cudnn:
+                    reason = "cuDNN not available"
+                    raise unittest.SkipTest(reason)
+                if self.cudnn_version < version:
+                    reason = "cuDNN version {0} is available but {1} required".format(self.cudnn_version, version)
+                    raise unittest.SkipTest(reason)
+
+            return fn(self, device, *args, **kwargs)
+
+        return wrap_fn
+    return dec_fn
+
+
+def skipCUDAIfNoCudnn(fn):
+    return skipCUDAIfCudnnVersionLessThan(0)(fn)
