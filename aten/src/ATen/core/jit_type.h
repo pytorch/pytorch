@@ -1234,6 +1234,12 @@ struct getTypePtr_<at::Scalar> final {
   }
 };
 template <>
+struct getTypePtr_<at::Generator*> final {
+  static TypePtr call() {
+    return OptionalType::create(GeneratorType::get());
+  }
+};
+template <>
 struct getTypePtr_<std::string> final {
   static TypePtr call() {
     return StringType::get();
@@ -1451,6 +1457,28 @@ struct CAFFE2_API ClassType : public NamedType {
       const std::string& name,
       TypePtr type,
       bool is_parameter = false);
+
+  // Add attribute \p NAME if it doesn't exist or verify that it has a
+  // compatible type otherwise.
+  size_t addOrCheckAttribute(
+      const std::string& name,
+      TypePtr ty,
+      bool is_parameter = false) {
+    auto slot_idx = findAttributeSlot(name);
+    if (!slot_idx) {
+      return addAttribute(name, ty, is_parameter);
+    }
+
+    TORCH_CHECK(
+        is_parameter == this->is_parameter(*slot_idx),
+        "Parameter field mismatch for the field '",
+        name,
+        "'");
+    TypePtr atype = getAttribute(*slot_idx);
+    TORCH_CHECK(ty->isSubtypeOf(atype));
+    return *slot_idx;
+  }
+
 
   at::ArrayRef<std::string> attributeNames() const {
     return attributeNames_;
