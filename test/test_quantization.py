@@ -1076,8 +1076,10 @@ class ObserverTest(QuantizationTestCase):
         model.qconfig = torch.quantization.default_qconfig
 
         model = prepare(model)
-        self.assertTrue(hasattr(model.fc1, 'qconfig'), "QConfig not propagating")
-        self.assertFalse(hasattr(model.no_quant_module, 'qconfig'), "QConfig propagating")
+        self.assertTrue(hasattr(model.fc1, 'qconfig'),
+                        "QConfig is expected to propagate")
+        self.assertFalse(hasattr(model.no_quant_module, 'qconfig'),
+                         "QConfig is expected to NOT propagate")
 
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
