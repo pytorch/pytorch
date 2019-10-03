@@ -101,15 +101,15 @@ class PackedSequence(PackedSequence_):
 
     def cuda(self, *args, **kwargs):
         # Adds device 'cuda' to kwargs if needed
-        ex = torch.FloatTensor().to(*args, **kwargs)
+        ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(*args, **kwargs)
         if ex.is_cuda:
             return self.to(*args, **kwargs)
         return self.to(*args, device='cuda', **kwargs)
 
     def cpu(self, *args, **kwargs):
         # Adds device 'cpu' to kwargs if needed
-        ex = torch.FloatTensor().to(*args, **kwargs)
-        if ex.is_cpu:
+        ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(*args, **kwargs)
+        if ex.device == 'cpu':
             return self.to(*args, **kwargs)
         return self.to(*args, device='cpu', **kwargs)
 
@@ -156,7 +156,7 @@ class PackedSequence(PackedSequence_):
             return self
         else:
             # Only forwards device arg/kwarg and non_blocking and copy kwargs
-            kwargs = {k : v for k, v in filter(lambda t: t[0] == 'non_blocking' or t[0] == 'copy', kwargs.iteritems())}
+            kwargs = {k : v for k, v in filter(lambda t: t[0] == 'non_blocking' or t[0] == 'copy', kwargs.items())}
             sorted_indices = bind(self.sorted_indices, lambda t: t.to(data.device, **kwargs))
             unsorted_indices = bind(self.unsorted_indices, lambda t: t.to(data.device, **kwargs))
             return type(self)(data, self.batch_sizes, sorted_indices, unsorted_indices)
