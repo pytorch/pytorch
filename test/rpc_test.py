@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import concurrent.futures
 import sys
 import unittest
 from unittest import mock
@@ -16,8 +17,15 @@ from torch.distributed.rpc_api import RpcBackend
 from dist_utils import dist_init, BACKEND, INIT_METHOD_TEMPLATE
 
 
+VALUE_FUTURE = concurrent.futures.Future()
+
+
 def stub_init_rpc_backend_handler(self_rank, self_name, init_method):
     return mock.Mock()  # RpcAgent.
+
+
+def set_value(value):
+    VALUE_FUTURE.set_result(value)
 
 
 # it is used to test python user defined function over rpc
@@ -366,6 +374,14 @@ class RpcTest(object):
 
         # it's safe to call join_rpc() multiple times
         dist.join_rpc()
+
+    @dist_init
+    def test_expected_src(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        expected_src_rank = (self.rank - 1) % self.world_size
+        ret = dist.rpc_sync("worker{}".format(dst_rank), set_value, args=(self.rank,))
+        value = VALUE_FUTURE.result()
+        self.assertEqual(value, expected_src_rank)
 
     @dist_init
     def test_py_built_in(self):
