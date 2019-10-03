@@ -24,16 +24,12 @@ void to_test_tensor(const c10::FunctionSchema&, torch::jit::Stack* stack) {
   torch::jit::push(*stack, t);
 }
 
-void from_test_tensor(const c10::FunctionSchema&, torch::jit::Stack* stack) {
-  auto self = torch::jit::pop(*stack).toTensor();
-  auto cst = static_cast<CustomTensorImpl*>(self.unsafeGetTensorImpl());
-  auto test_tensor = std::static_pointer_cast<TestTensor>(cst->storage());
-  auto tensor = test_tensor->c;
-  auto t = torch::autograd::make_variable(tensor);
-  torch::jit::push(*stack, t);
+at::Tensor from_test_tensor(at::Tensor self) {
+  auto test_tensor = extractCustomTensor<TestTensor>(self);
+  return test_tensor->c;
 }
 
-REGISTER_CUSTOM_TENSOR_METHOD(test_tensor, to_custom, to_test_tensor);
+REGISTER_CUSTOM_TENSOR_STACK_METHOD(test_tensor, to_custom, to_test_tensor);
 REGISTER_CUSTOM_TENSOR_METHOD(test_tensor, from_custom, from_test_tensor);
 
 TEST(TestCustomTensor, Basic) {

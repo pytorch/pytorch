@@ -9,14 +9,13 @@ namespace at {
 c10::intrusive_ptr<TensorImpl> CustomTensorImpl::shallow_copy_and_detach(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) const {
-  auto impl = c10::make_intrusive<CustomTensorImpl>(
+  return c10::make_intrusive<CustomTensorImpl>(
     tag_,
     storage_,
     type_set(),
     dtype(),
     device_type()
   );
-  return impl;
 }
 
 void customDispatch(const c10::FunctionSchema& schema, torch::jit::Stack* stack);
@@ -68,7 +67,9 @@ at::Tensor from_custom(const Tensor& self) {
 void customDispatch(const FunctionSchema& schema, torch::jit::Stack* stack) {
   size_t tag = -1; // meaningless, must be overwritten
 
-  for (const auto& iv : *stack) {
+  // This is backwards
+  auto len = schema.arguments().size();
+  for (const auto& iv : torch::jit::peekSlice(*stack, 0, len, len)) {
     if (iv.isTensor()) {
       auto t = iv.toTensor();
       auto cst = static_cast<CustomTensorImpl*>(t.unsafeGetTensorImpl());
