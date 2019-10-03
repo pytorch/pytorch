@@ -233,7 +233,7 @@
 - name: clamp_max(Tensor self, Scalar max) -> Tensor
   self: grad * (self <= max).to(grad.dtype())
 
-- name: clone(Tensor self) -> Tensor
+- name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
 
 - name: coalesce(Tensor self) -> Tensor
