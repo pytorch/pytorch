@@ -729,7 +729,7 @@ def trace(func,
     """
     Trace a function and return an executable  or :class:`ScriptFunction`
     that will be optimized using just-in-time compilation. Tracing is ideal for
-    code that operates only on ``Tensor``\s and lists, dictionaries, and tuples of ``Tensor``\s.
+    code that operates only on ``Tensor``\\s and lists, dictionaries, and tuples of ``Tensor``\\s.
 
     Using ``torch.jit.trace`` and :func:`torch.jit.trace_module<torch.jit.trace_module>`, you can turn an existing module or Python
     function into a TorchScript :class:`ScriptFunction` or :class:`ScriptModule`. You must provide example inputs,
@@ -845,6 +845,7 @@ def trace(func,
         # Trace a module (implicitly traces `forward`) and construct a
         # `ScriptModule` with a single `forward` method
         module = torch.jit.trace(n, example_forward_input)
+
     """
     if not _enabled:
         return func
@@ -978,6 +979,7 @@ def trace_module(mod,
         # a `ScriptModule` with `forward` and `weighted_kernel_sum` methods
         inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
         module = torch.jit.trace_module(n, inputs)
+
     """
     if not _enabled:
         return mod
