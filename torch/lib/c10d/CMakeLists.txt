@@ -16,6 +16,10 @@ else()
   message(STATUS "Building c10d without CUDA/ROCm support")
 endif()
 
+if(USE_TBB)
+include_directories(${TBB_ROOT_DIR}/include)
+endif()
+
 if(USE_GLOO)
   option(USE_C10D_GLOO "USE C10D GLOO" ON)
 endif()
