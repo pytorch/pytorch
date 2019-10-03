@@ -30,23 +30,26 @@ PythonRpcHandler& PythonRpcHandler::getInstance() {
 }
 
 std::vector<char> PythonRpcHandler::generatePythonUDFResult(
-    const Message& request,
-    std::vector<torch::Tensor>& tensorTable) {
+    const std::vector<char>& pickledPayload,
+    const std::vector<torch::Tensor>& requestTensorTable,
+    std::vector<torch::Tensor>& responseTensorTable) {
   AutoGIL ag;
-  auto pargs = py::bytes(request.payload().data(), request.payload().size());
+  auto pargs = py::bytes(pickledPayload.data(), pickledPayload.size());
   // runUDFFunction_ should be always called before RpcAgent.join() and thus
   // it should not be none
   TORCH_CHECK(!runUDFFunction_.is_none(), "runUDFFunction_ is none");
-  py::tuple pres = runUDFFunction_(pargs, request.tensors());
+  py::tuple pres = runUDFFunction_(pargs, requestTensorTable);
   const auto& presStr = pres[0].cast<std::string>();
-  tensorTable = pres[1].cast<std::vector<torch::Tensor>>();
+  responseTensorTable = pres[1].cast<std::vector<torch::Tensor>>();
   std::vector<char> payload(presStr.begin(), presStr.end());
   return payload;
 }
 
-py::object PythonRpcHandler::loadPythonUDFResult(const Message& message) {
+py::object PythonRpcHandler::loadPythonUDFResult(
+    const std::vector<char>& pickledPayload,
+    const std::vector<torch::Tensor>& tensorTable) {
   AutoGIL ag;
-  auto pargs = py::bytes(message.payload().data(), message.payload().size());
+  auto pargs = py::bytes(pickledPayload.data(), pickledPayload.size());
   py::object loadResFunc;
   // loadResultFunction_ will be cleaned up in RpcAgent.join()
   // but loadPythonUDFResult() could be called after RpcAgent.join(), in this
@@ -57,7 +60,7 @@ py::object PythonRpcHandler::loadPythonUDFResult(const Message& message) {
   } else {
     loadResFunc = loadResultFunction_;
   }
-  return loadResFunc(pargs, message.tensors());
+  return loadResFunc(pargs, tensorTable);
 }
 
 } // namespace rpc
