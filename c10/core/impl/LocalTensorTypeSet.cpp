@@ -16,7 +16,7 @@ thread_local PODLocalTensorTypeSet raw_local_tensor_type_set;
 
 #else // defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 
-PODLocalTensorTypeSet raw_local_tensor_type_set = 0;
+static PODLocalTensorTypeSet raw_local_tensor_type_set;
 
 #endif
 

@@ -1,9 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <c10/core/TensorTypeId.h>
+
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
-
 #include <ATen/core/ATenDispatch.h>
 
 #include <torch/csrc/jit/operator.h>
@@ -44,7 +45,7 @@ static int64_t override_call_count = 0;
 void generic_mode_fallback(const char* schema_str, torch::jit::Stack* stack) {
   override_call_count++;
   auto operation = getOperator(schema_str)->getOperation();
-  c10::impl::ExcludeTensorTypeIdGuard(TensorTypeId::TESTING_ONLY_GenericModeTensorId);
+  c10::impl::ExcludeTensorTypeIdGuard guard(TensorTypeId::TESTING_ONLY_GenericModeTensorId);
   auto offset = operation(*stack);
   TORCH_INTERNAL_ASSERT(offset == 0);
 }
@@ -129,7 +130,7 @@ class Environment : public ::testing::Environment {
 // basic functionality works.
 
 TEST(BoxedFallbackTest, TestBoxedFallbackWithMode) {
-  c10::impl::IncludeTensorTypeIdGuard(TensorTypeId::TESTING_ONLY_GenericModeTensorId);
+  c10::impl::IncludeTensorTypeIdGuard guard(TensorTypeId::TESTING_ONLY_GenericModeTensorId);
 
   override_call_count = 0;
   Tensor a = ones({5, 5}, kDouble);
