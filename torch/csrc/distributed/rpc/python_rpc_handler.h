@@ -36,10 +36,10 @@ class PYBIND11_EXPORT PythonRpcHandler {
   PythonRpcHandler(PythonRpcHandler&&) = delete;
   PythonRpcHandler& operator=(PythonRpcHandler&&) = delete;
 
-  // Ref to `torch.distributed.internal_rpc_utils._python_udf_run`.
+  // Ref to `torch.distributed.rpc.internal._python_udf_run`.
   py::object pythonUDFRun_;
 
-  // Ref to `torch.distributed.internal_rpc_utils._python_udf_load_result`.
+  // Ref to `torch.distributed.rpc.internal._python_udf_load_result`.
   py::object pythonUDFLoadResult_;
 };
 

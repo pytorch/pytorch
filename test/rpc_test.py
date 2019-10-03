@@ -10,7 +10,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from collections import namedtuple
-from torch.distributed.internal_rpc_utils import _internal_rpc_pickler, PythonUDF
+from torch.distributed.rpc.internal import _internal_rpc_pickler, PythonUDF
 
 from common_utils import load_tests
 from torch.distributed.rpc_api import RpcBackend

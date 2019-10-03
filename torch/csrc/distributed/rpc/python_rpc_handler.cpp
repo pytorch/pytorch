@@ -21,7 +21,7 @@ py::object getFunction(const py::object& module, const char* name) {
 PythonRpcHandler::PythonRpcHandler() {
   AutoGIL ag;
   py::object module =
-      py::module::import("torch.distributed.internal_rpc_utils");
+      py::module::import("torch.distributed.rpc.internal");
   pythonUDFRun_ = getFunction(module, "_python_udf_run");
   pythonUDFLoadResult_ = getFunction(module, "_python_udf_load_result");
 }
