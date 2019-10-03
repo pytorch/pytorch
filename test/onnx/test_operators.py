@@ -786,6 +786,16 @@ class TestOperators(TestCase):
         z = torch.ones(5, requires_grad=True)
         self.assertONNX(lambda x, y, z: torch.meshgrid(x, y, z), (x, y, z))
 
+    def test_topk(self):
+        x = torch.arange(1., 6., requires_grad=True)
+        k = torch.tensor(3)
+        self.assertONNX(lambda x, k: torch.topk(x, k), (x, k), opset_version=10)
+
+    def test_topk_smallest_unsorted(self):
+        x = torch.arange(1., 6., requires_grad=True)
+        k = torch.tensor(3)
+        self.assertONNX(lambda x, k: torch.topk(x, k, largest=False, sorted=False), (x, k), opset_version=11)
+
     def test_baddbmm(self):
         x = torch.randn(10, 3, 5)
         b1 = torch.randn(10, 3, 4)
