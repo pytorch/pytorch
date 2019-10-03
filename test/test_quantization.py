@@ -3,9 +3,9 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import torch.nn._intrinsic as nni
-import torch.nn._intrinsic.quantized as nniq
-import torch.nn._intrinsic.qat as nniqat
+import torch.nn.intrinsic as nni
+import torch.nn.intrinsic.quantized as nniq
+import torch.nn.intrinsic.qat as nniqat
 from torch.quantization import \
     QConfig, QConfigDynamic, default_observer, default_weight_observer, get_observer_dict,\
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
@@ -294,7 +294,7 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
         model = convert(model)
 
         def checkQuantized(model):
-            self.assertEqual(type(model.module.conv1), nn._intrinsic.quantized.ConvReLU2d)
+            self.assertEqual(type(model.module.conv1), nn.intrinsic.quantized.ConvReLU2d)
             self.assertEqual(type(model.module.myop), nn.quantized.QFunctional)
             self.assertEqual(type(model.module.avgpool), nn.AdaptiveAvgPool2d)
             test_only_eval_fn(model, self.img_data)
