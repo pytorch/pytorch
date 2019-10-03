@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 from os import getenv
 from functools import wraps
 import torch.distributed as dist
-from torch.distributed.rpc import RpcBackend
+from torch.distributed.rpc_api import RpcBackend
 
 if not dist.is_available():
     print("c10d not available, skipping tests")

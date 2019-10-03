@@ -50,9 +50,11 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
     }
     case MessageType::PYTHON_CALL: {
       auto& pyCall = static_cast<PythonUDFCall&>(rpc);
+      std::vector<torch::Tensor> responseTensorTable;
       auto payload = PythonRpcHandler::getInstance().generatePythonUDFResult(
-          pyCall.pickledPayload());
-      return c10::guts::make_unique<PythonUDFResp>(std::move(payload));
+          pyCall.pickledPayload(), pyCall.tensors(), responseTensorTable);
+      return c10::guts::make_unique<PythonUDFResp>(
+          std::move(payload), std::move(responseTensorTable));
     }
     case MessageType::REMOTE_CALL: {
       auto& src = static_cast<ScriptRemoteCall&>(rpc);

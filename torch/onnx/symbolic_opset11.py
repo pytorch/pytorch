@@ -13,8 +13,9 @@ from torch.onnx.symbolic_helper import _black_list_in_opset
 # This file exports ONNX ops for opset 11
 
 black_listed_operators = [
-    "eq", "ne", "sort", "topk", "hardtanh"
+    "eq", "ne", "hardtanh"
 ]
+
 
 for black_listed_op in black_listed_operators:
     vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
@@ -48,7 +49,8 @@ def _interpolate(name, dim, interpolate_mode):
         align_corners = sym_help._maybe_get_scalar(align_corners)
         output_size = sym_help._maybe_get_const(output_size, 'is')
         if sym_help._is_value(output_size):
-            offsets = g.op("Constant", value_t=torch.ones(offset, dtype=torch.int64))
+            offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.int64))
+            output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
             output_size = g.op("Concat", offsets, output_size, axis_i=0)
         else:
             output_size = [1 if i < 2 else output_size[-(dim - i)] for i in range(0, dim)]
@@ -113,6 +115,16 @@ def _unique2(g, self, sorted, return_inverse, return_counts):
 def unique_dim(g, self, dim, sorted, return_inverse, return_counts):
     u, indices, inverse_indices, counts = g.op("Unique", self, axis_i=dim, sorted_i=sorted, outputs=4)
     return u, inverse_indices, counts
+
+
+@parse_args('v', 'v', 'i', 'i', 'i', 'none')
+def topk(g, self, k, dim, largest, sorted, out=None):
+    return sym_help._topk_helper(g, self, k, dim, largest=largest, sorted=sorted, out=out)
+
+
+@parse_args('v', 'i', 'i', 'none')
+def sort(g, self, dim, decending, out=None):
+    return sym_help._sort_helper(g, self, dim, decending=decending, out=out)
 
 
 def round(g, self):

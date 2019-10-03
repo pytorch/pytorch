@@ -72,7 +72,7 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
       // TODO: Try to avoid a copy here.
       auto& resp = static_cast<PythonUDFResp&>(rpc);
       return PythonRpcHandler::getInstance().loadPythonUDFResult(
-          resp.pickledPayload());
+          resp.pickledPayload(), resp.tensors());
     }
     case MessageType::MESSAGE_WITH_AUTOGRAD_RESP: {
       auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
@@ -119,7 +119,7 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
 
     // Record autograd information for 'send'.
     addSendRpcBackward(
-        autogradContext, autogradMetadata, rpcWithAutograd.tensors(), dst.id_);
+        autogradContext, autogradMetadata, rpcWithAutograd.tensors());
 
     return agent.send(dst, std::move(rpcWithAutograd).toMessage());
   } else {
@@ -152,11 +152,13 @@ std::shared_ptr<RRef> pyRemoteBuiltin(
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerId& dst,
-    const std::string& pickledPythonUDF) {
+    const std::string& pickledPythonUDF,
+    std::vector<torch::Tensor>& tensors) {
   return agent.send(
       dst,
       PythonUDFCall(
-          std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()))
+          std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
+          tensors)
           .toMessage());
 }
 
