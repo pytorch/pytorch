@@ -13603,13 +13603,16 @@ tensor_op_tests = [
     ('new_ones', '', _small_3d, lambda t, d: [1, 2, 3, 4, 5], 1e-5, 1e-5, _types, False),
     ('permute', '', _new_t((1, 2, 3, 4)), lambda t, d: [2, 1, 3, 0], 1e-5, 1e-5, _types, False),
     ('put_', '', _new_t((2, 5, 3)),
-        lambda t, d: [torch.LongTensor([[0], [-2]]).to(device=d), torch.LongTensor([[3], [4]]).to(dtype=_convert_t(t, d), device=d)],
+        lambda t, d: [torch.LongTensor([[0], [-2]]).to(device=d),
+                      torch.LongTensor([[3], [4]]).to(dtype=_convert_t(t, d), device=d)],
         1e-5, 1e-5, _types, False),
     ('put_', 'empty', _new_t((2, 3)),
         lambda t, d: [torch.LongTensor([]).to(device=d), torch.LongTensor([]).to(dtype=_convert_t(t, d), device=d)],
         1e-5, 1e-5, _types, False),
     ('put_', 'accumulate', _new_t((2, 2)),
-        lambda t, d: [torch.LongTensor([[1], [-3]]).to(device=d), torch.LongTensor([[1], [2]]).to(dtype=_convert_t(t, d), device=d), True],
+        lambda t, d: [torch.LongTensor([[1], [-3]]).to(device=d),
+                      torch.LongTensor([[1], [2]]).to(dtype=_convert_t(t, d), device=d),
+                      True],
         1e-5, 1e-5, _types, False),
     ('prod', '', _small_2d_oneish, lambda t, d: [], 1e-2, 1e-5, _types, False),
     ('prod', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, _types, False),
@@ -13802,12 +13805,14 @@ def generate_tensor_op_tests(cls):
         if subtest_str:
             subtest_str = '_' + subtest_str
 
-        generate_test_function(cls, op_str, subtest_str, tensor_ctor, arg_ctor, half_precision, float_precision, dtype_list, decorators)
+        generate_test_function(cls, op_str, subtest_str, tensor_ctor, arg_ctor,
+                               half_precision, float_precision, dtype_list, decorators)
 
         if make_inplace_variant:
             op_str = op_str + '_'
             subtest_str = 'inplace' + subtest_str
-            generate_test_function(cls, op_str, subtest_str, tensor_ctor, arg_ctor, half_precision, float_precision, dtype_list, decorators)
+            generate_test_function(cls, op_str, subtest_str, tensor_ctor, arg_ctor,
+                                   half_precision, float_precision, dtype_list, decorators)
 
     for test in tensor_op_tests:
         caller(cls, *test)
