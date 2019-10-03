@@ -218,7 +218,8 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         weight.q_scale(),
         weight_zp);
     auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
-    for (int i = 0; i < weight_contig.numel(); ++i) {
+    auto wt_numel = weight_contig.numel();
+    for (int i = 0; i < wt_numel; ++i) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
     // We set the pre-packed conv weights to nullptr below as we call pre-pack
