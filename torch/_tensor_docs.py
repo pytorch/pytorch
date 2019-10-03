@@ -198,6 +198,13 @@ add_(value=1, other) -> Tensor
 In-place version of :meth:`~Tensor.add`
 """)
 
+add_docstr_all('add_relu',
+               r"""
+add(other) -> Tensor
+
+See :func:`torch.add_relu`
+""")
+
 add_docstr_all('addbmm',
                r"""
 addbmm(beta=1, alpha=1, batch1, batch2) -> Tensor
