@@ -14346,7 +14346,7 @@ a")
         self.assertEqual(eager_out, script_out)
 
     def test_nn_LSTM(self):
-        from torch.nn.utils.rnn import PackedSequence
+        from torch.nn.utils.rnn import PackedSequence  # noqa
         input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
 
         class S(torch.jit.ScriptModule):
@@ -14365,7 +14365,7 @@ a")
         self.assertEqual(eager_out, script_out)
 
     def test_nn_GRU(self):
-        from torch.nn.utils.rnn import PackedSequence
+        from torch.nn.utils.rnn import PackedSequence  # noqa
         seq_input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
         tensor_input = torch.randn(5, 5, 5)
 
@@ -19165,7 +19165,7 @@ class TestClassType(JitTestCase):
         @torch.jit.script
         class X(object):
             def __init__(self, x):
-                # type: (int    )
+                # type: (int) -> None
                 self.x = 2
 
             def script_method(self, y):
@@ -19173,7 +19173,7 @@ class TestClassType(JitTestCase):
 
             @torch.jit.unused
             def python_method(self):
-                import pdb
+                import pdb  # noqa
                 if True:
                     return 1
                 else:
