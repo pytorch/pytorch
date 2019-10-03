@@ -124,9 +124,12 @@ def get_concrete_type(original):
 
     class_annotations = getattr(original, '__annotations__', {})
 
-    # TODO: once properties are fixed, we should use __dict__ here because we
-    # only want to pick up attributes on this module instance, not the class
-    # itself.
+    # TODO: [switch to __dict__]
+    # we should use __dict__ here because we only want to pick up attributes on
+    # this module instance, not the class itself. We can't do it right now
+    # because there is code that relies on properties being turned into attributes.
+    # This is wrong (the property function is only evaluated once then "saved"
+    # as an attribute), so we should fix that and then switch this to using __dict__
     for name in dir(original):
         if name in blacklist or name.startswith("__"):
             # Python objects have lots of random attributes attached to them;
@@ -138,19 +141,20 @@ def get_concrete_type(original):
             continue
 
         if not hasattr(original, name):
-            # TODO we can clean this up when we switch to __dict__ (see above)
+            # TODO: delete this when [switch to __dict__]
             continue
 
         item = getattr(original, name)
-        # if isinstance(getattr(type(original), name, None), property):
-        #     # Avoid adding @property methods as attributes
-        #     continue
+        if name not in original.__dict__ and not isinstance(getattr(type(original), name, None), property):
+            # Skip class attributes that aren't properties
+            # TODO: delete this when [switch to __dict__]
+            continue
 
         if inspect.isfunction(item) and not inspect.ismethod(item):
             cls_attr = getattr(type(original), name, None)
             if inspect.isfunction(cls_attr):
                 # Skip function attributes that exist on the original class.
-                # TODO we can clean this up when we switch to __dict__ (see above)
+                # TODO: delete this when [switch to __dict__]
                 continue
 
             # This is a Python function attribute. Try to script it.
