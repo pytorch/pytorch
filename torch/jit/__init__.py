@@ -841,8 +841,8 @@ def trace(func,
 
     name = _qualified_name(func)
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
-                                                  var_lookup_fn,
-                                                  _force_outplace)
+                                                var_lookup_fn,
+                                                _force_outplace)
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:

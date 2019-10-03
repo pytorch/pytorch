@@ -19,8 +19,10 @@ namespace torch {
 namespace jit {
 
 static std::atomic<bool> profiling_mode{false};
+static std::atomic<bool> executor_mode{false};
 
 std::atomic<bool> &getProfilingMode() { return profiling_mode; }
+std::atomic<bool> &getExecutorMode() { return executor_mode; }
 
 std::shared_ptr<Graph> ProfilingGraphExecutorImpl::prepareGraph(
     const std::shared_ptr<Graph>& graph,
@@ -35,6 +37,7 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
 
+  //std::cout << "getPlanFor profiling: " << this << std::endl;
   if (optimized_plan_) {
     return *optimized_plan_;
   }
@@ -44,10 +47,12 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
     if (!pr_) {
       pr_ = ProfilingRecord::instrumentGraph(prepareGraph(graph, stack));
       auto copy = pr_->graph()->copy();
-      LowerGradOf(*copy);
-      RemoveExpands(copy);
-      CanonicalizeOps(copy);
-      EliminateDeadCode(copy);
+      //LowerGradOf(*copy);
+      specializeAutogradZero(*copy);
+      runRequiredPasses(copy);
+      // RemoveExpands(copy);
+      // CanonicalizeOps(copy);
+      // EliminateDeadCode(copy);
       const static auto *ppg = std::getenv("PYTORCH_PRINT_GRAPH");
       if (ppg) {
         std::cout << "profiled graph:\n";
@@ -86,7 +91,9 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   // otherwise we will need to teach
   // liveness and buildBailOut graphs
   // about them
-  LowerGradOf(*copy);
+  
+  //LowerGradOf(*copy);
+
   // constant fold into ConstantChunk
   CanonicalizeOps(copy);
   EliminateRedundantGuards(copy);

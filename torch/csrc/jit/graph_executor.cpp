@@ -335,7 +335,10 @@ struct DifferentiableGraphOp {
   DifferentiableGraphOp(Gradient grad)
       : f(grad.f), grad(std::move(grad)), grad_executor(this->grad.df),
         num_inputs(this->grad.f->inputs().size()),
-        num_outputs(this->grad.f->outputs().size()) {}
+        num_outputs(this->grad.f->outputs().size()) {
+          // std::cout << "getExecutorMode = " << getExecutorMode() << std::endl;
+          // std::cout << "grad_executor = " << &grad_executor << std::endl;
+        }
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
   int operator()(Stack& stack) const {
@@ -502,6 +505,8 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   }
 
   ExecutionPlan getPlanFor(Stack& stack) override {
+    //std::cout << "getPlanFor" << this << std::endl;
+    TORCH_INTERNAL_ASSERT(false);
     return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
   }
@@ -634,14 +639,14 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 };
 
 GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph)
-    // : pImpl(
-    //       getProfilingMode() ? dynamic_cast<GraphExecutorImplBase*>(
-    //                                new ProfilingGraphExecutorImpl(graph))
-    //                          : dynamic_cast<GraphExecutorImplBase*>(
-    //                                new GraphExecutorImpl(graph))) {}
+    : pImpl(
+          getExecutorMode() ? dynamic_cast<GraphExecutorImplBase*>(
+                                   new ProfilingGraphExecutorImpl(graph))
+                             : dynamic_cast<GraphExecutorImplBase*>(
+                                   new GraphExecutorImpl(graph))) {}
 
-    : pImpl(dynamic_cast<GraphExecutorImplBase *>(
-          new ProfilingGraphExecutorImpl(graph))) {}
+    // : pImpl(dynamic_cast<GraphExecutorImplBase *>(
+    //       new ProfilingGraphExecutorImpl(graph))) {}
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
@@ -661,7 +666,7 @@ GraphExecutorState GraphExecutor::getDebugState() {
 
 void runRequiredPasses(const std::shared_ptr<Graph>& g) {
   //specializeAutogradZero(*g);
-  LowerGradOf(*g);
+  // LowerGradOf(*g);
   // implicit inserted expand nodes are not necessarily always valid
   // when used inside script methods that might have unstable shapes
   // we remove the implicitly created ones, and have shape analysis

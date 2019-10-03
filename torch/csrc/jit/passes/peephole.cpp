@@ -208,8 +208,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
             node->input()->debugName());
         node->output()->replaceAllUsesWith(input_node->input());
       }
-    } else if (getProfilingMode() &&
-               node->matches("aten::size(Tensor self) -> int[]")) {
+    } else if (node->matches("aten::size(Tensor self) -> int[]")) {
       if (auto ptt = node->input()->type()->cast<TensorType>()) {
         if (auto sizes = ptt->sizes().concrete_sizes()) {
           WithInsertPoint guard(node);

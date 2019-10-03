@@ -59,6 +59,7 @@ TORCH_API void debugSetAutodiffSubgraphInlining(bool state);
 TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();
 
 TORCH_API std::atomic<bool> &getProfilingMode();
+TORCH_API std::atomic<bool> &getExecutorMode();
 
 TORCH_API void setGraphExecutorOptimize(bool o);
 TORCH_API bool getGraphExecutorOptimize();
