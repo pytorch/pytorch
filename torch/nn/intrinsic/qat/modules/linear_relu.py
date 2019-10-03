@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch.nn.qat as nnqat
-import torch.nn._intrinsic
+import torch.nn.intrinsic
 import torch.nn.functional as F
 
 class LinearReLU(nnqat.Linear):
@@ -11,7 +11,7 @@ class LinearReLU(nnqat.Linear):
 
     We adopt the same interface as :class:`torch.nn.Linear`.
 
-    Similar to `torch.nn._intrinsic.LinearReLU`, with FakeQuantize modules initialized to
+    Similar to `torch.nn.intrinsic.LinearReLU`, with FakeQuantize modules initialized to
     default.
 
     Attributes:
@@ -27,7 +27,7 @@ class LinearReLU(nnqat.Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    _FLOAT_MODULE = torch.nn._intrinsic.LinearReLU
+    _FLOAT_MODULE = torch.nn.intrinsic.LinearReLU
 
     def __init__(self, in_features, out_features, bias=True,
                  qconfig=None):

@@ -8,8 +8,8 @@ from __future__ import unicode_literals
 
 import torch
 import torch.nn as nn
-import torch.nn._intrinsic as nni
-import torch.nn._intrinsic.qat as nniqat
+import torch.nn.intrinsic as nni
+import torch.nn.intrinsic.qat as nniqat
 from torch.nn.utils import fuse_conv_bn_weights
 from torch._ops import ops
 from torch.nn.modules.utils import _pair

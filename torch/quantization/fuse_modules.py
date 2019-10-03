@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import copy
 
-import torch.nn._intrinsic.modules.fused as torch_fused
+import torch.nn.intrinsic.modules.fused as torch_fused
 
 def fuse_conv_bn(conv, bn):
     r"""Given the conv and bn modules, fuses them and returns the fused module
@@ -26,7 +26,7 @@ def fuse_conv_bn(conv, bn):
         assert bn.num_features == conv.out_channels, 'Output channel of Conv2d must match num_features of BatchNorm2d'
         assert bn.affine, 'Only support fusing BatchNorm2d with affine set to True'
         assert bn.track_running_stats, 'Only support fusing BatchNorm2d with tracking_running_stats set to True'
-        return torch.nn._intrinsic.ConvBn2d(conv, bn)
+        return torch.nn.intrinsic.ConvBn2d(conv, bn)
     else:
         return torch.nn.utils.fuse_conv_bn_eval(conv, bn)
 
@@ -87,8 +87,8 @@ def fuse_known_modules(mod_list):
     OP_LIST_TO_FUSER_METHOD = {
         (torch.nn.Conv2d, torch.nn.BatchNorm2d): fuse_conv_bn,
         (torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU): fuse_conv_bn_relu,
-        (torch.nn.Conv2d, torch.nn.ReLU): torch.nn._intrinsic.ConvReLU2d,
-        (torch.nn.Linear, torch.nn.ReLU): torch.nn._intrinsic.LinearReLU
+        (torch.nn.Conv2d, torch.nn.ReLU): torch.nn.intrinsic.ConvReLU2d,
+        (torch.nn.Linear, torch.nn.ReLU): torch.nn.intrinsic.LinearReLU
     }
 
     types = tuple(type(m) for m in mod_list)

@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch.nn.quantized as nnq
-import torch.nn._intrinsic
+import torch.nn.intrinsic
 import torch
 
 class LinearReLU(nnq.Linear):
@@ -14,13 +14,13 @@ class LinearReLU(nnq.Linear):
 
     Examples::
 
-        >>> m = nn._intrinsic.LinearReLU(20, 30)
+        >>> m = nn.intrinsic.LinearReLU(20, 30)
         >>> input = torch.randn(128, 20)
         >>> output = m(input)
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    _FLOAT_MODULE = torch.nn._intrinsic.LinearReLU
+    _FLOAT_MODULE = torch.nn.intrinsic.LinearReLU
 
     def __init__(self, in_features, out_features, bias=True):
         super(LinearReLU, self).__init__(in_features, out_features, bias)

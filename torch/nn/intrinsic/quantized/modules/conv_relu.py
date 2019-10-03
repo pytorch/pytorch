@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch.nn.quantized as nnq
-import torch.nn._intrinsic
-import torch.nn._intrinsic.qat
+import torch.nn.intrinsic
+import torch.nn.intrinsic.qat
 from torch.nn.utils import fuse_conv_bn_weights
 import torch
 
@@ -15,7 +15,7 @@ class ConvReLU2d(nnq.Conv2d):
         Same as torch.nn.quantized.Conv2d
 
     """
-    _FLOAT_MODULE = torch.nn._intrinsic.ConvReLU2d
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
@@ -37,7 +37,7 @@ class ConvReLU2d(nnq.Conv2d):
 
     @classmethod
     def from_float(cls, mod):
-        if type(mod) == torch.nn._intrinsic.qat.ConvBnReLU2d:
+        if type(mod) == torch.nn.intrinsic.qat.ConvBnReLU2d:
             mod.weight, mod.bias = \
                 fuse_conv_bn_weights(mod.weight, mod.bias, mod.running_mean,
                                      mod.running_var, mod.eps, mod.gamma, mod.beta)

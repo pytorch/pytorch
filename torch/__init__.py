@@ -303,7 +303,7 @@ import torch.cuda
 import torch.autograd
 from torch.autograd import no_grad, enable_grad, set_grad_enabled  # noqa: F401
 import torch.nn
-import torch.nn._intrinsic
+import torch.nn.intrinsic
 import torch.nn.quantized
 import torch.optim
 import torch.multiprocessing
