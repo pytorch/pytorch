@@ -1,11 +1,14 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
+import itertools
 import warnings
 
 import torch
 import torch.nn as nn
-import torch.nn._intrinsic as nni
+import torch.nn.intrinsic as nni
+import torch.nn.intrinsic.quantized as nniq
+import torch.nn.intrinsic.qat as nniqat
 import torch.nn.quantized as nnq
 
 from .default_mappings import (DEFAULT_DYNAMIC_MODULE_MAPPING,
@@ -189,28 +192,31 @@ def quantize_dynamic(model, qconfig_dict=None, dtype=torch.qint8,
     For simplest usage provide `dtype` argument that can be float16 or qint8. Weight-only quantization
     by default is performed for layers with large weights size - i.e. Linear and RNN variants.
 
-    Fine grained control is possible with `qconfig_dict` and `mapping` that act similarly to `quantize()`.
-    If `qconfig_dict` is provided, the `dtype` argument is ignored.
+    Fine grained control is possible with `qconfig` and `mapping` that act similarly to `quantize()`.
+    If `qconfig` is provided, the `dtype` argument is ignored.
 
     Args:
         module: input model
-        qconfig_dict: dictionary that maps from name or type of submodule to quantization
-            configuration, qconfig applies to all submodules of a given
-            module unless qconfig for the submodules are specified (when the
-            submodule already has qconfig attribute). Entries in the dictionary
-            need to be QConfigDynamic instances.
+        qconfig_spec: Either:
+            * A dictionary that maps from name or type of submodule to quantization
+              configuration, qconfig applies to all submodules of a given
+              module unless qconfig for the submodules are specified (when the
+              submodule already has qconfig attribute). Entries in the dictionary
+              need to be QConfigDynamic instances.
+            * A set of types and/or submodule names to apply dynamic quantization to,
+              in which case the `dtype` argument is used to specifiy the bit-width
         inplace: carry out model transformations in-place, the original module is mutated
         mapping: maps type of a submodule to a type of corresponding dynamically quantized version
             with which the submodule needs to be replaced
     """
-    if qconfig_dict is None:
+    if qconfig_spec is None:
         if dtype == torch.qint8:
-            qconfig_dict = {
+            qconfig_spec = {
                 nn.Linear : default_dynamic_qconfig,
                 nn.LSTM : default_dynamic_qconfig,
             }
         elif dtype == torch.float16:
-            qconfig_dict = {
+            qconfig_spec = {
                 # TODO: uncomment when float16 Linear support is added
                 # nn.Linear : default_dynamic_qconfig,
                 nn.LSTM : float16_dynamic_qconfig,
@@ -218,12 +224,22 @@ def quantize_dynamic(model, qconfig_dict=None, dtype=torch.qint8,
         else:
             raise ValueError(
                 "Don't know how to quantize with default settings for {}. Provide full qconfig please".format(dtype))
+    elif isinstance(qconfig_spec, set):
+        if dtype is torch.qint8:
+            default_qconfig = default_dynamic_qconfig
+        elif dtype is torch.float16:
+            default_qconfig = float16_dynamic_qconfig
+        else:
+            raise RuntimeError('Unknown dtype specified for quantize_dynamic: ', str(dtype))
+        qconfig_spec = dict(zip(qconfig_spec, itertools.repeat(default_qconfig)))
+
     if mapping is None:
         mapping = DEFAULT_DYNAMIC_MODULE_MAPPING
+
     if not inplace:
         model = copy.deepcopy(model)
     model.eval()
-    propagate_qconfig_(model, qconfig_dict)
+    propagate_qconfig_(model, qconfig_spec)
     convert(model, mapping, inplace=True)
     return model
 
