@@ -7,7 +7,6 @@ from torch.distributed.rpc.internal import _internal_rpc_pickler, PythonUDF
 
 import functools
 import sys
-import warnings
 import torch
 from enum import Enum
 
