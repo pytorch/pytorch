@@ -360,3 +360,24 @@ TEST_F(FunctionalTest, LogSigmoid) {
   auto y_exp = torch::log(torch::ones_like(x)/(torch::ones_like(x) + torch::exp(torch::neg(x))));
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
+
+TEST_F(FunctionalTest, Normalize) {
+  {
+    auto input = torch::randn({1,3,4,4}, torch::requires_grad());
+    auto norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
+    // reduce to scalar to call .backward()
+    torch::Tensor s = norm.sum();
+    s.backward();
+    ASSERT_EQ(s.ndimension(), 0);
+  }
+  {
+    auto input = torch::randn({1,3,4,4});
+    auto output = torch::randn({1,3,4,4});
+    F::normalize(input, NormalizeOptions().dim(-2), output);
+  }
+  {
+    auto input = torch::randn({1}, torch::requires_grad());
+    torch::Tensor norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
+    norm.backward();
+  }
+}
