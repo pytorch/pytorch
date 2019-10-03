@@ -173,6 +173,36 @@ class TestFakeQuantizePerTensor(TestCase):
 
         self.assertEqual(loaded_fq_module.calculate_qparams(), fq_module.calculate_qparams())
 
+    def test_fake_quant_control(self):
+        torch.manual_seed(42)
+        X = torch.rand(20, 10, dtype=torch.float32)
+        fq_module = torch.quantization.default_fake_quant()
+        # Output of fake quant is not identical to input
+        Y = fq_module(X)
+        self.assertNotEqual(Y, X)
+        torch.quantization.disable_fake_quant(fq_module)
+        X = torch.rand(20, 10, dtype=torch.float32)
+        Y = fq_module(X)
+        # Fake quant is disabled,output is identical to input
+        self.assertEqual(Y, X)
+        scale = fq_module.scale
+        zero_point = fq_module.zero_point
+        torch.quantization.disable_observer(fq_module)
+        torch.quantization.enable_fake_quant(fq_module)
+        X = 10.0 * torch.rand(20, 10, dtype=torch.float32) - 5.0
+        Y = fq_module(X)
+        self.assertNotEqual(Y, X)
+        # Observer is disabled, scale and zero-point do not change
+        self.assertEqual(fq_module.scale, scale)
+        self.assertEqual(fq_module.zero_point, zero_point)
+        torch.quantization.enable_observer(fq_module)
+        Y = fq_module(X)
+        self.assertNotEqual(Y, X)
+        # Observer is enabled, scale and zero-point are different
+        self.assertNotEqual(fq_module.scale, scale)
+        self.assertNotEqual(fq_module.zero_point, zero_point)
+
+
 
 class TestFakeQuantizePerChannel(TestCase):
     # NOTE: Tests in this class are decorated with no_deadline
