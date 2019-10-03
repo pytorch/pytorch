@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
+#include <c10/util/C++17.h>
 #include <torch/csrc/jit/pickle.h>
 
 namespace torch {
@@ -22,7 +23,7 @@ const at::IValue& ScriptRemoteCall::retForkId() {
   return retForkId_;
 }
 
-Message ScriptRemoteCall::toMessage() const {
+Message ScriptRemoteCall::toMessage() && {
   std::vector<IValue> ivalues;
   ScriptCall::toIValues(ivalues);
   ivalues.push_back(retRRefId_);
@@ -36,7 +37,8 @@ Message ScriptRemoteCall::toMessage() const {
       std::move(payload), std::move(tensor_table), MessageType::REMOTE_CALL);
 }
 
-ScriptRemoteCall ScriptRemoteCall::fromMessage(const Message& message) {
+std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
+    const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
 
@@ -51,7 +53,7 @@ ScriptRemoteCall ScriptRemoteCall::fromMessage(const Message& message) {
   values.pop_back();
 
   auto op = ScriptCall::fromIValues(values);
-  return ScriptRemoteCall(
+  return c10::guts::make_unique<ScriptRemoteCall>(
       op, std::move(values), std::move(retRRefId), std::move(retForkId));
 }
 
