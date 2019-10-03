@@ -5,7 +5,7 @@ echo ""
 echo "PWD: ${PWD}"
 WORKSPACE=/Users/distiller/workspace
 PROJ_ROOT=/Users/distiller/project
-export TCLLIBPATH="/usr/local/lib" 
+export TCLLIBPATH="/usr/local/lib"
 # Install conda
 curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
 chmod +x ~/Downloads/conda.sh
@@ -29,7 +29,7 @@ echo "IOS_PLATFORM: ${IOS_PLATFORM}"
 export BUILD_PYTORCH_MOBILE=1
 export IOS_ARCH=${IOS_ARCH}
 export IOS_PLATFORM=${IOS_PLATFORM}
-unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
+unbuffer sh|yes ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
 #store the binary
 cd ${WORKSPACE}
 DEST_DIR=${WORKSPACE}/ios

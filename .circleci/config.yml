@@ -850,8 +850,8 @@ jobs:
     - persist_to_workspace:
         root: /Users/distiller/workspace/
         paths: ios
-  
-  binary_ios_upload: 
+
+  binary_ios_upload:
     <<: *pytorch_ios_params
     macos:
       xcode: "10.2.1"
@@ -1347,7 +1347,7 @@ jobs:
             export BUILD_PYTORCH_MOBILE=1
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
-            unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
+            unbuffer sh|yes ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
 
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
@@ -3777,7 +3777,7 @@ workflows:
           build_environment: "libtorch-ios-10.2.1-nightly-x86_64-build"
           ios_platform: "SIMULATOR"
           ios_arch: "x86_64"
-          requires: 
+          requires:
             - setup
           filters:
             branches:
@@ -3787,7 +3787,7 @@ workflows:
           build_environment: "libtorch-ios-10.2.1-nightly-arm64-build"
           ios_arch: "arm64"
           ios_platform: "OS"
-          requires: 
+          requires:
             - setup
           filters:
             branches:
