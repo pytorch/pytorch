@@ -42,14 +42,6 @@ using ::c10::QualifiedName;
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
 using ModulePtr = c10::intrusive_ptr<c10::ivalue::Object>;
-// A method in a module, e.g. f in:
-//
-// class M(ScriptModule):
-//   @script_method
-//   def f(self, x):
-//     ...
-// Note: because Method/Module are exposed to python these
-// classes use python method naming conventions
 
 struct Module;
 
@@ -59,6 +51,14 @@ using slot_list = slot_list_impl<Slot>;
 using module_list = slot_list_impl<Module>;
 using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
 
+// A method in a module, e.g. f in:
+//
+// class M(ScriptModule):
+//   @script_method
+//   def f(self, x):
+//     ...
+// Note: because Method/Module are exposed to python these
+// classes use python method naming conventions
 struct TORCH_API Method {
   Method(ModulePtr owner, Function* function);
 
@@ -144,28 +144,27 @@ struct TORCH_API Module {
   // register_buffer method. With this simplification, we only need to track
   // whether a slot is a parameter to be able to classify it.
   void register_buffer(const std::string& name, autograd::Variable v) {
-    set_or_add_slot(name, TensorType::get(), v, EntityType::ATTRIBUTE);
+    type()->addOrCheckAttribute(name, TensorType::get());
+    module_object()->setAttr(name, v);
   }
-
   void register_parameter(
       const std::string& name,
       autograd::Variable v,
       bool is_buffer) {
-    set_or_add_slot(
-        name,
-        TensorType::get(),
-        v,
-        is_buffer ? EntityType::ATTRIBUTE : EntityType::PARAMETER);
+    type()->addOrCheckAttribute(name, TensorType::get(), !is_buffer);
+    module_object()->setAttr(name, v);
   }
   void register_attribute(
       const std::string& name,
-      const TypePtr type,
-      IValue ivalue) {
-    set_or_add_slot(name, type, ivalue, EntityType::ATTRIBUTE);
+      const TypePtr t,
+      IValue v,
+      bool is_param = false) {
+    type()->addOrCheckAttribute(name, t, is_param);
+    module_object()->setAttr(name, v);
   }
   void register_module(const std::string& name, const Module& module) {
-    set_or_add_slot(
-        name, module.type(), module.module_object(), EntityType::MODULE);
+    type()->addOrCheckAttribute(name, module.type());
+    module_object()->setAttr(name, module.module_object());
   }
 
   void set_parameter(const std::string& name, at::Tensor v) {
@@ -396,40 +395,20 @@ struct TORCH_API Module {
     }
     return nullptr;
   }
-  void check_entity(EntityType expected, size_t slot) const {
-    EntityType actual = get_slot(slot).entity_type();
-    TORCH_CHECK(
-        expected == actual,
-        "The field '",
-        type()->getAttributeName(slot),
-        "' is a ",
-        toString(actual),
-        " but this call is"
-        " trying to use it as a ",
-        toString(expected));
-  }
-
-  void set_or_add_slot(
-      const std::string& name,
-      const TypePtr& slot_type,
-      IValue v,
-      EntityType etype) {
-    auto slot = type()->findAttributeSlot(name);
-    if (!slot) {
-      slot =
-          type()->addAttribute(name, slot_type, etype == EntityType::PARAMETER);
-    } else {
-      check_entity(etype, *slot);
-    }
-    TypePtr atype = type()->getAttribute(*slot);
-    TORCH_CHECK(slot_type->isSubtypeOf(atype));
-    module_object()->setSlot(*slot, std::move(v));
-  }
 
   Slot get_slot(const std::string& name, EntityType etype) const {
-    size_t slot = type()->getAttributeSlot(name);
-    check_entity(etype, slot);
-    return get_slot(slot);
+    size_t slot_idx = type()->getAttributeSlot(name);
+    Slot slot = get_slot(slot_idx);
+    TORCH_CHECK(
+        etype == slot.entity_type(),
+        "The field '",
+        type()->getAttributeName(slot_idx),
+        "' is a ",
+        toString(slot.entity_type()),
+        " but this call is"
+        " trying to use it as a ",
+        toString(etype));
+    return slot;
   }
   c10::optional<Slot> find_slot(const std::string& name, EntityType etype)
       const {
