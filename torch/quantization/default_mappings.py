@@ -1,9 +1,9 @@
 
 from torch import nn
 
-import torch.nn._intrinsic as nni
-import torch.nn._intrinsic.quantized as nniq
-import torch.nn._intrinsic.qat as nniqat
+import torch.nn.intrinsic as nni
+import torch.nn.intrinsic.quantized as nniq
+import torch.nn.intrinsic.qat as nniqat
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
