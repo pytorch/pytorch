@@ -160,6 +160,9 @@ const auto options = TensorOptions()
 auto result_ = (${first}).${name}(${args_with_tensor_options});
 """)
 
+# Adding `AutoNonVariableTypeMode` guard for `USE_STATIC_DISPATCH` case is kinda
+# hack to address issue #26764. TODO: remove this hack after Variable/Tensor
+# unification (#23032) is done.
 CONSTRUCTOR = CodeTemplate("""\
 [](Stack & stack) {
     ${lvalues}

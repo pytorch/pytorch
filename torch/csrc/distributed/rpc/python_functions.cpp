@@ -1,4 +1,10 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
+#include <c10/util/C++17.h>
+#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
+#include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/python_udf_call.h>
+#include <torch/csrc/distributed/rpc/python_udf_resp.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
 namespace distributed {
@@ -47,10 +53,12 @@ std::shared_ptr<Operator> matchBuiltinOp(
 
 } // namespace
 
-py::object toPyObj(const Message& message) {
-  switch (message.type()) {
+using namespace torch::distributed::autograd;
+
+py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
+  switch (messageType) {
     case MessageType::SCRIPT_RET: {
-      ScriptRet ret = ScriptRet::fromMessage(message);
+      auto& ret = static_cast<ScriptResp&>(rpc);
       Stack stack;
       stack.push_back(ret.value());
       {
@@ -61,16 +69,30 @@ py::object toPyObj(const Message& message) {
       }
     }
     case MessageType::PYTHON_RET: {
-      return PythonRpcHandler::getInstance().loadPythonUDFResult(message);
+      // TODO: Try to avoid a copy here.
+      auto& resp = static_cast<PythonUDFResp&>(rpc);
+      return PythonRpcHandler::getInstance().loadPythonUDFResult(
+          resp.pickledPayload(), resp.tensors());
     }
-    case MessageType::EXCEPTION: {
-      std::string err(message.payload().begin(), message.payload().end());
-      throw std::runtime_error(err);
+    case MessageType::MESSAGE_WITH_AUTOGRAD_RESP: {
+      auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
+
+      // Attach 'recv' autograd function.
+      addRecvRpcBackward(
+          rpcWithAutograd.autogradMetadata(), rpcWithAutograd.tensors());
+
+      // Handle the original RPC.
+      auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
+      return toPyObjInternal(rpcWithAutograd.wrappedRpc(), wrappedMessageType);
     }
     default: {
-      AT_ERROR("Unrecognized response message type ", message.type());
+      AT_ERROR("Unrecognized response message type ", messageType);
     }
   }
+}
+
+py::object toPyObj(const Message& message) {
+  return toPyObjInternal(*deserializeResponse(message), message.type());
 }
 
 std::shared_ptr<FutureMessage> pyRpcBuiltin(
@@ -81,7 +103,28 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
     const py::kwargs& kwargs) {
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
-  return agent.send(dst, ScriptCall(op, std::move(stack)).toMessage());
+  auto scriptCall = c10::guts::make_unique<ScriptCall>(op, std::move(stack));
+  auto& autogradContainer = DistAutogradContainer::getInstance();
+  if (autogradContainer.hasValidContext()) {
+    // Retrieve the appropriate context to modify.
+    auto& autogradContext = autogradContainer.currentContext();
+
+    // Wrap the original rpc with autograd information.
+    AutogradMetadata autogradMetadata(
+        autogradContext.context_id(), autogradContainer.newAutogradMessageId());
+    RpcWithAutograd rpcWithAutograd(
+        MessageType::MESSAGE_WITH_AUTOGRAD_REQ,
+        autogradMetadata,
+        std::move(scriptCall));
+
+    // Record autograd information for 'send'.
+    addSendRpcBackward(
+        autogradContext, autogradMetadata, rpcWithAutograd.tensors());
+
+    return agent.send(dst, std::move(rpcWithAutograd).toMessage());
+  } else {
+    return agent.send(dst, std::move(*scriptCall).toMessage());
+  }
 }
 
 std::shared_ptr<RRef> pyRemoteBuiltin(
@@ -109,14 +152,14 @@ std::shared_ptr<RRef> pyRemoteBuiltin(
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerId& dst,
-    const std::string& pickledPythonUDF) {
-  std::vector<char> data(pickledPythonUDF.begin(), pickledPythonUDF.end());
-  std::vector<torch::Tensor> tensor_table;
-
+    const std::string& pickledPythonUDF,
+    std::vector<torch::Tensor>& tensors) {
   return agent.send(
       dst,
-      Message(
-          std::move(data), std::move(tensor_table), MessageType::PYTHON_CALL));
+      PythonUDFCall(
+          std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
+          tensors)
+          .toMessage());
 }
 
 } // namespace rpc
