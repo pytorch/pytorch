@@ -19243,6 +19243,21 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(fn(1), 3)
 
+    def test_staticmethod(self):
+        class X(object):
+            def __init__(self, x):
+                # type: (int) -> None
+                self.x = x
+
+            @staticmethod
+            def identity(x):
+                return x
+
+        def fn(x, y):
+            return X.identity(x)
+
+        self.checkScript(fn, (torch.randn(2, 2), torch.randn(2, 2)))
+
     def test_set_attr_type_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
             @torch.jit.script
@@ -19272,10 +19287,10 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_schema_human_readable(self):
-        """ 
+        """
         Make sure that the schema is human readable, ie the mode parameter should read "nearest" instead of being displayed in octal
-        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None, 
-        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor): 
+        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None,
+        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor):
         Expected a value of type 'Optional[int]' for argument 'size' but instead found type 'Tensor'.
         """
         with self.assertRaisesRegex(RuntimeError, "nearest"):
