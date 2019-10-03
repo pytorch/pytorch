@@ -76,7 +76,9 @@ graph {
     op_type: "Unsqueeze"
     attribute {
       name: "axes"
-      ints: 0
+      ints: 1
+      ints: 2
+      ints: 3
       type: INTS
     }
   }
@@ -92,7 +94,9 @@ graph {
     op_type: "Unsqueeze"
     attribute {
       name: "axes"
-      ints: 0
+      ints: 1
+      ints: 2
+      ints: 3
       type: INTS
     }
   }
