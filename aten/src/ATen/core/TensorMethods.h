@@ -963,7 +963,7 @@ inline Tensor Tensor::new_zeros(IntArrayRef size, const TensorOptions & options)
     return TypeDefault::new_zeros(const_cast<Tensor&>(*this), size, options);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::new_zeros(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, IntArrayRef, const TensorOptions &)>(type_set())(const_cast<Tensor&>(*this), size, options);
+    return table->callUnboxed<Tensor, const Tensor &, IntArrayRef, const TensorOptions &>(const_cast<Tensor&>(*this), size, options);
 #endif
 }
 inline Tensor & Tensor::resize_(IntArrayRef size) const {
