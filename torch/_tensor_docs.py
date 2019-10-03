@@ -1659,6 +1659,13 @@ mul_(value)
 In-place version of :meth:`~Tensor.mul`
 """)
 
+add_docstr_all('mul_relu',
+               r"""
+mul(value) -> Tensor
+
+See :func:`torch.mul_relu`
+""")
+
 add_docstr_all('multinomial',
                r"""
 multinomial(num_samples, replacement=False, *, generator=None) -> Tensor

@@ -3463,6 +3463,15 @@ Example::
             [ 0.4312,  0.1019, -0.4394,  1.8753]])
 """.format(**common_args))
 
+add_docstr(torch.mul_relu,
+           r"""
+.. function:: mul(input, other, out=None)
+
+Multiplies each element of the input :attr:`input` with the scalar
+:attr:`other`, applies the ReLU operation, and returns a new resulting tensor.
+
+""".format(**common_args))
+
 add_docstr(torch.multinomial,
            r"""
 multinomial(input, num_samples, replacement=False, out=None) -> LongTensor
