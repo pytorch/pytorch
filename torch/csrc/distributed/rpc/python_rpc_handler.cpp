@@ -22,8 +22,8 @@ PythonRpcHandler::PythonRpcHandler() {
   AutoGIL ag;
   py::object module =
       py::module::import("torch.distributed.internal_rpc_utils");
-  runUDFFunction_ = getFunction(module, "run_python_udf_internal");
-  loadResultFunction_ = getFunction(module, "load_python_udf_result_internal");
+  pythonUDFRun_ = getFunction(module, "_python_udf_run");
+  pythonUDFLoadResult_ = getFunction(module, "_python_udf_load_result");
 }
 
 PythonRpcHandler& PythonRpcHandler::getInstance() {
@@ -37,7 +37,7 @@ std::vector<char> PythonRpcHandler::generatePythonUDFResult(
     std::vector<torch::Tensor>& responseTensorTable) {
   AutoGIL ag;
   auto pargs = py::bytes(pickledPayload.data(), pickledPayload.size());
-  py::tuple pres = runUDFFunction_(pargs, requestTensorTable);
+  py::tuple pres = pythonUDFRun_(pargs, requestTensorTable);
   const auto& presStr = pres[0].cast<std::string>();
   responseTensorTable = pres[1].cast<std::vector<torch::Tensor>>();
   std::vector<char> payload(presStr.begin(), presStr.end());
@@ -49,7 +49,7 @@ py::object PythonRpcHandler::loadPythonUDFResult(
     const std::vector<torch::Tensor>& tensorTable) {
   AutoGIL ag;
   auto pargs = py::bytes(pickledPayload.data(), pickledPayload.size());
-  return loadResultFunction_(pargs, tensorTable);
+  return pythonUDFLoadResult_(pargs, tensorTable);
 }
 
 } // namespace rpc

@@ -99,11 +99,13 @@ class _InternalRPCPickler:
 _internal_rpc_pickler = _InternalRPCPickler()
 
 
-def run_python_udf_internal(pickled_python_udf, tensors):
+def _python_udf_run(pickled_python_udf, tensors):
     r"""
-    Internal python function will be imported and executed in C++ land
-    it unpickles pickled python udf strings and tensors and run the python
-    udf, return serialized result and tensor tables
+    This function is exclusively called from C++.
+    See ``torch/csrc/distributed/rpc/python_rpc_handler.cpp``.
+
+    Unpickles a Python function and its arguments, runs the function,
+    and pickles and returns the function's return value.
     """
     python_udf = _internal_rpc_pickler.deserialize(pickled_python_udf, tensors)
     try:
@@ -115,10 +117,12 @@ def run_python_udf_internal(pickled_python_udf, tensors):
     return _internal_rpc_pickler.serialize(result)
 
 
-def load_python_udf_result_internal(pickled_python_result, tensors):
+def _python_udf_load_result(pickled_python_result, tensors):
     r"""
-    Internal python function will be imported and executed in C++ land
-    it unpickled pickled python udf result and tensor tables, return python object
+    This function is exclusively called from C++.
+    See ``torch/csrc/distributed/rpc/python_rpc_handler.cpp``.
+
+    Unpickles a return value produced by a Python function.
     """
     result = _internal_rpc_pickler.deserialize(pickled_python_result, tensors)
     if isinstance(result, RemoteException):

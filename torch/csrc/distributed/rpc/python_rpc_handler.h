@@ -36,8 +36,11 @@ class PYBIND11_EXPORT PythonRpcHandler {
   PythonRpcHandler(PythonRpcHandler&&) = delete;
   PythonRpcHandler& operator=(PythonRpcHandler&&) = delete;
 
-  py::object runUDFFunction_;
-  py::object loadResultFunction_;
+  // Ref to `torch.distributed.internal_rpc_utils._python_udf_run`.
+  py::object pythonUDFRun_;
+
+  // Ref to `torch.distributed.internal_rpc_utils._python_udf_load_result`.
+  py::object pythonUDFLoadResult_;
 };
 
 } // namespace rpc
