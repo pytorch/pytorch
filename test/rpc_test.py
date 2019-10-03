@@ -116,15 +116,14 @@ def multi_layer_nested_async_rpc(dst, world_size, ttl):
     if ttl > 0:
         current_dst = "worker{}".format(dst)
         next_dst = (dst + 1) % world_size
-        dist.rpc(
+        dist.rpc_async(
             current_dst,
             multi_layer_nested_async_rpc,
             args=(
                 next_dst,
                 world_size,
                 ttl - 1
-            ),
-            async_call=True
+            )
         )
         return 0
 
@@ -473,7 +472,7 @@ class RpcTest(object):
     def test_py_tensors(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = dist.rpc("worker{}".format(dst_rank),
+        ret = dist.rpc_sync("worker{}".format(dst_rank),
                        my_tensor_function,
                        args=(torch.ones(n, n), torch.ones(n, n)))
         self.assertEqual(ret,
@@ -486,10 +485,10 @@ class RpcTest(object):
         n = self.rank + 1
         dst_rank = n % self.world_size
         for i in range(100):
-            fut = dist.rpc("worker{}".format(dst_rank),
+            fut = dist.rpc_async("worker{}".format(dst_rank),
                            my_tensor_function,
-                           args=(torch.ones(i, i), torch.ones(i, i)),
-                           async_call=True)
+                           args=(torch.ones(i, i), torch.ones(i, i))
+                           )
             futs.append(fut)
 
         j = 0
@@ -506,7 +505,7 @@ class RpcTest(object):
         a = [torch.ones(n, n), torch.ones(n, n)]
         b = TensorClass(build_complex_tensors())
         c = {"foo": torch.ones(n, n), "bar": torch.ones(n, n)}
-        ret = dist.rpc("worker{}".format(dst_rank),
+        ret = dist.rpc_sync("worker{}".format(dst_rank),
                        my_complex_tensor_function,
                        args=(a, b, c))
         self.assertEqual(ret, my_complex_tensor_function(a, b, c))
@@ -516,7 +515,7 @@ class RpcTest(object):
         n = self.rank + 1
         dst_rank = n % self.world_size
 
-        ret = dist.rpc("worker{}".format(dst_rank),
+        ret = dist.rpc_sync("worker{}".format(dst_rank),
                        run_nested_pickle,
                        args=(MyPickleClass(), torch.ones(2, 2)))
 
