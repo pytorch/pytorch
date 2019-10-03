@@ -1072,6 +1072,12 @@ TEST_F(ModulesTest, HardtanhMinValGEMaxVal) {
                      "max_val must be greater than min_val");
   ASSERT_THROWS_WITH(Hardtanh{HardtanhOptions().min_val(0.42).max_val(-0.42)},
                      "max_val must be greater than min_val");
+
+  Hardtanh ht {HardtanhOptions().min_val(-0.42).max_val(0.42)};
+  ht->options.min_val(0.42);
+  ASSERT_THROWS_WITH(ht->reset(), "max_val must be greater than min_val");
+  ht->options.max_val(-0.42);
+  ASSERT_THROWS_WITH(ht->reset(), "max_val must be greater than min_val");
 }
 
 TEST_F(ModulesTest, PrettyPrintIdentity) {
