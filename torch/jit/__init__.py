@@ -1338,11 +1338,10 @@ class OrderedDictWrapper(object):
 
 
 class OrderedModuleDict(OrderedDictWrapper):
-    def __init__(self, module, python_dict):  # TODO only none for BC with old way
+    def __init__(self, module, python_dict):
         super(OrderedModuleDict, self).__init__(module)
         # contains _both_ script modules and non-script python-only modules
 
-        # _python_modules stores the Python wrappers for cpp ScriptModules.
         # because script modules are subclassed in python and the
         # C++ script::Module class will not hold references to them,
         # to ensure that you always get the same python value here
@@ -1430,15 +1429,14 @@ def _get_valid_constant(attr, v):
         """.format(type(v).__name__, attr, constants)))
 
 
-# TODO rewrite
-# For each user-defined class that subclasses ScriptModule this meta-class,
-# (1) finds all the methods annotated with @script_method
-# in a ScriptModule and removes them from the class attributes, and
-# (2) puts a wrapper around the class's __init__ method to register
-# all of the script_methods with the module after the original __init__
-# has run. This has to occur after the user-defined __init__ so that
-# submodules and parameters are initialized _before_ the script compiler
-# resolve references to `self.param` or `self.module`.
+# For each user-defined class that subclasses ScriptModule, this meta-class:
+# (1) finds all the methods annotated with @script_method in a ScriptModule and
+#     removes them from the class attributes
+# (2) puts a wrapper around the class's __init__ method to recusively compile
+#     all of the script_methods with the module after the original __init__ has
+#     run. This has to occur after the user-defined __init__ so that submodules and
+#     parameters are initialized _before_ the script compiler resolve references to
+#     `self.param` or `self.module`.
 class ScriptMeta(type):
     def __init__(cls, name, bases, attrs):
         # Aggregate all the ScriptMethods and constants from superclasses
@@ -1471,8 +1469,9 @@ class ScriptMeta(type):
                 stubs = [v for k, v in sorted(cls._methods.items())]
                 self.__dict__["_actual_script_module"] = torch.jit._recursive.create_script_module(self, stubs)
 
-                # now delete the Python attributes that shadow the ScriptModule ones
-                # TODO how to make this robust over time? Maybe just blank out __dict__
+                # Delete the Python attributes that now shadow the ScriptModule
+                # ones, so that __getattr__ and __setattr__ will properly find
+                # the scripted versions.
                 concrete_type = self._actual_script_module._concrete_type
                 for name in concrete_type.get_attributes():
                     if hasattr(cls, name) and isinstance(getattr(cls, name), property):
@@ -1531,9 +1530,6 @@ if _enabled:
             setattr(self._actual_script_module, attr, value)
 
         def define(self, src):
-            """
-            TODO doc
-            """
             if "_actual_script_module" in self.__dict__:
                 # If we have completed initialization, just defer to the
                 # backing RecursiveScriptModule to eagerly compile the provided
@@ -1675,6 +1671,8 @@ if _enabled:
                                    "tried to replace existing module '{}': {}".format(attr, value))
             elif self._c._has_parameter(attr):
                 self._c._set_parameter(attr, value)
+            elif attr in self._concrete_type.get_constants().keys():
+                raise AttributeError("Cannot mutate TorchScript constant value: '{}'. Value: '{}'".format(attr, value))
             else:
                 # We allow setting Python attributes on the ScriptModule, for
                 # when people want to stash some convenience info on it.

@@ -1040,9 +1040,6 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_constants",
           [](const ConcreteModuleType& self) {
-            // TODO: we only use this for bind_to_wrapper, and it should be
-            // unnecessary if we consider constants to be module attributes
-            //
             // Convert to a more pybind-friendly representation, so we don't
             // need to bind ConcreteModuleType::Attribute as well.
             std::unordered_map<std::string, py::object> ret;

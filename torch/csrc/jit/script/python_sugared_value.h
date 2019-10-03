@@ -193,7 +193,36 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
   std::vector<StrongFunctionPtr> compiled_overloads_;
 };
 
-// This holds all relevant Python state that ModuleValue needs. I
+// You can think of an nn.Module as a template that corresponds to a family of
+// JIT types. The template "arguments" are things like the constant values.
+// e.g.
+//   class M(nn.Module):
+//        __constants__ = ["const"]
+//        ...
+//
+// Is similar to writing the following in C++:
+//
+//    template<TConst>
+//    class M {
+//       ...
+//    }
+//
+// We need to consider each different member of the type family a different JIT
+// type because, e.g. different constant values lead to different versions of
+// the same method.
+//
+// ConcreteModuleType corresponds to a single member of the type family, with
+// all template arguments fully specified. Two Modules that share a
+// ConcreteModuleType can share a JIT type, and vice versa.
+//
+// Why not just use a JIT type to represent concrete types? Because constants,
+// function attributes, etc. are currently not representable in the type system,
+// so this acts a non-first-class way of tracking concrete types.
+//
+// ConcreteModuleType is also the source of truth for servicing all
+// ModuleValue::attr calls. This is so we can guarantee that if two Module's
+// share a JIT type (and thus a ConcreteModuleType), then they behave the same
+// way when you access attributes on them.
 struct VISIBILITY_HIDDEN ConcreteModuleType {
   void addPyClass(py::object pyClass) {
     pyClass_ = std::move(pyClass);
@@ -215,11 +244,10 @@ struct VISIBILITY_HIDDEN ConcreteModuleType {
     TORCH_INTERNAL_ASSERT(type);
     if (auto functionType = type->cast<FunctionType>()) {
       functionAttributes_.emplace(std::move(name), std::move(functionType));
-      return;
+    } else {
+      attributes_.emplace(
+          std::move(name), Attribute(unshapedType(type), isParameter));
     }
-
-    attributes_.emplace(
-        std::move(name), Attribute(unshapedType(type), isParameter));
   }
 
   void addModule(
@@ -238,16 +266,19 @@ struct VISIBILITY_HIDDEN ConcreteModuleType {
   }
 
   // This determines whether two modules can share a type. The container structs
-  // used by ConcreteModuleType have been defined such that operator== implements a
-  // meaningful comparison in that context.
-  friend bool operator==(const ConcreteModuleType& lhs, const ConcreteModuleType& rhs) {
+  // used by ConcreteModuleType have been defined such that operator==
+  // implements a meaningful comparison in that context.
+  friend bool operator==(
+      const ConcreteModuleType& lhs,
+      const ConcreteModuleType& rhs) {
     return lhs.pyClass_.is(rhs.pyClass_) && lhs.constants_ == rhs.constants_ &&
         lhs.attributes_ == rhs.attributes_ && lhs.modules_ == rhs.modules_ &&
         lhs.overloads_ == rhs.overloads_ &&
         lhs.functionAttributes_ == rhs.functionAttributes_;
   }
 
-  std::shared_ptr<ConcreteModuleType> findSubmoduleConcreteType(const std::string& name) {
+  std::shared_ptr<ConcreteModuleType> findSubmoduleConcreteType(
+      const std::string& name) {
     const auto it = std::find_if(
         modules_.cbegin(), modules_.cend(), [&](const ModuleInfo& info) {
           return info.name == name;
@@ -260,9 +291,7 @@ struct VISIBILITY_HIDDEN ConcreteModuleType {
 
   struct Constant {
     /* implicit */ Constant(py::object v) : v_(std::move(v)) {}
-    friend bool operator==(
-        const Constant& lhs,
-        const Constant& rhs) {
+    friend bool operator==(const Constant& lhs, const Constant& rhs) {
       // Perform the equivalent of `lhs == rhs` in Python.
       int rv = PyObject_RichCompareBool(lhs.v_.ptr(), rhs.v_.ptr(), Py_EQ);
       if (rv == -1) {
@@ -276,9 +305,8 @@ struct VISIBILITY_HIDDEN ConcreteModuleType {
   struct Attribute {
     Attribute(TypePtr type, bool isParam)
         : type_(std::move(type)), isParam_(isParam) {}
-    friend bool operator==(
-        const Attribute& lhs,
-        const Attribute& rhs) {
+
+    friend bool operator==(const Attribute& lhs, const Attribute& rhs) {
       return *(lhs.type_) == *(rhs.type_) && lhs.isParam_ == rhs.isParam_;
     }
     TypePtr type_;
@@ -289,6 +317,7 @@ struct VISIBILITY_HIDDEN ConcreteModuleType {
     std::string name;
     TypePtr type;
     std::shared_ptr<ConcreteModuleType> meta;
+
     friend bool operator==(const ModuleInfo& lhs, const ModuleInfo& rhs) {
       return *(lhs.type) == *(rhs.type) && lhs.name == rhs.name;
     }
@@ -297,12 +326,17 @@ struct VISIBILITY_HIDDEN ConcreteModuleType {
   // The value of any constants defined by the module.
   std::unordered_map<std::string, Constant> constants_;
   // The types of any attributes
-  // TODO these shouldn't be unordered maps
   std::unordered_map<std::string, Attribute> attributes_;
+  // Overloads, in the same format as `__overloads__` in Python
   std::unordered_map<std::string, std::vector<std::string>> overloads_;
+  // Any attributes we failed to convert to TorchScript, along with a hint as to why
   std::unordered_map<std::string, std::string> failedAttributes_;
+  // Any function attributes. These are special right now because functions are
+  // not first-class in the type system.
   std::unordered_map<std::string, FunctionTypePtr> functionAttributes_;
+  // The concrete types of any submodules
   std::vector<ModuleInfo> modules_;
+  // The original `nn.Module` class that we derived this ScriptModule from.
   py::object pyClass_;
 };
 

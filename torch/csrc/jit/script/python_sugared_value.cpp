@@ -362,7 +362,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   // 3. Special case: for module dicts we manually desugar items(), keys(),
   // values() calls into the appropriate method.
-  // TODO: can these not be represented as first class methods?
+  // TODO: These could be represented as first class methods probably.
   const auto is_mod_dict_py =
       py::module::import("torch.jit._recursive")
           .attr("is_module_dict")(concreteType_.pyClass_);
@@ -417,7 +417,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
                              .attr("bind_to_dummy_module")(
                                  concreteType_, unboundMethod, module_);
       TORCH_CHECK(py::isinstance<py::function>(boundMethod));
-      // TODO: try to reduce our reliance on frame-based rcb
+      // TODO: Try to reduce our reliance on frame-based rcb
       auto rcb =
           py::module::import("torch.jit").attr("_gen_rcb")(boundMethod, 0);
       return std::make_shared<PythonValue>(boundMethod, rcb);
@@ -425,7 +425,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
     // HACK: This is used for rnn.py to get all the parameters of a Module as a
     // List[Tensor]
-    // TODO: this is easily replicated by adding a "parameter names" special
+    // TODO: This is easily replicated by adding a "parameter names" special
     // method to Modules
     bool isParameterList =
         py::cast<bool>(py::module::import("torch._jit_internal")

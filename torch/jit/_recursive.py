@@ -183,7 +183,7 @@ def get_concrete_type(original):
             # TODO: could add more detail here. For example, what the user should do
             # when the pytype is `list` or `NoneType`
             hint = ("(This attribute exists on the Python module, "
-                    "but we failed to convert Python type: {} "
+                    "but we failed to convert Python type: '{}' "
                     "to a TorchScript type.)").format(type(item).__name__)
             concrete_type.add_failed_attribute(name, hint)
 
