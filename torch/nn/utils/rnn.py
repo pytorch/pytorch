@@ -100,16 +100,16 @@ class PackedSequence(PackedSequence_):
                           bind(self.unsorted_indices, lambda t: t.pin_memory()))
 
     def cuda(self, *args, **kwargs):
-        # Adds device 'cuda' to kwargs if needed
+        # Tests to see if 'cuda' should be added to kwargs
         ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(*args, **kwargs)
         if ex.is_cuda:
             return self.to(*args, **kwargs)
         return self.to(*args, device='cuda', **kwargs)
 
     def cpu(self, *args, **kwargs):
-        # Adds device 'cpu' to kwargs if needed
+
         ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(*args, **kwargs)
-        if ex.device == 'cpu':
+        if ex.device.type == 'cpu':
             return self.to(*args, **kwargs)
         return self.to(*args, device='cpu', **kwargs)
 
@@ -140,7 +140,9 @@ class PackedSequence(PackedSequence_):
     def to(self, *args, **kwargs):
         r"""Performs dtype and/or device conversion on `self.data`.
 
-        It has similar signature as :meth:`torch.Tensor.to`.
+        It has similar signature as :meth:`torch.Tensor.to`, except optional
+        arguments like `non_blocking` and `copy` should be passed as kwargs,
+        not args, or they will not apply to the index tensors.
 
         .. note::
 
@@ -155,8 +157,8 @@ class PackedSequence(PackedSequence_):
         if data is self.data:
             return self
         else:
-            # Only forwards device arg/kwarg and non_blocking and copy kwargs
-            kwargs = {k : v for k, v in filter(lambda t: t[0] == 'non_blocking' or t[0] == 'copy', kwargs.items())}
+            # Does not forward device or dtype arg/kwargs, device is set from data.device
+            kwargs = {k : v for k, v in filter(lambda t: t[0] != 'device' and t[0] != 'dtype', kwargs.items())}
             sorted_indices = bind(self.sorted_indices, lambda t: t.to(data.device, **kwargs))
             unsorted_indices = bind(self.unsorted_indices, lambda t: t.to(data.device, **kwargs))
             return type(self)(data, self.batch_sizes, sorted_indices, unsorted_indices)
