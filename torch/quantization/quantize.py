@@ -3,9 +3,9 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import copy
 import torch
 import torch.nn as nn
-import torch.nn._intrinsic as nni
-import torch.nn._intrinsic.quantized as nniq
-import torch.nn._intrinsic.qat as nniqat
+import torch.nn.intrinsic as nni
+import torch.nn.intrinsic.quantized as nniq
+import torch.nn.intrinsic.qat as nniqat
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from .QConfig import default_dynamic_qconfig, float16_dynamic_qconfig
