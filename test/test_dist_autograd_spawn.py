@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from dist_autograd_test import TestDistAutograd
+from dist_autograd_test import DistAutogradTest
 from common_distributed import MultiProcessTestCase
-from common_utils import run_tests
+from common_utils import TEST_WITH_ASAN, run_tests
 
 import unittest
 
-@unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/27157")
-class TestDistAutogradWithSpawn(MultiProcessTestCase, TestDistAutograd):
+@unittest.skipIf(TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues")
+class DistAutogradTestWithSpawn(MultiProcessTestCase, DistAutogradTest):
 
     def setUp(self):
-        super(TestDistAutogradWithSpawn, self).setUp()
+        super(DistAutogradTestWithSpawn, self).setUp()
         self._spawn_processes()
 
 if __name__ == '__main__':
