@@ -13342,80 +13342,18 @@ _signed_types_no_half = [
 
 _unsigned_types = [torch.uint8]
 
-# Helper functions for producing tensors and scalars to use in tensor op tests.
-_S = 10
+# Helper values and functions for producing tensors and scalars to use in tensor op tests.
+# Tensor dimension sizes (Small, Medium, Large, Giant)
+_S = 5
 _M = 50
+_L = 1000
 _G = 275000000
 
-def _make_tensor(shape, dtype, device):
-    # Populates the CPU tensor with floats representable as halfs
-    if dtype == torch.half and device == 'cpu':
-        return torch.randn(*shape, dtype=torch.float, device=device).half().float()
+# Value to clamp divisors to since dividing by small numbers can be unstable
+# on devices.
+_div_min = 2**-8
 
-    if dtype in _float_types:
-        return torch.randn(shape, dtype=dtype, device=device).to(dtype=dtype)
-
-    t = torch.zeros(*shape, dtype=dtype, device=device)
-    return t.random_(0, 10).to(dtype=dtype)
-
-def _small_0d(dtype, device):
-    return _make_tensor((1,), dtype, device).squeeze()
-
-def _small_2d(dtype, device):
-    return _make_tensor((_S, _S), dtype, device)
-
-def _small_2d_oneish(dtype, device):
-    if dtype in _float_types:
-        return _make_tensor((_S, _S), dtype, device).clamp(.99, 1.01)
-
-    return _make_tensor((_S, _S), dtype, device).fill_(1)
-
-def _small_3d(dtype, device):
-    return _make_tensor((_S, _S, _S), dtype, device)
-
-def _small_3d_ones(dtype, device):
-    return _make_tensor((_S, _S, _S), dtype, device).copy_(torch.ones(_S, _S, _S))
-
-def _small_3d_unique(dtype, device):
-    return _make_tensor((_S, _S, _S), dtype, device).copy_(torch.arange(1, _S * _S * _S + 1).view(_S, _S, _S))
-
-def _small_2d_lapack(dtype, device):
-    t = _make_tensor((3, 3), dtype, device)
-    return t.copy_(torch.arange(1, 10).view(3, 3))
-
-def _small_2d_lapack_skinny(dtype, device):
-    t = _make_tensor((3, 4), dtype, device)
-    return t.copy_(torch.arange(1, 13).view(3, 4))
-
-def _small_2d_lapack_fat(dtype, device):
-    t = _make_tensor((4, 3), dtype, device)
-    return t.copy_(torch.arange(1, 13).view(4, 3))
-
-def _large_2d_lapack(dtype, device):
-    t = _make_tensor((1000, 1000), dtype, device)
-    return t.normal_()
-
-def _medium_1d(dtype, device):
-    return _make_tensor((_M,), dtype, device)
-
-def _medium_2d(dtype, device):
-    return _make_tensor((_M, _M), dtype, device)
-
-def _medium_2d_expanded(dtype, device):
-    return _make_tensor((1,), dtype, device).expand(_M, _M)
-
-def _giant_1d_ones(dtype, device):
-    return _make_tensor((_G), dtype, device).copy_(torch.ones(_G))
-
-def _new_t(shape):
-    def tmp(dtype, device):
-        return _make_tensor(shape, dtype, device)
-    return tmp
-
-def _small_3d_positive(dtype, device):
-    min_val = 1e-3 if dtype in [torch.float, torch.double] else 2
-    return _make_tensor((_S, _S, _S), dtype=dtype, device=device).clamp(min_val, 120)
-
+# Returns floating or integral scalar corresponding to dtype
 def _number(floating, integer, dtype):
     if dtype in [torch.half, torch.float, torch.double]:
         return floating
@@ -13426,6 +13364,74 @@ def _convert_t(dtype, device):
     if device == 'cpu' and dtype == torch.half:
         return torch.float
     return dtype
+
+# Returns a tensor of the requested shape, dtype, and device
+# Requesting a half CPU tensor returns a float CPU tensor with
+# values representable by a half.
+# Initialization uses randint for non-float types and randn for float types.
+def _make_tensor(shape, dtype, device, fill_ones=False):
+    # Returns a tensor filled with ones
+    if fill_ones:
+        return torch.ones(*shape, dtype=_convert_t(dtype, device), device=device)
+
+    # Returns a tensor with random integer values
+    if dtype not in _float_types:
+        t = torch.randint(0, 10, shape, device=device)
+        return t.to(_convert_t(dtype, device))
+
+    # Populates the CPU tensor with floats representable as halfs
+    if dtype == torch.half and device == 'cpu':
+        return torch.randn(*shape, dtype=torch.float, device=device).half().float()
+
+    # Default: returns a tensor with random float values
+    return torch.randn(shape, dtype=dtype, device=device).to(dtype=dtype)
+
+def _small_0d(dtype, device):
+    return _make_tensor((1,), dtype, device).squeeze()
+
+def _small_2d(dtype, device, has_zeros=True, fill_ones=False, oneish=False):
+    t = _make_tensor((_S, _S), dtype, device, fill_ones=fill_ones)
+    if oneish:
+        return t.clamp(min=_number(.99, 1, dtype), max=1.01)
+    if not has_zeros:
+        return t.clamp(min=(_number(_div_min, 1, dtype)))
+    return t
+
+def _small_3d(dtype, device, has_zeros=True, fill_ones=False, oneish=False):
+    t = _make_tensor((_S, _S, _S), dtype, device, fill_ones=fill_ones)
+    if oneish:
+        return t.clamp(min=_number(.99, 1, dtype), max=1.01)
+    if not has_zeros:
+        return t.clamp(min=(_number(_div_min, 1, dtype)))
+    return t
+
+def _small_3d_ones(dtype, device):
+    return _small_3d(dtype, device, fill_ones=True)
+
+def _small_3d_unique(dtype, device):
+    return (torch.randperm(_S * _S * _S,
+            dtype=_convert_t(dtype, device), device=device) + 1).view(_S, _S, _S)
+
+def _medium_1d(dtype, device):
+    return _make_tensor((_M,), dtype, device)
+
+def _medium_2d(dtype, device):
+    return _make_tensor((_M, _M), dtype, device)
+
+def _large_2d(dtype, device):
+    t = _make_tensor((_L, _L), dtype, device)
+    return t.normal_()
+
+def _giant_1d(dtype, device):
+    return _make_tensor((_G), dtype, device)
+
+# Helper method that returns a function which takes dtype and device and
+# instantiates tensors of the given shape.
+# Useful for tensor op tests with custom shapes.
+def _new_t(shape):
+    def tmp(dtype, device):
+        return _make_tensor(shape, dtype, device)
+    return tmp
 
 # TODO: random functions, cat, gather, scatter, index*, masked*,
 #       resize, resizeAs, storage_offset, storage, stride, unfold
@@ -13441,14 +13447,15 @@ def _convert_t(dtype, device):
 # - decorators (=[]), a list of decorators to apply to the test
 tensor_op_tests = [
     ('add', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-2),
-    ('add', 'tensor', _small_3d, lambda t, d: [_small_3d_positive(t, d)], 1e-2),
+    ('add', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d)], 1e-2),
     ('sub', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-2),
-    ('sub', 'tensor', _small_3d, lambda t, d: [_small_3d_positive(t, d)], 1e-2),
+    ('sub', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d)], 1e-2),
     ('mul', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-2),
-    ('mul', 'tensor', _small_3d, lambda t, d: [_small_3d_positive(t, d)], 1e-2),
+    ('mul', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d)], 1e-2),
     ('mul', 'scalar', _small_0d, lambda t, d: [_small_0d(torch.int32, d)], 1e-2),
-    ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-3),
-    ('div', 'tensor', _small_3d, lambda t, d: [_small_3d_positive(t, d)], 1e-3),
+    ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1),
+    ('div', 'tensor', _small_3d,
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1),
     ('pow', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1, 1e-5, _float_types),
     ('pow', '1', _small_3d, lambda t, d: [_number(1., 1, t)], 1e-1),
     ('pow', '2', _small_3d, lambda t, d: [_number(2., 2, t)], 1e-1),
@@ -13472,11 +13479,13 @@ tensor_op_tests = [
         1e-2, 1e-4, _float_types),
     ('bmm', '', _small_3d, lambda t, d: [_small_3d(t, d)],
         1e-5, 1e-5, _float_types_no_half, False),
-    ('addcdiv', '', _small_2d_lapack,
-        lambda t, d: [_small_2d_lapack(t, d).mul(2), _small_2d_lapack(t, d)], 1e-2),
-    ('addcdiv', 'scalar', _small_2d_lapack,
-        lambda t, d: [_number(2.8, 1, t), _small_2d_lapack(t, d).mul(2), _small_2d_lapack(t, d)], 1e-2),
-    ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2),
+    ('addcdiv', '', _small_2d,
+        lambda t, d: [_small_2d(t, d),
+                      _small_2d(t, d, has_zeros=False)], 1, 1e-3),
+    ('addcdiv', 'scalar', _small_2d,
+        lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
+                      _small_2d(t, d, has_zeros=False)], 1, 1e-3),
+    ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 1e-3),
     ('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2),
     ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)],
@@ -13505,7 +13514,7 @@ tensor_op_tests = [
         1e-2, 1e-4, _float_types),
     ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, _float_types),
     ('fmod', 'value', _small_3d, lambda t, d: [3], 1e-3),
-    ('fmod', 'tensor', _small_3d, lambda t, d: [_small_3d_positive(t, d)], 1e-3),
+    ('fmod', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-3),
     ('chunk', '', _medium_2d, lambda t, d: [4], 1e-5, 1e-5, _types, False),
     ('chunk', 'dim', _medium_2d, lambda t, d: [4, 1], 1e-5, 1e-5, _types, False),
     ('chunk', 'neg_dim', _medium_2d, lambda t, d: [4, -2], 1e-5, 1e-5, _types, False),
@@ -13555,12 +13564,12 @@ tensor_op_tests = [
     ('kthvalue', 'neg_dim', _small_3d_unique, lambda t, d: [3, -1], 1e-5, 1e-5, _types, False),
     ('lerp', '', _small_3d, lambda t, d: [_small_3d(t, d), 0.3],
         1e-2, 1e-5, _float_types_no_half),
-    ('max', '', _small_3d_unique, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('max', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
     ('max', 'dim', _small_3d_unique, lambda t, d: [1], 1e-5, 1e-5, _types, False),
     ('max', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-5, 1e-5, _types, False),
     ('max', 'elementwise', _medium_2d, lambda t, d: [_medium_2d(t, d)],
         1e-5, 1e-5, _types, False),
-    ('min', '', _small_3d_unique, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('min', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
     ('min', 'dim', _small_3d_unique, lambda t, d: [1], 1e-5, 1e-5, _types, False),
     ('min', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-5, 1e-5, _types, False),
     ('min', 'elementwise', _medium_2d, lambda t, d: [_medium_2d(t, d)],
@@ -13568,8 +13577,8 @@ tensor_op_tests = [
     ('mean', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types, False),
     ('mean', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, _float_types, False),
     ('mean', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, _float_types, False),
-    # # Double here because otherwise the CPU result will be wrong otherwise
-    ('mean', '64bit_indexing', _giant_1d_ones, lambda t, d: [],
+    # Double here because the CPU result will be wrong otherwise
+    ('mean', '64bit_indexing', _giant_1d, lambda t, d: [],
         1e-3, 1e-5, [torch.double], False, [slowTest]),
     ('mode', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
     ('mode', 'dim', _small_3d, lambda t, d: [1], 1e-5, 1e-5, _types, False),
@@ -13578,12 +13587,14 @@ tensor_op_tests = [
         1e-5, 1e-5, _float_types_no_half),
     ('mvlgamma', '2d_p=2', lambda t, d: _small_2d(t, d).clamp(0.6, 10), lambda t, d: [2],
         1e-5, 1e-5, _float_types_no_half),
-    ('remainder', 'value', _small_3d, lambda t, d: [3], 1e-3, 1e-5, _signed_types),
-    ('remainder', 'negative_value', _small_3d, lambda t, d: [-3], 1e-3, 1e-5, _signed_types),
-    ('remainder', 'tensor', _small_3d, lambda t, d: [_small_3d_positive(t, d)],
-        1e-3, 1e-5, _signed_types),
-    ('remainder', 'negative_tensor', _small_3d, lambda t, d: [0 - _small_3d_positive(t, d)],
-        1e-3, 1e-5, _signed_types),
+    ('remainder', 'value', _small_3d, lambda t, d: [3], 1e-1, 1e-5, _signed_types),
+    ('remainder', 'negative_value', _small_3d, lambda t, d: [-3], 1e-1, 1e-5, _signed_types),
+    ('remainder', 'tensor', _small_3d,
+        lambda t, d: [_small_3d(t, d, has_zeros=False)],
+        1e-1, 1e-5, _signed_types),
+    ('remainder', 'negative_tensor', _small_3d,
+        lambda t, d: [0 - _small_3d(t, d, has_zeros=False)],
+        1e-1, 1e-5, _signed_types),
     ('std', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types, False),
     ('std', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, _float_types, False),
     ('std', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, _float_types, False),
@@ -13614,7 +13625,8 @@ tensor_op_tests = [
                       torch.LongTensor([[1], [2]]).to(dtype=_convert_t(t, d), device=d),
                       True],
         1e-5, 1e-5, _types, False),
-    ('prod', '', _small_2d_oneish, lambda t, d: [], 1e-2, 1e-5, _types, False),
+    ('prod', '', lambda t, d: _small_2d(t, d, oneish=True),
+        lambda t, d: [], 1e-2, 1e-5, _types, False),
     ('prod', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, _types, False),
     ('prod', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, _types, False),
     ('sum', '', _small_2d, lambda t, d: [], 1e-2, 1e-5, _types, False),
@@ -13653,17 +13665,17 @@ tensor_op_tests = [
         1e-5, 1e-5, _types, False),
     ('trace', '', _medium_2d, lambda t, d: [], 1e-3, 1e-5, _types, False),
     ('tril', '', _medium_2d, lambda t, d: [],),
-    ('tril', 'zero_stride', _medium_2d_expanded, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('tril', 'zero_stride', _medium_2d, lambda t, d: [], 1e-5, 1e-5, _types, False),
     ('tril', 'positive', _medium_2d, lambda t, d: [2], ),
     ('tril', 'negative', _medium_2d, lambda t, d: [-2], ),
     ('triu', '', _medium_2d, lambda t, d: [],),
-    ('triu', 'zero_stride', _medium_2d_expanded, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('triu', 'zero_stride', _medium_2d, lambda t, d: [], 1e-5, 1e-5, _types, False),
     ('triu', 'positive', _medium_2d, lambda t, d: [2], ),
     ('triu', 'negative', _medium_2d, lambda t, d: [-2], ),
     ('unsqueeze', '', _new_t((2, 3, 4)), lambda t, d: [2],),
     ('unsqueeze', 'neg_dim', _new_t((2, 3, 4)), lambda t, d: [-2], ),
-    ('view', 'contiguous', _small_3d, lambda t, d: [100, 10], 1e-5, 1e-5, _types, False),
-    ('view_as', '', _small_3d, lambda t, d: [_make_tensor((100, 10), t, d)],
+    ('view', 'contiguous', _small_3d, lambda t, d: [25, 5], 1e-5, 1e-5, _types, False),
+    ('view_as', '', _small_3d, lambda t, d: [_make_tensor((25, 5), t, d)],
         1e-5, 1e-5, _types, False),
     ('zero_', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
     ('new_zeros', '', _small_3d, lambda t, d: [1, 2, 3, 4], 1e-5, 1e-5, _types, False),
@@ -13688,13 +13700,13 @@ tensor_op_tests = [
         lambda t, d: [2],
         1e-3, 1e-3, _signed_types_no_half, False),
     # lapack tests
-    ('qr', 'square', _small_2d_lapack, lambda t, d: [],
+    ('qr', 'square', _small_2d, lambda t, d: [],
         1e-5, 3e-4, _float_types_no_half, False, [skipCUDAIfNoMagma]),
-    ('qr', 'skinny', _small_2d_lapack_skinny, lambda t, d: [],
+    ('qr', 'skinny', _new_t((3, 4)), lambda t, d: [],
         1e-5, 3e-4, _float_types_no_half, False, [skipCUDAIfNoMagma]),
-    ('qr', 'fat', _small_2d_lapack_fat, lambda t, d: [],
+    ('qr', 'fat', _new_t((4, 3)), lambda t, d: [],
         1e-5, 3e-4, _float_types_no_half, False, [skipCUDAIfNoMagma]),
-    ('qr', 'big', _large_2d_lapack, lambda t, d: [],
+    ('qr', 'big', _large_2d, lambda t, d: [],
         1e-5, 3e-4, _float_types_no_half, False, [skipCUDAIfNoMagma]),
     ('geqrf', '', _new_t((20, 20)), lambda t, d: [],
         1e-5, 3e-4, _float_types_no_half, False, [skipCUDAIfNoMagma]),
@@ -13763,13 +13775,17 @@ def generate_test_function(cls,
         device_args = [arg.to(device=device) if torch.is_tensor(arg) else arg for arg in cpu_args]
 
         # Converts float device tensors to half when the dtype is half
+        # Note: CPU half tensors don't support many operations.
         if dtype == torch.half:
-            device_args = [arg.to(dtype=dtype) if (torch.is_tensor(arg) and arg.dtype == torch.float) else arg for arg in device_args]
+            device_args = [arg.to(dtype=dtype) if
+                           (torch.is_tensor(arg) and arg.dtype == torch.float) else arg
+                           for arg in device_args]
 
         # Runs the tensor op on CPU and device
         cpu_result = getattr(cpu_tensor, op_str)(*cpu_args)
         device_result = getattr(device_tensor, op_str)(*device_args)
 
+        # Compares CPU and device inputs and outputs
         precision = half_precision if dtype == torch.half else float_precision
 
         self.assertEqual(cpu_tensor, device_tensor, prec=precision)
@@ -13779,6 +13795,7 @@ def generate_test_function(cls,
     test_name = "test_" + op_str + subtest_str
     assert not hasattr(cls, test_name), "{0} already in TestDevicePrecision".format(test_name)
 
+    # Constructs decorator list and applies decorators
     if decorators is None:
         decorators = [dtypes(*dtype_list)]
     else:
