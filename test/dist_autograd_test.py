@@ -3,7 +3,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import sys
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
-from common_distributed import MultiProcessTestCase
 from functools import wraps
 import six
 import unittest
@@ -23,7 +22,7 @@ def dist_init(func):
     @wraps(func)
     def wrapper(self):
         self.worker_id = self.rank
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(backend='gloo', rank=self.rank,
                                 world_size=self.world_size, store=store)
         dist.init_model_parallel('worker%d' % self.rank)
@@ -34,7 +33,7 @@ def dist_init(func):
 
 @unittest.skipIf(not six.PY3, "Pytorch distributed autograd package "
                  "does not support python2")
-class TestDistAutograd(MultiProcessTestCase):
+class DistAutogradTest(object):
 
     @property
     def world_size(self):
@@ -60,8 +59,7 @@ class TestDistAutograd(MultiProcessTestCase):
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
-            ret = dist.rpc('worker{}'.format(dst_rank), torch.add,
-                           args=(t1, t2))
+            ret = dist.rpc_sync('worker{}'.format(dst_rank), torch.add, args=(t1, t2))
 
             # Get send function.
             ctx = dist_autograd._current_context()
@@ -97,8 +95,7 @@ class TestDistAutograd(MultiProcessTestCase):
             tensors = []
             for i in range(num_tensors):
                 tensors.append(torch.ones(3, 3, requires_grad=(i % 2 == 0)))
-            ret = dist.rpc('worker{}'.format(dst_rank), torch.stack,
-                           args=(tensors,))
+            ret = dist.rpc_sync('worker{}'.format(dst_rank), torch.stack, args=(tensors,))
             self.assertEqual(torch.stack(tensors), ret)
 
             # Verify appropriate tensors have been attached the autograd graph.
@@ -110,7 +107,3 @@ class TestDistAutograd(MultiProcessTestCase):
                     self.assertEqual(tensors[i], next_funcs[i][0].variable)
                 else:
                     self.assertIsNone(next_funcs[i][0])
-
-
-if __name__ == '__main__':
-    unittest.main()
