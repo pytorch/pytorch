@@ -444,3 +444,7 @@
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
+            # run test on X86 build
+            if [ ${IOS_PLATFORM} = "SIMULATOR" ]; then
+              ruby ${PROJ_ROOT}/scripts/xcode_ios_x86_build.rb -i ${PROJ_ROOT}/build_ios/install/lib -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj
+            fi

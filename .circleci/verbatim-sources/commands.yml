@@ -87,4 +87,4 @@ commands:
     steps:
       - brew_update
       - brew_install:
-          formulae: libtool
+          formulae: libtool xcodeproj

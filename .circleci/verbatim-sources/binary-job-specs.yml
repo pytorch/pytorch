@@ -232,12 +232,16 @@
     - run_brew_for_ios_build
     - run:
         name: Build
-        contxt: org-member
         no_output_timeout: "1h"
         command: |
           script="/Users/distiller/project/.circleci/scripts/binary_ios_build.sh"
           cat "$script"
           source "$script"
+    - run:
+        name: Test
+        no_output_timeout: "10m"
+        command: |
+          if         
     - persist_to_workspace:
         root: /Users/distiller/workspace/
         paths: ios

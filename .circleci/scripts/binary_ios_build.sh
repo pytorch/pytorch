@@ -2,7 +2,7 @@
 set -eux -o pipefail
 
 echo ""
-echo "PWD: ${PWD}"
+echo "PWD: $(pwd)"
 WORKSPACE=/Users/distiller/workspace
 PROJ_ROOT=/Users/distiller/project
 export TCLLIBPATH="/usr/local/lib" 
