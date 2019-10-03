@@ -429,7 +429,7 @@
             export PATH="~/anaconda/bin:${PATH}"
             source ~/anaconda/bin/activate
             # Install dependencies
-            conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests
+            conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests --yes
             # sync submodules
             cd ${PROJ_ROOT}
             git submodule sync
