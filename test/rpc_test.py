@@ -441,8 +441,8 @@ class RpcTest(object):
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = dist.rpc_sync("worker{}".format(dst_rank),
-                       my_tensor_function,
-                       args=(torch.ones(n, n), torch.ones(n, n)))
+                            my_tensor_function,
+                            args=(torch.ones(n, n), torch.ones(n, n)))
         self.assertEqual(ret,
                          my_tensor_function(torch.ones(n, n),
                                             torch.ones(n, n)))
@@ -454,9 +454,8 @@ class RpcTest(object):
         dst_rank = n % self.world_size
         for i in range(100):
             fut = dist.rpc_async("worker{}".format(dst_rank),
-                           my_tensor_function,
-                           args=(torch.ones(i, i), torch.ones(i, i))
-                           )
+                                 my_tensor_function,
+                                 args=(torch.ones(i, i), torch.ones(i, i)))
             futs.append(fut)
 
         j = 0
@@ -474,8 +473,8 @@ class RpcTest(object):
         b = TensorClass(build_complex_tensors())
         c = {"foo": torch.ones(n, n), "bar": torch.ones(n, n)}
         ret = dist.rpc_sync("worker{}".format(dst_rank),
-                       my_complex_tensor_function,
-                       args=(a, b, c))
+                            my_complex_tensor_function,
+                            args=(a, b, c))
         self.assertEqual(ret, my_complex_tensor_function(a, b, c))
 
     @dist_init
@@ -484,8 +483,8 @@ class RpcTest(object):
         dst_rank = n % self.world_size
 
         ret = dist.rpc_sync("worker{}".format(dst_rank),
-                       run_nested_pickle,
-                       args=(MyPickleClass(), torch.ones(2, 2)))
+                            run_nested_pickle,
+                            args=(MyPickleClass(), torch.ones(2, 2)))
 
         m = MyPickleClass()
         m.set(my_tensor_function(torch.ones(2, 2), torch.ones(2, 2)))
