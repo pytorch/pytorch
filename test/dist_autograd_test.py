@@ -33,7 +33,7 @@ def dist_init(func):
 
 @unittest.skipIf(not six.PY3, "Pytorch distributed autograd package "
                  "does not support python2")
-class TestDistAutograd(object):
+class DistAutogradTest(object):
 
     @property
     def world_size(self):
