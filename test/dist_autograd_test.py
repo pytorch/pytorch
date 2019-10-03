@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
+import torch.distributed.rpc as rpc
 from dist_utils import dist_init
 import six
 import unittest
@@ -48,8 +49,8 @@ class DistAutogradTest(object):
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
-            ret = dist.rpc_sync('worker{}'.format(dst_rank), torch.add, args=(t1, t2))
-            dist.rpc_sync('worker{}'.format(dst_rank), _set_rpc_done, args=(context_id,))
+            ret = rpc.rpc_sync('worker{}'.format(dst_rank), torch.add, args=(t1, t2))
+            rpc.rpc_sync('worker{}'.format(dst_rank), _set_rpc_done, args=(context_id,))
 
             # Get send function.
             ctx = dist_autograd._current_context()
@@ -118,7 +119,7 @@ class DistAutogradTest(object):
             tensors = []
             for i in range(num_tensors):
                 tensors.append(torch.ones(3, 3, requires_grad=(i % 2 == 0)))
-            ret = dist.rpc_sync('worker{}'.format(dst_rank), torch.stack, args=(tensors,))
+            ret = rpc.rpc_sync('worker{}'.format(dst_rank), torch.stack, args=(tensors,))
             self.assertEqual(torch.stack(tensors), ret)
 
             # Verify appropriate tensors have been attached the autograd graph.

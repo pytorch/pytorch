@@ -3,14 +3,14 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 from os import getenv
 from functools import wraps
 import torch.distributed as dist
-from torch.distributed.rpc_api import RpcBackend
+import torch.distributed.rpc as rpc
 
 if not dist.is_available():
     print("c10d not available, skipping tests")
     sys.exit(0)
 
 
-BACKEND = getenv('RPC_BACKEND', RpcBackend.PROCESS_GROUP)
+BACKEND = getenv('RPC_BACKEND', rpc.RpcBackend.PROCESS_GROUP)
 RPC_INIT_URL = getenv('RPC_INIT_URL', '')
 
 def dist_init(func):
@@ -26,11 +26,11 @@ def dist_init(func):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(backend='gloo', rank=self.rank,
                                 world_size=self.world_size, store=store)
-        dist.init_model_parallel(self_name='worker%d' % self.rank,
-                                 backend=BACKEND,
-                                 self_rank=self.rank,
-                                 init_method=RPC_INIT_URL)
+        rpc.init_model_parallel(self_name='worker%d' % self.rank,
+                                backend=BACKEND,
+                                self_rank=self.rank,
+                                init_method=RPC_INIT_URL)
         func(self)
-        dist.join_rpc()
+        rpc.join_rpc()
 
     return wrapper
