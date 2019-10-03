@@ -4025,7 +4025,7 @@ def foo(xyz):
 
         _, lineno = inspect.getsourcelines(FooTest2)
 
-        with self.assertRaisesRegex(torch._C.JITException, 'test_jit.py:{}'.format(lineno + 3)):
+        with self.assertRaisesRegex(torch.jit.Error, 'test_jit.py:{}'.format(lineno + 3)):
             ft = FooTest2()
             loaded = self.getExportImportCopy(ft)
             loaded()
@@ -5029,18 +5029,11 @@ a")
         a = torch.rand(2, 3)
 
         with enable_profiling_mode():
-            # the first calls are profiled
-            def_in_one_branch(a, False)
-            # check prim::profile are inserted
-            profiled_graph_str = str(def_in_one_branch.graph_for(a, True))
+            # the first call is profiled
+            profiled_graph_str = str(def_in_one_branch.graph_for(a, False))
             FileCheck().check_count("prim::profile", 4).run(profiled_graph_str)
+            # the second call is optimized
             def_in_one_branch(a, False)
-            def_in_one_branch(a, False)
-            # this call is optimized for
-            # the given shape of (2, 3)
-            def_in_one_branch(a, False)
-            # change shape to (3)
-            # so we go down a bailout path
             a = torch.ones(3)
             # check prim::BailOuts are inserted
             bailout_graph_str = str(def_in_one_branch.graph_for(a, True))
@@ -14659,7 +14652,7 @@ a")
         buffer.seek(0)
         loaded = torch.jit.load(buffer)
 
-        with self.assertRaisesRegex(torch._C.JITException, "annotated to be ignored and cannot be run"):
+        with self.assertRaisesRegex(torch.jit.Error, "annotated to be ignored and cannot be run"):
             loaded(torch.tensor(.5), True)
 
     def test_module_error(self):
