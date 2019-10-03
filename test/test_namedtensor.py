@@ -221,6 +221,30 @@ class TestNamedTensor(TestCase):
             [torch.randn(3, requires_grad=True, names=names)],
             names)
 
+    def test_index_fill(self):
+        for device in torch.testing.get_all_device_types():
+            expected_names = ('N', 'C')
+            x = torch.randn(3, 5, device=device, names=expected_names)
+
+            output = x.index_fill_('C', torch.tensor([0, 1], device=device), 5)
+            self.assertEqual(output.names, expected_names)
+
+            output = x.index_fill_('C', torch.tensor([0, 1], device=device), torch.tensor(4.))
+            self.assertEqual(output.names, expected_names)
+
+            output = x.index_fill('C', torch.tensor([0, 1], device=device), 5)
+            self.assertEqual(output.names, expected_names)
+
+            output = x.index_fill('C', torch.tensor([0, 1], device=device), torch.tensor(4.))
+            self.assertEqual(output.names, expected_names)
+
+    def test_squeeze(self):
+        x = create('N:3,C:1,H:1,W:1')
+        output = x.squeeze('C')
+        self.assertEqual(output.names, ['N', 'H', 'W'])
+
+        output = x.squeeze()
+        self.assertEqual(output.names, ['N'])
 
     def test_repr(self):
         named_tensor = torch.zeros(2, 3).rename_('N', 'C')
@@ -1064,7 +1088,7 @@ class TestNamedTensor(TestCase):
             Case(torch.logsumexp, False, True, True, True, None),
             Case(torch.mode, False, False, True, True, values_and_indices),
             Case(kthvalue_wrapper, False, False, True, True, values_and_indices),
-            Case(torch.median, False, False, True, True, values_and_indices),
+            Case(torch.median, True, False, True, True, values_and_indices),
         ]
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
@@ -1317,7 +1341,7 @@ class TestNamedTensor(TestCase):
         self.assertEqual(output.shape, [3, 5, 1, 2])
 
         # All input dimensions must be named
-        with self.assertRaisesRegex(RuntimeError, "All input dims must be named"):
+        with self.assertRaisesRegex(RuntimeError, "All input dims must be named. Found unnamed dim at index 0"):
             create('None:2,C:3').align_to('N', 'C')
 
         # not enough names
@@ -1373,6 +1397,7 @@ class TestNamedTensor(TestCase):
         self.assertEqual(output.names, ['N', 'H', 'W', 'C'])
         self.assertEqual(output.shape, [3, 5, 1, 2])
 
+    @unittest.skip("Not implemented yet")
     def test_align_tensors_two_inputs(self):
         def _test(tensor_namedshape, align_names, expected_sizes, expected_error):
             tensor_names, tensor_sizes = tensor_namedshape
@@ -1483,6 +1508,7 @@ class TestNamedTensor(TestCase):
         for test in tests:
             _test(*test)
 
+    @unittest.skip("Not implemented yet")
     def test_align_tensors(self):
         def reference_fn(*tensors):
             longest_names = tensors[0].names
@@ -1790,7 +1816,7 @@ class TestNamedTensor(TestCase):
     def test_nyi_dimname_overload_msg(self):
         x = torch.randn(3, 3)
         with self.assertRaisesRegex(RuntimeError, "squeeze: You passed a dimname"):
-            x.squeeze("N")
+            x.squeeze_("N")
 
     def test_dot(self):
         for device in torch.testing.get_all_device_types():
@@ -1799,6 +1825,53 @@ class TestNamedTensor(TestCase):
                 torch.dot, device=device,
                 args=(create('C:2'), create('W:2')),
                 expected_names=[])
+
+    def test_comparison_ops(self):
+        for device in torch.testing.get_all_device_types():
+            a = torch.randn(3, 3, names=('N', 'C'), device=device)
+            b = torch.randn(3, 3, names=('N', 'C'), device=device)
+            scalar = torch.randn([], device=device)
+
+            self.assertEqual((a == b).names, ['N', 'C'])
+            self.assertEqual((a != b).names, ['N', 'C'])
+            self.assertEqual((a > b).names, ['N', 'C'])
+            self.assertEqual((a < b).names, ['N', 'C'])
+            self.assertEqual((a >= b).names, ['N', 'C'])
+            self.assertEqual((a <= b).names, ['N', 'C'])
+
+            self.assertEqual((a == 1).names, ['N', 'C'])
+            self.assertEqual((a != 1).names, ['N', 'C'])
+            self.assertEqual((a > 1).names, ['N', 'C'])
+            self.assertEqual((a < 1).names, ['N', 'C'])
+            self.assertEqual((a >= 1).names, ['N', 'C'])
+            self.assertEqual((a <= 1).names, ['N', 'C'])
+
+            self.assertEqual((a == scalar).names, ['N', 'C'])
+            self.assertEqual((a != scalar).names, ['N', 'C'])
+            self.assertEqual((a > scalar).names, ['N', 'C'])
+            self.assertEqual((a < scalar).names, ['N', 'C'])
+            self.assertEqual((a >= scalar).names, ['N', 'C'])
+            self.assertEqual((a <= scalar).names, ['N', 'C'])
+
+            res = torch.empty(3, 3, dtype=torch.bool, device=device)
+            torch.eq(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.ne(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.lt(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.gt(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.le(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.ge(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+
+            res = torch.isnan(a)
+            self.assertEqual(res.names, ['N', 'C'])
+
+            res = torch.isinf(a)
+            self.assertEqual(res.names, ['N', 'C'])
 
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):

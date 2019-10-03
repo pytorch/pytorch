@@ -35,7 +35,7 @@ Each component is described in more detail below:
 ### `func`
 
 ```
-- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
+- func: func_name[.overload_name](ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
 ```
 
 The `func` entry is a string describing the name of the function and its type
@@ -170,7 +170,29 @@ two functions:
 Note that argument type modifiers such as defaults and optional are not currently supported on Return.
 
 
-The declarations also support the following attributes:
+**Overloads.** You can register multiple functions with the same name and different
+function signatures if you give them unique overload names. An overload name
+is specified after the function name, separated by a dot.
+
+Overload names do not have to be globally unique, but must be unique in the set
+of all overloads for the same function. Overload names cannot be changed for
+backwards compatibility reasons. Please try to make overload names semantically
+meaningful. An overload name that just enumerates all the argument types isn't
+helpful. In many cases, a semantic name is clear from what the overload is doing
+differently. As a fallback, you can use the name or type of the first differing
+argument as an overload name.
+
+If you add a new overload to an existing function, please leave the existing
+overload names as they are (for backwards compatibility), but give the new
+overload a new, unique name.
+
+Not specifying an overload name is equivalent to specifying an empty overload
+name. If you add a new function with multiple overloads, give them unique
+overload names, at most one overload is allowed to have an empty overload name.
+
+
+The declarations also support the following attributes.
+
 
 ### `variants`
 

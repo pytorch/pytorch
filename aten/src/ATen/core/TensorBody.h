@@ -186,8 +186,13 @@ class CAFFE2_API Tensor {
   int64_t ndimension() const {
     return dim();
   }
+
   bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
     return impl_->is_contiguous(memory_format);
+  }
+
+  bool is_non_overlapping_and_dense() const {
+    return impl_->is_non_overlapping_and_dense();
   }
 
   at::MemoryFormat suggest_memory_format() const {
@@ -734,7 +739,7 @@ class CAFFE2_API Tensor {
   #ifdef BUILD_NAMEDTENSOR
   Tensor norm(c10::optional<Scalar> p, DimnameList dim, bool keepdim=false) const;
   #endif
-  Tensor clone() const;
+  Tensor clone(c10::optional<MemoryFormat> memory_format=c10::nullopt) const;
   Tensor & resize_as_(const Tensor & the_template) const;
   Tensor pow(Scalar exponent) const;
   Tensor & zero_() const;
@@ -804,6 +809,12 @@ class CAFFE2_API Tensor {
   Tensor index_fill(int64_t dim, const Tensor & index, Scalar value) const;
   Tensor & index_fill_(int64_t dim, const Tensor & index, const Tensor & value) const;
   Tensor index_fill(int64_t dim, const Tensor & index, const Tensor & value) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & index_fill_(Dimname dim, const Tensor & index, Scalar value) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & index_fill_(Dimname dim, const Tensor & index, const Tensor & value) const;
+  #endif
   #ifdef BUILD_NAMEDTENSOR
   Tensor index_fill(Dimname dim, const Tensor & index, Scalar value) const;
   #endif
