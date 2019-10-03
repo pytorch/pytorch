@@ -3402,6 +3402,7 @@ class TestScript(JitTestCase):
     def test_mutate_constant(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ["foo"]
+
             def __init__(self, foo):
                 super(M, self).__init__()
                 self.foo = foo
@@ -20344,6 +20345,7 @@ class TestTypeSharing(JitTestCase):
         """
         class A(torch.nn.Module):
             __constants__ = ["const"]
+
             def __init__(self, in1, out1, in2, out2):
                 super(A, self).__init__()
                 self.submod1 = torch.nn.Linear(in1, out1)
@@ -20357,6 +20359,7 @@ class TestTypeSharing(JitTestCase):
 
         class B(torch.nn.Module):
             __constants__ = ["const"]
+
             def __init__(self, in1, out1, in2, out2):
                 super(B, self).__init__()
                 self.submod1 = torch.nn.Linear(in1, out1)
