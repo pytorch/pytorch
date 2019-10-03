@@ -8,6 +8,7 @@ import torch
 import tarfile
 import tempfile
 import warnings
+import copyreg
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
 from ._six import string_classes as _string_classes
@@ -427,6 +428,21 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
     finally:
         if new_fd:
             f.close()
+
+
+def _get_layout(name, _cache={}):
+    """Get layout extension object from its string representation.
+    """
+    if not _cache:
+        for v in torch.__dict__.values():
+            if isinstance(v, torch.layout):
+                _cache[str(v)] = v
+    return _cache[name]
+
+
+# Register pickling support for layout instances such as
+# torch.sparse_coo, etc
+copyreg.pickle(torch.layout, lambda obj: (_get_layout, (str(obj),)))
 
 
 def _load(f, map_location, pickle_module, **pickle_load_args):

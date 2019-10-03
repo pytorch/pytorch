@@ -142,7 +142,7 @@ def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, bac
 
 
 def _rebuild_sparse_tensor(layout, data):
-    if layout == 'sparse_coo':
+    if layout == torch.sparse_coo:
         indices, values, size = data
         return torch.sparse_coo_tensor(indices, values, size)
     raise NotImplementedError("rebuilding sparse tensor for layout %s" % (layout))
