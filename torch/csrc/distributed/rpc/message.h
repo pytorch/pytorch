@@ -17,6 +17,8 @@ enum MessageType {
   RREF_FETCH_RET,
   RREF_USER_CREATE,
   RREF_USER_DELETE,
+  MESSAGE_WITH_AUTOGRAD_REQ,
+  MESSAGE_WITH_AUTOGRAD_RESP,
   SHUTDOWN,
   EXCEPTION,
   UNKNOWN
@@ -38,8 +40,8 @@ enum MessageType {
 //                  request and response. Other implementation can ignore it
 //                  if they have their own ways to do matching.
 //
-// Layers above ``RpcAgent`` only converts ScriptCall, ScriptRet, PythonCall,
-// and PythonRet into a Message, and it is up to the RpcAgent
+// Layers above ``RpcAgent`` only converts ScriptCall, ScriptResp, PythonCall,
+// and PythonUDFResp into a Message, and it is up to the RpcAgent
 // implementation to determine how to serialize a message.
 class TORCH_API Message final {
  public:
@@ -62,7 +64,11 @@ class TORCH_API Message final {
   Message& operator=(Message&& rhs) &;
   void swap(Message& rhs) noexcept;
 
+  // Destructively retrieves the payload.
+  std::vector<char>&& movePayload() &&;
+
   const std::vector<char>& payload() const;
+  std::vector<torch::Tensor>& tensors();
   const std::vector<torch::Tensor>& tensors() const;
   const MessageType& type() const;
 

@@ -1,4 +1,5 @@
-#include <torch/csrc/distributed/rpc/script_ret.h>
+#include <torch/csrc/distributed/rpc/script_resp.h>
+#include <c10/util/C++17.h>
 #include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/unpickler.h>
 
@@ -13,13 +14,13 @@ using torch::jit::Unpickler;
 
 } // namespace
 
-ScriptRet::ScriptRet(at::IValue&& value) : value_(value) {}
+ScriptResp::ScriptResp(at::IValue&& value) : value_(value) {}
 
-const at::IValue& ScriptRet::value() {
+const at::IValue& ScriptResp::value() {
   return value_;
 }
 
-Message ScriptRet::toMessage() {
+Message ScriptResp::toMessage() && {
   std::vector<torch::Tensor> tensor_table;
   auto payload = jit::pickle(value_, &tensor_table);
   ;
@@ -27,12 +28,12 @@ Message ScriptRet::toMessage() {
       std::move(payload), std::move(tensor_table), MessageType::SCRIPT_RET);
 }
 
-ScriptRet ScriptRet::fromMessage(const Message& message) {
+std::unique_ptr<ScriptResp> ScriptResp::fromMessage(const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
   auto value =
       jit::unpickle(payload, payload_size, nullptr, &message.tensors());
-  return ScriptRet(std::move(value));
+  return c10::guts::make_unique<ScriptResp>(std::move(value));
 }
 
 } // namespace rpc

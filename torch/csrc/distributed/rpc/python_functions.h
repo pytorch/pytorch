@@ -8,7 +8,7 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
-#include <torch/csrc/distributed/rpc/script_ret.h>
+#include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 
