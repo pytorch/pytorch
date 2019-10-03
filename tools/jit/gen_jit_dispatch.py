@@ -163,6 +163,9 @@ auto result_ = (${first}).${name}(${args_with_tensor_options});
 CONSTRUCTOR = CodeTemplate("""\
 [](Stack & stack) {
     ${lvalues}
+#ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+#endif
     ${call}
     drop(stack, ${num_inputs});
     pack(stack, std::move(result_));
