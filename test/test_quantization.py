@@ -3,9 +3,9 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import torch.nn._intrinsic as nni
-import torch.nn._intrinsic.quantized as nniq
-import torch.nn._intrinsic.qat as nniqat
+import torch.nn.intrinsic as nni
+import torch.nn.intrinsic.quantized as nniq
+import torch.nn.intrinsic.qat as nniqat
 from torch.quantization import \
     QConfig, QConfigDynamic, default_observer, default_weight_observer, get_observer_dict,\
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
@@ -294,7 +294,7 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
         model = convert(model)
 
         def checkQuantized(model):
-            self.assertEqual(type(model.module.conv1), nn._intrinsic.quantized.ConvReLU2d)
+            self.assertEqual(type(model.module.conv1), nn.intrinsic.quantized.ConvReLU2d)
             self.assertEqual(type(model.module.myop), nn.quantized.QFunctional)
             self.assertEqual(type(model.module.avgpool), nn.AdaptiveAvgPool2d)
             test_only_eval_fn(model, self.img_data)
@@ -336,6 +336,11 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         quantize_dynamic(model, qconfig_dict, inplace=True)
         checkQuantized(model)
 
+        # Test set qconfig
+        model = SingleLayerLinearDynamicModel()
+        quantize_dynamic(model, set([nn.Linear]), inplace=True)
+        checkQuantized(model)
+
     def test_two_layers(self):
         r"""TwoLayerLinearModel has two Linear modules but we only quantize the second one
         `fc2`, and `fc1`is not quantized
@@ -357,6 +362,10 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         # test one line API
         model = quantize_dynamic(TwoLayerLinearModel().eval(), qconfig_dict)
+        checkQuantized(model)
+
+        # Test set API
+        model = quantize_dynamic(TwoLayerLinearModel().eval(), {'fc2'})
         checkQuantized(model)
 
     def test_nested1(self):
@@ -385,6 +394,9 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
+        model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2.fc1'})
+        checkQuantized(model)
+
     def test_nested2(self):
         r"""Another test case for quantized, we will quantize all submodules
         of submodule sub2
@@ -410,6 +422,10 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         # test one line API
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        checkQuantized(model)
+
+        # Test set API
+        model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2'})
         checkQuantized(model)
 
     def test_nested3(self):
@@ -441,6 +457,10 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         # test one line API
         model = quantize_dynamic(NestedModel().eval(), qconfig_dynamic_dict)
+        checkQuantized(model)
+
+        # Test set API
+        model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2', 'sub2.fc1'})
         checkQuantized(model)
 
     def test_type_match_rule(self):
@@ -644,15 +664,20 @@ class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
     " with instruction set support avx2 or newer.",
 )
-@unittest.skip("temoprarily disable the test - enable after known issues are fixed")
 class GraphModePostTrainingQuantTest(QuantizationTestCase):
     @_tmp_donotuse_dont_inline_everything
     def test_single_layer(self):
-        r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
-        to nnq.Linear which is the quantized version of the module
+        r"""Compare the result of quantizing single linear layer in
+        eager mode and graph mode
         """
         # eager mode
-        model_eager = quantize(AnnotatedSingleLayerLinearModel(), test_only_eval_fn,
+        annotated_linear_model = AnnotatedSingleLayerLinearModel()
+        linear_model = SingleLayerLinearModel()
+        # copy the weight from eager mode so that we can
+        # compare the result of the two quantized models later
+        linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
+        linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
+        model_eager = quantize(annotated_linear_model, test_only_eval_fn,
                                self.calib_data)
 
         qconfig_dict = {
@@ -661,11 +686,13 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
                 weight=default_weight_observer)
         }
         model_script = quantize_script(
-            torch.jit.script(SingleLayerLinearModel()),
+            torch.jit.script(linear_model),
             qconfig_dict,
             test_only_eval_fn,
-            [self.calib_data])
+            [self.calib_data],
+            inplace=False)
         result_eager = model_eager(self.calib_data[0][0])
+        torch._C._jit_pass_quant_fusion(model_script._c._get_module('fc1')._get_method('forward').graph)
         result_script = model_script._c._get_method('forward')(self.calib_data[0][0])
         self.assertEqual(result_eager, result_script)
 
@@ -909,6 +936,8 @@ class ObserverTest(QuantizationTestCase):
         if qdtype == torch.quint8 and qscheme == torch.per_tensor_symmetric:
             reduce_range = False
         myobs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        # Calculate Qparams should return with a warning for observers with no data
+        qparams = myobs.calculate_qparams()
         x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
         result = myobs(x)
@@ -957,6 +986,8 @@ class ObserverTest(QuantizationTestCase):
         if qdtype == torch.quint8 and qscheme == torch.per_channel_symmetric:
             reduce_range = False
         myobs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
+        # Calculate qparams should work for empty observers
+        qparams = myobs.calculate_qparams()
         x = torch.tensor(
             [
                 [[[1.0, 2.0], [2.0, 2.5]], [[3.0, 4.0], [4.5, 6.0]]],
@@ -1081,6 +1112,8 @@ class RecordHistogramObserverTest(QuantizationTestCase):
            reduce_range=st.booleans())
     def test_histogram_observer(self, qdtype, qscheme, reduce_range):
         myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        # Calculate qparams should work for empty observers
+        qparams = myobs.calculate_qparams()
         x = torch.tensor([2.0, 3.0, 4.0, 5.0])
         y = torch.tensor([5.0, 6.0, 7.0, 8.0])
         myobs(x)

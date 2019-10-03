@@ -899,7 +899,7 @@ class SummaryWriter(object):
         so it allows users to interact with the rendered object. Besides the basic definitions
         such as vertices, faces, users can further provide camera parameter, lighting condition, etc.
         Please check https://threejs.org/docs/index.html#manual/en/introduction/Creating-a-scene for
-        advanced usage. Note that currently this depends on tb-nightly to show.
+        advanced usage.
 
         Args:
             tag (string): Data identifier
