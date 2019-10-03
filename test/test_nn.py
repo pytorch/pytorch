@@ -8574,8 +8574,8 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not torch._nnpack_available(), "NNPACK unavailable")
     def test_nnpack_conv(self):
         for kern, inp_size in [(3, 6), (3, 7), (4, 9)]:
-            for batch, padding, chan_in, chan_out in \
-                    product([1, 2], [0, 1, 2], [2], [3]):
+            for batch, stride, padding, chan_in, chan_out in \
+                    product([1, 2], [1, 2], [0, 1, 2], [2], [3]):
 
                 for has_bias in [True, False]:
                     input_shape = [batch, chan_in]
