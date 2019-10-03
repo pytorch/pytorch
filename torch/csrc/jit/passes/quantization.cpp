@@ -693,18 +693,24 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
   rewriter.runOnGraph(graph);
 }
 
-c10::optional<IValue> toIntList(Value* v) {
+c10::optional<IValue> toTwoElementIntList(Value* v) {
   auto* n = v->node();
   if (n->kind() == prim::Constant) {
-    return toIValue(v);
-  } else if (n->kind() == prim::ListConstruct) {
+    auto iv = toIValue(v);
+    if (iv && iv.value().isIntList() && iv.value().toIntList().size() == 2) {
+      return iv;
+    }
+  }
+
+  if (n->kind() == prim::ListConstruct &&
+      n->inputs().size() == 2) {
     auto e0 = toIValue(n->inputs()[0]);
     auto e1 = toIValue(n->inputs()[1]);
     if (!e0 || !e1) {
       return c10::nullopt;
     }
     c10::List<int64_t> a =
-        c10::List<int64_t>({e0.value().toInt(), e1.value().toInt()});
+      c10::List<int64_t>({e0.value().toInt(), e1.value().toInt()});
     return IValue(a);
   }
   return c10::nullopt;
@@ -1026,13 +1032,13 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
       auto wrapper_module = packed_params_module.clone();
       auto set_weight_bias = wrapper_module.get_method("set_weight_bias");
       if (is_conv) {
-        auto stride = toIntList(match_vmap.at(vmap.at("stride")));
-        auto padding = toIntList(match_vmap.at(vmap.at("padding")));
-        auto dilation = toIntList(match_vmap.at(vmap.at("dilation")));
+        auto stride = toTwoElementIntList(match_vmap.at(vmap.at("stride")));
+        auto padding = toTwoElementIntList(match_vmap.at(vmap.at("padding")));
+        auto dilation = toTwoElementIntList(match_vmap.at(vmap.at("dilation")));
         auto groups = toIValue(match_vmap.at(vmap.at("groups")));
         auto set_conv_params = wrapper_module.get_method("set_conv_params");
         if (!stride || !padding || !dilation) {
-          TORCH_WARN("Non-constant stride/padding/dilation");
+          TORCH_WARN("Failed to extract two element IntList for stride/padding/dilation");
           continue;
         }
         set_conv_params(std::vector<IValue>{
