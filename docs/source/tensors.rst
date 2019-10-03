@@ -157,6 +157,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: acos_
    .. automethod:: add
    .. automethod:: add_
+   .. automethod:: add_relu
    .. automethod:: addbmm
    .. automethod:: addbmm_
    .. automethod:: addcdiv
@@ -342,6 +343,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: mul
    .. automethod:: mul_
    .. automethod:: multinomial
+   .. automethod:: mul_relu
    .. automethod:: mv
    .. automethod:: mvlgamma
    .. automethod:: mvlgamma_

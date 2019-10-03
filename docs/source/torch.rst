@@ -188,6 +188,7 @@ Pointwise Ops
 .. autofunction:: add
 .. autofunction:: addcdiv
 .. autofunction:: addcmul
+.. autofunction:: add_relu
 .. autofunction:: asin
 .. autofunction:: atan
 .. autofunction:: atan2
@@ -214,6 +215,7 @@ Pointwise Ops
 .. autofunction:: logical_not
 .. autofunction:: logical_xor
 .. autofunction:: mul
+.. autofunction:: mul_relu
 .. autofunction:: mvlgamma
 .. autofunction:: neg
 .. autofunction:: pow
