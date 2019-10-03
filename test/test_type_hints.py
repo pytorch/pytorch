@@ -109,8 +109,11 @@ class TestTypeHints(TestCase):
         Run documentation examples through mypy.
         """
         fn = os.path.join(os.path.dirname(__file__), 'generated_type_hints_smoketest.py')
+        examples_txt = get_all_examples()
+        print("===============================Example======================================")
+        print(examples_txt)
         with open(fn, "w") as f:
-            print(get_all_examples(), file=f)
+            print(examples_txt, file=f)
 
         # OK, so here's the deal.  mypy treats installed packages
         # and local modules differently: if a package is installed,
