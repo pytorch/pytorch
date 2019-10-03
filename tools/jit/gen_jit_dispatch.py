@@ -369,6 +369,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False):
         return [sorted(g, key=declkey) for g in grouped_decls]
 
     # We need to add methods implemented manually in TensorImpl
+    # TODO: This seems to claim sizes() returns an int64_t.  Really?
     tensor_impl_methods = [{
         'name': name,
         'api_name': name,
@@ -376,7 +377,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False):
         'method_of': ['Tensor'],
         'arguments': [{'name': 'self', 'simple_type': 'Tensor'}],
         'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t', 'simple_type': 'int64_t'}],
-    } for name in ['sizes', 'strides', 'dim']]
+    } for name in ['sizes', 'strides', 'dim', 'numel']]
     aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
     jit_decls = [d for d in aten_decls if is_jit_op(d)]
 
