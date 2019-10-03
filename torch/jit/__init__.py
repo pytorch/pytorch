@@ -1512,7 +1512,8 @@ if _enabled:
             else:
                 self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit, True)
 
-            Module._Module__construct(self)
+            super(ScriptModule, self).__init__()
+            self._c._register_attribute('training', torch._C.BoolType.get(), self.training)
 
             self._parameters = OrderedParameterDict(self._c)
             self._buffers = OrderedBufferDict(self._c)
