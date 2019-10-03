@@ -615,7 +615,7 @@ class ModelWithNoQconfigPropagation(nn.Module):
         self.dequant = DeQuantStub()
         self.no_quant_module = self.ListOutModule()
 
-    def forward(self,x):
+    def forward(self, x):
         x = self.quant(x)
         x = self.fc1(x)
         x = self.dequant(x)
