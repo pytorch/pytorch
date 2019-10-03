@@ -799,6 +799,7 @@ PyMethodDef variable_methods[] = {
   {"new_tensor", (PyCFunction)(void(*)(void))THPVariable_new_tensor, METH_VARARGS | METH_KEYWORDS, NULL},
   {"new_zeros", (PyCFunction)(void(*)(void))THPVariable_new_zeros, METH_VARARGS | METH_KEYWORDS, NULL},
   {"nonzero", (PyCFunction)(void(*)(void))THPVariable_nonzero, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"numel", (PyCFunction)THPVariable_numel, METH_NOARGS, NULL},
   {"numpy", (PyCFunction)THPVariable_numpy, METH_NOARGS, NULL},
   {"record_stream", (PyCFunction)THPVariable_record_stream, METH_O, NULL},
   {"requires_grad_", (PyCFunction)(void(*)(void))THPVariable_requires_grad_, METH_VARARGS | METH_KEYWORDS, NULL},
