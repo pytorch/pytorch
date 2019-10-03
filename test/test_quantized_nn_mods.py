@@ -1,10 +1,10 @@
 import torch
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-import torch.nn._intrinsic.quantized as nnq_fused
+import torch.nn.intrinsic.quantized as nnq_fused
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules import Conv2d
-from torch.nn._intrinsic.quantized import ConvReLU2d
+from torch.nn.intrinsic.quantized import ConvReLU2d
 import torch.quantization
 from common_utils import run_tests, IS_PPC, TEST_WITH_UBSAN
 from common_quantization import QuantizationTestCase, prepare_dynamic
@@ -228,7 +228,7 @@ class ModuleAPITest(QuantizationTestCase):
         qengine=st.sampled_from(("qnnpack", "fbgemm"))
     )
     def test_linear_api(self, batch_size, in_features, out_features, use_bias, use_fused, per_channel, qengine):
-        """test API functionality for nn.quantized.linear and nn._intrinsic.quantized.linear_relu"""
+        """test API functionality for nn.quantized.linear and nn.intrinsic.quantized.linear_relu"""
         if qengine not in torch.backends.quantized.supported_engines:
             return
         if qengine == 'qnnpack':
@@ -272,8 +272,12 @@ class ModuleAPITest(QuantizationTestCase):
             # ops directly
             if use_fused:
                 Z_ref = torch.ops.quantized.linear_relu(X_q, W_pack, scale, zero_point)
+
+                self.assertTrue('QuantizedLinearReLU' in str(qlinear))
             else:
                 Z_ref = torch.ops.quantized.linear(X_q, W_pack, scale, zero_point)
+
+                self.assertTrue('QuantizedLinear' in str(qlinear))
             self.assertEqual(Z_ref, Z_q)
 
             # Test serialization of quantized Linear Module using state_dict
@@ -483,6 +487,8 @@ class ModuleAPITest(QuantizationTestCase):
                                                     groups=g,
                                                     bias=use_bias,
                                                     padding_mode='zeros')
+
+                self.assertTrue('QuantizedConvReLU2d' in str(loaded_conv_under_test))
             else:
                 loaded_conv_under_test = Conv2d(in_channels=iC,
                                                 out_channels=oC,
@@ -493,6 +499,7 @@ class ModuleAPITest(QuantizationTestCase):
                                                 groups=g,
                                                 bias=use_bias,
                                                 padding_mode='zeros')
+                self.assertTrue('QuantizedConv2d' in str(loaded_conv_under_test))
             loaded_conv_under_test.load_state_dict(loaded_dict)
             self.assertEqual(loaded_conv_under_test._weight_bias(), conv_under_test._weight_bias())
             if use_bias:

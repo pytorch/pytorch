@@ -325,8 +325,10 @@ Tensor& ne_(Tensor& self, Scalar other) { return comparison_op_(self, other, ne_
 Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other,
                                         /*check_mem_overlap=*/true);
+  TORCH_CHECK(self.dtype() == other.dtype(),
+              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
+              other.dtype(), " for argument 'other'");
   max2_stub(iter.device_type(), iter);
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
   return result;
 }
 
@@ -340,8 +342,10 @@ Tensor& max_(Tensor& self, const Tensor& other) { return at::max_out(self, self,
 Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other,
                                         /*check_mem_overlap=*/true);
+  TORCH_CHECK(self.dtype() == other.dtype(),
+              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
+              other.dtype(), " for argument 'other'");
   min2_stub(iter.device_type(), iter);
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
   return result;
 }
 
