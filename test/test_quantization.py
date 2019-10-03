@@ -336,6 +336,11 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         quantize_dynamic(model, qconfig_dict, inplace=True)
         checkQuantized(model)
 
+        # Test set qconfig
+        model = SingleLayerLinearDynamicModel()
+        quantize_dynamic(model, set([nn.Linear]), inplace=True)
+        checkQuantized(model)
+
     def test_two_layers(self):
         r"""TwoLayerLinearModel has two Linear modules but we only quantize the second one
         `fc2`, and `fc1`is not quantized
@@ -357,6 +362,10 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         # test one line API
         model = quantize_dynamic(TwoLayerLinearModel().eval(), qconfig_dict)
+        checkQuantized(model)
+
+        # Test set API
+        model = quantize_dynamic(TwoLayerLinearModel().eval(), {'fc2'})
         checkQuantized(model)
 
     def test_nested1(self):
@@ -385,6 +394,9 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
+        model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2.fc1'})
+        checkQuantized(model)
+
     def test_nested2(self):
         r"""Another test case for quantized, we will quantize all submodules
         of submodule sub2
@@ -410,6 +422,10 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         # test one line API
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        checkQuantized(model)
+
+        # Test set API
+        model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2'})
         checkQuantized(model)
 
     def test_nested3(self):
@@ -441,6 +457,10 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         # test one line API
         model = quantize_dynamic(NestedModel().eval(), qconfig_dynamic_dict)
+        checkQuantized(model)
+
+        # Test set API
+        model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2', 'sub2.fc1'})
         checkQuantized(model)
 
     def test_type_match_rule(self):
