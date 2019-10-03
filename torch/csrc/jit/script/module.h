@@ -257,7 +257,12 @@ struct TORCH_API Module {
   }
   /// True if the module is in training mode.
   bool is_training() {
-    return get_attribute("training").toBool();
+    if (auto p = find_attribute("training")) {
+      return p->value().toBool();
+    }
+
+    // We are in training mode by default
+    return true;
   }
 
   /// Recursively casts all parameters to the given `dtype` and `device`.

@@ -488,19 +488,25 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   auto index = py::cast<size_t>(dispatched_fn_["index"]);
   auto arg_name = py::str(dispatched_fn_["arg_name"]);
 
+  ErrorReport error(loc);
   if (index < inputs.size()) {
     // Dispatch flag is in arg list
     result = constant_as<bool>(inputs.at(index).value(graph));
+    error << "Argument for boolean dispatch at position " << index
+          << " was not constant";
   } else if (auto i = findInputWithName(arg_name, attributes)) {
     // Dispatch flag is in kwargs
     result = constant_as<bool>(attributes[*i].value(graph));
+    error << "Keyword argument '" << arg_name
+          << "' for boolean dispatch at position was not constant";
   } else {
     // Didn't find dispatch flag, so use default value
     result = py::cast<bool>(dispatched_fn_["default"]);
+    TORCH_INTERNAL_ASSERT(result);
   }
 
   if (!result) {
-    throw ErrorReport(loc) << "value for boolean dispatch was not constant";
+    throw error;
   }
 
   std::shared_ptr<SugaredValue> value;

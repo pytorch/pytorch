@@ -3443,25 +3443,34 @@ def foo(x):
         FileCheck().check_dag("NamedTuple").check_dag("Exception").run(mod.forward.graph)
 
     def test_eval_python(self):
+        def _test(m):
+            self.assertTrue(m(torch.ones(2, 2)))
+            self.assertTrue(m.training)
+            self.assertTrue(m._c._get_attribute('training'))
+
+            m.eval()
+
+            self.assertFalse(m.training)
+            self.assertFalse(m._c._get_attribute('training'))
+            self.assertFalse(m(torch.ones(2, 2)))
+
         class M(nn.Module):
             def __init__(self):
-                super().__init__()
-                self.my = 2
+                super(M, self).__init__()
 
             def forward(self, x):
                 return self.training
 
-        m = torch.jit.script(M())
+        class OldM(torch.jit.ScriptModule):
+            def __init__(self):
+                super(OldM, self).__init__()
 
-        self.assertTrue(m(torch.ones(2, 2)))
-        self.assertTrue(m.training)
-        self.assertTrue(m._c._get_attribute('training'))
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.training
 
-        m.eval()
-
-        self.assertFalse(m.training)
-        self.assertFalse(m._c._get_attribute('training'))
-        self.assertFalse(m(torch.ones(2, 2)))
+        _test(torch.jit.script(M()))
+        _test(OldM())
 
     def test_inherit_method(self):
         class A(torch.jit.ScriptModule):
@@ -8343,11 +8352,12 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return (3,)
+                return (3, self.training)
 
             @torch.jit.export
             def __setstate__(self, state):
                 self.a = state[0]
+                self.training = state[1]
 
             def forward(self, x):
                 return x + self.a
@@ -8373,11 +8383,12 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return (3,)
+                return (3, self.training)
 
             @torch.jit.export
             def __setstate__(self, state):
                 self.a = state[0]
+                self.training = state[1]
 
             def forward(self, x):
                 return x + self.a
@@ -13501,12 +13512,13 @@ a")
 
             @torch.jit.script_method
             def __getstate__(self):
-                return (self.buffer1, self.buffer2, 74)
+                return (self.buffer1, self.buffer2, 74, self.training)
 
             @torch.jit.script_method
             def __setstate__(self, state):
                 self.buffer1 = state[0] + 10
                 self.buffer2 = state[1] + 10
+                self.training = state[3]
 
 
         class M(torch.jit.ScriptModule):
@@ -13521,13 +13533,14 @@ a")
 
             @torch.jit.script_method
             def __getstate__(self):
-                return (self.buffer1, self.buffer2, 74, self.submodule)
+                return (self.buffer1, self.buffer2, 74, self.submodule, self.training)
 
             @torch.jit.script_method
             def __setstate__(self, state):
                 self.buffer1 = state[0] + 10
                 self.buffer2 = state[1] + 10
                 self.submodule = state[3]
+                self.training = state[4]
 
         with TemporaryFileName() as fname:
             m = M(23, submodule=Root(99))
@@ -13558,12 +13571,13 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return 5
+                return (5, self.training)
 
             @torch.jit.export
             def __setstate__(self, state):
-                self.buffer1 = torch.ones(2, 2) + state
+                self.buffer1 = torch.ones(2, 2) + state[0]
                 self.buffer2 = torch.ones(2, 2) + 10
+                self.training = state[1]
 
         with TemporaryFileName() as fname:
             m = torch.jit.script(NoArgState())
@@ -15189,12 +15203,13 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return (self.tensor,)
+                return (self.tensor, self.training)
 
             @torch.jit.export
             def __setstate__(self, state):
-                # type: (Tuple[Tensor])
+                # type: (Tuple[Tensor, bool])
                 self.tensor = state[0]
+                self.training = state[1]
 
             def forward(self, x):
                 return x + self.tensor
@@ -15274,7 +15289,7 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return torch.ops.quantized.linear_unpack(self._packed_weight)[0]
+                return (torch.ops.quantized.linear_unpack(self._packed_weight)[0], self.training)
 
             def forward(self):
                 return self._packed_weight
@@ -15282,7 +15297,8 @@ a")
             @torch.jit.export
             def __setstate__(self, state):
                 self._packed_weight.set_(
-                    torch.ops.quantized.linear_prepack(state))
+                    torch.ops.quantized.linear_prepack(state[0]))
+                self.training = state[1]
 
             @property
             def weight(self):

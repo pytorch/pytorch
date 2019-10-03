@@ -42,12 +42,6 @@ void postSetStateValidate(const IValue& v) {
     // Verify that all the non-optional attributes have been initialized
     // TODO: Issue #20497
     if (attrType->kind() != TypeKind::OptionalType) {
-      if (slot.isNone() && attrName == "training") {
-        // Modules have a 'training' attribute by default, but the user shouldn't
-        // have to manually manage that if they add a __setstate__, so initialize
-        // it if it wasn't in __setstate__.
-        obj->setSlot(i, false);
-      }
       TORCH_CHECK(
           !slot.isNone(),
           "The field '",
