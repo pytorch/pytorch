@@ -326,6 +326,13 @@ class Tensor(torch._C._TensorBase):
         """
         return torch.unique_consecutive(self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
+    def cdist(x1, x2, p=2, compute_mode='use_mm_for_euclid_dist_if_necessary'):
+        r"""Computes the p-norm distance between each pair of the two collections of row vectors.
+
+        See :func:`torch.cdist`
+        """
+        return torch.cdist(x1, x2, p, compute_mode)
+
     def __rsub__(self, other):
         return _C._VariableFunctions.rsub(self, other)
 
