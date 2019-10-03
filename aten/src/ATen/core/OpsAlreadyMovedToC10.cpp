@@ -180,7 +180,6 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::floor_", ""},
         {"aten::frac", ""},
         {"aten::frac_", ""},
-        {"aten::full_like", ""},
         {"aten::grid_sampler", ""},
         {"aten::grid_sampler_2d", ""},
         {"aten::grid_sampler_2d_backward", ""},
@@ -931,6 +930,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
     #endif
         {"aten::full", ""},
         {"aten::full", "out"},
+        {"aten::full_like", ""},
         {"aten::full_like", "dtype"},
         {"aten::from_file", ""},
         {"aten::hann_window", ""},
