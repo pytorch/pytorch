@@ -724,14 +724,14 @@ def trace(func,
           _module_class=None,
           _compilation_unit=_python_cu):
     """
-    Trace a function and return an executable ``ScriptModule`` or ``torch._C.Function``
+    Trace a function and return an executable ``ScriptModule`` or ``torch._C.ScriptFunction``
     that will be optimized using just-in-time compilation.
 
     Using ``torch.jit.trace`` and :func:`torch.jit.trace_module<torch.jit.trace_module>`, you can turn an existing module or Python
-    function into a TorchScript ``torch._C.Function`` or ``ScriptModule``. You must provide example inputs,
+    function into a TorchScript ``torch._C.ScriptFunction`` or ``ScriptModule``. You must provide example inputs,
     and we run the function, recording the operations performed on all the tensors.
 
-    * The resulting recording of a standalone function produces ``torch._C.Function``.
+    * The resulting recording of a standalone function produces ``torch._C.ScriptFunction``.
     * The resulting recording of ``forward`` function of ``nn.Module`` or ``nn.Module`` produces ``ScriptModule``.
 
     This module also contains any parameters that the original
@@ -799,7 +799,7 @@ def trace(func,
         a ``ScriptModule`` object with a single ``forward()`` method containing the traced code.
         The returned ``ScriptModule`` will have the same set of sub-modules and parameters as the
         original ``nn.Module``.
-        If ``callable`` is a standalone function, ``trace`` returns ``torch._C.Function``
+        If ``callable`` is a standalone function, ``trace`` returns ``torch._C.ScriptFunction``
 
     Example (tracing a function):
 
@@ -1080,7 +1080,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a ``ScriptModule`` or
-    ``torch._C.Function``. TorchScript itself is a subset of the Python language, so not all
+    ``torch._C.ScriptFunction``. TorchScript itself is a subset of the Python language, so not all
     features in Python work, but we provide enough functionality to compute on
     tensors and do control-dependent operations. For a complete guide, see the
     `TorchScript Language Reference`_.
@@ -1089,7 +1089,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     ``@torch.jit.script`` for `TorchScript Classes <TorchScript Class_>`_ and functions.
 
     **Scripting a function**
-        The ``@torch.jit.script`` decorator will construct a ``torch._C.Function``
+        The ``@torch.jit.script`` decorator will construct a ``torch._C.ScriptFunction``
         by compiling the body of the function.
 
         Example (scripting a function):
@@ -2105,8 +2105,8 @@ def _graph_for(self, *args, **kwargs):
     return last_executed_optimized_graph()
 
 torch._C.ScriptMethod.graph_for = _graph_for
-torch._C.Function.graph_for = _graph_for
-Function = torch._C.Function
+torch._C.ScriptFunction.graph_for = _graph_for
+ScriptFunction = torch._C.ScriptFunction
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
