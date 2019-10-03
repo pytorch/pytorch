@@ -15,7 +15,8 @@ import torch.nn.quantized.dynamic as nnqd
 from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
-    propagate_qconfig_, convert, DEFAULT_DYNAMIC_MODULE_MAPPING
+    propagate_qconfig_, convert
+from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
 
 def test_only_eval_fn(model, calib_data):
     r"""
