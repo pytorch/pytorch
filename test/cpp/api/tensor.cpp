@@ -474,7 +474,7 @@ TEST(TensorTest, BackwardCreatesOnesGrad) {
               torch::ones_like(x)));
 }
 
-TEST(TensorTest, GradCanBeImplicitlyCreatedOnlyForScalarOutputs) {
+TEST(TensorTest, BackwardNonScalarOutputs) {
   auto x = torch::randn({5, 5}, torch::requires_grad());
   auto y = x * x;
   ASSERT_THROWS_WITH(y.backward(),
