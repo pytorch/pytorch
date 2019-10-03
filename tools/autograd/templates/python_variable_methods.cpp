@@ -99,7 +99,7 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
 #ifdef BUILD_NAMEDTENSOR
   else if (r.idx == 2) {
     if (jit::tracer::isTracing()) {
-      TORCH_INTERNAL_ASSERT("NYI: Named tensors w/ JIT");
+      TORCH_INTERNAL_ASSERT(false, "NYI: Named tensors w/ JIT");
     }
     return wrap(self_.size(r.dimname(0)));
   }
@@ -724,19 +724,32 @@ static PyObject * THPVariable_bool_scalar(PyObject* self, PyObject* args) {
   return THPVariable_is_nonzero(self, args);
 }
 
+// Wrapper converts a raised TypeError into returning NotImplemented
+// Used to implement binary arithmetic operators
+template <PyObject* (*Func)(PyObject*, PyObject*, PyObject*)>
+static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, PyObject* kwargs) {
+  PyObject* ret = Func(self, args, kwargs);
+  if (!ret && PyErr_ExceptionMatches(PyExc_TypeError)) {
+    PyErr_Clear();
+    Py_INCREF(Py_NotImplemented);
+    ret = Py_NotImplemented;
+  }
+  return ret;
+}
+
 PyMethodDef variable_methods[] = {
-  {"__add__", (PyCFunction)(void(*)(void))THPVariable_add, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__radd__", (PyCFunction)(void(*)(void))THPVariable_add, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__iadd__", (PyCFunction)(void(*)(void))THPVariable_add_, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__rmul__", (PyCFunction)(void(*)(void))THPVariable_mul, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__mul__", (PyCFunction)(void(*)(void))THPVariable_mul, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__imul__", (PyCFunction)(void(*)(void))THPVariable_mul_, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__sub__", (PyCFunction)(void(*)(void))THPVariable_sub, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__isub__", (PyCFunction)(void(*)(void))THPVariable_sub_, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__div__", (PyCFunction)(void(*)(void))THPVariable_div, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__truediv__", (PyCFunction)(void(*)(void))THPVariable_div, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__idiv__", (PyCFunction)(void(*)(void))THPVariable_div_, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__mod__", (PyCFunction)(void(*)(void))THPVariable_remainder, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__add__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_add>, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__radd__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_add>, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__iadd__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_add_>, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__rmul__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_mul>, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__mul__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_mul>, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__imul__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_mul_>, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__sub__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_sub>, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__isub__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_sub_>, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__div__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_div>, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__truediv__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_div>, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__idiv__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_div_>, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__mod__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_remainder>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__bool__", (PyCFunction)THPVariable_bool_scalar, METH_NOARGS, NULL},
   {"__float__", (PyCFunction)THPVariable_float_scalar, METH_NOARGS, NULL},
   {"__int__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
@@ -744,7 +757,7 @@ PyMethodDef variable_methods[] = {
   {"__index__", (PyCFunction)THPVariable_index_scalar, METH_NOARGS, NULL},
   {"__nonzero__", (PyCFunction)THPVariable_bool_scalar, METH_NOARGS, NULL},
   {"__invert__", (PyCFunction)THPVariable_invert, METH_NOARGS, NULL},
-  {"__matmul__", (PyCFunction)(void(*)(void))THPVariable_matmul, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__matmul__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_matmul>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"_is_view", (PyCFunction)THPVariable__is_view, METH_NOARGS, NULL},
   {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
   {"bfloat16", (PyCFunction)THPVariable_bfloat16, METH_NOARGS, NULL},

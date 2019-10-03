@@ -96,12 +96,20 @@ void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
 }
 
 void Module::_save_for_mobile(std::ostream& out, const ExtraFilesMap& extra_files) const {
+#ifndef C10_MOBILE
   ExportModule(*this, out, extra_files, true);
+#else
+  AT_ERROR("Saving module is not supported on mobile.");
+#endif
 }
 
 void Module::_save_for_mobile(const std::string& filename, const ExtraFilesMap& extra_files)
     const {
+#ifndef C10_MOBILE
   ExportModule(*this, filename, extra_files, true);
+#else
+  AT_ERROR("Saving module is not supported on mobile.");
+#endif
 }
 
 void module_state_to(
@@ -326,13 +334,9 @@ Module Module::clone_impl(
       const Module& orig = s.to_module();
       Module cloned = orig.clone_impl(type_remap);
       type_remap[orig.type()] = cloned.type();
-      r.set_or_add_slot(
-          s.name(),
-          type_remap.at(s.type()),
-          cloned.module_object(),
-          s.entity_type());
+      r.register_module(s.name(), cloned);
     } else {
-      r.set_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
+      r.register_attribute(s.name(), s.type(), s.value(), s.is_parameter());
     }
   }
 
