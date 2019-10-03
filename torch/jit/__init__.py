@@ -1671,7 +1671,9 @@ if _enabled:
                                    "tried to replace existing module '{}': {}".format(attr, value))
             elif self._c._has_parameter(attr):
                 self._c._set_parameter(attr, value)
-            elif attr in self._concrete_type.get_constants().keys():
+            elif hasattr(self, "_concrete_type") and attr in self._concrete_type.get_constants().keys():
+                # TODO: we don't have _concrete_type set after load(), and in general we lose constant information.
+                # We should encode constants as class type attributes (or something) so it persists across save/load.
                 raise AttributeError("Cannot mutate TorchScript constant value: '{}'. Value: '{}'".format(attr, value))
             else:
                 # We allow setting Python attributes on the ScriptModule, for
