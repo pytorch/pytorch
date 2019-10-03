@@ -18,12 +18,14 @@ PythonRpcHandler& PythonRpcHandler::getInstance() {
 }
 
 std::vector<char> PythonRpcHandler::generatePythonUDFResult(
-    const Message& request) {
+    const Message& request,
+    std::vector<torch::Tensor>& tensorTable) {
   AutoGIL ag;
   auto pargs = py::bytes(request.payload().data(), request.payload().size());
   TORCH_CHECK(runUDFFunction_ != nullptr, "runUDFFunction_ is nullptr");
-  py::bytes pres = runUDFFunction_(pargs);
-  const auto& presStr = static_cast<std::string>(pres);
+  py::tuple pres = runUDFFunction_(pargs, request.tensors());
+  const auto& presStr = pres[0].cast<std::string>();
+  tensorTable = pres[1].cast<std::vector<torch::Tensor>>();
   std::vector<char> payload(presStr.begin(), presStr.end());
   return payload;
 }
@@ -32,7 +34,7 @@ py::object PythonRpcHandler::loadPythonUDFResult(const Message& message) {
   AutoGIL ag;
   auto pargs = py::bytes(message.payload().data(), message.payload().size());
   TORCH_CHECK(loadResultFunction_ != nullptr, "loadResultFunction_ is nullptr");
-  return loadResultFunction_(pargs);
+  return loadResultFunction_(pargs, message.tensors());
 }
 
 } // namespace rpc
