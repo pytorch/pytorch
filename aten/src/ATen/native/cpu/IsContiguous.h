@@ -26,6 +26,7 @@ struct IsContiguous<0, 0, traits, s> {
 template <typename traits, int s>
 struct IsContiguous<0, -1, traits, s> {
   static bool eval(const int64_t* strides) {
+    return true;
   }
 };
 
