@@ -474,6 +474,13 @@ TEST(TensorTest, BackwardCreatesOnesGrad) {
               torch::ones_like(x)));
 }
 
+TEST(TensorTest, BackwardNonScalarOutputs) {
+  auto x = torch::randn({5, 5}, torch::requires_grad());
+  auto y = x * x;
+  ASSERT_THROWS_WITH(y.backward(),
+    "grad can be implicitly created only for scalar outputs");
+}
+
 TEST(TensorTest, IsLeaf) {
   auto x = torch::tensor({5}, at::TensorOptions().requires_grad(true));
   auto y = x * x;
