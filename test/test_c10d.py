@@ -2952,10 +2952,9 @@ class ComputeBucketAssignmentTest(TestCase):
         result = dist._compute_bucket_assignment_by_size(tensors, [200, 400])
         self.assertEqual([[0], [1], [2, 4], [3, 5]], result)
 
-
-class CommTest(MultiProcessTestCase):
+class NcclErrorHandlingTest(MultiProcessTestCase):
     def setUp(self):
-        super(CommTest, self).setUp()
+        super(NcclErrorHandlingTest, self).setUp()
         # Need to skip return code checking for these tests since the child
         # processes don't exit cleanly.
         self.skip_return_code_checks = [
@@ -2966,17 +2965,8 @@ class CommTest(MultiProcessTestCase):
         ]
         self._fork_processes()
 
-    def _get_wrapped_func(self, func):
-        # Get the original function which was wrapped in the decorator.
-        if hasattr(func, '__wrapped__'):
-            # py3 way.
-            return func.__wrapped__
-        else:
-            # py2 way.
-            return func.func_closure[0].cell_contents
-
     def tearDown(self):
-        super(CommTest, self).tearDown()
+        super(NcclErrorHandlingTest, self).tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -2990,33 +2980,14 @@ class CommTest(MultiProcessTestCase):
     def world_size(self):
         return 2
 
-    def _test_broadcast_coalesced(self, process_group, device):
-        half = torch.float16
-
-        # No support for float16 for CPU tensors
-        if device == torch.device('cpu'):
-            half = torch.float32
-
-        target = torch.arange(60, dtype=half, device=device).chunk(5)
-        target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
-        target += torch.arange(60, dtype=half, device=device).chunk(5)
-        target += torch.arange(60, dtype=torch.float64, device=device).chunk(5)
-        target += torch.arange(60, dtype=half, device=device).chunk(5)
-        target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
-
-        # The tensors to pass to broadcast are idential to the target
-        # only on the process that is the root of the broadcast.
-        if self.rank == 0:
-            tensors = list(tensor.clone() for tensor in target)
+    def _get_wrapped_func(self, func):
+        # Get the original function which was wrapped in the decorator.
+        if hasattr(func, '__wrapped__'):
+            # py3 way.
+            return func.__wrapped__
         else:
-            tensors = list(torch.empty_like(tensor) for tensor in target)
-
-        c10d._broadcast_coalesced(
-            process_group,
-            tensors,
-            buffer_size=256)
-
-        self.assertEqual(tensors, target)
+            # py2 way.
+            return func.func_closure[0].cell_contents
 
     def _run_all_reduce(self, pg):
         pg.allreduce(torch.rand(10).cuda(self.rank))
@@ -3120,6 +3091,58 @@ class CommTest(MultiProcessTestCase):
             total_time = time.time() - start
 
             self.assertLess(abs(total_time - timeout), 0.5)
+        else:
+            # Ensure the other rank sleeps to trigger timeout.
+            time.sleep(2 * timeout)
+
+
+class CommTest(MultiProcessTestCase):
+    def setUp(self):
+        super(CommTest, self).setUp()
+        self._fork_processes()
+
+    def tearDown(self):
+        super(CommTest, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def op_timeout_sec(self):
+        return 1
+
+    @property
+    def world_size(self):
+        return 2
+
+    def _test_broadcast_coalesced(self, process_group, device):
+        half = torch.float16
+
+        # No support for float16 for CPU tensors
+        if device == torch.device('cpu'):
+            half = torch.float32
+
+        target = torch.arange(60, dtype=half, device=device).chunk(5)
+        target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
+        target += torch.arange(60, dtype=half, device=device).chunk(5)
+        target += torch.arange(60, dtype=torch.float64, device=device).chunk(5)
+        target += torch.arange(60, dtype=half, device=device).chunk(5)
+        target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
+
+        # The tensors to pass to broadcast are idential to the target
+        # only on the process that is the root of the broadcast.
+        if self.rank == 0:
+            tensors = list(tensor.clone() for tensor in target)
+        else:
+            tensors = list(torch.empty_like(tensor) for tensor in target)
+
+        c10d._broadcast_coalesced(
+            process_group,
+            tensors,
+            buffer_size=256)
+
+        self.assertEqual(tensors, target)
 
     @requires_nccl()
     @skip_if_not_multigpu
