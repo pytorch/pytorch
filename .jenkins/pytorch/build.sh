@@ -199,6 +199,18 @@ else
     popd
     assert_git_not_dirty
   fi
+
+  # Build custom operator tests.
+  CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+  CUSTOM_OP_TEST="$PWD/test/custom_operator"
+  python --version
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  mkdir "$CUSTOM_OP_BUILD"
+  pushd "$CUSTOM_OP_BUILD"
+  cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+  make VERBOSE=1
+  popd
+  assert_git_not_dirty
 fi
 
 # Test no-Python build
@@ -212,18 +224,6 @@ if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
   WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
   popd
 fi
-
-# Build custom operator tests.
-CUSTOM_OP_BUILD="$PWD/../custom-op-build"
-CUSTOM_OP_TEST="$PWD/test/custom_operator"
-python --version
-SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-mkdir "$CUSTOM_OP_BUILD"
-pushd "$CUSTOM_OP_BUILD"
-cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
-make VERBOSE=1
-popd
-assert_git_not_dirty
 
 # Test XLA build
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
