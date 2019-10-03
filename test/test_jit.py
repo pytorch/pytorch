@@ -1418,7 +1418,13 @@ graph(%input, %weight):
                 stride, padding, dilation, groups = [1, 1], [0, 0], [1, 1], 1
                 packed = torch.ops.quantized.conv_prepack(wq, self.bias, stride, padding, dilation, groups)
                 w_unpacked, b_unpacked = torch.ops.quantized.conv_unpack(packed)
-                r = torch.nn.functional.conv2d(xq.dequantize(), w_unpacked.dequantize(), b_unpacked, stride, padding, dilation, groups)
+                r = torch.nn.functional.conv2d(xq.dequantize(),
+                                               w_unpacked.dequantize(),
+                                               b_unpacked,
+                                               stride,
+                                               padding,
+                                               dilation,
+                                               groups)
                 rq = torch.quantize_per_tensor(r, 0.2, 2, torch.quint8)
                 return rq
 
@@ -19281,10 +19287,10 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_schema_human_readable(self):
-        """ 
+        """
         Make sure that the schema is human readable, ie the mode parameter should read "nearest" instead of being displayed in octal
-        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None, 
-        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor): 
+        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None,
+        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor):
         Expected a value of type 'Optional[int]' for argument 'size' but instead found type 'Tensor'.
         """
         with self.assertRaisesRegex(RuntimeError, "nearest"):
