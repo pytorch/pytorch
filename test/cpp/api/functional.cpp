@@ -159,6 +159,19 @@ TEST_F(FunctionalTest, HingeEmbeddingLoss) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+
+TEST_F(FunctionalTest, TripletMarginLoss) {
+  auto anchor = torch::tensor({{3, 3}}, torch::kFloat);
+  auto positive = torch::tensor({{2, 2}}, torch::kFloat);
+  auto negative = torch::tensor({{0, 0}}, torch::kFloat);
+  auto output = F::triplet_margin_loss(
+      anchor, positive, negative, TripletMarginLossOptions().margin(3));
+  auto expected = torch::tensor({0}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+}
+
+
 TEST_F(FunctionalTest, MaxUnpool1d) {
   auto x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
@@ -215,24 +228,4 @@ TEST_F(FunctionalTest, MaxUnpool2d) {
       { 0, 41,  0, 43, 44},
       { 0, 46,  0, 48, 49}}}} , torch::kFloat)));
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 1, 5, 5}));
-}
-
-TEST_F(FunctionalTest, ELU) {
-  const auto size = 3;
-  for (const auto inplace : {false, true}) {
-    for (const auto alpha : {0.0, 0.42, 1.0, 4.2, 42.42}) {
-      auto x = torch::linspace(-10.0, 10.0, size * size * size);
-      x.resize_({size, size, size});
-      auto y_exp = torch::max(torch::zeros_like(x), x) +
-                torch::min(torch::zeros_like(x), alpha * (torch::exp(x) - 1.0));
-      auto y = F::elu(x, ELUOptions().alpha(alpha).inplace(inplace));
-
-      ASSERT_EQ(y.ndimension(), 3);
-      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
-      ASSERT_TRUE(torch::allclose(y, y_exp));
-      if (inplace) {
-        ASSERT_TRUE(torch::allclose(x, y_exp));
-      }
-    }
-  }
 }

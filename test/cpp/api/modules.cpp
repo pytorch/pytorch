@@ -651,71 +651,6 @@ TEST_F(ModulesTest, MaxPool2d_MaxUnpool2d) {
                      { 0, 0, 0,  0, 0}}}}, torch::kFloat)));
 }
 
-TEST_F(ModulesTest, MaxUnpool3d) {
-  auto indices = torch::tensor({{{{{26}}}}}, torch::kLong);
-  auto x = torch::tensor({{{{{26}}}}}, torch::requires_grad());
-  auto model = MaxUnpool3d{3};
-  auto y = model->forward(x, indices);
-
-  ASSERT_EQ(y.dim(), 5);
-  ASSERT_TRUE(torch::allclose(y, torch::tensor(
-   {{{{{ 0,  0,  0},
-       { 0,  0,  0},
-       { 0,  0,  0}},
-      {{ 0,  0,  0},
-       { 0,  0,  0},
-       { 0,  0,  0}},
-      {{ 0,  0,  0},
-       { 0,  0,  0},
-       { 0,  0, 26}}}}}, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 3, 3, 3}));
-}
-
-TEST_F(ModulesTest, MaxUnpool3dOutputSize) {
-  auto indices = torch::tensor(
-    {{{{{21, 23},
-        {29, 31}},
-       {{53, 55},
-        {61, 63}}}}}, torch::kLong);
-    auto x = torch::tensor(
-    {{{{{21, 23},
-        {29, 31}},
-       {{53, 55},
-        {61, 63}}}}}, torch::requires_grad());
-  auto model = MaxUnpool3d{MaxUnpool3dOptions(3).stride(2).padding(1)};
-  auto y = model->forward(x, indices, torch::IntArrayRef({1, 1, 4, 4, 4}));
-
-  ASSERT_EQ(y.dim(), 5);
-  ASSERT_TRUE(torch::allclose(y, torch::tensor(
-   {{{{{ 0,  0,  0,  0},
-       { 0,  0,  0,  0},
-       { 0,  0,  0,  0},
-       { 0,  0,  0,  0}},
-      {{ 0,  0,  0,  0},
-       { 0, 21,  0, 23},
-       { 0,  0,  0,  0},
-       { 0, 29,  0, 31}},
-      {{ 0,  0,  0,  0},
-       { 0,  0,  0,  0},
-       { 0,  0,  0,  0},
-       { 0,  0,  0,  0}},
-      {{ 0,  0,  0,  0},
-       { 0, 53,  0, 55},
-       { 0,  0,  0,  0},
-       { 0, 61,  0, 63}}}}}, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 4, 4, 4}));
-}
-
-TEST_F(ModulesTest, MaxPool3d_MaxUnpool3d) {
-  MaxPool3d pool {MaxPool3dOptions(3).stride(2)};
-  MaxUnpool3d unpool {MaxUnpool3dOptions(3).stride(2)};
-  auto input = torch::randn({20, 16, 51, 33, 15});
-  torch::Tensor output, indices;
-  std::tie(output, indices) = pool->forward_with_indices(input);
-  auto unpooled_output = unpool(output, indices);
-  ASSERT_EQ(unpooled_output.sizes(), torch::IntArrayRef({20, 16, 51, 33, 15}));
-}
-
 TEST_F(ModulesTest, Linear) {
   Linear model(5, 2);
   auto x = torch::randn({10, 5}, torch::requires_grad());
@@ -979,6 +914,20 @@ TEST_F(ModulesTest, HingeEmbeddingLoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, TripletMarginLoss) {
+  TripletMarginLoss loss(TripletMarginLossOptions().margin(3));
+  auto anchor = torch::tensor({{3, 3}}, torch::requires_grad());
+  auto positive = torch::tensor({{2, 2}}, torch::kFloat);
+  auto negative = torch::tensor({{0, 0}}, torch::kFloat);
+  auto output = loss->forward(anchor, positive, negative);
+  auto expected = torch::tensor({0}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
@@ -1003,26 +952,6 @@ TEST_F(ModulesTest, PairwiseDistance) {
 
   ASSERT_TRUE(output.allclose(expected));
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
-}
-
-TEST_F(ModulesTest, ELU) {
-  const auto size = 3;
-  for (const auto alpha : {0.0, 0.42, 1.0, 4.2, 42.42}) {
-    ELU model {ELUOptions().alpha(alpha)};
-    auto x = torch::linspace(-10.0, 10.0, size * size * size);
-    x.resize_({size, size, size}).set_requires_grad(true);
-    auto y = model(x);
-    torch::Tensor s = y.sum();
-
-    s.backward();
-    ASSERT_EQ(s.ndimension(), 0);
-
-    ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
-    auto y_exp = torch::max(torch::zeros_like(x), x) +
-                 torch::min(torch::zeros_like(x), alpha * (torch::exp(x) - 1.0));
-    ASSERT_TRUE(torch::allclose(y, y_exp));
-  }
 }
 
 TEST_F(ModulesTest, PrettyPrintIdentity) {
@@ -1246,10 +1175,4 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
       "    (table): torch::nn::Embedding(count=10, dimension=2)\n"
       "  )\n"
       ")");
-}
-
-TEST_F(ModulesTest, PrettyPrintELU) {
-  ASSERT_EQ(c10::str(ELU()), "torch::nn::ELU(alpha=1)");
-  ASSERT_EQ(c10::str(ELU(ELUOptions().alpha(42.42).inplace(true))),
-            "torch::nn::ELU(alpha=42.42, inplace=true)");
 }
