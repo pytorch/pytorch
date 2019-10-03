@@ -152,7 +152,7 @@ Tensor align_to(const Tensor& tensor, DimnameList names) {
     const auto& dim = tensor_names[idx];
     TORCH_CHECK(dim.isBasic(),
         "align_to: All input dims must be named. Found unnamed dim at index ",
-        dim, " of Tensor", tensor_names);
+        idx, " of Tensor", tensor_names);
     auto it = std::find(names.begin(), names.end(), dim);
     TORCH_CHECK(it != names.end(),
         "align_to: Cannot find dim ", dim, " from Tensor", names,
