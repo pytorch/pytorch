@@ -7993,9 +7993,7 @@ a")
 
     def test_script_module_const(self):
         class M(torch.jit.ScriptModule):
-
             __constants__ = ['b', 'i', 'c']
-
             def __init__(self):
                 super(M, self).__init__()
                 self.b = False
