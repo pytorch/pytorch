@@ -1584,7 +1584,6 @@ if _enabled:
             self._parameters = OrderedParameterDict(self._c)
             self._buffers = OrderedBufferDict(self._c)
             self._modules = OrderedModuleDict(self._c, self._modules)
-            self._c._finalize()
             self._initializing = False
 
         @property

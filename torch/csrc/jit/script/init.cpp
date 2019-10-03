@@ -662,7 +662,6 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
-      .def("_finalize", &Module::_finalize)
       .def_property_readonly(
           "name", [](const Module& self) { return self.name().name(); })
       .def(

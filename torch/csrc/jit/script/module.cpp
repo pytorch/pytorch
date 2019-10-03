@@ -40,8 +40,7 @@ Module::Module(c10::QualifiedName class_name)
 Module::Module(
     std::shared_ptr<CompilationUnit> cu,
     const c10::ClassTypePtr& type)
-    : isInitializing_(true),
-      module_value_(c10::ivalue::Object::create(
+    : module_value_(c10::ivalue::Object::create(
           c10::StrongTypePtr(std::move(cu), type),
           type->numAttributes())) {}
 
@@ -342,13 +341,9 @@ Module Module::clone_impl(
       const Module& orig = s.to_module();
       Module cloned = orig.clone_impl(type_remap);
       type_remap[orig.type()] = cloned.type();
-      r.set_or_add_slot(
-          s.name(),
-          type_remap.at(s.type()),
-          cloned.module_object(),
-          s.entity_type());
+      r.register_module(s.name(), cloned);
     } else {
-      r.set_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
+      r.register_attribute(s.name(), s.type(), s.value(), s.is_parameter());
     }
   }
 
