@@ -202,7 +202,7 @@ else
 fi
 
 # Test no-Python build
-if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
   echo "Building libtorch"
   # NB: Install outside of source directory (at the same level as the root
   # pytorch folder) so that it doesn't get cleaned away prior to docker push.
