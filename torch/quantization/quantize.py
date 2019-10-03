@@ -7,8 +7,6 @@ import warnings
 import torch
 import torch.nn as nn
 import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.qat as nniqat
 import torch.nn.quantized as nnq
 
 from .default_mappings import (DEFAULT_DYNAMIC_MODULE_MAPPING,
@@ -192,7 +190,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     convert(model, mapping, inplace=True)
     return model
 
-def quantize_dynamic(model, qconfig_dict=None, dtype=torch.qint8,
+def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
                      mapping=None, inplace=False):
     r"""Converts a float model to dynamic (i.e. weights-only) quantized model.
 
