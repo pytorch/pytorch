@@ -185,7 +185,6 @@ from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.cuda import CUDA_HOME, CUDA_VERSION
-from tools.setup_helpers.cudnn import CUDNN_LIBRARY, CUDNN_INCLUDE_DIR
 
 try:
     FileNotFoundError
@@ -258,7 +257,7 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = '1.3.0a0'
+version = open('version.txt', 'r').read().strip()
 sha = 'Unknown'
 
 try:
@@ -377,7 +376,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- NumPy not found')
         if cmake_cache_vars['USE_CUDNN']:
-            report('-- Detected cuDNN at ' + CUDNN_LIBRARY + ', ' + CUDNN_INCLUDE_DIR)
+            report('-- Detected cuDNN at ' +
+                   cmake_cache_vars['CUDNN_LIBRARY'] + ', ' + cmake_cache_vars['CUDNN_INCLUDE_DIR'])
         else:
             report('-- Not using cuDNN')
         if cmake_cache_vars['USE_CUDA']:

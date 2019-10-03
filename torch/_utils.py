@@ -140,6 +140,11 @@ def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, bac
     tensor._backward_hooks = backward_hooks
     return tensor
 
+def _rebuild_xla_tensor(data, dtype, device, requires_grad):
+    tensor = torch.from_numpy(data).to(dtype=dtype, device=device)
+    tensor.requires_grad = requires_grad
+    return tensor
+
 def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, requires_grad, backward_hooks):
     qscheme = quantizer_params[0]
     if qscheme == torch.per_tensor_affine:
@@ -147,12 +152,10 @@ def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, re
         tensor = torch._empty_affine_quantized(size, scale=scale, zero_point=zero_point, dtype=storage.dtype)
     elif qscheme == torch.per_channel_affine:
         _, scales, zero_points, axis = quantizer_params
-        if len(axis) != 1:
-            raise RuntimeError("Can't deserialize multi-axis per-channel quantized tensor yet")
         scales = torch.tensor(scales, dtype=torch.float64)
         zero_points = torch.tensor(zero_points, dtype=torch.int64)
-        tensor = torch._empty_per_channel_affine_quantized_like(
-            scales, zero_points=zero_points, size=size, axis=axis, dtype=storage.dtype)
+        tensor = torch._empty_per_channel_affine_quantized(
+            size, scales=scales, zero_points=zero_points, axis=axis, dtype=storage.dtype)
     else:
         raise RuntimeError("Can't deserialize quantized tensor with qscheme {}".format(qscheme))
     tensor.set_(storage, storage_offset, size, stride)

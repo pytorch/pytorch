@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/ir.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/operator.h>
@@ -18,8 +19,6 @@
 
 namespace torch {
 namespace jit {
-
-void printQuotedString(std::ostream& stmt, const std::string& str);
 
 // Constants relating to maintaining the topological index of nodes.
 //
@@ -116,7 +115,20 @@ static void printStrList(
   for (auto& item : items) {
     if (i++ > 0)
       out << ", ";
-    printQuotedString(out, item);
+    c10::printQuotedString(out, item);
+  }
+  out << "]";
+}
+
+static void printTypeList(
+    std::ostream& out,
+    const std::vector<TypePtr>& items) {
+  out << "[";
+  int i = 0;
+  for (auto& item : items) {
+    if (i++ > 0)
+      out << ", ";
+    out << *item;
   }
   out << "]";
 }
@@ -136,7 +148,7 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       printPrimList(out, is(name));
       break;
     case AttributeKind::s:
-      printQuotedString(out, s(name));
+      c10::printQuotedString(out, s(name));
       break;
     case AttributeKind::ss:
       printStrList(out, ss(name));
@@ -175,11 +187,17 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
     case AttributeKind::gs:
       out << "[<Graphs>]";
       break;
+    case AttributeKind::ty:
+      out << *ty(name);
+      break;
+    case AttributeKind::tys:
+      printTypeList(out, tys(name));
+      break;
   }
 }
 
-void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
-    const {
+void Node::printAttributes(std::ostream &out,
+                           bool ignore_subgraph = false) const {
   out << "[";
   auto names = attributeNames();
   int i = 0;
@@ -215,11 +233,10 @@ static std::ostream& indent(std::ostream& out, size_t level) {
   return out;
 }
 
-std::ostream& Node::print(
-    std::ostream& out,
-    size_t level,
-    std::vector<const Node*>* groups,
-    bool print_source_locations) const {
+std::ostream &Node::print(std::ostream &out, size_t level,
+                          std::vector<const Node *> *groups,
+                          bool print_source_locations, bool print_attributes,
+                          bool print_scopes, bool print_body) const {
   auto outs = outputs();
   indent(out, level) << const_value_list_with_types(outs);
   out << " = ";
@@ -227,7 +244,7 @@ std::ostream& Node::print(
     auto* pyOp = static_cast<const ::torch::jit::PythonOp*>(this);
     out << "^" << pyOp->name();
     pyOp->writeScalars(out);
-  } else {
+  } else if (print_attributes) {
     if (hasAttribute(attr::Subgraph) && groups) {
       out << kind().toQualString() << "_" << groups->size();
       if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
@@ -244,10 +261,13 @@ std::ostream& Node::print(
   }
 
   out << "(" << inputs() << ")";
-  std::string scName = scopeName();
-  if (!scName.empty()) {
-    out << ", ";
-    out << "scope: " << scName;
+
+  if (print_scopes) {
+    std::string scName = scopeName();
+    if (!scName.empty()) {
+      out << ", ";
+      out << "scope: " << scName;
+    }
   }
 
   // In debug print, append file:line:col as a comment after each node
@@ -258,6 +278,10 @@ std::ostream& Node::print(
       std::tie(filename, line, col) = *file_line_col;
       out << " # " << filename << ":" << line << ":" << col;
     }
+  }
+
+  if (!print_body) {
+    return out;
   }
 
   out << "\n";
@@ -904,6 +928,7 @@ bool Node::hasSideEffects() const {
     case prim::CallFunction:
     case prim::CallMethod:
     case prim::BailoutTemplate:
+    case prim::profile:
       return true;
   }
 
@@ -1489,6 +1514,25 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
   auto n = create(prim::Load, {}, /*num_outputs*/ 1);
   n->s_(attr::name, name);
   n->output()->setType(type);
+  return n;
+}
+
+Node* Graph::createIsInstance(
+    Value* v,
+    at::ArrayRef<TypePtr> types,
+    bool is_list,
+    bool is_tuple) {
+  auto n = create(prim::isinstance, {v}, /*num_outputs*/ 1);
+  std::vector<std::string> kinds;
+  if (is_list) {
+    kinds.push_back("list");
+  }
+  if (is_tuple) {
+    kinds.push_back("tuple");
+  }
+  n->ss_(attr::kinds, std::move(kinds));
+  n->tys_(attr::types, types.vec());
+  n->output()->setType(BoolType::get());
   return n;
 }
 

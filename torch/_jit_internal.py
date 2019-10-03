@@ -507,13 +507,20 @@ try:
 
     def is_optional(ann):
         # Optional[T] is just shorthand for Union[T, None], so check for both
+        def safe_is_subclass(the_type, super_type):
+            # Don't throw if `the_type` isn't a class type (e.g. if it is
+            # another type annotation instance)
+            if not inspect.isclass(the_type):
+                return False
+            return issubclass(the_type, super_type)
+
         union_optional = False
         if ann.__module__ == 'typing' and \
            (getattr(ann, '__origin__', None) is typing.Union):
             args = getattr(ann, '__args__', ())
             if len(args) == 2:
-                union_optional = (issubclass(args[1], type(None)) and not issubclass(args[0], type(None))) \
-                    or (issubclass(args[0], type(None)) and not issubclass(args[1], type(None)))
+                union_optional = (safe_is_subclass(args[1], type(None)) and not safe_is_subclass(args[0], type(None))) \
+                    or (safe_is_subclass(args[0], type(None)) and not safe_is_subclass(args[1], type(None)))
 
         optional = ann.__module__ == 'typing' and \
             (getattr(ann, '__origin__', None) is typing.Optional)
@@ -623,7 +630,7 @@ for i in range(2, 7):
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
 def _qualified_name(obj):
     # short-circuit in cases where the object already has a known qualified name
-    if isinstance(obj, torch._C.Function):
+    if isinstance(obj, torch.jit.ScriptFunction):
         return obj.qualified_name
 
     name = obj.__name__

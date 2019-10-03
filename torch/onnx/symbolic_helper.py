@@ -184,6 +184,7 @@ def _try_get_scalar_type(*args):
             pass
     return None
 
+
 def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if _export_onnx_opset_version <= 9:
         from torch.onnx.symbolic_opset9 import _slice
@@ -191,6 +192,75 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
     else:
         from torch.onnx.symbolic_opset10 import _slice
         return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
+
+
+def _sort_helper(g, input, dim, decending=True, out=None):
+    if out is not None:
+        _unimplemented("Sort", "Out parameter is not supported")
+    shape_ = g.op("Shape", input)
+    axis = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
+    start = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int64))
+    end = g.op("Constant", value_t=torch.tensor(dim + 1, dtype=torch.int64))
+    slice_ = _slice_helper(g, shape_, axes=axis, starts=start, ends=end, steps=None, dynamic_slice=True)
+    if _export_onnx_opset_version <= 10:
+        if not decending:
+            _unimplemented("Sort", "Ascending is not supported")
+        return g.op("TopK", input, slice_, axis_i=dim, outputs=2)
+    else:
+        return g.op("TopK", input, slice_, axis_i=dim, largest_i=decending, outputs=2)
+
+
+def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
+    if out is not None:
+        _unimplemented("TopK", "Out parameter is not supported")
+    if _export_onnx_opset_version <= 10:
+        if not largest:
+            _unimplemented("TopK", "Ascending is not supported")
+            return g.op("TopK", input, k_i=k, axis_i=dim, outputs=2)
+        k = _maybe_get_const(k, 'i')
+        if not _is_value(k):
+            k = g.op("Constant", value_t=torch.tensor(k, dtype=torch.int64))
+        from torch.onnx.symbolic_opset9 import unsqueeze
+        k = unsqueeze(g, k, 0)
+        return g.op("TopK", input, k, axis_i=dim, outputs=2)
+    else:
+        return g.op("TopK", input, k, axis_i=dim, largest_i=largest, sorted_i=sorted, outputs=2)
+
+
+def _interpolate_warning(interpolate_mode):
+    onnx_op = "onnx:Resize" if _export_onnx_opset_version >= 10 else "onnx:Upsample"
+    warnings.warn("You are trying to export the model with " + onnx_op + " for ONNX opset version "
+                  "" + str(_export_onnx_opset_version) + ". "
+                  "This operator might cause results to not match the expected results by PyTorch.\n"
+                  "ONNX's Upsample/Resize operator did not match Pytorch's Interpolation until opset 11. "
+                  "Attributes to determine how to transform the input were added in onnx:Resize in opset 11 "
+                  "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
+                  "We recommend using opset 11 and above for models using this operator. ")
+
+def _interpolate_size_to_scales(g, input, output_size, dim):
+    output_size = _maybe_get_const(output_size, 'is')
+    if _is_value(output_size):
+        offset = 2
+        offsets = g.op("Constant", value_t=torch.ones(offset))
+        dividend = g.op("Cast", output_size, to_i=cast_pytorch_to_onnx["Float"])
+        divisor = _slice_helper(g, g.op("Shape", input), axes=[0], ends=[dim], starts=[offset])
+        divisor = g.op("Cast", divisor, to_i=cast_pytorch_to_onnx["Float"])
+        scale_dims = g.op("Div", dividend, divisor)
+        scales = g.op("Concat", offsets, scale_dims, axis_i=0)
+    else:
+        scales_constant = [1. if i < 2 else
+                           float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
+                           for i in range(0, dim)]
+        scales = g.op("Constant", value_t=torch.tensor(scales_constant))
+    return scales
+
+
+def _scatter_helper(g, self, dim, index, src):
+    if _export_onnx_opset_version <= 10:
+        from torch.onnx.symbolic_opset9 import scatter
+    else:
+        from torch.onnx.symbolic_opset11 import scatter
+    return scatter(g, self, dim, index, src)
 
 # ---------------------------------------------------------------------
 # ONNX operator version

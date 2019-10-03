@@ -52,7 +52,6 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/Layout.cpp
     ${TORCH_SRC_DIR}/csrc/MemoryFormat.cpp
     ${TORCH_SRC_DIR}/csrc/python_dimname.cpp
-    ${TORCH_SRC_DIR}/csrc/QEngine.cpp
     ${TORCH_SRC_DIR}/csrc/QScheme.cpp
     ${TORCH_SRC_DIR}/csrc/Module.cpp
     ${TORCH_SRC_DIR}/csrc/PtrWrapper.cpp
@@ -69,7 +68,6 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/autograd/python_legacy_variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/python_variable_indexing.cpp
-    ${TORCH_SRC_DIR}/csrc/byte_order.cpp
     ${TORCH_SRC_DIR}/csrc/jit/init.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_loop.cpp
@@ -96,7 +94,6 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/utils/invalid_arguments.cpp
     ${TORCH_SRC_DIR}/csrc/utils/object_ptr.cpp
     ${TORCH_SRC_DIR}/csrc/utils/python_arg_parser.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/qengines.cpp
     ${TORCH_SRC_DIR}/csrc/utils/structseq.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_apply.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_dtypes.cpp
@@ -227,16 +224,14 @@ if (USE_DISTRIBUTED)
     if (NOT MSVC)
       list(APPEND TORCH_PYTHON_SRCS
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/comm.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/reducer.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_rpc_handler.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback_impl.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref.cpp

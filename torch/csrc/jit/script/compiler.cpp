@@ -140,9 +140,13 @@ struct CondValue {
       : value_(value),
         refinements_(std::move(refinements)),
         static_if_(static_if) {}
-  CondValue(Graph& g, const SourceRange& loc, bool static_value)
+  CondValue(
+      Graph& g,
+      const SourceRange& loc,
+      bool static_value,
+      RefinementSet refinements)
       : value_(g.insertConstant(static_value, loc)),
-        refinements_({}),
+        refinements_(std::move(refinements)),
         static_if_(static_value) {}
   Value* value() const {
     return value_;
@@ -576,6 +580,18 @@ struct to_ir {
           << "methods must have a self argument";
     }
     method.setSchema(emitDef(def, self, graph->block()));
+
+    // NB ORDERING: SSA conversion has to occur before
+    // lifting of closures and forks, this way closures are converted
+    // to SSA while part of their original graph, and closures are ready to
+    // be inlined into forked closures
+    ConvertToSSA(graph);
+    // convert loops with an iter and body condition specified to
+    // python-recognize while loops. we do this so they can be exported,
+    // and run the pass early to avoid jitter. Like conversion to SSA,
+    // it only needs to run once.
+    CanonicalizeModifiedLoops(graph);
+
     runCleanupPasses(graph);
   }
 
@@ -1011,12 +1027,12 @@ struct to_ir {
         // MA, MM, MN, NM, NN, AM -> cannot prove anything statically
         bool its_is = expr.kind() == TK_IS;
         if (lhs_none == ALWAYS && rhs_none == ALWAYS) {
-          return CondValue(*graph, expr.range(), its_is);
+          return CondValue(*graph, expr.range(), its_is, {});
         } else if (
             (lhs_none == ALWAYS && rhs_none == NEVER) ||
             (lhs_none == NEVER && rhs_none == ALWAYS)) {
           // lhs_val/rhs_val with A/M: only emit never_none_branch
-          return CondValue(*graph, expr.range(), !its_is);
+          return CondValue(*graph, expr.range(), !its_is, {});
         } else {
           auto kind = getNodeKind(expr.kind(), expr.get()->trees().size());
           Value* cond_value = emitBuiltinCall(
@@ -1070,44 +1086,66 @@ struct to_ir {
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
-  // emit a single expr from the loop comprehension so that we can correctly
-  // type the list we create, then remove the nodes we emitted
-  TypePtr getListCompType(
-      const ListComp& lc,
-      const ListTypePtr& input_list_type) {
+  TypePtr emitInTempEnvironment(const std::function<TypePtr()>& fn) {
     auto b = graph->insertNode(graph->create(prim::Loop))->addBlock();
     pushFrame(b);
     WithInsertPoint guard(b);
-    auto li_elem = graph->insertNode(
-        graph->createUninitialized(input_list_type->getElementType()));
-    emitExprsAssign(
-        List<Expr>::create(lc.range(), {lc.target()}),
-        {std::make_shared<SimpleValue>(li_elem->output())},
-        lc.range(),
-        /*n_binders*/ 1);
-    auto ret_type = emitExpr(lc.elt())->type();
+    auto ret_type = fn();
     popFrame();
     b->owningNode()->destroy();
     return ret_type;
   }
 
+  // emit a single expr from the loop comprehension so that we can correctly
+  // type the list we create, then remove the nodes we emitted
+  TypePtr getListCompType(const ListComp& lc, const TypePtr type_ptr) {
+    return emitInTempEnvironment([&]() {
+      auto li_elem = graph->insertNode(graph->createUninitialized(type_ptr));
+      emitExprsAssign(
+          List<Expr>::create(lc.range(), {lc.target()}),
+          {std::make_shared<SimpleValue>(li_elem->output())},
+          lc.range(),
+          /*n_binders*/ 1);
+      return emitExpr(lc.elt())->type();
+    });
+  }
+
+  // emit a single index of the Iterable to get the children type
+  TypePtr getIterableChildrenType(const ListComp& lc, IterableTree& tree) {
+    return emitInTempEnvironment([&]() {
+      return tree.getitem(lc.range(), method, graph->insertConstant(0))->type();
+    });
+  }
+
   Value* emitListComprehension(const ListComp& lc) {
     const auto tmp_name = createTempName("$list_acc");
-    const auto list_value = emitExpr(lc.iter());
-    if (list_value->type()->kind() != TypeKind::ListType) {
-      // TODO: constraining iterators to be simple lists for now
-      // as it makes easy to get list's element type.
+    const auto sv = emitSugaredExpr(lc.iter(), 1);
+
+    TypePtr list_type;
+
+    auto siv = dynamic_cast<SimpleValue*>(sv.get());
+    if (siv && siv->getValue()->type()->cast<ListType>()) {
+      auto list_elem =
+          siv->getValue()->type()->cast<ListType>()->getElementType();
+      list_type = getListCompType(lc, list_elem);
+    } else if (auto iterable_tree = dynamic_cast<IterableTree*>(sv.get())) {
+      list_type =
+          getListCompType(lc, getIterableChildrenType(lc, *iterable_tree));
+    } else if (dynamic_cast<RangeValue*>(sv.get())) {
+      list_type = getListCompType(lc, IntType::get());
+    } else {
       throw ErrorReport(lc.range())
-          << "iterator expression is expected to be a list";
+          << "iterator expression is expected to be a list, iterable, or "
+             "range, found "
+          << sv->kind();
     }
 
     // given `[x*2 for x in my_list]` this generates the following AST:
     // __list_acc = []
     // for x in my_list:
     //  __list_acc.append(x*2)
-    const auto n = graph->insertNode(graph->createList(
-        getListCompType(lc, list_value->type()->expect<ListType>()),
-        at::ArrayRef<Value*>{}));
+    const auto n =
+        graph->insertNode(graph->createList(list_type, at::ArrayRef<Value*>{}));
     environment_stack->setVar(lc.range(), tmp_name, n->output());
     const auto tmp_list_ident = Ident::create(lc.range(), tmp_name);
     const auto tmp_list_var = Var::create(lc.range(), tmp_list_ident);
@@ -1437,6 +1475,40 @@ struct to_ir {
         TypePtr type = typeParser_.parseTypeFromExpr(classinfo);
         types.emplace_back(type);
       }
+      bool staticallyTrue(const TypePtr& actual_type) {
+        // is this isinstance check statically true?
+        if ((list_check && actual_type->kind() == ListType::Kind) ||
+            (tuple_check && actual_type->kind() == TupleType::Kind)) {
+          return true;
+        }
+        for (const TypePtr& typ : types) {
+          if (actual_type->isSubtypeOf(typ)) {
+            return true;
+          }
+        }
+        return false;
+      }
+      bool maybeOfKind(TypeKind kind, const TypePtr& actual_type) {
+        if (actual_type->kind() == AnyType::Kind) {
+          return true;
+        }
+        if (auto op = actual_type->cast<OptionalType>()) {
+          return op->getElementType()->kind() == kind;
+        }
+        return false;
+      }
+      bool staticallyFalse(const TypePtr& actual_type) {
+        if ((list_check && maybeOfKind(ListType::Kind, actual_type)) ||
+            (tuple_check && maybeOfKind(TupleType::Kind, actual_type))) {
+          return false;
+        }
+        for (const TypePtr& typ : types) {
+          if (typ->isSubtypeOf(actual_type)) {
+            return false;
+          }
+        }
+        return true;
+      }
       ScriptTypeParser typeParser_;
       bool list_check = false;
       bool tuple_check = false;
@@ -1445,22 +1517,27 @@ struct to_ir {
     GatheredTypes gathered(typeParser_);
     gathered.gather(classinfo);
     auto val = emitExpr(obj);
-    if (val->type()->kind() == OptionalType::Kind) {
-      throw ErrorReport(obj.range())
-          << "Optional isinstance check is not supported, "
-          << "consider use is/is not None instead";
+    RefinementSet refinement;
+    if (gathered.types.size() == 1 && obj.kind() == TK_VAR) {
+      std::string ident = Var(obj).name().name();
+      Refinement isinstance(
+          std::move(ident), gathered.types.at(0));
+      refinement = RefinementSet({isinstance}, {});
     }
 
-    if ((gathered.list_check && val->type()->kind() == ListType::Kind) ||
-        (gathered.tuple_check && val->type()->kind() == TupleType::Kind)) {
-      return CondValue(*graph, obj.range(), true);
+    if (gathered.staticallyTrue(val->type())) {
+      return CondValue(*graph, obj.range(), true, std::move(refinement));
     }
-    for (const TypePtr& typ : gathered.types) {
-      if (val->type()->isSubtypeOf(typ)) {
-        return CondValue(*graph, obj.range(), true);
-      }
+    if (gathered.staticallyFalse(val->type())) {
+      return CondValue(*graph, obj.range(), false, std::move(refinement));
     }
-    return CondValue(*graph, obj.range(), false);
+    // check maybe true/false at runtime, need an actual op
+    Value* result =
+        graph
+            ->insertNode(graph->createIsInstance(
+                val, gathered.types, gathered.list_check, gathered.tuple_check))
+            ->output();
+    return CondValue(result, std::move(refinement), c10::nullopt);
   }
 
   void emitIf(const If& stmt) {
@@ -2927,7 +3004,7 @@ struct to_ir {
         tensor_indices[dims[i]] = expr;
       } else {
         TORCH_INTERNAL_ASSERT(
-            "Trying to process index type that we don't support.");
+            false, "Trying to process index type that we don't support.");
       }
     }
     // at::index takes in a List[Optional[Tensor]] where some dims can be None.
@@ -3117,14 +3194,14 @@ struct to_ir {
 
 struct FunctionResolver : public Resolver {
   explicit FunctionResolver(
-      const Resolver* otherResolver,
+      Resolver* otherResolver,
       const std::unordered_map<std::string, Function*>& functionTable)
       : otherResolver_(otherResolver), functionTable_(functionTable) {}
 
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
       Function& m,
-      const SourceRange& loc) const override {
+      const SourceRange& loc) override {
     auto it = functionTable_.find(name);
     if (it != functionTable_.end()) {
       return std::make_shared<FunctionValue>(it->second);
@@ -3133,12 +3210,12 @@ struct FunctionResolver : public Resolver {
   }
 
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
-      const override {
+      override {
     return otherResolver_->resolveType(name, loc);
   }
 
  private:
-  const Resolver* otherResolver_;
+  Resolver* otherResolver_;
   const std::unordered_map<std::string, Function*>& functionTable_;
 };
 
@@ -3276,21 +3353,7 @@ std::vector<Function*> CompilationUnit::define(
   return define(prefix, definitions, resolvers, self);
 }
 
-void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
-  // the graph including closures is converted to ssa in the first pass,
-  // so subsequent cleanups do not need reconvert it
-  if (convert_ssa) {
-    ConvertToSSA(to_clean);
-    // convert loops with an iter and body condition specified to
-    // python-recognize while loops. we do this so they can be exported,
-    // and run the pass early to avoid jitter. Like conversion to SSA,
-    // it only needs to run once.
-    CanonicalizeModifiedLoops(to_clean);
-  }
-  // NB ORDERING: SSA conversion has to occur before
-  // lifting of closures and forks, this way closures are converted
-  // to SSA while part of their original graph, and closures are ready to
-  // be inlined into forked closures
+void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   liftClosures(to_clean);
   inlineForkedClosures(to_clean);
   if (script::getInlineEverythingMode()) {
