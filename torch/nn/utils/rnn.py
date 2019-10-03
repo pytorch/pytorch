@@ -156,7 +156,7 @@ class PackedSequence(PackedSequence_):
             return self
         else:
             # Only forwards device arg/kwarg and non_blocking and copy kwargs
-            kwargs = {k : v for k, v in filter(lambda t: t[0] == 'non_blocking' or t[0] == 'copy', d.iteritems())}
+            kwargs = {k : v for k, v in filter(lambda t: t[0] == 'non_blocking' or t[0] == 'copy', kwargs.iteritems())}
             sorted_indices = bind(self.sorted_indices, lambda t: t.to(data.device, **kwargs))
             unsorted_indices = bind(self.unsorted_indices, lambda t: t.to(data.device, **kwargs))
             return type(self)(data, self.batch_sizes, sorted_indices, unsorted_indices)
