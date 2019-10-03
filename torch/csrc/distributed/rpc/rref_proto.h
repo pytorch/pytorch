@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/pickler.h>
@@ -12,7 +13,7 @@ namespace rpc {
 
 // Temporary solution of RRef operations.
 // TODO: Remove all these messages and use rpc + registered functions instead.
-class TORCH_API RRefMessageBase {
+class TORCH_API RRefMessageBase : public RpcCommandBase {
  public:
   RRefMessageBase(const RRefId& rrefId, MessageType type)
       : rrefId_(rrefId), type_(type) {}
@@ -21,7 +22,7 @@ class TORCH_API RRefMessageBase {
 
   const RRefId& rrefId();
 
-  virtual Message toMessage() const;
+  virtual Message toMessage() && override;
   static at::IValue fromMessage(const Message& message, MessageType type);
 
  protected:
@@ -38,7 +39,7 @@ class TORCH_API ForkMessageBase : public RRefMessageBase {
 
   const ForkId& forkId();
 
-  virtual Message toMessage() const override;
+  virtual Message toMessage() && override;
   static std::pair<RRefId, ForkId> fromMessage(
       const Message& message,
       MessageType type);
@@ -53,7 +54,8 @@ class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
   explicit ScriptRRefFetchCall(const RRefId& rrefId)
       : RRefMessageBase(rrefId, MessageType::SCRIPT_RREF_FETCH_CALL) {}
 
-  static ScriptRRefFetchCall fromMessage(const Message& message);
+  static std::unique_ptr<ScriptRRefFetchCall> fromMessage(
+      const Message& message);
 };
 
 class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
@@ -61,19 +63,20 @@ class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
   explicit PythonRRefFetchCall(const RRefId& rrefId)
       : RRefMessageBase(rrefId, MessageType::PYTHON_RREF_FETCH_CALL) {}
 
-  static PythonRRefFetchCall fromMessage(const Message& message);
+  static std::unique_ptr<PythonRRefFetchCall> fromMessage(
+      const Message& message);
 };
 
 // OwnerRRef uses this message to send the RRef value to a remote UserRRef
-class TORCH_API RRefFetchRet final {
+class TORCH_API RRefFetchRet final : public RpcCommandBase {
  public:
   explicit RRefFetchRet(std::vector<at::IValue> values)
       : values_(std::move(values)) {}
 
   const std::vector<at::IValue>& values();
 
-  Message toMessage() const;
-  static RRefFetchRet fromMessage(const Message& message);
+  Message toMessage() && override;
+  static std::unique_ptr<RRefFetchRet> fromMessage(const Message& message);
 
  private:
   std::vector<at::IValue> values_;
@@ -86,7 +89,8 @@ class TORCH_API RRefUserDelete final : public ForkMessageBase {
   RRefUserDelete(const RRefId& rrefId, const ForkId& forkId)
       : ForkMessageBase(rrefId, forkId, MessageType::RREF_USER_DELETE) {}
 
-  static RRefUserDelete fromMessage(const Message& message);
+  static std::unique_ptr<RRefUserDelete> fromMessage(
+      const Message& message);
 };
 
 class TORCH_API RemoteRet final : public ForkMessageBase {
@@ -94,20 +98,20 @@ class TORCH_API RemoteRet final : public ForkMessageBase {
   RemoteRet(const RRefId& rrefId, const ForkId& forkId)
       : ForkMessageBase(rrefId, forkId, MessageType::REMOTE_RET) {}
 
-  static RemoteRet fromMessage(const Message& message);
+  static std::unique_ptr<RemoteRet> fromMessage(const Message& message);
 };
 
 // The OwnerRRef uses this message to a UserRRef that its fork request has been
 // accepted. A UserRRef cannot be deleted if it has any pending fork requests.
 
-class TORCH_API RRefChildAccept final {
+class TORCH_API RRefChildAccept final : public RpcCommandBase {
  public:
   explicit RRefChildAccept(const ForkId& forkId) : forkId_(forkId) {}
 
   const ForkId& forkId() const;
 
-  Message toMessage();
-  static RRefChildAccept fromMessage(const Message& message);
+  Message toMessage() && override;
+  static std::unique_ptr<RRefChildAccept> fromMessage(const Message& message);
 
  private:
   const ForkId forkId_;
@@ -118,7 +122,15 @@ class TORCH_API RRefForkRequest final : public ForkMessageBase {
   RRefForkRequest(const RRefId& rrefId, const ForkId& forkId)
       : ForkMessageBase(rrefId, forkId, MessageType::RREF_FORK_REQUEST) {}
 
-  static RRefForkRequest fromMessage(const Message& message);
+  static std::unique_ptr<RRefForkRequest> fromMessage(const Message& message);
+};
+
+class TORCH_API RRefAck final : public RpcCommandBase {
+ public:
+  RRefAck() {}
+
+  Message toMessage() && override;
+  static std::unique_ptr<RRefAck> fromMessage(const Message& message);
 };
 
 } // namespace rpc

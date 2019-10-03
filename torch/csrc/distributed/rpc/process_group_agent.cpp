@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
+#include <c10/util/C++17.h>
 #include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/rpc/request_callback_impl.h>
 
 #include <Python.h>
 
@@ -22,7 +24,7 @@ void serialize(const Message& message, std::ostream& os) {
   std::vector<torch::Tensor> tensors = message.tensors();
   // append payload as a tensor
   tensors.push_back(torch::from_blob(payload, payload_size, {torch::kChar}));
-  // append id as a tensor
+  // append id and autograd metadata as a tensor
   tensors.push_back(torch::tensor({message.id()}, {torch::kInt64}));
 
   torch::save(tensors, os);
@@ -39,6 +41,7 @@ Message deserialize(MessageType type, std::istream& is) {
   auto payloadTensor = std::move(tensors.back());
   tensors.pop_back();
 
+  TORCH_INTERNAL_ASSERT(1, idTensor.numel());
   int64_t id = idTensor.storage().data<int64_t>()[0];
 
   std::vector<char> payload(payloadTensor.numel());
@@ -107,7 +110,7 @@ ProcessGroupAgent::ProcessGroupAgent(
     int numSendRecvThreads)
     : RpcAgent(
           WorkerInfo(std::move(workerName), pg->getRank()),
-          processRequestBlocking),
+          c10::guts::make_unique<RequestCallbackImpl>()),
       pg_(std::move(pg)),
       sendCounts_(pg_->getSize()),
       recvCounts_(pg_->getSize()),
@@ -199,7 +202,6 @@ bool ProcessGroupAgent::hasPendingMessage() {
 
   std::vector<torch::Tensor> inputSnapshot = {
       torch::from_blob(snapshot.data(), {2, worldSize}, {torch::kInt64})};
-
   // allgather both send and recv messages in one shot
   std::vector<std::vector<torch::Tensor>> outputSnapshots(1);
 
@@ -245,7 +247,7 @@ void ProcessGroupAgent::sync() {
   } while (hasPendingMessage());
 }
 
-std::shared_ptr<FutureMessage> ProcessGroupAgent::sendImpl(
+std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message) {
   TORCH_CHECK(
@@ -341,12 +343,8 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             (char*)payload.storage().data<signed char>(), payload.numel()));
 
         Message message = deserialize(work.type_, ss);
-
         if (message.isRequest()) {
-          auto id = message.id();
-          Message response = cb_(std::move(message));
-          response.setId(id);
-          send(work.from_, std::move(response));
+          send(work.from_, cb_->operator()(message));
         } else if (message.isResponse()) {
           auto id = message.id();
           std::shared_ptr<FutureMessage> fm = nullptr;
@@ -364,7 +362,8 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
           futureCV_.notify_all();
         } else {
           // TODO: pass the error back to the caller instead of crashing here.
-          AT_ERROR("unrecognized message type ", message.type());
+          TORCH_INTERNAL_ASSERT(
+              false, "unrecognized message type ", message.type());
         }
 
         recvCounts_.increment(work.from_.id_);

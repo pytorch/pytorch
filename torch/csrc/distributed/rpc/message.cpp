@@ -44,8 +44,16 @@ void Message::swap(Message& rhs) noexcept {
   std::swap(id_, rhs.id_);
 }
 
+std::vector<char>&& Message::movePayload() && {
+  return std::move(payload_);
+}
+
 const std::vector<char>& Message::payload() const {
   return payload_;
+}
+
+std::vector<torch::Tensor>& Message::tensors() {
+  return tensors_;
 }
 
 const std::vector<torch::Tensor>& Message::tensors() const {
@@ -66,7 +74,9 @@ bool Message::isRequest() const {
       MessageType::PYTHON_RREF_FETCH_CALL == type_ ||
       MessageType::RREF_USER_DELETE == type_ ||
       MessageType::RREF_CHILD_ACCEPT == type_ ||
-      MessageType::RREF_FORK_REQUEST == type_;
+      MessageType::RREF_FORK_REQUEST == type_ ||
+      // Autograd message
+      MessageType::MESSAGE_WITH_AUTOGRAD_REQ == type_;
 }
 
 bool Message::isResponse() const {
@@ -75,7 +85,9 @@ bool Message::isResponse() const {
       MessageType::REMOTE_RET == type_ || // ret of dist.remote
       MessageType::RREF_FETCH_RET == type_ || // ret on RRef::toHere()
       MessageType::EXCEPTION == type_ || // propagate back exceptions
-      MessageType::ACK == type_; // ret of other types
+      MessageType::RREF_ACK == type_ || // ret of other types
+      // Autograd response
+      MessageType::MESSAGE_WITH_AUTOGRAD_RESP == type_;
 }
 
 bool Message::isInternal() const {

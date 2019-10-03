@@ -139,10 +139,10 @@ IValue UserRRef<IValue>::toHere() {
   const Message& message = fm->wait();
   RRefContext::handleException(message);
   auto rfr = RRefFetchRet::fromMessage(message);
-  TORCH_INTERNAL_ASSERT(rfr.values().size() == 1,
+  TORCH_INTERNAL_ASSERT(rfr->values().size() == 1,
       "RRef of IValue should contain a single IValue, but got ",
-      rfr.values().size());
-  return rfr.values().front();
+      rfr->values().size());
+  return rfr->values().front();
 }
 
 template <>
@@ -155,7 +155,7 @@ py::object UserRRef<py::object>::toHere() {
   RRefContext::handleException(message);
   auto rfr = RRefFetchRet::fromMessage(message);
   return PythonRpcHandler::getInstance().deserialize(
-      SerializedPyObj::fromIValues(rfr.values()));
+      SerializedPyObj::fromIValues(rfr->values()));
 }
 
 template class UserRRef<IValue>;

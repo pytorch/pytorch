@@ -2,6 +2,7 @@
 
 #include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/csrc/distributed/rpc/request_callback.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
 #include <algorithm>
@@ -49,17 +50,6 @@ struct WorkerInfo {
 // will invoke the given ``RequestCallback`` to process received requests. It
 // should immediately become ready to serve request and accept response after
 // construction.
-class RpcAgent;
-
-// RpcAgent implementation should invoke ``RequestCallback`` to process received
-// requests. There is no restriction on the implementation's threading model.
-// This function takes an rvalue reference of the Message object.
-// It is expected to return the response message or message containing an
-// exception. Different rpc agent implementations are expected to ensure
-// delivery of the response/exception based on their implementation specific
-// mechanisms.
-using RequestCallback = std::function<Message(Message&&)>;
-
 class RpcAgent {
  public:
   // `WorkerInfo` is the globally unique identifier for this RpcAgent instance.
@@ -72,7 +62,7 @@ class RpcAgent {
   // ``RpcAgent`` base class makes no assumption on the thread-safeness of the
   // ``RequestCallback``. ``RpcAgent`` implementations need to make sure that
   // its threading model conform to ``RequestCallback``'s requirement.
-  RpcAgent(WorkerInfo id, RequestCallback cb);
+  RpcAgent(WorkerInfo id, std::unique_ptr<RequestCallback> cb);
 
   virtual ~RpcAgent();
 
@@ -83,7 +73,9 @@ class RpcAgent {
   // If ``message.isRequest()`` is true, the ``FutureMessage`` will be completed
   // when the response arrives. For other message types, the Future should be
   // ignored by the caller.
-  std::shared_ptr<FutureMessage> send(const WorkerInfo& to, Message&& message);
+  virtual std::shared_ptr<FutureMessage> send(
+      const WorkerInfo& to,
+      Message&& message) = 0;
 
   // Return a reference to the ``WorkerInfo`` of this RpcAgent.
   // NB: not using ``c10::optional<const std::string&>`` here because we might
@@ -107,15 +99,8 @@ class RpcAgent {
 
  protected:
   const WorkerInfo workerInfo_;
-
-  // Method that needs to be overridden by all implementations of this
-  // interface. The public send() method is responsible for common
-  // pre-processing shared across all implementations.
-  virtual std::shared_ptr<FutureMessage> sendImpl(
-      const WorkerInfo& to,
-      Message&& message) = 0;
   const std::string workerName_;
-  const RequestCallback cb_;
+  const std::unique_ptr<RequestCallback> cb_;
 };
 
 } // namespace rpc

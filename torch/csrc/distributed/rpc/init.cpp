@@ -1,6 +1,5 @@
 #include <torch/csrc/python_headers.h>
 
-#include <torch/csrc/distributed/rpc/functions.h>
 #include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
 #include <torch/csrc/distributed/rpc/py_rref.h>

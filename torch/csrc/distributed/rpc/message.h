@@ -28,12 +28,16 @@ enum MessageType {
   RREF_USER_DELETE = 10, // A UserRRef tells the owner to deref
   RREF_FORK_REQUEST = 11, // A child UserRRef tells the owner about itself
   RREF_CHILD_ACCEPT = 12, // A child UserRRef tells parent that owner knows it
+  RREF_ACK = 13, // ACK to internal RRef messages
+
+  // Messages with autograd info
+  MESSAGE_WITH_AUTOGRAD_REQ = 14,
+  MESSAGE_WITH_AUTOGRAD_RESP = 15,
 
   // Other internal message types
-  SHUTDOWN = 13,
-  EXCEPTION = 14,
-  ACK = 15,
-  UNKNOWN = 16
+  SHUTDOWN = 16,
+  EXCEPTION = 17,
+  UNKNOWN = 18
 };
 
 // A message to be sent/received by an RpcAgent.
@@ -52,8 +56,8 @@ enum MessageType {
 //                  request and response. Other implementation can ignore it
 //                  if they have their own ways to do matching.
 //
-// Layers above ``RpcAgent`` only converts ScriptCall, ScriptRet, PythonCall,
-// and PythonRet into a Message, and it is up to the RpcAgent
+// Layers above ``RpcAgent`` only converts ScriptCall, ScriptResp, PythonCall,
+// and PythonUDFResp into a Message, and it is up to the RpcAgent
 // implementation to determine how to serialize a message.
 class TORCH_API Message final {
  public:
@@ -76,7 +80,11 @@ class TORCH_API Message final {
   Message& operator=(Message&& rhs) &;
   void swap(Message& rhs) noexcept;
 
+  // Destructively retrieves the payload.
+  std::vector<char>&& movePayload() &&;
+
   const std::vector<char>& payload() const;
+  std::vector<torch::Tensor>& tensors();
   const std::vector<torch::Tensor>& tensors() const;
   const MessageType& type() const;
 

@@ -39,7 +39,7 @@ const RRefId& RRefMessageBase::rrefId() {
   return rrefId_;
 }
 
-Message RRefMessageBase::toMessage() const {
+Message RRefMessageBase::toMessage() && {
   return fromIValues({rrefId_.toIValue()}, type_);
 }
 
@@ -59,7 +59,7 @@ const ForkId& ForkMessageBase::forkId() {
   return forkId_;
 }
 
-Message ForkMessageBase::toMessage() const {
+Message ForkMessageBase::toMessage() && {
   return fromIValues({rrefId_.toIValue(), forkId_.toIValue()}, type_);
 }
 
@@ -77,21 +77,25 @@ std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
 
 /////////////////////////// RRef Protocol //////////////////////////////////
 
-ScriptRRefFetchCall ScriptRRefFetchCall::fromMessage(const Message& message) {
-  return ScriptRRefFetchCall(RRefId::fromIValue(RRefMessageBase::fromMessage(
-      message, MessageType::SCRIPT_RREF_FETCH_CALL)));
+std::unique_ptr<ScriptRRefFetchCall> ScriptRRefFetchCall::fromMessage(
+    const Message& message) {
+  return c10::guts::make_unique<ScriptRRefFetchCall>(
+      RRefId::fromIValue(RRefMessageBase::fromMessage(
+          message, MessageType::SCRIPT_RREF_FETCH_CALL)));
 }
 
-PythonRRefFetchCall PythonRRefFetchCall::fromMessage(const Message& message) {
-  return PythonRRefFetchCall(RRefId::fromIValue(RRefMessageBase::fromMessage(
-      message, MessageType::PYTHON_RREF_FETCH_CALL)));
+std::unique_ptr<PythonRRefFetchCall> PythonRRefFetchCall::fromMessage(
+    const Message& message) {
+  return c10::guts::make_unique<PythonRRefFetchCall>(
+      RRefId::fromIValue(RRefMessageBase::fromMessage(
+          message, MessageType::PYTHON_RREF_FETCH_CALL)));
 }
 
 const std::vector<at::IValue>& RRefFetchRet::values() {
   return values_;
 }
 
-Message RRefFetchRet::toMessage() const {
+Message RRefFetchRet::toMessage() && {
   std::vector<at::IValue> ivalues = values_;
   std::vector<torch::Tensor> tensor_table;
   auto payload =
@@ -101,7 +105,7 @@ Message RRefFetchRet::toMessage() const {
       std::move(payload), std::move(tensor_table), MessageType::RREF_FETCH_RET);
 }
 
-RRefFetchRet RRefFetchRet::fromMessage(const Message& message) {
+std::unique_ptr<RRefFetchRet> RRefFetchRet::fromMessage(const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
 
@@ -109,39 +113,52 @@ RRefFetchRet RRefFetchRet::fromMessage(const Message& message) {
       jit::unpickle(payload, payload_size, nullptr, &message.tensors());
   auto values = value.toTuple()->elements();
 
-  return RRefFetchRet(std::move(values));
+  return c10::guts::make_unique<RRefFetchRet>(std::move(values));
 }
 
-RRefUserDelete RRefUserDelete::fromMessage(const Message& message) {
-  auto pair =
-      ForkMessageBase::fromMessage(message, MessageType::RREF_USER_DELETE);
-  return RRefUserDelete(pair.first, pair.second);
+std::unique_ptr<RRefUserDelete> RRefUserDelete::fromMessage(
+    const Message& message) {
+  auto pair = ForkMessageBase::fromMessage(
+      message, MessageType::RREF_USER_DELETE);
+  return c10::guts::make_unique<RRefUserDelete>(
+      RRefUserDelete(pair.first, pair.second));
 }
 
-RemoteRet RemoteRet::fromMessage(const Message& message) {
+std::unique_ptr<RemoteRet> RemoteRet::fromMessage(const Message& message) {
   auto pair = ForkMessageBase::fromMessage(message, MessageType::REMOTE_RET);
-  return RemoteRet(pair.first, pair.second);
+  return c10::guts::make_unique<RemoteRet>(pair.first, pair.second);
 }
 
 const ForkId& RRefChildAccept::forkId() const {
   return forkId_;
 }
 
-Message RRefChildAccept::toMessage() {
+Message RRefChildAccept::toMessage() && {
   return fromIValues({forkId_.toIValue()}, MessageType::RREF_CHILD_ACCEPT);
 }
 
-RRefChildAccept RRefChildAccept::fromMessage(const Message& message) {
+std::unique_ptr<RRefChildAccept> RRefChildAccept::fromMessage(
+    const Message& message) {
   auto values = toIValues(message, MessageType::RREF_CHILD_ACCEPT);
   TORCH_INTERNAL_ASSERT(values.size() == 1, "Expect 1 IValues from message.");
 
-  return RRefChildAccept(ForkId::fromIValue(values.back()));
+  return c10::guts::make_unique<RRefChildAccept>(
+      ForkId::fromIValue(values.back()));
 }
 
-RRefForkRequest RRefForkRequest::fromMessage(const Message& message) {
+std::unique_ptr<RRefForkRequest> RRefForkRequest::fromMessage(
+    const Message& message) {
   auto pair =
       ForkMessageBase::fromMessage(message, MessageType::RREF_FORK_REQUEST);
-  return RRefForkRequest(pair.first, pair.second);
+  return c10::guts::make_unique<RRefForkRequest>(pair.first, pair.second);
+}
+
+Message RRefAck::toMessage() && {
+  return Message({}, {}, MessageType::RREF_ACK);
+}
+
+std::unique_ptr<RRefAck> RRefAck::fromMessage(const Message& message) {
+  return c10::guts::make_unique<RRefAck>();
 }
 
 } // namespace rpc

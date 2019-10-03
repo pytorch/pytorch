@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/pickler.h>
 #include <vector>
@@ -9,7 +10,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-class TORCH_API PythonRemoteCall final {
+class TORCH_API PythonRemoteCall : public RpcCommandBase {
  public:
   PythonRemoteCall(
       SerializedPyObj&& serializedPyObj,
@@ -28,8 +29,8 @@ class TORCH_API PythonRemoteCall final {
     return retForkId_;
   }
 
-  Message toMessage() const;
-  static PythonRemoteCall fromMessage(const Message& message);
+  Message toMessage() && override;
+  static std::unique_ptr<PythonRemoteCall> fromMessage(const Message& message);
 
  private:
   const SerializedPyObj serializedPyObj_;
