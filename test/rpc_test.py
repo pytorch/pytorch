@@ -3,7 +3,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import sys
 import unittest
-from os import getenv
 from unittest import mock
 
 import torch
@@ -14,10 +13,7 @@ from torch.distributed.internal_rpc_utils import _internal_rpc_pickler, PythonUD
 
 from common_utils import load_tests
 from torch.distributed.rpc_api import RpcBackend
-from dist_utils import dist_init
-
-BACKEND = getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP)
-RPC_INIT_URL = getenv("RPC_INIT_URL", "")
+from dist_utils import dist_init, BACKEND, INIT_METHOD_TEMPLATE
 
 
 def stub_init_rpc_backend_handler(self_rank, self_name, init_method):
@@ -151,6 +147,12 @@ class RpcTest(object):
     def world_size(self):
         return 4
 
+    @property
+    def init_method(self):
+        return INIT_METHOD_TEMPLATE.format(
+            file_name=self.file_name, rank=self.rank, world_size=self.world_size
+        )
+
     @dist_init
     def test_worker_id(self):
         n = self.rank + 1
@@ -195,36 +197,34 @@ class RpcTest(object):
         "PROCESS_GROUP rpc backend specific test, skip",
     )
     def test_duplicate_name(self):
-        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
+            backend="gloo", init_method=self.init_method
         )
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
             dist.init_model_parallel(
                 self_name="duplicate_name",
                 backend=BACKEND,
                 self_rank=self.rank,
-                init_method=RPC_INIT_URL,
+                init_method=self.init_method,
             )
         dist.join_rpc()
 
     def test_reinit(self):
-        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
+            backend="gloo", init_method=self.init_method,
         )
         dist.init_model_parallel(
             self_name="worker{}".format(self.rank),
             backend=BACKEND,
             self_rank=self.rank,
-            init_method=RPC_INIT_URL,
+            init_method=self.init_method,
         )
         with self.assertRaisesRegex(RuntimeError, "is already initialized"):
             dist.init_model_parallel(
                 self_name="worker{}".format(self.rank),
                 backend=BACKEND,
                 self_rank=self.rank,
-                init_method=RPC_INIT_URL,
+                init_method=self.init_method,
             )
         dist.join_rpc()
 
@@ -234,14 +234,13 @@ class RpcTest(object):
                 self_name="worker{}".format(self.rank),
                 backend="invalid",
                 self_rank=self.rank,
-                init_method=RPC_INIT_URL,
+                init_method=self.init_method,
             )
 
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     def test_invalid_names(self):
-        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
+            backend="gloo", init_method=self.init_method
         )
 
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
@@ -260,7 +259,7 @@ class RpcTest(object):
                 self_name="".join(["a" for _ in range(500)]),
                 backend=BACKEND,
                 self_rank=self.rank,
-                init_method=RPC_INIT_URL,
+                init_method=self.init_method,
             )
         dist.join_rpc()
 

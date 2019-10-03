@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
-from dist_utils import dist_init
+from dist_utils import dist_init, INIT_METHOD_TEMPLATE
 import six
 import unittest
 import torch
@@ -23,6 +23,12 @@ class DistAutogradTest(object):
     @property
     def world_size(self):
         return 4
+
+    @property
+    def init_method(self):
+        return INIT_METHOD_TEMPLATE.format(
+            file_name=self.file_name, rank=self.rank, world_size=self.world_size
+        )
 
     @dist_init
     def test_autograd_context(self):
