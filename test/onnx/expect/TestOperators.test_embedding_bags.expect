@@ -10,6 +10,7 @@ graph {
     output: "4"
     output: "5"
     output: "6"
+    name: "ATen_0"
     op_type: "ATen"
     attribute {
       name: "mode"

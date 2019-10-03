@@ -6,6 +6,7 @@ graph {
     input: "0"
     output: "1"
     output: "2"
+    name: "MaxPool_0"
     op_type: "MaxPool"
     attribute {
       name: "kernel_shape"
@@ -28,6 +29,7 @@ graph {
     input: "0"
     output: "3"
     output: "4"
+    name: "MaxPool_1"
     op_type: "MaxPool"
     attribute {
       name: "kernel_shape"
@@ -43,6 +45,7 @@ graph {
   node {
     input: "4"
     output: "5"
+    name: "Slice_2"
     op_type: "Slice"
     attribute {
       name: "axes"
@@ -64,6 +67,7 @@ graph {
     input: "2"
     input: "5"
     output: "6"
+    name: "Sub_3"
     op_type: "Sub"
   }
   name: "torch-jit-export"

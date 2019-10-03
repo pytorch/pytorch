@@ -5,6 +5,7 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "Sqrt_0"
     op_type: "Sqrt"
   }
   name: "torch-jit-export"

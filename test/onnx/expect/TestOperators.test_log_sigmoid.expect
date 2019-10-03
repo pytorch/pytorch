@@ -5,11 +5,13 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "Sigmoid_0"
     op_type: "Sigmoid"
   }
   node {
     input: "1"
     output: "2"
+    name: "Log_1"
     op_type: "Log"
   }
   name: "torch-jit-export"

@@ -5,6 +5,7 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "Tan_0"
     op_type: "Tan"
   }
   name: "torch-jit-export"

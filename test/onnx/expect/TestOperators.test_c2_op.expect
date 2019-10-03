@@ -9,6 +9,7 @@ graph {
     input: "3"
     output: "4"
     output: "5"
+    name: "GenerateProposals_0"
     op_type: "GenerateProposals"
     attribute {
       name: "spatial_scale"

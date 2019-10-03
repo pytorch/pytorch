@@ -172,6 +172,7 @@ class EncoderBase {
 
   onnx::ModelProto model_proto_;
   size_t num_blocks_;
+  size_t num_op_nodes_;
   onnx_torch::OperatorExportTypes operator_export_type_;
   bool strip_doc_;
   std::set<std::string> domains_;
@@ -212,6 +213,7 @@ EncoderBase::EncoderBase(
     onnx_torch::OperatorExportTypes operator_export_type,
     bool strip_doc)
     : num_blocks_(0),
+      num_op_nodes_(0),
       operator_export_type_(operator_export_type),
       strip_doc_(strip_doc) {
   model_proto_.set_producer_name("pytorch");
@@ -346,6 +348,8 @@ void EncoderBase::EncodeBlock(
           !node->kind().is_attr());
     }
     p_n->set_op_type(node->kind().toUnqualString());
+    p_n->set_name(p_n->op_type() + "_" + std::to_string(num_op_nodes_));
+    num_op_nodes_++;
     for (auto attr_name : node->attributeNames()) {
       AddAttribute(p_n, node, attr_name);
     }

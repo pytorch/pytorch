@@ -5,6 +5,7 @@ graph {
   node {
     input: "input"
     output: "1"
+    name: "Pad_0"
     op_type: "Pad"
     attribute {
       name: "mode"

@@ -6,6 +6,7 @@ graph {
     input: "x"
     input: "y"
     output: "2"
+    name: "Equal_0"
     op_type: "Equal"
   }
   name: "torch-jit-export"

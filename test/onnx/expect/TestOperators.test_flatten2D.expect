@@ -5,6 +5,7 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "Flatten_0"
     op_type: "Flatten"
     attribute {
       name: "axis"

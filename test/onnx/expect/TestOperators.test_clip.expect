@@ -5,6 +5,7 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "Clip_0"
     op_type: "Clip"
     attribute {
       name: "max"

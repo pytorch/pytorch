@@ -5,6 +5,7 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "DepthToSpace_0"
     op_type: "DepthToSpace"
     attribute {
       name: "blocksize"

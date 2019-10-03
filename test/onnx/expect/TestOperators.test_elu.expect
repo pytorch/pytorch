@@ -5,6 +5,7 @@ graph {
   node {
     input: "input"
     output: "1"
+    name: "Elu_0"
     op_type: "Elu"
     attribute {
       name: "alpha"

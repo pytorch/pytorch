@@ -5,6 +5,7 @@ graph {
   node {
     input: "input"
     output: "1"
+    name: "RandomUniformLike_0"
     op_type: "RandomUniformLike"
     attribute {
       name: "high"
@@ -21,6 +22,7 @@ graph {
     input: "input"
     input: "1"
     output: "2"
+    name: "PRelu_1"
     op_type: "PRelu"
   }
   name: "torch-jit-export"

@@ -5,6 +5,7 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "Slice_0"
     op_type: "Slice"
     attribute {
       name: "axes"

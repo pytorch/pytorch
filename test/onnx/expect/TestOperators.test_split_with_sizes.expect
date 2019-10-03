@@ -7,6 +7,7 @@ graph {
     output: "1"
     output: "2"
     output: "3"
+    name: "Split_0"
     op_type: "Split"
     attribute {
       name: "axis"

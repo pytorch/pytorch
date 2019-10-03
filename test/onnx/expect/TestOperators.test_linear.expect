@@ -7,6 +7,7 @@ graph {
     input: "weight"
     input: "bias"
     output: "3"
+    name: "Gemm_0"
     op_type: "Gemm"
     attribute {
       name: "alpha"

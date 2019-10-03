@@ -3,29 +3,11 @@ producer_name: "pytorch"
 producer_version: "1.3"
 graph {
   node {
-    output: "2"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        dims: 1
-        data_type: 7
-        raw_data: "\001\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    input: "1"
-    input: "2"
-    output: "3"
-    op_type: "Reshape"
-  }
-  node {
     input: "0"
-    input: "3"
-    output: "4"
-    output: "5"
+    input: "1"
+    output: "2"
+    output: "3"
+    name: "TopK_0"
     op_type: "TopK"
     attribute {
       name: "axis"
@@ -68,7 +50,7 @@ graph {
     }
   }
   output {
-    name: "4"
+    name: "2"
     type {
       tensor_type {
         elem_type: 1
@@ -81,7 +63,7 @@ graph {
     }
   }
   output {
-    name: "5"
+    name: "3"
     type {
       tensor_type {
         elem_type: 7

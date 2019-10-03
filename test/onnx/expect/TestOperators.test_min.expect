@@ -6,6 +6,7 @@ graph {
     input: "0"
     input: "1"
     output: "2"
+    name: "Min_0"
     op_type: "Min"
   }
   name: "torch-jit-export"

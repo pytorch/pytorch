@@ -6,11 +6,13 @@ graph {
     input: "0"
     input: "1"
     output: "2"
+    name: "Equal_0"
     op_type: "Equal"
   }
   node {
     input: "2"
     output: "3"
+    name: "Not_1"
     op_type: "Not"
   }
   name: "torch-jit-export"

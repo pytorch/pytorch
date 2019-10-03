@@ -5,6 +5,7 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "ReduceMean_0"
     op_type: "ReduceMean"
     attribute {
       name: "axes"
