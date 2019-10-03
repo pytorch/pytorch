@@ -35,6 +35,9 @@ class ConvReLU2d(nnq.Conv2d):
                                                self.dilation, self.groups,
                                                self.scale, self.zero_point)
 
+    def _get_name(self):
+        return 'QuantizedConvReLU2d'
+
     @classmethod
     def from_float(cls, mod):
         if type(mod) == torch.nn.intrinsic.qat.ConvBnReLU2d:
