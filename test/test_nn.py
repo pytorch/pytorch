@@ -187,6 +187,7 @@ class PackedSequenceTest(TestCase):
                 padded, lengths, enforce_sorted=enforce_sorted).cpu()
 
             self.assertIs(a, a.to('cpu'))
+            self.assertIs(a, a.cpu())
             self.assertIs(a, a.to('cpu', dtype=torch.int32))
             self.assertEqual(a.long(), a.to(torch.int64))
 
@@ -194,6 +195,7 @@ class PackedSequenceTest(TestCase):
                 for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
                     b = a.cuda(device=cuda)
                     self.assertIs(b, b.to(cuda))
+                    self.assertIs(b, b.cuda())
                     self.assertEqual(a, b.to('cpu'))
                     self.assertEqual(b, a.to(cuda))
                     self.assertEqual(a, b.to('cpu', dtype=torch.int32))
