@@ -139,7 +139,8 @@ IValue UserRRef<IValue>::toHere() {
   const Message& message = fm->wait();
   RRefContext::handleException(message);
   auto rfr = RRefFetchRet::fromMessage(message);
-  TORCH_INTERNAL_ASSERT(rfr->values().size() == 1,
+  TORCH_INTERNAL_ASSERT(
+      rfr->values().size() == 1,
       "RRef of IValue should contain a single IValue, but got ",
       rfr->values().size());
   return rfr->values().front();

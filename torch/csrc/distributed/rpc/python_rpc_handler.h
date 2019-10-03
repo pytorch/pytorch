@@ -8,7 +8,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-
 // Singleton class provides interface to execute python UDF remote call
 // and deserialize the returned results by running python function
 // in internal_rpc_utilities.

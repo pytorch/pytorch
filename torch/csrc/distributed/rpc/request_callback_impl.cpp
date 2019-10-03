@@ -88,8 +88,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
 
       auto ownerRRef = ctx->getOrCreateOwnerRRef<py::object>(rrefId);
       ownerRRef->setValue(
-          PythonRpcHandler::getInstance().runPythonUDF(
-              prc.serializedPyObj()));
+          PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()));
       ctx->addForkOfOwner(rrefId, forkId);
       return c10::guts::make_unique<RemoteRet>(rrefId, forkId);
     }

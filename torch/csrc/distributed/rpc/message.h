@@ -90,9 +90,6 @@ class TORCH_API Message final {
 
   bool isRequest() const;
   bool isResponse() const;
-  // Internal messages does not contain any UDF, and their request/response
-  // callbacks should be idempotent and retryable.
-  bool isInternal() const;
   bool isShutdown() const;
 
   // id is an optional field to match request/response. If an RpcAgent

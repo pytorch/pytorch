@@ -46,16 +46,14 @@ py::object PythonRpcHandler::runPythonUDF(
     const SerializedPyObj& serializedObj) {
   AutoGIL ag;
   return runUDFFunction_(
-      py::bytes(serializedObj.payload_),
-      serializedObj.tensors_);
+      py::bytes(serializedObj.payload_), serializedObj.tensors_);
 }
 
 SerializedPyObj PythonRpcHandler::serialize(const py::object& obj) {
   AutoGIL ag;
   py::tuple t = serializeFunction_(obj);
   return SerializedPyObj(
-      t[0].cast<std::string>(),
-      t[1].cast<std::vector<torch::Tensor>>());
+      t[0].cast<std::string>(), t[1].cast<std::vector<torch::Tensor>>());
 }
 
 py::object PythonRpcHandler::deserialize(const SerializedPyObj& serializedObj) {

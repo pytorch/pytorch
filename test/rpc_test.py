@@ -495,9 +495,11 @@ class RpcTest(object):
     def test_py_tensors(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = dist.rpc("worker{}".format(dst_rank),
-                       my_tensor_function,
-                       args=(torch.ones(n, n), torch.ones(n, n)))
+        ret = dist.rpc_sync(
+            "worker{}".format(dst_rank),
+            my_tensor_function,
+            args=(torch.ones(n, n), torch.ones(n, n))
+        )
         self.assertEqual(ret,
                          my_tensor_function(torch.ones(n, n),
                                             torch.ones(n, n)))

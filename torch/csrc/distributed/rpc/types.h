@@ -41,13 +41,9 @@ TORCH_API std::ostream& operator<<(
 using RRefId = GloballyUniqueId;
 using ForkId = GloballyUniqueId;
 
-
 struct TORCH_API SerializedPyObj final {
-  SerializedPyObj(
-      std::string&& payload,
-      std::vector<at::Tensor>&& tensors)
-      : payload_(std::move(payload)),
-        tensors_(std::move(tensors)) {}
+  SerializedPyObj(std::string&& payload, std::vector<at::Tensor>&& tensors)
+      : payload_(std::move(payload)), tensors_(std::move(tensors)) {}
 
   std::vector<at::IValue> toIValues() const;
   static SerializedPyObj fromIValues(std::vector<at::IValue> value);

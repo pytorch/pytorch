@@ -155,7 +155,7 @@ PyRRef pyRemoteBuiltin(
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
 
   auto& ctx = RRefContext::getInstance();
-  // TODO: support creaing RRefs on a local object.
+  // TODO: support creating RRefs on a local object.
   TORCH_INTERNAL_ASSERT(
       ctx->getWorkerId() != dst.id_,
       "Does not support creating RRef on self yet.");
@@ -190,7 +190,7 @@ PyRRef pyRemotePythonUdf(
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors) {
   auto& ctx = RRefContext::getInstance();
-  // TODO: support creaing RRefs on a local object.
+  // TODO: support creating RRefs on a local object.
   TORCH_INTERNAL_ASSERT(
       ctx->getWorkerId() != dst.id_,
       "Does not support creating RRef on self yet.");

@@ -89,8 +89,7 @@ class TORCH_API RRefUserDelete final : public ForkMessageBase {
   RRefUserDelete(const RRefId& rrefId, const ForkId& forkId)
       : ForkMessageBase(rrefId, forkId, MessageType::RREF_USER_DELETE) {}
 
-  static std::unique_ptr<RRefUserDelete> fromMessage(
-      const Message& message);
+  static std::unique_ptr<RRefUserDelete> fromMessage(const Message& message);
 };
 
 class TORCH_API RemoteRet final : public ForkMessageBase {
@@ -101,9 +100,8 @@ class TORCH_API RemoteRet final : public ForkMessageBase {
   static std::unique_ptr<RemoteRet> fromMessage(const Message& message);
 };
 
-// The OwnerRRef uses this message to a UserRRef that its fork request has been
-// accepted. A UserRRef cannot be deleted if it has any pending fork requests.
-
+// A child RRef uses this message to notify its parent that the child has been
+// confirmed by the owner.
 class TORCH_API RRefChildAccept final : public RpcCommandBase {
  public:
   explicit RRefChildAccept(const ForkId& forkId) : forkId_(forkId) {}
@@ -117,6 +115,7 @@ class TORCH_API RRefChildAccept final : public RpcCommandBase {
   const ForkId forkId_;
 };
 
+// A child RRef uses this message to send a fork request to the owner.
 class TORCH_API RRefForkRequest final : public ForkMessageBase {
  public:
   RRefForkRequest(const RRefId& rrefId, const ForkId& forkId)

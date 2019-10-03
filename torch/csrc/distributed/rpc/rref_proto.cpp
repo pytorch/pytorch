@@ -105,7 +105,8 @@ Message RRefFetchRet::toMessage() && {
       std::move(payload), std::move(tensor_table), MessageType::RREF_FETCH_RET);
 }
 
-std::unique_ptr<RRefFetchRet> RRefFetchRet::fromMessage(const Message& message) {
+std::unique_ptr<RRefFetchRet> RRefFetchRet::fromMessage(
+    const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
 
@@ -118,8 +119,8 @@ std::unique_ptr<RRefFetchRet> RRefFetchRet::fromMessage(const Message& message) 
 
 std::unique_ptr<RRefUserDelete> RRefUserDelete::fromMessage(
     const Message& message) {
-  auto pair = ForkMessageBase::fromMessage(
-      message, MessageType::RREF_USER_DELETE);
+  auto pair =
+      ForkMessageBase::fromMessage(message, MessageType::RREF_USER_DELETE);
   return c10::guts::make_unique<RRefUserDelete>(
       RRefUserDelete(pair.first, pair.second));
 }
