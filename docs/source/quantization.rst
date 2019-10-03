@@ -1,5 +1,5 @@
-PyTorch Quantization 
-================================
+torch.quantization
+===========================
 
 
 Introduction to Quantization
@@ -145,8 +145,6 @@ The code is organized into the following sections
    of those fused operations needed for quantization aware training.
 
 
-torch.quantization
-===========================
 .. automodule:: torch.quantization
 
 Initialization
