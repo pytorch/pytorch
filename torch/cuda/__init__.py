@@ -454,11 +454,58 @@ def empty_cache():
 
     .. note::
         :func:`~torch.cuda.empty_cache` doesn't increase the amount of GPU
-        memory available for PyTorch. See :ref:`cuda-memory-management` for
+        memory available for PyTorch. However, it may help reduce fragmentation
+        of GPU memory in certain cases. See :ref:`cuda-memory-management` for
         more details about GPU memory management.
     """
     if _initialized:
         torch._C._cuda_emptyCache()
+
+
+def memory_event_counts(device=None):
+    r"""Returns a dictionary of historical CUDA memory allocator event counts:
+
+    - `"num_alloc_requests"`: total number of memory allocations ever requested.
+    - `"num_free_requests"`: total number of memory frees ever requested.
+    - `"num_blocks_allocated"`: total number of internal memory "blocks" ever allocated.
+    - `"num_blocks_released"`: total number of internal memory "blocks" ever released.
+    - `"num_blocks_split"`: total number of splits of larger blocks into smaller blocks.
+    - `"num_cuda_mallocs"`: total number of calls to cudaMalloc by the allocator.
+    - `"num_cuda_frees"`: total number of calls to cudaFree by the allocator.
+    - `"num_cache_flushes"`: total number of internal cache flushes by the allocator.
+
+    :func:`~torch.cuda.reset_memory_event_counts` can be used to reset
+    these counts.
+
+    Arguments:
+        device (torch.device or int, optional): selected device. Returns
+            statistics for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    .. note::
+        See :ref:`cuda-memory-management` for more details about GPU memory
+        management.
+    """
+    device = _get_device_index(device, optional=True)
+    return torch._C._cuda_memoryEventCounts(device)
+
+
+def reset_memory_event_counts(device=None):
+    r"""Resets the event counts tracked by the CUDA memory allocator.
+
+    See :func:`~torch.cuda.memory_event_counts` for details.
+
+    Arguments:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    .. note::
+        See :ref:`cuda-memory-management` for more details about GPU memory
+        management.
+    """
+    device = _get_device_index(device, optional=True)
+    return torch._C._cuda_resetMemoryEventCounts(device)
 
 
 def memory_allocated(device=None):

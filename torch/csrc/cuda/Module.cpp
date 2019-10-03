@@ -235,6 +235,60 @@ PyObject * THCPModule_emptyCache(PyObject *_unused, PyObject *noargs)
   Py_RETURN_NONE;
 }
 
+PyObject * THCPModule_memoryEventCounts(PyObject *_unused, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
+  int device = (int) THPUtils_unpackLong(arg);
+
+  PyObject* result = PyDict_New();
+
+  #define _RESULT_SET_UNSIGNED_LONG(name, val) \  // NOLINT: allow function-like macro
+    do { \  // NOLINT
+      PyDict_SetItemString(result, #name, PyLong_FromUnsignedLongLong(val)); \  // NOLINT
+    } while (0)  // NOLINT
+
+  _RESULT_SET_UNSIGNED_LONG(
+      num_alloc_requests,
+      c10::cuda::CUDACachingAllocator::totalNumAllocRequests(device));
+  _RESULT_SET_UNSIGNED_LONG(
+      num_free_requests,
+      c10::cuda::CUDACachingAllocator::totalNumFreeRequests(device));
+  _RESULT_SET_UNSIGNED_LONG(
+      num_blocks_allocated,
+      c10::cuda::CUDACachingAllocator::totalNumBlocksAllocated(device));
+  _RESULT_SET_UNSIGNED_LONG(
+      num_blocks_released,
+      c10::cuda::CUDACachingAllocator::totalNumBlocksReleased(device));
+  _RESULT_SET_UNSIGNED_LONG(
+      num_blocks_split,
+      c10::cuda::CUDACachingAllocator::totalNumBlocksSplit(device));
+  _RESULT_SET_UNSIGNED_LONG(
+      num_cuda_mallocs,
+      c10::cuda::CUDACachingAllocator::totalNumCudaMallocs(device));
+  _RESULT_SET_UNSIGNED_LONG(
+      num_cuda_frees,
+      c10::cuda::CUDACachingAllocator::totalNumCudaFrees(device));
+  _RESULT_SET_UNSIGNED_LONG(
+      num_cache_flushes,
+      c10::cuda::CUDACachingAllocator::totalNumCacheFlushes(device));
+
+  #undef _RESULT_SET_UNSIGNED_LONG  // NOLINT
+
+  return result;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_resetMemoryEventCounts(PyObject *_unused, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to reset_max_memory_allocated");
+  int device = (int) THPUtils_unpackLong(arg);
+  c10::cuda::CUDACachingAllocator::resetEventCounts(device);
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
+}
+
 PyObject * THCPModule_memoryAllocated(PyObject *_unused, PyObject *arg)
 {
   HANDLE_TH_ERRORS
@@ -411,7 +465,9 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_getDriverVersion", (PyCFunction)THCPModule_getDriverVersion, METH_NOARGS, nullptr},
   {"_cuda_getCompiledVersion", (PyCFunction)THCPModule_getCompiledVersion, METH_NOARGS, nullptr},
   {"_cuda_hasPrimaryContext", (PyCFunction) THCPModule_hasPrimaryContext,  METH_O,  nullptr},
-  {"_cuda_emptyCache", (PyCFunction) THCPModule_emptyCache,       METH_NOARGS,  nullptr},
+  {"_cuda_emptyCache", (PyCFunction) THCPModule_emptyCache, METH_NOARGS, nullptr},
+  {"_cuda_memoryEventCounts", (PyCFunction) THCPModule_memoryEventCounts, METH_O, nullptr},
+  {"_cuda_resetMemoryEventCounts", (PyCFunction) THCPModule_resetMemoryEventCounts, METH_O, nullptr},
   {"_cuda_memoryAllocated", (PyCFunction) THCPModule_memoryAllocated, METH_O,  nullptr},
   {"_cuda_maxMemoryAllocated", (PyCFunction) THCPModule_maxMemoryAllocated, METH_O,  nullptr},
   {"_cuda_resetMaxMemoryAllocated", (PyCFunction) THCPModule_resetMaxMemoryAllocated, METH_O,  nullptr},

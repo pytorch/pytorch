@@ -64,14 +64,63 @@ constexpr size_t kMinLargeAlloc = 10485760; // allocations between 1 and 10 MiB 
 constexpr size_t kRoundLarge = 2097152;     // round up large allocs to 2 MiB
 
 struct DeviceStats {
-  uint64_t   amount_allocated;      // total amount allocated in bytes
-  uint64_t   max_amount_allocated;  // max total amount allocated in bytes
-  uint64_t   amount_cached;         // total amount in cache in bytes
-  uint64_t   max_amount_cached;     // max total amount in cache in bytes
+  uint64_t   total_num_alloc_requests;    // total number of allocation requests received by
+                                          // the allocator
+  uint64_t   total_num_free_requests;     // total number of free requests received by the allocator
+
+  uint64_t   total_num_blocks_allocated;  // total number of memory blocks ever created
+                                          // (including splits)
+  uint64_t   total_num_blocks_released;   // total number of memory blocks ever released
+  uint64_t   total_num_blocks_split;      // total number of memory blocks ever split into two
+
+  uint64_t   total_num_cuda_mallocs;      // total number of calls to CUDA malloc
+  uint64_t   total_num_cuda_frees;        // total number of calls to CUDA free
+  uint64_t   total_num_cache_flushes;     // total number of cache flushes
+                                          //   (i.e. failed calls to CUDA malloc)
+
+  uint64_t   amount_allocated;            // total amount allocated in bytes
+  uint64_t   max_amount_allocated;        // max total amount allocated in bytes
+  uint64_t   amount_cached;               // total amount in cache in bytes
+  uint64_t   max_amount_cached;           // max total amount in cache in bytes
 
   DeviceStats() :
+      total_num_alloc_requests(0), total_num_free_requests(0),
+      total_num_blocks_allocated(0), total_num_blocks_released(0), total_num_blocks_split(0),
+      total_num_cuda_mallocs(0), total_num_cuda_frees(0), total_num_cache_flushes(0),
       amount_allocated(0), max_amount_allocated(0),
       amount_cached(0), max_amount_cached(0) { }
+
+  void logAllocRequest(size_t occurrences=1) {
+    total_num_alloc_requests += occurrences;
+  }
+
+  void logFreeRequest(size_t occurrences=1) {
+    total_num_free_requests += occurrences;
+  }
+
+  void logBlockAlloc(size_t occurrences=1) {
+    total_num_blocks_allocated += occurrences;
+  }
+
+  void logBlockRelease(size_t occurrences=1) {
+    total_num_blocks_released += occurrences;
+  }
+
+  void logBlockSplit(size_t occurrences=1) {
+    total_num_blocks_split += occurrences;
+  }
+
+  void logCudaMalloc(size_t occurrences=1) {
+    total_num_cuda_mallocs += occurrences;
+  }
+
+  void logCudaFree(size_t occurrences=1) {
+    total_num_cuda_frees += occurrences;
+  }
+
+  void logCacheFlush(size_t occurrences=1) {
+    total_num_cache_flushes += occurrences;
+  }
 
   void increaseAllocated(size_t delta) {
     amount_allocated += delta;
@@ -202,6 +251,7 @@ struct THCCachingAllocator
     size = round_size(size);
 
     DeviceStats &stats = get_stats_for_device(device);
+    stats.logAllocRequest();
 
     Block search_key(device, stream, size);
     auto& pool = get_pool(size);
@@ -270,6 +320,7 @@ struct THCCachingAllocator
         }
       }
       stats.increaseCached(alloc_size);
+      stats.logBlockAlloc();
       block = new Block(device, stream, alloc_size, &pool, ptr);
     }
 
@@ -279,6 +330,8 @@ struct THCCachingAllocator
 
       remaining = block;
 
+      stats.logBlockAlloc();
+      stats.logBlockSplit();
       block = new Block(device, stream, size, &pool, block->ptr);
       block->prev = remaining->prev;
       if (block->prev) {
@@ -316,7 +369,10 @@ struct THCCachingAllocator
     allocated_blocks.erase(it);
     block->allocated = false;
 
-    get_stats_for_device(block->device).decreaseAllocated(block->size);
+    DeviceStats& stats = get_stats_for_device(block->device);
+    stats.decreaseAllocated(block->size);
+    stats.logFreeRequest();
+
     if (!block->stream_uses.empty()) {
       insert_events(block);
     } else {
@@ -404,6 +460,8 @@ struct THCCachingAllocator
     try_merge_blocks(block, block->prev, pool);
     try_merge_blocks(block, block->next, pool);
     pool.insert(block);
+
+    get_stats_for_device(block->device).logBlockRelease();
   }
 
   /** combine previously split blocks */
@@ -471,6 +529,7 @@ struct THCCachingAllocator
     // Try cudaMalloc. If cudaMalloc fails, frees all non-split cached blocks
     // and retries.
     cudaError_t err = cudaMalloc(devPtr, size);
+
     if (err != cudaSuccess) {
       cudaGetLastError();  // reset the last CUDA error
       free_cached_blocks(device);
@@ -479,6 +538,9 @@ struct THCCachingAllocator
         return err;
       }
     }
+
+    get_stats_for_device(device).logCudaMalloc();
+
     return cudaSuccess;
   }
 
@@ -500,6 +562,8 @@ struct THCCachingAllocator
         small_blocks,
         small_blocks.lower_bound(&lower_bound),
         small_blocks.lower_bound(&upper_bound));
+
+    get_stats_for_device(device).logCacheFlush();
   }
 
   void free_blocks(BlockPool& blocks, BlockPool::iterator it, BlockPool::iterator end)
@@ -510,7 +574,9 @@ struct THCCachingAllocator
       Block* block = *it;
       if (!block->prev && !block->next) {
         C10_CUDA_CHECK(cudaFree((void*)block->ptr));
-        get_stats_for_device(block->device).decreaseCached(block->size);
+        auto& stats = get_stats_for_device(block->device);
+        stats.decreaseCached(block->size);
+        stats.logCudaFree();
         auto cur = it;
         ++it;
         blocks.erase(cur);
@@ -665,6 +731,59 @@ std::mutex* getFreeMutex()
 static inline void assertValidDevice(int device) {
   int device_num = device_count();
   AT_ASSERTM(0 <= device && device < device_num, "Invalid device argument.");
+}
+
+uint64_t totalNumAllocRequests(int device) {
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).total_num_alloc_requests;
+}
+
+uint64_t totalNumFreeRequests(int device) {
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).total_num_free_requests;
+}
+
+uint64_t totalNumBlocksAllocated(int device) {
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).total_num_blocks_allocated;
+}
+
+uint64_t totalNumBlocksReleased(int device) {
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).total_num_blocks_released;
+}
+
+uint64_t totalNumBlocksSplit(int device) {
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).total_num_blocks_split;
+}
+
+uint64_t totalNumCudaMallocs(int device) {
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).total_num_cuda_mallocs;
+}
+
+uint64_t totalNumCudaFrees(int device) {
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).total_num_cuda_frees;
+}
+
+uint64_t totalNumCacheFlushes(int device) {
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).total_num_cache_flushes;
+}
+
+void resetEventCounts(int device) {
+  assertValidDevice(device);
+  DeviceStats& stats = caching_allocator.get_stats_for_device(device);
+  stats.total_num_alloc_requests = 0;
+  stats.total_num_free_requests = 0;
+  stats.total_num_blocks_allocated = 0;
+  stats.total_num_blocks_released = 0;
+  stats.total_num_blocks_split = 0;
+  stats.total_num_cuda_mallocs = 0;
+  stats.total_num_cuda_frees = 0;
+  stats.total_num_cache_flushes = 0;
 }
 
 uint64_t currentMemoryAllocated(int device)
