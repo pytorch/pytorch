@@ -430,18 +430,20 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
             f.close()
 
 
-def _get_layout(name, _cache={}):
-    """Get layout extension object from its string representation.
-    """
-    if not _cache:
-        for v in torch.__dict__.values():
-            if isinstance(v, torch.layout):
-                _cache[str(v)] = v
-    return _cache[name]
-
-
 # Register pickling support for layout instances such as
 # torch.sparse_coo, etc
+def _get_layout(name):
+    """Get layout extension object from its string representation.
+    """
+    cache = _get_layout.cache
+    if not cache:
+        for v in torch.__dict__.values():
+            if isinstance(v, torch.layout):
+                cache[str(v)] = v
+    return cache[name]
+
+
+_get_layout.cache = {}
 copyreg.pickle(torch.layout, lambda obj: (_get_layout, (str(obj),)))
 
 
