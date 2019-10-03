@@ -210,6 +210,16 @@ Example::
             [ -8.9902,  -8.3667,  -7.3925,  -7.6147]])
 """.format(**common_args))
 
+add_docstr(torch.add_relu,
+           r"""
+.. function:: add(input, other, out=None)
+
+Adds the scalar :attr:`other` to each element of the input :attr:`input`,
+applies the ReLU operation, and returns a new resulting tensor.
+
+Currently only implemented for Quantized tensors.
+""")
+
 add_docstr(torch.addbmm,
            r"""
 addbmm(beta=1, input, alpha=1, batch1, batch2, out=None) -> Tensor
