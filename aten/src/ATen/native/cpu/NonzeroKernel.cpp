@@ -30,10 +30,9 @@ static void nonzero_apply(Tensor& subscript, const Tensor& self) {
   auto iter = TensorIterator();
   iter.add_input(self);
   iter.build();
-  iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
+  cpu_kernel(iter, [&](scalar_t a) {
     for (int64_t i = 0; i < n; i++) {
-      auto out_ptr = (scalar_t *) (data[0] + i * strides[0]);
-      if (*out_ptr != 0) {
+      if (a != 0) {
         ii = idx + dimensions;
         for (int64_t dim = dimensions - 1; dim >= 0; dim--) {
           --ii;
@@ -52,24 +51,22 @@ static void nonzero_apply(Tensor& subscript, const Tensor& self) {
         ++(*ii);
       }
     }
-  }, {0, iter.numel()});
+  });
 }
 
 static void nonzero_kernel(Tensor& subscript, const Tensor& self) {
   AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, self.scalar_type(), "nonzero", [&] {
-    // TODO:Use Norm for large Tensor
     int64_t numel = 0;
     auto iter = TensorIterator();
     iter.add_input(self);
     iter.build();
-    iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
-      for (int64_t i = 0; i < n; i++) {
-        auto out_ptr = (scalar_t*)(data[0] + i * strides[0]);
-        if (*out_ptr != 0) {
+    cpu_kernel(iter,
+      [&](scalar_t a) -> void {
+        if (a != 0) {
           numel++;
         }
-      }
-    }, {0, iter.numel()});
+      });
+    });
     subscript.resize_({numel, self.dim()});
     if (numel <= 0) {
       return;
