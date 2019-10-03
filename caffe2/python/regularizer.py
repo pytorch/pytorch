@@ -42,6 +42,9 @@ class Regularizer(object):
     def _run_after_optimizer(self, net, param_init_net, param, grad):
         return None
 
+    def _feature_grouping(self, param, net):
+        return None
+
     def _ensure_clipped(
         self,
         net,
@@ -84,6 +87,52 @@ class L1Norm(Regularizer):
         net.Scale([output_blob], [output_blob], scale=self.reg_lambda)
         return output_blob
 
+class FCInputLpNorm(Regularizer):
+    def __init__(self, reg_lambda, p_value=0.5):
+        super(FCInputLpNorm, self).__init__()
+        assert reg_lambda >= 0, "factor ahead of regularization should be 0 or positive"
+        assert p_value >= 0, "p_value factor should be 0 or positive"
+        self.p_value = p_value
+        self.reg_lambda = reg_lambda
+
+    def _feature_grouping(self, param, net):
+        # Possible alternative grouping method via summing over absolute values
+        # Compute l2norm over feature weights
+        # pow( sum_i { pow(theda_i, 2) } ,  0.5)
+        param_mul = net.Mul([param, param], [net.NextScopedBlob("param_mul")])
+        param_reduced = net.ReduceFrontSum(
+            [param_mul], [net.NextScopedBlob("param_reduced")]
+        )
+        grouped_feature_weight_vec = net.Pow(
+            [param_reduced],
+            [net.NextScopedBlob("grouped_feature_weight_vec")],
+            exponent=0.5,
+        )
+
+        return grouped_feature_weight_vec
+
+    def _run_on_loss(self, net, param_init_net, param, grad=None):
+        # TODO: the second dim (num of input nodes) of param is after feature preproc,
+        # and does not correspond to the original num of dense features.
+        # In the future, will want to create a util to reduce the input dim of param to
+        # match the num of dense features.
+
+        output_blob = net.NextScopedBlob(param + "_dense_feature_regularization")
+        grouped_feature_weight_vec = self._feature_grouping(param, net)
+
+        # Compute Lpnorm over l2norm:
+        # pow( sum_i { pow(theda_i, p) } ,  1/p)
+        lp_vec_raised = net.Pow(
+            [grouped_feature_weight_vec], [net.NextScopedBlob("lp_vec_raised")], exponent=self.p_value
+        )
+        lp_vec_summed = net.ReduceFrontSum(
+            [lp_vec_raised], [net.NextScopedBlob("lp_vec_summed")]
+        )
+        lp_vec = net.Pow(
+            [lp_vec_summed], [net.NextScopedBlob("lp_vec")], exponent=(1 / self.p_value)
+        )
+        net.Scale([lp_vec], [output_blob], scale=self.reg_lambda)
+        return output_blob
 
 class L1NormTrimmed(Regularizer):
     """
