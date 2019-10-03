@@ -67,7 +67,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
       // src is only alive within this block, use reference to avoid copy
       auto& stack = src.stackRef();
       src.op()->getOperation()(stack);
-      AT_ASSERT(
+      TORCH_INTERNAL_ASSERT(
           stack.size() == 1,
           "Return value of a builtin operator or a "
           "TorchScript function should be a single IValue, got a vector of "

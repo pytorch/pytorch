@@ -24,6 +24,7 @@ def requires_process_group_agent(func):
         "Only ProcessGroupAgent supports global termination detection",
     )
 
+
 BACKEND = getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP)
 RPC_INIT_URL = getenv("RPC_INIT_URL", "")
 

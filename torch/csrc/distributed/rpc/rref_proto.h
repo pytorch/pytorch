@@ -18,7 +18,7 @@ class TORCH_API RRefMessageBase : public RpcCommandBase {
   RRefMessageBase(const RRefId& rrefId, MessageType type)
       : rrefId_(rrefId), type_(type) {}
 
-  virtual ~RRefMessageBase() = default;
+  virtual ~RRefMessageBase() override = default;
 
   const RRefId& rrefId();
 
@@ -35,7 +35,7 @@ class TORCH_API ForkMessageBase : public RRefMessageBase {
   ForkMessageBase(const RRefId& rrefId, const ForkId& forkId, MessageType type)
       : RRefMessageBase(rrefId, type), forkId_(forkId) {}
 
-  virtual ~ForkMessageBase() = default;
+  virtual ~ForkMessageBase() override = default;
 
   const ForkId& forkId();
 

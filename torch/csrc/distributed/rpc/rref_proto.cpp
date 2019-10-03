@@ -159,6 +159,12 @@ Message RRefAck::toMessage() && {
 }
 
 std::unique_ptr<RRefAck> RRefAck::fromMessage(const Message& message) {
+  TORCH_INTERNAL_ASSERT(
+      message.type() == MessageType::RREF_ACK,
+      "Message type miss match, expect ",
+      MessageType::RREF_ACK,
+      ", but got ",
+      message.type());
   return c10::guts::make_unique<RRefAck>();
 }
 
