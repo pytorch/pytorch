@@ -414,6 +414,10 @@ class Tensor(torch._C._TensorBase):
         return id(self)
 
     def __dir__(self):
+        if self.is_quantized:
+            warnings.warn('dir() of a quantized tensor is possibly wrong. '
+                          'Not all members are supported (yet). '
+                          'Use at your own disgression!')
         tensor_methods = dir(self.__class__)
         tensor_methods.remove('volatile')  # deprecated
         attrs = list(self.__dict__.keys())
