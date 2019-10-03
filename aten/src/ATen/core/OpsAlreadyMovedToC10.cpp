@@ -275,7 +275,6 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::_nnpack_spatial_convolution_backward", ""},
         {"aten::_nnpack_spatial_convolution_backward_input", ""},
         {"aten::_nnpack_spatial_convolution_backward_weight", ""},
-        {"aten::ones_like", ""},
         {"aten::pairwise_distance", ""},
         {"aten::cdist", ""},
         {"aten::_cdist_backward", ""},
@@ -1056,6 +1055,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
     #endif
         {"aten::ones", ""},
         {"aten::ones", "out"},
+        {"aten::ones_like", ""},
         {"aten::ones_like", "dtype"},
         {"aten::scalar_tensor", ""},
     #ifdef BUILD_NAMEDTENSOR

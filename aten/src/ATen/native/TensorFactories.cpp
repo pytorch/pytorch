@@ -383,14 +383,20 @@ Tensor& ones_out(Tensor& result, IntArrayRef size) {
   return native::full_out(result, size, /*fill_value=*/1);
 }
 
-Tensor ones_like(const Tensor& self) {
-  return native::ones(self.sizes(), self.options());
+Tensor ones_like(
+    const Tensor& self,
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.fill_(1);
 }
 
-Tensor ones_like(const Tensor& self, const TensorOptions& options) {
-  return native::ones(self.sizes(), options);
+Tensor ones_like(
+    const Tensor& self,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::ones_like(
+      self, self.options(), optional_memory_format);
 }
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor scalar_tensor(Scalar s, const TensorOptions& options) {

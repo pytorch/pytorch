@@ -63,8 +63,8 @@ def process_function(decl, has_tensor_options, disable_autograd):
         actuals.append(actual)
     requires_grad = "options.requires_grad()" if has_tensor_options else "false"
     if decl['name'].endswith('_like') and not has_tensor_options:
-        # it's a tensor
-        if decl['name'] == 'empty_like' or decl['name'] == 'full_like':
+        SUPPORT_MEMORY_FORMAT = ['empty_like', 'full_like', 'ones_like']
+        if decl['name'] in SUPPORT_MEMORY_FORMAT:
             actuals.insert(-1, '{}.options().is_variable(false)'.format(actuals[0]))
         else:
             actuals.append('{}.options().is_variable(false)'.format(actuals[0]))
