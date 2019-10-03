@@ -10,11 +10,19 @@ import torch
 import torch.distributed as dist
 import torch.distributed.rpc_backend_registry as rpc_backend_registry
 from collections import namedtuple
-from torch.distributed.internal_rpc_utils import _internal_rpc_pickler, PythonUDF
-
 from common_utils import load_tests
-from torch.distributed.rpc_api import RpcBackend
 from dist_utils import dist_init
+from torch.distributed import ProcessGroupAgent
+from torch.distributed.internal_rpc_utils import _internal_rpc_pickler, PythonUDF
+from torch.distributed.rpc_api import RpcBackend
+
+
+def requires_process_group_agent(func):
+    from torch.distributed.rpc_api import _agent
+    return unittest.skipUnless(
+        isinstance(_agent, ProcessGroupAgent),
+        "Only ProcessGroupAgent supports global termination detection",
+    )
 
 BACKEND = getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP)
 RPC_INIT_URL = getenv("RPC_INIT_URL", "")
@@ -644,12 +652,14 @@ class RpcTest(object):
             self.assertEqual(rrefs[i].to_here(), expected[i])
 
     @dist_init
+    @requires_process_group_agent
     def test_multi_builtin_remote_ret(self):
         def args_fn(n):
             return (torch.ones(n, n), torch.ones(n, n))
         self._test_multi_remote_call(torch.add, args_fn=args_fn)
 
     @dist_init
+    @requires_process_group_agent
     def test_py_udf_remote(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -661,6 +671,7 @@ class RpcTest(object):
         self.assertEqual(rref.to_here(), my_function(n, n + 1, n + 2))
 
     @dist_init
+    @requires_process_group_agent
     def test_multi_py_udf_remote(self):
         def kwargs_fn(n):
             return {
@@ -671,6 +682,7 @@ class RpcTest(object):
         self._test_multi_remote_call(my_function, kwargs_fn=kwargs_fn)
 
     @dist_init
+    @requires_process_group_agent
     def test_py_rref_args(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -692,6 +704,7 @@ class RpcTest(object):
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
     @dist_init
+    @requires_process_group_agent
     def test_py_rref_args_user_share(self):
         n = self.rank + 1
         owner_rank = n % self.world_size
@@ -715,6 +728,7 @@ class RpcTest(object):
 
 
     @dist_init
+    @requires_process_group_agent
     def test_py_rpc_rref_args(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -738,6 +752,7 @@ class RpcTest(object):
         self.assertEqual(c, torch.ones(n, n) + 4)
 
     @dist_init
+    @requires_process_group_agent
     def test_nested_remote(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -750,6 +765,7 @@ class RpcTest(object):
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 3)
 
     @dist_init
+    @requires_process_group_agent
     def test_nested_rref(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -765,6 +781,7 @@ class RpcTest(object):
         self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
 
     @dist_init
+    @requires_process_group_agent
     def test_nested_rref_stress(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -787,6 +804,7 @@ class RpcTest(object):
             self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
 
     @dist_init
+    @requires_process_group_agent
     def test_multi_layer_nested_async_rpc(self):
         # This test will exit right away, but there will be a chain of async
         # RPCs. The termination algorithm should detect those messages properly.
@@ -799,6 +817,7 @@ class RpcTest(object):
         multi_layer_nested_async_rpc(dst_rank, self.world_size, ttl)
 
     @dist_init
+    @requires_process_group_agent
     def test_remote_with_exception(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -810,6 +829,7 @@ class RpcTest(object):
             rref.to_here()
 
     @dist_init
+    @requires_process_group_agent
     def test_rpc_return_rref(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -822,6 +842,7 @@ class RpcTest(object):
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1)
 
     @dist_init
+    @requires_process_group_agent
     def test_rref_forward_chain(self):
         ttl = 8
         n = self.rank + 1
@@ -843,6 +864,7 @@ class RpcTest(object):
         self.assertEqual(ret, torch.add(torch.ones(n, n), 1))
 
     @dist_init
+    @requires_process_group_agent
     def test_remote_same_worker(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
