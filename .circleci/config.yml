@@ -1494,11 +1494,6 @@ workflows:
           name: pytorch_linux_xenial_py2_7_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py2.7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7:347"
       - pytorch_linux_test:
@@ -1506,11 +1501,6 @@ workflows:
           requires:
             - setup
             - pytorch_linux_xenial_py2_7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py2.7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7:347"
           resource_class: large
@@ -1532,11 +1522,6 @@ workflows:
           name: pytorch_linux_xenial_pynightly_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-pynightly-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-pynightly:347"
       - pytorch_linux_test:
@@ -1544,11 +1529,6 @@ workflows:
           requires:
             - setup
             - pytorch_linux_xenial_pynightly_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-pynightly-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-pynightly:347"
           resource_class: large
@@ -1556,11 +1536,6 @@ workflows:
           name: pytorch_linux_xenial_py3_6_gcc4_8_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3.6-gcc4.8-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc4.8:347"
       - pytorch_linux_test:
@@ -1568,11 +1543,6 @@ workflows:
           requires:
             - setup
             - pytorch_linux_xenial_py3_6_gcc4_8_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3.6-gcc4.8-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc4.8:347"
           resource_class: large
@@ -1616,11 +1586,6 @@ workflows:
           name: pytorch_linux_xenial_py3_6_gcc7_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3.6-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7:347"
       - pytorch_linux_test:
@@ -1628,11 +1593,6 @@ workflows:
           requires:
             - setup
             - pytorch_linux_xenial_py3_6_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3.6-gcc7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7:347"
           resource_class: large
@@ -1682,11 +1642,6 @@ workflows:
           name: pytorch_linux_xenial_cuda9_cudnn7_py2_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py2-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:347"
       - pytorch_linux_test:
@@ -1694,11 +1649,6 @@ workflows:
           requires:
             - setup
             - pytorch_linux_xenial_cuda9_cudnn7_py2_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py2-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:347"
           use_cuda_docker_runtime: "1"
@@ -1790,11 +1740,6 @@ workflows:
           name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:347"
       - pytorch_linux_test:
@@ -1802,11 +1747,6 @@ workflows:
           requires:
             - setup
             - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:347"
           use_cuda_docker_runtime: "1"
@@ -1815,22 +1755,12 @@ workflows:
           name: pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7:347"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:347"
       - pytorch_linux_test:
@@ -1838,11 +1768,6 @@ workflows:
           requires:
             - setup
             - pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:347"
           use_cuda_docker_runtime: "1"
@@ -1857,33 +1782,18 @@ workflows:
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_64-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:347"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v7a-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:347"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v8a-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:347"
       # Warning: indentation here matters!
@@ -1928,11 +1838,6 @@ workflows:
           name: caffe2_py2_gcc4_8_ubuntu14_04_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "caffe2-py2-gcc4.8-ubuntu14.04-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:315"
       - caffe2_linux_test:
@@ -1940,11 +1845,6 @@ workflows:
           requires:
             - setup
             - caffe2_py2_gcc4_8_ubuntu14_04_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "caffe2-py2-gcc4.8-ubuntu14.04-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:315"
           resource_class: large
@@ -1952,11 +1852,6 @@ workflows:
           name: caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "caffe2-py2-cuda9.0-cudnn7-ubuntu16.04-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:315"
       - caffe2_linux_test:
@@ -1964,11 +1859,6 @@ workflows:
           requires:
             - setup
             - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "caffe2-py2-cuda9.0-cudnn7-ubuntu16.04-test"
           use_cuda_docker_runtime: "1"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:315"
@@ -2035,11 +1925,6 @@ workflows:
           name: caffe2_py2_clang3_8_ubuntu16_04_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "caffe2-py2-clang3.8-ubuntu16.04-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.8-ubuntu16.04:315"
           build_only: "1"
@@ -2047,11 +1932,6 @@ workflows:
           name: caffe2_py2_clang3_9_ubuntu16_04_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "caffe2-py2-clang3.9-ubuntu16.04-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.9-ubuntu16.04:315"
           build_only: "1"
@@ -2087,11 +1967,6 @@ workflows:
           name: caffe2_py2_cuda9_0_cudnn7_centos7_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "caffe2-py2-cuda9.0-cudnn7-centos7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-centos7:315"
       - caffe2_linux_test:
@@ -2099,11 +1974,6 @@ workflows:
           requires:
             - setup
             - caffe2_py2_cuda9_0_cudnn7_centos7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "caffe2-py2-cuda9.0-cudnn7-centos7-test"
           use_cuda_docker_runtime: "1"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-centos7:315"
@@ -2112,11 +1982,6 @@ workflows:
           name: caffe2_py2_ios_macos10_13_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "caffe2-py2-ios-macos10.13-build"
           build_ios: "1"
       - caffe2_macos_build:

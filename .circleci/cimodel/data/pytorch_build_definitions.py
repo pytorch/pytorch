@@ -110,9 +110,6 @@ class Conf:
             job_name = "pytorch_linux_build"
 
 
-        if not self.is_important:
-            # If you update this, update
-            # caffe2_build_definitions.py too
         job_def.update(self.gen_workflow_params(phase))
 
         return {job_name : job_def}
