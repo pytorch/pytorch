@@ -3466,16 +3466,6 @@ inline Tensor Tensor::values() const {
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this));
 #endif
 }
-inline int64_t Tensor::numel() const {
-#ifdef USE_STATIC_DISPATCH
-    at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::numel(const_cast<Tensor&>(*this));
-#else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::numel", ""}).value();
-    return c10::Dispatcher::singleton().callUnboxed<int64_t, const Tensor &>(
-        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this));
-#endif
-}
 inline std::vector<Tensor> Tensor::unbind(int64_t dim) const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);

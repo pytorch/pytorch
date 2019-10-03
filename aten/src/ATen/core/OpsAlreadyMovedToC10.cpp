@@ -451,7 +451,6 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::values", ""},
         {"aten::hspmm", ""},
         {"aten::copy_sparse_to_sparse_", ""},
-        {"aten::numel", ""},
         {"aten::unbind", "int"},
         {"aten::to_sparse", "sparse_dim"},
         {"aten::to_sparse", ""},

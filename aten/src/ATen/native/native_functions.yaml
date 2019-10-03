@@ -3557,12 +3557,6 @@
     SparseCUDA: copy_sparse_
   requires_tensor: True
 
-- func: numel(Tensor self) -> int
-  use_c10_dispatcher: full
-  variants: function, method
-  device_guard: False
-  supports_named_tensor: True
-
 - func: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: unboxed_only
   variants: function, method

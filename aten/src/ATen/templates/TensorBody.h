@@ -206,6 +206,10 @@ class CAFFE2_API Tensor {
     return impl_->numel() * impl_->itemsize();
   }
 
+  int64_t numel() const {
+    return impl_->numel();
+  }
+
   // Length of one array element in bytes.  This is the traditional
   // Numpy naming.
   size_t itemsize() const {

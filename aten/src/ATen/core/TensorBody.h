@@ -206,6 +206,10 @@ class CAFFE2_API Tensor {
     return impl_->numel() * impl_->itemsize();
   }
 
+  int64_t numel() const {
+    return impl_->numel();
+  }
+
   // Length of one array element in bytes.  This is the traditional
   // Numpy naming.
   size_t itemsize() const {
@@ -760,7 +764,6 @@ class CAFFE2_API Tensor {
   Tensor & _coalesced_(bool coalesced) const;
   Tensor indices() const;
   Tensor values() const;
-  int64_t numel() const;
   std::vector<Tensor> unbind(int64_t dim=0) const;
   #ifdef BUILD_NAMEDTENSOR
   std::vector<Tensor> unbind(Dimname dim) const;

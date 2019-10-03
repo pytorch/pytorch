@@ -181,6 +181,14 @@ static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
    END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
+{
+   HANDLE_TH_ERRORS
+   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+   return THPUtils_packInt64(self_.numel());
+   END_HANDLE_TH_ERRORS
+}
+
 static Tensor dispatch_contiguous(const Tensor & self, at::MemoryFormat memory_format) {
   AutoNoGIL no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
