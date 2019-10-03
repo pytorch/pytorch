@@ -30,7 +30,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // Serialized a py::object into a string
   SerializedPyObj serialize(const py::object& obj);
   // Deserialize a string into a py::object
-  py::object deserialize(SerializedPyObj serializedObj);
+  py::object deserialize(const SerializedPyObj& serializedObj);
 
  private:
   PythonRpcHandler();

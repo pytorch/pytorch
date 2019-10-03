@@ -126,7 +126,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       "invoke_rpc_python_udf",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
-         const std::string& pickledPythonUDF,
+         std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors) {
         return pyRpcPythonUdf(agent, dst, pickledPythonUDF, tensors);
       });
@@ -145,7 +145,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       "invoke_remote_python_udf",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
-         const std::string& pickledPythonUDF,
+         std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors) {
         return pyRemotePythonUdf(agent, dst, pickledPythonUDF, tensors);
       });

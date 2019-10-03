@@ -48,7 +48,7 @@ SerializedPyObj PythonRpcHandler::serialize(const py::object& obj) {
       t[1].cast<std::vector<torch::Tensor>>());
 }
 
-py::object PythonRpcHandler::deserialize(SerializedPyObj serializedObj) {
+py::object PythonRpcHandler::deserialize(const SerializedPyObj& serializedObj) {
   AutoGIL ag;
   return loadResultFunction_(
       py::bytes(serializedObj.payload_), serializedObj.tensors_);

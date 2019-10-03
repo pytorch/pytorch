@@ -64,6 +64,7 @@ std::ostream& operator<<(std::ostream& os, GloballyUniqueId const& globalId) {
 
 std::vector<at::IValue> SerializedPyObj::toIValues() const {
   std::vector<at::IValue> ivalues;
+  ivalues.reserve(tensors_.size() + 1);
   for (auto& tensor: tensors_) {
     ivalues.emplace_back(tensor);
   }
@@ -76,6 +77,7 @@ SerializedPyObj SerializedPyObj::fromIValues(std::vector<at::IValue> values) {
   std::string payload = values.back().toStringRef();
   values.pop_back();
   std::vector<at::Tensor> tensors;
+  tensors.reserve(values.size());
   for (auto& value: values) {
     tensors.emplace_back(value.toTensor());
   }

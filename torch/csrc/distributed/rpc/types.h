@@ -44,7 +44,7 @@ using ForkId = GloballyUniqueId;
 
 struct TORCH_API SerializedPyObj final {
   SerializedPyObj(
-      const std::string&& payload,
+      std::string&& payload,
       std::vector<at::Tensor>&& tensors)
       : payload_(std::move(payload)),
         tensors_(std::move(tensors)) {}

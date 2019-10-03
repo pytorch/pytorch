@@ -130,7 +130,7 @@ PyRRef pyRemoteBuiltin(
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerInfo& dst,
-    const std::string& pickledPythonUDF,
+    std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors) {
   std::vector<char> data(pickledPythonUDF.begin(), pickledPythonUDF.end());
 
@@ -142,7 +142,7 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
 PyRRef pyRemotePythonUdf(
     RpcAgent& agent,
     const WorkerInfo& dst,
-    const std::string& pickledPythonUDF,
+    std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors) {
   auto& ctx = RRefContext::getInstance();
   // TODO: support creaing RRefs on a local object.

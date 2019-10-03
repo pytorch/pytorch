@@ -21,7 +21,7 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerInfo& dst,
-    const std::string& pickledPythonUDF,
+    std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors);
 
 PyRRef pyRemoteBuiltin(
@@ -34,7 +34,7 @@ PyRRef pyRemoteBuiltin(
 PyRRef pyRemotePythonUdf(
     RpcAgent& agent,
     const WorkerInfo& dst,
-    const std::string& pickledPythonUDF,
+    std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors);
 
 } // namespace rpc
