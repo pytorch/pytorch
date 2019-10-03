@@ -5367,7 +5367,13 @@ inline Tensor Tensor::masked_select(const Tensor & mask) const {
 inline Tensor Tensor::nonzero() const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::nonzero(const_cast<Tensor&>(*this));
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::nonzero(const_cast<Tensor&>(*this));
+            break;
+        default:
+            AT_ERROR("nonzero not implemented for ", at::toString(type_set()));
+    }
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::nonzero", ""}).value();
     return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor &>(

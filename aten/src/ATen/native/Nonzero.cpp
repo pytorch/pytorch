@@ -9,7 +9,7 @@ namespace at { namespace native {
 DEFINE_DISPATCH(nonzero_stub);
 
 Tensor nonzero(const Tensor& self) {
-  auto indices = at::empty({}, self.options().dtype(kLong));
+  Tensor indices = at::empty({}, self.options().dtype(kLong));
   native::nonzero_out(indices, self);
   return indices;
 }
