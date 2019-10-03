@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from . import invoke_rpc_builtin, invoke_rpc_python_udf, invoke_remote_builtin
 from . import init_rref_context
 from . import ProcessGroupAgent
