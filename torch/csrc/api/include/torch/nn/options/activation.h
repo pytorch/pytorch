@@ -2,6 +2,7 @@
 
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/types.h>
 
 namespace torch {
 namespace nn {
@@ -54,6 +55,45 @@ struct LeakyReLUOptions {
 
   /// can optionally do the operation in-place. Default: False
   TORCH_ARG(bool, inplace) = false;
+};
+
+// ============================================================================
+
+/// Options for MultiheadAttention functional and module.
+struct MultiheadAttentionOptions {
+  MultiheadAttentionOptions(int64_t embed_dim, int64_t num_heads)
+    : embed_dim_(embed_dim), num_heads_(num_heads) {
+    if (!kdim_) {
+      kdim_ = embed_dim;
+    }
+    if (!vdim_) {
+      vdim_ = embed_dim;
+    }
+  }
+
+  /// total dimension of the model.
+  TORCH_ARG(int64_t, embed_dim);
+
+  /// parallel attention heads.
+  TORCH_ARG(int64_t, num_heads);
+
+  /// a Dropout layer on attn_output_weights. Default: 0.0.
+  TORCH_ARG(double, dropout) = 0.0;
+
+  /// add bias as module parameter. Default: true.
+  TORCH_ARG(bool, bias) = true;
+
+  /// add bias to the key and value sequences at dim=0.
+  TORCH_ARG(bool, add_bias_kv) = false;
+
+  /// add a new batch of zeros to the key and value sequences at dim=1.
+  TORCH_ARG(bool, add_zero_attn) = false;
+
+  /// total number of features in key. Default: c10::nullopt.
+  TORCH_ARG(c10::optional<int64_t>, kdim) = c10::nullopt;
+
+  /// total number of features in key. Default: c10::nullopt.
+  TORCH_ARG(c10::optional<int64_t>, vdim) = c10::nullopt;
 };
 
 } // namespace nn

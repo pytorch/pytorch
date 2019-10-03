@@ -120,5 +120,40 @@ class TORCH_API LogSigmoidImpl : public torch::nn::Cloneable<LogSigmoidImpl> {
 
 TORCH_MODULE(LogSigmoid);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MultiheadAttention ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the MultiheadAttention function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.MultiheadAttention
+/// to learn about the exact behavior of this module.
+class TORCH_API MultiheadAttentionImpl
+  : public torch::nn::Cloneable<MultiheadAttentionImpl> {
+ public:
+  MultiheadAttentionImpl(int64_t embed_dim, int64_t num_heads)
+      : MultiheadAttentionImpl(MultiheadAttentionOptions(embed_dim, num_heads)) {}
+  explicit MultiheadAttentionImpl(const MultiheadAttentionOptions& options_);
+
+  Tensor forward(const std::map<int, int>& query, int key, int value,
+                 const c10::optional<Tensor>& key_padding_mask = c10::nullopt,
+                 bool need_weights = true,
+                 const c10::optional<int> attn_mask = c10::nullopt);
+
+  void reset() override;
+
+  /// Pretty prints the `MultiheadAttention` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  MultiheadAttentionOptions options;
+
+ private:
+  bool _qkv_same_embed_dim;
+  Tensor in_proj_weight;
+  Tensor in_proj_bias;
+  Tensor bias_k;
+  Tensor bias_v;
+};
+
+TORCH_MODULE(MultiheadAttention);
+
 } // namespace nn
 } // namespace torch
