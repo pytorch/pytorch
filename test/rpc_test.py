@@ -8,7 +8,7 @@ from unittest import mock
 
 import torch
 import torch.distributed as dist
-import torch.distributed.rpc_backend_registry as rpc_backend_registry
+import torch.distributed.rpc as rpc
 from collections import namedtuple
 from torch.distributed.internal_rpc_utils import _internal_rpc_pickler, PythonUDF
 
@@ -184,7 +184,7 @@ class RpcTest(object):
         self, mock_init_rref_context, mock_dist_autograd_init
     ):
         backend_name = "stub_backend"
-        rpc_backend_registry.register_rpc_backend(
+        rpc.register_backend(
             backend_name, stub_init_rpc_backend_handler
         )
         dist.init_model_parallel(self_name="worker1", backend=backend_name, self_rank=1)
