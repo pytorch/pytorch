@@ -10,6 +10,8 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc_backend_registry as rpc_backend_registry
+from collections import namedtuple
+from torch.distributed.internal_rpc_utils import _internal_rpc_pickler, PythonUDF
 
 
 if not dist.is_available():
@@ -29,37 +31,32 @@ def stub_init_rpc_backend_handler(self_rank, self_name, init_method):
 
 
 # it is used to test python user defined function over rpc
-def my_function(a, b, c):
-    return a + b + c
+# classes and functions are used to test python user defined class and
+# methods over rpc
+TensorClass = namedtuple("TensorClass", ["tensors"])
 
 
-# it is used to test python user defined function over rpc
-def no_result():
-    print("do nothing")
+class MyPickleClass:
+    def __init__(self):
+        self.t = None
+
+    def __getstate__(self):
+        (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
+            PythonUDF(my_tensor_function,
+                      (torch.ones(2, 2), torch.ones(2, 2)),
+                      None))
+        return (pickled_python_udf, tensors)
+
+    def __setstate__(self, obj):
+        python_udf = _internal_rpc_pickler.deserialize(obj[0], obj[1])
+        result = python_udf.func(python_udf.args[0], python_udf.args[1])
+        self.t = result
+
+    def set(self, val):
+        self.t = val
 
 
-def nested_rpc(dst):
-    return dist.rpc_sync(dst, torch.add, args=(torch.ones(2, 2), 1))
-
-
-def light_rpc():
-    return 0
-
-
-def heavy_rpc(tensor):
-    for i in range(1, 100):
-        tensor *= i
-        tensor /= i + 1
-    return 0
-
-
-# it is used to test python user defined function over rpc
-def raise_func():
-    raise ValueError("Expected error")
-
-
-# it is used to test python user defined class and methods over rpc
-class my_class:
+class MyClass:
     def __init__(self, a):
         self.a = a
 
@@ -73,6 +70,77 @@ class my_class:
     @staticmethod
     def my_static_method(f):
         return f > 10
+
+
+def run_nested_pickle(pickle_cls_instance, tensor):
+    return pickle_cls_instance.t + tensor
+
+
+def build_complex_tensors():
+    a = torch.ones(3, 3)
+    b = [a, a]
+    c = [b, b]
+    d = [a, b]
+    e = {a : d}
+    return [a, b, c, d, e]
+
+
+def my_function(a, b, c):
+    return a + b + c
+
+
+def my_tensor_function(a, b):
+    return a + b
+
+
+def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
+    res = list_input[0]
+    for t in list_input:
+        res += t
+    for k, v in dict_input.items():
+        res += v
+    complex_tensors = tensor_class_input.tensors
+    return (res, complex_tensors[0], complex_tensors[1], complex_tensors[2])
+
+
+def no_result():
+    print("do nothing")
+
+
+def nested_rpc(dst):
+    return dist.rpc_sync(dst, torch.add, args=(torch.ones(2, 2), 1))
+
+def multi_layer_nested_async_rpc(dst, world_size, ttl):
+    # this method returns immediately without blocking the callee, but will
+    # generate additional requests.
+    if ttl > 0:
+        current_dst = "worker{}".format(dst)
+        next_dst = (dst + 1) % world_size
+        dist.rpc(
+            current_dst,
+            multi_layer_nested_async_rpc,
+            args=(
+                next_dst,
+                world_size,
+                ttl - 1
+            ),
+            async_call=True
+        )
+        return 0
+
+def light_rpc():
+    return 0
+
+
+def heavy_rpc(tensor):
+    for i in range(1, 100):
+        tensor *= i
+        tensor /= i + 1
+    return 0
+
+
+def raise_func():
+    raise ValueError("Expected error")
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -354,7 +422,7 @@ class RpcTest(object):
     def test_py_class_constructor(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = dist.rpc_sync("worker{}".format(dst_rank), my_class, args=(n,))
+        ret = dist.rpc_sync("worker{}".format(dst_rank), MyClass, args=(n,))
         self.assertEqual(ret.a, n)
 
     @_wrap_with_rpc
@@ -362,36 +430,36 @@ class RpcTest(object):
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = dist.rpc_sync(
-            "worker{}".format(dst_rank), my_class(2).my_instance_method, args=(n,)
+            "worker{}".format(dst_rank), MyClass(2).my_instance_method, args=(n,)
         )
-        self.assertEqual(ret, my_class(2).my_instance_method(n))
+        self.assertEqual(ret, MyClass(2).my_instance_method(n))
 
     @_wrap_with_rpc
     def test_py_class_method(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = dist.rpc_sync(
-            "worker{}".format(dst_rank), my_class.my_class_method, args=(n, n + 1)
+            "worker{}".format(dst_rank), MyClass.my_class_method, args=(n, n + 1)
         )
-        self.assertEqual(ret, my_class.my_class_method(n, n + 1))
+        self.assertEqual(ret, MyClass.my_class_method(n, n + 1))
 
     @_wrap_with_rpc
     def test_py_class_static_method(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = dist.rpc_sync(
-            "worker{}".format(dst_rank), my_class.my_static_method, args=(n + 10,)
+            "worker{}".format(dst_rank), MyClass.my_static_method, args=(n + 10,)
         )
-        self.assertEqual(ret, my_class.my_static_method(n + 10))
+        self.assertEqual(ret, MyClass.my_static_method(n + 10))
 
     @_wrap_with_rpc
     def test_py_multi_async_call(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
         dst_worker_id = dist.get_worker_id("worker{}".format(dst_rank))
-        fut1 = dist.rpc_async(dst_worker_id, my_class.my_static_method, args=(n + 10,))
+        fut1 = dist.rpc_async(dst_worker_id, MyClass.my_static_method, args=(n + 10,))
         fut2 = dist.rpc_async(dst_worker_id, min, args=(n, n + 1, n + 2))
-        self.assertEqual(fut1.wait(), my_class.my_static_method(n + 10))
+        self.assertEqual(fut1.wait(), MyClass.my_static_method(n + 10))
         self.assertEqual(fut2.wait(), min(n, n + 1, n + 2))
 
     @_wrap_with_rpc
@@ -400,6 +468,61 @@ class RpcTest(object):
         dst_rank = n % self.world_size
         ret = dist.rpc_sync("worker{}".format(dst_rank), no_result)
         self.assertEqual(ret, no_result())
+
+    @_wrap_with_rpc
+    def test_py_tensors(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        ret = dist.rpc("worker{}".format(dst_rank),
+                       my_tensor_function,
+                       args=(torch.ones(n, n), torch.ones(n, n)))
+        self.assertEqual(ret,
+                         my_tensor_function(torch.ones(n, n),
+                                            torch.ones(n, n)))
+
+    @_wrap_with_rpc
+    def test_py_tensors_multi_async_call(self):
+        futs = []
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        for i in range(100):
+            fut = dist.rpc("worker{}".format(dst_rank),
+                           my_tensor_function,
+                           args=(torch.ones(i, i), torch.ones(i, i)),
+                           async_call=True)
+            futs.append(fut)
+
+        j = 0
+        for fut in futs:
+            self.assertEqual(fut.wait(),
+                             my_tensor_function(torch.ones(j, j),
+                                                torch.ones(j, j)))
+            j += 1
+
+    @_wrap_with_rpc
+    def test_py_tensors_in_container(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        a = [torch.ones(n, n), torch.ones(n, n)]
+        b = TensorClass(build_complex_tensors())
+        c = {"foo": torch.ones(n, n), "bar": torch.ones(n, n)}
+        ret = dist.rpc("worker{}".format(dst_rank),
+                       my_complex_tensor_function,
+                       args=(a, b, c))
+        self.assertEqual(ret, my_complex_tensor_function(a, b, c))
+
+    @_wrap_with_rpc
+    def test_py_nested_pickle(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+
+        ret = dist.rpc("worker{}".format(dst_rank),
+                       run_nested_pickle,
+                       args=(MyPickleClass(), torch.ones(2, 2)))
+
+        m = MyPickleClass()
+        m.set(my_tensor_function(torch.ones(2, 2), torch.ones(2, 2)))
+        self.assertEqual(ret, run_nested_pickle(m, torch.ones(2, 2)))
 
     @_wrap_with_rpc
     def test_py_function_exception(self):
@@ -486,3 +609,15 @@ class RpcTest(object):
 
         for i in range(m):
             self.assertEqual(rrefs[i].to_here(), expected[i])
+
+    @_wrap_with_rpc
+    def test_multi_layer_nested_async_rpc(self):
+        # This test will exit right away, but there will be a chain of async
+        # RPCs. The termination algorithm should detect those messages properly.
+        # Otherwise, some peer could exit early, leaving others to timeout
+        # errors or connection closed errors.
+        ttl = 20
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+
+        multi_layer_nested_async_rpc(dst_rank, self.world_size, ttl)
