@@ -1444,7 +1444,7 @@
 
 # nnpack
 
-- name: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int[2] padding) -> Tensor
+- name: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int[2] stride, int[2] padding) -> Tensor
   input: _nnpack_spatial_convolution_backward_input(input, grad, weight, padding)
   weight: _nnpack_spatial_convolution_backward_weight(input, weight.sizes(), grad, padding)
   bias: grad.contiguous().view({grad.size(0), grad.size(1), -1}).sum(0).sum(1)
