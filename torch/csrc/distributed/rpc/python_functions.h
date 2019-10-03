@@ -8,7 +8,7 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
-#include <torch/csrc/distributed/rpc/script_ret.h>
+#include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -28,7 +28,8 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerId& dst,
-    const std::string& pickledPythonUDF);
+    const std::string& pickledPythonUDF,
+    std::vector<torch::Tensor>& tensors);
 
 std::shared_ptr<RRef> pyRemoteBuiltin(
     RpcAgent& agent,

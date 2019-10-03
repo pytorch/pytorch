@@ -14,6 +14,7 @@ torch/csrc/jit/generated/
 
 import argparse
 import copy
+import re
 from itertools import groupby
 from ..autograd.utils import CodeTemplate, write
 from ..autograd.gen_autograd import load_aten_declarations
@@ -159,9 +160,15 @@ const auto options = TensorOptions()
 auto result_ = (${first}).${name}(${args_with_tensor_options});
 """)
 
+# Adding `AutoNonVariableTypeMode` guard for `USE_STATIC_DISPATCH` case is kinda
+# hack to address issue #26764. TODO: remove this hack after Variable/Tensor
+# unification (#23032) is done.
 CONSTRUCTOR = CodeTemplate("""\
 [](Stack & stack) {
     ${lvalues}
+#ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+#endif
     ${call}
     drop(stack, ${num_inputs});
     pack(stack, std::move(result_));
@@ -238,6 +245,19 @@ def is_out_variant(decl):
     return decl['name'].endswith('_out')
 
 
+# Copied from ..autograd.gen_python_functions.SKIP_PYTHON_BINDINGS
+BACKWARD_OP_PATTERNS = [
+    '.*_backward',
+    '.*_backward_(out|input|weight|bias)',
+]
+
+def is_backward_op(decl):
+    for pattern in BACKWARD_OP_PATTERNS:
+        if re.match('^' + pattern + '$', decl['name']):
+            return True
+    return False
+
+
 # for each argument in decl, the location it should appear in the
 # jit schema declaration. e.g.
 # arguments = [x, y, z] # the order in aten
@@ -248,7 +268,7 @@ def argument_order(decl):
     return decl.get('jit_argument_order') or list(range(len(decl['arguments'])))
 
 
-def gen_jit_dispatch(declarations, out, template_path):
+def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False):
     REGISTER_ATEN_OPS_CPP = CodeTemplate.from_file(template_path + '/register_aten_ops.cpp')
 
     ops = []
@@ -321,6 +341,14 @@ def gen_jit_dispatch(declarations, out, template_path):
                                              op_capture=op_capture,
                                              lvalues=lvalues)
         return constructor
+
+    def filter_decls(jit_decls, disable_autograd):
+        result = []
+        for decl in jit_decls:
+            if disable_autograd and is_backward_op(decl):
+                continue
+            result.append(decl)
+        return result
 
     # This function declares an order on declarations. This is necessary because
     # there is some ambiguity in the choice of overload: if an argument is overloaded
@@ -407,6 +435,7 @@ def gen_jit_dispatch(declarations, out, template_path):
                 additional_jit_decls.append(decl_copy)
 
     jit_decls.extend(additional_jit_decls)
+    jit_decls = filter_decls(jit_decls, disable_autograd)
 
     # Group and sort the generated snippets to ensure that the
     # generation is deterministic
