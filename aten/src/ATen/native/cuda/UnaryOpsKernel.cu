@@ -76,7 +76,7 @@ void log10_kernel_cuda(TensorIterator& iter) {
 void log1p_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "log1p_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return std::log1p(a);
+      return ::log1p(a);
     });
   });
 }
