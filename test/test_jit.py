@@ -19161,6 +19161,38 @@ class TestDict(JitTestCase):
             torch.jit.script(test_dict_error)
 
 class TestClassType(JitTestCase):
+    def test_unused(self):
+        @torch.jit.script
+        class X(object):
+            def __init__(self, x):
+                # type: (int    )
+                self.x = 2
+
+            def script_method(self, y):
+                return self.x + y
+
+            @torch.jit.unused
+            def python_method(self):
+                import pdb
+                if True:
+                    return 1
+                else:
+                    return 'String'
+
+        def ok(t):
+            x = X(2)
+            return x.script_method(t)
+
+        def bad():
+            x = X(2)
+            return x.python_method()
+
+        # Just check compilation
+        self.checkScript(ok, (torch.randn(2, 2),))
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to access nonexistent attribute"):
+            torch.jit.script(bad)
+
     def test_get_with_method(self):
         @torch.jit.script
         class FooTest(object):
@@ -19258,10 +19290,10 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_schema_human_readable(self):
-        """ 
+        """
         Make sure that the schema is human readable, ie the mode parameter should read "nearest" instead of being displayed in octal
-        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None, 
-        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor): 
+        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None,
+        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor):
         Expected a value of type 'Optional[int]' for argument 'size' but instead found type 'Tensor'.
         """
         with self.assertRaisesRegex(RuntimeError, "nearest"):

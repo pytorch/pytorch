@@ -9,6 +9,8 @@ from torch._six import PY2
 from torch._C._jit_tree_views import *
 from torch._utils_internal import get_source_lines_and_file
 
+import torch._jit_internal
+
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
 
@@ -144,6 +146,7 @@ def get_jit_class_def(cls, self_name):
     # Get defs for each method independently
     methods = inspect.getmembers(
         cls, predicate=lambda m: inspect.ismethod(m) or inspect.isfunction(m))
+    methods = filter(lambda m: not torch._jit_internal.is_unused_fn(m[1]), methods)
     method_defs = [get_jit_def(method[1],
                    self_name=self_name) for method in methods]
 
