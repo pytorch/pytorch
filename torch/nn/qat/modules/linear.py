@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn._intrinsic import LinearReLU
+from torch.nn.intrinsic import LinearReLU
 
 class Linear(nn.Linear):
     r"""
