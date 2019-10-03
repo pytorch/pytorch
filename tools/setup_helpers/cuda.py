@@ -5,7 +5,7 @@ import ctypes.util
 from subprocess import Popen, PIPE
 
 from . import which
-from .env import IS_WINDOWS, IS_LINUX, IS_DARWIN, check_env_flag, check_negative_env_flag
+from .env import IS_WINDOWS, IS_LINUX, IS_DARWIN, check_negative_env_flag
 
 LINUX_HOME = '/usr/local/cuda'
 WINDOWS_HOME = glob.glob('C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*')
@@ -53,7 +53,7 @@ def find_cuda_version(cuda_home):
     if len(candidates) > 0:
         return candidates[0]
 
-if check_negative_env_flag('USE_CUDA') or check_env_flag('USE_ROCM'):
+if check_negative_env_flag('USE_CUDA'):
     USE_CUDA = False
     CUDA_HOME = None
     CUDA_VERSION = None
