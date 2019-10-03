@@ -150,7 +150,7 @@ class PackedSequence(PackedSequence_):
             # Indices are always long tensors, so don't forward requests
             # to change the dtype
             args = [arg for arg in args if not isinstance(arg, torch.dtype)]
-            del kwargs['dtype']
+            kwargs.pop('dtype', None)
 
             sorted_indices = bind(self.sorted_indices, lambda t: t.to(*args, **kwargs))
             unsorted_indices = bind(self.unsorted_indices, lambda t: t.to(*args, **kwargs))
