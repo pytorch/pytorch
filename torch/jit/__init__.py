@@ -1677,7 +1677,14 @@ if _enabled:
             elif self._c._has_parameter(attr):
                 self._c._set_parameter(attr, value)
             else:
-                raise AttributeError("Trying to assign to non-existent attribute: '{}'".format(attr))
+                # We allow setting Python attributes on the ScriptModule, for
+                # when people want to stash some convenience info on it.
+                # TODO: it's possible that the following is confusing:
+                #   s = torch.jit.script(...)
+                #   s.python_attr = ...
+                #   s.save()   <--- this doesn't have `python_attr`
+                # It's fairly trivial to save enough info to warn in this case.
+                return super(RecursiveScriptModule, self).__setattr__(attr, value)
 
         def copy(self):
             return torch.jit._recursive.wrap_cpp_module(self._c._clone())
