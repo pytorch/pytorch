@@ -418,6 +418,9 @@ class CAFFE2_API Tensor {
   Tensor align_to(DimnameList names) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
+  Tensor align_to(DimnameList order, int64_t ellipsis_idx) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
   Tensor align_as(const Tensor & other) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR

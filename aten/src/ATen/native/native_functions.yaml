@@ -69,6 +69,10 @@
   variants: method
   supports_named_tensor: True
 
+- func: align_to(Tensor(a) self, DimnameList order, int ellipsis_idx) -> Tensor(a)
+  variants: method
+  supports_named_tensor: True
+
 - func: align_as(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: unboxed_only
   variants: method

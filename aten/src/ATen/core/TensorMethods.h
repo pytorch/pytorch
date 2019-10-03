@@ -147,6 +147,17 @@ inline Tensor Tensor::align_to(DimnameList names) const {
 }
 #endif
 #ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::align_to(DimnameList order, int64_t ellipsis_idx) const {
+#ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
+    return TypeDefault::align_to(const_cast<Tensor&>(*this), order, ellipsis_idx);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::align_to(Tensor(a) self, DimnameList order, int ellipsis_idx) -> Tensor(a)");
+    return table->callUnboxed<Tensor, const Tensor &, DimnameList, int64_t>(const_cast<Tensor&>(*this), order, ellipsis_idx);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
 inline Tensor Tensor::align_as(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
