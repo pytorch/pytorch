@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 import torch.nn as nn
-import torch.nn._intrinsic
+import torch.nn.intrinsic
 import torch.nn.qat as nnqat
 import torch.nn.functional as F
 from torch.nn import init
@@ -28,7 +28,7 @@ class ConvBn2d(nn.Conv2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = torch.nn._intrinsic.ConvBn2d
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvBn2d
 
     def __init__(self,
                  # Conv2d args
@@ -192,7 +192,7 @@ class ConvBnReLU2d(ConvBn2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = torch.nn._intrinsic.ConvBnReLU2d
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvBnReLU2d
 
     def __init__(self,
                  # Conv2d args
@@ -236,7 +236,7 @@ class ConvReLU2d(nnqat.Conv2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = torch.nn._intrinsic.ConvReLU2d
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
@@ -244,17 +244,16 @@ class ConvReLU2d(nnqat.Conv2d):
                  qconfig=None):
         super(ConvReLU2d, self).__init__(in_channels, out_channels, kernel_size,
                                          stride=stride, padding=padding, dilation=dilation,
-                                         groups=groups, bias=bias, padding_mode=padding_mode)
+                                         groups=groups, bias=bias, padding_mode=padding_mode,
+                                         qconfig=qconfig)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.observer = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
 
     def forward(self, input):
-        return self.observer(F.relu(conv2d_forward(input, self.padding_mode,
-                             self.padding, self.weight_fake_quant(self.weight),
-                             self.bias, self.stride, self.dilation, self.groups),
-                             True))
+        return self.observer(F.relu(super(ConvReLU2d, self).conv2d_forward(input,
+                             self.weight_fake_quant(self.weight))))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):

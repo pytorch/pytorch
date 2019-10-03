@@ -110,19 +110,19 @@ TEST(InitTest, CanInitializeTensorThatRequiresGrad) {
 
 TEST(InitTest, CalculateGainWithTanh) {
   double gain =
-      torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::Tanh);
+      torch::nn::init::calculate_gain(torch::kTanh);
   ASSERT_DOUBLE_EQ(gain, 5.0 / 3.0);
 }
 
 TEST(InitTest, CalculateGainWithRelu) {
   double gain =
-      torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::ReLU);
+      torch::nn::init::calculate_gain(torch::kReLU);
   ASSERT_DOUBLE_EQ(gain, std::sqrt(2.0));
 }
 
 TEST(InitTest, CalculateGainWithLeakyRelu) {
   double gain =
-      torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::LeakyReLU);
+      torch::nn::init::calculate_gain(torch::kLeakyReLU);
   ASSERT_DOUBLE_EQ(gain, std::sqrt(2.0 / (1 + pow(0.01, 2))));
 }
 
