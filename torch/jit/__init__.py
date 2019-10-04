@@ -773,8 +773,10 @@ def trace(func,
                                              that will be run with ``example_inputs``.
                                              arguments and returns to ``func`` must be tensors
                                              or (possibly nested) tuples that
-                                             contain tensors. When a module is passed to :func:`torch.jit.trace <torch.jit.trace>`, only
-                                             the ``forward`` method is run and traced (see :func:`torch.jit.trace <torch.jit.trace_module>` for details).
+                                             contain tensors. When a module is passed to
+                                             :func:`torch.jit.trace <torch.jit.trace>`, only the
+                                             ``forward`` method is run and traced
+                                             (see :func:`torch.jit.trace <torch.jit.trace_module>` for details).
         example_inputs (tuple):  A tuple of example inputs that will be passed to the function
                                  while tracing. The resulting trace can be run with
                                  inputs of different types and shapes assuming the traced operations
