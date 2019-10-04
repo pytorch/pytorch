@@ -70,6 +70,7 @@ def copy_to_script_module(original, stubs):
             the_type = torch.jit.annotations.ann_to_type(class_annotations[name])
         else:
             the_type = torch._C._jit_try_infer_type(item)
+
         if the_type is not None:
             try:
                 script_module._c._register_attribute(name, the_type, item)
