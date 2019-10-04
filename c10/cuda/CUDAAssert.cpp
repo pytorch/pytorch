@@ -28,7 +28,7 @@ struct FileErrorRange {
 
 static std::map<int32_t, FileErrorRange> error_range_file_table{
     FILE_ERROR_RANGE("MultinomialKernel.cu", AssertTag::MultinomialKernel),
-    FILE_ERROR_RANGE("BinaryOpsKernell.cu", AssertTag::BinaryOpsKernel),
+    FILE_ERROR_RANGE("BinaryOpsKernel.cu", AssertTag::BinaryOpsKernel),
     FILE_ERROR_RANGE("IndexKernel.cu", AssertTag::IndexKernel),
     FILE_ERROR_RANGE("THCTensorIndex.cu", AssertTag::THCTensorIndex),
     FILE_ERROR_RANGE("ClassNLLCriterion.cu", AssertTag::ClassNLLCriterion),

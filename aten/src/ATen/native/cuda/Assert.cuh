@@ -120,6 +120,7 @@ C10_HOST_DEVICE __noinline__ void assert_fail(
 
   dst = copy_args(dst, end, line, args...);
 
+  assert_state->kind = kind;
   assert_state->line = line;
   assert_state->length = dst ? dst - buffer : 0;
   assert_state->persistent = persistent;
@@ -199,4 +200,4 @@ static inline CUDAAssert* prepare_kernel_assert() {
 
 #define C10_KERNEL_INDEX_ERROR_SOFT(code, index, axis, size) \
   C10_KERNEL_ASSERT_SOFT_TYPE(                               \
-      code, exp, c10::cuda::AssertKind::INDEX_ERROR, index, axis, size)
+      code, false, c10::cuda::AssertKind::INDEX_ERROR, index, axis, size)
