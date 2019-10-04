@@ -43,5 +43,18 @@ struct HardtanhOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
+// ============================================================================
+
+/// Options for LeakyReLU functional and module.
+struct LeakyReLUOptions {
+  LeakyReLUOptions() {}
+
+  /// Controls the angle of the negative slope. Default: 1e-2
+  TORCH_ARG(double, negative_slope) = 1e-2;
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace) = false;
+};
+
 } // namespace nn
 } // namespace torch

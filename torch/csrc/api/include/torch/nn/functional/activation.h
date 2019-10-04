@@ -28,6 +28,14 @@ inline Tensor hardtanh(Tensor& input, const HardtanhOptions& options) {
   }
 }
 
+inline Tensor leaky_relu(Tensor& input, const LeakyReLUOptions& options) {
+  if (options.inplace()) {
+    return torch::leaky_relu_(input, options.negative_slope());
+  } else {
+    return torch::leaky_relu(input, options.negative_slope());
+  }
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch
