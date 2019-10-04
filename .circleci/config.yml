@@ -544,6 +544,7 @@ jobs:
             export IN_CIRCLECI=1
 
             brew install cmake
+            brew install libomp # hilariously, installs python
 
             # Reinitialize submodules
             git submodule sync && git submodule update -q --init --recursive
