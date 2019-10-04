@@ -35,7 +35,7 @@ class Conf:
     parent_build: Optional['Conf'] = None
     is_namedtensor: bool = False
     is_important: bool = False
-    parallel_backend: str = ""
+    parallel_backend: Optional[str] = None
 
     # TODO: Eliminate the special casing for docker paths
     # In the short term, we *will* need to support special casing as docker images are merged for caffe2 and pytorch
@@ -50,7 +50,7 @@ class Conf:
             leading.append("xla")
         if self.is_namedtensor and not for_docker:
             leading.append("namedtensor")
-        if len(self.parallel_backend) > 0:
+        if self.parallel_backend is not None:
             leading.append(self.parallel_backend)
 
         cuda_parms = []
@@ -229,7 +229,7 @@ def instantiate_configs():
 
         is_namedtensor = fc.find_prop("is_namedtensor") or False
         is_important = fc.find_prop("is_important") or False
-        parallel_backend = fc.find_prop("parallel_backend") or ""
+        parallel_backend = fc.find_prop("parallel_backend") or None
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":
@@ -254,7 +254,8 @@ def instantiate_configs():
 
         if (compiler_name == "gcc"
                 and compiler_version == "5.4"
-                and not is_namedtensor):
+                and not is_namedtensor
+                and parallel_backend is None):
             bc_breaking_check = Conf(
                 "backward-compatibility-check",
                 [],
