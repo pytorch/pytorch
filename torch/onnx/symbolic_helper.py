@@ -194,6 +194,11 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
         return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
 
 
+def _is_fp(value):
+    type = value.type().scalarType()
+    return (type == 'Float') or (type == 'Double') or (type == 'Half')
+
+
 def _sort_helper(g, input, dim, decending=True, out=None):
     if out is not None:
         _unimplemented("Sort", "Out parameter is not supported")
@@ -237,6 +242,7 @@ def _interpolate_warning(interpolate_mode):
                   "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
                   "We recommend using opset 11 and above for models using this operator. ")
 
+
 def _interpolate_size_to_scales(g, input, output_size, dim):
     output_size = _maybe_get_const(output_size, 'is')
     if _is_value(output_size):
@@ -253,7 +259,6 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
                            for i in range(0, dim)]
         scales = g.op("Constant", value_t=torch.tensor(scales_constant))
     return scales
-
 
 def _scatter_helper(g, self, dim, index, src):
     if _export_onnx_opset_version <= 10:
