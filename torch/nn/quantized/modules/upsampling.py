@@ -2,7 +2,7 @@
 from torch import nn
 from .utils import __add_alias
 
-UpsamplingBilinear2d = __add_alias(nn.UpsamplingBilinear2d,r"""
+UpsamplingBilinear2d = __add_alias(nn.UpsamplingBilinear2d, r"""
 Applies a 2D bilinear upsampling to a quantized input signal composed of several
 quantized input channels.
 
@@ -99,5 +99,4 @@ Examples::
            quantization_scheme=torch.per_tensor_affine, scale=1e-06, zero_point=0)
 
 See :class:`~torch.nn.UpsamplingNearest2d`
-"""
-)
+""")
