@@ -32,6 +32,12 @@ if [ -n "${IN_CIRCLECI}" ]; then
   fi
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # TODO: Move this to Docker
+  sudo apt-get -qq update
+  sudo apt-get -qq install --no-install-recommends libsndfile1
+fi
+
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # JIT C++ extensions require ninja.
