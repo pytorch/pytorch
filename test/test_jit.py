@@ -26,7 +26,7 @@ from torch.quantization._quantize_script import PackedParams
 # Testing utils
 from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
-    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
+    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy
 from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, enable_profiling_mode, do_input_map, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -1148,6 +1148,20 @@ graph(%x : Tensor,
                    .check("quantized::linear_unpack") \
                    .run(get_forward_graph(m._c))
 
+        conv_input_str = """
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
+        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK: quantized::conv_prepack
+        # CHECK: quantized::conv_unpack
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        return (%r)"""
+        graph = parse_ir(conv_input_str)
+        torch._C._jit_pass_insert_prepack_unpack(graph)
+        FileCheck().run(conv_input_str, graph)
+
     def test_quant_fusion(self):
         input_strs = [
             # aten::conv2d --> quantized::conv2d
@@ -1779,6 +1793,7 @@ graph(%Ra, %Rb):
         x, y = torch.randn(2, 2), torch.randn(1, 10)
         self.assertEqual(to_tensor_trace(x, y), to_tensor(x, y))
 
+    @skipIfCompiledWithoutNumpy
     def test_trace_warn(self):
         def fn(x):
             int(x)  # Warning 1.
@@ -3988,7 +4003,7 @@ def foo(xyz):
 
         _, lineno = inspect.getsourcelines(FooTest2)
 
-        with self.assertRaisesRegex(torch._C.JITException, 'test_jit.py:{}'.format(lineno + 3)):
+        with self.assertRaisesRegex(torch.jit.Error, 'test_jit.py:{}'.format(lineno + 3)):
             ft = FooTest2()
             loaded = self.getExportImportCopy(ft)
             loaded()
@@ -4992,18 +5007,11 @@ a")
         a = torch.rand(2, 3)
 
         with enable_profiling_mode():
-            # the first calls are profiled
-            def_in_one_branch(a, False)
-            # check prim::profile are inserted
-            profiled_graph_str = str(def_in_one_branch.graph_for(a, True))
+            # the first call is profiled
+            profiled_graph_str = str(def_in_one_branch.graph_for(a, False))
             FileCheck().check_count("prim::profile", 4).run(profiled_graph_str)
+            # the second call is optimized
             def_in_one_branch(a, False)
-            def_in_one_branch(a, False)
-            # this call is optimized for
-            # the given shape of (2, 3)
-            def_in_one_branch(a, False)
-            # change shape to (3)
-            # so we go down a bailout path
             a = torch.ones(3)
             # check prim::BailOuts are inserted
             bailout_graph_str = str(def_in_one_branch.graph_for(a, True))
@@ -6778,11 +6786,12 @@ a")
             test(inp, typ, type_hint)
 
         # test optional isinstance check
-        with self.assertRaisesRegex(RuntimeError, "Optional isinstance check is not supported"):
-            @torch.jit.script
-            def opt_func(x):
-                # type: (Optional[int]) -> bool
-                return isinstance(x, int)
+        @torch.jit.script
+        def opt_func(x):
+            # type: (Optional[int]) -> bool
+            return isinstance(x, int)
+        self.assertTrue(opt_func(3))
+        self.assertFalse(opt_func(None))
 
     def test_dropout_eval(self):
         class ScriptedConv2d(torch.jit.ScriptModule):
@@ -8804,6 +8813,7 @@ a")
             m = M2()
             m(torch.zeros(4, 3))
 
+    @skipIfCompiledWithoutNumpy
     def test_pack_padded_pad_packed_trace(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
         T, B, C = 3, 5, 7
@@ -8924,6 +8934,7 @@ a")
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
 
+    @skipIfCompiledWithoutNumpy
     def test_rnn_trace_override(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
         num_layers = 3
@@ -14027,6 +14038,21 @@ a")
         out = test_non_primitive_types(_MyNamedTuple(value=torch.tensor(5.0)))
         self.assertEqual(out, torch.tensor(6.0))
 
+    def test_isinstance_dynamic(self):
+        @torch.jit.script
+        def foo(a):
+            # type: (Optional[List[int]]) -> int
+            b = 0
+            if isinstance(a, (int, (float,), list, str)):
+                b += 1
+            if isinstance(a, (int, str)):
+                b += 1
+            if isinstance(a, List[int]):
+                b += 1
+            return b
+        self.assertEqual(foo([3, 4]), 2)
+        self.assertEqual(foo(None), 0)
+
     def test_function_overloads(self):
         # TODO: pyflakes currently does not compose @overload annotation with other
         # decorators. This is fixed on master but not on version 2.1.1.
@@ -14606,7 +14632,7 @@ a")
         buffer.seek(0)
         loaded = torch.jit.load(buffer)
 
-        with self.assertRaisesRegex(torch._C.JITException, "annotated to be ignored and cannot be run"):
+        with self.assertRaisesRegex(torch.jit.Error, "annotated to be ignored and cannot be run"):
             loaded(torch.tensor(.5), True)
 
     def test_module_error(self):
@@ -19234,6 +19260,18 @@ class TestClassType(JitTestCase):
                 def set_non_initialized(self, y):
                     self.bar = y  # can't assign to non-initialized attr
 
+    def test_schema_human_readable(self):
+        """
+        Make sure that the schema is human readable, ie the mode parameter should read "nearest" instead of being displayed in octal
+        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None,
+        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor):
+        Expected a value of type 'Optional[int]' for argument 'size' but instead found type 'Tensor'.
+        """
+        with self.assertRaisesRegex(RuntimeError, "nearest"):
+            @torch.jit.script
+            def FooTest(x):
+                return torch.nn.functional.interpolate(x, 'bad')
+
     def test_type_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "Expected a value of type \'bool"):
             @torch.jit.script  # noqa: B903
@@ -19681,8 +19719,46 @@ class TestClassType(JitTestCase):
                 # type: (OneTwoWrong) -> int
                 return as_interface(x)
 
-    # TODO test: interface-interface class-interface inheritance errors,
-    # NamedTuple inheritance errors
+        # Test interface/class python assignment
+        with torch.jit._disable_emit_hooks():
+            class TestPyAssign(nn.Module):
+                def __init__(self):
+                    super(TestPyAssign, self).__init__()
+                    self.proxy_mod = Foo()
+
+                def forward(self, x):
+                    return self.proxy_mod.two(x)
+
+            TestPyAssign.__annotations__ = {'proxy_mod': OneTwo}
+
+            input = torch.rand(3, 4)
+            scripted_pyassign_mod = torch.jit.script(TestPyAssign())
+            self.assertEqual(scripted_pyassign_mod(input), 2 * input)
+
+            class TestPyAssignError(nn.Module):
+                def __init__(self, obj):
+                    super(TestPyAssignError, self).__init__()
+                    self.proxy_mod = obj
+
+                def forward(self, x):
+                    return self.proxy_mod.two(x)
+
+            TestPyAssignError.__annotations__ = {'proxy_mod': OneTwoThree}
+
+            with self.assertRaisesRegex(RuntimeError,
+                                        "is not compatible with interface __torch__"):
+                torch.jit.script(TestPyAssignError(Foo()))
+
+            # test pure python object assignment to interface fails
+            class PyClass(object):
+                def __init__(self):
+                    pass
+
+            with self.assertRaisesRegex(RuntimeError,
+                                        "the value is not a TorchScript compatible type"):
+                torch.jit.script(TestPyAssignError(PyClass()))
+        # TODO test: interface-interface class-interface inheritance errors,
+        # NamedTuple inheritance errors
 
     def test_overloaded_fn(self):
         @torch.jit.script

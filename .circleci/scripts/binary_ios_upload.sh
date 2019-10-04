@@ -31,10 +31,10 @@ cp ${PROJ_ROOT}/LICENSE ${ZIP_DIR}/
 ZIPFILE=libtorch_ios_1.3.0.zip
 cd ${ZIP_DIR}
 #for testing
-# touch version.txt
-# echo $(date +%s) > version.txt
-# zip -r ${ZIPFILE} install src version.txt LICENSE
-zip -r ${ZIPFILE} install src LICENSE
+touch version.txt
+echo $(date +%s) > version.txt
+zip -r ${ZIPFILE} install src version.txt LICENSE
+# zip -r ${ZIPFILE} install src LICENSE
 # upload to aws
 brew install awscli
 set +x
