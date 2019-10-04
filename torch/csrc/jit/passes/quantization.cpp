@@ -652,12 +652,12 @@ c10::optional<IValue> toTwoElementIntList(Value* v) {
       n->inputs().size() == 2) {
     auto e0 = toIValue(n->inputs()[0]);
     auto e1 = toIValue(n->inputs()[1]);
-    if (!e0 || !e1) {
+    if (!e0 || !e1 ||
+        !e0.value().isInt() ||
+        !e1.value().isInt()) {
       return c10::nullopt;
     }
-    c10::List<int64_t> a =
-      c10::List<int64_t>({e0.value().toInt(), e1.value().toInt()});
-    return IValue(a);
+    return IValue(c10::List<int64_t>({e0.value().toInt(), e1.value().toInt()}));
   }
   return c10::nullopt;
 }
@@ -983,10 +983,9 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
       std::make_tuple(false, linear_prepack, linear_params_module),
       std::make_tuple(true, conv2d_prepack, conv_params_module)};
   for (const auto& item : pattern_and_modules) {
-    bool is_conv;
-    std::string pattern;
-    script::Module packed_params_module;
-    std::tie(is_conv, pattern, packed_params_module) = item;
+    bool is_conv = std::get<0>(item);
+    std::string pattern = std::get<1>(item);
+    script::Module packed_params_module = std::get<2>(item);
     Graph pattern_graph;
     std::unordered_map<std::string, Value*> vmap;
     script::parseIR(pattern, &pattern_graph, vmap);
