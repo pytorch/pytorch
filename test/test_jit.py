@@ -3993,7 +3993,7 @@ def foo(x):
         bytesio = io.BytesIO(buffer)
         scripted = torch.jit.load(bytesio)
 
-        fc = FileCheck().check(':6:11')
+        fc = FileCheck().check(':7:11')
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
