@@ -10,6 +10,9 @@ option_parser = OptionParser.new do |opts|
  opts.on('-x', '--xcodeproj ', 'path to the XCode project file') { |value|
     options[:xcodeproj] = value
  }
+ opts.on('-p', '--platform ', 'iOS platform for the current build') { |value|
+    options[:platform] = value
+ }
 end.parse!
 puts options.inspect
 
@@ -36,6 +39,7 @@ target.build_configurations.each do |config|
     config.build_settings['HEADER_SEARCH_PATHS']    = header_search_path
     config.build_settings['LIBRARY_SEARCH_PATHS']   = libraries_search_path
     config.build_settings['OTHER_LINKER_FLAGS']     = other_linker_flags
+    config.build_settings['ENABLE_BITCODE']         = 'No'
 end
 
 # link static libraries
@@ -48,5 +52,15 @@ for lib in libs do
 end
 project.save
 
+sdk = nil
+if options[:platform] == 'SIMULATOR'
+    sdk = 'iphonesimulator'
+elsif options[:platform] == 'OS'
+    sdk = 'iphoneos'
+else
+    puts "unsupported platform #{options[:platform]}"
+    exit(false)
+end 
+
 # run xcodebuild
-exec "xcodebuild clean build  -project #{xcodeproj_path}  -target #{target.name} -sdk iphonesimulator -configuration Release"
+exec "xcodebuild clean build  -project #{xcodeproj_path}  -target #{target.name} -sdk #{sdk} -configuration Release"

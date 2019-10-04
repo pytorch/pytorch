@@ -2230,6 +2230,28 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         model = MeshgridModel()
         outputs = model(x, y, z)
         self.run_model_test(model, train=False, input=(x, y, z), batch_size=BATCH_SIZE,
+
+    def test_remainder(self):
+        class RemainderModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.remainder(input, other)
+
+        x = torch.randn(4, 2, 3)
+        y = torch.randn(1, 2, 1)
+        model = RemainderModel()
+        outputs = model(x, y)
+        self.run_model_test(model, train=False, input=(x, y), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+    def test_remainder_scalar(self):
+        class RemainderModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.remainder(input, 2.55)
+
+        inputs = torch.randint(10, (2, 3))
+        model = RemainderModel()
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
                             example_outputs=(outputs,))
 
     def test_baddbmm(self):
