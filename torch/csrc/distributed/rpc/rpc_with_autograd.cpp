@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/rpc/rpc_with_autograd.h>
 #include <c10/util/C++17.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/utils/byte_order.h>
 
 namespace torch {
@@ -16,10 +17,13 @@ AutogradMetadata::AutogradMetadata(
       autogradMessageId(autogradMessageId_) {}
 
 RpcWithAutograd::RpcWithAutograd(
+    worker_id_t fromWorkerId,
     MessageType messageType,
     const AutogradMetadata& autogradMetadata,
     std::unique_ptr<RpcCommandBase> wrappedRpc)
-    : messageType_(messageType), autogradMetadata_(autogradMetadata) {
+    : fromWorkerId_(fromWorkerId),
+      messageType_(messageType),
+      autogradMetadata_(autogradMetadata) {
   TORCH_INTERNAL_ASSERT(wrappedRpc != nullptr, "wrappedRpc cannot be null!");
   TORCH_INTERNAL_ASSERT(
       messageType_ == MessageType::MESSAGE_WITH_AUTOGRAD_REQ ||
@@ -30,12 +34,14 @@ RpcWithAutograd::RpcWithAutograd(
 }
 
 RpcWithAutograd::RpcWithAutograd(
+    worker_id_t fromWorkerId,
     MessageType messageType,
     const AutogradMetadata& autogradMetadata,
     std::unique_ptr<RpcCommandBase> wrappedRpc,
     MessageType wrappedMessageType,
     std::vector<torch::Tensor> tensors)
-    : messageType_(messageType),
+    : fromWorkerId_(fromWorkerId),
+      messageType_(messageType),
       autogradMetadata_(autogradMetadata),
       wrappedRpc_(std::move(wrappedRpc)),
       wrappedMessageType_(wrappedMessageType),
@@ -83,64 +89,64 @@ Message RpcWithAutograd::toMessage() && {
 
 std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
     const Message& message) {
-  MessageType originalMessageType = message.type();
   TORCH_INTERNAL_ASSERT(
-      MessageType::MESSAGE_WITH_AUTOGRAD_REQ == originalMessageType ||
-      MessageType::MESSAGE_WITH_AUTOGRAD_RESP == originalMessageType);
+      MessageType::MESSAGE_WITH_AUTOGRAD_REQ == message.type() ||
+      MessageType::MESSAGE_WITH_AUTOGRAD_RESP == message.type());
 
-  std::vector<torch::Tensor> tensors = message.tensors();
-  int64_t messageId = message.id();
-  // Decode message type, autograd context id and autograd message id.
+  // Decode message type, autograd context id, autograd message id and worker
+  // id.
   auto payload = message.payload();
-  TORCH_INTERNAL_ASSERT(payload.size() > kAutogradMessageSize);
 
-  int64_t autogradContextId, autogradMessageId;
-  // autograd message id.
+  // Read the autograd payload remove it from the payload.
+  int64_t autogradPayLoadSize;
   size_t indexToRead = payload.size() - sizeof(int64_t);
   TORCH_INTERNAL_ASSERT(indexToRead >= 0);
   torch::utils::THP_decodeInt64Buffer(
-      &autogradMessageId,
+      &autogradPayLoadSize,
       reinterpret_cast<uint8_t*>(payload.data()) + indexToRead,
       torch::utils::THPByteOrder::THP_BIG_ENDIAN,
       1);
+  payload.resize(indexToRead);
 
-  // autograd context id.
-  indexToRead -= sizeof(int64_t);
-  TORCH_INTERNAL_ASSERT(indexToRead >= 0);
-  torch::utils::THP_decodeInt64Buffer(
-      &autogradContextId,
-      reinterpret_cast<uint8_t*>(payload.data()) + indexToRead,
-      torch::utils::THPByteOrder::THP_BIG_ENDIAN,
-      1);
+  // Now read the entire autograd payload and unpickle.
+  TORCH_INTERNAL_ASSERT(payload.size() > autogradPayLoadSize)
+  auto autogradPayLoadBegin =
+      static_cast<const char*>(message.payload().data()) + payload.size() -
+      autogradPayLoadSize;
+  std::vector<torch::Tensor> tensorTable;
+  IValue tuple = jit::unpickle(
+      autogradPayLoadBegin, autogradPayLoadSize, nullptr, &tensorTable);
+  std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
 
-  // message type.
-  indexToRead -= 1;
-  TORCH_INTERNAL_ASSERT(indexToRead >= 0);
+  // Gather all the fields.
+  TORCH_INTERNAL_ASSERT(tupleElements.size() == 4);
   MessageType wrappedMessageType =
-      static_cast<MessageType>(payload[indexToRead]);
-
-  // Remove the autograd information.
-  payload.resize(payload.size() - kAutogradMessageSize);
+      static_cast<MessageType>(tupleElements[0].toInt());
+  AutogradMetadata autogradMetadata(
+      tupleElements[1].toInt(), tupleElements[2].toInt());
+  worker_id_t workerId = tupleElements[3].toInt();
+  payload.resize(payload.size() - autogradPayLoadSize);
 
   // Create new message type and build wrapped RPC.
+  std::vector<torch::Tensor> tensors = message.tensors();
   Message wrappedMessage(
-      std::move(payload), std::move(tensors), wrappedMessageType, messageId);
+      std::move(payload), std::move(tensors), wrappedMessageType, message.id());
 
   std::unique_ptr<RpcCommandBase> wrappedRpc;
-  if (originalMessageType == MessageType::MESSAGE_WITH_AUTOGRAD_REQ) {
-    wrappedRpc = deserializeRequest(wrappedMessage);
+  if (message.type() == MessageType::MESSAGE_WITH_AUTOGRAD_REQ) {
+    wrappedRpc = std::move(deserializeRequest(wrappedMessage));
   } else {
-    wrappedRpc = deserializeResponse(wrappedMessage);
+    wrappedRpc = std::move(deserializeResponse(wrappedMessage));
   }
 
   return c10::guts::make_unique<RpcWithAutograd>(
-      originalMessageType,
-      AutogradMetadata(autogradContextId, autogradMessageId),
+      workerId,
+      message.type(),
+      autogradMetadata,
       std::move(wrappedRpc),
       wrappedMessageType,
-      std::move(tensors));
+      message.tensors());
 }
-
 std::vector<torch::Tensor>& RpcWithAutograd::tensors() {
   return tensors_;
 }
@@ -156,6 +162,10 @@ RpcCommandBase& RpcWithAutograd::wrappedRpc() {
 
 MessageType RpcWithAutograd::wrappedMessageType() const {
   return wrappedMessageType_;
+}
+
+rpc::worker_id_t RpcWithAutograd::fromWorkerId() const {
+  return fromWorkerId_;
 }
 
 } // namespace rpc

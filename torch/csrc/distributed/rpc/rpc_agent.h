@@ -97,10 +97,19 @@ class RpcAgent {
   // all ``RpcAgent``s reach this method and send all pending messages.
   virtual void sync() = 0;
 
+  // Set the default rpc agent.
+  static void setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent);
+
+  // Retrieve the default rpc agent.
+  static std::shared_ptr<RpcAgent> getDefaultRpcAgent();
+
  protected:
   const WorkerInfo workerInfo_;
   const std::string workerName_;
   const std::unique_ptr<RequestCallback> cb_;
+
+ private:
+  static std::shared_ptr<RpcAgent> defaultRpcAgent_;
 };
 
 } // namespace rpc

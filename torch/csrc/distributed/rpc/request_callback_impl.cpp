@@ -4,17 +4,16 @@
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/future_message.h>
-#include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/python_udf_call.h>
 #include <torch/csrc/distributed/rpc/python_udf_resp.h>
 #include <torch/csrc/distributed/rpc/rpc_with_autograd.h>
 #include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
-#include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
+#include <torch/csrc/distributed/rpc/script_rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
@@ -57,11 +56,15 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
       return c10::guts::make_unique<PythonUDFResp>(
           std::move(payload), std::move(responseTensorTable));
     }
-    case MessageType::SCRIPT_REMOTE_CALL: {
+    case MessageType::REMOTE_CALL: {
       auto& src = static_cast<ScriptRemoteCall&>(rpc);
-      auto& ctx = RRefContext::getInstance();
 
-      auto ownerRRef = ctx->getOrCreateOwnerRRef<IValue>(src.retRRefId());
+      auto rrefId = RRefId::fromIValue(src.retRRefId());
+      auto forkId = ForkId::fromIValue(src.retForkId());
+      TORCH_CHECK(rrefId != forkId, "Does not support remote call to self.");
+
+      auto& ctx = RRefContext::getInstance();
+      auto ownerRRef = ctx->getOrCreateOwnerRRef<IValue>(rrefId);
 
       // TODO: make this asynchronous
       // src is only alive within this block, use reference to avoid copy
@@ -75,60 +78,25 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
           stack.size());
 
       ownerRRef->setValue(std::move(stack.front()));
-      ctx->addForkOfOwner(src.retRRefId(), src.retForkId());
-      return c10::guts::make_unique<RemoteRet>(
-          src.retRRefId(), src.retForkId());
+      return nullptr;
     }
-    case MessageType::PYTHON_REMOTE_CALL: {
-      auto& prc = static_cast<PythonRemoteCall&>(rpc);
-
-      auto rrefId = RRefId::fromIValue(prc.retRRefId());
-      auto forkId = ForkId::fromIValue(prc.retForkId());
-      auto& ctx = RRefContext::getInstance();
-
-      auto ownerRRef = ctx->getOrCreateOwnerRRef<py::object>(rrefId);
-      ownerRRef->setValue(
-          PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()));
-      ctx->addForkOfOwner(rrefId, forkId);
-      return c10::guts::make_unique<RemoteRet>(rrefId, forkId);
-    }
-    case MessageType::SCRIPT_RREF_FETCH_CALL: {
+    case MessageType::RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
-      auto& ctx = RRefContext::getInstance();
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
-          ctx->getOrCreateOwnerRRef<IValue>(srf.rrefId());
-      return c10::guts::make_unique<RRefFetchRet>(
-          RRefFetchRet({rref->getValue()}));
+          RRefContext::getInstance()->getOrCreateOwnerRRef<IValue>(
+              RRefId::fromIValue(srf.value()));
+      return c10::guts::make_unique<ScriptRRefFetchRet>(rref->getValue());
     }
-    case MessageType::PYTHON_RREF_FETCH_CALL: {
-      auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
-      auto& ctx = RRefContext::getInstance();
-      // TODO: make this asynchronous
-      std::shared_ptr<OwnerRRef<py::object>> rref =
-          ctx->getOrCreateOwnerRRef<py::object>(prf.rrefId());
-      SerializedPyObj result =
-          PythonRpcHandler::getInstance().serialize(rref->getValue());
-      return c10::guts::make_unique<RRefFetchRet>(
-          RRefFetchRet(result.toIValues()));
+    case MessageType::RREF_USER_CREATE: {
+      auto& sra = static_cast<ScriptRRefCreate&>(rpc);
+      RRefContext::getInstance()->addFork(sra.valueRef());
+      return nullptr;
     }
     case MessageType::RREF_USER_DELETE: {
-      auto& rud = static_cast<RRefUserDelete&>(rpc);
-      auto& ctx = RRefContext::getInstance();
-      ctx->delForkOfOwner(rud.rrefId(), rud.forkId());
-      return c10::guts::make_unique<RRefAck>();
-    }
-    case MessageType::RREF_CHILD_ACCEPT: {
-      auto& rca = static_cast<RRefChildAccept&>(rpc);
-      auto& ctx = RRefContext::getInstance();
-      ctx->delPendingChild(rca.forkId());
-      return c10::guts::make_unique<RRefAck>();
-    }
-    case MessageType::RREF_FORK_REQUEST: {
-      auto& rfr = static_cast<RRefForkRequest&>(rpc);
-      auto& ctx = RRefContext::getInstance();
-      ctx->addForkOfOwner(rfr.rrefId(), rfr.forkId());
-      return c10::guts::make_unique<RRefAck>();
+      auto& srd = static_cast<ScriptRRefDelete&>(rpc);
+      RRefContext::getInstance()->delFork(srd.valueRef());
+      return nullptr;
     }
     case MessageType::MESSAGE_WITH_AUTOGRAD_REQ: {
       auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
@@ -151,15 +119,14 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
           autogradContainer.newAutogradMessageId());
 
       auto response = c10::guts::make_unique<RpcWithAutograd>(
+          rpc::RpcAgent::getDefaultRpcAgent()->getWorkerInfo().id_,
           MessageType::MESSAGE_WITH_AUTOGRAD_RESP,
           responseAutogradMetadata,
           std::move(wrappedRpcResponse));
 
       // Attach the 'send' autograd function if needed.
       if (autogradContext != nullptr) {
-        const int kAutoIncrementBits = 48;
-        rpc::worker_id_t dstWorkerId =
-            autogradMetadata.autogradContextId >> kAutoIncrementBits;
+        rpc::worker_id_t dstWorkerId = rpcWithAutograd.fromWorkerId();
         addSendRpcBackward(
             *autogradContext,
             responseAutogradMetadata,

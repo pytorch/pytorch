@@ -131,13 +131,17 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
     AutogradMetadata autogradMetadata(
         autogradContext.context_id(), autogradContainer.newAutogradMessageId());
     RpcWithAutograd rpcWithAutograd(
+        agent.getWorkerInfo().id_,
         MessageType::MESSAGE_WITH_AUTOGRAD_REQ,
         autogradMetadata,
         std::move(scriptCall));
 
     // Record autograd information for 'send'.
     addSendRpcBackward(
-        autogradContext, autogradMetadata, rpcWithAutograd.tensors());
+        autogradContext,
+        autogradMetadata,
+        rpcWithAutograd.tensors(),
+        agent.getWorkerInfo().id_);
 
     return agent.send(dst, std::move(rpcWithAutograd).toMessage());
   } else {

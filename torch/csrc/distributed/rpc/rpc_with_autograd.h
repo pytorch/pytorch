@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 namespace torch {
 namespace distributed {
@@ -24,12 +25,14 @@ class TORCH_API RpcWithAutograd final : public RpcCommandBase {
  public:
   // Used when we are sending an RPC over the wire.
   RpcWithAutograd(
+      rpc::worker_id_t fromWorkerId,
       MessageType messageType,
       const AutogradMetadata& autogradMetadata,
       std::unique_ptr<RpcCommandBase> wrappedRpc);
 
   // Used when receiving an RPC over the wire.
   RpcWithAutograd(
+      rpc::worker_id_t fromWorkerId,
       MessageType messageType,
       const AutogradMetadata& autogradMetadata,
       std::unique_ptr<RpcCommandBase> wrappedRpc,
@@ -48,10 +51,16 @@ class TORCH_API RpcWithAutograd final : public RpcCommandBase {
 
   RpcCommandBase& wrappedRpc();
 
+  // Retrieve ther worker id from which the RPC originated.
+  rpc::worker_id_t fromWorkerId() const;
+
   // Message type of the wrapped RPC.
-  MessageType wrappedMessageType() const;
+  rpc::MessageType wrappedMessageType() const;
 
  private:
+  // WorkerId from which this RPC originated. gthis is necessary for knowing
+  // which worker we need to contact during the backward pass.
+  rpc::worker_id_t fromWorkerId_;
   // Message type for this call.
   MessageType messageType_;
 
