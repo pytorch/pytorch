@@ -423,34 +423,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       return std::make_shared<PythonValue>(boundMethod, rcb);
     }
 
-    // HACK: This is used for rnn.py to get all the parameters of a Module as a
-    // List[Tensor]
-    // TODO: This is easily replicated by adding a "parameter names" special
-    // method to Modules
-    bool isParameterList =
-        py::cast<bool>(py::module::import("torch._jit_internal")
-                           .attr("is_parameter_list")(unboundMethod));
-    if (isParameterList) {
-      // Fetch the names of the parameters in the list so they're in the
-      // right order
-      auto unboundParamNamesMethod =
-          py::getattr(unboundMethod, "_parameter_names_fn");
-      auto boundMethod =
-          py::module::import("torch.jit._recursive")
-              .attr("bind_to_dummy_module")(
-                  concreteType_, unboundParamNamesMethod, module_);
-      auto param_names = boundMethod();
-
-      Graph& g = *m.graph();
-      // Add all module parameters as inputs to the graph
-      std::vector<Value*> params;
-      for (auto name : param_names) {
-        params.emplace_back(g.insertGetAttr(self_, py::str(name)));
-      }
-      auto list = g.insertNode(g.createTuple(params))->output();
-      return std::make_shared<ConstantParameterList>(list);
-    }
-
     // If we reach here, it's because this is a "normal" method that just hasn't
     // been compiled yet (directly exported methods would have been returned by
     // step 1). Just compile it.
@@ -591,10 +563,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
   } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
-    return std::make_shared<ForkValue>();
+    return SpecialFormValue::create(prim::fork);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
-    return std::make_shared<AnnotateValue>();
+    return SpecialFormValue::create(prim::annotate);
   } else if (auto callee = as_module(obj)) {
     throw ErrorReport(loc) << "Cannot call a ScriptModule that is not"
                            << " a submodule of the caller";
