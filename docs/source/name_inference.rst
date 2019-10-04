@@ -7,18 +7,17 @@ Named Tensors operator coverage
 
 Please read :ref:`named_tensors-doc` first for an introduction to named tensors.
 
-This document is a reference for *name inference*, a process for how named tensors
-use names to automatically check that APIs are being called correctly at runtime and
-for how operators propagate names from input tensors to outputs.
+This document is a reference for *name inference*, a process that defines how
+named tensors:
 
-More formally, name inference consists of the following two steps:
-
-- Check names: an operator may check that certain dimensions names must match.
-- Propagate names: name inference computes and propagates names to output tensors.
+1. use names to provide additional automatic runtime correctness checks
+2. propagate names from input tensors to output tensors
 
 Below is a list of all operations that are supported with named tensors
-and their associated name inference rules. If an operation is not here then it
-is probably not supported but one can try to run the operation and see what happens.
+and their associated name inference rules. 
+
+If you don't see an operation listed here, but it would help your use case, please
+`search if an issue has already been filed <https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3A%22module%3A+named+tensor%22>`_ and if not, `file one <https://github.com/pytorch/pytorch/issues/new/choose>`_.
 
 .. warning::
     The named tensor API is experimental and subject to change.
@@ -38,7 +37,7 @@ is probably not supported but one can try to run the operation and see what happ
    ":meth:`Tensor.addmv`, :func:`torch.addmv`",:ref:`contracts_away_dims-doc`
    :meth:`Tensor.addmv_`,:ref:`contracts_away_dims-doc`
    :meth:`Tensor.align_as`,See documentation
-   ":meth:`Tensor.align_to`, :func:`torch.align_to`",See documentation
+   ":meth:`Tensor.align_to`",See documentation
    ":meth:`Tensor.all`, :func:`torch.all`",None
    ":meth:`Tensor.any`, :func:`torch.any`",None
    ":meth:`Tensor.asin`, :func:`torch.asin`",:ref:`keeps_input_names-doc`
@@ -226,6 +225,8 @@ is probably not supported but one can try to run the operation and see what happ
 Keeps input names
 ^^^^^^^^^^^^^^^^^
 
+All pointwise unary functions follow this rule as well as some other unary functions.
+
 - Check names: None
 - Propagate names: input tensor's names are propagated to the output.
 
@@ -240,22 +241,35 @@ Keeps input names
 Removes dimensions
 ^^^^^^^^^^^^^^^^^^
 
-Some ops, like :meth:`~Tensor.sum(dim)` remove dimensions by performing a reduction
-over the desired dimensions. Wherever one can pass an integer dimension index, one
-can also pass a dimension name to be reduced over. Functions that can take in
-multiple dimension indices can also take in a list of names.
+All reduction ops like :meth:`~Tensor.sum` remove dimensions by reducing
+over the desired dimensions. Other operations like :meth:`~Tensor.select` and
+:meth:`~Tensor.squeeze` remove dimensions.
+
+Wherever one can pass an integer dimension index to an operator, one can also pass
+a dimension name. Functions that take lists of dimension indices can also take in a
+list of dimension names.
 
 - Check names: If :attr:`dim` or :attr:`dims` is passed in as a list of names,
   check that those names exist in :attr:`self`.
-- Propagate names: If the specified dimension to be reduced over in :attr:`dim` or
-  :attr:`dims` is removed from the output tensor, then it does not appear in
-  ``output.names``.
+- Propagate names: If the dimensions of the input tensor specified by :attr:`dim`
+  or :attr:`dims` are not present in the output tensor, then the corresponding names
+  of those dimensions do not appear in ``output.names``.
 
 ::
 
+    >>> x = torch.randn(1, 3, 3, 3, names=('N', 'C', 'H', 'W'))
+    >>> x.squeeze('N').names
+    ('C', 'H', 'W')
+
     >>> x = torch.randn(3, 3, 3, 3, names=('N', 'C', 'H', 'W'))
-    >>> x.sum('C').names
-    ('N', 'H', 'W')
+    >>> x.sum(['N', 'C']).names
+    ('H', 'W')
+
+    # Reduction ops with keepdim=True don't actually remove dimensions.
+    >>> x = torch.randn(3, 3, 3, 3, names=('N', 'C', 'H', 'W'))
+    >>> x.sum(['N', 'C'], keepdim=True).names
+    ('N', 'C', 'H', 'W')
+
 
 .. _unifies_names_from_inputs-doc:
 
@@ -279,6 +293,9 @@ For example,
 
 ::
 
+    # tensor: Tensor[   N, None]
+    # other:  Tensor[None,    C]
+    >>> tensor = torch.randn(3, 3, names=('N', 'C'))
     >>> tensor = torch.randn(3, 3, names=('N', None))
     >>> other = torch.randn(3, 3, names=(None, 'C'))
     >>> (tensor + other).names
@@ -294,7 +311,9 @@ Finally, the output names are computed with
 
 More examples::
 
-    # Dimensions don't match from the right
+    # Dimensions don't match from the right:
+    # tensor: Tensor[N, C]
+    # other:  Tensor[   N]
     >>> tensor = torch.randn(3, 3, names=('N', 'C'))
     >>> other = torch.randn(3, names=('N',))
     >>> (tensor + other).names
@@ -302,13 +321,22 @@ More examples::
     ['N']: dim 'C' and dim 'N' are at the same position from the right but do
     not match.
 
-    # Dimensions aren't aligned when matching tensor.names[-1] and other.names[-1]
+    # Dimensions aren't aligned when matching tensor.names[-1] and other.names[-1]:
+    # tensor: Tensor[N, None]
+    # other:  Tensor[      N]
     >>> tensor = torch.randn(3, 3, names=('N', None))
     >>> other = torch.randn(3, names=('N',))
     >>> (tensor + other).names
     RuntimeError: Misaligned dims when attempting to broadcast dims ['N'] and
     dims ['N', None]: dim 'N' appears in a different position from the right
     across both lists.
+
+.. note::
+
+    In both of the last examples, it is possible to align the tensors by names
+    and then perform the addition. Use :meth:`Tensor.align_as` to align
+    tensors by name or :meth:`Tensor.align_to` to align tensors to a custom
+    dimension ordering.
 
 .. _permutes_dimensions-doc:
 
@@ -384,8 +412,8 @@ Examples::
 
 
 Finally, there are fused ``add`` versions of many matmul functions. i.e., :func:`addmm`
-and :func:`addmv`. These are treated as name infererence for i.e. :func:`mm` and
-then running name inference for :func:`add`.
+and :func:`addmv`. These are treated as composing name inference for i.e. :func:`mm` and
+name inference for :func:`add`.
 
 .. _factory-doc:
 

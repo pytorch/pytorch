@@ -62,11 +62,12 @@ Name propagation semantics
 --------------------------
 
 Named tensors use names to automatically check that APIs are being called
-correctly at runtime. This occurs in a process called *named inference*.
+correctly at runtime. This occurs in a process called *name inference*.
 More formally, name inference consists of the following two steps:
 
-- Check names: an operator may check that certain dimensions must match.
-- Propagate names: name inference computes and propagates names to output tensors.
+- **Check names**: an operator may perform automatic checks at runtime that 
+  check that certain dimension names must match.
+- **Propagate names**: name inference propagates names to output tensors.
 
 All operations that support named tensors propagate names.
 
@@ -83,11 +84,11 @@ match semantics
 ^^^^^^^^^^^^^^^
 
 Two names *match* if they are equal (string equality) or if at least one is ``None``.
-Nones are essentially a special wildcard name.
+Nones are essentially a special "wildcard" name.
 
-``unify(A, B)`` takes two names and returns the more *specific* of the two names,
-if they match. If the names do not match, it errors. A non-``None`` name is more
-specific than a ``None`` name.
+``unify(A, B)`` determines which of the names ``A`` and ``B`` to propagate to the outputs.
+It returns the more *specific* of the two names, if they match. If the names do not match,
+then it errors.
 
 .. note::
     In practice, when working with named tensors, one should avoid having unnamed
@@ -98,7 +99,8 @@ specific than a ``None`` name.
 Basic name inference rules
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Let's go through the very small example of adding two one-dim tensors with no broadcasting.
+Let's see how ``match`` and ``unify`` are used in name inference in the case of
+adding two one-dim tensors with no broadcasting.
 
 ::
 
@@ -106,21 +108,22 @@ Let's go through the very small example of adding two one-dim tensors with no br
     y = torch.randn(3)
     z = torch.randn(3, names=('Z',))
 
-Check names step: check that the names of the two tensors match.
+**Check names**: check that the names of the two tensors *match*.
 
 For the following examples:
 
 ::
 
-    >>> # x + y  # 'X' matches None
-    >>> # x + z  # 'X' does not match 'Z'.
-    >>> # x + x  # 'X' matches 'X'
+    >>> # x + y  # match('X', None) is True
+    >>> # x + z  # match('X', 'Z') is False
+    >>> # x + x  # match('X', 'X') is True
 
     >>> x + z
     Error when attempting to broadcast dims ['X'] and dims ['Z']: dim 'X' and dim 'Z' are at the same position from the right but do not match.
 
-Propagate names step: unify the two names by returning the more specific name of the two.
-In ``x + y``, ``'X'`` is more specific than ``None``.
+**Propagate names**: *unify* the names to select which one to propagate.
+In the case of ``x + y``, ``unify('X', None) = 'X'`` because ``'X'`` is more
+specific than ``None``.
 
 ::
 
@@ -129,7 +132,10 @@ In ``x + y``, ``'X'`` is more specific than ``None``.
     >>> (x + x).names
     ('X',)
 
-For a comprehensive list of named inference rules, see :ref:`name_inference_reference-doc`.
+For a comprehensive list of name inference rules, see :ref:`name_inference_reference-doc`.
+There are two main ones that are important to go over:
+- Binary arithmetic ops: :ref:`unifies_names_from_inputs-doc`
+- Matrix multiplication ops: :ref:`contracts_away_dims-doc`
 
 Explicit alignment by names
 ---------------------------
@@ -237,16 +243,17 @@ For ``torch.nn.functional`` operators, we support the following:
 Subsystems
 ^^^^^^^^^^
 
+Autograd is supported, see :ref:named_tensors_autograd-doc`.
+Because gradients are currently unnamed, optimizers may work but are untested.
+
 NN modules are currently unsupported. This can lead to the following when calling
 modules with named tensor inputs:
 - NN module parameters are unnamed, so outputs may be partially named.
 - NN module forward passes have code that don't support named tensors and will
   error out appropriately.
 
-Because gradients are currently unnamed (:ref:`named_tensors_autograd-doc`),
-optimizers may work but are untested.
-
-We also do not support the following subsystems, though some may work:
+We also do not support the following subsystems, though some may work out
+of the box:
 - distributions
 - serialization (:func:`torch.load`, :func:`torch.save`)
 - multiprocessing
@@ -254,8 +261,16 @@ We also do not support the following subsystems, though some may work:
 - distributed
 - ONNX
 
+If any of these would help your use case, please
+`search if an issue has already been filed <https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3A%22module%3A+named+tensor%22>`_
+and if not, `file one <https://github.com/pytorch/pytorch/issues/new/choose>`_.
+
 Named tensor API reference
 --------------------------
+
+In this section please find the documentation for named tensor specific APIs.
+For a comprehensive list of how names are propagated through other PyTorch
+operators, see :ref:`name_inference_reference-doc`.
 
 .. class:: Tensor()
 
