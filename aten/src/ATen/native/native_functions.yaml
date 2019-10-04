@@ -232,6 +232,18 @@
     CPU: _imag_out_cpu
     CUDA: _abs_out_cuda
 
+- func: conj(Tensor self) -> Tensor
+  variants: function, method
+  named_guard: False
+  supports_named_tensor: True
+
+- func: conj.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+  supports_named_tensor: True
+  dispatch:
+    CPU: _conj_out_cpu
+    CUDA: _abs_out_cuda
+
 - func: acos(Tensor self) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True

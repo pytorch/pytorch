@@ -480,7 +480,7 @@ angle(input, out=None) -> Tensor
 Computes the element-wise angle (in radians) of the given :attr:`input` tensor.
 
 .. math::
-    \text{out}_{i} = |\text{input}_{i}|
+    \text{out}_{i} = angle(\text{input}_{i})
 """ + r"""
 Args:
     {input}
@@ -488,8 +488,8 @@ Args:
 
 Example::
 
-    >>> torch.real(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))*180/3.14159
-    tensor([ 135.,  135,  -45])
+    >>> torch.angle(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))*180/3.14159
+    tensor([ 135.,  135,  325])
 """.format(**common_args))
 
 add_docstr(torch.as_strided,
@@ -1246,6 +1246,25 @@ Example::
     tensor([ 0.7753, -0.4702, -0.4599,  1.1899])
     >>> torch.clamp(a, max=0.5)
     tensor([ 0.5000, -0.4702, -0.4599,  0.5000])
+""".format(**common_args))
+
+add_docstr(torch.conj,
+           r"""
+conj(input, out=None) -> Tensor
+
+Computes the element-wise conjugate of the given :attr:`input` tensor.
+
+.. math::
+    \text{out}_{i} = conj(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.conj(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
+    tensor([-1 - 1j, -2 - 2j, 3 + 3j])
 """.format(**common_args))
 
 add_docstr(torch.cos,

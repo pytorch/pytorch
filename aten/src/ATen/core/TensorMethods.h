@@ -244,6 +244,15 @@ inline Tensor Tensor::imag() const {
     return table->callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
+inline Tensor Tensor::conj() const {
+#ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
+    return TypeDefault::conj(const_cast<Tensor&>(*this));
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::conj(Tensor self) -> Tensor");
+    return table->callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+#endif
+}
 inline Tensor Tensor::acos() const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);

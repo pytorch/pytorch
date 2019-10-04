@@ -644,6 +644,13 @@ Args:
         cases, this argument has no effect.
 """)
 
+add_docstr_all('conj',
+               r"""
+conj() -> Tensor
+
+See :func:`torch.conj`
+""")
+
 add_docstr_all('cos',
                r"""
 cos() -> Tensor

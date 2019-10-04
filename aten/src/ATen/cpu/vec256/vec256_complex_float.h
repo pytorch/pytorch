@@ -141,7 +141,7 @@ public:
     return _mm256_hadd_ps(val_2, val_2);            // a*a+b*b a*a+b*b
   }
   __m256 abs_() const {
-    auto abs = _mm256_sqrt_ps(abs_2_());            // abs     abs
+    return _mm256_sqrt_ps(abs_2_());                // abs     abs
   }
   Vec256<std::complex<float>> abs() const {
     const __m256 real_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
@@ -181,6 +181,13 @@ public:
     }
   Vec256<std::complex<float>> imag() const {
     return _mm256_permute_ps(imag_(), 0x55);        //b        a
+  }
+  __m256 conj_() const {
+    const __m256 conj_mask = _mm256_setr_ps(1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0);
+    return _mm256_mul_ps(values, conj_mask);        //a        -b
+  }
+  Vec256<std::complex<float>> conj() const {
+    return conj_();
   }
   Vec256<std::complex<float>> acos() const {
     return map(std::acos);

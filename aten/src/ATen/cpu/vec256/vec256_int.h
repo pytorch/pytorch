@@ -106,6 +106,9 @@ struct Vec256<int64_t> : public Vec256i {
   Vec256<int64_t> imag() const {
     return _mm256_set1_epi64x(0);
   }
+  Vec256<int64_t> conj() const {
+    return *this;
+  }
   Vec256<int64_t> frac() const;
   Vec256<int64_t> neg() const;
   Vec256<int64_t> operator==(const Vec256<int64_t>& other) const {
@@ -212,6 +215,9 @@ struct Vec256<int32_t> : public Vec256i {
   }
   Vec256<int32_t> imag() const {
     return _mm256_set1_epi32(0);
+  }
+  Vec256<int32_t> conj() const {
+    return *this;
   }
   Vec256<int32_t> frac() const;
   Vec256<int32_t> neg() const;
@@ -408,6 +414,9 @@ struct Vec256<int16_t> : public Vec256i {
   }
   Vec256<int16_t> imag() const {
     return _mm256_set1_epi16(0);
+  }
+  Vec256<int16_t> conj() const {
+    return *this;
   }
   Vec256<int16_t> frac() const;
   Vec256<int16_t> neg() const;

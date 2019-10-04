@@ -108,6 +108,9 @@ public:
   Vec256<float> imag() const {
     return _mm256_set1_ps(0);
   }
+  Vec256<float> conj() const {
+    return *this;
+  }
   Vec256<float> acos() const {
     return Vec256<float>(Sleef_acosf8_u10(values));
   }

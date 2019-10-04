@@ -214,6 +214,9 @@ public:
   Vec256<T> imag() const {
     return *this;
   }
+  Vec256<T> conj() const {
+    return *this;
+  }
   Vec256<T> acos() const {
     return map(std::acos);
   }
