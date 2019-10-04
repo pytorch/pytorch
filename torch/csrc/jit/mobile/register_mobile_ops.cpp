@@ -23,5 +23,41 @@ static auto registry0 = torch::RegisterOperators().op(
   [](at::Tensor a, at::Scalar b, at::Scalar c) ->at::Tensor {
     return at::add(a, b, c);
   })
+).op(
+  "_aten::_convolution",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](at::Tensor input, at::Tensor weight, c10::optional<at::Tensor> bias,
+  std::vector<int64_t> stride, std::vector<int64_t> padding,
+  std::vector<int64_t> dilation, bool transposed, std::vector<int64_t> output_padding,
+  int64_t groups, bool benchmark, bool deterministic, bool cudnn_enabled) {
+  return at::_convolution(input, weight, optional_to_tensor(bias), stride, padding, dilation,
+                     transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled);
+  })
+).op(
+  // Dummy operator that does nothing. Used to reserve a location of an operator table.
+  "_prim::ListConstruct.int",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+  })
+).op(
+  "_prim::ListConstruct.float",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+  })
+).op(
+  "_prim::ListConstruct.bool",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+  })
+).op(
+  "_prim::ListConstruct.tensor",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+  })
+).op(
+  "_prim::ListConstruct.generic",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+  })
 );
 

@@ -5,34 +5,43 @@
 namespace torch{
 namespace jit{
 char const * toString(OpCode op);
+std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
 InterpreterState::InterpreterState(std::shared_ptr<Code> code) : code_(code) {
   registers_.resize(code_->register_size_);
 }
 
-//InterpreterState::InterpreterState(Function* function)
-//    : function_(function) {
-//  registers_.resize(function->register_size());
-//}
+namespace {
+template <typename dtype> // int64_t, bool, double
+void listConstruct(Stack& stack, int num_inputs) {
+  auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
+  c10::List<dtype> vals =
+      c10::impl::toList(fmap(inputs, [](const IValue& v) { return v.to<dtype>(); }));
+  drop(stack, num_inputs);
+  push(stack, std::move(vals));
+}
+}
 
 bool InterpreterState::run(Stack& stack) {
   size_t pc = 0;
   while (true) {
-    //    std::cout << "RUNNING " << pc << " " << instructions_[pc];
-    //    std::cout << std::endl;
-    //    for (auto val : stack) {
-    //      if (val.isTensor()) {
-    //        std::cout << val.toTensor().sizes() << std::endl;
-    //      } else {
-    //        std::cout << val << std::endl;
-    //      }
-    //    }
+//    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
+//    std::cout << std::endl;
+//    for (auto val : stack) {
+//      if (val.isTensor()) {
+//        std::cout << val.toTensor().sizes() << std::endl;
+//      } else {
+//        std::cout << val << std::endl;
+//      }
+//    }
     Instruction inst = code_->instructions_[pc];
-    TORCH_CHECK(isOpSupportedInMobile(inst.op), toString(inst.op),
-                " is not supported in mobile module.");
     switch (inst.op) {
       case OP: {
         c10::Dispatcher::singleton().callBoxed(*code_->operators_[inst.X], &stack);
+        ++pc;
+      } break;
+      case OPN: {
+        code_->vararg_operators_[inst.X](inst.N, stack);
         ++pc;
       } break;
       case LOAD:
