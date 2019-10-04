@@ -4598,7 +4598,7 @@ a")
         def func():
             c = 1
             return c.add(1)
-        with self.assertRaisesRegex(RuntimeError, 'Cannot call methods on numbers'):
+        with self.assertRaisesRegex(RuntimeError, 'nonexistent attribute or method'):
             torch.jit.script(func)
 
     # testing implicit conversion of tensors to scalars to match function arguments
@@ -10668,7 +10668,7 @@ a")
             ReassignSelfRHS()
 
     def test_unknown_builtin(self):
-        with self.assertRaisesRegex(RuntimeError, 'Unknown builtin op'):
+        with self.assertRaisesRegex(RuntimeError, 'nonexistent attribute or method'):
             @torch.jit.script
             def unknown_builtin(x):
                 return x.splork(3)
@@ -11966,12 +11966,12 @@ a")
 
         self.checkScript(f, (torch.rand(20, 20, 20),), optimize=True)
 
-        with self.assertRaisesRegex(RuntimeError, "Unknown attribute to named tuple"):
+        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute"):
             @torch.jit.script
             def g1(x):
                 return x.max(dim=1).unknown_symbol
 
-        with self.assertRaisesRegex(RuntimeError, "Getting attributes of tuples is not supported"):
+        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute"):
             @torch.jit.script
             def g2(x):
                 print((x, x, x).__doc__)
@@ -19910,7 +19910,7 @@ class TestClassType(JitTestCase):
         for func in ops:
             self.checkScript(func, ())
 
-        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute __add__. Did you forget to initialize it"):
+        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute"):
             @torch.jit.script
             def test():
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))

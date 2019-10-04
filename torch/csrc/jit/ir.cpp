@@ -1711,6 +1711,14 @@ Node* ProfileOp::allocNewInstance(Graph* g) {
   return new ProfileOp(g, {nullptr});
 }
 
+TypePtr NamedValue::type() const {
+  if (value_) {
+    return value_->type();
+  } else {
+    return ivalue_.type();
+  }
+}
+
 constexpr Symbol ProfileOp::Kind;
 } // namespace jit
 } // namespace torch
