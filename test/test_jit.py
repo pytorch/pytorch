@@ -19258,10 +19258,10 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_schema_human_readable(self):
-        """ 
+        """
         Make sure that the schema is human readable, ie the mode parameter should read "nearest" instead of being displayed in octal
-        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None, 
-        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor): 
+        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None,
+        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor):
         Expected a value of type 'Optional[int]' for argument 'size' but instead found type 'Tensor'.
         """
         with self.assertRaisesRegex(RuntimeError, "nearest"):
@@ -19716,8 +19716,46 @@ class TestClassType(JitTestCase):
                 # type: (OneTwoWrong) -> int
                 return as_interface(x)
 
-    # TODO test: interface-interface class-interface inheritance errors,
-    # NamedTuple inheritance errors
+        # Test interface/class python assignment
+        with torch.jit._disable_emit_hooks():
+            class TestPyAssign(nn.Module):
+                def __init__(self):
+                    super(TestPyAssign, self).__init__()
+                    self.proxy_mod = Foo()
+
+                def forward(self, x):
+                    return self.proxy_mod.two(x)
+
+            TestPyAssign.__annotations__ = {'proxy_mod': OneTwo}
+
+            input = torch.rand(3, 4)
+            scripted_pyassign_mod = torch.jit.script(TestPyAssign())
+            self.assertEqual(scripted_pyassign_mod(input), 2 * input)
+
+            class TestPyAssignError(nn.Module):
+                def __init__(self, obj):
+                    super(TestPyAssignError, self).__init__()
+                    self.proxy_mod = obj
+
+                def forward(self, x):
+                    return self.proxy_mod.two(x)
+
+            TestPyAssignError.__annotations__ = {'proxy_mod': OneTwoThree}
+
+            with self.assertRaisesRegex(RuntimeError,
+                                        "is not compatible with interface __torch__"):
+                torch.jit.script(TestPyAssignError(Foo()))
+
+            # test pure python object assignment to interface fails
+            class PyClass(object):
+                def __init__(self):
+                    pass
+
+            with self.assertRaisesRegex(RuntimeError,
+                                        "the value is not a TorchScript compatible type"):
+                torch.jit.script(TestPyAssignError(PyClass()))
+        # TODO test: interface-interface class-interface inheritance errors,
+        # NamedTuple inheritance errors
 
     def test_overloaded_fn(self):
         @torch.jit.script
