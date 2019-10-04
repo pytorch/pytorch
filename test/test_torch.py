@@ -13347,12 +13347,542 @@ class TestDevicePrecision(TestCase):
         self.assertEqual(output, expected)
 
 
-add_neg_dim_tests()
-instantiate_device_type_tests(TestTorchDeviceType, globals())
-instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
+# Below are fixtures and functions that generate tensor op comparison tests
+# These tests run a single op on both a CPU and device tensor and compare the
+# the results. In-place variants of the ops can also be run.
+
+# Lists of dtypes to instantiate tensor op test variants.
+_types = [
+    torch.half, torch.float, torch.double,
+    torch.int8, torch.short, torch.int, torch.long,
+    torch.uint8
+]
+
+_float_types = [torch.half, torch.float, torch.double]
+
+_float_types_no_half = [torch.float, torch.double]
+
+_signed_types = [
+    torch.half, torch.float, torch.double,
+    torch.int8, torch.short, torch.int, torch.long
+]
+
+_signed_types_no_half = [
+    torch.float, torch.double,
+    torch.int8, torch.short, torch.int, torch.long
+]
+
+_unsigned_types = [torch.uint8]
+
+# Helper values and functions for producing tensors and scalars to use in tensor op tests.
+# Tensor dimension sizes (Small, Medium, Large, Giant)
+_S = 5
+_M = 50
+_L = 1000
+_G = 275000000
+
+# Value to clamp divisors to since dividing by small numbers can be unstable
+# on devices.
+_div_min = 2**-8
+
+# Returns floating or integral scalar corresponding to dtype
+def _number(floating, integer, dtype):
+    if dtype in [torch.half, torch.float, torch.double]:
+        return floating
+    return integer
+
+# Converts half dtype to float when device is cpu
+def _convert_t(dtype, device):
+    if device == 'cpu' and dtype == torch.half:
+        return torch.float
+    return dtype
+
+# Returns a tensor of the requested shape, dtype, and device
+# Requesting a half CPU tensor returns a float CPU tensor with
+# values representable by a half.
+# Initialization uses randint for non-float types and randn for float types.
+def _make_tensor(shape, dtype, device, fill_ones=False):
+    # Returns a tensor filled with ones
+    if fill_ones:
+        return torch.ones(*shape, dtype=_convert_t(dtype, device), device=device)
+
+    # Returns a tensor with random integer values
+    if dtype not in _float_types:
+        t = torch.randint(0, 10, shape, device=device)
+        return t.to(_convert_t(dtype, device))
+
+    # Populates the CPU tensor with floats representable as halfs
+    if dtype == torch.half and device == 'cpu':
+        return torch.randn(*shape, dtype=torch.float, device=device).half().float()
+
+    # Default: returns a tensor with random float values
+    return torch.randn(shape, dtype=dtype, device=device).to(dtype=dtype)
+
+def _small_0d(dtype, device):
+    return _make_tensor((1,), dtype, device).squeeze()
+
+def _small_2d(dtype, device, has_zeros=True, fill_ones=False, oneish=False):
+    t = _make_tensor((_S, _S), dtype, device, fill_ones=fill_ones)
+    if oneish:
+        return t.clamp(min=_number(.99, 1, dtype), max=1.01)
+    if not has_zeros:
+        return t.clamp(min=(_number(_div_min, 1, dtype)))
+    return t
+
+def _small_3d(dtype, device, has_zeros=True, fill_ones=False, oneish=False):
+    t = _make_tensor((_S, _S, _S), dtype, device, fill_ones=fill_ones)
+    if oneish:
+        return t.clamp(min=_number(.99, 1, dtype), max=1.01)
+    if not has_zeros:
+        return t.clamp(min=(_number(_div_min, 1, dtype)))
+    return t
+
+def _small_3d_ones(dtype, device):
+    return _small_3d(dtype, device, fill_ones=True)
+
+def _small_3d_unique(dtype, device):
+    return (torch.randperm(_S * _S * _S,
+            dtype=_convert_t(dtype, device), device=device) + 1).view(_S, _S, _S)
+
+def _medium_1d(dtype, device):
+    return _make_tensor((_M,), dtype, device)
+
+def _medium_2d(dtype, device):
+    return _make_tensor((_M, _M), dtype, device)
+
+def _large_2d(dtype, device):
+    t = _make_tensor((_L, _L), dtype, device)
+    return t.normal_()
+
+def _giant_1d(dtype, device):
+    return _make_tensor((_G), dtype, device)
+
+# Helper method that returns a function which takes dtype and device and
+# instantiates tensors of the given shape.
+# Useful for tensor op tests with custom shapes.
+def _new_t(shape):
+    def tmp(dtype, device):
+        return _make_tensor(shape, dtype, device)
+    return tmp
+
+# TODO: random functions, cat, gather, scatter, index*, masked*,
+#       resize, resizeAs, storage_offset, storage, stride, unfold
+# Each tests is defined in tensor_op_tests as a tuple of:
+# - op name (string)
+# - (sub)test name (string)
+# - tensor constructor, takes dtype and device and constructs the tensor to run the op on
+# - arg constructor, takes dtype and device and constructs op arguments
+# - torch.half precision (=1e-5)
+# - precision (=1e-5), precision to use for all other dtypes
+# - make_inplace_variant (=True), if true the inplace version of the op (op_) is also tested
+# - dtype_list (=_types), a list of torch dtypes to test the op(s) with
+# - decorators (=[]), a list of decorators to apply to the test
+tensor_op_tests = [
+    ('add', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-2),
+    ('add', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d)], 1e-2),
+    ('sub', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-2),
+    ('sub', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d)], 1e-2),
+    ('mul', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-2),
+    ('mul', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d)], 1e-2),
+    ('mul', 'scalar', _small_0d, lambda t, d: [_small_0d(torch.int32, d)], 1e-2),
+    ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1),
+    ('div', 'tensor', _small_3d,
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1),
+    ('pow', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1, 1e-5, _float_types),
+    ('pow', '1', _small_3d, lambda t, d: [_number(1., 1, t)], 1e-1),
+    ('pow', '2', _small_3d, lambda t, d: [_number(2., 2, t)], 1e-1),
+    ('pow', '3', _small_3d, lambda t, d: [_number(3., 3, t)], 1e-1),
+    ('pow', '-1', _small_3d, lambda t, d: [_number(-1., -1, t)], 1e-1, 1e-5, _float_types),
+    ('pow', '-2', _small_3d, lambda t, d: [_number(-2., -2, t)],
+        1e-1, 1e-5, _float_types_no_half, False, [skipCUDAIfRocm]),
+    ('pow', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d).abs()],
+        1e-1, 1e-5, _float_types),
+    ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
+        1e-1, 1e-4, _float_types),
+    ('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
+        1e-1, 1e-4, _float_types),
+    ('addbmm', 'two_scalars', _small_2d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
+        1e-1, 1e-4, _float_types),
+    ('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
+        1e-2, 1e-4, _float_types),
+    ('baddbmm', 'scalar', _small_3d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
+        1e-2, 1e-4, _float_types),
+    ('baddbmm', 'two_scalars', _small_3d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
+        1e-2, 1e-4, _float_types),
+    ('bmm', '', _small_3d, lambda t, d: [_small_3d(t, d)],
+        1e-5, 1e-5, _float_types_no_half, False),
+    ('addcdiv', '', _small_2d,
+        lambda t, d: [_small_2d(t, d),
+                      _small_2d(t, d, has_zeros=False)], 1, 1e-3),
+    ('addcdiv', 'scalar', _small_2d,
+        lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
+                      _small_2d(t, d, has_zeros=False)], 1, 1e-3),
+    ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 1e-3),
+    ('addcmul', 'scalar', _small_3d,
+        lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2),
+    ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)],
+        1e-1, 1e-4, _float_types),
+    ('addmm', 'scalar', _medium_2d,
+        lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)],
+        1e-1, 1e-4, _float_types),
+    ('addmm', 'two_scalars', _medium_2d,
+        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)],
+        1e-1, 1e-4, _float_types),
+    ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)],
+        1e-2, 1e-4, _float_types),
+    ('addmv', 'scalar', _medium_1d,
+        lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
+        1e-2, 1e-4, _float_types),
+    ('addmv', 'two_scalars', _medium_1d,
+        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
+        1e-2, 1e-4, _float_types),
+    ('addr', '', _medium_2d, lambda t, d: [_medium_1d(t, d), _medium_1d(t, d)],
+        1e-2, 1e-4, _float_types),
+    ('addr', 'scalar', _medium_2d,
+        lambda t, d: [_number(0.4, 2, t), _medium_1d(t, d), _medium_1d(t, d)],
+        1e-2, 1e-4, _float_types),
+    ('addr', 'two_scalars', _medium_2d,
+        lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_1d(t, d), _medium_1d(t, d)],
+        1e-2, 1e-4, _float_types),
+    ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, _float_types),
+    ('fmod', 'value', _small_3d, lambda t, d: [3], 1e-3),
+    ('fmod', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-3),
+    ('chunk', '', _medium_2d, lambda t, d: [4], 1e-5, 1e-5, _types, False),
+    ('chunk', 'dim', _medium_2d, lambda t, d: [4, 1], 1e-5, 1e-5, _types, False),
+    ('chunk', 'neg_dim', _medium_2d, lambda t, d: [4, -2], 1e-5, 1e-5, _types, False),
+    ('clamp', 'neg', _medium_2d, lambda t, d: [-1, 5], 1e-5, 1e-5, _signed_types),
+    ('clamp', 'pos', _medium_2d, lambda t, d: [1, 5], 1e-5, 1e-5, _unsigned_types),
+    ('clone', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('contiguous', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('cross', '', _new_t((_M, 3, _M)), lambda t, d: [_new_t((_M, 3, _M))(t, d)],
+        1e-2, 1e-5, _types, False),
+    ('cumprod', '', _small_3d, lambda t, d: [1], 1e-2, 1e-4, _types, False),
+    ('cumprod', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-4, _types, False),
+    ('cumsum', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, _types, False),
+    ('cumsum', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, _types, False),
+    ('dim', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('dist', '', _small_2d, lambda t, d: [_small_2d(t, d)], 1e-2, 1e-5, _float_types, False),
+    ('dist', '3_norm', _small_2d, lambda t, d: [_small_2d(t, d), 3], 1e-2, 1e-5, _float_types, False),
+    ('dist', '2_5_norm', _small_2d, lambda t, d: [_small_2d(t, d), 2.5],
+        1e-2, 1e-5, _float_types, False),
+    ('dot', '', _medium_1d, lambda t, d: [_medium_1d(t, d)],
+        1e-2, 1e-5, _float_types, False, [skipCUDAIfRocm]),
+    ('element_size', '', _medium_1d, lambda t, d: [], 1e-5, 1e-5, _float_types_no_half, False),
+    ('eq', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)],),
+    ('eq', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)]),
+    ('ne', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)],),
+    ('ne', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)]),
+    ('equal', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)],
+        1e-5, 1e-5, _types, False),
+    ('equal', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)], 1e-5, 1e-5, _types, False),
+    ('expand', '', _new_t((_M, 1, _M)), lambda t, d: [_M, 4, _M], 1e-5, 1e-5, _types, False),
+    ('expand_as', '', _new_t((_M, 1, _M)), lambda t, d: [_new_t((_M, 4, _M))(t, d)],
+        1e-5, 1e-5, _types, False),
+    ('fill_', '', _medium_2d, lambda t, d: [_number(3.14, 3, t)], 1e-3, 1e-5, _types, False),
+    ('ge', '', _medium_2d, lambda t, d: [_medium_2d(t, d)],),
+    ('le', '', _medium_2d, lambda t, d: [_medium_2d(t, d)],),
+    ('gt', '', _medium_2d, lambda t, d: [_medium_2d(t, d)],),
+    ('lt', '', _medium_2d, lambda t, d: [_medium_2d(t, d)],),
+    ('is_contiguous', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    # TODO: can't check negative case - cross-device copy is contiguous
+    ('is_same_size', 'negative', _medium_2d, lambda t, d: [_small_3d(t, d)],
+        1e-5, 1e-5, _types, False),
+    ('is_same_size', 'positive', _medium_2d, lambda t, d: [_medium_2d(t, d)],
+        1e-5, 1e-5, _types, False),
+    ('is_set_to', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, _types, False),
+    # TODO: positive case
+    ('kthvalue', '', _small_3d_unique, lambda t, d: [3], 1e-5, 1e-5, _types, False),
+    ('kthvalue', 'dim', _small_3d_unique, lambda t, d: [3, 1], 1e-5, 1e-5, _types, False),
+    ('kthvalue', 'neg_dim', _small_3d_unique, lambda t, d: [3, -1], 1e-5, 1e-5, _types, False),
+    ('lerp', '', _small_3d, lambda t, d: [_small_3d(t, d), 0.3],
+        1e-2, 1e-5, _float_types_no_half),
+    ('max', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('max', 'dim', _small_3d_unique, lambda t, d: [1], 1e-5, 1e-5, _types, False),
+    ('max', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-5, 1e-5, _types, False),
+    ('max', 'elementwise', _medium_2d, lambda t, d: [_medium_2d(t, d)],
+        1e-5, 1e-5, _types, False),
+    ('min', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('min', 'dim', _small_3d_unique, lambda t, d: [1], 1e-5, 1e-5, _types, False),
+    ('min', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-5, 1e-5, _types, False),
+    ('min', 'elementwise', _medium_2d, lambda t, d: [_medium_2d(t, d)],
+        1e-5, 1e-5, _types, False),
+    ('mean', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types, False),
+    ('mean', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, _float_types, False),
+    ('mean', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, _float_types, False),
+    # Double here because the CPU result will be wrong otherwise
+    ('mean', '64bit_indexing', _giant_1d, lambda t, d: [],
+        1e-3, 1e-5, [torch.double], False, [slowTest]),
+    ('mode', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('mode', 'dim', _small_3d, lambda t, d: [1], 1e-5, 1e-5, _types, False),
+    ('mode', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-5, 1e-5, _types, False),
+    ('mvlgamma', '2d_p=1', lambda t, d: _small_2d(t, d).clamp(0.1, 10), lambda t, d: [1],
+        1e-5, 1e-5, _float_types_no_half),
+    ('mvlgamma', '2d_p=2', lambda t, d: _small_2d(t, d).clamp(0.6, 10), lambda t, d: [2],
+        1e-5, 1e-5, _float_types_no_half),
+    ('remainder', 'value', _small_3d, lambda t, d: [3], 1e-1, 1e-5, _signed_types),
+    ('remainder', 'negative_value', _small_3d, lambda t, d: [-3], 1e-1, 1e-5, _signed_types),
+    ('remainder', 'tensor', _small_3d,
+        lambda t, d: [_small_3d(t, d, has_zeros=False)],
+        1e-1, 1e-5, _signed_types),
+    ('remainder', 'negative_tensor', _small_3d,
+        lambda t, d: [0 - _small_3d(t, d, has_zeros=False)],
+        1e-1, 1e-5, _signed_types),
+    ('std', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types, False),
+    ('std', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, _float_types, False),
+    ('std', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, _float_types, False),
+    ('var', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types, False),
+    ('var', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, _float_types, False),
+    ('var', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, _float_types, False),
+    ('ndimension', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('nelement', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('numel', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('narrow', '', _small_3d, lambda t, d: [1, 3, 2], 1e-5, 1e-5, _types, False),
+    ('narrow', 'neg_dim', _small_3d, lambda t, d: [-1, 3, 2], 1e-5, 1e-5, _types, False),
+    ('nonzero', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('norm', '', _small_3d, lambda t, d: [], 1e-1, 1e-5, _float_types, False),
+    ('norm', '3_norm', _small_3d, lambda t, d: [3], 1e-1, 1e-5, _float_types, False),
+    ('norm', '3_norm_dim', _small_3d, lambda t, d: [3, 0], 1e-1, 1e-5, _float_types, False),
+    ('norm', '3_norm_neg_dim', _small_3d, lambda t, d: [3, -2], 1e-1, 1e-5, _float_types, False),
+    ('new_ones', '', _small_3d, lambda t, d: [1, 2, 3, 4, 5], 1e-5, 1e-5, _types, False),
+    ('permute', '', _new_t((1, 2, 3, 4)), lambda t, d: [2, 1, 3, 0], 1e-5, 1e-5, _types, False),
+    ('put_', '', _new_t((2, 5, 3)),
+        lambda t, d: [torch.LongTensor([[0], [-2]]).to(device=d),
+                      torch.LongTensor([[3], [4]]).to(dtype=_convert_t(t, d), device=d)],
+        1e-5, 1e-5, _types, False),
+    ('put_', 'empty', _new_t((2, 3)),
+        lambda t, d: [torch.LongTensor([]).to(device=d), torch.LongTensor([]).to(dtype=_convert_t(t, d), device=d)],
+        1e-5, 1e-5, _types, False),
+    ('put_', 'accumulate', _new_t((2, 2)),
+        lambda t, d: [torch.LongTensor([[1], [-3]]).to(device=d),
+                      torch.LongTensor([[1], [2]]).to(dtype=_convert_t(t, d), device=d),
+                      True],
+        1e-5, 1e-5, _types, False),
+    ('prod', '', lambda t, d: _small_2d(t, d, oneish=True),
+        lambda t, d: [], 1e-2, 1e-5, _types, False),
+    ('prod', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, _types, False),
+    ('prod', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, _types, False),
+    ('sum', '', _small_2d, lambda t, d: [], 1e-2, 1e-5, _types, False),
+    ('sum', 'dim', _small_3d, lambda t, d: [1], 1e-2, 1e-5, _types, False),
+    ('sum', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, _types, False),
+    ('renorm', '2_norm', _small_3d, lambda t, d: [2, 1, 1], 1e-3, 1e-5, _float_types),
+    ('renorm', '2_norm_neg_dim', _small_3d, lambda t, d: [2, -1, 1], 1e-3, 1e-5, _float_types),
+    ('renorm', '1_5_norm', _small_3d, lambda t, d: [1.5, 1, 1], 1e-3, 1e-5, _float_types),
+    ('repeat', '', _small_2d, lambda t, d: [2, 2, 2], 1e-5, 1e-5, _types, False),
+    ('size', '', _new_t((1, 2, 3, 4)), lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('size', 'dim', _new_t((1, 2, 3, 4)), lambda t, d: [1], 1e-5, 1e-5, _types, False),
+    ('size', 'neg_dim', _new_t((1, 2, 3, 4)), lambda t, d: [-2], 1e-5, 1e-5, _types, False),
+    ('sort', '', _small_3d_unique, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('sort', 'dim', _small_3d_unique, lambda t, d: [1], 1e-5, 1e-5, _types, False),
+    ('sort', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-5, 1e-5, _types, False),
+    ('sort', 'dim_descending', _small_3d_unique, lambda t, d: [1, True], 1e-5, 1e-5, _types, False),
+    ('sort', 'neg_dim_descending', _small_3d_unique, lambda t, d: [-1, True], 1e-5, 1e-5, _types, False),
+    ('split', '', _small_3d, lambda t, d: [2], 1e-5, 1e-5, _types, False),
+    ('split', 'dim', _small_3d, lambda t, d: [2, 1], 1e-5, 1e-5, _types, False),
+    ('split', 'neg_dim', _small_3d, lambda t, d: [2, -3], 1e-5, 1e-5, _types, False),
+    ('squeeze', '', _new_t((1, 2, 1, 4)), lambda t, d: [],),
+    ('squeeze', 'dim', _new_t((1, 2, 1, 4)), lambda t, d: [2], ),
+    ('squeeze', 'neg_dim', _new_t((1, 2, 1, 4)), lambda t, d: [-2], ),
+    ('t', '', _new_t((1, 2)), lambda t, d: [],),
+    ('take', '', _new_t((3, 4)),
+        lambda t, d: [torch.LongTensor([[0], [-2]]).to(device=d)],
+        1e-5, 1e-5, _types, False),
+    ('transpose', '', _new_t((1, 2, 3, 4)), lambda t, d: [1, 2],),
+    ('transpose', 'neg_dim', _new_t((1, 2, 3, 4)), lambda t, d: [-1, -2], ),
+    ('tolist', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('topk', 'dim_sort', _small_3d_unique, lambda t, d: [2, 1, False, True],
+        1e-5, 1e-5, _types, False),
+    ('topk', 'neg_dim_sort', _small_3d_unique, lambda t, d: [2, -1, False, True],
+        1e-5, 1e-5, _types, False),
+    ('topk', 'dim_desc_sort', _small_3d_unique, lambda t, d: [2, 1, True, True],
+        1e-5, 1e-5, _types, False),
+    ('trace', '', _medium_2d, lambda t, d: [], 1e-3, 1e-5, _types, False),
+    ('tril', '', _medium_2d, lambda t, d: [],),
+    ('tril', 'zero_stride', _medium_2d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('tril', 'positive', _medium_2d, lambda t, d: [2], ),
+    ('tril', 'negative', _medium_2d, lambda t, d: [-2], ),
+    ('triu', '', _medium_2d, lambda t, d: [],),
+    ('triu', 'zero_stride', _medium_2d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('triu', 'positive', _medium_2d, lambda t, d: [2], ),
+    ('triu', 'negative', _medium_2d, lambda t, d: [-2], ),
+    ('unsqueeze', '', _new_t((2, 3, 4)), lambda t, d: [2],),
+    ('unsqueeze', 'neg_dim', _new_t((2, 3, 4)), lambda t, d: [-2], ),
+    ('view', 'contiguous', _small_3d, lambda t, d: [25, 5], 1e-5, 1e-5, _types, False),
+    ('view_as', '', _small_3d, lambda t, d: [_make_tensor((25, 5), t, d)],
+        1e-5, 1e-5, _types, False),
+    ('zero_', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('new_zeros', '', _small_3d, lambda t, d: [1, 2, 3, 4], 1e-5, 1e-5, _types, False),
+    ('flip', 'd0', _small_3d, lambda t, d: [0], 1e-5, 1e-5, _types, False),
+    ('flip', 'd012', _small_3d, lambda t, d: [0, 1, 2], 1e-5, 1e-5, _types, False),
+    ('flip', 'd02', _small_3d, lambda t, d: [0, 2], 1e-5, 1e-5, _types, False),
+    ('flip', 'd20', _small_3d, lambda t, d: [2, 0], 1e-5, 1e-5, _types, False),
+    ('flip', 'neg_d', _small_3d, lambda t, d: [-1], 1e-5, 1e-5, _types, False),
+    ('rot90', 'k1_d01', _small_2d, lambda t, d: [1, [0, 1]], 1e-5, 1e-5, _types, False),
+    ('rot90', 'k1_d12', _small_3d, lambda t, d: [1, [1, 2]], 1e-5, 1e-5, _types, False),
+    ('rot90', 'k1_neg_d', _small_3d, lambda t, d: [1, [1, -1]], 1e-5, 1e-5, _types, False),
+    ('rot90', 'default', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
+    ('rsqrt', '', lambda t, d: _small_3d(t, d) + 1, lambda t, d: [], 1e-2, 1e-4, _float_types_no_half),
+    ('sinh', '', lambda t, d: _small_3d(t, d).clamp(-1, 1), lambda t, d: [], 1e-3, 1e-5, _float_types),
+    ('tan', '', lambda t, d: _small_3d(t, d).clamp(-1, 1), lambda t, d: [], 1e-3, 1e-5, _float_types),
+    ('__lshift__', '',
+        lambda t, d: torch.pow(2, torch.arange(1, 5).to(dtype=_convert_t(t, d), device=d)),
+        lambda t, d: [2],
+        1e-3, 1e-3, _signed_types_no_half, False),
+    ('__rshift__', '',
+        lambda t, d: torch.pow(2, torch.arange(3, 7).to(dtype=_convert_t(t, d), device=d)),
+        lambda t, d: [2],
+        1e-3, 1e-3, _signed_types_no_half, False),
+    # lapack tests
+    ('qr', 'square', _small_2d, lambda t, d: [],
+        1e-5, 3e-4, _float_types_no_half, False, [skipCUDAIfNoMagma]),
+    ('qr', 'skinny', _new_t((3, 4)), lambda t, d: [],
+        1e-5, 3e-4, _float_types_no_half, False, [skipCUDAIfNoMagma]),
+    ('qr', 'fat', _new_t((4, 3)), lambda t, d: [],
+        1e-5, 3e-4, _float_types_no_half, False, [skipCUDAIfNoMagma]),
+    ('qr', 'big', _large_2d, lambda t, d: [],
+        1e-5, 3e-4, _float_types_no_half, False, [skipCUDAIfNoMagma]),
+    ('geqrf', '', _new_t((20, 20)), lambda t, d: [],
+        1e-5, 3e-4, _float_types_no_half, False, [skipCUDAIfNoMagma]),
+    ('svd', 'square', _new_t((10, 10)), lambda t, d: [],
+        1e-5, 1e-5, _float_types_no_half, False, [skipCUDAIfNoMagma]),
+    ('svd', 'square_col_maj', lambda t, d: _new_t((10, 10))(t, d).t(), lambda t, d: [True],
+        1e-5, 1e-5, _float_types_no_half, False, [skipCUDAIfNoMagma]),
+    ('svd', 'tall_some', _new_t((20, 5)), lambda t, d: [True],
+        1e-5, 1e-5, _float_types_no_half, False, [skipCUDAIfNoMagma]),
+    ('svd', 'tall_all', _new_t((20, 5)), lambda t, d: [False],
+        1e-5, 1e-5, _float_types_no_half, False, [skipCUDAIfNoMagma]),
+    ('svd', 'tall_some_col_maj', lambda t, d: _new_t((5, 20))(t, d).t(), lambda t, d: [True],
+        1e-5, 1e-5, _float_types_no_half, False, [skipCUDAIfNoMagma]),
+    ('svd', 'tall_all_col_maj', lambda t, d: _new_t((5, 20))(t, d).t(), lambda t, d: [False],
+        1e-5, 1e-5, _float_types_no_half, False, [skipCUDAIfNoMagma]),
+    ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
+        1e-5, 1e-5, _float_types_no_half, False, [skipCUDAIfNoMagma]),
+    ('abs', '', _small_3d, lambda t, d: []),
+    ('sign', '', _small_3d, lambda t, d: []),
+    ('log', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, _float_types),
+    ('log10', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, _float_types),
+    ('log1p', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types_no_half),
+    ('log2', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, _float_types),
+    ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types),
+    ('sin', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types),
+    ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types),
+    ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types),
+    ('acos', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types),
+    ('asin', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types),
+    ('atan', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types),
+    ('cos', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types),
+    ('cosh', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, _float_types),
+    ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types),
+    ('erfc', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, _float_types),
+    ('exp', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, _float_types),
+    ('expm1', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, _float_types),
+    ('reciprocal', '', _small_3d, lambda t, d: [], 1e-1, 1e-5, _float_types),
+    ('floor', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _float_types),
+    ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _float_types),
+    ('neg', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _float_types),
+    ('round', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _float_types),
+    ('trunc', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _float_types),
+    ('ceil', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, _float_types),
+    ('lgamma', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, _float_types_no_half),
+    ('digamma', 'op', _small_3d, lambda t, d: [], 1e-5, 1e0, _float_types_no_half),
+]
+
+# Creates and decorates a generic test and adds it to the class.
+def generate_test_function(cls,
+                           op_str,
+                           subtest_str,
+                           tensor_ctor,
+                           arg_ctor,
+                           half_precision,
+                           float_precision,
+                           dtype_list,
+                           decorators):
+    def fn(self, device, dtype):
+        # Generates the CPU inputs
+        # Note: CPU tensors are never torch.half
+        cpu_tensor = tensor_ctor(dtype, 'cpu')
+        cpu_args = arg_ctor(dtype, 'cpu')
+
+        # Converts CPU tensors to device tensors
+        device_tensor = cpu_tensor.to(dtype=dtype, device=device)
+        device_args = [arg.to(device=device) if torch.is_tensor(arg) else arg for arg in cpu_args]
+
+        # Converts float device tensors to half when the dtype is half
+        # Note: CPU half tensors don't support many operations.
+        if dtype == torch.half:
+            device_args = [arg.to(dtype=dtype) if
+                           (torch.is_tensor(arg) and arg.dtype == torch.float) else arg
+                           for arg in device_args]
+
+        # Runs the tensor op on CPU and device
+        cpu_result = getattr(cpu_tensor, op_str)(*cpu_args)
+        device_result = getattr(device_tensor, op_str)(*device_args)
+
+        # Compares CPU and device inputs and outputs
+        precision = half_precision if dtype == torch.half else float_precision
+
+        self.assertEqual(cpu_tensor, device_tensor, prec=precision)
+        self.assertEqual(cpu_args, device_args, prec=precision)
+        self.assertEqual(cpu_result, device_result, prec=precision)
+
+    test_name = "test_" + op_str + subtest_str
+    assert not hasattr(cls, test_name), "{0} already in TestDevicePrecision".format(test_name)
+
+    # Constructs decorator list and applies decorators
+    if decorators is None:
+        decorators = [dtypes(*dtype_list)]
+    else:
+        decorators = decorators + [dtypes(*dtype_list)]
+
+    for dec in decorators:
+        fn = dec(fn)
+
+    setattr(cls, test_name, fn)
+
+# Instantiates variants of tensor_op_tests and adds them to the given class.
+def generate_tensor_op_tests(cls):
+
+    def caller(cls,
+               op_str,
+               subtest_str,
+               tensor_ctor,
+               arg_ctor,
+               half_precision=1e-5,
+               float_precision=1e-5,
+               dtype_list=_types,
+               make_inplace_variant=True,
+               decorators=None):
+        if subtest_str:
+            subtest_str = '_' + subtest_str
+
+        generate_test_function(cls, op_str, subtest_str, tensor_ctor, arg_ctor,
+                               half_precision, float_precision, dtype_list, decorators)
+
+        if make_inplace_variant:
+            op_str = op_str + '_'
+            subtest_str = 'inplace' + subtest_str
+            generate_test_function(cls, op_str, subtest_str, tensor_ctor, arg_ctor,
+                                   half_precision, float_precision, dtype_list, decorators)
+
+    for test in tensor_op_tests:
+        caller(cls, *test)
+
+
+class TestTensorDeviceOps(TestCase):
+    pass
+
 
 class TestTorch(TestCase, _TestTorchMixin):
     pass
+
+
+# Generates tests
+# Note: test generation must be done at file scope, not within main, or
+# pytest will fail.
+add_neg_dim_tests()
+generate_tensor_op_tests(TestTensorDeviceOps)
+instantiate_device_type_tests(TestTorchDeviceType, globals())
+instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
+instantiate_device_type_tests(TestTensorDeviceOps, globals(), except_for='cpu')
 
 if __name__ == '__main__':
     run_tests()
