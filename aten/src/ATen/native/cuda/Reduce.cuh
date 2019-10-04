@@ -10,7 +10,6 @@
 #include <THC/THCGeneral.hpp>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/cuda/Assert.cuh>
 #include <c10/macros/Macros.h>
 #include <functional>
 #include <iosfwd>
@@ -488,7 +487,7 @@ struct ReduceOp {
     out_scalar_t*, arg_t,
     typename std::enable_if<!can_acc>::type* = nullptr
   ) const {
-    assert(false);
+    assert(false); // can't use AT_ASSERT in Cuda.
     return arg_t {};
   }
 
@@ -602,7 +601,6 @@ static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction)
 
   auto stream = at::cuda::getCurrentCUDAStream();
   int shared_memory = config.shared_memory_size();
-  C10_PREPARE_KERNEL_ASSERT;
   reduce_kernel<nt, R><<<grid, block, shared_memory, stream>>>(reduction);
   AT_CUDA_CHECK(cudaGetLastError());
 }

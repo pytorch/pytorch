@@ -413,13 +413,13 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
           requiredShared,
           at::cuda::getCurrentCUDAStream()>>>(
               result.data_ptr<int64_t>(),
-                numDist,
-                numCategories,
-                sampled.data_ptr<scalar_t>(),
-                self_v.data_ptr<scalar_t>(),
-                self_v.stride(0),
-                self_v.stride(1),
-                __c10_assert_state
+                  numDist,
+                  numCategories,
+                  sampled.data_ptr<scalar_t>(),
+                  self_v.data_ptr<scalar_t>(),
+                  self_v.stride(0),
+                  self_v.stride(1),
+                  __c10_assert_state
           );
     } else {
       // Generic, slow implementation with memory allocations
