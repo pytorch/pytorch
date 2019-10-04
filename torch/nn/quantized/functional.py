@@ -127,6 +127,8 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     The input dimensions are interpreted in the form:
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
+    .. note:: The input quantization parameters propagate to the output.
+
     .. note:: Only 2D input is supported for quantized inputs
 
     .. note:: Only the following modes are supported for the quantized inputs:
@@ -166,7 +168,7 @@ def linear(input, weight, bias=None, scale=None, zero_point=None):
 
     .. note::
 
-      Current implementation uses packed weights. This has penalty on performance.
+      Current implementation packs weights on every call, which has penalty on performance.
       If you want to avoid the overhead, use :class:`~torch.nn.quantized.Linear`.
 
     Args:
@@ -194,6 +196,8 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
     r"""Applies a 2D max pooling over a quantized input signal composed of
     several quantized input planes.
+
+    .. note:: The input quantization parameters are propagated to the output.
 
     See :class:`~torch.nn.quantized.MaxPool2d` for details.
     """
@@ -235,6 +239,8 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
 
     The input dimensions are interpreted in the form:
     `mini-batch x channels x [optional depth] x [optional height] x width`.
+
+    .. note:: The input quantization parameters propagate to the output.
 
     .. note:: Only 2D input is supported for quantized inputs
 
@@ -282,6 +288,8 @@ def upsample_bilinear(input, size=None, scale_factor=None):
         This is equivalent with
         ``nn.quantized.functional.interpolate(..., mode='bilinear', align_corners=True)``.
 
+    .. note:: The input quantization parameters propagate to the output.
+
     .. note:: Only 2D inputs are supported
 
     Args:
@@ -300,6 +308,8 @@ def upsample_nearest(input, size=None, scale_factor=None):
         This function is deprecated in favor of
         :func:`torch.nn.quantized.functional.interpolate`.
         This is equivalent with ``nn.quantized.functional.interpolate(..., mode='nearest')``.
+
+    .. note:: The input quantization parameters propagate to the output.
 
     .. note:: Only 2D inputs are supported
 
