@@ -122,8 +122,16 @@ void SpatialSoftMax_getLaunchSizes(
   uint32_t block_threads = block.x * block.y;
   smem_size = block.x == 1 ? 0 : block_threads * sizeof(accscalar_t);
   int max_active_blocks;
+#ifdef __HIP_PLATFORM_HCC__
+  // XXX HIP function signature is not compatible yet.
+  uint32_t max_blocks;
+  cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks,
+                                                k, block_threads, smem_size);
+  max_active_blocks = max_blocks;
+#else
   cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_active_blocks,
                                                 k, block_threads, smem_size);
+#endif
   max_active_blocks *= at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   grid = SpatialSoftMax_getGridSize(block, max_active_blocks, outer_size, dim_size, inner_size);
 }
