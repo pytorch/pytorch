@@ -67,7 +67,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
   if (cudnnGetVersion() < 7600) {
     probs = log_probs->softmax(2);
   } else {
-    probs = log_probs;
+    probs = *log_probs;
   }
   TensorDescriptor probs_desc{probs};
   Tensor grad = at::empty_like(probs);
