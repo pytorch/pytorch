@@ -48,7 +48,7 @@ class FakeQuantize(Module):
         given the stats
         `observer_kwargs`
     '''
-    def __init__(self, observer=MinMaxObserver, quant_min=0, quant_max=255, **observer_kwargs):
+    def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255, **observer_kwargs):
         super(FakeQuantize, self).__init__()
         assert quant_min <= quant_max, \
             'quant_min must be less than or equal to quant_max'
