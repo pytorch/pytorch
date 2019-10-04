@@ -2391,8 +2391,6 @@ graph(%Ra, %Rb):
         with self.assertRaises(AttributeError):
             linear_submodule.in_features
         linear_submodule.weight
-        with self.assertRaises(AttributeError):
-            traced_model.asdf = 4
         linear_submodule.weight = nn.Parameter(torch.randn(linear_submodule.weight.shape))
         with self.assertRaises(RuntimeError):
             del linear_submodule.weight
@@ -20549,6 +20547,25 @@ class TestTypeSharing(JitTestCase):
         b = torch.jit.trace(M(), (torch.ones(1, 1), torch.zeros(1, 1)))
         self.assertDifferentType(a, b)
 
+    def test_ignored_fns(self):
+        class M(torch.nn.Module):
+            def __init__(self, foo):
+                super(M, self).__init__()
+                self.foo = foo
+
+            @torch.jit.ignore
+            def ignored(self):
+                return self.foo
+
+            def forward(self):
+                return self.ignored()
+
+        a = torch.jit.script(M(torch.ones(1)))
+        b = torch.jit.script(M(torch.ones(2)))
+        self.assertSameType(a, b)
+        print(a())
+        print(b())
+        self.assertNotEqual(a(), b())
 
 for test in autograd_method_tests():
     add_autograd_test(*test)

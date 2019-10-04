@@ -512,25 +512,28 @@ def is_module_list(cls):
 
 def bind_to_dummy_module(concrete_type, unbound_method, cpp_mod):
     """
+    TODO redoc
     Create a dummy ScriptModule object for `unbound_method` to bind to.
     This ScriptModule object should behave "as if" it was the actual
     ScriptModule object holding `cpp_mod`, but since we constructed it only
     from information in `concrete_type` we can be sure that there is no dynamic
     shenanigans that would ruin our type sharing.
     """
-    script_module = torch.jit.RecursiveScriptModule(cpp_mod)
-    orig_class = concrete_type.py_class
+    def lazy_binding(cpp_mod, *args):
+        script_module = torch.jit.RecursiveScriptModule(cpp_mod)
+        orig_class = concrete_type.py_class
 
-    # Copy @ignored/@unused methods from the original module to the new one.
-    # This ensures they are available during compilation.
-    for name in dir(orig_class):
-        item = getattr(orig_class, name, None)
-        if _jit_internal.is_ignored_fn(item) or hasattr(item, "_parameter_names_fn"):
-            setattr(script_module, name, item)
+        # Copy @ignored/@unused methods from the original module to the new one.
+        # This ensures they are available during compilation.
+        for name in dir(orig_class):
+            item = getattr(orig_class, name, None)
+            if _jit_internal.is_ignored_fn(item) or hasattr(item, "_parameter_names_fn"):
+                setattr(script_module, name, item)
 
-    for name, value in concrete_type.get_constants().items():
-        setattr(script_module, name, value)
+        for name, value in concrete_type.get_constants().items():
+            setattr(script_module, name, value)
 
-    script_module._finalize()
-    method = bind_method(unbound_method, script_module, torch.jit.RecursiveScriptModule)
-    return method
+        script_module._finalize()
+        method = bind_method(unbound_method, script_module, torch.jit.RecursiveScriptModule)
+        return method(*args)
+    return lazy_binding

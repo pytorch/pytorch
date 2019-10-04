@@ -30,8 +30,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 c10::optional<StrongFunctionPtr> as_function(const py::object& obj);
 
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
-  PythonValue(py::object the_self, c10::optional<py::object> rcb = c10::nullopt)
-      : self(std::move(the_self)), rcb(std::move(rcb)) {}
+  PythonValue(
+      py::object the_self,
+      c10::optional<py::object> rcb = c10::nullopt,
+      Value* module_self = nullptr)
+      : self(std::move(the_self)), rcb(std::move(rcb)), moduleSelf_(module_self) {}
 
   FunctionSchema getSchema(
       const size_t n_args,
@@ -65,6 +68,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
   py::object self;
   c10::optional<py::object> rcb;
+  Value* moduleSelf_ = nullptr;
 };
 
 struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
@@ -224,24 +228,60 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
 // share a JIT type (and thus a ConcreteModuleType), then they behave the same
 // way when you access attributes on them.
 struct VISIBILITY_HIDDEN ConcreteModuleType {
+  ClassTypePtr jitType() const {
+    TORCH_INTERNAL_ASSERT(jitType_);
+    return jitType_;
+  }
+
+  ClassTypePtr createNewTypeFromThis() {
+    TORCH_INTERNAL_ASSERT(!jitType_);
+    TORCH_INTERNAL_ASSERT(pyClass_);
+
+    auto cu = get_python_cu();
+    py::object pyQualName = py::module::import("torch._jit_internal")
+                                .attr("_qualified_name")(pyClass_);
+
+    auto className = c10::QualifiedName(py::cast<std::string>(pyQualName));
+    if (className.prefix().empty()) {
+      className = c10::QualifiedName("__torch__", className.name());
+    }
+    if (cu->get_class(className) != nullptr) {
+      className = cu->mangle(className);
+    }
+    auto cls = ClassType::create(std::move(className), cu, /*is_module=*/true);
+    cu->register_type(cls);
+
+    // populate type with info from the concrete type information
+    for (const auto& pr : attributes_) {
+      const auto& name = pr.first;
+      const auto& type = pr.second.type_;
+      const auto& isParameter = pr.second.isParam_;
+
+      cls->addAttribute(name, type, isParameter);
+    }
+
+    jitType_ = std::move(cls);
+    return jitType_;
+  }
+
+  void addJitType(ClassTypePtr type) {
+    TORCH_INTERNAL_ASSERT(!jitType_)
+    jitType_ = std::move(type);
+  }
+
   void addPyClass(py::object pyClass) {
+    TORCH_INTERNAL_ASSERT(!jitType_);
     pyClass_ = std::move(pyClass);
   }
 
   void addConstant(std::string name, py::object value) {
+    TORCH_INTERNAL_ASSERT(!jitType_);
     constants_.emplace(std::move(name), std::move(value));
-  }
-
-  c10::optional<py::object> findConstant(const std::string& name) {
-    auto it = constants_.find(name);
-    if (it != constants_.end()) {
-      return it->second.v_;
-    }
-    return c10::nullopt;
   }
 
   void addAttribute(std::string name, TypePtr type, bool isParameter) {
     TORCH_INTERNAL_ASSERT(type);
+    TORCH_INTERNAL_ASSERT(!jitType_);
     if (auto functionType = type->cast<FunctionType>()) {
       functionAttributes_.emplace(std::move(name), std::move(functionType));
     } else {
@@ -255,6 +295,7 @@ struct VISIBILITY_HIDDEN ConcreteModuleType {
       TypePtr type,
       std::shared_ptr<ConcreteModuleType> meta) {
     TORCH_INTERNAL_ASSERT(type);
+    TORCH_INTERNAL_ASSERT(!jitType_);
     modules_.emplace_back(
         ModuleInfo{std::move(name), std::move(type), std::move(meta)});
   }
@@ -262,7 +303,16 @@ struct VISIBILITY_HIDDEN ConcreteModuleType {
   void addOverload(
       std::string methodName,
       std::vector<std::string> overloadedMethodNames) {
+    TORCH_INTERNAL_ASSERT(!jitType_);
     overloads_.emplace(std::move(methodName), std::move(overloadedMethodNames));
+  }
+
+  c10::optional<py::object> findConstant(const std::string& name) const {
+    auto it = constants_.find(name);
+    if (it != constants_.end()) {
+      return it->second.v_;
+    }
+    return c10::nullopt;
   }
 
   // This determines whether two modules can share a type. The container structs
@@ -278,7 +328,7 @@ struct VISIBILITY_HIDDEN ConcreteModuleType {
   }
 
   std::shared_ptr<ConcreteModuleType> findSubmoduleConcreteType(
-      const std::string& name) {
+      const std::string& name) const {
     const auto it = std::find_if(
         modules_.cbegin(), modules_.cend(), [&](const ModuleInfo& info) {
           return info.name == name;
@@ -338,6 +388,7 @@ struct VISIBILITY_HIDDEN ConcreteModuleType {
   std::vector<ModuleInfo> modules_;
   // The original `nn.Module` class that we derived this ScriptModule from.
   py::object pyClass_;
+  ClassTypePtr jitType_ = nullptr;
 };
 
 struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {

@@ -34,6 +34,10 @@ FunctionSchema PythonValue::getSchema(
   auto signature =
       annotations.attr("get_signature")(self, rcb ? *rcb : py::none(), loc);
   std::vector<Argument> args, rets;
+
+  if (moduleSelf_) {
+    args.push_back(Argument("self", moduleSelf_->type(), {}, {}, false));
+  }
   // We may mutate this if we can determine the number of args from Python
   // introspection.
   size_t actual_n_args = n_args;
@@ -93,9 +97,16 @@ std::shared_ptr<SugaredValue> PythonValue::call(
     at::ArrayRef<NamedValue> inputs_,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  auto inputs = toValues(*m.graph(), inputs_);
-  auto schema = getSchema(inputs.size(), n_binders, loc);
+  auto schema = getSchema(inputs_.size(), n_binders, loc);
 
+  std::vector<NamedValue> inputsWithSelf;
+  if (moduleSelf_) {
+    inputsWithSelf.push_back(NamedValue("self", moduleSelf_));
+  }
+  inputsWithSelf.insert(inputsWithSelf.end(), inputs_.begin(), inputs_.end());
+  inputs_ = inputsWithSelf;
+
+  auto inputs = toValues(*m.graph(), inputs_);
   std::stringstream failure_messages;
   c10::optional<MatchedSchema> matched_schema = tryMatchSchema(
       schema,
@@ -420,7 +431,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       // TODO: Try to reduce our reliance on frame-based rcb
       auto rcb =
           py::module::import("torch.jit").attr("_gen_rcb")(boundMethod, 0);
-      return std::make_shared<PythonValue>(boundMethod, rcb);
+      return std::make_shared<PythonValue>(boundMethod, rcb, self_);
     }
 
     // If we reach here, it's because this is a "normal" method that just hasn't
