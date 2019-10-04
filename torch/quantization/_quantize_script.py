@@ -24,10 +24,11 @@ class PackedParams(torch.nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
-        return self._weight_bias()
+        return self._weight_bias(), self.training
 
     @torch.jit.export
     def __setstate__(self, state):
+        # type: (Tuple[Tuple[Tensor, Tensor], bool]) -> None
         self.set_weight_bias(state[0], state[1])
 
 def _check_is_script_module(model):

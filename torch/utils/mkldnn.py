@@ -17,13 +17,14 @@ class MkldnnLinear(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def __getstate__(self):
-        return (self.weight.to_dense(), self.bias.to_dense())
+        return (self.weight.to_dense(), self.bias.to_dense(), self.training)
 
     @torch.jit.script_method
     def __setstate__(self, state):
-        # type: (Tuple[Tensor, Tensor]) -> None
+        # type: (Tuple[Tensor, Tensor, bool]) -> None
         self.weight = state[0].to_mkldnn()
         self.bias = state[1].to_mkldnn()
+        self.training = state[2]
 
     @torch.jit.script_method
     def forward(self, x):
