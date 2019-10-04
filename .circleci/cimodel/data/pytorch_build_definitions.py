@@ -50,7 +50,7 @@ class Conf:
             leading.append("xla")
         if self.is_namedtensor and not for_docker:
             leading.append("namedtensor")
-        if self.parallel_backend is not None:
+        if self.parallel_backend is not None and not for_docker:
             leading.append(self.parallel_backend)
 
         cuda_parms = []
