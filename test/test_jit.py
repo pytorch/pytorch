@@ -1970,6 +1970,7 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
     @skipIfRocm
@@ -1979,6 +1980,7 @@ graph(%Ra, %Rb):
         torch._C._jit_run_cpp_tests(run_cuda=False)
         tests_setup.shutdown()
 
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @skipIfRocm
     def test_cpp_cuda(self):
