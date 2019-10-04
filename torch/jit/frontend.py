@@ -144,16 +144,16 @@ def get_jit_class_def(cls, self_name):
     # Get defs for each method independently
     methods = inspect.getmembers(
         cls, predicate=lambda m: inspect.ismethod(m) or inspect.isfunction(m))
-    method_defs = [get_jit_def(method[1],
-                   self_name=self_name) for method in methods]
-
+    methods = list(map(lambda member: member[1], methods))
+    method_defs = [get_jit_def(method, self_name=self_name) for method in methods]
+    methods_to_defaults = {method.__name__ : get_default_args(method) for method in methods}
     sourcelines, file_lineno, filename = get_source_lines_and_file(cls)
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
-    return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
+    return build_class_def(ctx, py_ast.body[0], method_defs, self_name), methods_to_defaults
 
 
 def get_jit_def(fn, self_name=None):

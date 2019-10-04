@@ -840,7 +840,8 @@ void initJitScriptBindings(PyObject* module) {
       "_jit_script_class_compile",
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
-         ResolutionCallback rcb) {
+         ResolutionCallback rcb,
+         std::unordered_map<std::string, FunctionDefaults> name_to_defaults) {
         C10_LOG_API_USAGE_ONCE("torch.script.class");
         if (classDef.superclass().present()) {
           throw ErrorReport(classDef.range())
@@ -852,19 +853,38 @@ void initJitScriptBindings(PyObject* module) {
         cu->register_type(classType);
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
-        for (const auto& def : classDef.body()) {
-          if (def.kind() != TK_DEF) {
-            throw ErrorReport(def.range())
+        std::vector<std::pair<Def, FunctionDefaults>> all_defaults;
+        for (const auto& def_stmt : classDef.body()) {
+          if (def_stmt.kind() != TK_DEF) {
+            throw ErrorReport(def_stmt.range())
                 << "Currently class bodies can only contain method "
                    "definitions. File an issue on Github if you want "
                    "something else!";
           }
-          methodDefs.emplace_back(Def(def));
+          Def def(def_stmt);
+          methodDefs.emplace_back(def_stmt);
           rcbs.push_back(
               pythonResolver(rcb, classDef.name().name(), classType));
+          auto defaults_for_def = name_to_defaults.find(def.name().name());
+          TORCH_INTERNAL_ASSERT(defaults_for_def != name_to_defaults.end());
+          all_defaults.push_back(std::make_pair<Def, FunctionDefaults>(
+              std::move(def), std::move(defaults_for_def->second)));
         }
         const auto self = SimpleSelf(classType);
-        cu->define(classname, methodDefs, rcbs, &self);
+        auto defined_fns = cu->define(classname, methodDefs, rcbs, &self);
+
+        TORCH_INTERNAL_ASSERT(all_defaults.size() == defined_fns.size());
+        for (size_t i = 0; i < defined_fns.size(); i++) {
+          auto& defined_fn = defined_fns.at(i);
+          auto& defaults_entry = all_defaults.at(i);
+
+          // Set the defaults on each function
+          defined_fn->setSchema(getSchemaWithNameAndDefaults(
+              defaults_entry.first.range(),
+              defined_fn->getSchema(),
+              defaults_entry.first.name().name(),
+              defaults_entry.second));
+        }
       });
   m.def(
       "_jit_script_interface_compile",

@@ -19164,6 +19164,28 @@ class TestDict(JitTestCase):
             torch.jit.script(test_dict_error)
 
 class TestClassType(JitTestCase):
+    def test_default_args(self):
+        class X(object):
+            def __init__(self, x=2, y=None):
+                # type: (int, Optional[Tensor])
+                self.x = x
+                self.y = y
+
+            def go(self, extra=2):
+                # type: (int)
+                return self.x, self.y, extra
+
+        def fn():
+            return X().go(9), X(3, torch.ones(2, 2)).go()
+
+        # Default args aren't supported in the string compiler
+        # https://github.com/pytorch/pytorch/issues/27406, so checkScript
+        # can't be used here
+        eager_out = fn()
+        script_out = torch.jit.script(fn)()
+
+        self.assertEqual(eager_out, script_out)
+
     def test_get_with_method(self):
         @torch.jit.script
         class FooTest(object):

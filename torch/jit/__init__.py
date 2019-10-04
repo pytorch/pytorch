@@ -1074,8 +1074,8 @@ def whichmodule(obj):
     return '__main__'
 
 def _compile_and_register_class(obj, rcb, qualified_name):
-    ast = get_jit_class_def(obj, obj.__name__)
-    _jit_script_class_compile(qualified_name, ast, rcb)
+    ast, methods_to_defaults = get_jit_class_def(obj, obj.__name__)
+    _jit_script_class_compile(qualified_name, ast, rcb, methods_to_defaults)
     _add_script_class(obj, qualified_name)
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
