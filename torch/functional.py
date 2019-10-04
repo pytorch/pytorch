@@ -811,7 +811,4 @@ def lu(A, pivot=True, get_infos=False, out=None):
 
 
 def align_tensors(*tensors):
-    if not torch._C._BUILD_NAMEDTENSOR:
-        raise RuntimeError('NYI: torch.align_tensors is experimental and a part '
-                           'of our named tensors project.')
-    return torch._C._VariableFunctions.align_tensors(tensors)
+    raise RuntimeError('`align_tensors` not yet implemented.')

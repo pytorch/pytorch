@@ -55,7 +55,7 @@ ncclDataType_t _get_data_type(const at::Tensor& t);
 using comm_list = std::vector<ncclComm_t>;
 using stream_list = std::vector<c10::optional<at::cuda::CUDAStream>>;
 
-std::uint64_t version();
+TORCH_API std::uint64_t version();
 
 bool is_available(at::TensorList tensors);
 
