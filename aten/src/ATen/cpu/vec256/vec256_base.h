@@ -188,22 +188,10 @@ public:
             typename std::enable_if<std::is_floating_point<float_t>::value, int>::type = 0>
   Vec256<T> abs() const {
     // float_t is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<float_t, T>::value, "float_t must be T");
+    static_assert(std::is_same<float_t, T>::value || std::is_same<float_t, T>::value, "float_t must be T");
     // Specifically deal with floating-point because the generic code above won't handle -0.0 (which should result in
     // 0.0) properly.
     return map(std::abs);
-  }
-  template <typename complex_t = T,
-            typename std::enable_if<std::is_complex_t<complex_t>::value, int>::type = 0>
-  Vec256<T> abs() const {
-    // complex_t is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<complex_t, T>::value, "complex_t must be T");
-    // Specifically deal with passing values by reference (const T &) function arguments
-    Vec256<complex_t> ret;
-    for (int64_t i = 0; i < size(); i++) {
-      ret[i] = static_cast<complex_t>(std::abs(values[i]));
-    }
-    return ret;
   }
   Vec256<T> angle() const {
     return *this;

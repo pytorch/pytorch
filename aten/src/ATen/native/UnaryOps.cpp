@@ -246,8 +246,8 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
     return at::op##_out(self, self);                                   \
   }                                                                    \
   Tensor& _##op##_out_##prefix(Tensor& result, const Tensor& self) {   \
-    checkDeviceType(#op, result, DeviceType::CPU);                    \
-    checkLayout(#op, result, Layout::Strided);                        \
+    checkDeviceType(#op, result, DeviceType::device);                  \
+    checkLayout(#op, result, Layout::Strided);                         \
     auto iter = TensorIterator::unary_op(result, self,                 \
       /*check_mem_overlap=*/true);                                     \
     op##_stub(iter.device_type(), iter);                               \
