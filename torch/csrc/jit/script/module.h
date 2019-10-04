@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/named_value.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/script/slot.h>
 #include <torch/csrc/jit/source_range.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -47,9 +46,11 @@ struct Module;
 
 template <typename T>
 struct slot_list_impl;
-using slot_list = slot_list_impl<Slot>;
-using module_list = slot_list_impl<Module>;
+using module_list = slot_list_impl<std::pair<std::string, Module>>;
+using ivalue_list = slot_list_impl<std::pair<std::string, IValue>>;
 using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
+
+enum class EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
 
 // A method in a module, e.g. f in:
 //
@@ -197,11 +198,13 @@ struct TORCH_API Module {
     return Module(obj);
   }
 
+  ivalue_list get_slots() const;
+
   module_list get_modules() const;
-  slot_list get_slots() const;
-  slot_list get_parameters() const;
-  slot_list get_attributes() const;
-  slot_list get_module_slots() const;
+
+  ivalue_list get_parameters() const;
+
+  ivalue_list get_attributes() const;
 
   void dump(
       bool print_method_bodies,
@@ -322,14 +325,26 @@ struct TORCH_API Module {
 
   IValue create_class(const c10::QualifiedName& name, Stack stack) const;
 
-  Slot get_slot(size_t slot) const {
-    TORCH_CHECK(
-        slot < module_object()->slots().size(), "not a valid slot offset");
-    return Slot(module_object(), slot);
-  }
-
   size_t num_slots() const {
     return module_object()->slots().size();
+  }
+  c10::optional<EntityType> entity_type(const std::string& name) const {
+    if (auto slot_idx = type()->findAttributeSlot(name)) {
+      return entity_type(*slot_idx);
+    }
+    return c10::nullopt;
+  }
+  EntityType entity_type(size_t offset_) const {
+    if (type()->is_parameter(offset_)) {
+      return EntityType::PARAMETER;
+    }
+    at::TypePtr t = type()->getAttribute(offset_);
+    if (auto cls = t->cast<at::ClassType>()) {
+      if (cls->is_module()) {
+        return EntityType::MODULE;
+      }
+    }
+    return EntityType::ATTRIBUTE;
   }
 
  private:
@@ -390,7 +405,7 @@ struct TORCH_API slot_iterator_impl {
  private:
   void advance_to_valid() {
     while (i_ < module_.num_slots() &&
-           (type_ && module_.get_slot(i_).entity_type() != *type_)) {
+           (type_ && module_.entity_type(i_) != *type_)) {
       ++i_;
     }
   }
@@ -405,13 +420,19 @@ struct TORCH_API slot_iterator_impl {
 };
 
 template <>
-inline Slot slot_iterator_impl<Slot>::operator*() const {
-  return module_.get_slot(i_);
+inline std::pair<std::string, Module> slot_iterator_impl<
+    std::pair<std::string, Module>>::operator*() const {
+  return std::make_pair(
+      module_.type()->getAttributeName(i_),
+      module_.module_object()->getSlot(i_).toObject());
 }
 
 template <>
-inline Module slot_iterator_impl<Module>::operator*() const {
-  return Module(module_.get_slot(i_).to_module());
+inline std::pair<std::string, IValue> slot_iterator_impl<
+    std::pair<std::string, IValue>>::operator*() const {
+  return std::make_pair(
+      module_.type()->getAttributeName(i_),
+      module_.module_object()->getSlot(i_));
 }
 
 template <typename T>

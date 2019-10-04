@@ -347,14 +347,14 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
   for (const auto& slot : module.get_attributes()) {
     // Verify that all the non-optional attributes have been initialized
     // TODO: Issue #20497
-    if (slot.type()->kind() != TypeKind::OptionalType) {
+    if (slot.second.type()->kind() != TypeKind::OptionalType) {
       TORCH_CHECK(
-          !slot.value().isNone(),
+          !slot.second.isNone(),
           "The field '",
-          slot.name(),
+          slot.first,
           "' was left unitialized after __setstate__, but expected a ",
           "value of type '",
-          slot.type()->python_str(),
+          slot.second.type()->python_str(),
           "'");
     }
   }

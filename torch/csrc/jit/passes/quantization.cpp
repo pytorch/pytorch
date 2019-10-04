@@ -32,14 +32,15 @@ void fillQConfigMap(
   }
   map[module.module_object()] = qconfig;
 
-  for (script::Slot s : module.get_module_slots()) {
+  for (auto p : module.get_modules()) {
     std::string child_key;
     if (key == "") {
-      child_key = s.name();
+      child_key = p.first;
     } else {
-      child_key = key + "." + s.name();
+      child_key = key + "." + p.first;
     }
-    fillQConfigMap(s.to_module(), qconfig_dict, map, child_key, qconfig);
+    fillQConfigMap(
+        p.second.module_object(), qconfig_dict, map, child_key, qconfig);
   }
 }
 
@@ -615,6 +616,29 @@ void InsertQuantDeQuantImpl(
 
   qh.destroyNodes();
 }
+
+void insertPrepackUnpackForConv2d(std::shared_ptr<Graph>& graph) {
+  std::string conv_with_quant = R"(
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        return (%r))";
+
+  std::string conv_with_quant_prepack = R"(
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        return (%r))";
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(conv_with_quant, conv_with_quant_prepack);
+  rewriter.runOnGraph(graph);
+}
+
 } // namespace
 
 TORCH_API script::Module InsertObservers(
@@ -739,8 +763,8 @@ graph(%self, %x):
     worklist.pop();
 
     // Queue submodules for processing
-    for (const script::Module& submodule : current.get_modules()) {
-      worklist.push(submodule);
+    for (const auto& p : current.get_modules()) {
+      worklist.push(p.second);
     }
 
     // Process forward method of the current module
@@ -898,14 +922,16 @@ graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
   rewriter.runOnGraph(graph, filter);
+
+  insertPrepackUnpackForConv2d(graph);
 }
 
 void InsertPrepackUnpack(script::Module& module) {
   for (auto& method : module.get_methods()) {
     auto graph = method.graph();
     InsertPrepackUnpack(graph);
-    for (auto m : module.get_modules()) {
-      InsertPrepackUnpack(m);
+    for (auto p : module.get_modules()) {
+      InsertPrepackUnpack(p.second);
     }
   }
 }
@@ -987,7 +1013,7 @@ void FoldPrepackedWeightIntoModule(
   for (auto& method : module.get_methods()) {
     FoldPrepackedWeightIntoModule(module, method.name(), wrapper_module);
     for (auto m : module.get_modules()) {
-      FoldPrepackedWeightIntoModule(m, wrapper_module);
+      FoldPrepackedWeightIntoModule(m.second, wrapper_module);
     }
   }
 }

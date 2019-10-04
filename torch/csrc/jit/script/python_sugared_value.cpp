@@ -297,8 +297,8 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::desugarModuleContainer(
   // and script Modules. If we need to load a Module, we need its field
   // name so we can emit 'self.field_name'.
   std::unordered_map<at::ivalue::Object*, std::string> obj_to_field;
-  for (Slot s : module_.get_module_slots()) {
-    obj_to_field[s.value().toObject().get()] = s.name();
+  for (auto p : module_.get_modules()) {
+    obj_to_field[p.second.module_object().get()] = p.first;
   }
 
   std::vector<std::shared_ptr<SugaredValue>> result;

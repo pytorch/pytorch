@@ -146,7 +146,7 @@ Value* TracingState::getValue(const IValue& var) {
       }
       return it->second;
     }
-    std::ostringstream oss; 
+    std::ostringstream oss;
     if (var.isFuture()) {
       oss << "Tried to trace Future or Object that the tracer was not aware of.";
     } else {
@@ -285,16 +285,21 @@ static void gatherParametersAndBuffers(
     Value* self_value,
     const script::Module& self) {
   Graph& g = *self_value->owningGraph();
-  
+
   state->setValue(self.module_object(), self_value);
 
-  for (script::Slot s : self.get_slots()) {
-    if (s.type()->isSubtypeOf(TensorType::get())) {
+  for (auto s : self.get_slots()) {
+    if (s.second.type()->isSubtypeOf(TensorType::get())) {
       addInput(
-          state, s.value(), s.type(), g.insertGetAttr(self_value, s.name()));
-    } else if (s.entity_type() == script::EntityType::MODULE) {
+          state,
+          s.second,
+          s.second.type(),
+          g.insertGetAttr(self_value, s.first));
+    } else if (*self.entity_type(s.first) == script::EntityType::MODULE) {
       gatherParametersAndBuffers(
-          state, g.insertGetAttr(self_value, s.name()), s.to_module());
+          state,
+          g.insertGetAttr(self_value, s.first),
+          script::Module(s.second.toObject()));
     }
   }
 }

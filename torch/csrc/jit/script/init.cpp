@@ -552,8 +552,8 @@ void initJitScriptBindings(PyObject* module) {
           "_get_modules",
           [](Module& self) {
             std::vector<std::pair<std::string, Module>> modules;
-            for (Slot s : self.get_module_slots()) {
-              modules.emplace_back(s.name(), s.to_module());
+            for (auto p : self.get_modules()) {
+              modules.emplace_back(p);
             }
             return modules;
           })
@@ -563,10 +563,10 @@ void initJitScriptBindings(PyObject* module) {
             auto parameters = self.get_parameters();
             py::tuple result(parameters.size());
             auto i = 0;
-            for (Slot p : parameters) {
+            for (auto p : parameters) {
               py::tuple r(2);
               result[i++] = std::make_tuple(
-                  p.name(), autograd::as_variable_ref(p.value().toTensor()));
+                  p.first, autograd::as_variable_ref(p.second.toTensor()));
             }
             return result;
           })
@@ -576,11 +576,11 @@ void initJitScriptBindings(PyObject* module) {
             auto attributes = self.get_attributes();
             py::tuple result(attributes.size());
             size_t i = 0;
-            for (Slot buffer : attributes) {
+            for (auto p : attributes) {
               py::tuple r(3);
-              IValue v = buffer.value();
+              IValue v = p.second;
               result[i++] = std::make_tuple(
-                  buffer.name(), buffer.type(), toPyObject(std::move(v)));
+                  p.first, p.second.type(), toPyObject(std::move(v)));
             }
             return result;
           })
@@ -686,7 +686,7 @@ void initJitScriptBindings(PyObject* module) {
             cu.define(c10::nullopt, src, pythonResolver(rcb), nullptr);
           });
 
-  py::class_<StrongFunctionPtr>(m, "Function", py::dynamic_attr())
+  py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
           "__call__",
           [](py::args args, py::kwargs kwargs) {
